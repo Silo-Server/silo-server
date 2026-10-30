@@ -125,7 +125,9 @@ window and offset comes from the existing conversion:
   (`-c:s copy`, Matroska, or MP4 for `mov_text`), into a temporary file.
   `-output_ts_offset` adds the start time the demux took off back, so the
   copy is on the source's timeline too and a muxer has no negative timestamp
-  to shift. FFmpeg writes Cues for every subtitle packet of a file it can
+  to shift. An MP4 copy is written with `+faststart`: it is converted from a
+  pipe, where FFmpeg can't seek back to a moov written after the samples and
+  converts nothing past the first few dozen kilobytes. FFmpeg writes Cues for every subtitle packet of a file it can
   seek in. A demux whose copy fails runs again without it, so the copy never
   costs a viewer the track.
 
@@ -149,26 +151,59 @@ queue a deleted file's prefix. A row whose object is missing, as after a
 storage transition that left objects behind, is deleted and the track read
 again.
 
+A conversion of a kept track, which holds packets, that yields no cue is a
+failure however FFmpeg exited: the request demuxes the source instead, and
+the empty result is neither served nor cached.
+
 **Local copies.** A node copies a kept stream it reads to
 `<transcode dir>/subtitle-cache/kept/<sha256>.<ext>` and serves from there; a
 fetched copy must match its hash. Copies never go stale, since the name is the
-content, and are held to 1 GiB, least recently used first.
+content. A copy's file is never touched after it is written, so the index
+cache, keyed by path, size and modification time, keeps its index; recency is
+kept in memory, and copies are held to 1 GiB, least recently used first. A
+node without a transcode directory keeps no tracks.
 
-**One read at a time.** Concurrent requests for a track on a node share one
-read, which stops only when every caller whose context ended has gone. Across
-nodes, a reader holds a claim in `embedded_subtitle_track_claims` with a lease
-longer than its read can last, and releases it after. A request that finds
-another node's claim polls for that node's row, or the claim coming free, for
-up to the read's timeout, then reads anyway. The claim only saves work: there
+**Storing.** A read writes the kept stream to a local copy, not to memory,
+and the object is streamed from it. The key goes into `blob_gc_queue`, due a
+day later, before the object is stored: if the row then fails to land, the
+collector deletes the object, and if it lands, the collector finds the key
+live and only dequeues it.
+
+**One read at a time.** Concurrent calls for a track on a node share one
+read. A prefetch starts its read at background priority and stops it when
+its callers go; a request that joins it raises its I/O priority and
+concurrency (`embeddedsub.Priority`). A request's read finishes and keeps the
+track even after every caller has gone, so a client that gave up and
+retries finds the track kept or still being read. Up to four whole reads run
+on a node at once, each holding at most 128 MiB of packets; a larger track is
+demuxed. Across nodes, a reader holds a claim in
+`embedded_subtitle_track_claims` with a lease longer than its read and keep
+can last, and releases it after. A request that finds another node's claim
+polls for that node's row, or the claim coming free, for up to three
+minutes, then reads anyway; a prefetch skips the track. The claim only saves work: there
 is no fence, since a read that outlives its lease keeps an equally valid
 track, and two writers of a track write the same key or replace each other's
 row.
 
-**Timing.** A whole read through the index is bounded to three minutes. A
-request waits on it for at most 90 seconds, well inside the response's write
-stall window, which runs until the first byte; it then demuxes the source,
-which streams its first cues at once, while the read goes on and keeps the
-track.
+**Timing.** Waiting on another node and the read itself are each bounded to
+three minutes, and storing to one. A request waits on the read for at most
+90 seconds, well inside the response's write stall window, which runs until
+the first byte; it then demuxes the source, which streams its first cues at
+once, while the read goes on and keeps the track.
+
+**The first byte.** Players give up on a silent response sooner than the
+server does: Android's player client reads with a 30-second timeout, and
+Apple's player gives up after about a minute. Every WebVTT output starts
+with `WEBVTT\n`, so while a WebVTT response's output is late, those seven
+bytes go ahead one at a time, the first after five seconds and the rest
+twelve seconds apart, and are dropped from the output when it comes, which
+must start with them. The response stays byte-identical. A failure after the
+first of them aborts the response instead of answering 500. ASS and SUP
+output have no constant prefix (an ASS header is the track's own, and a SUP
+stream starts with a timestamp), so their first byte waits on the read, as
+does a SubRip or ASS answer that jellycompat or translation builds whole
+before writing it; a client that times out leaves the read running, and its
+retry finds the track kept or joins the read.
 
 ## Serving
 
@@ -187,7 +222,10 @@ before anything reaches the response falls back to the demux. Windows
 from `ReadPackets` for just the window, else from FFmpeg's seek through the
 source as before. A window open to the end (a position without a duration)
 covers most of the track, so it is read whole and kept first, as a
-whole-track request would. Only a file without usable cues and without a kept track
+whole-track request would; a PGS one is answered from the node's cached
+`.sup` first, when there is one. A PGS window answered from the source warms
+the cached `.sup` in the background, as a demuxed one did, which keeps the
+track too. Only a file without usable cues and without a kept track
 still runs FFmpeg over the source for a window.
 
 The native route, offline downloads' embedded sidecars and AI translation

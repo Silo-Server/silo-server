@@ -1636,7 +1636,10 @@ Languages match on their primary subtag, case-insensitively and across ISO
 639-1 and 639-2 (`eng`, `en` and `en-US` match). Values with no readable
 language, such as `und`, match only when spelled the same. Request validation
 bounds the list (at most 16 values, each 1 to 64 characters) and lowercases
-the values, but it accepts values the server does not know. Planning then skips
+the values, but it accepts values the server does not know. The frozen
+`/api/v1` surface, which never advertises the feature, ignores `limitations`
+and plans an entry as it did before they existed, and its inventory rows
+carry no `stream_index`, `container_track_id` or `native_selectable`. Planning then skips
 that whole entry, because the server cannot tell what its player gets wrong,
 and the track falls back to a sidecar or burn-in like any track without a
 native entry. Older clients send no limitations, and their entries plan as
