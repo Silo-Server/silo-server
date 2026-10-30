@@ -6,7 +6,9 @@ and Meilisearch, in one container supervised by
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
-main server and `docker-compose.node.yml` a node.
+main server and `docker-compose.node.yml` a node. `docker-compose.split.yml`
+is the earlier multi-container file, kept for installs that stay on that
+layout; it runs the regular image.
 
 ## Build
 
@@ -220,7 +222,19 @@ named `postgres`, `redis`, and `meilisearch`, so `docker compose up` replaces th
 old containers, which stops them, and Silo waits for all three to exit
 successfully. `redis` and `meilisearch` exit at once. `postgres` runs
 `/etc/silo-omnibus/migrate-compose-stack` with `SILO_DATA_ROOT` mounted at
-`/silo-data`, which works within that one mount so it can hard-link:
+`/silo-data`.
+
+The move is opt-in. When the script finds an earlier install it has not
+moved, beside no omnibus database of its own, it stops unless
+`MIGRATE_COMPOSE_STACK=true`, and its message offers both choices: keep the
+layout by selecting `docker-compose.split.yml` in `COMPOSE_FILE`, which is the
+earlier file with the same service names and mounts, or set the variable to
+move. Until a run succeeds, `REQUIRE_COMPOSE_MIGRATION` keeps Silo from
+creating an empty database (see below), so an install updated without either
+choice stays down rather than coming up empty. Installs the script already
+moved, and omnibus installs of their own, never reach this check.
+
+With the variable set, it works within the one mount so it can hard-link:
 
 - Silo's three directories are hard-linked into `config/silo`, or copied when
   hard links fail across file systems. This happens with an external
@@ -250,6 +264,9 @@ It does nothing when the omnibus install already has a database of its own
 and none of the earlier stack is here, and refuses, before anything is moved
 into place, when:
 
+- An earlier install is here, unmoved, and `MIGRATE_COMPOSE_STACK` is not
+  set (above). This check comes before the others, so an install that keeps
+  its layout never sees advice about moving it.
 - A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `aio` past the pin.

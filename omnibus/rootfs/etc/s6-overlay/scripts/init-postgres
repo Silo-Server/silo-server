@@ -26,10 +26,11 @@ fi
 if ! enabled postgres && truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
   cat >&2 <<'MSG'
 The Compose file's postgres service has not yet checked SILO_DATA_ROOT for an
-earlier multi-container install to move here (/config/.compose-migration-checked
-is missing). Silo was likely started on its own, as `docker compose up -d
---no-deps silo` does. Run `docker compose up -d` once without --no-deps; later
-updates can use --no-deps again.
+earlier multi-container install (/config/.compose-migration-checked is
+missing). Silo was likely started on its own, as `docker compose up -d
+--no-deps silo` does. Run `docker compose up -d` once without --no-deps; if the
+postgres service finds an earlier install, its log says how to keep or move it.
+Later updates can use --no-deps again.
 MSG
   exit 1
 fi
@@ -82,11 +83,12 @@ else
   if truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
     cat >&2 <<'MSG'
 /config/postgres/data holds no database, and the Compose file's postgres service
-has not yet checked SILO_DATA_ROOT for an earlier multi-container install to move
-here (/config/.compose-migration-checked is missing). Silo was likely started on
-its own, as `docker compose up -d --no-deps silo` does. Run `docker compose up -d`
-once without --no-deps so the postgres service can move an earlier install;
-later updates can use --no-deps again.
+has not yet checked SILO_DATA_ROOT for an earlier multi-container install
+(/config/.compose-migration-checked is missing). Silo was likely started on its
+own, as `docker compose up -d --no-deps silo` does. Run `docker compose up -d`
+once without --no-deps so the postgres service can check; if it finds an
+earlier install, its log says how to keep or move it. Later updates can use
+--no-deps again.
 MSG
     exit 1
   fi

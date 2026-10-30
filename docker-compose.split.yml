@@ -1,0 +1,131 @@
+# Silo, PostgreSQL, Redis, and optionally Meilisearch, each in a container of
+# its own: the layout docker-compose.yml ran before it moved to the omnibus
+# image. An install of that layout keeps running on it unchanged when its .env
+# selects this file:
+#
+#   COMPOSE_FILE=docker-compose.split.yml
+#
+# For hardware transcoding, layer docker-compose.vaapi.yml or
+# docker-compose.nvidia.yml after it, as in
+# COMPOSE_FILE=docker-compose.split.yml:docker-compose.vaapi.yml.
+# New installs should use docker-compose.yml. Moving an install of this layout
+# into that single container is opt-in; see "Moving from the multi-container
+# stack" in docs/architecture/omnibus-image.md.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-8gb}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-silo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
+      POSTGRES_DB: ${POSTGRES_DB:-silo}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${SILO_DATA_ROOT:-/opt/silo}/postgres:/var/lib/postgresql
+    command: ["postgres", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ${SILO_DATA_ROOT:-/opt/silo}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  meilisearch:
+    # Pinned: Meilisearch will not open data written by another version.
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.54.0}
+    restart: unless-stopped
+    profiles: [search]
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        if [ -z "$${MEILI_MASTER_KEY:-}" ]; then
+          echo "MEILI_MASTER_KEY is required when enabling the search profile" >&2
+          exit 1
+        fi
+        exec /bin/meilisearch
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_UPGRADE_DB: ${MEILI_UPGRADE_DB:-false}
+    ports:
+      - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
+    volumes:
+      - ${SILO_DATA_ROOT:-/opt/silo}/meilisearch:/meili_data
+
+  silo:
+    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
+    restart: unless-stopped
+    # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
+    # (default 5s), then finishes in-flight requests. Docker kills a container
+    # 10s after asking it to stop, which would cut that short. A single server
+    # with no load balancer in front can set SILO_SHUTDOWN_DELAY=0.
+    stop_grace_period: 2m
+    environment:
+      MODE: integrated
+      # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
+      # are host-side published-port overrides.
+      PORT: "8080"
+      JF_PORT: "8096"
+      ABS_PORT: "13378"
+      # Master key for at-rest credential encryption. Required — the server
+      # refuses to start without it. Generate with: openssl rand -base64 48
+      # Back it up SEPARATELY from your database dumps; losing it makes encrypted
+      # secrets unrecoverable. See docs/architecture/secret-encryption.md.
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
+      POSTGRES_TUNE: ${POSTGRES_TUNE:-auto}
+    ports:
+      - "${PORT:-8090}:8080"
+      - "${JF_PORT:-8096}:8096"
+      - "${ABS_PORT:-13378}:13378"
+    volumes:
+      - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+      - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+      - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
+      - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
+      - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+      # Prepared downloads. With "Prepared file directory" (download.artifact_dir)
+      # blank, Silo keeps them beside the transcode directory, not inside it, so
+      # they need their own mount to survive image updates. This path assumes the
+      # default playback.transcode_dir; with another one, mount the
+      # silo-download-artifacts directory beside it instead. No storage
+      # budget applies until one is set ("Default storage budget per location",
+      # download.artifact_max_bytes, in Settings > Downloads).
+      - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
+      - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
+      # Only load-bearing when the Docker host is itself an LXC container, where
+      # these three files describe the physical machine and the LXC's own cap
+      # sits on a cgroup this container cannot see. lxcfs virtualizes them to the
+      # LXC's limits, so passing that view in is what makes CPU, load, and memory
+      # report this container's share instead of the whole machine's. Harmless
+      # everywhere else: on bare metal or a VM they are the same files Silo would
+      # read anyway. Each is used independently, so dropping one only reverts
+      # that reading. See docs/architecture/observability.md#node-resource-sampling.
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false

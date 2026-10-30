@@ -105,17 +105,31 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-An install from before the omnibus image moves to it on the first
-`docker compose up -d` with this Compose file. Its earlier data directories stay
-in place until you delete them. Remove any `docker-compose.override.yml`
-entries for the old `postgres`, `redis`, or `meilisearch` services first. The
-earlier stack ran Silo as root; the omnibus image runs it as `PUID` (default
-1000), so set `PUID` and `PGID` in `.env` to an account that can read
-`MEDIA_ROOT`. If its
-`.env` sets `SILO_SEARCH_PROVIDER`,
-`SILO_MEILISEARCH_URL`, or `SILO_MEILISEARCH_API_KEY` for the separate
-Meilisearch service, remove them and set `ENABLE_MEILISEARCH=true` to use the
-bundled one.
+### Updating an install from before the omnibus image
+
+An install that runs PostgreSQL, Redis, and Silo in separate containers can
+keep that layout. Before updating, add this line to its `.env`, followed by
+any file you already layer on it, such as `:docker-compose.vaapi.yml`:
+
+```sh
+COMPOSE_FILE=docker-compose.split.yml
+```
+
+Without it, `docker compose up -d` stops at the `postgres` service and leaves
+Silo down; `docker compose logs postgres` says what to do. Nothing is moved.
+
+To move the install into the single container instead, back it up, then set
+`MIGRATE_COMPOSE_STACK=true` in `.env` and run `docker compose up -d`. The
+earlier data directories stay in place until you delete them. Before that:
+
+- Remove any `docker-compose.override.yml` entries for the old `postgres`,
+  `redis`, or `meilisearch` services.
+- The earlier stack ran Silo as root; the omnibus image runs it as `PUID`
+  (default 1000), so set `PUID` and `PGID` to an account that can read
+  `MEDIA_ROOT`.
+- If `.env` sets `SILO_SEARCH_PROVIDER`, `SILO_MEILISEARCH_URL`, or
+  `SILO_MEILISEARCH_API_KEY` for the separate Meilisearch service, remove them
+  and set `ENABLE_MEILISEARCH=true` to use the bundled one.
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,

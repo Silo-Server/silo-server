@@ -2,7 +2,9 @@
 # Copy an install of the multi-container Compose stack, which ran PostgreSQL,
 # Redis, and Meilisearch in containers of their own, into the omnibus layout
 # under SILO_DATA_ROOT/config. docker-compose.yml runs this as its postgres
-# service before Silo starts, with SILO_DATA_ROOT mounted at /silo-data.
+# service before Silo starts, with SILO_DATA_ROOT mounted at /silo-data. It
+# moves an earlier install only with MIGRATE_COMPOSE_STACK=true; otherwise it
+# stops and points at docker-compose.split.yml, which keeps that layout.
 #
 # The PostgreSQL cluster is copied and Silo's plugins, artwork, and compat
 # directories are hard-linked, so the earlier Compose file still starts on the
@@ -73,6 +75,15 @@ control_fingerprint() {
   printf '%s' "$out"
 }
 
+# earlier_dirs: the earlier stack's directories in SILO_DATA_ROOT, for messages.
+earlier_dirs() {
+  local name found=()
+  for name in postgres "${silo_dirs[@]}"; do
+    [[ -e "$root/$name" || -L "$root/$name" ]] && found+=("$name")
+  done
+  printf '%s' "${found[*]}"
+}
+
 # set_aside PATH: move a result an earlier attempt left at PATH out of the way.
 set_aside() {
   local dest
@@ -82,12 +93,6 @@ set_aside() {
 }
 
 [[ -d "$root" ]] || fail "mount SILO_DATA_ROOT at $root"
-
-# The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
-# would otherwise follow aio past a pinned build.
-if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
-  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
-fi
 
 # --- What is there. ----------------------------------------------------------
 
@@ -122,6 +127,21 @@ if [[ -d "$config" ]]; then
   fi
 fi
 
+# An earlier install this step has not moved, beside no omnibus database. It
+# stays where it is unless the administrator asks for the move: keeping it
+# means running docker-compose.split.yml, which uses it as it is.
+if [[ ! -s "$done_marker" && ! -e "$pgdata/PG_VERSION" ]] &&
+  { (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; } &&
+  ! truthy "${MIGRATE_COMPOSE_STACK:-false}"; then
+  fail "$host_root holds an install of the multi-container Compose stack ($(earlier_dirs)), which this file moves into its single container only when asked. To keep running it as before, add COMPOSE_FILE=docker-compose.split.yml to .env (followed by any file you layer on it, such as :docker-compose.vaapi.yml) and run docker compose up -d again. To move it instead, back it up, set MIGRATE_COMPOSE_STACK=true in .env, and run docker compose up -d; its directories stay in place"
+fi
+
+# The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
+# would otherwise follow aio past a pinned build.
+if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
+  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
+fi
+
 # Migrated before: refuse if the earlier stack has run on the original since,
 # since starting on the copy would drop what it wrote.
 if [[ -s "$done_marker" ]]; then
@@ -142,11 +162,7 @@ fi
 # earlier install would leave that data behind unannounced.
 if [[ -e "$pgdata/PG_VERSION" ]]; then
   if (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; then
-    found=()
-    for name in postgres "${silo_dirs[@]}"; do
-      [[ -e "$root/$name" || -L "$root/$name" ]] && found+=("$name")
-    done
-    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root (${found[*]}) was moved, likely by starting Silo before this step (docker compose up --no-deps). If $(host "$pgdata") holds nothing you need, move it aside and start again. To keep it, delete the earlier stack's directories in $host_root"
+    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root ($(earlier_dirs)) was moved, likely by starting Silo before this step (docker compose up --no-deps). If $(host "$pgdata") holds nothing you need, move it aside and start again. To keep it, delete the earlier stack's directories in $host_root"
   fi
   mark_checked
   exit 0

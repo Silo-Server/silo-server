@@ -7,6 +7,10 @@
 # docker-compose.nvidia.yml on this file (COMPOSE_FILE in .env.example). For
 # proxy or transcode nodes on other hosts, layer docker-compose.node-access.yml
 # here and run docker-compose.node.yml on each node's host.
+#
+# An install of the earlier multi-container layout keeps it by selecting
+# docker-compose.split.yml in .env. This file moves such an install only with
+# MIGRATE_COMPOSE_STACK=true; otherwise it stops before Silo starts.
 
 # The services that keep the names of the multi-container stack's PostgreSQL,
 # Redis, and Meilisearch; see the note under services.
@@ -115,14 +119,18 @@ services:
   # Earlier versions of this file ran PostgreSQL, Redis, and Meilisearch as
   # services of their own. These three keep those names, so `docker compose up`
   # replaces the old containers, which stops them, before Silo starts. Each
-  # exits at once. The postgres service first copies an earlier install into
-  # the layout above and leaves the old directories as they were; see "Moving
-  # from the multi-container stack" in docs/architecture/omnibus-image.md.
+  # exits at once. The postgres service first checks for an earlier install:
+  # it stops with instructions unless MIGRATE_COMPOSE_STACK=true, and then
+  # copies it into the layout above, leaving the old directories as they were;
+  # see "Moving from the multi-container stack" in
+  # docs/architecture/omnibus-image.md.
   postgres:
     <<: *bridge
     entrypoint: ["/etc/silo-omnibus/migrate-compose-stack"]
     environment:
       SILO_DATA_ROOT: ${SILO_DATA_ROOT:-/opt/silo}
+      # Set to "true" in .env to move an earlier install into this container.
+      MIGRATE_COMPOSE_STACK: ${MIGRATE_COMPOSE_STACK:-false}
       PUID: ${PUID:-1000}
       # The names the earlier stack created its database and superuser with.
       POSTGRES_USER: ${POSTGRES_USER:-silo}
