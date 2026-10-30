@@ -61,13 +61,22 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(name, directories, rootRelative, allowNumericSeason, allowUnseasoned...) {
 				continue
 			}
+			closed := -1
+			if pattern == xEpisodeRe {
+				if open, end, ok := bracketedCoordinate(name, match[2], match[5]); ok {
+					// A bracketed code after an episode number belongs to the
+					// episode title: Show - 03 - Title (2x14).
+					if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 {
+						continue
+					}
+					closed = end
+				}
+			}
 			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]})
 			// The closing bracket of Show - [1x02] - Title belongs to the
 			// coordinate, not to the episode title after it.
-			if pattern == xEpisodeRe {
-				if closed := bracketedCoordinateEnd(name, match[2], match[5]); closed >= 0 {
-					token.end = closed
-				}
+			if closed >= 0 {
+				token.end = closed
 			}
 			return token, true
 		}
@@ -317,18 +326,19 @@ func insideReleaseTag(name string, index int) bool {
 	return strings.LastIndex(prefix, "[") > strings.LastIndex(prefix, "]") || strings.LastIndex(prefix, "(") > strings.LastIndex(prefix, ")")
 }
 
-// bracketedCoordinateEnd returns the index after the bracket or parenthesis
-// that holds only the text from start to end, as in [1x02] or ( 1x02 ), or -1.
-func bracketedCoordinateEnd(name string, start, end int) int {
+// bracketedCoordinate reports a bracket or parenthesis that holds only the
+// text from start to end, as in [1x02] or ( 1x02 ). open is the index of its
+// opening character and closed the index after its closing one.
+func bracketedCoordinate(name string, start, end int) (open, closed int, ok bool) {
 	before := strings.TrimRight(name[:start], " ")
 	after := strings.TrimLeft(name[end:], " ")
 	if before == "" || after == "" {
-		return -1
+		return 0, 0, false
 	}
-	if open, closing := before[len(before)-1], after[0]; (open == '[' && closing == ']') || (open == '(' && closing == ')') {
-		return len(name) - len(after) + 1
+	if opening, closing := before[len(before)-1], after[0]; (opening == '[' && closing == ']') || (opening == '(' && closing == ')') {
+		return len(before) - 1, len(name) - len(after) + 1, true
 	}
-	return -1
+	return 0, 0, false
 }
 
 func validXEpisodeCoordinate(name string, match []int) bool {
@@ -339,11 +349,14 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	episode := name[match[4]:match[5]]
 	number, _ := strconv.Atoi(episode)
 	// Release tags and aspect ratios before release details describe the
-	// video: [16x9 1080p], Movie.4x3.DVDRip. A tag holding only the
-	// coordinate labels the episode ([1x02], (1x02)) unless it is an aspect
-	// ratio ([4x3]); the picture size checks below still apply ([1920x1080]).
-	if bracketedCoordinateEnd(name, start, match[5]) >= 0 {
-		if aspectRatioRe.MatchString(name[start:match[5]]) {
+	// video: [16x9 1080p], Movie.4x3.DVDRip. A tag holding only a coordinate
+	// with a two-digit episode labels the episode ([1x02], (1x02)); a shorter
+	// one is more often a ratio or part of a title ([2x1], (4x4)). Aspect
+	// ratios stay rejected ([16x10]), and the picture size checks below still
+	// apply ([1920x1080]).
+	_, closed, bracketed := bracketedCoordinate(name, start, match[5])
+	if bracketed {
+		if len(episode) < 2 || aspectRatioRe.MatchString(name[start:match[5]]) {
 			return false
 		}
 	} else if insideReleaseTag(name, start) {
@@ -367,8 +380,12 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		return false
 	}
 	// A leading NxM followed by a release year is a title: 10x10 (2018),
-	// 4x4.2019, 10x10 - 2018.
-	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
+	// 4x4.2019, 10x10 - 2018, [10x10] (2018).
+	title, rest := strings.Trim(name[:start], " ._-"), name[match[5]:]
+	if bracketed {
+		title, rest = strings.Trim(name[:start], " ._-[("), name[closed:]
+	}
+	if title == "" && titleYearAfterRe.MatchString(rest) {
 		return false
 	}
 	season, _ := strconv.Atoi(name[start:match[3]])
