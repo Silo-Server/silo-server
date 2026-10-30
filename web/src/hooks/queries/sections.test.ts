@@ -166,7 +166,7 @@ describe("home row limit", () => {
     ["a row under the cap", row(ids(12), { item_limit: 12, total_count: 12 }), 20, false],
     ["a row that filled the cap", row(ids(20), { total_count: 80 }), 20, true],
     ["a short row whose source holds more", row(ids(9), { total_count: 80 }), 20, true],
-    ["a short row that is complete", row(ids(9), { total_count: 9 }), 20, false],
+    ["a short row the filters may have cut", row(ids(9), { total_count: 9 }), 20, true],
   ])("%s", (_name, section, itemLimit, partial) => {
     expect(isPartialHomeRow(section, itemLimit)).toBe(partial);
   });

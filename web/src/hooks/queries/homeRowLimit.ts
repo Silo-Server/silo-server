@@ -18,13 +18,14 @@ export const HOME_ROW_ITEM_LIMIT =
 /**
  * Whether a row read with itemLimit may hold more cards than it answered.
  * The server reports the smaller of the row's own limit and itemLimit, so a
- * row under the cap was answered whole. A row at the cap may hold more when
- * it filled the cap, or when Home's hide-watched filter cut it short while
- * its source counts more.
+ * row under the cap was answered whole. A row the cap reached may hold more
+ * whatever it answered: Home's hide-watched and Not interested filters run on
+ * the capped cards and cut both the items and total_count, so a short answer
+ * does not prove the row is exhausted. Completing it reads the row whole once;
+ * Home skips that read for a row already at its own limit.
  */
 export function isPartialHomeRow(section: ResolvedSection, itemLimit: number | undefined): boolean {
-  if (itemLimit === undefined || section.item_limit < itemLimit) return false;
-  return section.items.length >= itemLimit || section.total_count > section.items.length;
+  return itemLimit !== undefined && section.item_limit >= itemLimit;
 }
 
 /** The cached form of a row read with itemLimit, or read whole without one. */
