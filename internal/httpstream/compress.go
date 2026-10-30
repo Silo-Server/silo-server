@@ -43,7 +43,8 @@ func CompressExcept(skip func(*http.Request) bool, types ...string) func(http.Ha
 // CompressWithExclusions encodes responses of the given media types (the
 // default list when none are named) in the content coding the request's
 // Accept-Encoding weights highest (see negotiate), and adds
-// Vary: Accept-Encoding to the responses it encodes.
+// Vary: Accept-Encoding to every response whose coding it negotiates,
+// including those that stay identity, so a cache keeps one per coding.
 //
 // It has two exclusions. skipRequest is decided before the handler runs, and
 // a request it reports gets the ResponseWriter untouched, as in
@@ -51,8 +52,7 @@ func CompressExcept(skip func(*http.Request) bool, types ...string) func(http.Ha
 // once the response header is known: a response it reports reaches the wire
 // identity-encoded with no Content-Encoding or Vary added. Either exclusion
 // may be nil. Responses that already declare a content coding or a
-// Content-Range, 204 and 304 responses, and bodies declared shorter than
-// minEncodedLength are never encoded.
+// Content-Range, and 204, 206 and 304 responses, are never negotiated.
 func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse func(*http.Request, http.Header) bool, types ...string) func(http.Handler) http.Handler {
 	if len(types) == 0 {
 		types = defaultCompressibleTypes
@@ -68,10 +68,6 @@ func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse f
 				return
 			}
 			coding, identityRefused := negotiate(r.Header.Values("Accept-Encoding"))
-			if coding == nil && skipResponse == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
 			cw := &compressWriter{ResponseWriter: w, r: r, c: c, coding: coding, identityRefused: identityRefused}
 			defer cw.close()
 			next.ServeHTTP(cw, r)
@@ -84,10 +80,10 @@ type compressor struct {
 	skipResponse func(*http.Request, http.Header) bool
 }
 
-// encodes reports whether a response with this status and header gets the
-// negotiated coding. It runs after skipResponse, which may have declared one.
-// A client that refused identity gets even a short body encoded.
-func (c *compressor) encodes(status int, h http.Header, identityRefused bool) bool {
+// negotiates reports whether the coding of a response with this status and
+// header depends on Accept-Encoding. It runs after skipResponse, which may
+// have declared one.
+func (c *compressor) negotiates(status int, h http.Header) bool {
 	if status == http.StatusNoContent || status == http.StatusNotModified || status == http.StatusPartialContent {
 		return false
 	}
@@ -97,14 +93,21 @@ func (c *compressor) encodes(status int, h http.Header, identityRefused bool) bo
 		return false
 	}
 	mediaType, _, _ := strings.Cut(h.Get("Content-Type"), ";")
-	if _, ok := c.types[strings.ToLower(strings.TrimSpace(mediaType))]; !ok {
+	_, ok := c.types[strings.ToLower(strings.TrimSpace(mediaType))]
+	return ok
+}
+
+// encodes reports whether a negotiated response gets the request's coding. A
+// client that refused identity gets even a short body encoded.
+func (w *compressWriter) encodes(h http.Header) bool {
+	if w.coding == nil {
 		return false
 	}
-	if identityRefused {
+	if w.identityRefused {
 		return true
 	}
 	// A body declared shorter than minEncodedLength comes out no smaller once
-	// the coding's framing and the Content-Encoding and Vary lines are counted.
+	// the coding's framing and the Content-Encoding line are counted.
 	n, err := strconv.ParseInt(h.Get("Content-Length"), 10, 64)
 	return err != nil || n >= minEncodedLength
 }
@@ -116,11 +119,11 @@ const minEncodedLength = 256
 
 // negotiate returns the coding to apply for the Accept-Encoding field lines,
 // or nil for identity: the offered coding with the highest weight, ties going
-// to the earlier entry in codings. A coding weighted q=0 is refused, `*` sets
-// the weight of every coding the field does not name, x-gzip names gzip, and
-// an element with a malformed weight is ignored (RFC 9110 12.5.3). A missing
-// or empty field gets identity. identityRefused reports a field that weights
-// identity q=0, itself or through `*`.
+// to the earlier entry in codings, unless identity outweighs it. A coding
+// weighted q=0 is refused, `*` sets the weight of every coding the field does
+// not name (identity included), x-gzip names gzip, and an element with a
+// malformed weight is ignored (RFC 9110 12.5.3). A missing or empty field gets
+// identity. identityRefused reports a field that weights identity q=0.
 func negotiate(values []string) (best *coding, identityRefused bool) {
 	var weights [len(codings)]float64
 	for i := range weights {
@@ -159,7 +162,13 @@ func negotiate(values []string) (best *coding, identityRefused bool) {
 			best, bestQ = codings[i], q
 		}
 	}
-	return best, identity == 0 || (identity < 0 && star == 0)
+	if identity < 0 {
+		identity = star
+	}
+	if identity > bestQ {
+		best = nil
+	}
+	return best, identity == 0
 }
 
 // qValue reads the weight from an element's parameters: 1 when it has none,
@@ -200,11 +209,13 @@ func (w *compressWriter) WriteHeader(status int) {
 		w.decided = true
 		h := w.Header()
 		skipped := w.c.skipResponse != nil && w.c.skipResponse(w.r, h)
-		if !skipped && w.coding != nil && w.c.encodes(status, h, w.identityRefused) {
-			h.Set("Content-Encoding", w.coding.name)
+		if !skipped && w.c.negotiates(status, h) {
 			h.Add("Vary", "Accept-Encoding")
-			h.Del("Content-Length")
-			w.enc = w.coding.get(w.ResponseWriter)
+			if w.encodes(h) {
+				h.Set("Content-Encoding", w.coding.name)
+				h.Del("Content-Length")
+				w.enc = w.coding.get(w.ResponseWriter)
+			}
 		}
 	}
 	w.ResponseWriter.WriteHeader(status)

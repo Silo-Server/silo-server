@@ -103,7 +103,8 @@ func TestCompressWithExclusionsWriterSupportsFlush(t *testing.T) {
 }
 
 // The compressor applies the coding the client weights highest, ties going to
-// zstd, then br, then gzip, and leaves excluded responses identity-encoded.
+// zstd, then br, then gzip, marks every negotiated response Vary, and leaves
+// excluded responses identity-encoded without it.
 func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 	var large strings.Builder
 	for i := range 2000 {
@@ -114,7 +115,7 @@ func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 	for _, tc := range []struct {
 		name, accept, path, contentType string
 		status                          int
-		etag                            bool
+		etag, noVary                    bool
 		body                            string
 		want                            string
 	}{
@@ -134,13 +135,15 @@ func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 		{name: "malformed weights are ignored", accept: "br;q=2, gzip;q=x, zstd;q=0.1", want: "zstd"},
 		{name: "everything refused", accept: "*;q=0"},
 		{name: "identity only", accept: "identity"},
+		{name: "identity weighted above every coding", accept: "identity;q=1, gzip;q=0.1"},
+		{name: "identity tied with a coding", accept: "gzip, identity", want: "gzip"},
 		{name: "no Accept-Encoding"},
 		{name: "unsupported codings", accept: "deflate, compress"},
 		{name: "problem documents", accept: "zstd", contentType: "application/problem+json", status: http.StatusNotFound, body: problem, want: "zstd"},
-		{name: "incompressible type", accept: "gzip", contentType: "image/webp"},
-		{name: "partial content", accept: "gzip", contentType: "text/vtt", status: http.StatusPartialContent},
-		{name: "request exclusion", accept: "gzip", path: "/media"},
-		{name: "validator-bearing response", accept: "zstd, br, gzip", etag: true},
+		{name: "incompressible type", accept: "gzip", contentType: "image/webp", noVary: true},
+		{name: "partial content", accept: "gzip", contentType: "text/vtt", status: http.StatusPartialContent, noVary: true},
+		{name: "request exclusion", accept: "gzip", path: "/media", noVary: true},
+		{name: "validator-bearing response", accept: "zstd, br, gzip", etag: true, noVary: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := cmp.Or(tc.body, large.String())
@@ -170,9 +173,12 @@ func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("Content-Encoding = %q, want %q", got, tc.want)
 			}
-			wantVary, wantLength := "", strconv.Itoa(len(body))
+			wantVary, wantLength := "Accept-Encoding", strconv.Itoa(len(body))
+			if tc.noVary {
+				wantVary = ""
+			}
 			if tc.want != "" {
-				wantVary, wantLength = "Accept-Encoding", ""
+				wantLength = ""
 			}
 			if vary, length := rec.Header().Get("Vary"), rec.Header().Get("Content-Length"); vary != wantVary || length != wantLength {
 				t.Fatalf("Vary = %q, Content-Length = %q; want %q, %q", vary, length, wantVary, wantLength)
