@@ -107,17 +107,31 @@ func (g *Generator) Create(ctx context.Context, c Candidate) error {
 	return nil
 }
 
-// download fetches the trailer and returns the inputs ffmpeg should read: the
-// merged file when the downloader produced one, otherwise the video and audio
-// parts it left behind, which is what happens where it cannot find ffmpeg itself.
+// download fetches the trailer and returns the files ffmpeg should read.
+//
+// The downloader muxes the video and audio parts it picks into the named file,
+// but only when it can find an encoder itself, and the image keeps
+// jellyfin-ffmpeg outside the search path it uses for that. So the encoder is
+// named for it: without that the parts are never merged, every trailer costs a
+// second pass through the encoder here, and a clip is lost outright wherever
+// the downloader cannot find one at all.
 func (g *Generator) download(ctx context.Context, c Candidate, work string) ([]string, error) {
 	merged := filepath.Join(work, "source.mp4")
 	url := youtubeWatchURL + c.SiteKey
 
-	err := runCommand(ctx, g.ytdlpPath(), "--no-playlist", "--no-warnings",
+	args := []string{"--no-playlist", "--no-warnings",
 		"-S", fmt.Sprintf("res:%d", g.sourceHeight()),
-		"--merge-output-format", "mp4", "-o", merged, url)
-	if err != nil {
+		"--merge-output-format", "mp4",
+		"-o", merged}
+	// An unset path is left alone rather than guessed at: with no location given
+	// the downloader searches its own path, which is where a deployment that
+	// installs its own tools keeps them.
+	if path := g.configuredFFmpegPath(); path != "" {
+		args = append(args, "--ffmpeg-location", path)
+	}
+	args = append(args, url)
+
+	if err := runCommand(ctx, g.ytdlpPath(), args...); err != nil {
 		return nil, fmt.Errorf("download trailer: %w", err)
 	}
 
@@ -125,16 +139,12 @@ func (g *Generator) download(ctx context.Context, c Candidate, work string) ([]s
 		return []string{merged}, nil
 	}
 
-	video, err := firstMatch(work, "source.mp4.f*.mp4")
+	parts, err := downloadParts(work)
 	if err != nil {
 		return nil, fmt.Errorf("download trailer: %w", err)
 	}
-	inputs := []string{video}
-	if audio, err := firstMatch(work, "source.mp4.f*.webm"); err == nil {
-		inputs = append(inputs, audio)
-	}
 
-	return inputs, nil
+	return parts, nil
 }
 
 // encode cuts the downloaded trailer to the recipe. The whole trailer is kept:
@@ -247,12 +257,21 @@ func (g *Generator) tempRoot() string {
 }
 
 func (g *Generator) ffmpegPath() string {
-	if g.FFmpegPath != nil {
-		if path := g.FFmpegPath(); path != "" {
-			return path
-		}
+	if path := g.configuredFFmpegPath(); path != "" {
+		return path
 	}
 	return "ffmpeg"
+}
+
+// configuredFFmpegPath is the encoder's location when the deployment named one,
+// and empty when it did not. The downloader is given only a path it can use, so
+// that an unset value falls back to its own search instead of being handed a
+// bare command name to look up relative to the working directory.
+func (g *Generator) configuredFFmpegPath() string {
+	if g.FFmpegPath == nil {
+		return ""
+	}
+	return g.FFmpegPath()
 }
 
 // ytdlpPath resolves the downloader: the configured path first, then an override
@@ -274,6 +293,9 @@ const (
 	// defaultYtDlpPath is the downloader's name on the path, which is where the
 	// image installs it.
 	defaultYtDlpPath = "yt-dlp"
+	// downloadPrefix is how the downloader names every file it writes: the output
+	// name, then the format it came from, as in source.f399.mp4.
+	downloadPrefix = "source."
 	// youtubeWatchURL is the watch page a site key resolves to.
 	youtubeWatchURL = "https://www.youtube.com/watch?v="
 	// CommandTimeout bounds one external step, so a stalled download cannot hold
@@ -324,14 +346,35 @@ func lastLine(message string) string {
 	return message
 }
 
-// firstMatch returns the first file matching a pattern in a directory.
-func firstMatch(dir, pattern string) (string, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, pattern))
+// downloadParts names what the downloader left behind when it did not merge
+// them. Each part carries its format id between the output name and the
+// extension, so an unmuxed 1080p trailer reads as source.f399.mp4 beside
+// source.f251.webm. Nothing is classified or ordered here: ffmpeg picks the
+// video and audio streams it needs out of the inputs it is given.
+func downloadParts(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if len(matches) == 0 {
-		return "", fmt.Errorf("no file matching %s", pattern)
+
+	var parts []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, downloadPrefix) {
+			continue
+		}
+		if incompleteSuffixes[strings.ToLower(filepath.Ext(name))] {
+			continue
+		}
+		parts = append(parts, filepath.Join(dir, name))
 	}
-	return matches[0], nil
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("no downloaded file in %s", dir)
+	}
+
+	return parts, nil
 }
+
+// incompleteSuffixes mark a transfer that has not finished. Handing one to the
+// encoder would turn part of a trailer into a whole clip.
+var incompleteSuffixes = map[string]bool{".part": true, ".ytdl": true}
