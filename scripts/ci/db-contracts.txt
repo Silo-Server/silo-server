@@ -291,6 +291,7 @@
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 ./internal/requests TestDiscoverLayoutDatabase
+./internal/requests TestRoutingFactsMergeDatabase
 ./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.

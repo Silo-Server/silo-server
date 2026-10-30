@@ -178,6 +178,7 @@ type AdminRequestCapabilitiesOutputBody struct {
 	Available            bool `json:"available"`
 	GuardedConfiguration bool `json:"guarded_configuration"`
 	Routing              bool `json:"routing" doc:"Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing"`
+	RoutingSeriesStatus  bool `json:"routing_series_status" doc:"Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true"`
 	DiscoverLayout       bool `json:"discover_layout" doc:"Whether the Requests Discover page's layout can be edited under /admin/request-discover"`
 	DiscoverListOrder    bool `json:"discover_list_order" doc:"Whether an mdblist Discover row takes list.order. Send it only when true"`
 }
@@ -224,6 +225,7 @@ func registerAdminRequests(reg *Registry) {
 		out.Body.Available = reg.deps.AdminRequests != nil
 		_, out.Body.GuardedConfiguration = reg.deps.AdminRequests.(guardedAdminRequests)
 		_, out.Body.Routing = reg.deps.AdminRequests.(adminRequestRoutes)
+		out.Body.RoutingSeriesStatus = out.Body.Routing
 		_, out.Body.DiscoverLayout = reg.deps.AdminRequests.(adminRequestDiscover)
 		out.Body.DiscoverListOrder = out.Body.DiscoverLayout
 		return out, nil
