@@ -3,10 +3,11 @@
 # ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
 # docs/architecture/omnibus-image.md describes the image.
 #
-# For hardware transcoding, layer docker-compose.vaapi.yml or
-# docker-compose.nvidia.yml on this file (COMPOSE_FILE in .env.example). For
-# proxy or transcode nodes on other hosts, layer docker-compose.node-access.yml
-# here and run docker-compose.node.yml on each node's host.
+# Optional settings are commented out in the silo service: hardware
+# transcoding (VA-API or NVIDIA), and the ports proxy or transcode nodes on
+# other hosts use to reach this server. A node's own host runs this same file
+# with MODE, DATABASE_URL, REDIS_URL, and NODE_URL in its .env; see the node
+# section of .env.example.
 #
 # An install of the earlier multi-container layout keeps it by selecting
 # docker-compose.split.yml in .env. This file moves such an install only with
@@ -32,8 +33,10 @@ services:
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests, and PostgreSQL shuts
     # down after it. Docker kills a container 10s after asking it to stop,
-    # which would cut that short.
-    stop_grace_period: 2m
+    # which would cut that short. A transcode node first drains its sessions
+    # for up to SILO_NODE_DRAIN_TIMEOUT (default 10m), so a node's host sets
+    # SILO_STOP_GRACE_PERIOD=11m.
+    stop_grace_period: ${SILO_STOP_GRACE_PERIOD:-2m}
     # NET_ADMIN lets Silo use kernel BBR congestion control on its client
     # connections even when the host does not allow bbr, and force a larger
     # TCP send buffer on its listeners when the kernel's limit would cap
@@ -45,7 +48,9 @@ services:
     # supervisor, disabled-service placeholders, docker exec shells) keep it
     # while the container runs. NET_ADMIN can change this container's
     # interfaces, routes and firewall rules and reaches more kernel code
-    # (nf_tables); with network_mode: host, the host's.
+    # (nf_tables); with network_mode: host, the host's. A proxy node uses it
+    # the same way; a transcode node drops it at startup and uses nothing
+    # from it.
     # Undo: remove this line. Silo then logs the TCP limits it cannot
     # change and how to raise them. SILO_NET_TCP_CONGESTION=off in .env turns
     # BBR off; SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
@@ -79,6 +84,12 @@ services:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
+      # Proxy or transcode nodes on other hosts: set ENABLE_NODE_ACCESS=true,
+      # POSTGRES_PASSWORD, REDIS_PASSWORD, and NODE_ACCESS_HOST in .env, then
+      # uncomment these two. Nodes sign in as silo with those passwords. Neither
+      # connection is encrypted, so use an address on a network you trust.
+      # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${POSTGRES_PORT:-5432}:5432"
+      # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${REDIS_PORT:-6379}:6379"
     volumes:
       # Silo's state, the PostgreSQL cluster, and the Redis and Meilisearch data.
       - ${SILO_DATA_ROOT:-/opt/silo}/config:/config
@@ -115,6 +126,19 @@ services:
     env_file:
       - path: .env
         required: false
+    # Intel or AMD hardware transcoding (VA-API, Quick Sync): uncomment.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # NVIDIA, with the NVIDIA Container Toolkit installed: uncomment. "video"
+    # mounts the NVENC/NVDEC libraries; without it FFmpeg sees the GPU but
+    # encodes in software.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: ${NVIDIA_GPU_COUNT:-1}
+    #           capabilities: [gpu, compute, utility, video]
 
   # Earlier versions of this file ran PostgreSQL, Redis, and Meilisearch as
   # services of their own. These three keep those names, so `docker compose up`
@@ -147,6 +171,8 @@ services:
       POSTGRES_PASSWORD_SET: ${POSTGRES_PASSWORD:+set}
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
       ENABLE_REDIS: ${ENABLE_REDIS:-true}
+      # With node access on, the move accepts a server with registered nodes.
+      ENABLE_NODE_ACCESS: ${ENABLE_NODE_ACCESS:-false}
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
   redis: *bridge

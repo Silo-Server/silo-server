@@ -5,9 +5,7 @@
 #
 #   COMPOSE_FILE=docker-compose.split.yml
 #
-# For hardware transcoding, layer docker-compose.vaapi.yml or
-# docker-compose.nvidia.yml after it, as in
-# COMPOSE_FILE=docker-compose.split.yml:docker-compose.vaapi.yml.
+# Hardware transcoding (VA-API or NVIDIA) is commented out in the silo service.
 # New installs should use docker-compose.yml. Moving an install of this layout
 # into that single container is opt-in; see "Moving from the multi-container
 # stack" in docs/architecture/omnibus-image.md.
@@ -129,3 +127,16 @@ services:
     env_file:
       - path: .env
         required: false
+    # Intel or AMD hardware transcoding (VA-API, Quick Sync): uncomment.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # NVIDIA, with the NVIDIA Container Toolkit installed: uncomment. "video"
+    # mounts the NVENC/NVDEC libraries; without it FFmpeg sees the GPU but
+    # encodes in software.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: ${NVIDIA_GPU_COUNT:-1}
+    #           capabilities: [gpu, compute, utility, video]

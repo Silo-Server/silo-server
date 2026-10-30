@@ -105,11 +105,14 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
+Hardware transcoding (VA-API or NVIDIA) and access for proxy or transcode
+nodes on other hosts are commented out in `docker-compose.yml`; uncomment the
+lines you need.
+
 ### Updating an install from before the omnibus image
 
 An install that runs PostgreSQL, Redis, and Silo in separate containers can
-keep that layout. Before updating, add this line to its `.env`, followed by
-any file you already layer on it, such as `:docker-compose.vaapi.yml`:
+keep that layout. Before updating, set this in its `.env`:
 
 ```sh
 COMPOSE_FILE=docker-compose.split.yml
@@ -117,6 +120,13 @@ COMPOSE_FILE=docker-compose.split.yml
 
 Without it, `docker compose up -d` stops at the `postgres` service and leaves
 Silo down; `docker compose logs postgres` says what to do. Nothing is moved.
+
+The separate GPU and node files (`docker-compose.vaapi.yml`,
+`docker-compose.nvidia.yml`, `docker-compose.node-access.yml`, and
+`docker-compose.node.yml`) are gone. If `COMPOSE_FILE` named one, Compose
+reports it missing: name only the main file, and uncomment the matching lines
+in it instead. A node's host runs `docker-compose.yml` with the node settings
+in `.env.example`.
 
 To move the install into the single container instead, back it up, then set
 `MIGRATE_COMPOSE_STACK=true` in `.env` and run `docker compose up -d`. The

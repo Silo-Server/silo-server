@@ -133,7 +133,7 @@ fi
 if [[ ! -s "$done_marker" && ! -e "$pgdata/PG_VERSION" ]] &&
   { (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; } &&
   ! truthy "${MIGRATE_COMPOSE_STACK:-false}"; then
-  fail "$host_root holds an install of the multi-container Compose stack ($(earlier_dirs)), which this file moves into its single container only when asked. To keep running it as before, add COMPOSE_FILE=docker-compose.split.yml to .env (followed by any file you layer on it, such as :docker-compose.vaapi.yml) and run docker compose up -d again. To move it instead, back it up, set MIGRATE_COMPOSE_STACK=true in .env, and run docker compose up -d; its directories stay in place"
+  fail "$host_root holds an install of the multi-container Compose stack ($(earlier_dirs)), which this file moves into its single container only when asked. To keep running it as before, set COMPOSE_FILE=docker-compose.split.yml in .env (its GPU lines are commented out in that file) and run docker compose up -d again. To move it instead, back it up, set MIGRATE_COMPOSE_STACK=true in .env, and run docker compose up -d; its directories stay in place"
 fi
 
 # The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
@@ -365,7 +365,7 @@ SQL
   if ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
     nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled")"
     if (( nodes > 0 )); then
-      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Layer docker-compose.node-access.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
+      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
     fi
   fi
 

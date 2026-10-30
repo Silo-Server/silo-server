@@ -1,5 +1,5 @@
 # Development stack:
-#   docker compose -f docker-compose.dev.yml up --build
+#   docker compose -f dev/compose.yml up --build
 #
 # Vite serves the UI at http://localhost:${PORT:-8090} and proxies API
 # requests to the Air-reloaded Go backend on the compose network.
@@ -40,7 +40,7 @@ services:
 
   silo:
     build:
-      context: .
+      context: ..
       dockerfile_inline: |
         FROM node:22-slim AS node_runtime
 
@@ -123,7 +123,7 @@ services:
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
     volumes:
-      - .:/app
+      - ..:/app
       - silo-dev-air-tmp:/app/tmp
       - silo-dev-go-build:/root/.cache/go-build
       - silo-dev-go-mod:/go/pkg/mod
@@ -145,12 +145,12 @@ services:
       retries: 30
       start_period: 10s
     env_file:
-      - path: .env
+      - path: ../.env
         required: false
 
   web:
     build:
-      context: .
+      context: ..
       dockerfile_inline: |
         FROM node:22-slim
 
@@ -168,7 +168,7 @@ services:
     ports:
       - "${PORT:-8090}:5173"
     volumes:
-      - .:/app
+      - ..:/app
       - silo-dev-web-node-modules:/app/web/node_modules
       - silo-dev-pnpm-store:/pnpm/store
     depends_on:

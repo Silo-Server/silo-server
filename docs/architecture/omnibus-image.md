@@ -6,9 +6,10 @@ and Meilisearch, in one container supervised by
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
-main server and `docker-compose.node.yml` a node. `docker-compose.split.yml`
-is the earlier multi-container file, kept for installs that stay on that
-layout; it runs the regular image.
+main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
+and `NODE_URL`. Hardware transcoding and node access are commented out in it.
+`docker-compose.split.yml` is the earlier multi-container file, kept for
+installs that stay on that layout; it runs the regular image.
 
 ## Build
 
@@ -188,9 +189,10 @@ changes the shared database's schema or settings. `/config` holds the node's
 own state. An administrator adds the node on the main server, which then checks
 its health over `NODE_URL`.
 
-A main server shares its bundled services with nodes when
-`ENABLE_NODE_ACCESS=true`, which `docker-compose.node-access.yml` sets
-alongside publishing ports 5432 and 6379 on `NODE_ACCESS_HOST`:
+A main server shares its bundled services with nodes when `.env` sets
+`ENABLE_NODE_ACCESS=true` and the two commented port lines in
+`docker-compose.yml` are uncommented to publish 5432 and 6379 on
+`NODE_ACCESS_HOST`:
 
 - PostgreSQL also listens on every interface (`conf.d/01-node-access.conf`),
   and `pg_hba.conf` gains `host silo silo all scram-sha-256`.
