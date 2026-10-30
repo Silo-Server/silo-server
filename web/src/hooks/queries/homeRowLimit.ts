@@ -74,6 +74,7 @@ export function completeHomeRow(
   return {
     section: { ...whole.section, items: [...shown.section.items, ...rest].slice(0, length) },
     shown: shown.section.items.length,
+    shownAt: Date.now(),
   };
 }
 

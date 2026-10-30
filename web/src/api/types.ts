@@ -4564,6 +4564,12 @@ export interface HomeSectionItemsResponse {
    * homeRowLimit's completeHomeRow).
    */
   shown?: number;
+  /**
+   * When the row was completed, in epoch milliseconds. Home restores its
+   * cached rows' duplicate-filter order by it, since a cache edit rewrites
+   * every row's updated time.
+   */
+  shownAt?: number;
 }
 
 export interface CollectionSectionConfig {

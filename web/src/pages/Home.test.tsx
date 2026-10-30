@@ -9,8 +9,11 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
+import type { HomeSectionItemsResponse } from "@/api/types";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
+import { completeHomeRow } from "@/hooks/queries/homeRowLimit";
 import { sectionKeys } from "@/hooks/queries/keys";
+import { removeItemFromHomeSectionCaches } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
@@ -594,6 +597,36 @@ describe("Home", () => {
     await waitForRenderedFirstItems({ "for-you": "For You Only", "top-picks": "Shared" });
   });
 
+  it("keeps cached completed rows in the order they completed after a cache edit", async () => {
+    avoidDuplicatesFor("recommended_for_you", "taste_match");
+    const layout = [
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+      { ...homeLayout("top-picks"), section_type: "taste_match" },
+    ];
+    showLayout(layout);
+    const queryClient = new QueryClient();
+    const complete = (entry: (typeof layout)[number], titles: string[]) =>
+      queryClient.setQueryData(
+        sectionKeys.homeItems(entry.id),
+        completeHomeRow(sectionWith(entry, titles.slice(0, 1)), sectionWith(entry, titles)),
+      );
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    // Both rows showed X. Top Picks loaded the rest of its row before For You
+    // did, then watching a card rewrote every cached row.
+    clock.mockReturnValue(now - 3000);
+    complete(layout[1]!, ["X", "Shared", "Top Pick Only"]);
+    clock.mockReturnValue(now - 2000);
+    complete(layout[0]!, ["X", "Shared", "Watched"]);
+    clock.mockReturnValue(now - 1000);
+    removeItemFromHomeSectionCaches(queryClient, "Watched");
+    clock.mockRestore();
+
+    await renderHome(queryClient);
+
+    await waitForRenderedFirstItems({ "for-you": "X", "top-picks": "Shared" });
+  });
+
   // Renders Home and lets one microtask run, optionally inside the sidebar's main stage.
   async function mountHome(queryClient: QueryClient, onStage = false) {
     const home = (
@@ -713,13 +746,16 @@ function avoidDuplicatesFor(...types: string[]) {
 }
 
 // A row answering one card per title, each title its content id.
-function sectionWith(entry: ReturnType<typeof homeLayout>, titles: string[]) {
+function sectionWith(
+  entry: ReturnType<typeof homeLayout>,
+  titles: string[],
+): HomeSectionItemsResponse {
   return {
     section: {
       ...entry,
       total_count: titles.length,
       items: titles.map((title) => ({
-        ...homeSection(entry.id).section.items[0],
+        ...homeSection(entry.id).section.items[0]!,
         content_id: title,
         title,
       })),
@@ -765,7 +801,7 @@ function homeLayout(id: string) {
   };
 }
 
-function homeSection(id: string, label = "item") {
+function homeSection(id: string, label = "item"): HomeSectionItemsResponse {
   return {
     section: {
       ...homeLayout(id),

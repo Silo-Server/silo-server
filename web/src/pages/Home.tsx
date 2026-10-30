@@ -187,7 +187,7 @@ export default function Home() {
             // filter keeps comparing the cards it showed before.
             return cached?.shown === undefined || response.partial
               ? response
-              : { ...response, shown: cached.shown };
+              : { ...response, shown: cached.shown, shownAt: cached.shownAt };
           },
           staleTime: HOME_SECTION_STALE_TIME,
           gcTime: HOME_SECTION_GC_TIME,
@@ -549,7 +549,9 @@ function freshCachedHomeSectionIds(
   );
 }
 
-// The cached rows' shownCounts entries, in the order they were read.
+// The cached rows' shownCounts entries, in the order they were completed. A
+// row read whole without a completion counts from its last write, which any
+// cache edit moves. Ties keep layout order.
 function cachedShownCounts(
   queryClient: QueryClient,
   layout: ResolvedSectionLayout[],
@@ -559,7 +561,8 @@ function cachedShownCounts(
       sectionKeys.homeItems(section.id),
     );
     const shown = homeRowShownCount(section.featured, state?.data);
-    return state && shown !== undefined ? [{ id: section.id, shown, at: state.dataUpdatedAt }] : [];
+    if (!state || shown === undefined) return [];
+    return [{ id: section.id, shown, at: state.data?.shownAt ?? state.dataUpdatedAt }];
   });
   return new Map(rows.sort((a, b) => a.at - b.at).map((row) => [row.id, row.shown]));
 }
