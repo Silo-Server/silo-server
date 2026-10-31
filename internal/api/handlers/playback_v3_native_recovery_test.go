@@ -316,3 +316,61 @@ func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
 		})
 	}
 }
+
+// A subtitle switch reported as a failure recovery stays on the version
+// playing, as a track_change does, even when the requested edition has become
+// playable: its answer is the same media.
+func TestSubtitleTrackChangedRecoveryStaysOnEffectiveAlternate(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution, source.Bitrate = "2160p", 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Width, source.VideoTracks[0].Height = 3840, 2160
+	source.VideoTracks[0].Level, source.VideoTracks[0].Bitrate = 51, 32_000
+	source.SubtitleTracks = []models.SubtitleTrack{{Index: 2, Codec: "subrip", Language: "eng"}, {Index: 3, Codec: "subrip", Language: "spa"}}
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID, alternate.Resolution, alternate.Bitrate = 84, "1080p", 8_000
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Width, alternate.VideoTracks[0].Height = 1920, 1080
+	alternate.VideoTracks[0].Level, alternate.VideoTracks[0].Bitrate = 41, 8_000
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
+	stubCopySeekAnchorV3(handler)
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	start := v3HandlerStartRequest()
+	start.QualityPreference = "auto"
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+	before := started.PlaybackPlan
+	if before.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("start played file %d, want the alternate %d", before.EffectiveMediaFileID, alternate.ID)
+	}
+
+	// The device can now decode the requested 4K edition, which a quality or
+	// output change would return to.
+	upgraded := start.Capabilities
+	upgraded.MaxResolution = "2160p"
+	upgraded.VideoDecode = append([]playback.VideoDecodeCapabilityV3(nil), start.Capabilities.VideoDecode...)
+	upgraded.VideoDecode[0].Levels = []int{51}
+	upgraded.VideoDecode[0].MaxWidth, upgraded.VideoDecode[0].MaxHeight = 3840, 2160
+	upgraded.VideoDecode[0].MaxBitrateKbps = 50_000
+	spanish := 1
+	after := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationFailureRecoveryV3,
+		Failure:           playback.FailureV3{Classification: "subtitle_track_changed"},
+		PlaybackAttemptID: start.PlaybackAttemptID, ReplanRequestID: "alternate-subtitle-recovery-0001",
+		FailedPlanID: before.PlanID, PlanAttemptID: "alternate-subtitle-recovery-attempt-0001",
+		PlanAttemptKey: before.PlanAttemptKey, AttemptedPlanKeys: []string{before.PlanAttemptKey}, AttemptCount: 1, PositionSeconds: 30,
+		SelectedTracks: playback.SelectedTracksV3{Audio: before.SelectedTracks.Audio, Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(alternate.ID, "subtitle", spanish), Index: &spanish}},
+		Capabilities:   upgraded, ClientPlaybackContext: start.ClientPlaybackContext,
+	}).PlaybackPlan
+	if after == nil || after.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("subtitle_track_changed recovery left the alternate: %+v", after)
+	}
+	if after.SelectedTracks.Subtitle == nil || after.SelectedTracks.Subtitle.Index == nil || *after.SelectedTracks.Subtitle.Index != spanish {
+		t.Fatalf("subtitle = %+v, want the alternate's track %d", after.SelectedTracks.Subtitle, spanish)
+	}
+}
