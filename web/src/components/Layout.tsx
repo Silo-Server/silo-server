@@ -58,11 +58,17 @@ const UserSettingsSidebar = lazy(() => import("@/components/settings/UserSetting
  * The lazily loaded activity indicator. Layout wraps every page, so a chunk
  * that fails to load leaves the indicator out instead of breaking the page.
  */
-function AdminActivityIndicator() {
+function AdminActivityIndicator({
+  className,
+  popoverSide,
+}: {
+  className?: string;
+  popoverSide?: "top" | "bottom";
+}) {
   return (
     <LocalErrorBoundary>
       <Suspense fallback={null}>
-        <ServerActivity hideWhenEmpty />
+        <ServerActivity hideWhenEmpty className={className} popoverSide={popoverSide} />
       </Suspense>
     </LocalErrorBoundary>
   );
@@ -502,10 +508,14 @@ export default function Layout({ children }: LayoutProps) {
           </SheetContent>
         </Sheet>
 
-        {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
+        {/* Desktop admin activity indicator — a floating control in the
+            bottom-right corner, where it clears the top bar and whichever
+            background playback bar is showing. Its panel opens upward into
+            that same corner. Hidden below lg, where the mobile header carries
+            its own copy. */}
         {showAdminActivity && (
-          <div className="fixed top-6 right-5 z-40 hidden lg:block">
-            <AdminActivityIndicator />
+          <div className="fixed right-6 bottom-[calc(var(--playback-bar-clearance,0px)+1.5rem)] z-40 hidden lg:block">
+            <AdminActivityIndicator className="glass" popoverSide="top" />
           </div>
         )}
 

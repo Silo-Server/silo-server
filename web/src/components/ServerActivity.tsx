@@ -50,6 +50,12 @@ interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
   hideWhenEmpty?: boolean;
   className?: string;
+  /**
+   * Which side the panel opens on. `bottom` for a trigger near the top of the
+   * viewport; `top` for the bottom-right floating placement, so the panel
+   * unfolds upward into the corner instead of past the bottom edge.
+   */
+  popoverSide?: "top" | "bottom";
 }
 
 // ── Data hook ────────────────────────────────────────────────
@@ -139,7 +145,11 @@ function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   return isNonLive && connectionProblemState;
 }
 
-export default function ServerActivity({ hideWhenEmpty = false, className }: ServerActivityProps) {
+export default function ServerActivity({
+  hideWhenEmpty = false,
+  className,
+  popoverSide = "bottom",
+}: ServerActivityProps) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
@@ -201,7 +211,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
 
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
-          side="bottom"
+          side={popoverSide}
           align="end"
           sideOffset={8}
           className="data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 z-50 w-[320px] origin-[var(--radix-popover-content-transform-origin)] rounded-2xl border border-[color-mix(in_srgb,var(--border)_72%,transparent)] bg-[color-mix(in_srgb,var(--surface)_95%,transparent)] p-0 shadow-[0_24px_50px_-12px_rgb(0_0_0/0.5)] backdrop-blur-2xl"
