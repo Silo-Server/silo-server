@@ -169,6 +169,11 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://silo:8080
       VITE_HMR_CLIENT_PORT: "${PORT:-8090}"
+      # Docker Desktop bind mounts don't forward inotify events from the host
+      # into the container, so a host-side edit never reaches Vite's watcher and
+      # the dev server keeps serving its cached transform until it restarts.
+      # Polling costs some CPU and makes edits appear a moment later.
+      CHOKIDAR_USEPOLLING: "1"
       PNPM_STORE_DIR: /pnpm/store
       CI: "true"
     ports:
