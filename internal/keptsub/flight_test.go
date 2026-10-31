@@ -3,7 +3,9 @@ package keptsub
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -176,5 +178,51 @@ func TestNoLocalDirectoryKeepsNothing(t *testing.T) {
 	}
 	if _, claims := repo.counts(); claims != 0 || len(blobs.objects) != 0 {
 		t.Fatal("read or stored a track it can't serve")
+	}
+}
+
+// Releasing a copy's pin scans the mirror directory only while pinned copies
+// have left it over budget, so a warm read doesn't stat every copy.
+func TestPinReleaseScansOnlyOverBudget(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(newMemRepo(), &memBlobs{}, Options{MirrorDir: func() string { return dir }, MirrorMaxBytes: 1 << 20})
+	write := func(body string) (string, func()) {
+		t.Helper()
+		path, _, _, release, err := s.writeMirror(dir, ".mks", func(w io.Writer) error {
+			_, err := io.WriteString(w, body)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path, release
+	}
+	// A scan removes a temp file a crash left; its presence shows none ran.
+	staleTemp := func() string {
+		t.Helper()
+		path := filepath.Join(dir, mirrorTempPrefix+"stale")
+		old := time.Now().Add(-2 * staleMirrorTempAge)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first, release := write("first")
+	release()
+	stale := staleTemp()
+	s.pinMirror(first)()
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("a release under budget scanned the directory: %v", err)
+	}
+	// Over budget with the new copy pinned, its release scans.
+	s.opts.MirrorMaxBytes = 1
+	_, release = write("second")
+	stale = staleTemp()
+	release()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the release that left the directory over budget didn't scan: %v", err)
 	}
 }
