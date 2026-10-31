@@ -90,7 +90,7 @@ type SubtitleInventoryItemV3 struct {
 	// NativeSelectable marks an embedded track the client may switch to on
 	// the stream it already plays: selecting it under this plan's
 	// capabilities, delivery and audio yields subtitle.embedded.
-	NativeSelectable bool `json:"native_selectable,omitempty" doc:"Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url stays the fallback."`
+	NativeSelectable bool `json:"native_selectable,omitempty" doc:"Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none."`
 	// downloadedSubtitleID is deliberately not serialized: clients address the
 	// opaque session URL, while the server uses the row ID to make that URL
 	// stable across inventory reordering and seek reanchors.

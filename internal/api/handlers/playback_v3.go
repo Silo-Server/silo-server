@@ -59,6 +59,9 @@ const (
 	transcodeStartFailedReasonV3  = "transcode_start_failed"
 	trackUnavailableReasonV3      = "track_unavailable"
 	capabilityUnavailableReasonV3 = "transcode_node_capability_unavailable"
+	// failureSubtitleTrackChangedV3 is the failure_recovery classification
+	// of a subtitle the client switched to on its own.
+	failureSubtitleTrackChangedV3 = "subtitle_track_changed"
 	// transportStartupReadyV3 is the "outcome" of a transport startup whose
 	// first manifest became ready.
 	transportStartupReadyV3 = "ready"
@@ -5633,6 +5636,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	trackChange := operation == playback.ReplanOperationTrackChangeV3
+	// A subtitle switch the client already made on the playing stream, and
+	// reports as a failure recovery, is expressed in the mounted file's
+	// inventory like a track_change, and its answer must be the same media:
+	// it stays on the effective file as a track_change does.
+	pinnedTrackChange := trackChange ||
+		(operation == playback.ReplanOperationFailureRecoveryV3 && req.Failure.Classification == failureSubtitleTrackChangedV3)
 	qualityChange := operation == playback.ReplanOperationQualityChangeV3
 	outputChange := operation == playback.ReplanOperationOutputChangeV3
 	// User-intent operations replace the legacy audio PATCH and client-recipe
@@ -5699,7 +5708,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// is expressed in the mounted alternate's inventory and must stay pinned to
 		// that file or its combined ordinals can select unrelated tracks.
 		start.FileID = record.EffectiveMediaFileID
-		if intentChange && !trackChange {
+		if intentChange && !pinnedTrackChange {
 			start.FileID = record.RequestedMediaFileID
 		}
 		if strings.TrimSpace(req.QualityPreference) != "" {
@@ -5788,8 +5797,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if intentChange && !trackChange {
 		// Prefer returning to the requested edition, but a quality/output/track
 		// change must not abandon a healthy active alternate merely because the
-		// inactive original has gone missing since playback started.
-		if requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
+		// inactive original has gone missing since playback started. A reported
+		// subtitle switch stays on the version playing.
+		if !pinnedTrackChange && requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
 			effectiveFile = requestedFile
 		}
 		// Track identities only need remapping when the effective edition
@@ -5917,7 +5927,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
-	choosesVersion := qualityChange || (intentChange && !trackChange)
+	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -5990,7 +6000,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// when the limit lowered that plan, it still lowers this one. Any other
 	// label stands only if the same replan without the limit plays more, as
 	// bitrates alone cannot tell whether the requested file could play.
-	staysLimited := (!intentChange || trackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
+	staysLimited := (!intentChange || pinnedTrackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
 		var readingErr error
 		if !seekScopedRecovery {
