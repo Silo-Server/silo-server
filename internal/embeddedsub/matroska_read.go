@@ -79,12 +79,23 @@ func readMatroskaPackets(ctx context.Context, r *fileReader, b *budget, idx *Ind
 	if t.allCueDurations {
 		lookback = t.maxCueDuration
 	}
+	// One visited byte per cue, plus int64 cue times for window filtering.
+	metadata := len(t.Cues)
+	if !whole {
+		metadata += 8 * len(t.Cues)
+	}
+	if err := b.take(metadata); err != nil {
+		return nil, err
+	}
 	m := &matroskaRead{r: r, budget: b, idx: idx, t: t, heads: map[int64]*clusterHead{}}
 	done := make([]bool, len(t.Cues))
 	res := &Result{}
 	var damage []error
 	for {
-		sel := selectCues(t.Cues, done, from, to, lookback)
+		sel, err := selectCues(t.Cues, done, from, to, lookback, b)
+		if err != nil {
+			return nil, err
+		}
 		if len(sel) == 0 {
 			break
 		}
@@ -417,6 +428,9 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 	whole, ok := ticksDuration(duration, scale)
 	if !ok || duration > math.MaxInt64/2/laces || ticks > math.MaxInt64-duration {
 		return nil, corrupt("block at %d has duration %d", at, duration)
+	}
+	if err := m.budget.take(len(blk.frames) * packetMetadataBytes); err != nil {
+		return nil, err
 	}
 	packets := make([]Packet, 0, laces)
 	for n, frame := range blk.frames {

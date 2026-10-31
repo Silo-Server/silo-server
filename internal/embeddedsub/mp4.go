@@ -597,6 +597,9 @@ func readMP4Packets(ctx context.Context, r *fileReader, b *budget, t *Track, fro
 	for i, s := range m.samples {
 		pts := m.pts(s.dts)
 		if whole || overlaps(pts, pts+ticksToDuration(int64(s.delta), int64(m.timescale)), from, to) {
+			if err := b.take(cueMetadataBytes); err != nil {
+				return nil, err
+			}
 			sel = append(sel, i)
 		}
 	}
@@ -653,7 +656,7 @@ func (m *mp4Track) readSamples(r io.ReaderAt, b *budget, rd mp4Read) jobResult {
 			jr.damage = append(jr.damage, corrupt("MP4 sample at %d is cut off", s.offset))
 			continue
 		}
-		if err := b.take(int(s.size)); err != nil {
+		if err := b.take(int(s.size) + packetMetadataBytes); err != nil {
 			return jobResult{err: err}
 		}
 		jr.packets = append(jr.packets, Packet{

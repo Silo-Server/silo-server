@@ -881,3 +881,35 @@ func TestPacketBudgetBoundsDecompression(t *testing.T) {
 		})
 	}
 }
+
+func TestReadBudgetIncludesMetadata(t *testing.T) {
+	t.Run("cue jobs", func(t *testing.T) {
+		cues := make([]Cue, 1024)
+		for i := range cues {
+			cues[i] = Cue{Time: 0, Duration: 2 * time.Second, ClusterPosition: int64(i + 1)}
+		}
+		track := &Track{Number: 1, Cues: cues}
+		_, err := readMatroskaPackets(t.Context(), nil, newBudget(64<<10), &Index{TimestampScale: 1_000_000}, track, 0, time.Second, ReadOptions{}, 16)
+		if !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("oversized cue metadata: %v, want ErrTooLarge", err)
+		}
+	})
+	t.Run("laced packet structs", func(t *testing.T) {
+		m := matroskaRead{budget: newBudget(16 << 10), idx: &Index{TimestampScale: 1_000_000}, t: &Track{Number: 1}}
+		_, err := m.blockPackets(blockElement{id: matroska.IDSimpleBlock, data: []byte{0x81, 0, 0, 0x84, 255}}, 0, &clusterHead{}, nil)
+		if !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("256 empty packet structs: %v, want ErrTooLarge", err)
+		}
+	})
+	t.Run("MP4 packet structs", func(t *testing.T) {
+		samples := make([]mp4Sample, 1024)
+		for i := range samples {
+			samples[i] = mp4Sample{dts: int64(i), delta: 1}
+		}
+		track := &Track{mp4: &mp4Track{samples: samples, timescale: 1000}}
+		_, err := readMP4Packets(t.Context(), nil, newBudget(64<<10), track, 0, 2*time.Second, 16)
+		if !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("empty MP4 packet metadata: %v, want ErrTooLarge", err)
+		}
+	})
+}

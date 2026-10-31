@@ -108,15 +108,19 @@ small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
 data by default (`ErrTooLarge`), and refuses a file whose size or
 modification time changed since it was indexed (`ErrFileChanged`). Window
 reads hold at most `WindowMaxBytes` (16 MiB): a rendition segment's read,
-which holds one of eight conversion slots, so on-demand segments hold at most
-128 MiB at once, and a kept-track or source window, which the subtitle cache
+which holds one of eight conversion slots, so on-demand segments share at most
+128 MiB in read budgets, and a kept-track or source window, which the subtitle cache
 demuxes instead when it is refused. A window open to the end is most of the
 track and gets a whole read's 128 MiB. An index keeps at most 2^20 cue
 entries or MP4 samples across its tracks, and a file of more than 1,000
 tracks is malformed; past the cue bound a Matroska file's Cues aren't trusted,
 and past the sample bound an MP4 file is malformed, so either is demuxed.
 The packet budget reserves buffer capacity before decompression allocates it,
-and cache accounting includes compression prefixes. Open and fstat observe
+and cache accounting includes compression prefixes. Reads also reserve
+conservative metadata weights before allocation: 1 KiB per selected cue or
+sample and 512 bytes per packet, plus visited flags and cue times used by
+Matroska windows. This bounds jobs, result arrays and laced packet structs
+even when payloads are empty. Open and fstat observe
 cancellation; unfinished kernel calls are limited to 32 per process and one
 per path until they return.
 
