@@ -165,6 +165,32 @@ func TestExpandSamplesRejectsOffsetsPastTheFile(t *testing.T) {
 	}
 }
 
+// FFmpeg drops the samples that start at or after a media edit's end and
+// keeps one that runs past it whole, and so does the reader.
+func TestMP4EditListEndDropsLaterSamples(t *testing.T) {
+	m := testMP4Track(be32(1, 1, 0, 0x10000)) // the edit ends 1 ms in
+	packets := []Packet{
+		{Data: textSample("runs past the end"), mp4Delta: 2000},
+		{Data: textSample("starts after it"), mp4DTS: 2000, mp4Delta: 1000},
+	}
+	var file bytes.Buffer
+	if err := writeMP4(&file, &Track{mp4: m}, packets); err != nil {
+		t.Fatal(err)
+	}
+	path := writeFixture(t, file.Bytes())
+	idx, err := ReadIndex(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ReadPackets(context.Background(), path, idx, 7, WholeFrom, WholeTo, ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Packets) != 1 || res.Packets[0].Duration != 2*time.Millisecond {
+		t.Fatalf("packets = %+v, want the first, whole", res.Packets)
+	}
+}
+
 // Uniform sample tables are cheap to declare, so the samples of all an
 // index's text tracks share one budget, checked before a table is expanded.
 func TestMP4IndexBoundsSamplesAcrossTracks(t *testing.T) {
