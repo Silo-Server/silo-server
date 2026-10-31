@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -873,4 +874,59 @@ type fakeCoverageGate struct {
 
 func (g fakeCoverageGate) CoverageReady(_ []string) (bool, string) {
 	return g.ready, g.reason
+}
+
+// Feature detection must not fail while Meilisearch is down: searches still
+// answer through the PostgreSQL fallback, so capabilities report that path.
+func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
+	}))
+	defer healthy.Close()
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+
+	postgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
+	for _, tc := range []struct {
+		name        string
+		url         string
+		activeUID   string
+		staleSchema bool
+		circuitOpen bool
+		wantResult  SearchContinuationCapabilities
+	}{
+		{name: "healthy index", url: healthy.URL, activeUID: "silo_media_items", wantResult: SearchContinuationCapabilities{
+			Provider: SearchProviderMeilisearch, ResultWindowLimit: 1000,
+			SessionTTLSeconds: int(searchSessionTTL.Seconds()), MaxSessionsPerAccount: searchSessionsPerAccount,
+		}},
+		{name: "meilisearch unreachable", url: down.URL, activeUID: "silo_media_items", wantResult: postgres},
+		{name: "index not built", url: healthy.URL, wantResult: postgres},
+		{name: "index schema mismatch", url: healthy.URL, activeUID: "silo_media_items", staleSchema: true, wantResult: postgres},
+		{name: "circuit open", url: healthy.URL, activeUID: "silo_media_items", circuitOpen: true, wantResult: postgres},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: tc.url})
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := catalogSearchMeilisearchSchemaVersion(provider.config.Embedder, provider.config.IndexTypes, false, false)
+			if tc.staleSchema {
+				schema = 1
+			}
+			provider.stateRepo = fakeMeilisearchIndexStateStore{state: SearchIndexState{ActiveIndexUID: tc.activeUID, SchemaVersion: schema}}
+			provider.sessions = &searchSessionStore{}
+			if tc.circuitOpen {
+				provider.tripCircuit(errors.New("meilisearch timed out"))
+			}
+			resolver := &CatalogResolver{searchProvider: provider}
+
+			got, err := resolver.SearchContinuationCapabilities(t.Context())
+			if err != nil {
+				t.Fatalf("SearchContinuationCapabilities error = %v", err)
+			}
+			if got != tc.wantResult {
+				t.Fatalf("SearchContinuationCapabilities = %+v, want %+v", got, tc.wantResult)
+			}
+		})
+	}
 }
