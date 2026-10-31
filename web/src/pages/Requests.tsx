@@ -402,6 +402,7 @@ function RequestRow({
   const MediaIcon = request.media_type === "series" ? Tv : Film;
   const details = [
     formatMediaType(request.media_type),
+    request.is_4k ? "4K" : "",
     request.year ? String(request.year) : "",
     request.seasons?.length ? formatSeasonList(request.seasons) : "",
     state === "partially_available" && request.season_progress?.length

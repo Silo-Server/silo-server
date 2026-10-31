@@ -19100,6 +19100,12 @@ export interface components {
        */
       max_requests: number | null;
       /**
+       * @description Whether the group's accounts may make 4K requests; inherit uses the server's requests_4k_default
+       * @example inherit
+       * @enum {string}
+       */
+      requests_4k: "inherit" | "allowed" | "denied";
+      /**
        * Format: int64
        * @example 7
        */
@@ -19112,6 +19118,12 @@ export interface components {
       limit_mode: "inherit" | "custom" | "unlimited";
       /** Format: int64 */
       max_requests: number | null;
+      /**
+       * @description Absent keeps the stored value
+       * @example allowed
+       * @enum {string}
+       */
+      requests_4k?: "inherit" | "allowed" | "denied";
       /** Format: int64 */
       window_days: number | null;
     };
@@ -19174,6 +19186,12 @@ export interface components {
       limit_mode: "inherit" | "custom" | "unlimited" | "blocked";
       /** Format: int64 */
       max_requests: number | null;
+      /**
+       * @description Absent keeps the stored value
+       * @example allowed
+       * @enum {string}
+       */
+      requests_4k?: "inherit" | "allowed" | "denied";
       /** Format: int64 */
       window_days: number | null;
     };
@@ -19432,6 +19450,11 @@ export interface components {
       global_max_requests: number;
       /** Format: int64 */
       global_window_days: number;
+      /**
+       * @description Whether accounts may make 4K requests where neither the account nor its access group says; absent on update keeps the stored value
+       * @example false
+       */
+      requests_4k_default?: boolean;
       requests_enabled: boolean;
       /**
        * @description Adding a title that is not in the library to a watchlist also requests it; absent on update keeps the stored value
@@ -19455,6 +19478,12 @@ export interface components {
       /** Format: int64 */
       max_requests: number | null;
       /**
+       * @description Whether the account may make 4K requests; inherit uses its access group's setting, then the server's requests_4k_default
+       * @example inherit
+       * @enum {string}
+       */
+      requests_4k: "inherit" | "allowed" | "denied";
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -19473,6 +19502,8 @@ export interface components {
       max_requests: number;
       /** Format: int64 */
       remaining: number;
+      /** @description Whether this account may make 4K requests, resolved over the account, its access group and the server default */
+      requests_4k: boolean;
       /** @description Server-wide requests switch */
       requests_enabled: boolean;
       unlimited: boolean;
@@ -25211,6 +25242,10 @@ export interface components {
       /** @description Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available. */
       missing_seasons_requestable: boolean;
       rating_restrictions_enforced: boolean;
+      /** @description Whether the viewer may make 4K requests now: their account may, and a download server takes 4K for movies or for series. request_4k on the title detail says which */
+      requests_4k_allowed: boolean;
+      /** @description Whether the server takes 4K requests: is_4k on createRequest and on requests, and request_4k on the title detail */
+      requests_4k_supported: boolean;
       requests_enabled: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -27190,6 +27225,11 @@ export interface components {
        * @example radarr
        */
       integration_kind?: string;
+      /**
+       * @description A 4K request, fulfilled by a 4K copy alone. A regular request gets an HD copy, and a 4K one too while the server asks every request for 4K
+       * @example false
+       */
+      is_4k: boolean;
       is_anime: boolean;
       /** @description Admins only: why the last submission to a download server failed. It can name servers and routing rules */
       last_error?: string;
@@ -27279,6 +27319,11 @@ export interface components {
       backdrop_path?: string;
       /** @example tt0113277 */
       imdb_id?: string;
+      /**
+       * @description Request a 4K copy alone. Needs the account's 4K permission (403 otherwise) and a download server that takes 4K (409 otherwise); see request_4k on the title detail. Omitted seasons then mean every aired season
+       * @example false
+       */
+      is_4k?: boolean;
       /**
        * @example movie
        * @enum {string}
@@ -30943,6 +30988,8 @@ export interface components {
        */
       release_date?: string;
       request: components["schemas"]["RequestMediaState"];
+      /** @description The title's 4K request: its open 4K request, or whether the viewer may make one. Reasons beyond request's: 4k_not_allowed (the account may not make 4K requests) and 4k_unavailable (no download server takes 4K for this media type). A 4K request is independent of the regular one and is not refused because the library has the title */
+      request_4k: components["schemas"]["RequestMediaState"];
       /**
        * Format: int64
        * @description Minutes

@@ -3,5 +3,6 @@
   "limit_mode": "inherit",
   "max_requests": null,
   "window_days": null,
-  "approval_mode": "inherit"
+  "approval_mode": "inherit",
+  "requests_4k": "inherit"
 }

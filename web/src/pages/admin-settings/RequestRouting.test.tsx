@@ -563,11 +563,7 @@ describe("Where requests go: the rule editor", () => {
     expect(within(dialog).getByRole("combobox", { name: "4K version Send to" })).toHaveTextContent(
       "Same as Everything else (no 4K version)",
     );
-    expect(
-      within(dialog).getByText(
-        "Sent along with the HD version when the requester's playback limit allows 4K.",
-      ),
-    ).toBeTruthy();
+    expect(within(dialog).getByText("Gets 4K requests.")).toBeTruthy();
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Remove the release year condition" }),
     );
@@ -876,7 +872,7 @@ describe("Where requests go: try a title", () => {
   });
 
   it("says why there is no HD version when Everything else has no HD server", async () => {
-    const note = "Everything else sends no HD version; requests from users without 4K fail.";
+    const note = "Everything else sends no HD version; regular requests fail.";
     serve({
       servers: allServers,
       routes: ready,

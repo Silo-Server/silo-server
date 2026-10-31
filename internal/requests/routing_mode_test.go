@@ -124,6 +124,57 @@ func standardStore(facts RoutingFacts) *modeStore {
 	return &modeStore{fakeStore: store, mode: RoutingStandard}
 }
 
+// A 4K request sends the 4K tier alone, to the server marked 4K, and fails
+// visibly when no server is marked 4K rather than waiting with nothing sent.
+func TestStandardSends4KRequestToThe4KServerAlone(t *testing.T) {
+	cases := []struct {
+		name      string
+		servers   []Integration
+		wantCalls int
+		want4K    func(*Target) bool
+	}{
+		{
+			name:      "4K server",
+			servers:   []Integration{arrServer("radarr-hd", kindRadarr, nil), arrServer("radarr-4k", kindRadarr, map[string]any{"is_4k": true})},
+			wantCalls: 1,
+			want4K:    func(t *Target) bool { return t.Status == StatusQueued && t.IntegrationID == "radarr-4k" },
+		},
+		{
+			name:    "no 4K server",
+			servers: []Integration{arrServer("radarr-hd", kindRadarr, nil)},
+			want4K: func(t *Target) bool {
+				return t.Status == StatusFailed && t.LastError == "no server takes 4K movies: none is marked 4K"
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := standardStore(RoutingFacts{})
+			store.integrations = tc.servers
+			store.requests["r1"].Is4K = true
+			router := &fakeRouterProvider{}
+			svc := modeService(store, &fakeTMDBClient{})
+			svc.SetRouterProvider(router)
+
+			if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+			if len(router.fulfillLog) != tc.wantCalls {
+				t.Fatalf("fulfill calls = %+v, want %d", router.fulfillLog, tc.wantCalls)
+			}
+			for _, call := range router.fulfillLog {
+				if len(call.qualities) != 1 || call.qualities[0] != Quality2160p || call.conns[0].ID != "radarr-4k" {
+					t.Fatalf("fulfill call = %+v, want 2160p alone to radarr-4k", call)
+				}
+			}
+			targets, _ := store.ListTargets(context.Background(), "r1")
+			if len(targets) != 1 || targets[0].Quality != Quality2160p || !tc.want4K(&targets[0]) {
+				t.Fatalf("targets = %+v, want one 4K target", targets)
+			}
+		})
+	}
+}
+
 func TestStandardSendsEachTierToItsServerAsIs(t *testing.T) {
 	// Facts were never captured and there is no TMDB client: Standard does
 	// not need them.
@@ -131,7 +182,7 @@ func TestStandardSendsEachTierToItsServerAsIs(t *testing.T) {
 	router := &fakeRouterProvider{}
 	svc := modeService(store, &fakeTMDBClient{})
 	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+	store.settings.ForceDualQuality = true
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -238,7 +289,7 @@ func TestStandardSendsAnimeSeriesWithTheAnimeSeriesType(t *testing.T) {
 		router := &fakeRouterProvider{}
 		svc := modeService(store, &fakeTMDBClient{})
 		svc.SetRouterProvider(router)
-		svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+		store.settings.ForceDualQuality = true
 
 		if _, err := svc.submitApprovedRequest(context.Background(), *req, Viewer{}, nil); err != nil {
 			t.Fatalf("anime=%v: submit: %v", anime, err)

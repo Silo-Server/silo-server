@@ -16,6 +16,10 @@ var (
 	ErrNotFound     = errors.New("request not found")
 	ErrForbidden    = errors.New("request forbidden")
 	ErrInvalidState = errors.New("invalid request state")
+	// ErrUHDNotAllowed refuses a 4K request from an account that may not
+	// make them; ErrUHDUnavailable one no download server would take.
+	ErrUHDNotAllowed  = errors.New("account may not make 4K requests")
+	ErrUHDUnavailable = errors.New("no download server takes 4K requests")
 	// ErrIntegrationUnreachable reports that the configured request integration
 	// (its plugin, or the service behind it) could not be reached. It is a
 	// dependency failure, not a bug in the request, so the API layer answers an

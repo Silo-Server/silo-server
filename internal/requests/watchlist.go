@@ -258,7 +258,7 @@ func (s *Service) RequestFromWatchlist(ctx context.Context, viewer Viewer, title
 // applyWatchlistRequest creates or follows the title's request and returns
 // the reason a refused request gives, if any.
 func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, title WatchlistTitle) string {
-	active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
+	active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs(), false)
 	if err != nil {
 		s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
 		return ""
@@ -291,7 +291,7 @@ func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, titl
 		return ""
 	case errors.Is(err, ErrAlreadyRequested):
 		// Another request landed between the read and the create.
-		active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
+		active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs(), false)
 		if err != nil {
 			s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
 			return ""
@@ -361,7 +361,7 @@ func (s *Service) WithdrawWatchlistRequest(ctx context.Context, viewer Viewer, m
 	if err != nil {
 		return err
 	}
-	active, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{tmdbID})
+	active, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{tmdbID}, false)
 	if err != nil {
 		return err
 	}
@@ -432,7 +432,7 @@ func (s *Service) WatchlistRequestStates(ctx context.Context, viewer Viewer, tit
 		if err != nil {
 			return nil, err
 		}
-		active, err := s.store.ListActiveByTMDB(ctx, mediaType, ids)
+		active, err := s.store.ListActiveByTMDB(ctx, mediaType, ids, false)
 		if err != nil {
 			return nil, err
 		}

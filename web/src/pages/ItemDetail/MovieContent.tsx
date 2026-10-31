@@ -31,6 +31,7 @@ import QualityBadges from "./components/QualityBadges";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
 import MediaUserActionBar from "./components/MediaUserActionBar";
+import { useDetail4KRequest } from "./components/useDetail4KRequest";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
@@ -216,6 +217,7 @@ export default function MovieContent({
           }
         : null,
   });
+  const request4K = useDetail4KRequest("movie", Number(item.tmdb_id) || 0, item.title ?? "");
   const restartHref =
     primaryAction.label === "Resume" && item.versions.length > 0
       ? `/watch/${item.content_id}?restart=1`
@@ -282,90 +284,99 @@ export default function MovieContent({
           )}
           crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
           actions={
-            <MediaUserActionBar
-              item={item}
-              contentId={item.content_id}
-              watchTogether={watchTogether.menu}
-              playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
-              playLabel={primaryAction.label}
-              playProgress={primaryAction.progress}
-              restartHref={restartHref}
-              resumePositionSeconds={
-                item.user_data && "position_seconds" in item.user_data
-                  ? item.user_data.position_seconds
-                  : undefined
-              }
-              resumeDurationSeconds={
-                item.user_data && "duration_seconds" in item.user_data
-                  ? item.user_data.duration_seconds
-                  : undefined
-              }
-              resumeResolution={
-                item.user_data && "last_resolution" in item.user_data
-                  ? item.user_data.last_resolution
-                  : undefined
-              }
-              resumeHdr={
-                item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
-              }
-              onRefresh={
-                canCurateMetadata
-                  ? (mode) =>
-                      refreshMetadataMutation.mutate({
-                        item,
-                        mode,
-                        onReplaced: followReplacedItem,
-                      })
-                  : undefined
-              }
-              isRefreshing={refreshMetadataMutation.isPending}
-              onRedetectMarkers={
-                isAdmin && canRedetectMovieCredits
-                  ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
-                  : undefined
-              }
-              redetectKind="credits"
-              isRedetectingMarkers={redetectMarkersMutation.isPending}
-              isAdmin={isAdmin}
-              canCurateMetadata={canCurateMetadata}
-              canEditMarkers={canEditMarkers}
-              canManageTrickplay={canManageTrickplay}
-              onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-              onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
-              onSplitItem={
-                canCurateMetadata && item.versions.length > 1 ? () => setSplitOpen(true) : undefined
-              }
-              onShowMediaInfo={
-                canCurateMetadata && item.versions.length > 0 ? () => openMediaInfo() : undefined
-              }
-              versions={item.versions}
-              playbackVariants={item.playback_variants}
-              selectedVersion={selectedVersion}
-              versionPicked={pickedVersion != null}
-              onSelectVersion={handleSelectVersion}
-              onDownload={
-                user?.download_allowed && item.versions.length > 0
-                  ? () => setDownloadOpen(true)
-                  : undefined
-              }
-              onSearchSubtitles={
-                item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
-              }
-              qualityPreference={qualityPreference}
-              audioSelectionMode={audioSelection.mode}
-              explicitAudioTrackIndex={audioSelection.explicitIndex}
-              onSelectAudioTrack={audioSelection.select}
-              onResetAudioSelection={audioSelection.reset}
-              prePlaySubtitleMode={subtitleSelectionMode}
-              explicitSubtitleSelection={explicitSubtitleSelection}
-              onSelectSubtitle={handleSelectSubtitle}
-              onSelectSubtitleOff={handleSelectSubtitleOff}
-              onResetSubtitleSelection={handleResetSubtitleSelection}
-              preferredSubtitleLanguage={item.effective_subtitle_language}
-              preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
-              subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
-              showForcedSubtitles={item.effective_show_forced_subtitles}
-            />
+            <>
+              <MediaUserActionBar
+                item={item}
+                contentId={item.content_id}
+                watchTogether={watchTogether.menu}
+                playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
+                playLabel={primaryAction.label}
+                playProgress={primaryAction.progress}
+                restartHref={restartHref}
+                resumePositionSeconds={
+                  item.user_data && "position_seconds" in item.user_data
+                    ? item.user_data.position_seconds
+                    : undefined
+                }
+                resumeDurationSeconds={
+                  item.user_data && "duration_seconds" in item.user_data
+                    ? item.user_data.duration_seconds
+                    : undefined
+                }
+                resumeResolution={
+                  item.user_data && "last_resolution" in item.user_data
+                    ? item.user_data.last_resolution
+                    : undefined
+                }
+                resumeHdr={
+                  item.user_data && "last_hdr" in item.user_data
+                    ? item.user_data.last_hdr
+                    : undefined
+                }
+                onRefresh={
+                  canCurateMetadata
+                    ? (mode) =>
+                        refreshMetadataMutation.mutate({
+                          item,
+                          mode,
+                          onReplaced: followReplacedItem,
+                        })
+                    : undefined
+                }
+                isRefreshing={refreshMetadataMutation.isPending}
+                onRedetectMarkers={
+                  isAdmin && canRedetectMovieCredits
+                    ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
+                    : undefined
+                }
+                redetectKind="credits"
+                isRedetectingMarkers={redetectMarkersMutation.isPending}
+                isAdmin={isAdmin}
+                canCurateMetadata={canCurateMetadata}
+                canEditMarkers={canEditMarkers}
+                canManageTrickplay={canManageTrickplay}
+                onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+                onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+                onSplitItem={
+                  canCurateMetadata && item.versions.length > 1
+                    ? () => setSplitOpen(true)
+                    : undefined
+                }
+                onShowMediaInfo={
+                  canCurateMetadata && item.versions.length > 0 ? () => openMediaInfo() : undefined
+                }
+                versions={item.versions}
+                playbackVariants={item.playback_variants}
+                selectedVersion={selectedVersion}
+                versionPicked={pickedVersion != null}
+                onSelectVersion={handleSelectVersion}
+                onDownload={
+                  user?.download_allowed && item.versions.length > 0
+                    ? () => setDownloadOpen(true)
+                    : undefined
+                }
+                onSearchSubtitles={
+                  item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
+                }
+                qualityPreference={qualityPreference}
+                audioSelectionMode={audioSelection.mode}
+                explicitAudioTrackIndex={audioSelection.explicitIndex}
+                onSelectAudioTrack={audioSelection.select}
+                onResetAudioSelection={audioSelection.reset}
+                prePlaySubtitleMode={subtitleSelectionMode}
+                explicitSubtitleSelection={explicitSubtitleSelection}
+                onSelectSubtitle={handleSelectSubtitle}
+                onSelectSubtitleOff={handleSelectSubtitleOff}
+                onResetSubtitleSelection={handleResetSubtitleSelection}
+                preferredSubtitleLanguage={item.effective_subtitle_language}
+                preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
+                subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
+                showForcedSubtitles={item.effective_show_forced_subtitles}
+                onRequest4K={request4K.onRequest4K}
+                onCancel4KRequest={request4K.onCancel4KRequest}
+              />
+              {request4K.status}
+            </>
           }
         />
       }
@@ -413,6 +424,7 @@ export default function MovieContent({
             />
           )}
           {watchTogether.sheet}
+          {request4K.dialogs}
         </>
       }
     >

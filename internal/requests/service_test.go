@@ -176,6 +176,44 @@ func TestCreateRequestActiveDuplicateBlocks(t *testing.T) {
 	}
 }
 
+// A 4K request needs the account's permission and a server that takes 4K,
+// and stands next to the title's regular request: one open request of each.
+func TestCreate4KRequest(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.trackActive = true
+	radarr := routerInst("radarr")
+	radarr.PluginConfig = map[string]any{"service_kind": "radarr", "is_default": true}
+	store.integrations = []Integration{radarr}
+	svc, _ := newRoutedService(store)
+	ctx := context.Background()
+	in4K := fightClubInput
+	in4K.Is4K = true
+
+	if _, err := svc.CreateRequest(ctx, testViewer(1), in4K); !errors.Is(err, ErrUHDNotAllowed) {
+		t.Fatalf("without permission: error = %v, want ErrUHDNotAllowed", err)
+	}
+	store.settings.UHDRequestsAllowed = true
+	if _, err := svc.CreateRequest(ctx, testViewer(1), in4K); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("without a 4K server: error = %v, want ErrUHDUnavailable", err)
+	}
+	store.integrations[0].PluginConfig["is_default_4k"] = true
+
+	if _, err := svc.CreateRequest(ctx, testViewer(1), fightClubInput); err != nil {
+		t.Fatalf("regular request: %v", err)
+	}
+	uhd, err := svc.CreateRequest(ctx, testViewer(1), in4K)
+	if err != nil {
+		t.Fatalf("4K request next to the regular one: %v", err)
+	}
+	if !uhd.Is4K {
+		t.Fatalf("request = %+v, want a 4K request", uhd)
+	}
+	if _, err := svc.CreateRequest(ctx, testViewer(1), in4K); !errors.Is(err, ErrAlreadyRequested) {
+		t.Fatalf("second 4K request: error = %v, want ErrAlreadyRequested", err)
+	}
+}
+
 // Auto-approval does not wait for a router: on a server without Sonarr/Radarr
 // the approved request waits for the title to reach the library (AC3, AC4).
 func TestCreateRequestAutoApprovesWithoutRouter(t *testing.T) {
@@ -190,6 +228,23 @@ func TestCreateRequestAutoApprovesWithoutRouter(t *testing.T) {
 	}
 	if req.Status != StatusApproved || req.Outcome != OutcomeActive || req.LastError != "" {
 		t.Fatalf("request = %+v, want approved and waiting for the library", req)
+	}
+}
+
+// The library never completes a 4K request, so an approved one with no
+// server to go to records why and retries instead of waiting for the library.
+func TestApproved4KRequestWithoutRouterRetries(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7, Is4K: true}
+	store.requests["r1"] = &req
+
+	got, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
+	if err != nil {
+		t.Fatalf("submitApprovedRequest: %v", err)
+	}
+	if got.LastError != "no download server takes 4K movies" || got.SubmitAttempts != 1 {
+		t.Fatalf("request = %+v, want a recorded attempt saying no server takes 4K", got)
 	}
 }
 
@@ -1352,12 +1407,22 @@ func (f *fakeStore) usedLocked(userID int, since time.Time) int {
 	return used
 }
 
-func (f *fakeStore) ListActiveByTMDB(_ context.Context, mediaType MediaType, ids []int) (map[int]*Request, error) {
+func (f *fakeStore) ListActiveByTMDB(_ context.Context, mediaType MediaType, ids []int, is4K bool) (map[int]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := map[int]*Request{}
+	if is4K {
+		// The active map holds regular requests; 4K ones are found by scan.
+		for _, req := range f.requests {
+			if req.Is4K && req.MediaType == mediaType && slices.Contains(ids, req.TMDBID) &&
+				req.Outcome == OutcomeActive && req.Status != StatusCompleted {
+				out[req.TMDBID] = req
+			}
+		}
+		return out, nil
+	}
 	for _, id := range ids {
-		if req := f.active[mediaType][id]; req != nil {
+		if req := f.active[mediaType][id]; req != nil && !req.Is4K {
 			out[id] = req
 		}
 	}
@@ -1383,7 +1448,7 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 	if input.ReplaceFailed {
 		for id, req := range f.requests {
 			if req.RequestedByUserID == input.Requester.UserID && req.MediaType == input.Input.MediaType &&
-				req.TMDBID == input.Input.TMDBID && req.Outcome == OutcomeFailed {
+				req.TMDBID == input.Input.TMDBID && req.Is4K == input.Input.Is4K && req.Outcome == OutcomeFailed {
 				delete(f.requests, id)
 			}
 		}
@@ -1408,11 +1473,12 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		RequestedByUserID:    input.Requester.UserID,
 		RequestedByProfileID: input.Requester.ProfileID,
 		Source:               requestSource(input.Input.Source),
+		Is4K:                 input.Input.Is4K,
 		CreatedAt:            input.Now,
 		UpdatedAt:            input.Now,
 	}
 	f.requests[input.ID] = req
-	if f.trackActive && req.Outcome == OutcomeActive {
+	if f.trackActive && req.Outcome == OutcomeActive && !req.Is4K {
 		f.active[req.MediaType][req.TMDBID] = req
 	}
 	copy := *req
@@ -2414,28 +2480,10 @@ func (f *certTMDBClient) GetCertification(_ context.Context, _ string, id int) (
 	return f.certs[id], nil
 }
 
-type fixedCeiling struct{ q string }
-
-// failingCeiling is an entitlement resolver whose lookup always errors.
-type failingCeiling struct{}
-
-func (failingCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
-	return "", errors.New("entitlement lookup failed")
-}
-
-func (f fixedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
-	return f.q, nil
-}
-
-// ratedCeiling implements both EntitlementResolver and ContentRatingResolver.
+// ratedCeiling is an EntitlementResolver with a fixed rating ceiling.
 type ratedCeiling struct {
-	q         string
 	rating    string
 	ratingErr error
-}
-
-func (f ratedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
-	return f.q, nil
 }
 
 func (f ratedCeiling) MaxContentRating(context.Context, int, string) (string, error) {
@@ -2677,90 +2725,25 @@ func TestUpdateIntegrationPassesSiblingsToValidate(t *testing.T) {
 	}
 }
 
-func TestAllowedQualities(t *testing.T) {
-	svc := newTestService(newFakeStore())
-
-	t.Run("hd ceiling stays 1080p only", func(t *testing.T) {
-		svcHD := newTestService(newFakeStore())
-		svcHD.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-		got, _ := svcHD.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 1 || got[0] != Quality1080p {
-			t.Fatalf("qualities = %v, want [1080p]", got)
-		}
-	})
-
-	t.Run("any/no-cap ceiling adds 2160p", func(t *testing.T) {
-		// A requester whose max playback quality is "Any" resolves to an empty
-		// (no-cap) ceiling. Empty means UNLIMITED, so 4K must be requested
-		// alongside 1080p — it must not be read as "below 4K".
-		svcAny := newTestService(newFakeStore())
-		svcAny.SetEntitlementResolver(fixedCeiling{q: ""})
-		got, _ := svcAny.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-
-	t.Run("force dual adds 2160p", func(t *testing.T) {
-		got, _ := svc.allowedQualities(context.Background(), Request{}, Settings{ForceDualQuality: true})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-
-	t.Run("4k ceiling adds 2160p", func(t *testing.T) {
-		svc4k := newTestService(newFakeStore())
-		svc4k.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-		got, _ := svc4k.allowedQualities(context.Background(), Request{}, Settings{})
-		if len(got) != 2 || got[1] != Quality2160p {
-			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
-		}
-	})
-}
-
-func TestSubmitApprovedSkipsUnconfiguredOptional4KTarget(t *testing.T) {
-	store := newFakeStore()
-	hd := routerInst("router-1")
-	hd.PluginConfig = map[string]any{
-		"service_kind": "radarr",
-		"is_default":   true,
-		"is_4k":        false,
+func TestRequestQualities(t *testing.T) {
+	cases := []struct {
+		name      string
+		is4K      bool
+		forceDual bool
+		want      []Quality
+	}{
+		{name: "regular request is HD only", want: []Quality{Quality1080p}},
+		{name: "force dual adds 4K to a regular request", forceDual: true, want: []Quality{Quality1080p, Quality2160p}},
+		{name: "4K request is 4K only", is4K: true, want: []Quality{Quality2160p}},
+		{name: "force dual adds no HD to a 4K request", is4K: true, forceDual: true, want: []Quality{Quality2160p}},
 	}
-	store.integrations = []Integration{hd}
-	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: ""})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	if len(router.gotQualities) != 1 || router.gotQualities[0] != Quality1080p {
-		t.Fatalf("qualities = %v, want only [1080p] when no 4K default is configured", router.gotQualities)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality1080p || targets[0].Status == StatusFailed {
-		t.Fatalf("targets = %+v, want one healthy 1080p target", targets)
-	}
-}
-
-func TestSubmitApprovedUsesConfiguredOptional4KDefault(t *testing.T) {
-	store := newFakeStore()
-	hd := routerInst("router-hd")
-	hd.PluginConfig = map[string]any{
-		"service_kind": "radarr",
-		"is_default":   true,
-		"is_4k":        false,
-	}
-	uhd := routerInst("router-uhd")
-	uhd.PluginConfig = map[string]any{
-		"service_kind":  "radarr",
-		"is_4k":         true,
-		"is_default_4k": true,
-	}
-	store.integrations = []Integration{hd, uhd}
-	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-
-	mustSubmitApprovedMovie(t, svc, store)
-	if len(router.gotQualities) != 2 || router.gotQualities[0] != Quality1080p || router.gotQualities[1] != Quality2160p {
-		t.Fatalf("qualities = %v, want [1080p 2160p]", router.gotQualities)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := requestQualities(Request{Is4K: tc.is4K}, Settings{ForceDualQuality: tc.forceDual})
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("qualities = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -2768,7 +2751,6 @@ func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}
 	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"}) // HD ceiling -> only 1080p allowed
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
@@ -2782,7 +2764,7 @@ func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	// HD ceiling only -> only 1080p is allowed, and it already has a healthy target,
+	// A regular request wants only 1080p, and it already has a healthy target,
 	// so Fulfill is never called.
 	if router.fulfillCalls != 0 {
 		t.Fatalf("fulfill calls = %d, want 0 (healthy 1080p target already exists)", router.fulfillCalls)
@@ -2868,7 +2850,6 @@ func TestSubmitApprovedContainsToChosenCapability(t *testing.T) {
 	seerrConn.CapabilityID = "seerr"
 	store.integrations = []Integration{arrConn, seerrConn}
 	service, router := newRoutedService(store)
-	service.SetEntitlementResolver(fixedCeiling{q: "1080p"}) // single quality, keep it simple
 
 	mustSubmitApprovedMovie(t, service, store)
 	if len(router.gotConns) != 1 {
@@ -2889,10 +2870,6 @@ func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	// Pin an HD ceiling: this test is about deduping a duplicate quality, not 4K
-	// entitlement, so keep it to a single requested quality (1080p).
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
 	got, err := submitApprovedMovie(svc, store)
 	if err != nil {
 		t.Fatalf("submit returned error: %v", err)
@@ -2943,10 +2920,6 @@ func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	// Pin an HD ceiling: this test is about skipping an unknown quality, not 4K
-	// entitlement, so keep it to a single requested quality (1080p).
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
 	mustSubmitApprovedMovie(t, svc, store)
 	targets, _ := store.ListTargets(context.Background(), "r1")
 	if len(targets) != 1 {
@@ -2967,7 +2940,6 @@ func TestSubmitApprovedSkipsUnknownConnectionTarget(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	got, err := submitApprovedMovie(svc, store)
 	if err != nil {
@@ -2990,10 +2962,6 @@ func TestSubmitApprovedCoercesUnknownStatusToQueued(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	// Pin an HD ceiling: this test is about status coercion, not 4K entitlement,
-	// so keep it to a single requested quality (1080p).
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
-
 	mustSubmitApprovedMovie(t, svc, store)
 	targets, _ := store.ListTargets(context.Background(), "r1")
 	if len(targets) != 1 || targets[0].Status != StatusQueued {

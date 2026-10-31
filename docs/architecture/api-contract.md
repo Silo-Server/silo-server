@@ -2062,6 +2062,21 @@ Request state gains `following` and `requested_by_viewer`, and
 `GET /api/v2/requests/status` advertises `follow_supported`. The frozen v1
 surface has no follow operation and does not carry these fields.
 
+A request asks for one quality. `POST /api/v2/requests` takes `is_4k` for a 4K
+copy alone; requests carry `is_4k`; and the title detail carries `request_4k`,
+the title's 4K request state beside its regular `request`, with the extra
+reasons `4k_not_allowed` and `4k_unavailable`. A title can have one open
+regular and one open 4K request. A 4K create answers `403` when the account may
+not make 4K requests and `409` when no download server takes 4K for the title.
+`GET /api/v2/requests/status` advertises `requests_4k_supported`, and
+`requests_4k_allowed` when the viewer may make one now. Account and access group
+limits carry `requests_4k` (`inherit`, `allowed`, `denied`), request usage the
+resolved `requests_4k`, and request settings `requests_4k_default` (default
+off); a limit or settings update that omits them keeps the stored value, and so
+does every v1 write. The frozen v1 surface gains no field: a 4K request appears
+there as a request without its quality. See
+[Media requests](media-requests.md#4k-requests).
+
 Requests carry `source`: `direct` for a request someone made, `watchlist` for
 one a watchlist add made. It is an open set; the admin queue reads it too.
 Discovery results (search, the Discover sections and browse operations, and a

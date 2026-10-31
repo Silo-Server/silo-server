@@ -289,7 +289,7 @@ type RouteTrace struct {
 // undecided and failed. Everything else with no HD server makes no HD copy
 // when the title's 4K copy goes to a server, so a media type whose servers are
 // all marked 4K gets its 4K version without a failed HD tier. A title whose 4K
-// copy goes nowhere (a requester without 4K) keeps HD undecided, so it fails
+// copy goes nowhere (a regular request) keeps HD undecided, so it fails
 // rather than being sent nowhere.
 func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]RouteDecision, []RouteTrace) {
 	var ordered []Route

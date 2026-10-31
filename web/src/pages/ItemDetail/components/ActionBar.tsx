@@ -40,6 +40,7 @@ import {
   UsersRound,
   Hand,
   Wrench,
+  X,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -265,6 +266,10 @@ export interface ActionBarProps {
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
   onRequestSeasons?: () => void;
+  /** Requests the title in 4K, beside the library's copy. */
+  onRequest4K?: () => void;
+  /** Cancels the viewer's own open 4K request. */
+  onCancel4KRequest?: () => void;
   /** Shuffles this series' or season's episodes. */
   onShuffle?: () => void;
   rating?: number | null;
@@ -332,6 +337,8 @@ export default function ActionBar({
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
+  onRequest4K,
+  onCancel4KRequest,
   onShuffle,
   rating,
   onRatingChange,
@@ -765,6 +772,22 @@ export default function ActionBar({
       >
         <Inbox className="size-4" />
         Request Seasons
+      </DetailOverflowMenuItem>
+    ),
+    onRequest4K && (
+      <DetailOverflowMenuItem key="request-4k" closeMenu={closeOverflowMenu} onAction={onRequest4K}>
+        <Inbox className="size-4" />
+        Request in 4K
+      </DetailOverflowMenuItem>
+    ),
+    onCancel4KRequest && (
+      <DetailOverflowMenuItem
+        key="cancel-4k"
+        closeMenu={closeOverflowMenu}
+        onAction={onCancel4KRequest}
+      >
+        <X className="size-4" />
+        Cancel 4K Request
       </DetailOverflowMenuItem>
     ),
     onToggleNotInterested && (

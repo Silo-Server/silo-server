@@ -42,10 +42,10 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 	var s Settings
 	err := r.pool.QueryRow(ctx, `
 		SELECT requests_enabled, global_max_requests, global_window_days,
-		       global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at, revision
+		       global_auto_approval_enabled, force_dual_quality, watchlist_requests, uhd_requests_allowed, updated_at, revision
 		FROM request_settings
 		WHERE id = true
-	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UpdatedAt, &s.Revision)
+	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UHDRequestsAllowed, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Settings{
@@ -62,15 +62,16 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 }
 
 // UpdateSettings is the v1 settings write. The frozen v1 body does not carry
-// watchlist_requests, so the stored value is kept.
+// watchlist_requests or uhd_requests_allowed, so the stored values are kept.
 func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Settings, error) {
-	return r.updateSettings(ctx, r.pool, settings, -1, nil)
+	return r.updateSettings(ctx, r.pool, settings, -1, nil, nil)
 }
 
 // updateSettings writes the settings row when its revision still equals
 // expected (-1 skips the check). A nil watchlist keeps the stored
-// watchlist_requests value, true on a first write.
-func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, settings Settings, expected int64, watchlist *bool) (Settings, error) {
+// watchlist_requests value, true on a first write; a nil uhd keeps the
+// stored uhd_requests_allowed, false on a first write.
+func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, settings Settings, expected int64, watchlist, uhd *bool) (Settings, error) {
 	if settings.GlobalWindowDays <= 0 {
 		settings.GlobalWindowDays = 7
 	}
@@ -82,9 +83,9 @@ func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, s
 	err := exec.QueryRow(ctx, `
 		INSERT INTO request_settings (
 			id, requests_enabled, global_max_requests, global_window_days,
-			global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at
+			global_auto_approval_enabled, force_dual_quality, watchlist_requests, uhd_requests_allowed, updated_at
 		)
-		VALUES (true, $1, $2, $3, $4, $5, COALESCE($7::boolean, true), now())
+		VALUES (true, $1, $2, $3, $4, $5, COALESCE($7::boolean, true), COALESCE($8::boolean, false), now())
 		ON CONFLICT (id) DO UPDATE SET
 			requests_enabled = EXCLUDED.requests_enabled,
 			global_max_requests = EXCLUDED.global_max_requests,
@@ -92,12 +93,13 @@ func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, s
 			global_auto_approval_enabled = EXCLUDED.global_auto_approval_enabled,
 			force_dual_quality = EXCLUDED.force_dual_quality,
 			watchlist_requests = COALESCE($7::boolean, request_settings.watchlist_requests),
+			uhd_requests_allowed = COALESCE($8::boolean, request_settings.uhd_requests_allowed),
 			updated_at = now()
 		WHERE $6::bigint = -1 OR request_settings.revision = $6
 		RETURNING requests_enabled, global_max_requests, global_window_days,
-		          global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at, revision
-	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality, expected, watchlist).
-		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UpdatedAt, &s.Revision)
+		          global_auto_approval_enabled, force_dual_quality, watchlist_requests, uhd_requests_allowed, updated_at, revision
+	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality, expected, watchlist, uhd).
+		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UHDRequestsAllowed, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		return Settings{}, fmt.Errorf("update request settings: %w", err)
 	}
@@ -108,10 +110,10 @@ func (r *Repository) GetUserLimit(ctx context.Context, userID int) (*UserLimit, 
 	var row UserLimit
 	var max, window sql.NullInt64
 	err := r.pool.QueryRow(ctx, `
-		SELECT user_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision
+		SELECT user_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at, revision
 		FROM request_user_limits
 		WHERE user_id = $1
-	`, userID).Scan(&row.UserID, &row.LimitMode, &max, &window, &row.ApprovalMode, &row.UpdatedAt, &row.Revision)
+	`, userID).Scan(&row.UserID, &row.LimitMode, &max, &window, &row.ApprovalMode, &row.UHDMode, &row.UpdatedAt, &row.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -145,19 +147,20 @@ func (r *Repository) upsertUserLimit(ctx context.Context, exec requestExecutor, 
 	var scannedMax, scannedWindow sql.NullInt64
 	err := exec.QueryRow(ctx, `
 		INSERT INTO request_user_limits (
-			user_id, limit_mode, max_requests, window_days, approval_mode, updated_at
+			user_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, now())
+		VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF($7, ''), 'inherit'), now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			limit_mode = EXCLUDED.limit_mode,
 			max_requests = EXCLUDED.max_requests,
 			window_days = EXCLUDED.window_days,
 			approval_mode = EXCLUDED.approval_mode,
+			uhd_mode = COALESCE(NULLIF($7, ''), request_user_limits.uhd_mode),
 			updated_at = now()
 		WHERE $6::bigint = -1 OR request_user_limits.revision = $6
-		RETURNING user_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision
-	`, limit.UserID, limit.LimitMode, max, window, limit.ApprovalMode, expected).
-		Scan(&row.UserID, &row.LimitMode, &scannedMax, &scannedWindow, &row.ApprovalMode, &row.UpdatedAt, &row.Revision)
+		RETURNING user_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at, revision
+	`, limit.UserID, limit.LimitMode, max, window, limit.ApprovalMode, expected, string(limit.UHDMode)).
+		Scan(&row.UserID, &row.LimitMode, &scannedMax, &scannedWindow, &row.ApprovalMode, &row.UHDMode, &row.UpdatedAt, &row.Revision)
 	if err != nil {
 		return nil, fmt.Errorf("upsert request user limit: %w", err)
 	}
@@ -196,7 +199,7 @@ func (r *Repository) CountUserRequestsSince(ctx context.Context, userID int, sin
 	return count, nil
 }
 
-func (r *Repository) ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int) (map[int]*Request, error) {
+func (r *Repository) ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int, is4K bool) (map[int]*Request, error) {
 	if len(tmdbIDs) == 0 {
 		return map[int]*Request{}, nil
 	}
@@ -204,9 +207,10 @@ func (r *Repository) ListActiveByTMDB(ctx context.Context, mediaType MediaType, 
 		WHERE media_type = $1
 		  AND provider = 'tmdb'
 		  AND tmdb_id = ANY($2)
+		  AND is_4k = $3
 		  AND outcome = 'active'
 		  AND status <> 'completed'
-	`, mediaType, tmdbIDs)
+	`, mediaType, tmdbIDs, is4K)
 	if err != nil {
 		return nil, fmt.Errorf("list active requests by tmdb: %w", err)
 	}
@@ -325,8 +329,9 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 			  AND media_type = $2
 			  AND provider = 'tmdb'
 			  AND tmdb_id = $3
+			  AND is_4k = $4
 			  AND outcome = 'failed'
-		`, input.Requester.UserID, input.Input.MediaType, input.Input.TMDBID); err != nil {
+		`, input.Requester.UserID, input.Input.MediaType, input.Input.TMDBID, input.Input.Is4K); err != nil {
 			return nil, fmt.Errorf("replace failed requests: %w", err)
 		}
 	}
@@ -376,20 +381,20 @@ func (r *Repository) insertRequest(
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
 			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at,
-			routing_facts, seasons, source
+			routing_facts, seasons, source, is_4k
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $16, $17,
-			$18, $19, $20
+			$18, $19, $20, $21
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
 		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt,
-		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source))
+		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source), input.Input.Is4K)
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
@@ -1460,7 +1465,7 @@ func requestColumns() string {
 	        overview, poster_path, backdrop_path, status, outcome,
 	        requested_by_user_id, requested_by_profile_id, is_anime,
 	        last_error, created_at, updated_at, approved_at, completed_at,
-	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source`
+	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source, is_4k`
 }
 
 type requestScanner interface {
@@ -1501,6 +1506,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&rawFacts,
 		&req.Seasons,
 		&req.Source,
+		&req.Is4K,
 	); err != nil {
 		return nil, err
 	}

@@ -280,8 +280,8 @@ func (s *Service) ReorderRoutes(ctx context.Context, viewer Viewer, mediaType Me
 }
 
 // PreviewRoute shows how the routes would send a title for a requester now,
-// from TMDB's current facts. Both tiers are shown regardless of the
-// requester's 4K entitlement.
+// from TMDB's current facts. Both tiers are shown: HD for a regular request,
+// 4K for a 4K request or under force-dual.
 func (s *Service) PreviewRoute(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbID, requesterUserID int) (*RoutePreview, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
@@ -329,12 +329,12 @@ func (s *Service) PreviewRoute(ctx context.Context, viewer Viewer, mediaType Med
 			if isStandardRouting(routes, mediaType) {
 				tier.Reason = "The only server is marked 4K, so there is no HD version"
 			}
-			// HD is skipped only because 4K goes out; a requester without 4K
-			// gets neither unless every request also asks for 4K.
+			// HD is skipped only because 4K goes out; a regular request gets
+			// neither unless every request also asks for 4K.
 			if fc.settings.ForceDualQuality {
 				tier.Reason += "."
 			} else {
-				tier.Reason += "; requests from users without 4K fail."
+				tier.Reason += "; regular requests fail."
 			}
 		case decision.Skip && isStandardRouting(routes, mediaType):
 			tier.RouteID, tier.RouteName = decision.RouteID, decision.RouteName

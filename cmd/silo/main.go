@@ -5154,15 +5154,7 @@ type scopeEntitlementResolver struct {
 	resolver scopeResolver
 }
 
-func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := r.resolveScope(ctx, userID, profileID)
-	if err != nil {
-		return "", err
-	}
-	return scope.MaxPlaybackQuality, nil
-}
-
-// MaxContentRating implements mediarequests.ContentRatingResolver so request
+// MaxContentRating implements mediarequests.EntitlementResolver so request
 // discovery honors the profile's parental rating ceiling.
 func (r scopeEntitlementResolver) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
 	scope, err := r.resolveScope(ctx, userID, profileID)

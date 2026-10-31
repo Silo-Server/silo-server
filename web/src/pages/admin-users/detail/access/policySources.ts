@@ -188,14 +188,15 @@ export function countCustomPolicyRows(user: AdminUser): number {
 }
 
 /**
- * Request approval and limit set on the account itself. They live in the
- * account's request-limit record, not on AdminUser, so countCustomPolicyRows
- * can't see them.
+ * Request approval, limit and 4K permission set on the account itself. They
+ * live in the account's request-limit record, not on AdminUser, so
+ * countCustomPolicyRows can't see them.
  */
 export function countCustomRequestTerms(terms: ResolvedRequestTerms | undefined): number {
   if (!terms) return 0;
-  return [terms.quotaSource, terms.approvalSource].filter((source) => source.kind === "account")
-    .length;
+  return [terms.quotaSource, terms.approvalSource, terms.allow4KSource].filter(
+    (source) => source.kind === "account",
+  ).length;
 }
 
 export function countCustomRows(user: AdminUser, rows: readonly PolicyRowKey[]): number {

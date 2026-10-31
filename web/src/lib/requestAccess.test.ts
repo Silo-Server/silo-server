@@ -133,6 +133,38 @@ describe("request access wording", () => {
   });
 });
 
+describe("4K requests", () => {
+  it("resolve like the server: the account, then its group, then the server default", () => {
+    const server = { ...input().server, requests_4k_default: true };
+    const account = { ...KIDS, requests_4k: "inherit" as const };
+    const group = { ...KIDS, requests_4k: "denied" as const };
+    const fromGroup = resolveRequestTerms(
+      [
+        [{ kind: "account" }, account],
+        [{ kind: "group", name: "Kids" }, group],
+      ],
+      server,
+    );
+    expect(fromGroup).toMatchObject({
+      allow4K: false,
+      allow4KSource: { kind: "group", name: "Kids" },
+    });
+    const fromAccount = resolveRequestTerms(
+      [
+        [{ kind: "account" }, { ...account, requests_4k: "allowed" }],
+        [{ kind: "group", name: "Kids" }, group],
+      ],
+      server,
+    );
+    expect(fromAccount).toMatchObject({ allow4K: true, allow4KSource: { kind: "account" } });
+    // A layer from a server without 4K requests reads as inherit.
+    expect(resolveRequestTerms([[{ kind: "account" }, KIDS]], server)).toMatchObject({
+      allow4K: true,
+      allow4KSource: { kind: "server" },
+    });
+  });
+});
+
 describe("request limit drafts", () => {
   it("round-trips a layer and counts edits", () => {
     const base = requestLimitDraft(KIDS);
@@ -141,9 +173,11 @@ describe("request limit drafts", () => {
       limit: "custom",
       maxRequests: "5",
       windowDays: "7",
+      requests4K: "inherit",
     });
     expect(requestLimitChanges(base, base)).toBe(0);
     expect(requestLimitChanges({ ...base, maxRequests: "6" }, base)).toBe(1);
+    expect(requestLimitChanges({ ...base, requests4K: "allowed" }, base)).toBe(1);
     // The numbers stop counting once the limit is no longer custom.
     expect(requestLimitChanges({ ...base, limit: "inherit", maxRequests: "6" }, base)).toBe(1);
     expect(requestLimitBody({ ...base, maxRequests: " 6 " })).toEqual({
@@ -151,6 +185,7 @@ describe("request limit drafts", () => {
       approval_mode: "manual",
       max_requests: 6,
       window_days: 7,
+      requests_4k: "inherit",
     });
     expect(requestLimitBody({ ...base, limit: "unlimited" })).toMatchObject({
       max_requests: null,
