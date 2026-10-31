@@ -772,6 +772,9 @@ func (s *Service) awaitingRemoval(ctx context.Context, src Source, in ChangeInge
 // bounded, so a stalled network mount reads as unconfirmed instead of
 // blocking the webhook request or the retry batch.
 func removalConfirmed(ctx context.Context, path string) bool {
+	// Arr can send the folder with a trailing separator, which filepath.Dir
+	// would treat as the folder itself rather than its parent.
+	path = filepath.Clean(path)
 	ctx, cancel := context.WithTimeout(ctx, removalStatTimeout)
 	defer cancel()
 	if _, err := fspath.StatContext(ctx, path); !errors.Is(err, fs.ErrNotExist) {
