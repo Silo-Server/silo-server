@@ -2049,12 +2049,17 @@ sending it: about 25 ms of the strictest active rate, between 32 KiB and 1 MiB,
 so a fast cap is not bounded by one Redis round trip per 32 KiB. A charge
 reserves its bytes even when the bucket is short and waits until they are paid
 for, so contending transfers are served in order. A process whose settings are
-not yet refreshed leaves a bucket it sees as unlimited untouched. For any
-interval of length T, charged bytes are bounded by `rate*T + burst`; HTTP and
-socket buffering may shift the observed arrival times of charged chunks. Redis
-time and retained balances keep API or proxy restarts from granting new
-budget. Capped downloads stay on the API egress path rather than being routed to
-proxies. API delivery of worker artifacts is charged once at egress.
+not yet refreshed leaves a bucket it sees as unlimited untouched. Over time,
+bytes sent against a bucket average its rate. A chunk is released only when
+both of its buckets have paid for it, so a chunk held back by its account
+bucket can leave together with later ones, and a short interval can exceed
+`rate*T + burst` by the chunks concurrent transfers hold reserved. HTTP and
+socket buffering may also shift the observed arrival times of charged chunks.
+Redis time and retained balances keep API or proxy restarts from granting new
+budget. While either limit is set, newly negotiated routes keep downloads on
+the API egress path rather than proxies; a proxy token issued before a limit
+was set can still reach its proxy, which applies the limits itself. API delivery
+of worker artifacts is charged once at egress.
 
 With Redis, each serving process reads the two bandwidth settings at most every
 5 seconds, so saved edits reach capped transfers within about 5 seconds. Without
@@ -2065,8 +2070,10 @@ without the limiter and stays unlimited; later edits apply to new transfers. A
 failed settings read keeps the last known limits. A failed budget operation is
 retried for up to 10 seconds, sending no bytes meanwhile; after that the
 transfer stops without exposing uncharged bytes. Each attempt has a one-second
-deadline. Clients must handle incomplete bodies and retry using their existing
-Range/resume flow after dependency recovery.
+deadline. Clients must handle incomplete bodies. Managed downloads retry
+through their existing Range/resume flow after dependency recovery. A stopped
+ephemeral original download marks its row `failed`, which later requests
+reject, so the client starts a new ephemeral download instead.
 
 `download.max_per_period` counts registrations independently for each account
 in the rolling `download.period_duration`; zero is unlimited. It is not a
