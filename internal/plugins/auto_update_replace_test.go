@@ -183,6 +183,12 @@ func TestCompareVersions(t *testing.T) {
 		{"1.2.3", "1.2.3.1", 1},
 		{"1.2.3.1", "1.2.3.2", -1},
 		{"1.2.3.10", "1.2.3.9", 1},
+		{"1.2.3.4", "1.2.3.4.5", -1},
+		// Integer segments sort before text, so invalid versions stay
+		// transitive: 2.dev < 10.dev < 1a.dev.
+		{"2.dev", "10.dev", -1},
+		{"10.dev", "1a.dev", -1},
+		{"2.dev", "1a.dev", -1},
 		{"", "", 0},
 	}
 	for _, tt := range tests {

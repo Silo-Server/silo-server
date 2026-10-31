@@ -22,8 +22,7 @@ import (
 // metadata is ignored. Manifests are not validated, so a version that is not
 // valid semver sorts below every valid one, which lets a catalog release
 // replace a hand-installed build with a free-form version. Two invalid
-// versions compare dot segment by dot segment, numerically when both segments
-// are integers and lexicographically otherwise.
+// versions compare dot segment by dot segment (see compareVersionSegments).
 func compareVersions(a, b string) int {
 	semA, semB := semverString(a), semverString(b)
 	validA, validB := semver.IsValid(semA), semver.IsValid(semB)
@@ -46,6 +45,10 @@ func semverString(version string) string {
 	return "v" + version
 }
 
+// compareVersionSegments orders two versions dot segment by dot segment. A
+// missing segment sorts first, then integers by value, then other text
+// lexicographically. Ranking the kinds before comparing keeps the order
+// transitive, which the catalog sort needs.
 func compareVersionSegments(a, b string) int {
 	partsA := strings.Split(a, ".")
 	partsB := strings.Split(b, ".")
@@ -58,18 +61,39 @@ func compareVersionSegments(a, b string) int {
 		if i < len(partsB) {
 			segB = partsB[i]
 		}
-
-		numA, errA := strconv.Atoi(segA)
-		numB, errB := strconv.Atoi(segB)
-		if errA == nil && errB == nil {
-			if c := cmp.Compare(numA, numB); c != 0 {
-				return c
-			}
-		} else if c := strings.Compare(segA, segB); c != 0 {
+		if c := compareVersionSegment(segA, segB); c != 0 {
 			return c
 		}
 	}
 	return 0
+}
+
+func compareVersionSegment(a, b string) int {
+	rankA, numA := versionSegmentRank(a)
+	rankB, numB := versionSegmentRank(b)
+	if c := cmp.Compare(rankA, rankB); c != 0 {
+		return c
+	}
+	if rankA == segmentNumeric {
+		return cmp.Compare(numA, numB)
+	}
+	return strings.Compare(a, b)
+}
+
+const (
+	segmentMissing = iota
+	segmentNumeric
+	segmentText
+)
+
+func versionSegmentRank(segment string) (rank, value int) {
+	if segment == "" {
+		return segmentMissing, 0
+	}
+	if n, err := strconv.Atoi(segment); err == nil {
+		return segmentNumeric, n
+	}
+	return segmentText, 0
 }
 
 const pluginIDTMDB = "silo.tmdb"
