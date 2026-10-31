@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -803,6 +804,52 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := audiobookPeopleCreditsEqual(tt.existing, tt.desired); got != tt.want {
 				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A monitor or webhook scan scoped to a book folder that was deleted is an
+// empty scope, so the book's files can be reconciled. A missing library root,
+// or a missing parent above the book, stays an unreadable path.
+func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
+	library := t.TempDir()
+	author := filepath.Join(library, "Author")
+	if err := os.MkdirAll(author, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missingLibrary := filepath.Join(t.TempDir(), "unmounted")
+	// A dangling book symlink with a non-UTF-8 name: the scope is the encoded
+	// path, and the link still exists, so it stays protected.
+	danglingLegacy := filepath.Join(author, "B\xe5k")
+	if err := os.Symlink(filepath.Join(library, "missing-target"), danglingLegacy); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		scope      string
+		libRoot    string
+		wantFailed bool
+	}{
+		{"deleted book folder", filepath.Join(author, "Gone Book"), library, false},
+		{"deleted author and book folders", filepath.Join(library, "Gone Author", "Gone Book"), library, true},
+		{"missing library root", missingLibrary, missingLibrary, true},
+		{"dangling legacy-named book symlink", fspath.Encode(danglingLegacy), library, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{tc.scope}, []string{tc.libRoot}, true)
+			if err != nil {
+				t.Fatalf("collectAudiobookRootScans: %v", err)
+			}
+			if len(scans) != 1 {
+				t.Fatalf("got %d root scans, want 1", len(scans))
+			}
+			if got := scans[0].failed(); got != tc.wantFailed {
+				t.Fatalf("failed() = %v (rootErr %v), want %v", got, scans[0].rootErr, tc.wantFailed)
+			}
+			if len(scans[0].candidates) != 0 {
+				t.Fatalf("candidates = %v, want none", scans[0].candidates)
 			}
 		})
 	}

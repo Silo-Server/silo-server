@@ -280,3 +280,71 @@ func TestScanSubtreeReconcilesDeletedTitleFolderDB(t *testing.T) {
 		t.Fatalf("scan warning = %q, want none", *warning.Code)
 	}
 }
+
+// TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB covers a scoped scan of
+// a deleted book folder. Under a library root that still has entries the
+// book's files are reconciled; under a configured root that is now an empty
+// directory (a lost mount leaving its mountpoint) they must stay untouched.
+func TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	for _, tc := range []struct {
+		name        string
+		rootIsEmpty bool
+		wantMissing bool
+	}{
+		{"root still has other entries", false, true},
+		{"configured root is empty", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			root := t.TempDir()
+			if !tc.rootIsEmpty {
+				if err := os.Mkdir(filepath.Join(root, "Other Author"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			folderID := seedDeadRootTestFolder(t, pool, "audiobooks", fmt.Sprintf("vanished-book-%d", time.Now().UnixNano()))
+			folder := &models.MediaFolder{ID: folderID, Type: "audiobooks", Paths: []string{root}}
+			bookDir := filepath.Join(root, "Gone Book")
+			bookFile := filepath.Join(bookDir, "part.m4b")
+			contentID := fmt.Sprintf("audiobook-vanished-%d", folderID)
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE content_id = $1`, contentID)
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+			})
+			for _, stmt := range []struct {
+				sql  string
+				args []any
+			}{
+				{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'audiobook', 'Gone Book', 'local', '{}'::text[])`, []any{contentID}},
+				{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{contentID, folderID}},
+				{`INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path, file_size, file_modified_at)
+				  VALUES ($1, $2, $3, $4, $4, 4, now())`, []any{contentID, folderID, bookFile, bookDir}},
+			} {
+				if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+
+			s := NewScanner(NewFileRepository(pool), "", nil, 2, false, time.Hour)
+			if _, err := s.ScanSubtree(ctx, folder, bookDir); err != nil {
+				t.Fatalf("subtree scan: %v", err)
+			}
+
+			var missing bool
+			if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, bookFile).Scan(&missing); err != nil {
+				t.Fatalf("read file row: %v", err)
+			}
+			if missing != tc.wantMissing {
+				t.Fatalf("file marked missing = %v, want %v", missing, tc.wantMissing)
+			}
+			var memberships int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
+				t.Fatalf("count memberships: %v", err)
+			}
+			if kept := memberships > 0; kept == tc.wantMissing {
+				t.Fatalf("library memberships = %d, want kept = %v", memberships, !tc.wantMissing)
+			}
+		})
+	}
+}
