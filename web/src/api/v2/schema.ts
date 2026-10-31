@@ -19297,7 +19297,7 @@ export interface components {
       original_languages?: string[];
       /** @description Accounts whose requests the route applies to */
       requester_user_ids?: number[];
-      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them */
+      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, the first time it is routed while a rule checks status (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them */
       series_statuses?: ("returning" | "in_production" | "upcoming" | "ended" | "cancelled")[];
       /**
        * Format: int64
