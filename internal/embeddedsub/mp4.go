@@ -336,8 +336,9 @@ func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLe
 	if t.Unsupported == "" && stbl.compositionOffsets {
 		t.Unsupported = "MP4 composition offsets"
 	}
+	var editEnd time.Duration
 	if t.Unsupported == "" {
-		if m.mediaTime, m.delay, ok = parseEditList(edtsPayload, movieTimescale); !ok {
+		if m.mediaTime, m.delay, editEnd, ok = parseEditList(edtsPayload, movieTimescale); !ok {
 			t.Unsupported = unsupportedEditList
 		}
 	}
@@ -347,6 +348,11 @@ func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLe
 			t.Unsupported = err.Error()
 		}
 		m.samples = samples
+	}
+	// FFmpeg drops the samples that start at or after the media edit's
+	// end, and keeps one that runs past it whole; so does the reader.
+	if editEnd > 0 {
+		m.samples = slices.DeleteFunc(m.samples, func(s mp4Sample) bool { return m.pts(s.dts) >= editEnd })
 	}
 	t.FrameCount = int64(len(m.samples))
 	if len(m.samples) > 0 {
@@ -433,14 +439,15 @@ func sampleEntry(stsd []byte) (kind string, private []byte, forced bool, unsuppo
 }
 
 // parseEditList reads the edit list as optional leading empty edits and one
-// edit at normal rate. Anything else isn't mapped.
-func parseEditList(edts []byte, movieTimescale uint32) (mediaTime int64, delay time.Duration, ok bool) {
+// edit at normal rate, and where that edit ends on the presentation timeline
+// (0 when it doesn't say). Anything else isn't mapped.
+func parseEditList(edts []byte, movieTimescale uint32) (mediaTime int64, delay, end time.Duration, ok bool) {
 	_, elst := childBox(edts, "elst")
 	if elst == nil {
-		return 0, 0, true
+		return 0, 0, 0, true
 	}
 	if len(elst) < 8 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	v1 := elst[0] == 1
 	entrySize := 12
@@ -449,7 +456,7 @@ func parseEditList(edts []byte, movieTimescale uint32) (mediaTime int64, delay t
 	}
 	n := binary.BigEndian.Uint32(elst[4:])
 	if int64(n) > int64((len(elst)-8)/entrySize) {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	seen := false
 	for i := range int(n) {
@@ -467,16 +474,22 @@ func parseEditList(edts []byte, movieTimescale uint32) (mediaTime int64, delay t
 		switch {
 		case media == -1 && !seen:
 			if duration > math.MaxInt64 {
-				return 0, 0, false
+				return 0, 0, 0, false
 			}
 			delay += ticksToDuration(int64(duration), int64(movieTimescale))
 		case media >= 0 && !seen && rate == 0x00010000:
+			if duration > math.MaxInt64 {
+				return 0, 0, 0, false
+			}
 			mediaTime, seen = media, true
+			if duration > 0 {
+				end = delay + ticksToDuration(int64(duration), int64(movieTimescale))
+			}
 		default:
-			return 0, 0, false
+			return 0, 0, 0, false
 		}
 	}
-	return mediaTime, delay, true
+	return mediaTime, delay, end, true
 }
 
 // tableLen returns the entry count of a full box's table of entrySize-byte
