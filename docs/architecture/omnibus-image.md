@@ -298,7 +298,7 @@ here. It refuses, before anything is moved into place, when:
 
 - No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
   or other paths, which have to move there first.
-- A pinned `SILO_IMAGE` (other than `latest`, `dev`, or `aio`) is set
+- A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `latest` past the pin.
 - The omnibus install has a database of its own, no migration finished, and

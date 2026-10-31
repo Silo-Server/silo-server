@@ -69,9 +69,11 @@ class DockerTagsTest(unittest.TestCase):
         self.assertEqual(["1.0.1", "1.0"], release.docker_tags(["v1.0.0", "v1.1.0"], "1.0.1"))
         self.assertEqual(["0.24.1", "0.24"], release.docker_tags(["v0.24.0", "v0.25.0"], "0.24.1"))
 
-    def test_republishing_is_stable(self):
+    def test_republishing_never_moves_latest_backwards(self):
         tags = ["v0.24.0", "v1.0.0-rc.1", "v1.0.0"]
         self.assertEqual(["1.0.0", "1.0", "1", "latest"], release.docker_tags(tags, "v1.0.0"))
+        self.assertEqual(["0.24.0", "0.24"], release.docker_tags(["v0.24.0", "v1.0.0-rc.1"], "v0.24.0"))
+        self.assertEqual(["1.0.0-rc.1"], release.docker_tags(tags, "v1.0.0-rc.1"))
 
 
 if __name__ == "__main__":
