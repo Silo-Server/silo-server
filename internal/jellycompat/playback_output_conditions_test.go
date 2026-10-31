@@ -172,12 +172,12 @@ func TestTranscodingProfileRefFramesRuleOnEncode(t *testing.T) {
 	}
 }
 
-// The streaming encoder's maximum rate is the requested cap, not the source's
-// rate, so a client's level rule is checked at the cap: a 4,000 kbps source
-// capped near 60,000 kbps needs level 5.0, above a required 4.1.
+// A client's level rule is checked at the rate the encoder is held to: an
+// 80,000 kbps source capped near 60,000 kbps needs level 5.0, above a required
+// 4.1, while a 4,000 kbps source under the same ceiling stays at its own rate.
 func TestH264EncodeLevelUsesTheConfiguredRate(t *testing.T) {
 	version := catalog.FileVersion{
-		FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 4000, Resolution: "1080p",
+		FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 80_000, Resolution: "1080p",
 		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24"}},
 		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
 	}
@@ -197,9 +197,55 @@ func TestH264EncodeLevelUsesTheConfiguredRate(t *testing.T) {
 		t.Fatalf("SupportsTranscoding = true: a %d kbps cap needs level 5.0, above the required 4.1", source.TargetBitrateKbps)
 	}
 
+	version.Bitrate = 4000
+	if source = h.buildPlaybackSource("item", "play", version, profile, req, true); !source.SupportsTranscoding {
+		t.Fatalf("SupportsTranscoding = false for a %d kbps encode of a 4,000 kbps 1080p24 source", source.TargetBitrateKbps)
+	}
+
 	// Uncapped, the encode is estimated at the source's rate: level 4.0, so 4.1.
 	req.MaxStreamingBitrate = 0
 	if source := h.buildPlaybackSource("item", "play", version, profile, req, true); !source.SupportsTranscoding {
 		t.Fatal("SupportsTranscoding = false for an uncapped encode of a 4,000 kbps 1080p24 source")
+	}
+}
+
+// An encode is sized by the source, not by a client's generous ceiling, but
+// only a ceiling the source really exceeds is reported as a bitrate problem or
+// lowers the resolution.
+func TestEncodeTargetStopsAtTheSourceRate(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct {
+		name           string
+		codec          string
+		sourceKbps     int
+		maxBitrate     int64
+		wantKbps       int
+		wantResolution string
+		wantReason     string
+	}{
+		{name: "ceiling far above the source", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 120_000_000, wantKbps: 23_400, wantReason: "VideoCodecNotSupported"},
+		{name: "low-bitrate source keeps its size", codec: "mpeg2video", sourceKbps: 1500, maxBitrate: 120_000_000, wantKbps: 1500, wantReason: "VideoCodecNotSupported"},
+		{name: "HEVC source gets H.264 headroom", codec: "hevc", sourceKbps: 6000, maxBitrate: 120_000_000, wantKbps: 10_000, wantReason: "VideoCodecNotSupported"},
+		{name: "ceiling below the source still wins", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 8_820_000, wantKbps: 8187, wantReason: "VideoBitrateNotSupported"},
+		{name: "unknown source rate targets the ceiling", codec: "mpeg2video", maxBitrate: 8_820_000, wantKbps: 8187, wantReason: "VideoCodecNotSupported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := catalog.FileVersion{
+				FileID: 42, Container: "mkv", CodecVideo: tc.codec, CodecAudio: "aac", Bitrate: tc.sourceKbps, Resolution: "1080p",
+				VideoTracks: []models.VideoTrack{{Codec: tc.codec, Width: 1920, Height: 1080, FrameRate: "24"}},
+				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+			}
+			profile := DeviceProfile{
+				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"}},
+			}
+			req := playbackInfoRequest{EnableDirectPlay: new(false), EnableDirectStream: new(false), MaxStreamingBitrate: tc.maxBitrate}
+			source := h.buildPlaybackSource("item", "play", version, profile, req, true)
+			if !source.SupportsTranscoding || source.TargetBitrateKbps != tc.wantKbps || source.TargetResolution != tc.wantResolution {
+				t.Fatalf("transcoding=%v target=%d kbps at %q, want %d kbps at %q", source.SupportsTranscoding, source.TargetBitrateKbps, source.TargetResolution, tc.wantKbps, tc.wantResolution)
+			}
+			if reasons := compatTranscodeReasons(source); reasons[0] != tc.wantReason {
+				t.Fatalf("reasons = %v, want %s", reasons, tc.wantReason)
+			}
+		})
 	}
 }

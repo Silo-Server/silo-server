@@ -164,6 +164,11 @@ type PlaybackMediaSource struct {
 	// builds the source, so they are not stored.
 	h264TargetBitrateKbps int
 	h264TargetResolution  string
+	// encodeCeilingKbps and h264EncodeCeilingKbps are the limits those targets
+	// were fit to, which the targets themselves fall below for a low-bitrate
+	// source. They are not stored either.
+	encodeCeilingKbps     int
+	h264EncodeCeilingKbps int
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
