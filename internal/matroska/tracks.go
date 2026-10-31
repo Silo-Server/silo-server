@@ -33,6 +33,13 @@ type ContentEncoding struct {
 	CompSettings []byte
 }
 
+// MaxContentEncodings is how many ContentEncodings ParseTrackEntry keeps of
+// a TrackEntry. Real files chain at most two (compression and encryption),
+// and a reader that meets more than one treats the track as unsupported, so
+// keeping the first few loses nothing; it bounds what a crafted entry of
+// empty encodings can make the parser allocate.
+const MaxContentEncodings = 8
+
 // TrackEntry is the part of a TrackEntry the readers use. Fields the entry
 // omits take the specification's defaults. Byte slices alias the Tracks data
 // they were parsed from.
@@ -56,7 +63,8 @@ type TrackEntry struct {
 	DefaultDuration uint64
 	// TimestampScale is the deprecated TrackTimestampScale, 1 when absent.
 	TimestampScale float64
-	Encodings      []ContentEncoding
+	// Encodings holds at most MaxContentEncodings entries.
+	Encodings []ContentEncoding
 }
 
 // ParseTrackEntry decodes a TrackEntry's data.
@@ -94,7 +102,7 @@ func ParseTrackEntry(entry []byte) TrackEntry {
 			t.TimestampScale = Float(v)
 		case IDContentEncodings:
 			Children(v, func(id uint64, v []byte) {
-				if id == IDContentEncoding {
+				if id == IDContentEncoding && len(t.Encodings) < MaxContentEncodings {
 					t.Encodings = append(t.Encodings, parseContentEncoding(v))
 				}
 			})

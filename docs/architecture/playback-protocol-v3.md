@@ -1637,14 +1637,16 @@ Languages match on their primary subtag, case-insensitively and across ISO
 639-1 and 639-2 (`eng`, `en` and `en-US` match). Values with no readable
 language, such as `und`, match only when spelled the same. Request validation
 bounds the list (at most 16 values, each 1 to 64 characters) and lowercases
-the values, but it accepts values the server does not know. The frozen
-`/api/v1` surface, which never advertises the feature, ignores `limitations`
-and plans an entry as it did before they existed, and its inventory rows
-carry no `stream_index`, `container_track_id` or `native_selectable`. Planning then skips
-that whole entry, because the server cannot tell what its player gets wrong,
-and the track falls back to a sidecar or burn-in like any track without a
-native entry. Older clients send no limitations, and their entries plan as
-before.
+the values, but it accepts values the server does not know. When an entry
+names such a value, planning skips that whole entry, because the server cannot
+tell what its player gets wrong, and the track falls back to a sidecar or
+burn-in like any track without a native entry. Older clients send no
+limitations, and their entries plan as before.
+
+The frozen `/api/v1` surface never advertises the feature. It ignores
+`limitations` and plans an entry as it did before they existed, and its
+inventory rows carry no `stream_index`, `container_track_id` or
+`native_selectable`.
 
 Roku OS 16 declares `{"container": "mkv", "codecs": ["subrip"],
 "track_identity": "container_track_id", "ass_styling": false,
@@ -1670,7 +1672,8 @@ server, and then report the switch with a `subtitle_track_changed` (or
 `track_change`) replan. The answer is a plan for the same media, with the same
 effective file, delivery, stream URL and effective recipe, and only the
 subtitle selection changed, which the client applies in place. Inventory URLs
-stay published on native-selectable entries as the fallback.
+stay published on native-selectable entries as the fallback; a bitmap track
+delivered only by burn-in has none.
 
 A confirmed native selection failure triggers `failure_recovery` with `failure.classification: "subtitle_embedded_failed"`. The server disables native selection for the rest of that playback attempt, including later capability refreshes, and replans with an executable fallback. The native identity participates in both plan identifiers, so the same video route with extracted subtitles is a distinct attempt. Seek reanchors preserve the native identity and reject source drift.
 
