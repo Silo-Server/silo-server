@@ -418,6 +418,9 @@ func subtitleTracks(data []byte) ([]Track, error) {
 		tracks  []Track
 		entries int
 	)
+	// Compressed codec private data can be much larger than Tracks. Bound
+	// its expansion across every track, including temporary growth buffers.
+	privateBudget := newBudget(maxTracksSize)
 	matroska.Children(data, func(id uint64, v []byte) {
 		if id != matroska.IDTrackEntry {
 			return
@@ -426,7 +429,7 @@ func subtitleTracks(data []byte) ([]Track, error) {
 			return
 		}
 		if e := matroska.ParseTrackEntry(v); isSubtitleTrack(e) {
-			tracks = append(tracks, newTrack(e))
+			tracks = append(tracks, newTrack(e, privateBudget))
 		}
 	})
 	if entries > maxTrackEntries {
@@ -435,7 +438,7 @@ func subtitleTracks(data []byte) ([]Track, error) {
 	return tracks, nil
 }
 
-func newTrack(e matroska.TrackEntry) Track {
+func newTrack(e matroska.TrackEntry, privateBudget *budget) Track {
 	t := Track{
 		Number: e.Number, UID: e.UID, CodecID: e.CodecID,
 		Language: e.Language, LanguageBCP47: e.LanguageBCP47, Name: e.Name,
@@ -470,9 +473,12 @@ func newTrack(e matroska.TrackEntry) Track {
 				t.Compression = c
 			}
 			if enc.Scope&matroska.ScopeCodecPrivate != 0 && len(t.CodecPrivate) > 0 {
-				private, err := decompress(c, t.CodecPrivate)
+				private, err := decompressBudget(c, t.CodecPrivate, privateBudget)
 				if err != nil {
 					t.Unsupported = "codec private data doesn't decompress"
+					if errors.Is(err, ErrTooLarge) {
+						t.Unsupported = "codec private data exceeds index budget"
+					}
 				}
 				t.CodecPrivate = private
 			}

@@ -160,12 +160,8 @@ func parseBlock(b []byte) (matroskaBlock, byte, error) {
 	return blk, flags, nil
 }
 
-// decompress undoes a track's ContentCompression, as FFmpeg's
+// decompressBudget undoes a track's ContentCompression, as FFmpeg's
 // matroska_decode_buffer does.
-func decompress(c *Compression, data []byte) ([]byte, error) {
-	return decompressBudget(c, data, newBudget(2*maxPacketSize))
-}
-
 func decompressBudget(c *Compression, data []byte, b *budget) ([]byte, error) {
 	switch c.Algorithm {
 	case matroska.CompressionHeaderStripping:
@@ -199,10 +195,10 @@ type packetBuffer struct {
 }
 
 func (w *packetBuffer) Write(p []byte) (int, error) {
-	need := len(w.data) + len(p)
-	if need > maxPacketSize {
+	if len(p) > maxPacketSize-len(w.data) {
 		return 0, corrupt("decompressed packet over %d bytes", maxPacketSize)
 	}
+	need := len(w.data) + len(p)
 	if need > cap(w.data) {
 		capacity := min(maxPacketSize, max(need, 2*cap(w.data)))
 		if err := w.budget.take(capacity); err != nil {

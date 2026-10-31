@@ -367,25 +367,39 @@ func TestServeExtractSendsTheWebVTTHeaderAheadOfASlowRead(t *testing.T) {
 	defer func() { keepaliveDelay, keepaliveInterval = delay, interval }()
 	c, source := newTestCache(t)
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
 	c.SetEmbeddedSource(&slowEmbeddedSource{fakeEmbeddedSource: &fakeEmbeddedSource{}, release: release})
 	const converted = "WEBVTT\n\n00:00.500 --> 00:02.000\nAt the top\n"
 	extract := func(_ context.Context, opts StreamExtractOpts) error {
 		_, err := io.WriteString(opts.Writer, converted)
 		return err
 	}
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	var serveErr error
 	go func() {
-		// Release the read once the whole header has gone ahead.
-		waitForCondition(t, func() bool {
-			fill := inflightFill(c)
-			if fill == nil {
-				return false
-			}
-			fill.mu.Lock()
-			defer fill.mu.Unlock()
-			return fill.written >= int64(len(webVTTPrefix))
-		}, func() { close(release) })
+		defer close(done)
+		serveErr = c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, extract)
 	}()
-	rec := serveText(t, c, StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, extract)
+	defer func() {
+		unblock()
+		<-done
+	}()
+	// Release the read once the whole header has gone ahead. A failed wait
+	// must still release the source and join the request before cleanup.
+	waitForCondition(t, func() bool {
+		fill := inflightFill(c)
+		if fill == nil {
+			return false
+		}
+		fill.mu.Lock()
+		defer fill.mu.Unlock()
+		return fill.written >= int64(len(webVTTPrefix))
+	}, unblock)
+	<-done
+	if serveErr != nil {
+		t.Fatal(serveErr)
+	}
 	withoutBlankLines := func(body string) string {
 		return webVTTPrefix + "\n" + strings.TrimLeft(strings.TrimPrefix(body, webVTTPrefix), "\n")
 	}

@@ -161,12 +161,17 @@ func (s *Store) pinMirror(path string) func() {
 	s.mirrorPins[path]++
 	s.mu.Unlock()
 	return func() {
+		dir := filepath.Dir(path)
 		s.mu.Lock()
+		var evict bool
 		if s.mirrorPins[path]--; s.mirrorPins[path] == 0 {
 			delete(s.mirrorPins, path)
+			evict = s.mirrorOverBudget[dir]
 		}
 		s.mu.Unlock()
-		s.evictMirrors(filepath.Dir(path))
+		if evict {
+			s.evictMirrors(dir)
+		}
 	}
 }
 
@@ -178,8 +183,12 @@ func (c *byteCounter) Write(p []byte) (int, error) {
 }
 
 // evictMirrors removes the least recently used copies over the budget, and
-// temp files a crash left.
+// temp files a crash left. Writes scan the directory; releases scan only
+// while pinned copies have left it over budget. The lock keeps the final
+// over-budget flag and a concurrent final release from missing each other.
 func (s *Store) evictMirrors(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -191,7 +200,6 @@ func (s *Store) evictMirrors(dir string) {
 	}
 	var copies []copyFile
 	var total int64
-	s.mu.Lock()
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil || !info.Mode().IsRegular() {
@@ -211,21 +219,22 @@ func (s *Store) evictMirrors(dir string) {
 		copies = append(copies, copyFile{path: path, size: info.Size(), used: used})
 		total += info.Size()
 	}
-	s.mu.Unlock()
 	slices.SortFunc(copies, func(a, b copyFile) int { return a.used.Compare(b.used) })
 	for _, c := range copies {
 		if total <= s.opts.MirrorMaxBytes {
-			return
+			break
 		}
-		s.mu.Lock()
 		if s.mirrorPins[c.path] > 0 {
-			s.mu.Unlock()
 			continue
 		}
 		if err := os.Remove(c.path); err == nil || os.IsNotExist(err) {
 			total -= c.size
 			delete(s.mirrorUsed, c.path)
 		}
-		s.mu.Unlock()
+	}
+	if total > s.opts.MirrorMaxBytes {
+		s.mirrorOverBudget[dir] = true
+	} else {
+		delete(s.mirrorOverBudget, dir)
 	}
 }

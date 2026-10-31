@@ -119,12 +119,13 @@ type Store struct {
 	// reads holds a slot per whole read running (wholeReads).
 	reads chan struct{}
 
-	mu         sync.Mutex
-	flights    map[flightKey]*flight
-	starts     map[sourceVersion]time.Duration
-	mirrors    map[string]*mirrorFetch
-	mirrorUsed map[string]time.Time
-	mirrorPins map[string]int
+	mu               sync.Mutex
+	flights          map[flightKey]*flight
+	starts           map[sourceVersion]time.Duration
+	mirrors          map[string]*mirrorFetch
+	mirrorUsed       map[string]time.Time
+	mirrorPins       map[string]int
+	mirrorOverBudget map[string]bool
 }
 
 // NewStore returns a Store over repo and blobs, or nil without either.
@@ -143,12 +144,13 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		pollInterval: defaultPollInterval,
 		flights:      map[flightKey]*flight{},
 		// A request's wait on a whole read; see foregroundWait.
-		foregroundWait: foregroundWait,
-		starts:         map[sourceVersion]time.Duration{},
-		mirrors:        map[string]*mirrorFetch{},
-		mirrorUsed:     map[string]time.Time{},
-		mirrorPins:     map[string]int{},
-		reads:          make(chan struct{}, wholeReads),
+		foregroundWait:   foregroundWait,
+		starts:           map[sourceVersion]time.Duration{},
+		mirrors:          map[string]*mirrorFetch{},
+		mirrorUsed:       map[string]time.Time{},
+		mirrorPins:       map[string]int{},
+		mirrorOverBudget: map[string]bool{},
+		reads:            make(chan struct{}, wholeReads),
 	}
 	s.probeStart = func(ctx context.Context, path string) (time.Duration, error) {
 		return playback.SubtitleSourceStartTime(ctx, s.ffmpegPath(), path)
