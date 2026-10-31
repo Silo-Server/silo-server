@@ -177,9 +177,9 @@ func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
 	nonOwnerAdmin := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "s2"})
 	noGuard := func(AdminSettingsSnapshot) error { return nil }
 
-	writes := map[string]func(t *testing.T, h *AdminHandler, key string) int{
-		"v1 batch": func(t *testing.T, h *AdminHandler, key string) int {
-			body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{key: replacement}})
+	writes := map[string]func(t *testing.T, h *AdminHandler, key, value string) int{
+		"v1 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{key: value}})
 			if err != nil {
 				t.Fatalf("marshal request: %v", err)
 			}
@@ -188,8 +188,8 @@ func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
 			h.HandleUpdateSettings(rec, req)
 			return rec.Code
 		},
-		"v1 single": func(t *testing.T, h *AdminHandler, key string) int {
-			body, err := json.Marshal(updateSettingRequest{Value: replacement})
+		"v1 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingRequest{Value: value})
 			if err != nil {
 				t.Fatalf("marshal request: %v", err)
 			}
@@ -198,12 +198,12 @@ func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
 			h.HandleUpdateSetting(rec, withChiParam(req, "key", key))
 			return rec.Code
 		},
-		"v2 batch": func(t *testing.T, h *AdminHandler, key string) int {
-			_, err := h.UpdateAdminSettings(nonOwnerAdmin, map[string]string{key: replacement}, noGuard)
+		"v2 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSettings(nonOwnerAdmin, map[string]string{key: value}, noGuard)
 			return apiErrorStatus(t, err)
 		},
-		"v2 single": func(t *testing.T, h *AdminHandler, key string) int {
-			_, err := h.UpdateAdminSetting(nonOwnerAdmin, key, replacement, noGuard)
+		"v2 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSetting(nonOwnerAdmin, key, value, noGuard)
 			return apiErrorStatus(t, err)
 		},
 	}
@@ -214,18 +214,20 @@ func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
 		"audiobooks.abs.jwt_secret",
 	} {
 		for name, write := range writes {
-			t.Run(key+"/"+name, func(t *testing.T) {
-				settings := &fakeServerSettingsStore{values: map[string]string{key: stored}}
-				if status := write(t, &AdminHandler{SettingsRepo: settings}, key); status != http.StatusBadRequest {
-					t.Fatalf("status = %d, want 400", status)
-				}
-				if got := settings.values[key]; got != stored {
-					t.Fatalf("%s = %q, want unchanged %q", key, got, stored)
-				}
-				if settings.atomicCalls != 0 {
-					t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
-				}
-			})
+			for valueName, value := range map[string]string{"replace": replacement, "clear": ""} {
+				t.Run(key+"/"+name+"/"+valueName, func(t *testing.T) {
+					settings := &fakeServerSettingsStore{values: map[string]string{key: stored}}
+					if status := write(t, &AdminHandler{SettingsRepo: settings}, key, value); status != http.StatusBadRequest {
+						t.Fatalf("status = %d, want 400", status)
+					}
+					if got := settings.values[key]; got != stored {
+						t.Fatalf("%s = %q, want unchanged %q", key, got, stored)
+					}
+					if settings.atomicCalls != 0 {
+						t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
+					}
+				})
+			}
 		}
 	}
 }
