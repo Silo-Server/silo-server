@@ -95,6 +95,11 @@
 @media (min-width: 64rem) {
   :root[data-app-shell][data-app-topnav="true"] {
     --app-sidebar-offset: 0px;
+    /* The bar row's height, which TopNav draws at h-16. Chrome that has to
+       clear the bar pins itself with this. Published from lg up because below
+       that the bar also carries the phone chip row, and nothing pins under the
+       bar at those widths. */
+    --app-topnav-height: 4rem;
   }
 }
 
@@ -142,4 +147,68 @@
 /* The same high-contrast bump app.css gives the other frosted surfaces. */
 html[data-high-contrast="true"] .weflix-account-menu {
   border-color: color-mix(in srgb, var(--border) 88%, white 12%);
+}
+
+/*
+ * ── The top bar as frosted glass ─────────────────────────────────────
+ *
+ * The account menu's recipe on the bar's own surface. It stays darker than
+ * that panel: the bar carries white text across the full width over whatever
+ * the page scrolls beneath it, so it keeps the theme's black rather than the
+ * popover's lifted grey, and holds a little more of it — 80% against the
+ * panel's 72% — because a full-width row of text has less room to lose
+ * legibility to a bright frame passing behind it.
+ *
+ * Unlayered for the same reason as the panel above: `bg-background` is a
+ * utility, and a utility outranks @layer components whatever selector is
+ * used, so the bar would stay opaque and the blur would have nothing to show
+ * through. `bg-background` stays on the element as the fallback for a browser
+ * without color-mix or backdrop-filter.
+ */
+.weflix-top-bar {
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  backdrop-filter: blur(20px) saturate(1.2);
+}
+
+/* The same high-contrast bump app.css gives the other frosted surfaces. */
+html[data-high-contrast="true"] .weflix-top-bar {
+  border-color: color-mix(in srgb, var(--border) 88%, white 12%);
+}
+
+/*
+ * ── Sticky page chrome under the bar ─────────────────────────────────
+ *
+ * app.css promotes the library's marquee header to `sticky; top: 0` from lg
+ * up, and it was written for a shell with nothing above the content there: the
+ * upstream shell hides its mobile top bar at that width. The top bar sits
+ * above the content at every width, so the header pinned behind it — same
+ * `top`, lower z-index, and the bar's glass over the top of it.
+ *
+ * Here it pins below the bar instead, as a bare row: its own panel is stripped
+ * because the bar already frosts this band, and a second sheet of glass under
+ * the first reads as two stacked surfaces rather than one header. What is left
+ * carries nothing but its labels.
+ *
+ * It is also smart-sticky, the way the mobile shell's header is: scrolling
+ * down slides the row out of the way, and scrolling up glides it back under
+ * the bar. LibraryHeader reports the direction on `data-hidden`; the transform
+ * is the bar's height plus the row, so a hidden row clears the bar rather than
+ * showing through its glass.
+ *
+ * These rules are unlayered, like the surfaces above, so they outrank the
+ * @layer components rules that set `top`, the glass and the border.
+ */
+@media (min-width: 64rem) {
+  :root[data-app-shell][data-app-topnav="true"] .library-marquee-header {
+    top: var(--app-topnav-height, 4rem);
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-bottom-color: transparent;
+    transition: transform var(--duration-normal) var(--ease-default);
+  }
+  :root[data-app-shell][data-app-topnav="true"] .library-marquee-header[data-hidden="true"] {
+    transform: translateY(calc(-100% - var(--app-topnav-height, 4rem)));
+  }
 }

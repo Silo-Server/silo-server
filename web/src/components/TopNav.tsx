@@ -360,7 +360,10 @@ export default function TopNav() {
   );
 
   return (
-    <header className="bg-background border-border/60 sticky top-0 z-40 w-full border-b">
+    <header
+      data-sticky-header
+      className="weflix-top-bar bg-background border-border/60 sticky top-0 z-40 w-full border-b"
+    >
       <div className="flex h-16 items-center gap-3 px-4 md:gap-5 md:px-6">
         <ViewTransitionLink to="/" aria-label="Home" className="flex shrink-0 items-center">
           <SiloBrand className="h-8 w-[88px] md:h-9 md:w-[100px]" />

@@ -39,6 +39,9 @@ const AUDIOBOOK_TAB_LABELS: Record<LibraryTab, string> = {
 /** Scroll distance (in px) at which an overlay header switches to glass. */
 const GLASS_THRESHOLD_PX = 160;
 
+/** Scroll distance (in px) past which scrolling down slides the row away. */
+const HIDE_THRESHOLD_PX = 80;
+
 export default function LibraryHeader({
   libraryName,
   libraryType = "",
@@ -49,15 +52,36 @@ export default function LibraryHeader({
 }: LibraryHeaderProps) {
   const tabLabels = isAudiobookLibraryType(libraryType) ? AUDIOBOOK_TAB_LABELS : TAB_LABELS;
   const [pastThreshold, setPastThreshold] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
+  // Two scroll readings from one listener. Past the hero, an overlay header
+  // takes its glass (the caller passes `overlay` only when a backdrop is
+  // actually behind it). Separately, the row reports when the reader is
+  // scrolling down: the top-bar shell pins this row under the bar, and its own
+  // rules slide a `data-hidden` row out of the way and glide it back on the way
+  // up. Shells that do not pin it ignore the attribute.
   useEffect(() => {
-    if (!overlay) return;
+    let lastY = window.scrollY;
+    let ticking = false;
     const update = () => {
-      setPastThreshold(window.scrollY > GLASS_THRESHOLD_PX);
+      const y = window.scrollY;
+      if (overlay) setPastThreshold(y > GLASS_THRESHOLD_PX);
+      const delta = y - lastY;
+      if (Math.abs(delta) > 4) {
+        if (delta > 0 && y > HIDE_THRESHOLD_PX) setHidden(true);
+        else if (delta < 0) setHidden(false);
+        lastY = y;
+      }
+      ticking = false;
     };
     update();
-    window.addEventListener("scroll", update, { passive: true });
-    return () => window.removeEventListener("scroll", update);
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(update);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, [overlay]);
 
   const scrolled = overlay && pastThreshold;
@@ -67,6 +91,7 @@ export default function LibraryHeader({
       data-sticky-header
       className={cn("library-marquee-header", overlay && "is-overlay")}
       data-scrolled={overlay ? (scrolled ? "true" : "false") : undefined}
+      data-hidden={hidden ? "true" : "false"}
     >
       {/* Eyebrow is hidden on mobile — the top nav already identifies the
           current page, and at narrow widths it would either crowd out the
