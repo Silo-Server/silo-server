@@ -240,6 +240,9 @@ func (s *TranscodeSession) pruneDownloadedSegments(generation uint64, downloaded
 			}
 			continue
 		}
+		if s.copyGroups != nil {
+			s.copyGroups.forget(candidate.number)
+		}
 		removed++
 		freedBytes += info.Size()
 	}
@@ -272,6 +275,9 @@ func (s *TranscodeSession) segmentRetentionFloor(generation uint64, opts Transco
 		return 0, false, nil
 	}
 
+	if s.copyPlan != nil {
+		return s.copyPlan.retentionFloor(downloadedThrough, retentionSeconds), true, nil
+	}
 	if !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		segmentDuration := opts.SegmentDuration
 		if segmentDuration <= 0 {
