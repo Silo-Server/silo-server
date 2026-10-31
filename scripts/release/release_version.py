@@ -70,11 +70,10 @@ def check(tags, version):
 def docker_tags(tags, version):
     """Docker tags for a published release.
 
-    Before the first 1.0.0 release candidate, latest follows every main build,
-    so a release adds only its own tags. From 1.0.0-rc.1 on, latest moves to the
-    newest stable release, and to a release candidate only while no stable
-    1.x release exists yet. X.Y and X move only to the newest stable release in
-    their line, so a hotfix to an older line never takes them back.
+    latest moves to the newest release, and to a release candidate only while
+    no 1.x release exists yet (the 1.0.0 candidates). X.Y and X move only to the
+    newest release in their line, so a fix to an older line never takes them
+    back. Every main build moves dev instead (see docker.yml).
     """
     key = parse(version)
     if not key:
@@ -88,13 +87,12 @@ def docker_tags(tags, version):
         same_major = [k for k in existing if is_stable(k) and k[0] == key[0]]
         if key[0] >= 1 and key == same_major[-1]:
             out.append(f"{key[0]}")
-    if key >= (1, 0, 0, 1):
-        stable_v1 = [k for k in existing if is_stable(k) and k[0] >= 1]
-        if is_stable(key):
-            if key == stable_v1[-1]:
-                out.append("latest")
-        elif not stable_v1 and key == existing[-1]:
+    stable = [k for k in existing if is_stable(k)]
+    if is_stable(key):
+        if key == stable[-1]:
             out.append("latest")
+    elif key == existing[-1] and not any(k[0] >= 1 for k in stable):
+        out.append("latest")
     return out
 
 
