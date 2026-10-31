@@ -39,8 +39,8 @@ var (
 var errKeepalivePrefix = errors.New("subtitle output doesn't start with the prefix sent ahead of it")
 
 // prefixKeepalive writes to w, sending prefix ahead a byte at a time while
-// nothing has been written, and dropping the bytes it sent from the start
-// of the output, which must match them.
+// only the header has been written, and dropping the bytes it sent from the
+// start of the output, which must match them.
 type prefixKeepalive struct {
 	w      io.Writer
 	prefix string
@@ -48,9 +48,9 @@ type prefixKeepalive struct {
 	once   sync.Once
 
 	mu sync.Mutex
-	// sent counts the prefix bytes sent ahead; matched those the output has
-	// repeated since. started stops the keepalive once output past the
-	// prefix reaches w.
+	// sent counts prefix bytes written by the timer or output; matched counts
+	// prefix bytes received from output. started stops the keepalive once
+	// output past the prefix reaches w.
 	sent, matched int
 	started       bool
 	err           error
@@ -109,10 +109,21 @@ func (k *prefixKeepalive) Write(p []byte) (int, error) {
 		return 0, k.err
 	}
 	n := len(p)
-	for k.matched < k.sent && len(p) > 0 {
+	for k.matched < len(k.prefix) && len(p) > 0 {
 		if p[0] != k.prefix[k.matched] {
-			k.err = errKeepalivePrefix
-			return 0, k.err
+			if k.matched < k.sent {
+				k.err = errKeepalivePrefix
+				return 0, k.err
+			}
+			// Without bytes sent ahead to match, pass this output through.
+			break
+		}
+		if k.matched == k.sent {
+			if _, err := k.w.Write(p[:1]); err != nil {
+				k.err = err
+				return 0, err
+			}
+			k.sent++
 		}
 		p = p[1:]
 		k.matched++
