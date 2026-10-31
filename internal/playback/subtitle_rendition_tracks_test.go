@@ -1041,3 +1041,50 @@ func TestOnDemandSegmentsReadFromKeptTracksMatchTheSource(t *testing.T) {
 		}
 	}
 }
+
+// MP4 text tracks encode the gap before a cue as a nonempty, two-byte
+// clearing sample. Real FFmpeg verifies that the header-only window is
+// valid and cached, and that its later text cue still converts.
+func TestOnDemandEmptyMP4WindowIsCached(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	dir := t.TempDir()
+	srt, path := filepath.Join(dir, "late.srt"), filepath.Join(dir, "source.mp4")
+	if err := os.WriteFile(srt, []byte("1\n00:00:10,000 --> 00:00:11,000\nlater\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.CommandContext(t.Context(), ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=16x16:rate=1",
+		"-i", srt, "-map", "0:v", "-map", "1:0", "-t", "12", "-c:v", "mpeg4", "-c:s", "mov_text", path).CombinedOutput(); err != nil {
+		t.Fatalf("make source: %v: %s", err, out)
+	}
+	idx, err := embeddedsub.ReadIndex(t.Context(), path)
+	if err != nil || len(idx.Tracks) != 1 {
+		t.Fatalf("source index: %+v, %v", idx, err)
+	}
+	number := idx.Tracks[0].Number
+	res, err := embeddedsub.ReadPackets(t.Context(), path, idx, number, 0, 2*time.Second, embeddedsub.ReadOptions{})
+	if err != nil || len(res.Packets) != 1 || !bytes.Equal(res.Packets[0].Data, []byte{0, 0}) {
+		t.Fatalf("gap samples: %+v, %v", res, err)
+	}
+	opts := TranscodeOpts{
+		InputPath: path, FFmpegPath: ffmpeg, TargetCodecVideo: transcodeCodecH264, TotalDuration: 12, SegmentDuration: 2,
+		SubtitleRenditionSource: SubtitleRenditionSource{Size: idx.Size, ModTimeUnixNano: idx.ModTime.UnixNano()},
+	}
+	for i := range 2 {
+		if i == 1 {
+			// A hit must not start another conversion.
+			opts.FFmpegPath = filepath.Join(dir, "missing-ffmpeg")
+		}
+		data, err := readOnDemandCues(t.Context(), opts, number, 0, subtitleCueSpan{}, subtitleCueWindow{duration: 2})
+		if err != nil || string(bytes.TrimSpace(data)) != "WEBVTT" {
+			t.Fatalf("legitimate empty window: %q, %v", data, err)
+		}
+	}
+	opts.FFmpegPath = ffmpeg
+	data, err := readOnDemandCues(t.Context(), opts, number, 5, subtitleCueSpan{}, subtitleCueWindow{offset: 10, duration: 2})
+	if err != nil || !bytes.Contains(data, []byte("later")) {
+		t.Fatalf("later text window: %q, %v", data, err)
+	}
+}
