@@ -9,7 +9,7 @@ with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
 main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
 and `NODE_URL`. Hardware transcoding and node access are commented out in it.
-`docker-compose.split.yml` is the earlier multi-container file, kept for
+`docker-compose.advanced.yml` is the earlier multi-container file, kept for
 installs that stay on that layout; it runs the same image, whose bundled
 services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 
@@ -238,16 +238,18 @@ Before the omnibus image, `docker-compose.yml` ran PostgreSQL
 (`pgvector/pgvector:pg18`), Redis, and Meilisearch as services of their own,
 with data in `SILO_DATA_ROOT/postgres`, `redis`, and `meilisearch`, and Silo's
 state in `plugins`, `artwork`, and `compat`. That file is now
-`docker-compose.split.yml`, and an install of that layout keeps it by
-selecting it in `COMPOSE_FILE`.
+`docker-compose.advanced.yml` (briefly `docker-compose.split.yml`), and an
+install of that layout keeps it by selecting it in `COMPOSE_FILE`. A
+`COMPOSE_FILE` that still names `docker-compose.split.yml` fails until it names
+the new file.
 
 `docker-compose.yml` is an example of a new install and does not look for an
 earlier one. Started on its `SILO_DATA_ROOT`, it replaces the earlier `silo`
 container and creates a new, empty bundled database, with first-run setup open
 on the published ports. The earlier `postgres`, `redis`, and `meilisearch`
 containers keep running as orphans of the Compose project, their data
-untouched; selecting `docker-compose.split.yml` and running `docker compose up
--d` again brings the install back.
+untouched; selecting `docker-compose.advanced.yml` and running
+`docker compose up -d` again brings the install back.
 
 Moving an install into the single container is a separate step that an
 administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
@@ -255,7 +257,7 @@ earlier stack stopped. With `.env` still holding the earlier stack's
 settings, and `COMPOSE_FILE` removed from it once the stack is down:
 
 ```sh
-docker compose -f docker-compose.split.yml down
+docker compose -f docker-compose.advanced.yml down
 docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
   --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
 docker compose up -d
@@ -367,7 +369,7 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- Going back to `docker-compose.split.yml` after a move leaves the copy
+- Going back to `docker-compose.advanced.yml` after a move leaves the copy
   stale. Before using `docker-compose.yml` again, move `config` aside and run
   the move again; a run on the stale copy refuses (the done marker above).
 - Silo directories that `init-config` made, empty, before the move are

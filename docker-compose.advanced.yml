@@ -1,9 +1,10 @@
 # Silo, PostgreSQL, Redis, and optionally Meilisearch, each in a container of
 # its own: the layout docker-compose.yml ran before Silo moved to one
-# container. An install of that layout keeps running on it when its .env
-# selects this file:
+# container, for installs that run or tune those services separately. An
+# install of that layout keeps running on it when its .env selects this file
+# (named docker-compose.split.yml in earlier builds):
 #
-#   COMPOSE_FILE=docker-compose.split.yml
+#   COMPOSE_FILE=docker-compose.advanced.yml
 #
 # Silo's Docker image bundles PostgreSQL and Redis, and leaves both off here
 # because DATABASE_URL and REDIS_URL name the services below. It runs Silo as

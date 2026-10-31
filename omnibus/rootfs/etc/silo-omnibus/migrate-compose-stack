@@ -5,7 +5,7 @@
 # on it. An administrator runs it once, with SILO_DATA_ROOT mounted at
 # /silo-data, after stopping the earlier stack; see "Moving from the
 # multi-container stack" in docs/architecture/omnibus-image.md. Nothing runs
-# it on its own: docker-compose.split.yml keeps an install on the earlier
+# it on its own: docker-compose.advanced.yml keeps an install on the earlier
 # layout.
 #
 # The PostgreSQL cluster is copied and Silo's plugins, artwork, and compat
