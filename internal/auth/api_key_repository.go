@@ -82,7 +82,11 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 	if err != nil {
 		return nil, fmt.Errorf("beginning api key creation: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
 	return insertAPIKey(ctx, tx, userID, label, scopes)
 }
 
@@ -187,7 +191,11 @@ func (r *APIKeyRepository) Delete(ctx context.Context, id int64, userID int) err
 	if err != nil {
 		return fmt.Errorf("beginning api key deletion: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
 	// The audit row's account locks come before the key row lock, the order
 	// an account deletion takes them in.
 	if err := auditmutation.LockActors(ctx, tx); err != nil {
