@@ -18,6 +18,15 @@ poster artwork. The artwork is intended to use generic original scenes and
 avoid copyrighted movie/show posters, recognizable actors, franchise
 characters, provider logos, and readable in-image third-party branding.
 
+## Ranked Row Numerals
+
+`web/src/lib/rankNumerals.ts` carries the SVG path data for the outline digits a
+ranked "Top 10" row draws behind each poster. The paths were copied from the
+project owner's own `plex-custom-frontend` (weflix) repository at the owner's
+direction, so both products render identical numerals. The digit shapes follow
+the numeral treatment of a commercial streaming service's top-ten row. They are
+silhouettes only: no third party's logo, wordmark, or artwork is reproduced.
+
 ## FFmpeg audio decoders (WebAssembly)
 
 `web/src/player/engine/wasm/silo-audio-decoders.wasm` and its JavaScript glue

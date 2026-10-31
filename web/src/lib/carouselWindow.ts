@@ -1,4 +1,8 @@
-import { carouselCardWidthPx, type PosterSize } from "@/lib/uiCustomization";
+import {
+  carouselCardWidthPx,
+  type CarouselSlideWidth,
+  type PosterSize,
+} from "@/lib/uiCustomization";
 
 /** Slides mounted up front when the viewport width is unknown (SSR, tests). */
 export const CAROUSEL_WINDOW_FALLBACK_SLIDES = 12;
@@ -23,23 +27,29 @@ function currentViewportWidth(): number | null {
  * How many carousel cards of this size fit across the viewport. The viewport
  * width overestimates the row (sidebar, page padding), which errs toward
  * mounting a card too many rather than leaving a visible slide empty.
+ *
+ * slideWidth names the row it is for, so a ranked row's wider cards or a
+ * Featured row's larger ones measure what they actually are.
  */
 export function visibleCarouselSlideCount(
   size: PosterSize | "wide",
   viewportWidth: number | null = currentViewportWidth(),
+  slideWidth: CarouselSlideWidth = "poster",
 ): number {
   if (viewportWidth === null) return CAROUSEL_WINDOW_FALLBACK_SLIDES;
-  const slideWidth = carouselCardWidthPx(size, viewportWidth) + carouselSlideGapPx(viewportWidth);
-  return Math.max(1, Math.ceil(viewportWidth / slideWidth));
+  const slideWidthPx =
+    carouselCardWidthPx(size, viewportWidth, slideWidth) + carouselSlideGapPx(viewportWidth);
+  return Math.max(1, Math.ceil(viewportWidth / slideWidthPx));
 }
 
 /** The cards a windowed carousel row mounts in its first commit. */
 export function initialCarouselSlideCount(
   size: PosterSize | "wide",
   viewportWidth: number | null = currentViewportWidth(),
+  slideWidth: CarouselSlideWidth = "poster",
 ): number {
   if (viewportWidth === null) return CAROUSEL_WINDOW_FALLBACK_SLIDES;
-  return visibleCarouselSlideCount(size, viewportWidth) + CAROUSEL_WINDOW_BUFFER_SLIDES;
+  return visibleCarouselSlideCount(size, viewportWidth, slideWidth) + CAROUSEL_WINDOW_BUFFER_SLIDES;
 }
 
 /** Runs `task` in the next idle window (or after a timeout at the latest). */

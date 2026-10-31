@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -9,8 +9,23 @@ import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
-import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
+import {
+  carouselCardWidthClasses,
+  featuredCarouselCardWidthClasses,
+  rankedCarouselCardWidthClasses,
+  rankedCarouselGutterClasses,
+  rankedCarouselNumeralClasses,
+  WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
+  type CarouselSlideWidth,
+} from "@/lib/uiCustomization";
 import { initialCarouselSlideCount, visibleCarouselSlideCount } from "@/lib/carouselWindow";
+import { MAX_RANKED_CARDS } from "@/lib/rankNumerals";
+import {
+  EXPANDING_SECTION_TYPES,
+  RANKED_SECTION_TYPES,
+  expandedCardWidthClasses,
+} from "@/lib/featuredCard";
+import { useHeroTrailersEnabled } from "@/hooks/useHeroTrailersEnabled";
 
 interface SectionRowProps {
   section: ResolvedSection;
@@ -68,7 +83,29 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
-  const posterWidthClasses = carouselCardWidthClasses(posterSize);
+  /*
+   * Which card is open, and the only state an opening row keeps. The row owns it
+   * rather than each card, so two tiles can never be open at the same time.
+   */
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const isRanked = RANKED_SECTION_TYPES.has(section.section_type);
+  const isExpanding = EXPANDING_SECTION_TYPES.has(section.section_type);
+  /*
+   * The Featured row lays its cards out wider than an ordinary row does, so this
+   * is the width its slides take — the same width carouselWindow measures its
+   * first commit against, or the row mounts too few of them.
+   */
+  const posterWidthClasses = isRanked
+    ? rankedCarouselCardWidthClasses(posterSize)
+    : isExpanding
+      ? featuredCarouselCardWidthClasses(posterSize)
+      : carouselCardWidthClasses(posterSize);
+  const rankedGutterClasses = isRanked ? rankedCarouselGutterClasses(posterSize) : "";
+  const rankedNumeralClasses = isRanked ? rankedCarouselNumeralClasses(posterSize) : "";
+  const expandedWidthClasses = isExpanding ? expandedCardWidthClasses(posterSize) : "";
+  // Read once for the row rather than once per card. A clip is bandwidth a
+  // profile opts into, and this is the same gate the hero reads.
+  const trailersEnabled = useHeroTrailersEnabled() === true;
   const isProgressRow =
     section.section_type === "continue_watching" || section.section_type === "next_up";
   // One spoiler lookup per row rather than one per card.
@@ -86,17 +123,17 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
       ? "poster"
       : "wide";
   const slideSize = isProgressRow && progressCardVariant === "wide" ? "wide" : posterSize;
+  // Which width table this row's slides are measured against.
+  const slideWidth: CarouselSlideWidth = isRanked ? "ranked" : isExpanding ? "featured" : "poster";
   const windowing = useMemo<MediaCarouselWindowing>(
     () => ({
-      initialCount: initialCarouselSlideCount(slideSize),
+      initialCount: initialCarouselSlideCount(slideSize, undefined, slideWidth),
       placeholderClassName:
-        slideSize === "wide"
-          ? WIDE_CAROUSEL_CARD_WIDTH_CLASSES
-          : carouselCardWidthClasses(slideSize),
+        slideSize === "wide" ? WIDE_CAROUSEL_CARD_WIDTH_CLASSES : posterWidthClasses,
     }),
-    [slideSize],
+    [slideSize, slideWidth, posterWidthClasses],
   );
-  const priorityCount = priority ? visibleCarouselSlideCount(slideSize) : 0;
+  const priorityCount = priority ? visibleCarouselSlideCount(slideSize, undefined, slideWidth) : 0;
 
   if (section.items.length === 0) return null;
 
@@ -111,6 +148,7 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
       viewAllHref={browseHref}
       headerActions={headerActions}
       windowing={windowing}
+      reflowKey={expandedKey}
     >
       {isProgressRow
         ? section.items.map((item, index) => (
@@ -126,13 +164,39 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
             />
           ))
         : section.items.map((item, index) => (
-            <div key={`${item.content_id}-${index}`} className={posterWidthClasses} role="listitem">
+            /*
+             * The card widens *in the row* when it opens — its width is swapped,
+             * not layered over its neighbours — so the row reflows and the cards
+             * to its right move along. Only one width class may be present at a
+             * time: with two on one element, which wins is decided by stylesheet
+             * order rather than by the order they are written here.
+             */
+            <div
+              key={`${item.content_id}-${index}`}
+              className={`transition-[width] duration-300 ease-out ${
+                isExpanding && expandedKey === item.content_id
+                  ? expandedWidthClasses
+                  : posterWidthClasses
+              }`}
+              role="listitem"
+            >
               <SectionItemCard
                 item={item}
                 libraryId={libraryId}
                 overlayPrefs={overlayPrefs}
                 quickActionMode={quickActionMode}
                 priority={index < priorityCount}
+                rank={isRanked && index < MAX_RANKED_CARDS ? index + 1 : undefined}
+                rankedGutterClasses={rankedGutterClasses}
+                rankedNumeralClasses={rankedNumeralClasses}
+                expandable={isExpanding}
+                expanded={isExpanding && expandedKey === item.content_id}
+                onExpand={() => setExpandedKey(item.content_id)}
+                onCollapse={() =>
+                  setExpandedKey((current) => (current === item.content_id ? null : current))
+                }
+                restingWidthClasses={posterWidthClasses}
+                trailersEnabled={trailersEnabled}
               />
             </div>
           ))}

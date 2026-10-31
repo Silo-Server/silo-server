@@ -77,9 +77,23 @@ export function useCarouselEmbla({ options }: UseCarouselEmblaOptions = {}) {
     emblaApi?.scrollNext();
   }, [emblaApi]);
 
+  /**
+   * Measure the slides again. A slide that changes its own width — an opening
+   * card widening in the row — moves only the container's content, which no
+   * ResizeObserver sees.
+   *
+   * Embla v8 names this `reInit`, and it takes the options and plugins again:
+   * called without them it would drop the wheel gestures and the resize
+   * watching this hook just set up.
+   */
+  const reflow = useCallback(() => {
+    emblaApi?.reInit(emblaOptions, emblaPlugins);
+  }, [emblaApi, emblaOptions, emblaPlugins]);
+
   return {
     emblaApi,
     emblaRef,
+    reflow,
     canScrollPrev,
     canScrollNext,
     scrollPrev,

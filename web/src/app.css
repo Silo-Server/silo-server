@@ -1410,6 +1410,28 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transform: translateY(-4px);
   }
 
+  /*
+   * The expanding card's landscape tile: the backdrop, then a dark gradient from
+   * the left so the logo and title stay legible over whatever the backdrop
+   * holds, then the clip that fades in over both.
+   *
+   * The tile keeps the card's height and takes FEATURED_CARD_SCALE times its
+   * width, so it reads as landscape without growing taller than its row. Its
+   * width classes live in lib/featuredCard.ts, which owns the scale.
+   */
+  .media-card-featured-tile {
+    background: #1c1c1f;
+  }
+  .media-card-featured-gradient {
+    background: linear-gradient(
+      to right,
+      rgba(0, 0, 0, 0.92) 0%,
+      rgba(0, 0, 0, 0.72) 38%,
+      rgba(0, 0, 0, 0.28) 68%,
+      rgba(0, 0, 0, 0.1) 100%
+    );
+  }
+
   /* Home/library pages can contain hundreds of cards across off-screen rows.
      Let supporting engines skip layout and paint for those rows until they
      approach the viewport. Browsers without content-visibility ignore this

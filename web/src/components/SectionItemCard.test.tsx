@@ -1,11 +1,24 @@
-import type { ReactNode } from "react";
+import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import SectionItemCard from "./SectionItemCard";
 
 vi.mock("@/components/ViewTransitionLink", () => ({
-  default: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
+  /*
+   * Every anchor prop is forwarded, not just children. A stub that drops
+   * className or aria-label hides the very thing a test is asserting, and the
+   * test then passes for the wrong reason.
+   */
+  default: ({
+    children,
+    to,
+    ...rest
+  }: { children: ReactNode; to: string } & AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
+  ),
 }));
 
 vi.mock("@/components/MediaItemMenu", () => ({
@@ -20,6 +33,12 @@ vi.mock("@/components/CardPlayOverlay", () => ({
 
 vi.mock("@/components/overlays/CardOverlays", () => ({
   default: () => null,
+}));
+
+// The tile's watchlist button writes through the query layer. This test is about
+// what the card draws, so the write is stubbed rather than provided for.
+vi.mock("@/hooks/queries/watchlist", () => ({
+  useToggleWatchlist: () => ({ mutate: () => {}, isPending: false }),
 }));
 
 describe("SectionItemCard", () => {
@@ -118,5 +137,102 @@ describe("SectionItemCard", () => {
     expect(markup).toContain("Wed, Apr 8");
     expect(markup).toContain("8:00 PM");
     expect(markup).not.toContain('data-watched-indicator="icon-only"');
+  });
+
+  it("draws a ranked card's own numeral and holds the poster and caption clear of it", () => {
+    const card = (rank: number) =>
+      renderToStaticMarkup(
+        <SectionItemCard
+          rank={rank}
+          rankedGutterClasses="pl-[130px]"
+          rankedNumeralClasses="-left-[130px]"
+          item={{
+            content_id: "movie-1",
+            type: "movie",
+            title: "Heat",
+            year: 1995,
+            genres: [],
+            status: "matched",
+            rating_imdb: null,
+            overview: "",
+            poster_url: "",
+            poster_thumbhash: "",
+            backdrop_url: "",
+            backdrop_thumbhash: "",
+            logo_url: "",
+          }}
+        />,
+      );
+
+    const first = card(1);
+    const fourth = card(4);
+
+    expect(first).toContain('data-rank="1"');
+    expect(fourth).toContain('data-rank="4"');
+    // A different glyph, not the same box relabelled.
+    expect(fourth).not.toBe(first);
+    expect(fourth).toContain('viewBox="0 0 130 154"');
+
+    // The caption clears the numeral, so a ranked row's titles still line up
+    // with its posters. (The poster's own padding is asserted in
+    // SectionRow.test, whose ViewTransitionLink is not stubbed out.)
+    expect(fourth).toContain("pl-[130px]");
+
+    // The numerals stop at ten: an eleventh card is drawn as an ordinary one.
+    expect(card(11)).not.toContain("data-rank=");
+  });
+
+  it("draws the open tile's backdrop and logo, and pins the poster, only while open", () => {
+    const card = (expanded: boolean) =>
+      renderToStaticMarkup(
+        <SectionItemCard
+          expandable
+          expanded={expanded}
+          restingWidthClasses="w-[185px]"
+          item={{
+            content_id: "movie-1",
+            play_content_id: "movie-1",
+            type: "movie",
+            title: "Heat",
+            year: 1995,
+            runtime: 102,
+            genres: ["Drama"],
+            content_rating: "M",
+            status: "matched",
+            rating_imdb: null,
+            overview: "",
+            poster_url: "",
+            poster_thumbhash: "",
+            backdrop_url: "/backdrop.jpg",
+            backdrop_thumbhash: "",
+            logo_url: "/logo.png",
+          }}
+        />,
+      );
+
+    const open = card(true);
+    expect(open).toContain("media-card-featured-tile");
+    expect(open).toContain('src="/backdrop.jpg"');
+    expect(open).toContain('src="/logo.png"');
+
+    // The poster holds its resting width whether the card is open or shut. That
+    // pin has to outlast the open state: the card's width animates, the
+    // artwork's height follows its width, and a poster that let go on collapse
+    // would balloon to the grown width's height and push every row below it.
+    expect(open).toContain("w-[185px]");
+
+    // The tile's own body: the hero's buttons and its metadata row, at tile size.
+    expect(open).toContain("pill-primary");
+    expect(open).toContain("Add Heat to watchlist");
+    expect(open).toContain("More info about Heat");
+    expect(open).toContain("Drama");
+    expect(open).toContain("1h 42m");
+
+    // Shut, there is no tile, and so none of the body it carries.
+    const closed = card(false);
+    expect(closed).not.toContain("media-card-featured-tile");
+    expect(closed).not.toContain("pill-primary");
+    expect(closed).not.toContain("1h 42m");
+    expect(closed).toContain("w-[185px]");
   });
 });

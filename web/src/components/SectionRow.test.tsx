@@ -231,4 +231,35 @@ describe("SectionRow", () => {
     expect(latestCarouselProps?.titleHref).toBe(href);
     expect(latestCarouselProps?.viewAllHref).toBe(href);
   });
+
+  it("numbers a ranked row's first ten cards and leaves the rest unnumbered", () => {
+    const items = Array.from({ length: 12 }, (_, index) =>
+      movie(`movie-${index + 1}`, `Title ${index + 1}`),
+    );
+    const section = (sectionType: string): ResolvedSection => ({
+      id: "top-ten",
+      section_type: sectionType,
+      title: "Top 10 Movies Today",
+      featured: false,
+      item_limit: items.length,
+      total_count: items.length,
+      is_custom: false,
+      customized: false,
+      items,
+    });
+
+    const rankedMarkup = renderRow(section("trending_discover"));
+    const ranks = [...rankedMarkup.matchAll(/data-rank="(\d+)"/g)].map((match) => Number(match[1]));
+    expect(ranks).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+    // A ranked row's cards are widened for the numeral; the poster and the
+    // caption under it are padded out of the numeral's way.
+    expect(rankedMarkup).toContain("pl-[130px]");
+
+    // A row of any other type is left exactly as it was, however many items it
+    // has: no numerals, and no reserved gutter.
+    const plainMarkup = renderRow(section("recently_added"));
+    expect(plainMarkup).not.toContain("data-rank=");
+    expect(plainMarkup).not.toContain("pl-[130px]");
+  });
 });

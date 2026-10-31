@@ -10,7 +10,16 @@ import {
   type MouseEvent,
 } from "react";
 import { Link } from "react-router";
-import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen, Volume2, VolumeX } from "lucide-react";
+import {
+  Info,
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Pause,
+  BookOpen,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -36,6 +45,7 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
+import { mediaPlayLabel } from "@/lib/mediaPlayLabel";
 
 // On-view translation for the visible slide loads after the hero itself, so
 // it stays out of the launch bundle; the plain overview shows meanwhile.
@@ -154,30 +164,6 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
     </div>
   );
 });
-
-function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
-  if (item.type === "ebook") {
-    return "Read";
-  }
-  if (item.type !== "audiobook") {
-    return "Play";
-  }
-  if (activeAudiobookPlaying === true) {
-    return "Pause";
-  }
-  if (activeAudiobookPlaying === false) {
-    return "Resume";
-  }
-  const position = item.position_seconds ?? 0;
-  const duration = item.duration_seconds ?? 0;
-  if (position > 0 && (duration <= 0 || position < duration)) {
-    return "Resume";
-  }
-  if (item.user_state?.played) {
-    return "Listen Again";
-  }
-  return "Listen";
-}
 
 export default function HeroBanner({
   items,
@@ -505,7 +491,7 @@ export default function HeroBanner({
     current.type === "audiobook" && audiobookPlayback?.active?.contentId === current.content_id
       ? audiobookPlayback.active.playing
       : null;
-  const playLabel = heroPlayLabel(current, activeAudiobookPlaying);
+  const playLabel = mediaPlayLabel(current, activeAudiobookPlaying);
   const playHref = buildMediaPlayHref({
     contentId: current.content_id,
     type: current.type,

@@ -65,6 +65,13 @@ interface MediaCarouselProps {
    */
   compact?: boolean;
   windowing?: MediaCarouselWindowing;
+  /**
+   * Changes whenever a slide's own width changes — an opening card. Embla
+   * measures its slides once, and such a change only moves the container's
+   * content, which no ResizeObserver sees, so without this its scroll extent and
+   * arrow state go stale.
+   */
+  reflowKey?: string | number | null;
 }
 
 /**
@@ -188,10 +195,21 @@ export default function MediaCarousel({
   edgePadding = true,
   compact = false,
   windowing,
+  reflowKey,
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaRef, reflow, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  // Embla measures its slides once, so a slide that resizes itself — an opening
+  // card widening in the row — has to be measured again, or the row's scroll
+  // extent and its arrow state go stale behind a layout that visibly moved.
+  const lastReflowKey = useRef(reflowKey);
+  useEffect(() => {
+    if (lastReflowKey.current === reflowKey) return;
+    lastReflowKey.current = reflowKey;
+    reflow();
+  }, [reflow, reflowKey]);
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
