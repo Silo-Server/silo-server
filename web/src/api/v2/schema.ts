@@ -15067,7 +15067,7 @@ export interface components {
       /** @description Original validated client diagnostics manifest document, retaining its own schema_version and extension fields. */
       manifest: unknown;
       /** @enum {string} */
-      platform: "android" | "android-tv" | "ios" | "tvos";
+      platform: "android" | "android-tv" | "ios" | "tvos" | "roku";
       playback_session_ids: string[];
       profile_id?: string;
       /**
@@ -15106,7 +15106,7 @@ export interface components {
        */
       id: string;
       /** @enum {string} */
-      platform: "android" | "android-tv" | "ios" | "tvos";
+      platform: "android" | "android-tv" | "ios" | "tvos" | "roku";
       playback_session_ids: string[];
       profile_id?: string;
       /**

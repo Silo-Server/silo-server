@@ -2888,7 +2888,7 @@ export type DiagnosticReportType =
   | "hang"
   | "abnormal_exit"
   | "manual";
-export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos";
+export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos" | "roku";
 
 export interface ClientDiagnosticManifest {
   schema_version: number;

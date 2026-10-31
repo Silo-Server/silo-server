@@ -6228,7 +6228,8 @@
               "android",
               "android-tv",
               "ios",
-              "tvos"
+              "tvos",
+              "roku"
             ],
             "type": "string"
           },
@@ -6338,7 +6339,8 @@
               "android",
               "android-tv",
               "ios",
-              "tvos"
+              "tvos",
+              "roku"
             ],
             "type": "string"
           },
