@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -315,6 +313,7 @@ func (h *DiagnosticsHandler) initDiagnosticChunks(ctx context.Context, userID in
 	})
 	if err != nil {
 		h.chunkSessions.unreserve(userID)
+		h.logChunkUploadError(ctx, err)
 		statusCode, message := uploadErrorResponse(err)
 		return DiagnosticsChunkInitResponse{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
@@ -371,6 +370,7 @@ func (h *DiagnosticsHandler) PutDiagnosticChunk(w http.ResponseWriter, r *http.R
 		if errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired) {
 			h.chunkSessions.drop(uploadID)
 		}
+		h.logChunkUploadError(r.Context(), err)
 		statusCode, message := uploadErrorResponse(err)
 		return DiagnosticsChunkStateResponse{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
@@ -445,10 +445,17 @@ func (h *DiagnosticsHandler) CompleteDiagnosticChunks(ctx context.Context, userI
 
 	upload, err := h.chunkSessions.manager.Complete(uploadID)
 	if err != nil {
-		if errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired) {
-			h.chunkSessions.drop(uploadID)
-		}
+		h.logChunkUploadError(ctx, err)
 		statusCode, message := uploadErrorResponse(err)
+		switch {
+		case errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired):
+			h.chunkSessions.drop(uploadID)
+		case statusCode == http.StatusInternalServerError:
+			// Complete consumed the session but could not reopen the file it
+			// spooled to.
+			h.chunkSessions.drop(uploadID)
+			return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
+		}
 		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
 	// The manager session is consumed; a failed ingest is retried by the
@@ -456,13 +463,7 @@ func (h *DiagnosticsHandler) CompleteDiagnosticChunks(ctx context.Context, userI
 	defer h.chunkSessions.drop(uploadID)
 	defer upload.Cleanup()
 
-	bundle, err := os.Open(upload.Path)
-	if err != nil {
-		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
-	}
-	defer bundle.Close()
-
-	result, err := h.service.Ingest(ctx, userID, profileID, owner.manifest, io.Reader(bundle))
+	result, err := h.service.Ingest(ctx, userID, profileID, owner.manifest, upload.File)
 	if err != nil {
 		return diagnostics.IngestResult{}, diagnosticsServiceFailure(err)
 	}
@@ -485,6 +486,14 @@ func (h *DiagnosticsHandler) AbortDiagnosticChunks(userID int, uploadID string) 
 		return
 	}
 	h.abortChunkedUpload(uploadID)
+}
+
+// logChunkUploadError logs a spool failure the client sees only as a 500, such
+// as an upload root the manager refuses; client errors are not logged.
+func (h *DiagnosticsHandler) logChunkUploadError(ctx context.Context, err error) {
+	if status, _ := uploadErrorResponse(err); status == http.StatusInternalServerError {
+		h.diagnosticsLogger().ErrorContext(ctx, "diagnostics chunked upload failed", "component", "diagnostics", "error", err)
+	}
 }
 
 func (h *DiagnosticsHandler) abortChunkedUpload(uploadID string) {
