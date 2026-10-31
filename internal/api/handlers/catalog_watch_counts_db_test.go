@@ -57,75 +57,17 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
+	f := seedWatchCounts(t, pool)
 
-	prefix := fmt.Sprintf("watch-counts-%d", time.Now().UnixNano())
-	started, finished, hidden, movie := prefix+"-started", prefix+"-finished", prefix+"-hidden", prefix+"-movie"
-	podcast := prefix + "-podcast"
-	var allowedFolder, hiddenFolder, userID int
-	for _, f := range []struct {
-		name string
-		id   *int
-	}{{prefix + "-allowed", &allowedFolder}, {prefix + "-hidden", &hiddenFolder}} {
-		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, f.name).Scan(f.id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username,role) VALUES ($1,'user') RETURNING id`, prefix).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id=$1`, userID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE series_id = ANY($1)`, []string{started, finished, hidden, podcast})
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{started, finished, hidden, movie, podcast})
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{allowedFolder, hiddenFolder})
-	})
-
-	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'series','Started'), ($2,'series','Finished'), ($3,'series','Hidden'), ($4,'movie','Movie')`,
-		started, finished, hidden, movie)
-	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$5), ($2,$5), ($4,$5), ($3,$6)`,
-		started, finished, hidden, movie, allowedFolder, hiddenFolder)
-	// Started has four available episodes and one whose file is gone; Finished
-	// has two; Hidden has one in a library the viewer may not see.
-	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES
-		($1||'-e1',$1,1,1,'One'), ($1||'-e2',$1,1,2,'Two'), ($1||'-e3',$1,1,3,'Three'), ($1||'-e4',$1,1,4,'Four'), ($1||'-gone',$1,1,5,'Gone'),
-		($2||'-e1',$2,1,1,'One'), ($2||'-e2',$2,1,2,'Two'),
-		($3||'-e1',$3,1,1,'One')`, started, finished, hidden)
-	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES
-		($1||'-e1',$4), ($1||'-e2',$4), ($1||'-e3',$4), ($1||'-e4',$4), ($2||'-e1',$4), ($2||'-e2',$4), ($3||'-e1',$5)`,
-		started, finished, hidden, allowedFolder, hiddenFolder)
-	// A podcast show is not a series, though its episodes share the table.
-	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Podcast')`, podcast)
-	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, podcast, allowedFolder)
-	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1||'-e1',$1,1,1,'One')`, podcast)
-	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1||'-e1',$2)`, podcast, allowedFolder)
-
-	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1_000_000_000_000)
-	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$2,'Watch counts fixture')`, profileID, userID)
-	// Started: e1 finished, e2 half watched, and the gone episode finished
-	// (it no longer counts). Finished: e1 finished, e2 finished only in
-	// history. Hidden: finished, but the viewer may not see the series.
-	exec(`INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,duration_seconds,completed) VALUES
-		($1,$2,$3||'-e1',1800,1800,true), ($1,$2,$3||'-e2',600,1800,false), ($1,$2,$3||'-gone',1800,1800,true),
-		($1,$2,$4||'-e1',1800,1800,true), ($1,$2,$5||'-e1',1800,1800,true)`, userID, profileID, started, finished, hidden)
-	exec(`INSERT INTO user_watch_history (id,user_id,profile_id,media_item_id,completed) VALUES ($1,$2,$3,$4||'-e2',true)`,
-		prefix+"-history", userID, profileID, finished)
-
-	pgStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
+	pgStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, f.userID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authCtx := middleware.SetClaims(ctx, &auth.Claims{UserID: userID, Role: "user"})
-	viewer := ItemViewer{ProfileID: profileID, Access: catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{allowedFolder}}}
+	authCtx := middleware.SetClaims(ctx, &auth.Claims{UserID: f.userID, Role: "user"})
+	viewer := ItemViewer{ProfileID: f.profileID, Access: catalog.AccessFilter{UserID: f.userID, ProfileID: f.profileID, AllowedLibraryIDs: []int{f.allowedFolder}}}
 	want := map[string]*catalog.SeasonUserData{
-		started:  {WatchedCount: 1, UnplayedCount: 3, InProgressCount: 1},
-		finished: {WatchedCount: 2, Played: true},
+		f.started:  {WatchedCount: 1, UnplayedCount: 3, InProgressCount: 1},
+		f.finished: {WatchedCount: 2, Played: true},
 	}
 	for _, tc := range []struct {
 		name    string
@@ -145,7 +87,7 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 				episodeRepo:   catalog.NewEpisodeRepository(pool),
 				storeProvider: testUserStoreProvider{store: tc.store},
 			}}
-			got, err := h.SeriesWatchCounts(authCtx, viewer, []string{started, finished, hidden, movie, podcast, prefix + "-unknown"})
+			got, err := h.SeriesWatchCounts(authCtx, viewer, []string{f.started, f.finished, f.hidden, f.movie, f.podcast, f.unknown})
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("counts = %+v, want an error", got)
@@ -160,4 +102,74 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 			}
 		})
 	}
+}
+
+// watchCountsFixture is what seedWatchCounts builds: series a viewer of
+// allowedFolder may see with known watch state, and IDs that must not count.
+type watchCountsFixture struct {
+	started, finished, hidden, movie, podcast, unknown string
+	allowedFolder, userID                              int
+	profileID                                          string
+}
+
+func seedWatchCounts(t *testing.T, pool *pgxpool.Pool) watchCountsFixture {
+	t.Helper()
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prefix := fmt.Sprintf("watch-counts-%d", time.Now().UnixNano())
+	f := watchCountsFixture{
+		started: prefix + "-started", finished: prefix + "-finished", hidden: prefix + "-hidden",
+		movie: prefix + "-movie", podcast: prefix + "-podcast", unknown: prefix + "-unknown",
+	}
+	var hiddenFolder int
+	for _, folder := range []struct {
+		name string
+		id   *int
+	}{{prefix + "-allowed", &f.allowedFolder}, {prefix + "-hidden", &hiddenFolder}} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, folder.name).Scan(folder.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username,role) VALUES ($1,'user') RETURNING id`, prefix).Scan(&f.userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id=$1`, f.userID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE series_id = ANY($1)`, []string{f.started, f.finished, f.hidden, f.podcast})
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{f.started, f.finished, f.hidden, f.movie, f.podcast})
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{f.allowedFolder, hiddenFolder})
+	})
+
+	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'series','Started'), ($2,'series','Finished'), ($3,'series','Hidden'), ($4,'movie','Movie'), ($5,'podcast','Podcast')`,
+		f.started, f.finished, f.hidden, f.movie, f.podcast)
+	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$6), ($2,$6), ($4,$6), ($5,$6), ($3,$7)`,
+		f.started, f.finished, f.hidden, f.movie, f.podcast, f.allowedFolder, hiddenFolder)
+	// Started has four available episodes and one whose file is gone; Finished
+	// has two; Hidden has one in a library the viewer may not see. A podcast
+	// show is not a series, though its episodes share the table.
+	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES
+		($1||'-e1',$1,1,1,'One'), ($1||'-e2',$1,1,2,'Two'), ($1||'-e3',$1,1,3,'Three'), ($1||'-e4',$1,1,4,'Four'), ($1||'-gone',$1,1,5,'Gone'),
+		($2||'-e1',$2,1,1,'One'), ($2||'-e2',$2,1,2,'Two'),
+		($3||'-e1',$3,1,1,'One'), ($4||'-e1',$4,1,1,'One')`, f.started, f.finished, f.hidden, f.podcast)
+	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES
+		($1||'-e1',$5), ($1||'-e2',$5), ($1||'-e3',$5), ($1||'-e4',$5), ($2||'-e1',$5), ($2||'-e2',$5), ($4||'-e1',$5), ($3||'-e1',$6)`,
+		f.started, f.finished, f.hidden, f.podcast, f.allowedFolder, hiddenFolder)
+
+	f.profileID = fmt.Sprintf("00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1_000_000_000_000)
+	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$2,'Watch counts fixture')`, f.profileID, f.userID)
+	// Started: e1 finished, e2 half watched, and the gone episode finished
+	// (it no longer counts). Finished: e1 finished, e2 finished only in
+	// history. Hidden: finished, but the viewer may not see the series.
+	exec(`INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,duration_seconds,completed) VALUES
+		($1,$2,$3||'-e1',1800,1800,true), ($1,$2,$3||'-e2',600,1800,false), ($1,$2,$3||'-gone',1800,1800,true),
+		($1,$2,$4||'-e1',1800,1800,true), ($1,$2,$5||'-e1',1800,1800,true)`, f.userID, f.profileID, f.started, f.finished, f.hidden)
+	exec(`INSERT INTO user_watch_history (id,user_id,profile_id,media_item_id,completed) VALUES ($1,$2,$3,$4||'-e2',true)`,
+		prefix+"-history", f.userID, f.profileID, f.finished)
+	return f
 }
