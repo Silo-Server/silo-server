@@ -238,7 +238,7 @@ func (s *Store) Window(ctx context.Context, path string, ref playback.EmbeddedSu
 	if !servable(ref.Codec) {
 		return nil, errNotServable
 	}
-	info, err := fspath.Stat(path)
+	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSu
 		// Kept tracks are served from their local copies.
 		return nil, errNoMirrorDir
 	}
-	info, err := fspath.Stat(path)
+	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +547,7 @@ func (s *Store) DemuxCopy(ctx context.Context, path string, ref playback.Embedde
 	if s.mirrorDir() == "" {
 		return playback.DemuxCopy{}, errNoMirrorDir
 	}
-	info, err := fspath.Stat(path)
+	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
 		return playback.DemuxCopy{}, err
 	}
@@ -585,7 +585,7 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	if packets <= 0 {
 		return errNoPackets
 	}
-	if info, err := fspath.Stat(path); err != nil || info.Size() != srcSize || !info.ModTime().Equal(srcModTime) {
+	if info, err := fspath.StatContext(ctx, path); err != nil || info.Size() != srcSize || !info.ModTime().Equal(srcModTime) {
 		return errSourceChanged
 	}
 	copyFile, err := os.Open(demuxCopy.Path)

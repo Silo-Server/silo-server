@@ -59,9 +59,10 @@ func NewCache(maxBytes int64) *Cache {
 }
 
 // Index returns the file's index, reading it on a miss (ReadIndex). It
-// stats the file on every call. Errors aren't cached.
+// stats the file on every call, within ctx: a stat on a stalled mount
+// doesn't hold a caller past its context. Errors aren't cached.
 func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
-	info, err := fspath.Stat(path)
+	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
