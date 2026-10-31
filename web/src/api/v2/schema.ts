@@ -32810,8 +32810,8 @@ export interface components {
        */
       request_origin?: string;
       /**
-       * @description Server build identity (short revision, +dirty when built from a modified tree, or "unavailable"). Diagnostic only: never feature-detect on it.
-       * @example 1.0.0-dev
+       * @description Server build identity: the release version for a release build (for example 0.24.0 or 1.0.0-rc.1), otherwise the short revision; +dirty when built from a modified tree, or "unavailable". Diagnostic only: never feature-detect on it.
+       * @example 1.0.0-rc.1
        */
       server_version: string;
     };

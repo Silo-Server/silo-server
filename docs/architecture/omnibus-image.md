@@ -18,8 +18,10 @@ services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
 from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
 names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
-set to that tag and publishes the result as `<full SHA>`, plus `build-N` and
-`latest` on the default branch or `apiv2` on the `apiv2` branch.
+set to that tag and publishes the result as `<full SHA>`, `build-N`, and `dev`,
+plus `latest` until the first `v1.0.0` release candidate. A published release
+adds its version tags to that image; see
+[release versioning](../release-versioning.md#container-tags).
 
 Builds from before this layout published the base image under those tags and
 the omnibus image under the same tags with `-aio` added, with `aio` in place of
@@ -296,7 +298,7 @@ here. It refuses, before anything is moved into place, when:
 
 - No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
   or other paths, which have to move there first.
-- A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
+- A pinned `SILO_IMAGE` (other than `latest`, `dev`, or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `latest` past the pin.
 - The omnibus install has a database of its own, no migration finished, and

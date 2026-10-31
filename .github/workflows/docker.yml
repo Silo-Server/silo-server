@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main, apiv2]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -31,14 +31,14 @@ jobs:
       build_number: ${{ steps.identity.outputs.build_number }}
       built_at: ${{ steps.identity.outputs.built_at }}
       image_version: ${{ steps.identity.outputs.image_version }}
+      latest_follows_main: ${{ steps.latest.outputs.follows_main }}
     if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       contains(fromJSON('["main","apiv2"]'), github.event.workflow_run.head_branch))
+       github.event.workflow_run.head_branch == 'main')
     steps:
       - name: Resolve build identity
         id: identity
@@ -68,6 +68,18 @@ jobs:
             echo "built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo "image_version=${image_version}"
           } >> "$GITHUB_OUTPUT"
+
+      # latest follows every main build until the first 1.0.0 release
+      # candidate. From then on only release-published.yml moves it, so a
+      # v1-or-later release tag switches main builds over to dev alone.
+      - name: Decide whether latest follows main
+        id: latest
+        shell: bash
+        run: |
+          v1_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[1-9]*')"
+          follows_main=true
+          [[ -n "$v1_tags" ]] && follows_main=false
+          echo "follows_main=${follows_main}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare]
@@ -112,8 +124,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # The base image is the omnibus build's starting point, not a published
-      # image: its only tag is the commit SHA with -base added. latest,
-      # build-N, apiv2, and the bare SHA belong to the omnibus image.
+      # image: its only tag is the commit SHA with -base added. dev, latest,
+      # build-N, and the bare SHA belong to the omnibus image.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
         env:
@@ -125,8 +137,9 @@ jobs:
           docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${BASE_TAG}"
 
   # The published image: PostgreSQL, Redis, Meilisearch, and s6-overlay
-  # layered on the base image the merge job just pushed. It carries latest,
-  # build-N, apiv2, and the commit SHA. Its digest artifacts are named so the
+  # layered on the base image the merge job just pushed. It carries dev,
+  # build-N, the commit SHA, and latest until the first 1.0.0 release
+  # candidate (release-published.yml adds version tags). Its digest artifacts are named so the
   # merge job's digests-* pattern never picks them up.
   omnibus:
     needs: [prepare, merge]
@@ -179,9 +192,9 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=raw,value=latest,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
+            type=raw,value=dev
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.latest_follows_main == 'true' }}
+            type=raw,value=build-${{ needs.prepare.outputs.build_number }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
 
       - name: Create and push manifest list
