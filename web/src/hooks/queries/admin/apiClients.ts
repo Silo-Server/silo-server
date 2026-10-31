@@ -48,21 +48,22 @@ export function useAdminApiClientEndpoints(sessionId: string | null, hours: numb
   return useQuery({
     queryKey: adminKeys.apiClientEndpoints(sessionId ?? "", window),
     enabled: sessionId !== null,
-    queryFn: async (): Promise<AdminApiClientEndpoints> => {
+    queryFn: async (): Promise<Pick<AdminApiClientEndpoints, "endpoints">> => {
       const authority = captureAdminAuthority();
-      let result: AdminApiClientEndpoints;
+      let endpoints: AdminApiClientEndpoints["endpoints"];
       try {
-        result = await v2("GET /api/v2/admin/stats/api-clients/{session_id}/endpoints", {
+        const result = await v2("GET /api/v2/admin/stats/api-clients/{session_id}/endpoints", {
           profileContext: authority,
           path: { session_id: sessionId ?? "" },
           query: { hours: window },
         });
+        endpoints = result.endpoints;
       } catch (error) {
         if (!isNotFoundProblem(error)) throw error;
-        result = { session_id: sessionId ?? "", hours: window, endpoints: [] };
+        endpoints = [];
       }
       requireAdminAuthority(authority);
-      return result;
+      return { endpoints };
     },
     staleTime: API_CLIENTS_STALE_TIME,
   });
