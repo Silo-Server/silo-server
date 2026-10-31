@@ -51,6 +51,10 @@ const (
 	// DefaultMaxBytes is far above a whole film's decompressed PGS track,
 	// the largest subtitle tracks there are.
 	DefaultMaxBytes = 256 << 20
+	// WindowMaxBytes is a MaxBytes for windowed reads. A window of seconds
+	// to minutes holds kilobytes of text and a few megabytes of bitmaps, so
+	// a crafted file can't make each one hold what a whole read may.
+	WindowMaxBytes = 16 << 20
 )
 
 // budget counts the bytes a read may still hold.

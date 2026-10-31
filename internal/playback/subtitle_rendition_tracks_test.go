@@ -814,6 +814,16 @@ func TestOnDemandSegmentFailures(t *testing.T) {
 		t.Fatalf("segment of the planned source = %q, %v", body, err)
 	}
 
+	// A segment whose window's packets exceed the read's budget answers an
+	// empty segment, as a track the file can't give does.
+	previousCues, previousMax := renditionCues, renditionWindowMaxBytes
+	renditionCues, renditionWindowMaxBytes = newRenditionCueCache(renditionCueCacheBytes, renditionLoads), 1
+	body, err = session(ffmpeg, planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0)
+	renditionCues, renditionWindowMaxBytes = previousCues, previousMax
+	if err != nil || strings.Contains(string(body), " --> ") || !strings.HasPrefix(string(body), "WEBVTT\n") {
+		t.Fatalf("segment over its read budget = %q, %v", body, err)
+	}
+
 	// A segment past the encode's grid (15 segments of 2 s) is not read,
 	// however long the live span runs.
 	live := session(ffmpeg, planned)

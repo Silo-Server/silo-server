@@ -205,6 +205,17 @@ func TestWindows(t *testing.T) {
 	path, file := fixtureFile(t, ffmpeg, true)
 	s, repo, _ := newTestStore(t, ffmpeg)
 	forced := *playback.EmbeddedSubtitleRefFor(file, 1)
+	// A window's read holds at most windowMaxBytes; past it the read
+	// refuses, and the subtitle cache demuxes instead.
+	overBudget := func(where string) {
+		t.Helper()
+		windowMaxBytes = 1
+		defer func() { windowMaxBytes = embeddedsub.WindowMaxBytes }()
+		if _, err := s.Window(t.Context(), path, forced, 5*time.Second, 8*time.Second); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("window over its budget %s: err = %v", where, err)
+		}
+	}
+	overBudget("from the index")
 	fromIndex, err := s.Window(t.Context(), path, forced, 5*time.Second, 8*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +233,7 @@ func TestWindows(t *testing.T) {
 	if len(fromKept.Packets) != 1 || fromKept.Index.Size == fromIndex.Index.Size {
 		t.Fatalf("window from the kept track = %d packets from a %d byte file", len(fromKept.Packets), fromKept.Index.Size)
 	}
+	overBudget("from the kept track")
 	if got, want := convert(t, ffmpeg, fromKept), convert(t, ffmpeg, fromIndex); got != want || !strings.Contains(got, "Noch einer") {
 		t.Fatalf("kept window %q, index window %q", got, want)
 	}
