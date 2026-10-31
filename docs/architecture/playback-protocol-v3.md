@@ -1636,14 +1636,16 @@ Languages match on their primary subtag, case-insensitively and across ISO
 639-1 and 639-2 (`eng`, `en` and `en-US` match). Values with no readable
 language, such as `und`, match only when spelled the same. Request validation
 bounds the list (at most 16 values, each 1 to 64 characters) and lowercases
-the values, but it accepts values the server does not know. The frozen
-`/api/v1` surface, which never advertises the feature, ignores `limitations`
-and plans an entry as it did before they existed, and its inventory rows
-carry no `stream_index`, `container_track_id` or `native_selectable`. Planning then skips
-that whole entry, because the server cannot tell what its player gets wrong,
-and the track falls back to a sidecar or burn-in like any track without a
-native entry. Older clients send no limitations, and their entries plan as
-before.
+the values, but it accepts values the server does not know. When an entry
+names such a value, planning skips that whole entry, because the server cannot
+tell what its player gets wrong, and the track falls back to a sidecar or
+burn-in like any track without a native entry. Older clients send no
+limitations, and their entries plan as before.
+
+The frozen `/api/v1` surface never advertises the feature. It ignores
+`limitations` and plans an entry as it did before they existed, and its
+inventory rows carry no `stream_index`, `container_track_id` or
+`native_selectable`.
 
 Roku OS 16 declares `{"container": "mkv", "codecs": ["subrip"],
 "track_identity": "container_track_id", "ass_styling": false,
