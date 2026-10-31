@@ -49,6 +49,7 @@ function makeScanRun(
       memberships_removed: 0,
       errors: 0,
       skipped: 0,
+      unsupported_files: 0,
     },
     ...overrides,
   };

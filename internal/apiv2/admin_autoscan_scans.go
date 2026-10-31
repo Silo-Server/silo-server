@@ -68,13 +68,14 @@ type AdminAutoscanScanResult struct {
 	MembershipsRemoved      int `json:"memberships_removed" minimum:"0" doc:"Titles removed from this library because none of their files remain in it."`
 	Errors                  int `json:"errors" minimum:"0"`
 	Skipped                 int `json:"skipped" minimum:"0" doc:"Non-zero when the run did not scan because an overlapping scan of the same scope was already in progress."`
+	UnsupportedFiles        int `json:"unsupported_files" minimum:"0" doc:"Files the run found but did not catalog because of their type; listUnsupportedFiles lists them. Counted again on every scan that finds them, so not a change."`
 }
 
 func adminAutoscanScanResult(result *autoscan.ScanResult) *AdminAutoscanScanResult {
 	if result == nil {
 		return nil
 	}
-	return &AdminAutoscanScanResult{New: result.New, Updated: result.Updated, Unchanged: result.Unchanged, Missing: result.Missing, MissingSkippedProtected: result.MissingSkippedProtected, FilesDeleted: result.FilesDeleted, ItemsDeleted: result.ItemsDeleted, MembershipsRemoved: result.MembershipsRemoved, Errors: result.Errors, Skipped: result.Skipped}
+	return &AdminAutoscanScanResult{New: result.New, Updated: result.Updated, Unchanged: result.Unchanged, Missing: result.Missing, MissingSkippedProtected: result.MissingSkippedProtected, FilesDeleted: result.FilesDeleted, ItemsDeleted: result.ItemsDeleted, MembershipsRemoved: result.MembershipsRemoved, Errors: result.Errors, Skipped: result.Skipped, UnsupportedFiles: result.UnsupportedFiles}
 }
 
 func registerAdminAutoscanScans(reg *Registry) {
