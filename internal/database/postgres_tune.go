@@ -743,8 +743,8 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 // postgresSettingsPendingRestart returns, in order, the names whose configured
 // value differs from the one the server runs with. pg_file_settings re-reads
 // the configuration files and sets error on an entry the server cannot apply
-// without a restart; a setting no file sets any more still runs on a file value
-// until the restart.
+// without a restart. A setting no file sets any more returns to its built-in
+// default at the restart, so it is pending only while it runs on another value.
 func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
@@ -756,7 +756,7 @@ WHERE s.name = ANY($1::text[])
   AND CASE
         WHEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name)
           THEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name AND f.error IS NOT NULL)
-        ELSE s.source = 'configuration file'
+        ELSE s.source = 'configuration file' AND s.setting IS DISTINCT FROM s.boot_val
       END`, names)
 	if err != nil {
 		return nil, err
