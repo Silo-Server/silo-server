@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +54,12 @@ type SubtitleCache struct {
 	// non-blocking: warms beyond the budget are dropped, not queued; the
 	// next windowed miss for that track re-attempts the warm.
 	warmSem chan struct{}
+
+	// source, when set, reads embedded tracks from kept copies or through
+	// the source's index before the cache demuxes the source
+	// (SetEmbeddedSource). Requests whose options name no track
+	// (StreamExtractOpts.Embedded) skip it.
+	source EmbeddedSubtitleSource
 }
 
 const (
@@ -106,6 +111,13 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 // tracks. Explicit text windows stream without caching; SUP retains its
 // progressive window and background-warming behavior in ServeSUPExtract.
 // Only one request fills the cache; other viewers stream independently.
+//
+// A complete track comes from, in order: the cache; a fill that converts
+// the track kept in blob storage or read through the source's index (the
+// EmbeddedSubtitleSource, when set and opts.Embedded names the track); a
+// fill that demuxes the source, which also keeps the track. A window comes
+// from the kept track or the source's index, else from a demux of the
+// source.
 func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
 	if err := r.Context().Err(); err != nil {
 		return err
@@ -132,7 +144,10 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 
 	w.Header().Set("Cache-Control", "no-store")
 	if full {
-		return c.streamFullTrack(r.Context(), w, opts, format, extract)
+		return c.streamFullTrack(r.Context(), w, opts, format, c.sourced(extract))
+	}
+	if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+		return err
 	}
 	opts.Writer = w
 	return extract(r.Context(), opts)
@@ -183,7 +198,7 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	return c.streamFullTrack(r.Context(), w, opts, subtitleFormatSUP, extract)
+	return c.streamFullTrack(r.Context(), w, opts, subtitleFormatSUP, c.sourced(extract))
 }
 
 // streamFullTrack streams a complete track that was not cached when the
@@ -326,7 +341,22 @@ func (s *skipWriter) Flush() {
 // started so later windows — the client re-fetches on every seek — hit the
 // fast path.
 func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	cachedPath, _, cached := c.cachedEntryPath(opts.InputPath, opts.TrackIndex)
+	// A window open to the end is most of the track: the cached .sup answers
+	// it at once, where the source would be read whole first.
+	if !cached || opts.DurationSeconds > 0 {
+		if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+			if !cached {
+				// As after a demuxed window: keep the track and cache its .sup
+				// for the windows to come.
+				c.WarmInBackground(opts, c.sourced(extract))
+			}
+			return err
+		}
+	}
+	if cached {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
@@ -335,11 +365,9 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			opts = windowFromCachedSup(opts, firstCue)
 		}
 	} else {
-		c.WarmInBackground(opts, extract)
+		c.WarmInBackground(opts, c.sourced(extract))
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
 	opts.Writer = w
@@ -914,82 +942,5 @@ func (f *SubtitleCacheFill) closeAndRemoveTmp() {
 	_ = f.tmp.Close()
 	if err := os.Remove(f.tmp.Name()); err != nil && !os.IsNotExist(err) {
 		slog.Warn("subtitle cache temp remove failed", "path", f.tmp.Name(), "error", err)
-	}
-}
-
-// removeStaleSiblings deletes committed entries for the same source+track
-// with a different mtime/size suffix — the source was replaced, so those can
-// never be served again.
-func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, keepKey string) {
-	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if name == keepKey || !strings.HasPrefix(name, prefix) || filepath.Ext(name) != filepath.Ext(keepKey) {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			slog.Warn("subtitle cache stale entry remove failed", "name", name, "error", err)
-		}
-	}
-}
-
-// evict is the scan-on-write LRU pass: when committed entries exceed the
-// byte budget, the oldest-mtime entries are removed until the total fits.
-// It also sweeps orphaned .part temp files older than stalePartMaxAge
-// (crash leftovers). No background daemon — commits are rare enough that a
-// directory scan per commit is cheap.
-func (c *SubtitleCache) evict(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	type cacheEnt struct {
-		path  string
-		size  int64
-		mtime time.Time
-	}
-	var (
-		ents  []cacheEnt
-		total int64
-	)
-	now := time.Now()
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		if strings.Contains(e.Name(), ".part-") {
-			if now.Sub(info.ModTime()) > stalePartMaxAge {
-				_ = os.Remove(path)
-			}
-			continue
-		}
-		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, ".srt"}, filepath.Ext(e.Name())) {
-			continue
-		}
-		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})
-		total += info.Size()
-	}
-	if total <= c.maxBytes {
-		return
-	}
-	slices.SortFunc(ents, func(a, b cacheEnt) int { return a.mtime.Compare(b.mtime) })
-	for _, e := range ents {
-		if total <= c.maxBytes {
-			break
-		}
-		if err := os.Remove(e.path); err != nil {
-			if !os.IsNotExist(err) {
-				slog.Warn("subtitle cache eviction remove failed", "path", e.path, "error", err)
-			}
-			continue
-		}
-		slog.Info("evicted cached subtitle track (LRU)", "path", e.path, "bytes", e.size)
-		total -= e.size
 	}
 }

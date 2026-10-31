@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
+	"github.com/Silo-Server/silo-server/internal/matroska"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 )
 
@@ -34,36 +35,14 @@ type matroskaSubtitleStream struct {
 var errMatroskaLayoutMismatch = errors.New("matroska tracks do not match the probed streams")
 
 const (
-	ffmpegCodecWebVTT = "webvtt"
-	ffmpegCodecASS    = "ass"
-	ffmpegCodecSubRip = "subrip"
+	ffmpegCodecASS    = matroska.FFmpegCodecASS
+	ffmpegCodecSubRip = matroska.FFmpegCodecSubRip
 	// Legacy Matroska codec IDs for ASS and SSA subtitles.
 	matroskaCodecIDASSLegacy = "S_ASS"
 	matroskaCodecIDSSALegacy = "S_SSA"
 	// containerMKV is the normalized container of Matroska and WebM files.
 	containerMKV = "mkv"
 )
-
-// ffmpegMatroskaSubtitleCodecs mirrors the subtitle rows of FFmpeg's
-// ff_mkv_codec_tags. FFmpeg matches a CodecID by prefix and takes the first
-// row that matches, so order matters.
-var ffmpegMatroskaSubtitleCodecs = []struct{ prefix, codec string }{
-	{"D_WEBVTT/SUBTITLES", ffmpegCodecWebVTT},
-	{"D_WEBVTT/CAPTIONS", ffmpegCodecWebVTT},
-	{"D_WEBVTT/DESCRIPTIONS", ffmpegCodecWebVTT},
-	{"D_WEBVTT/METADATA", ffmpegCodecWebVTT},
-	{"S_TEXT/UTF8", ffmpegCodecSubRip},
-	{"S_TEXT/ASCII", "text"},
-	{"S_TEXT/ASS", ffmpegCodecASS},
-	{"S_TEXT/SSA", ffmpegCodecASS},
-	{matroskaCodecIDASSLegacy, ffmpegCodecASS},
-	{matroskaCodecIDSSALegacy, ffmpegCodecASS},
-	{"S_VOBSUB", "dvd_subtitle"},
-	{"S_DVBSUB", "dvb_subtitle"},
-	{"S_HDMV/PGS", "hdmv_pgs_subtitle"},
-	{"S_HDMV/TEXTST", "hdmv_text_subtitle"},
-	{"S_ARIBSUB", "arib_caption"},
-}
 
 // unresolvableMatroskaCodecIDs are legacy aliases FFmpeg accepts but players
 // that identify tracks by TrackNumber do not: Media3's MatroskaExtractor
@@ -73,15 +52,6 @@ var ffmpegMatroskaSubtitleCodecs = []struct{ prefix, codec string }{
 // the planner down a native route that fails and replans; without it the
 // track keeps server extraction.
 var unresolvableMatroskaCodecIDs = map[string]bool{matroskaCodecIDASSLegacy: true, matroskaCodecIDSSALegacy: true}
-
-func ffmpegMatroskaSubtitleCodec(codecID string) string {
-	for _, row := range ffmpegMatroskaSubtitleCodecs {
-		if strings.HasPrefix(codecID, row.prefix) {
-			return row.codec
-		}
-	}
-	return ""
-}
 
 // ffmpegCreatesMatroskaStream reports whether FFmpeg's Matroska demuxer turns
 // a TrackEntry into a stream. It mirrors the checks matroska_parse_tracks
@@ -161,7 +131,7 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 		if track.Type != mediaprobe.MatroskaTrackTypeSubtitle {
 			return nil, fmt.Errorf("%w: stream %d is track type %d", errMatroskaLayoutMismatch, sub.Index, track.Type)
 		}
-		codec := ffmpegMatroskaSubtitleCodec(track.CodecID)
+		codec := matroska.FFmpegSubtitleCodec(track.CodecID)
 		if codec == "" {
 			continue
 		}

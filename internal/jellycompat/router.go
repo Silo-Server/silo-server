@@ -194,6 +194,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
 	playbackHandler.PlaySync = deps.SubtitlePlaySync
+	if deps.KeptSubtitles != nil {
+		playbackHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
+	}
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs

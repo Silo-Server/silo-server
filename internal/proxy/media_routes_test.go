@@ -220,6 +220,16 @@ func TestProxyPlaybackEndpointStatusV3BindsRecipeFamily(t *testing.T) {
 			claims.PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 			return claims
 		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
+		{name: "subtitle-renditions transcode", claims: func() streamtoken.Claims {
+			claims := transcodeVideo
+			claims.PlayMethod = streamtoken.PlayMethodSubtitleRenditionsTranscode
+			return claims
+		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
+		{name: "subtitle-renditions copy", claims: func() streamtoken.Claims {
+			claims := transcodeRemux
+			claims.PlayMethod = streamtoken.PlayMethodSubtitleRenditionsCopyFMP4
+			return claims
+		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
 		{name: "transcode on identity", claims: transcodeVideo, endpoint: proxyPlaybackEndpointIdentityV3, want: http.StatusServiceUnavailable},
 		{name: "direct auxiliary", claims: direct, endpoint: proxyPlaybackEndpointAuxiliaryV3},
 		{name: "remux auxiliary", claims: remux, endpoint: proxyPlaybackEndpointAuxiliaryV3},

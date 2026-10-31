@@ -1206,7 +1206,7 @@ func TestPlanPlaybackV3KeepsTheRemuxPlanForTranscodeRenditionsOnly(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(gotJSON) != string(wantJSON) || FreezeExecutableRecipeV3(got) != FreezeExecutableRecipeV3(want) {
+	if string(gotJSON) != string(wantJSON) || !reflect.DeepEqual(FreezeExecutableRecipeV3(got), FreezeExecutableRecipeV3(want)) {
 		t.Fatalf("plan changed:\n%s\nwant:\n%s", gotJSON, wantJSON)
 	}
 }
@@ -1460,7 +1460,7 @@ func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 
 		started := time.Now()
 		rr := httptest.NewRecorder()
-		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), 5)
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), "sub_00005.vtt")
 		if rr.Code != http.StatusNotFound || time.Since(started) < subtitleSegmentProductionWait {
 			t.Fatalf("segment ahead of FFmpeg = %d after %v, want 404 after the planned wait", rr.Code, time.Since(started))
 		}
@@ -1487,7 +1487,7 @@ func TestPlannedCopySubtitleSegmentPastThePlanLeavesTheThrottle(t *testing.T) {
 		session.startSubtitleSpanLocked(opts)
 
 		rr := httptest.NewRecorder()
-		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_99999.vtt", nil), 99999)
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_99999.vtt", nil), "sub_99999.vtt")
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("segment past the plan = %d, want 404", rr.Code)
 		}
