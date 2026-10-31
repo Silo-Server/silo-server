@@ -409,8 +409,8 @@ func TestChangePasswordSignOutOtherSessionsDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !CheckPassword(user, "new password") {
-		t.Fatal("password not replaced")
+	if ok, err := CheckPassword(ctx, user, "new password"); err != nil || !ok {
+		t.Fatalf("password not replaced: %v", err)
 	}
 }
 
@@ -425,6 +425,8 @@ type signInFixture struct {
 	hash     []byte
 	suffix   string
 	ids      []int
+	// owners maps each login session the fixture opened to its user_id.
+	owners map[string]int
 }
 
 // accountSignIns is one account's sign-ins: login sessions, then a
@@ -451,7 +453,7 @@ func newSignInFixture(t *testing.T) *signInFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &signInFixture{t: t, pool: pool, sessions: NewSessionRepository(pool), users: NewUserRepository(pool), hash: hash, suffix: strconv.FormatInt(time.Now().UnixNano(), 10)}
+	f := &signInFixture{t: t, pool: pool, sessions: NewSessionRepository(pool), users: NewUserRepository(pool), hash: hash, suffix: strconv.FormatInt(time.Now().UnixNano(), 10), owners: map[string]int{}}
 	t.Cleanup(func() {
 		ctx := context.WithoutCancel(t.Context())
 		_, _ = pool.Exec(ctx, `DELETE FROM device_login_requests WHERE device_name=$1`, f.suffix)
@@ -484,6 +486,7 @@ func (f *signInFixture) session(userID int, impersonator *int) string {
 	if _, err := f.pool.Exec(f.t.Context(), `INSERT INTO auth_sessions(id,user_id,impersonator_user_id,device_name,created_at,expires_at) VALUES($1,$2,$3,'Test client',$4,$5)`, id, userID, impersonator, now, now.Add(time.Hour)); err != nil {
 		f.t.Fatal(err)
 	}
+	f.owners[id] = userID
 	return id
 }
 
@@ -506,7 +509,7 @@ func (f *signInFixture) signIns(userID int, sessions ...string) accountSignIns {
 
 func (f *signInFixture) active(sessionID string) bool {
 	f.t.Helper()
-	_, ok, err := f.sessions.ActiveSession(f.t.Context(), sessionID)
+	_, ok, err := f.sessions.ActiveSession(f.t.Context(), sessionID, f.owners[sessionID])
 	if err != nil {
 		f.t.Fatal(err)
 	}
