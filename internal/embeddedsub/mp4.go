@@ -189,6 +189,9 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 			fragmented = true
 		case mp4BoxTrak:
 			traks = append(traks, payload)
+			if len(traks) > maxTrackEntries {
+				return false
+			}
 		}
 		return true
 	})
