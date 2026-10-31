@@ -134,6 +134,11 @@ interface CardOverlaysProps {
    * just clear of it; with no bar the badges stay flush in the corners.
    */
   hasProgressBar?: boolean;
+  /**
+   * Set by hosts that draw their own top-right mark (SeasonCarousel's
+   * completed check). Top-right badges shift left so they do not cover it.
+   */
+  hasTopRightHostBadge?: boolean;
 }
 
 interface ResolvedBadge {
@@ -271,6 +276,7 @@ export default function CardOverlays({
   prefs,
   variant = "poster",
   hasProgressBar = false,
+  hasTopRightHostBadge = false,
 }: CardOverlaysProps) {
   // The language badge resolves names from lazily loaded data and stays empty
   // until it arrives; this re-renders the card when it does. Cards without the
@@ -348,7 +354,10 @@ export default function CardOverlays({
       {(topLeft.length > 0 || topRight.length > 0) && (
         <div
           data-overlay-edge="top"
-          className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2"
+          className={cn(
+            "pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2",
+            hasTopRightHostBadge && "pr-8",
+          )}
           style={{ top: edgeInset, right: edgeInset, left: edgeInset, gap: edgeGap }}
         >
           <BadgeStack badges={topLeft} align="start" preset={preset} scalingMode={scalingMode} />

@@ -28,6 +28,10 @@ type SectionViewer struct {
 	// ImageWidths are per-slot target widths overriding ImageSize; only the
 	// native v2 API carries them.
 	ImageWidths imagesize.Widths
+	// IncludeCardAvailability runs the season/series presence lookup for
+	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
+	// frozen v1 card shape, so v1 must not pay for the aggregation.
+	IncludeCardAvailability bool
 	// ItemLimitCap lowers every row's item limit to at most this many items
 	// on the aggregate section reads (HomeSections, LibrarySections). Zero
 	// leaves each row at its own limit; only the native v2 API sets it, at
@@ -195,7 +199,7 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
+	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork(), viewer.IncludeCardAvailability), nil
 }
 
 // LibrarySectionItems answers one section of the library with its items, or
@@ -230,7 +234,7 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 			}
 			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork())
+		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork(), viewer.IncludeCardAvailability)
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,
