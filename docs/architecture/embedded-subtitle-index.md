@@ -94,10 +94,13 @@ each frame with the ones after it in view.
 ## Use
 
 An `Index` is immutable and safe for concurrent use; `Cache` keeps them by
-path, size and modification time. Concurrent misses share one read, which
-gets 30 s: a read that hangs, as on a stalled network mount, fails the
-callers waiting on it, and the next caller reads again. A process keeps one
-`Cache` (`playback.SubtitleIndexes`, 64 MiB), for sources and kept tracks
+path, size and modification time. Concurrent misses share one read, whose
+callers get a result within 30 s. A timed-out read stays registered until its
+filesystem work finishes, so retries of that file version share the timeout
+instead of starting more blocked readers. At most eight cached index reads
+run across the process, including timed-out workers. Saturation fails a new
+load immediately so its caller can retry or fall back to demux. A process keeps
+one `Cache` (`playback.SubtitleIndexes`, 64 MiB), for sources and kept tracks
 alike, which kept-track serving, on-demand renditions and the planner all
 read through. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each

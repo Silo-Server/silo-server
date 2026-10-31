@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
-	"syscall"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/matroska"
@@ -647,34 +648,70 @@ func TestCacheKeysOnFileVersion(t *testing.T) {
 	}
 }
 
-// A read that hangs fails its callers at the load deadline and doesn't hold
-// the next caller: opening a FIFO with no writer blocks, as a stalled mount
-// does.
-func TestCacheGivesUpOnAHungRead(t *testing.T) {
-	fifo := filepath.Join(t.TempDir(), "stalled.mkv")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skipf("mkfifo: %v", err)
-	}
-	t.Cleanup(func() {
-		// Let the abandoned reads finish.
-		for range 2 {
-			if f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
-				_ = f.Close()
-			}
-		}
-	})
+func TestCacheBoundsAbandonedIndexReads(t *testing.T) {
 	previous := indexLoadTimeout
 	indexLoadTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { indexLoadTimeout = previous })
-	c := NewCache(1 << 20)
-	for attempt := range 2 {
-		started := time.Now()
-		if _, err := c.Index(context.Background(), fifo); !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("attempt %d: err = %v, want the load deadline", attempt, err)
+	for _, sameFile := range []bool{true, false} {
+		name := "across caches"
+		if sameFile {
+			name = "repeated file"
 		}
-		if elapsed := time.Since(started); elapsed > 5*time.Second {
-			t.Fatalf("attempt %d waited %v", attempt, elapsed)
-		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				release := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer func() {
+					unblock()
+					synctest.Wait()
+				}()
+				var reads atomic.Int32
+				stalled := func(ctx context.Context, path string) (*Index, error) {
+					reads.Add(1)
+					<-release // models a kernel read that cannot observe cancellation
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+					return ReadIndex(ctx, path)
+				}
+				fixture := (mkvFixture{tracks: []fixtureTrack{{number: 1, codec: "S_TEXT/UTF8"}}}).build()
+				path := writeFixture(t, fixture)
+				cache := NewCache(1 << 20)
+				cache.readIndex = stalled
+				attempts := maxIndexReads + 1
+				if sameFile {
+					attempts = 3
+				}
+				for attempt := range attempts {
+					if !sameFile {
+						path = writeFixture(t, fixture)
+						cache = NewCache(1 << 20)
+						cache.readIndex = stalled
+					}
+					_, err := cache.Index(t.Context(), path)
+					if !sameFile && attempt == maxIndexReads {
+						if !errors.Is(err, errIndexReadBusy) {
+							t.Fatalf("load beyond process limit = %v, want busy", err)
+						}
+					} else if !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("stalled load = %v, want shared deadline", err)
+					}
+				}
+				want := int32(maxIndexReads)
+				if sameFile {
+					want = 1
+				}
+				synctest.Wait()
+				if got := reads.Load(); got != want {
+					t.Fatalf("started %d stalled index reads, want %d", got, want)
+				}
+				unblock()
+				synctest.Wait()
+				if _, err := cache.Index(t.Context(), path); err != nil {
+					t.Fatalf("read after stalled workers finish: %v", err)
+				}
+			})
+		})
 	}
 }
 
