@@ -2379,6 +2379,11 @@ the acknowledged batch validator; an intervening writer's snapshot cannot rebase
 them. Batch validation considers the
 prospective combined values. Single-key validation preserves the existing paired
 setting repair behavior. Empty values retain the established clear/default rules.
+Machine-managed keys, including the `auth.jwt_secret` and
+`audiobooks.abs.jwt_secret` signing keys the server generates itself, are
+refused with `422 validation_failed` (`400 bad_request` on `/api/v1`) and the
+detail `<key> is managed internally`, and nothing is written. The batch PUT
+checks `If-Match` before the keys, so a stale validator still answers 412.
 
 Both writes are nonretryable. Enabling diagnostics can probe storage before the
 transaction, a change to the Redis connection connects to Redis before it (see

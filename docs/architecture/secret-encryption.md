@@ -107,7 +107,8 @@ example:
 - Decrypt the sensitive `server_settings` back to plaintext (run a one-off that
   reads each via the encrypting repo and writes the plaintext via the raw repo),
   **or**
-- At minimum, clear `auth.jwt_secret` so the older binary regenerates a fresh
+- At minimum, clear the `auth.jwt_secret` row in `server_settings` (the admin
+  settings API refuses this key) so the older binary regenerates a fresh
   plaintext one (this still logs everyone out), and re-enter any integration
   credentials as plaintext.
 
