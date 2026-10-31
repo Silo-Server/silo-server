@@ -80,6 +80,8 @@ type StreamExtractOpts struct {
 	KeepPath   string
 	KeepFormat string
 	KeepOffset time.Duration
+	// KeepMaxBytes can lower the kept copy's cutoff; zero uses MaxDemuxCopyBytes.
+	KeepMaxBytes int64
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -168,6 +170,17 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 
 // keepFormatMP4 is the KeepFormat of MP4 copies.
 const keepFormatMP4 = "mp4"
+
+// MaxDemuxCopyBytes is the cutoff for a demuxed subtitle copy. Files at or
+// above it are not persisted: FFmpeg may have stopped that output early.
+const MaxDemuxCopyBytes int64 = 128 << 20
+
+func (opts StreamExtractOpts) demuxCopyLimit() int64 {
+	if opts.KeepMaxBytes > 0 {
+		return min(opts.KeepMaxBytes, MaxDemuxCopyBytes)
+	}
+	return MaxDemuxCopyBytes
+}
 
 // cachedSupSeekSlack is how far before a window's start an extract from a
 // cached .sup seeks, so a display set at the start is read whole. Its
@@ -312,8 +325,11 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		// The demux takes the source's start time off; adding it back keeps
 		// the copy on the source's timeline, where no timestamp is negative,
 		// so the muxer has nothing to shift.
+		// Flush packets so -fs observes MP4 output while it is written.
 		args = append(args, "-map", fmt.Sprintf("0:s:%d", trackIndex), "-c:s", "copy",
-			"-output_ts_offset", formatMicroseconds(opts.KeepOffset))
+			"-output_ts_offset", formatMicroseconds(opts.KeepOffset),
+			"-flush_packets", "1",
+			"-fs", strconv.FormatInt(opts.demuxCopyLimit(), 10))
 		if opts.KeepFormat == keepFormatMP4 {
 			// The copy is converted from a pipe later, and FFmpeg's MP4
 			// demuxer can't seek back on one: past the first few dozen

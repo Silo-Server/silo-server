@@ -330,6 +330,16 @@ func (c *SubtitleCache) demuxAndKeep(ctx context.Context, opts StreamExtractOpts
 		opts.Writer = &skipWriter{w: opts.Writer, n: counter.n}
 		return extract(ctx, opts)
 	}
+	// -fs stops only the kept output; the viewer still gets the whole
+	// conversion. Its muxer buffer or trailer can cross the cutoff, so
+	// a copy at or above it must never be recorded as a complete track.
+	if info, err := os.Stat(copyPath); err != nil || info.Size() >= keeping.demuxCopyLimit() {
+		_ = os.Remove(copyPath)
+		slog.DebugContext(ctx, "demuxed subtitle copy not kept", "component", "playback",
+			"file_id", ref.MediaFileID, "stream_index", ref.StreamIndex,
+			"size_limit", keeping.demuxCopyLimit(), "error", err)
+		return nil
+	}
 	go func() {
 		defer func() { _ = os.Remove(copyPath) }()
 		keepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepDemuxedTimeout)

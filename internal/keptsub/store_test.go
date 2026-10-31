@@ -325,6 +325,51 @@ func TestDemuxedCopyServesFilesWithoutCues(t *testing.T) {
 	}
 }
 
+func TestKeepDemuxedRejectsOversizedCopy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(path, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(t.TempDir(), "copy.mks")
+	f, err := os.Create(copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := embeddedsub.WriteKept(f, &embeddedsub.Index{Container: embeddedsub.ContainerMatroska, TimestampScale: 1_000_000},
+		&embeddedsub.Track{Number: 1, CodecID: "S_HDMV/PGS", Enabled: true},
+		[]embeddedsub.Packet{{PTS: time.Second, Duration: time.Second, Data: []byte("packet")}}); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Truncate(playback.MaxDemuxCopyBytes + 1); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, repo, blobs := newTestStore(t, "unused-ffmpeg")
+	err = s.KeepDemuxed(t.Context(), path, playback.EmbeddedSubtitleRef{MediaFileID: 41, StreamIndex: 1, Codec: "hdmv_pgs_subtitle"},
+		playback.DemuxCopy{Path: copyPath, Format: "matroska"}, info.Size(), info.ModTime())
+	if !errors.Is(err, embeddedsub.ErrTooLarge) {
+		t.Fatalf("oversized copy: %v, want ErrTooLarge", err)
+	}
+	if puts, _ := repo.counts(); puts != 0 || len(blobs.objects) != 0 {
+		t.Fatal("oversized copy was persisted")
+	}
+	entries, err := os.ReadDir(s.mirrorDir())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatal("oversized copy left a mirror")
+	}
+}
+
 func TestSubtitleTrackFacts(t *testing.T) {
 	ffmpeg := requireFFmpeg(t)
 	path, file := fixtureFile(t, ffmpeg, true)

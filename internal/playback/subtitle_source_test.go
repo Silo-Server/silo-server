@@ -1,12 +1,16 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -193,6 +197,77 @@ func TestServeExtractRetriesADemuxWhoseCopyFailed(t *testing.T) {
 	}
 }
 
+// A real multi-output demux must finish the response even when its optional
+// kept output reaches its cutoff; that partial track must never be persisted.
+func TestServeExtractDiscardsACappedDemuxCopy(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required to verify independent output cutoffs")
+	}
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "captions.srt")
+	var script strings.Builder
+	for i := range 48 {
+		fmt.Fprintf(&script, "%d\n00:00:%02d,000 --> 00:00:%02d,900\n%s\n\n", i+1, i, i, strings.Repeat("x", 2048))
+	}
+	if err := os.WriteFile(srt, []byte(script.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{"matroska", "mp4"} {
+		t.Run(format, func(t *testing.T) {
+			codec := "subrip"
+			if format == keepFormatMP4 {
+				codec = "mov_text"
+			}
+			path := filepath.Join(dir, "source."+format)
+			if out, err := exec.CommandContext(t.Context(), ffmpeg, "-v", "error", "-i", srt, "-c:s", codec, "-f", format, path).CombinedOutput(); err != nil {
+				t.Fatalf("make fixture: %v: %s", err, out)
+			}
+			var want bytes.Buffer
+			opts := StreamExtractOpts{InputPath: path, SourceCodec: codec, FFmpegPath: ffmpeg, Writer: &want}
+			if err := StreamExtractSubtitle(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			c, _ := newTestCache(t)
+			src := &fakeEmbeddedSource{whole: embeddedsub.ErrNoCues, format: format, keptCopy: make(chan string, 1)}
+			c.SetEmbeddedSource(src)
+			opts.Embedded, opts.KeepMaxBytes = testEmbeddedRef, 4096
+			var copyPath string
+			var copySize int64
+			calls := 0
+			extract := func(ctx context.Context, opts StreamExtractOpts) error {
+				calls++
+				if err := StreamExtractSubtitle(ctx, opts); err != nil {
+					return err
+				}
+				copyPath = opts.KeepPath
+				if info, err := os.Stat(copyPath); err == nil {
+					copySize = info.Size()
+				}
+				return nil
+			}
+			rec := serveText(t, c, opts, extract)
+			if got := strings.TrimSpace(strings.TrimPrefix(rec.Body.String(), webVTTPrefix)); got != strings.TrimSpace(strings.TrimPrefix(want.String(), webVTTPrefix)) || calls != 1 {
+				t.Fatalf("response differs from the full demux after %d extracts", calls)
+			}
+			// FFmpeg's -fs may overshoot by buffered output or a muxer trailer.
+			// This fixture's small packets keep that below 16 KiB.
+			if copySize < opts.KeepMaxBytes || copySize > 16<<10 {
+				t.Fatalf("kept output = %d bytes, want a cutoff near %d", copySize, opts.KeepMaxBytes)
+			}
+			t.Logf("kept copy stopped at %d bytes; complete response %d bytes", copySize, rec.Body.Len())
+			if _, err := os.Stat(copyPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("capped copy remains: %v", err)
+			}
+			select {
+			case <-src.keptCopy:
+				t.Fatal("capped track was offered for persistence")
+			default:
+			}
+		})
+	}
+}
+
 // Requests that don't name a track, such as the proxy's, demux as before.
 func TestServeExtractWithoutATrackSkipsTheSource(t *testing.T) {
 	c, source := newTestCache(t)
@@ -297,7 +372,7 @@ func fillTextEntry(t *testing.T, c *SubtitleCache, source string, ordinal int, f
 func TestStreamExtractArgsKeepAnMP4CopyWithItsMoovFirst(t *testing.T) {
 	opts := StreamExtractOpts{InputPath: "/media/in.mp4", SourceCodec: "mov_text", KeepPath: "/tmp/kept.part-2", KeepFormat: "mp4"}
 	got := strings.Join(streamExtractArgs(opts), " ")
-	if !strings.HasSuffix(got, "-c:s copy -output_ts_offset 0.000000 -movflags +faststart -f mp4 file:/tmp/kept.part-2") {
+	if !strings.HasSuffix(got, "-c:s copy -output_ts_offset 0.000000 -flush_packets 1 -fs 134217728 -movflags +faststart -f mp4 file:/tmp/kept.part-2") {
 		t.Fatalf("args %s", got)
 	}
 }
@@ -305,7 +380,7 @@ func TestStreamExtractArgsKeepAnMP4CopyWithItsMoovFirst(t *testing.T) {
 func TestStreamExtractArgsKeepACopy(t *testing.T) {
 	opts := StreamExtractOpts{InputPath: "/media/in.mkv", TrackIndex: 2, SourceCodec: "subrip", KeepPath: "/tmp/kept.part-1", KeepFormat: "matroska", KeepOffset: 1500 * time.Millisecond}
 	got := strings.Join(streamExtractArgs(opts), " ")
-	want := "-hide_banner -nostats -loglevel error -y -i /media/in.mkv -map 0:s:2 -c:s webvtt -f webvtt pipe:1 -map 0:s:2 -c:s copy -output_ts_offset 1.500000 -f matroska file:/tmp/kept.part-1"
+	want := "-hide_banner -nostats -loglevel error -y -i /media/in.mkv -map 0:s:2 -c:s webvtt -f webvtt pipe:1 -map 0:s:2 -c:s copy -output_ts_offset 1.500000 -flush_packets 1 -fs 134217728 -f matroska file:/tmp/kept.part-1"
 	if got != want {
 		t.Fatalf("args\n got %s\nwant %s", got, want)
 	}

@@ -177,6 +177,14 @@ window and offset comes from the existing conversion:
   seek in. A demux whose copy fails runs again without it, so the copy never
   costs a viewer the track.
 
+  The copy output flushes packets and has a 128 MiB `-fs` cutoff; the converted
+  response continues to completion. FFmpeg may flush buffered output or a
+  trailer beyond that cutoff. Copies at or above it are discarded, so an
+  output stopped early is never recorded as a complete track. `KeepDemuxed`
+  refuses such files before indexing them and independently limits the mirror
+  write to 128 MiB, deleting the temporary mirror on refusal even if the file
+  grew after its size check.
+
 The row records the source version read (`source_size`, `source_mtime_ns`),
 the codec and `container_track_id`, the key, SHA-256, size and packet count,
 `completeness` (`complete` when the cues matched NUMBER_OF_FRAMES or FFmpeg

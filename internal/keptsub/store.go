@@ -567,6 +567,18 @@ func (s *Store) DemuxCopy(ctx context.Context, path string, ref playback.Embedde
 // indexes as one track with packets. Only a text track's packets are read,
 // for its override-tag fact; a PGS track's are counted from the index.
 func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, demuxCopy playback.DemuxCopy, srcSize int64, srcModTime time.Time) error {
+	copyFile, err := os.Open(demuxCopy.Path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = copyFile.Close() }()
+	info, err := copyFile.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() >= playback.MaxDemuxCopyBytes {
+		return embeddedsub.ErrTooLarge
+	}
 	idx, err := embeddedsub.ReadIndex(ctx, demuxCopy.Path)
 	if err != nil {
 		return err
@@ -593,15 +605,15 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	if info, err := fspath.StatContext(ctx, path); err != nil || info.Size() != srcSize || !info.ModTime().Equal(srcModTime) {
 		return errSourceChanged
 	}
-	copyFile, err := os.Open(demuxCopy.Path)
-	if err != nil {
-		return err
-	}
 	local, sum, size, release, err := s.writeMirror(s.mirrorDir(), streamExt(demuxCopy.Format), func(w io.Writer) error {
-		_, err := io.Copy(w, copyFile)
+		// Bound the write even if the file grew since the stat. Reaching
+		// the cutoff also refuses an incomplete FFmpeg -fs output.
+		n, err := io.Copy(w, io.LimitReader(copyFile, playback.MaxDemuxCopyBytes))
+		if err == nil && n >= playback.MaxDemuxCopyBytes {
+			return embeddedsub.ErrTooLarge
+		}
 		return err
 	})
-	_ = copyFile.Close()
 	if err != nil {
 		return err
 	}
