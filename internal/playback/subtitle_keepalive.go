@@ -141,7 +141,11 @@ func (k *prefixKeepalive) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// Flush flushes w. Like every call that reaches w, it holds k.mu, so it
+// never runs beside a tick: a response writer isn't safe for concurrent use.
 func (k *prefixKeepalive) Flush() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	if f, ok := k.w.(http.Flusher); ok {
 		f.Flush()
 	}

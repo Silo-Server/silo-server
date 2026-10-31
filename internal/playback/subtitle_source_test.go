@@ -11,8 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -390,6 +392,56 @@ func TestStreamExtractArgsKeepACopy(t *testing.T) {
 		t.Fatalf("window args keep a copy: %s", got)
 	}
 }
+
+// The keepalive's ticks and the extract's writes and flushes reach the
+// response writer one at a time: it isn't safe for concurrent use.
+func TestPrefixKeepaliveSerializesTheWriter(t *testing.T) {
+	w := &exclusiveWriter{}
+	k := newPrefixKeepalive(w, "WEBVTT\n", time.Hour, time.Hour)
+	defer k.stop()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 500 {
+			k.tick()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 500 {
+			k.Flush()
+		}
+	}()
+	wg.Wait()
+	if w.overlapped.Load() {
+		t.Fatal("a tick and a flush reached the writer at once")
+	}
+}
+
+// exclusiveWriter records calls that overlap; it is a flushing response
+// writer that isn't safe for concurrent use.
+type exclusiveWriter struct {
+	inUse      atomic.Int32
+	overlapped atomic.Bool
+	calls      int // unsynchronized, for the race detector
+}
+
+func (w *exclusiveWriter) enter() {
+	if w.inUse.Add(1) > 1 {
+		w.overlapped.Store(true)
+	}
+	w.calls++
+	runtime.Gosched()
+	w.inUse.Add(-1)
+}
+
+func (w *exclusiveWriter) Write(p []byte) (int, error) {
+	w.enter()
+	return len(p), nil
+}
+
+func (w *exclusiveWriter) Flush() { w.enter() }
 
 func TestPrefixKeepalive(t *testing.T) {
 	var out strings.Builder
