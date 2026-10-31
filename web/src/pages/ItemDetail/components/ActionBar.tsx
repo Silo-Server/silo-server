@@ -82,12 +82,18 @@ const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-prim
  * on a title the library does not have yet.
  *
  * It is the row's widest control: 40px a side past the secondary pills' px-5,
- * because it leads the row. Handset widths keep their own geometry, where
- * `[data-compact-mobile] .detail-primary-actions > button` in detailLayout.css
- * outranks these utilities with 14px.
+ * because it leads the row. The padding carries the `has-[>svg]` variant for
+ * the same reason the Button's size does: this pill holds an icon, and that
+ * variant is what decides an icon button's padding. Written plain it lost to
+ * the size variant's px-3 on both specificity and order, so the pill drew at
+ * 12px a side whatever the caller asked for.
+ *
+ * Handset widths keep their own geometry: detailLayout.css's
+ * `[data-compact-mobile] .detail-primary-actions > button` outranks these
+ * utilities, and is left to, with 14px.
  */
 const PLAY_PILL_CLASS =
-  "relative h-11 gap-2.5 overflow-hidden rounded-full px-[72px] text-[0.9375rem] font-bold tracking-wide";
+  "relative h-11 gap-2.5 overflow-hidden rounded-full has-[>svg]:px-[72px] text-[0.9375rem] font-bold tracking-wide";
 const staticGlassActionClass = "transition-none";
 const overflowMenuClass =
   "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
