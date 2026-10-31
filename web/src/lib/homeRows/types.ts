@@ -34,6 +34,11 @@ export interface HomeRow {
   /** 0 for a row that holds no titles, such as Discover's studio cards. */
   itemLimit: number;
   hero: boolean;
+  /**
+   * Admin: the hero banner is kept off the apps, so only the web shows the
+   * row. Absent when the server doesn't answer it.
+   */
+  webOnly?: boolean;
   /** Admin: the row is enabled. Profile: the row is not hidden. */
   shown: boolean;
   /** A row the profile added itself ("Yours"). Always false on the admin surface. */
@@ -64,6 +69,8 @@ export interface HomeRowsCapabilities {
   draftPreview: boolean;
   /** A row may be added to several library pages at once (library pages only). */
   libraryCopies: boolean;
+  /** A hero row may be kept off the apps (admin, on a server that supports it). */
+  webOnlyHero?: boolean;
 }
 
 /** The collections a collection row may show on this surface. */

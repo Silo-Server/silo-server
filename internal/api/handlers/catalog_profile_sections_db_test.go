@@ -139,9 +139,9 @@ func TestCatalogProfileSectionsDB(t *testing.T) {
 				}
 				var layoutErr error
 				if scope == "home" {
-					_, layoutErr = h.HomeLayout(viewerContext(owner))
+					_, layoutErr = h.HomeLayout(viewerContext(owner), SectionViewer{})
 				} else {
-					_, layoutErr = h.LibraryLayout(viewerContext(owner), f.library)
+					_, layoutErr = h.LibraryLayout(viewerContext(owner), f.library, SectionViewer{})
 				}
 				if apiErr, ok := errors.AsType[*APIError](layoutErr); !ok || apiErr.Status != http.StatusInternalServerError {
 					t.Fatalf("layout after failed profile lookup = %v, want internal error", layoutErr)

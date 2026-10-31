@@ -109,6 +109,7 @@ export async function createAdminSection(data: Partial<PageSectionConfig>) {
     item_limit: data.item_limit,
     config: data.config,
     enabled: data.enabled,
+    web_only: data.web_only,
   };
   return adminSectionFromV2(await v2("POST /api/v2/admin/sections", { body }));
 }
@@ -128,11 +129,11 @@ export async function updateAdminSection({
   etag,
   ...data
 }: Partial<PageSectionConfig> & { id: string; etag: string }) {
-  const { title, section_type, position, featured, item_limit, config, enabled } = data;
+  const { title, section_type, position, featured, item_limit, config, enabled, web_only } = data;
   const section = await v2("PATCH /api/v2/admin/sections/{id}", {
     path: { id },
     headers: { "If-Match": requiredSectionETag(etag) },
-    body: { title, section_type, position, featured, item_limit, config, enabled },
+    body: { title, section_type, position, featured, item_limit, config, enabled, web_only },
   });
   return adminSectionFromV2(section);
 }

@@ -12,7 +12,7 @@ func (reg *Registry) getAdminSectionCapabilities(ctx context.Context, _ *Capabil
 		return out, nil
 	}
 	caps := reg.deps.AdminSections.AdminSectionCapabilities(ctx)
-	out.Body = AdminSectionCapabilities{Available: true, ResetProfiles: caps.ResetProfiles, Preview: caps.Preview}
+	out.Body = AdminSectionCapabilities{Available: true, ResetProfiles: caps.ResetProfiles, Preview: caps.Preview, WebOnly: true}
 	return out, nil
 }
 
