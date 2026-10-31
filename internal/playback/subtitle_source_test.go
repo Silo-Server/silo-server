@@ -336,6 +336,25 @@ func TestPrefixKeepalive(t *testing.T) {
 	if k.tick(); out.String() != converted {
 		t.Fatalf("output %q, want %q", out.String(), converted)
 	}
+	// A wait past the whole header goes on with blank lines, also while the
+	// output has repeated only the header, as a demux of a sparse track does
+	// before its first cue; the cues follow unchanged.
+	out.Reset()
+	k = newPrefixKeepalive(&out, "WEBVTT\n", time.Hour, time.Hour)
+	defer k.stop()
+	for range len("WEBVTT\n") + 1 {
+		k.tick()
+	}
+	if _, err := k.Write([]byte("WEBVTT\n")); err != nil {
+		t.Fatal(err)
+	}
+	k.tick()
+	if _, err := k.Write([]byte(converted[len("WEBVTT\n"):])); err != nil {
+		t.Fatal(err)
+	}
+	if k.tick(); out.String() != "WEBVTT\n\n\n"+converted[len("WEBVTT\n"):] {
+		t.Fatalf("output after a long wait %q", out.String())
+	}
 	// Output that doesn't start with what went ahead fails.
 	out.Reset()
 	k = newPrefixKeepalive(&out, "WEBVTT\n", time.Hour, time.Hour)
