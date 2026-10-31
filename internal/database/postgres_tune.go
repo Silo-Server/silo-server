@@ -335,6 +335,13 @@ func ApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, opts PostgresT
 		return result, fmt.Errorf("pg_reload_conf returned false")
 	}
 
+	// ALTER SYSTEM rewrites a setting even when the server already runs with
+	// its value, so keep only the restart-only settings PostgreSQL has yet to
+	// apply. A role that cannot read pg_file_settings keeps the full list.
+	if pending, err := postgresSettingsPendingRestart(ctx, pool, result.RestartRequired); err == nil {
+		result.RestartRequired = pending
+	}
+
 	return result, nil
 }
 
@@ -731,6 +738,48 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 	var requiresRestart bool
 	err := pool.QueryRow(ctx, "SELECT context = 'postmaster' FROM pg_settings WHERE name = $1", name).Scan(&requiresRestart)
 	return requiresRestart, err
+}
+
+// postgresSettingsPendingRestart returns, in order, the names whose configured
+// value differs from the one the server runs with. pg_file_settings re-reads
+// the configuration files and sets error on an entry the server cannot apply
+// without a restart; a setting no file sets any more still runs on a file value
+// until the restart.
+func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+SELECT s.name
+FROM pg_settings s
+WHERE s.name = ANY($1::text[])
+  AND CASE
+        WHEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name)
+          THEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name AND f.error IS NOT NULL)
+        ELSE s.source = 'configuration file'
+      END`, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := make(map[string]struct{}, len(names))
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pending[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range names {
+		if _, ok := pending[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 func postgresSettingExists(ctx context.Context, pool *pgxpool.Pool, name string) (bool, error) {
