@@ -579,12 +579,29 @@ const (
 	// bin on another filesystem copies every file first. A delivery that is
 	// still waiting after this long is scanned as the folder stands.
 	removalWait = time.Hour
-	// removalRecheckDelay is how soon a waiting delivery is checked again. The
-	// retry task's own interval adds to it.
+	// removalRecheckDelay is how soon a waiting delivery is checked again
+	// while it is younger than removalFastWindow, which covers most arr
+	// deletes. The retry task's own interval adds to it.
 	removalRecheckDelay = 10 * time.Second
-	// removalStatTimeout bounds each filesystem check of a deleted path.
-	removalStatTimeout = 5 * time.Second
+	removalFastWindow   = 2 * time.Minute
+	// removalSlowRecheckDelay spaces the checks of a delivery still waiting
+	// after removalFastWindow, such as a recycle-bin copy to another
+	// filesystem, so long waits cost the shared retry batch little.
+	removalSlowRecheckDelay = time.Minute
+	// removalStatTimeout bounds each filesystem check of a deleted path. A
+	// full retry batch of checks on a stalled mount must finish well inside
+	// webhookDeliveryLease, or another node reclaims rows still in progress.
+	removalStatTimeout = 2 * time.Second
 )
+
+// removalRecheckDelayFor is how soon a delivery received at receivedAt and
+// still waiting for a removal is checked again.
+func removalRecheckDelayFor(receivedAt time.Time) time.Duration {
+	if time.Since(receivedAt) < removalFastWindow {
+		return removalRecheckDelay
+	}
+	return removalSlowRecheckDelay
+}
 
 const (
 	webhookRetryBaseDelay = 5 * time.Second
@@ -650,10 +667,10 @@ func (s *Service) processWebhookDelivery(ctx context.Context, delivery WebhookDe
 		return result
 	}
 	if errors.Is(ingestErr, errAwaitingRemoval) {
-		// Expected for every arr folder delete: check again shortly, without
-		// the failure backoff and without recording an error on the source.
+		// Expected for every arr folder delete: check again, without the
+		// failure backoff and without recording an error on the source.
 		result.AwaitingRemoval = true
-		if err := s.store.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, removalRecheckDelay, ""); err != nil {
+		if err := s.store.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, removalRecheckDelayFor(delivery.ReceivedAt), ""); err != nil {
 			slog.WarnContext(ctx, "autoscan: schedule removal recheck failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
 		}
 		return result

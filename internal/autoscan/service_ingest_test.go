@@ -238,6 +238,14 @@ func TestIngestChangesWaitsForRemovedFolder(t *testing.T) {
 	if len(store.retryDelays) != 2 || store.retryDelays[1] != store.retryDelays[0] || store.retryMessages[0] != "" || store.retryMessages[1] != "" {
 		t.Fatalf("rechecks = %v %q, want two equal delays and no error", store.retryDelays, store.retryMessages)
 	}
+	// A delivery still waiting after a few minutes is checked less often.
+	store.retried[0].ReceivedAt = time.Now().Add(-10 * time.Minute)
+	if _, err := svc.RetryPendingWebhookDeliveries(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.retryDelays) != 3 || store.retryDelays[2] <= store.retryDelays[1] || store.retryMessages[2] != "" {
+		t.Fatalf("rechecks = %v %q, want a longer delay for an older delivery", store.retryDelays, store.retryMessages)
+	}
 
 	if err := os.Remove(folder); err != nil {
 		t.Fatal(err)
