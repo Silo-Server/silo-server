@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -91,7 +92,11 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 	if err != nil {
 		return nil, fmt.Errorf("beginning api key creation: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
 	rows, err := tx.Query(ctx, `SELECT id, role, is_owner FROM users
 		WHERE id = ANY($1) ORDER BY id FOR SHARE`, []int{actorID, userID})
 	if err != nil {
