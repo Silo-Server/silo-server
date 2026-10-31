@@ -517,7 +517,9 @@ Buckets share the per-key limiter's backend. Redis keeps one bucket per session 
 every instance, timed by the Redis clock, and shares the window limiter's outage
 pause: while Redis is unavailable each process counts in its own bucket. Settings
 changes keep every bucket's balance; a bucket reads its size and rate on each
-request, and is dropped only after a week without one.
+request, and is dropped once even the slowest refill the settings allow would have
+filled it: a week after a drained bucket's last request, seconds after one a client
+barely used.
 
 The defaults come from production traffic. The busiest first-party sessions stayed
 under 20000 requests in any hour and rarely went above 10000, while a polling

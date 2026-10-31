@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,19 +45,33 @@ func TestQuotaBucket(t *testing.T) {
 	}
 
 	// A drained bucket outlives a slower rate's refill: lowering the rate must
-	// not hand it a fresh burst. It is dropped only after a week untouched.
+	// not hand it a fresh burst. It holds half a token of 3, so it is kept until
+	// the slowest allowed rate (a burst a week) would have refilled the rest.
 	slow := SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 1, Burst: 3}
 	last := start.Add(time.Hour)
 	if got := ml.takeAt("k", slow, last.Add(30*time.Minute)); got.Allowed {
 		t.Fatalf("take after lowering the rate = %+v, want the drained bucket kept", got)
 	}
-	ml.evictLocked(last.Add(30*time.Minute + SessionQuotaIdleTTL - time.Second))
+	keep := SessionQuotaIdleTTL * 5 / 6
+	ml.evictLocked(last.Add(30*time.Minute+keep-time.Second), slow.Burst)
 	if len(ml.buckets) != 1 {
-		t.Fatal("bucket evicted before it was idle for SessionQuotaIdleTTL")
+		t.Fatal("drained bucket evicted before the slowest allowed rate would have refilled it")
 	}
-	ml.evictLocked(last.Add(30*time.Minute + SessionQuotaIdleTTL))
+	ml.evictLocked(last.Add(30*time.Minute+keep), slow.Burst)
 	if len(ml.buckets) != 0 {
-		t.Fatal("idle bucket kept after SessionQuotaIdleTTL")
+		t.Fatal("idle bucket kept after the slowest allowed rate would have refilled it")
+	}
+
+	// Sessions that sign in, make one request and leave don't pile up: at the
+	// default size their buckets go at the next sweep a minute later.
+	def := DefaultConfig().Session
+	busy := NewMemoryQuotaLimiter()
+	for i := range 1000 {
+		busy.takeAt(fmt.Sprint("session:", i), def, start)
+	}
+	busy.takeAt("session:later", def, start.Add(quotaEvictEvery))
+	if len(busy.buckets) != 1 {
+		t.Fatalf("%d buckets kept a minute after one request each, want only the new one", len(busy.buckets))
 	}
 }
 
