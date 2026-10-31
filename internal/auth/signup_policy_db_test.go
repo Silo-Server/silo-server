@@ -71,7 +71,9 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM invite_codes WHERE code=$1`, code)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			_, _ = env.pool.Exec(cleanupCtx, `DELETE FROM invite_codes WHERE code=$1`, code)
 		})
 		return code
 	}
