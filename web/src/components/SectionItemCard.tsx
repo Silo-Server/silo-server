@@ -61,6 +61,14 @@ interface SectionItemCardProps {
    */
   rankedNumeralClasses?: string;
   /**
+   * How this card's overlay badges are sized. A poster card's badges scale with
+   * its own width by default, measured against the 185px reference poster, so a
+   * wider card draws wider badges. Pass "reference" for a row drawn far wider
+   * than an ordinary poster that still wants poster-sized badges — the Featured
+   * row, whose cards reach 340px where every other row's stop at 185px.
+   */
+  overlayScale?: "card" | "reference";
+  /**
    * This row's cards open into a landscape tile when the pointer rests on them.
    * The row decides this, because only one card may be open at a time.
    */
@@ -93,6 +101,7 @@ export default memo(function SectionItemCard({
   rank,
   rankedGutterClasses = "",
   rankedNumeralClasses = "",
+  overlayScale = "card",
   expandable = false,
   expanded = false,
   onExpand,
@@ -260,7 +269,11 @@ export default memo(function SectionItemCard({
               </span>
             )}
             {item.status === "matched" && overlayPrefs && (
-              <CardOverlays data={overlayDataFromSectionItem(item)} prefs={overlayPrefs} />
+              <CardOverlays
+                data={overlayDataFromSectionItem(item)}
+                prefs={overlayPrefs}
+                scaleWithCard={overlayScale !== "reference"}
+              />
             )}
             {upcomingEvent && upcomingEvent.badges.length > 0 && (
               <div className="absolute top-2.5 left-2.5 flex max-w-[calc(100%-2.5rem)] flex-wrap gap-1">

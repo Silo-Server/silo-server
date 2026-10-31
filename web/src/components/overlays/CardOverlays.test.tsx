@@ -45,6 +45,11 @@ function badgeTexts(container: HTMLElement): (string | null)[] {
   return Array.from(container.querySelectorAll("span.inline-flex")).map((n) => n.textContent);
 }
 
+/** The top badge row's inset, which the layer writes in the mode's own units. */
+function topEdgeInset(container: HTMLElement): string | undefined {
+  return container.querySelector<HTMLElement>('[data-overlay-edge="top"]')?.style.top;
+}
+
 describe("CardOverlays", () => {
   beforeEach(() => vi.stubGlobal("CSS", { supports: () => true }));
   afterEach(() => {
@@ -218,5 +223,27 @@ describe("CardOverlays", () => {
         badgeStyle({ ...attention, request_status_attention: false }, custom),
       );
     });
+  });
+
+  it("pins the badges at the reference size when the card does not scale them", () => {
+    // Every badge length is a container unit against the 185px reference
+    // poster, so a card drawn much wider takes its badges with it: the Featured
+    // row's 340px cards drew a rating chip at nearly twice the size the same
+    // chip has in every other row. scaleWithCard={false} holds it at the
+    // reference size instead, which is what that row asks for.
+    const scaled = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("resolution")} />,
+    );
+    const pinned = render(
+      <CardOverlays
+        data={SAMPLE_MOVIE_DATA}
+        prefs={prefsWithOnly("resolution")}
+        scaleWithCard={false}
+      />,
+    );
+
+    // The 8px reference inset, in each mode's own unit.
+    expect(topEdgeInset(scaled.container)).toBe("4.324324cqi");
+    expect(topEdgeInset(pinned.container)).toBe("8px");
   });
 });

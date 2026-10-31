@@ -128,6 +128,16 @@ interface CardOverlaysProps {
   prefs: CardOverlayPrefs;
   variant?: "poster" | "wide";
   /**
+   * Whether the badges are measured from the card's own width. On (the default)
+   * every length is a container unit against the 185px reference poster, so a
+   * wider card draws wider badges, which is what a poster wants. Off pins them
+   * at exactly that reference size, for a card that is far wider than a poster
+   * but should still read as one: the Featured row's cards are 340px at the
+   * widest breakpoint, where a rating chip would otherwise draw at nearly twice
+   * the size the same chip has in every other row on the page.
+   */
+  scaleWithCard?: boolean;
+  /**
    * Set by hosts that draw a watch-progress bar along the bottom of the
    * artwork (ContinueWatchingCard, EpisodeRow, SeasonEpisodeGrid). The bar
    * occupies the same edge strip as the bottom badge row, so the row rises
@@ -270,6 +280,7 @@ export default function CardOverlays({
   data,
   prefs,
   variant = "poster",
+  scaleWithCard = true,
   hasProgressBar = false,
 }: CardOverlaysProps) {
   // The language badge resolves names from lazily loaded data and stays empty
@@ -291,11 +302,8 @@ export default function CardOverlays({
   const bottomLeft = resolve("bottom-left");
   const bottomRight = resolve("bottom-right");
   const wide = variant === "wide";
-  const scalingMode: ScalingMode = wide
-    ? "fixed"
-    : supportsContainerQueryUnits()
-      ? "container"
-      : "legacy";
+  const scalingMode: ScalingMode =
+    wide || !scaleWithCard ? "fixed" : supportsContainerQueryUnits() ? "container" : "legacy";
   const layerRef = useRef<HTMLDivElement>(null);
   const edgeInset = overlayLength(EDGE_INSET, scalingMode, POSTER_VARS.edgeInset);
   const edgeGap = overlayLength(EDGE_GAP, scalingMode, POSTER_VARS.edgeGap);

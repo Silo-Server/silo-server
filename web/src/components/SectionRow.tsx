@@ -206,6 +206,7 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
                 rankedNumeralClasses={
                   isRanked && index === 0 ? rankedOneNumeralClasses : rankedNumeralClasses
                 }
+                overlayScale={isExpanding ? "reference" : "card"}
                 expandable={isExpanding}
                 expanded={isExpanding && expandedKey === item.content_id}
                 onExpand={() => setExpandedKey(item.content_id)}
