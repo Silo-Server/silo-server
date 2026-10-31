@@ -116,14 +116,17 @@ export type ReaderSelection = {
   selectedText: string;
 };
 
+// foliate's search reports each match's context as text before, the match, and text after.
+type FoliateSearchExcerpt = { pre?: string; match?: string; post?: string };
+
 type FoliateSearchResult = {
   cfi?: string;
-  excerpt?: string;
+  excerpt?: FoliateSearchExcerpt;
   label?: string;
   section?: { label?: string; href?: string };
   subitems?: Array<{
     cfi?: string;
-    excerpt?: string;
+    excerpt?: FoliateSearchExcerpt;
     label?: string;
   }>;
 };
@@ -430,13 +433,18 @@ function searchResultLabel(result: FoliateSearchResult, item?: { label?: string 
   return item?.label || result.label || result.section?.label || "";
 }
 
+function searchExcerptText(excerpt?: FoliateSearchExcerpt): string | undefined {
+  if (!excerpt) return undefined;
+  return `${excerpt.pre ?? ""}${excerpt.match ?? ""}${excerpt.post ?? ""}`;
+}
+
 function flattenSearchResult(result: FoliateSearchResult): ReaderSearchResult[] {
   const direct = result.cfi
     ? [
         {
           cfi: result.cfi,
           label: searchResultLabel(result),
-          excerpt: result.excerpt,
+          excerpt: searchExcerptText(result.excerpt),
         },
       ]
     : [];
@@ -447,7 +455,7 @@ function flattenSearchResult(result: FoliateSearchResult): ReaderSearchResult[] 
       .map((item) => ({
         cfi: item.cfi || "",
         label: searchResultLabel(result, item),
-        excerpt: item.excerpt,
+        excerpt: searchExcerptText(item.excerpt),
       })),
   );
 }
