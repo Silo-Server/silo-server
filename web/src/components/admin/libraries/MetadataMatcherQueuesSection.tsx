@@ -30,7 +30,7 @@ function describeRejection(decision: MatchDecision): string | undefined {
   if (decision.outcome !== "candidate_rejected") return undefined;
   switch (decision.rejection) {
     case "below_floor":
-      return "No result reached the minimum score.";
+      return "No eligible result reached the minimum score.";
     case "lone_candidate":
       return "A single result needs a higher score when nothing else, such as a matching year, confirms it.";
     case "year_mismatch":
