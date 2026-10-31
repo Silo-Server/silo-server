@@ -124,6 +124,7 @@ type Store struct {
 	starts     map[sourceVersion]time.Duration
 	mirrors    map[string]*mirrorFetch
 	mirrorUsed map[string]time.Time
+	mirrorPins map[string]int
 }
 
 // NewStore returns a Store over repo and blobs, or nil without either.
@@ -146,6 +147,7 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		starts:         map[sourceVersion]time.Duration{},
 		mirrors:        map[string]*mirrorFetch{},
 		mirrorUsed:     map[string]time.Time{},
+		mirrorPins:     map[string]int{},
 		reads:          make(chan struct{}, wholeReads),
 	}
 	s.probeStart = func(ctx context.Context, path string) (time.Duration, error) {
@@ -191,7 +193,7 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 		if err != nil {
 			return nil, err
 		}
-		local, err := s.mirror(ctx, t)
+		_, release, err := s.mirror(ctx, t)
 		if errors.Is(err, blobstore.ErrNotFound) && attempt == 0 {
 			// The row outlived its object (a storage move that left the
 			// objects behind): read the track again.
@@ -205,26 +207,25 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 		if err != nil {
 			return nil, err
 		}
-		return s.streamInput(ctx, t, local), nil
+		in := s.streamInput(ctx, t)
+		release()
+		return in, nil
 	}
 }
 
-// streamInput feeds FFmpeg the local copy of t at local, fetching it again
+// streamInput feeds FFmpeg the local copy of t, fetching it again
 // should it have been evicted since.
-func (s *Store) streamInput(ctx context.Context, t *Track, local string) *playback.SubtitlePacketInput {
+func (s *Store) streamInput(ctx context.Context, t *Track) *playback.SubtitlePacketInput {
 	return &playback.SubtitlePacketInput{
 		StreamFormat:    t.StreamFormat,
 		SourceStartTime: t.StartTime,
 		ExpectCues:      t.Packets > 0,
 		Stream: func() (io.ReadCloser, error) {
-			f, err := os.Open(local) //nolint:gosec // G304: a copy under the mirror directory, named by its hash
-			if err == nil {
-				return f, nil
-			}
-			again, err := s.mirror(ctx, t)
+			again, release, err := s.mirror(ctx, t)
 			if err != nil {
 				return nil, err
 			}
+			defer release()
 			return os.Open(again) //nolint:gosec // G304: as above
 		},
 	}
@@ -289,10 +290,11 @@ func (s *Store) sourceWindow(ctx context.Context, path string, ref playback.Embe
 
 // keptWindow cuts a window from the local copy of t.
 func (s *Store) keptWindow(ctx context.Context, t *Track, from, to time.Duration) (*playback.SubtitlePacketInput, error) {
-	local, err := s.mirror(ctx, t)
+	local, release, err := s.mirror(ctx, t)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	idx, err := s.indexes.Index(ctx, local)
 	if err != nil {
 		return nil, err
@@ -406,10 +408,11 @@ func (s *Store) readWhole(ctx context.Context, f *flight, path string, ref playb
 
 	readCtx, cancel := context.WithTimeout(ctx, wholeReadTimeout)
 	defer cancel()
-	t, stats, err := s.readAndCopy(readCtx, f, path, ref, number, v)
+	t, stats, release, err := s.readAndCopy(readCtx, f, path, ref, number, v)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	// The read is done: keep it even if every caller has gone.
 	keepCtx, cancelKeep := context.WithTimeout(context.WithoutCancel(ctx), keepTimeout)
 	defer cancelKeep()
@@ -426,34 +429,34 @@ func (s *Store) readWhole(ctx context.Context, f *flight, path string, ref playb
 // readAndCopy reads the track's packets, in one of the node's whole-read
 // slots, and writes them as a kept stream to the local copies, returning
 // the track to record.
-func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref playback.EmbeddedSubtitleRef, number uint64, v sourceVersion) (*Track, embeddedsub.ReadStats, error) {
+func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref playback.EmbeddedSubtitleRef, number uint64, v sourceVersion) (*Track, embeddedsub.ReadStats, func(), error) {
 	select {
 	case s.reads <- struct{}{}:
 		defer func() { <-s.reads }()
 	case <-ctx.Done():
-		return nil, embeddedsub.ReadStats{}, ctx.Err()
+		return nil, embeddedsub.ReadStats{}, nil, ctx.Err()
 	}
 	idx, track, err := s.sourceTrack(ctx, path, ref, number)
 	if err != nil {
-		return nil, embeddedsub.ReadStats{}, err
+		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	start, err := s.startTime(ctx, path, v)
 	if err != nil {
-		return nil, embeddedsub.ReadStats{}, err
+		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo,
 		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: keptMaxBytes})
 	if err != nil {
-		return nil, embeddedsub.ReadStats{}, err
+		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	if len(res.Packets) == 0 {
-		return nil, res.Stats, errNoPackets
+		return nil, res.Stats, nil, errNoPackets
 	}
-	_, sum, size, err := s.writeMirror(s.mirrorDir(), streamExt(idx.StreamFormat()), func(w io.Writer) error {
+	_, sum, size, release, err := s.writeMirror(s.mirrorDir(), streamExt(idx.StreamFormat()), func(w io.Writer) error {
 		return embeddedsub.WriteKept(w, idx, track, res.Packets)
 	})
 	if err != nil {
-		return nil, res.Stats, err
+		return nil, res.Stats, nil, err
 	}
 	completeness := CompletenessUnknown
 	if track.Completeness == embeddedsub.CompletenessComplete {
@@ -474,7 +477,7 @@ func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref pla
 		Completeness:     completeness,
 		Method:           MethodCues,
 		HasOverrideTags:  overrideTags(ref.Codec, res.Packets),
-	}, res.Stats, nil
+	}, res.Stats, release, nil
 }
 
 // waitForOther waits while another server reads the track, for the track
@@ -592,7 +595,7 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	if err != nil {
 		return err
 	}
-	local, sum, size, err := s.writeMirror(s.mirrorDir(), streamExt(demuxCopy.Format), func(w io.Writer) error {
+	local, sum, size, release, err := s.writeMirror(s.mirrorDir(), streamExt(demuxCopy.Format), func(w io.Writer) error {
 		_, err := io.Copy(w, copyFile)
 		return err
 	})
@@ -600,6 +603,7 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	if err != nil {
 		return err
 	}
+	defer release()
 	t := &Track{
 		MediaFileID:      ref.MediaFileID,
 		StreamIndex:      ref.StreamIndex,

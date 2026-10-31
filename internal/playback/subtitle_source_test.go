@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
@@ -359,7 +360,7 @@ func waitForCondition(t *testing.T, cond func() bool, then func()) {
 }
 
 // A slow whole read gets the WebVTT header ahead of it a byte at a time, and
-// the response is still exactly the converted track.
+// the response carries the converted cues after any keepalive blank lines.
 func TestServeExtractSendsTheWebVTTHeaderAheadOfASlowRead(t *testing.T) {
 	delay, interval := keepaliveDelay, keepaliveInterval
 	keepaliveDelay, keepaliveInterval = time.Millisecond, time.Millisecond
@@ -381,11 +382,14 @@ func TestServeExtractSendsTheWebVTTHeaderAheadOfASlowRead(t *testing.T) {
 			}
 			fill.mu.Lock()
 			defer fill.mu.Unlock()
-			return fill.written == int64(len(webVTTPrefix))
+			return fill.written >= int64(len(webVTTPrefix))
 		}, func() { close(release) })
 	}()
 	rec := serveText(t, c, StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, extract)
-	if rec.Body.String() != converted {
+	withoutBlankLines := func(body string) string {
+		return webVTTPrefix + "\n" + strings.TrimLeft(strings.TrimPrefix(body, webVTTPrefix), "\n")
+	}
+	if withoutBlankLines(rec.Body.String()) != converted {
 		t.Fatalf("body %q, want %q", rec.Body.String(), converted)
 	}
 	if f, _, ok := c.lookup(source, 0, "vtt"); !ok {
@@ -393,7 +397,7 @@ func TestServeExtractSendsTheWebVTTHeaderAheadOfASlowRead(t *testing.T) {
 	} else {
 		data, _ := io.ReadAll(f)
 		_ = f.Close()
-		if string(data) != converted {
+		if withoutBlankLines(string(data)) != converted {
 			t.Fatalf("cached %q", data)
 		}
 	}
@@ -532,4 +536,46 @@ func TestWarmEmbeddedTextTracksKeepsItsSlotForTheBatch(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the batch never ran")
 	}
+}
+
+type timedFallbackSource struct{ *fakeEmbeddedSource }
+
+func (s *timedFallbackSource) WholeTrack(context.Context, string, EmbeddedSubtitleRef) (*SubtitlePacketInput, error) {
+	time.Sleep(90 * time.Second) //nolint:forbidigo // synctest advances virtual time through the foreground wait
+	return nil, errors.New("whole track still being read")
+}
+
+type progressWriter struct {
+	last       time.Time
+	longestGap time.Duration
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	w.longestGap = max(w.longestGap, time.Since(w.last))
+	w.last = time.Now()
+	return len(p), nil
+}
+
+// The source's foreground wait can expire before a demux finishes. A
+// client with a 30-second read timeout still needs progress in that gap.
+func TestKeepaliveCoversSlowWholeReadAndFallback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, source := newTestCache(t)
+		c.SetEmbeddedSource(&timedFallbackSource{fakeEmbeddedSource: &fakeEmbeddedSource{}})
+		writer := &progressWriter{last: time.Now()}
+		extract := func(_ context.Context, opts StreamExtractOpts) error {
+			time.Sleep(40 * time.Second) //nolint:forbidigo // synctest models fallback latency beyond the read timeout
+			_, err := io.WriteString(opts.Writer, "WEBVTT\n\n00:01.000 --> 00:02.000\nvisible\n")
+			return err
+		}
+		err := c.sourced(extract)(t.Context(), StreamExtractOpts{
+			InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef, Writer: writer,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if writer.longestGap > 30*time.Second {
+			t.Fatalf("valid extraction left the viewer without bytes for %v; a 30-second read timeout expires", writer.longestGap)
+		}
+	})
 }

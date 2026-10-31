@@ -163,29 +163,69 @@ func parseBlock(b []byte) (matroskaBlock, byte, error) {
 // decompress undoes a track's ContentCompression, as FFmpeg's
 // matroska_decode_buffer does.
 func decompress(c *Compression, data []byte) ([]byte, error) {
+	return decompressBudget(c, data, newBudget(2*maxPacketSize))
+}
+
+func decompressBudget(c *Compression, data []byte, b *budget) ([]byte, error) {
 	switch c.Algorithm {
 	case matroska.CompressionHeaderStripping:
-		out := make([]byte, 0, len(c.Settings)+len(data))
+		size := len(c.Settings) + len(data)
+		if size > maxPacketSize {
+			return nil, corrupt("header stripping packet over %d bytes", maxPacketSize)
+		}
+		if err := b.take(size); err != nil {
+			return nil, err
+		}
+		out := make([]byte, 0, size)
 		return append(append(out, c.Settings...), data...), nil
 	case matroska.CompressionZlib:
 		zr, err := zlib.NewReader(bytes.NewReader(data))
 		if err != nil {
 			return nil, corrupt("zlib: %v", err)
 		}
-		return readDecompressed(zr, "zlib")
+		defer func() { _ = zr.Close() }()
+		return readDecompressedBudget(zr, "zlib", b)
 	case matroska.CompressionBzlib:
-		return readDecompressed(bzip2.NewReader(bytes.NewReader(data)), "bzlib")
+		return readDecompressedBudget(bzip2.NewReader(bytes.NewReader(data)), "bzlib", b)
 	}
 	return nil, corrupt("compression algorithm %d", c.Algorithm)
 }
 
-func readDecompressed(r io.Reader, name string) ([]byte, error) {
-	out, err := io.ReadAll(io.LimitReader(r, maxPacketSize+1))
+// packetBuffer reserves allocation capacity before growing, including the
+// old buffer during a copy. Its retained capacity stays charged to the read.
+type packetBuffer struct {
+	data   []byte
+	budget *budget
+}
+
+func (w *packetBuffer) Write(p []byte) (int, error) {
+	need := len(w.data) + len(p)
+	if need > maxPacketSize {
+		return 0, corrupt("decompressed packet over %d bytes", maxPacketSize)
+	}
+	if need > cap(w.data) {
+		capacity := min(maxPacketSize, max(need, 2*cap(w.data)))
+		if err := w.budget.take(capacity); err != nil {
+			return 0, err
+		}
+		data := make([]byte, len(w.data), capacity)
+		copy(data, w.data)
+		w.budget.give(cap(w.data))
+		w.data = data
+	}
+	w.data = append(w.data, p...)
+	return len(p), nil
+}
+
+func readDecompressedBudget(r io.Reader, name string, b *budget) ([]byte, error) {
+	w := &packetBuffer{budget: b}
+	_, err := io.Copy(w, r)
 	if err != nil {
+		b.give(cap(w.data))
+		if errors.Is(err, ErrTooLarge) {
+			return nil, err
+		}
 		return nil, corrupt("%s: %v", name, err)
 	}
-	if len(out) > maxPacketSize {
-		return nil, corrupt("%s packet over %d bytes", name, maxPacketSize)
-	}
-	return out, nil
+	return w.data, nil
 }

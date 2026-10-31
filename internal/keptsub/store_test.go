@@ -3,6 +3,7 @@ package keptsub
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,6 +357,17 @@ func TestSubtitleTrackFacts(t *testing.T) {
 	if got := s.SubtitleTrackFacts(t.Context(), &changed).OverrideTags(&changed, changed.SubtitleTracks[0]); got != playback.SubtitleFactUnknownV3 {
 		t.Fatalf("facts from another version of the file: %v", got)
 	}
+	changed = *file
+	changed.FileModifiedAt = nil
+	if got := s.SubtitleTrackFacts(t.Context(), &changed).OverrideTags(&changed, changed.SubtitleTracks[0]); got != playback.SubtitleFactUnknownV3 {
+		t.Fatalf("facts without catalog mtime: %v", got)
+	}
+	changed = *file
+	later := file.FileModifiedAt.Add(time.Second)
+	changed.FileModifiedAt = &later
+	if got := s.SubtitleTrackFacts(t.Context(), &changed).OverrideTags(&changed, changed.SubtitleTracks[0]); got != playback.SubtitleFactUnknownV3 {
+		t.Fatalf("facts from an older same-size file: %v", got)
+	}
 }
 
 // A request stops waiting on a slow read and demuxes instead; the read goes
@@ -383,4 +395,74 @@ func TestSlowReadsHandOverToTheDemux(t *testing.T) {
 		tr, _ := repo.Track(t.Context(), file.ID, 1)
 		return tr != nil
 	})
+}
+
+// A storage budget must not prevent a freshly read track from reaching
+// durable storage before its local mirror becomes eligible for eviction.
+func TestOversizedMirrorStillKeepsTrack(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	s, _, _ := newTestStore(t, ffmpeg)
+	s.opts.MirrorMaxBytes = 1
+	in, err := s.WholeTrack(t.Context(), path, *playback.EmbeddedSubtitleRefFor(file, 0))
+	if err != nil {
+		t.Fatalf("newly read track could not reach storage: %v", err)
+	}
+	stream, err := in.Stream()
+	if err != nil {
+		t.Fatalf("oversized stored track could not be consumed: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	data, err := io.ReadAll(stream)
+	if err != nil || len(data) == 0 {
+		t.Fatalf("read stored track: %d bytes, %v", len(data), err)
+	}
+}
+
+type delayedQueueRepo struct {
+	Repo
+	first   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *delayedQueueRepo) QueueCollection(ctx context.Context, key string, after time.Duration) error {
+	if r.first.CompareAndSwap(false, true) {
+		close(r.entered)
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return r.Repo.QueueCollection(ctx, key, after)
+}
+
+// A second whole read must not evict the first read's mirror while the
+// first read is still waiting to persist it.
+func TestPendingKeepSurvivesConcurrentMirrorWrite(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	s, repo, _ := newTestStore(t, ffmpeg)
+	s.opts.MirrorMaxBytes = 300 // each fixture track fits; both together do not
+	delayed := &delayedQueueRepo{Repo: repo, entered: make(chan struct{}), release: make(chan struct{})}
+	s.repo = delayed
+	first := make(chan error, 1)
+	go func() {
+		_, err := s.WholeTrack(t.Context(), path, *playback.EmbeddedSubtitleRefFor(file, 0))
+		first <- err
+	}()
+	select {
+	case <-delayed.entered:
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	_, secondErr := s.WholeTrack(t.Context(), path, *playback.EmbeddedSubtitleRefFor(file, 1))
+	close(delayed.release)
+	if secondErr != nil {
+		t.Fatal(secondErr)
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("another mirror write broke an active keep: %v", err)
+	}
 }

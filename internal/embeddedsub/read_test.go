@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"syscall"
 	"testing"
@@ -183,6 +184,32 @@ func TestReadIndexTrackFields(t *testing.T) {
 	stripped, _ := idx.Track(strippedTrack)
 	if stripped.Compression == nil || string(stripped.Compression.Settings) != "Line: " {
 		t.Errorf("stripped compression = %+v", stripped.Compression)
+	}
+}
+
+func TestMatroskaFallsBackForUnsupportedTimingAndCueIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		extra           [][]byte
+		withoutPosition bool
+	}{
+		{name: "codec delay", extra: [][]byte{uintEl(0x56AA, 500_000_000)}},
+		{name: "same-time block numbers", withoutPosition: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, second := textBlock(1, 2000, 1000, "first"), textBlock(1, 2000, 1000, "second")
+			if tc.withoutPosition {
+				first.cue, second.cue = cueWithoutPosition, cueWithoutPosition
+				first.cueBlockNumber, second.cueBlockNumber = 1, 2
+			}
+			path, idx := readFixture(t, mkvFixture{
+				tracks:   []fixtureTrack{{number: 1, uid: 1, codec: "S_TEXT/UTF8", extra: tc.extra}},
+				clusters: []fixtureCluster{{blocks: []fixtureBlock{first, second}}},
+			})
+			if _, err := ReadPackets(t.Context(), path, idx, 1, WholeFrom, WholeTo, ReadOptions{}); !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("unsupported track read = %v, want FFmpeg fallback", err)
+			}
+		})
 	}
 }
 
@@ -731,6 +758,58 @@ func BenchmarkReadPackets(b *testing.B) {
 			b.ReportMetric(float64(stats.Reads), "reads/op")
 			b.ReportMetric(float64(stats.Bytes), "bytes-read/op")
 			b.ReportMetric(float64(len(data)), "file-bytes")
+		})
+	}
+}
+
+func TestCompressionSettingsCountAgainstCacheBudget(t *testing.T) {
+	const prefixBytes = 2 << 20
+	track := newTrack(matroska.TrackEntry{
+		Number: 1, Type: matroska.TrackTypeSubtitle, CodecID: "S_TEXT/UTF8", TimestampScale: 1,
+		Encodings: []matroska.ContentEncoding{{
+			Scope: matroska.ScopeFrames, CompAlgo: matroska.CompressionHeaderStripping,
+			CompSettings: bytes.Repeat([]byte("a"), prefixBytes),
+		}},
+	})
+	idx := &Index{Tracks: []Track{track}}
+	cache := NewCache(prefixBytes / 2)
+	cache.add(cacheKey{path: "fixture"}, idx)
+	if len(cache.entries) != 0 {
+		t.Fatalf("cache retained a %d-byte compression prefix under a %d-byte budget; estimated %d bytes", prefixBytes, cache.maxBytes, idx.memSize())
+	}
+}
+
+func TestPacketBudgetBoundsDecompression(t *testing.T) {
+	const expandedBytes = 4 << 20
+	const packetBudget = 64 << 10
+	for _, algorithm := range []uint64{matroska.CompressionZlib, matroska.CompressionHeaderStripping} {
+		t.Run(map[uint64]string{matroska.CompressionZlib: "zlib", matroska.CompressionHeaderStripping: "header stripping"}[algorithm], func(t *testing.T) {
+			compression := &Compression{Algorithm: algorithm}
+			payload := []byte("a")
+			if algorithm == matroska.CompressionZlib {
+				payload = zlibBytes(t, bytes.Repeat([]byte("a"), expandedBytes))
+			} else {
+				compression.Settings = bytes.Repeat([]byte("a"), expandedBytes)
+			}
+			m := &matroskaRead{
+				budget: newBudget(packetBudget), idx: &Index{TimestampScale: 1_000_000},
+				t: &Track{Number: 1, Compression: compression},
+			}
+			element := blockElement{id: matroska.IDSimpleBlock, data: append([]byte{0x81, 0, 0, 0x80}, payload...)}
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			_, err := m.blockPackets(element, 0, &clusterHead{}, nil)
+			runtime.ReadMemStats(&after)
+			if !errors.Is(err, ErrTooLarge) {
+				t.Fatalf("oversized decoded packet: %v", err)
+			}
+			allocated := after.TotalAlloc - before.TotalAlloc
+			// Permit decoder setup and allocation growth, but not a full decoded
+			// packet that is sixty-four times the available shared budget.
+			if allocated >= expandedBytes {
+				t.Fatalf("allocated %d bytes before rejecting a packet under a %d-byte budget", allocated, packetBudget)
+			}
 		})
 	}
 }

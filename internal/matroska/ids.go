@@ -37,6 +37,7 @@ const (
 	IDFlagLacing           = 0x9C
 	IDDefaultDuration      = 0x23E383
 	IDTrackTimestampScale  = 0x23314F
+	IDCodecDelay           = 0x56AA
 	IDName                 = 0x536E
 	IDLanguage             = 0x22B59C
 	IDLanguageBCP47        = 0x22B59D

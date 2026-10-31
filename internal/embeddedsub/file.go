@@ -5,15 +5,95 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
-// openFile opens path for reading and advises the kernel that reads are
+// sourceOpens bounds open/fstat calls still blocked in the kernel after their
+// caller gives up. Waiting for a slot observes the caller's cancellation too.
+var sourceOpens = make(chan struct{}, 32)
+
+var (
+	sourceOpeningMu sync.Mutex
+	sourceOpening   = map[string]chan struct{}{}
+)
+
+// openFile returns on cancellation and closes any descriptor that arrives
+// after the caller has gone.
+func openFile(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	// Wait for a prior open of this path before starting another. A stalled
+	// mount then holds one kernel call even when requests repeatedly retry.
+	var finished chan struct{}
+	for {
+		sourceOpeningMu.Lock()
+		pending := sourceOpening[path]
+		if pending == nil {
+			finished = make(chan struct{})
+			sourceOpening[path] = finished
+		}
+		sourceOpeningMu.Unlock()
+		if pending == nil {
+			break
+		}
+		select {
+		case <-pending:
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
+	finish := func() {
+		sourceOpeningMu.Lock()
+		delete(sourceOpening, path)
+		close(finished)
+		sourceOpeningMu.Unlock()
+	}
+	select {
+	case sourceOpens <- struct{}{}:
+	case <-ctx.Done():
+		finish()
+		return nil, nil, ctx.Err()
+	}
+	type opened struct {
+		file *os.File
+		info os.FileInfo
+		err  error
+	}
+	done := make(chan opened)
+	go func() {
+		defer finish()
+		defer func() { <-sourceOpens }()
+		f, info, err := openFileSync(path)
+		select {
+		case done <- opened{f, info, err}:
+		case <-ctx.Done():
+			if f != nil {
+				_ = f.Close()
+			}
+		}
+	}()
+	select {
+	case result := <-done:
+		if err := ctx.Err(); err != nil {
+			if result.file != nil {
+				_ = result.file.Close()
+			}
+			return nil, nil, err
+		}
+		return result.file, result.info, result.err
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+}
+
+// openFileSync opens path for reading and advises the kernel that reads are
 // random, so it doesn't read ahead around each one: CephFS otherwise turns
 // every small read into a fetch of the whole 4 MiB object.
-func openFile(path string) (*os.File, os.FileInfo, error) {
+func openFileSync(path string) (*os.File, os.FileInfo, error) {
 	f, err := fspath.Open(path)
 	if err != nil {
 		return nil, nil, err

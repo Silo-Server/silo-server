@@ -63,9 +63,10 @@ type fixtureBlock struct {
 	// track.
 	frames [][]byte
 	// duration is the BlockDuration in ticks; negative writes none.
-	duration   int64
-	references bool
-	cue        cueMode
+	duration       int64
+	references     bool
+	cue            cueMode
+	cueBlockNumber uint64
 	// cueDuration writes the block's duration as its CueDuration too.
 	cueDuration bool
 	// corruptAt overwrites the block's first byte, so its cue points at
@@ -233,6 +234,9 @@ func (f mkvFixture) cues(at *fixtureLayout) []byte {
 				cluster, rel = at.clusters[ci], at.blocks[ci][bi]
 			}
 			tp := [][]byte{uintEl(matroska.IDCueTrack, b.track), uintEl(matroska.IDCueClusterPosition, uint64(cluster))}
+			if b.cueBlockNumber != 0 {
+				tp = append(tp, uintEl(matroska.IDCueBlockNumber, b.cueBlockNumber))
+			}
 			if b.cue == cueWithPosition {
 				tp = append(tp, uintEl(matroska.IDCueRelativePosition, uint64(rel)))
 			}

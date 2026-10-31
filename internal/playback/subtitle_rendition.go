@@ -579,6 +579,7 @@ func (s *TranscodeSession) ServeSubtitleSegment(w http.ResponseWriter, r *http.R
 		body, err = s.SubtitleSegmentVTT(r.Context(), segNum)
 	}
 	if err != nil && r.Context().Err() != nil {
+		http.Error(w, "segment not found", http.StatusNotFound)
 		return
 	}
 	if errors.Is(err, ErrSegmentNotFound) {

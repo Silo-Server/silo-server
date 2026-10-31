@@ -60,15 +60,21 @@ func (s *Store) used(path string) {
 
 // mirror returns the local copy of t's stream, fetching it from storage
 // when the node has none. The fetched bytes must hash to t's SHA-256.
-func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
+func (s *Store) mirror(ctx context.Context, t *Track) (local string, release func(), err error) {
 	dir := s.mirrorDir()
 	if dir == "" {
-		return "", errNoMirrorDir
+		return "", nil, errNoMirrorDir
 	}
 	path := filepath.Join(dir, mirrorName(t))
+	unpin := s.pinMirror(path)
+	defer func() {
+		if err != nil {
+			unpin()
+		}
+	}()
 	if _, err := os.Stat(path); err == nil {
 		s.used(path)
-		return path, nil
+		return path, unpin, nil
 	}
 	s.mu.Lock()
 	f := s.mirrors[path]
@@ -90,9 +96,9 @@ func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
 	s.mu.Unlock()
 	select {
 	case <-f.done:
-		return f.path, f.err
+		return f.path, unpin, f.err
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", nil, ctx.Err()
 	}
 }
 
@@ -102,13 +108,14 @@ func (s *Store) fetchMirror(ctx context.Context, dir string, t *Track) (string, 
 		return "", err
 	}
 	defer func() { _ = r.Close() }()
-	path, sum, _, err := s.writeMirror(dir, streamExt(t.StreamFormat), func(w io.Writer) error {
+	path, sum, _, release, err := s.writeMirror(dir, streamExt(t.StreamFormat), func(w io.Writer) error {
 		_, err := io.Copy(w, r)
 		return err
 	})
 	if err != nil {
 		return "", err
 	}
+	defer release()
 	if sum != t.SHA256 {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("keptsub: %s holds bytes with SHA-256 %s, want %s", t.BlobKey, sum, t.SHA256)
@@ -117,14 +124,14 @@ func (s *Store) fetchMirror(ctx context.Context, dir string, t *Track) (string, 
 }
 
 // writeMirror writes a copy through a temp file, hashing it, and renames it
-// to its hash with ext. It returns the copy's path, SHA-256 and size.
-func (s *Store) writeMirror(dir, ext string, write func(io.Writer) error) (path, sum string, size int64, err error) {
+// to its hash with ext. The caller releases its eviction pin after consuming it.
+func (s *Store) writeMirror(dir, ext string, write func(io.Writer) error) (path, sum string, size int64, release func(), err error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", "", 0, err
+		return "", "", 0, nil, err
 	}
 	tmp, err := os.CreateTemp(dir, mirrorTempPrefix+"*")
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, nil, err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	h := sha256.New()
@@ -134,16 +141,33 @@ func (s *Store) writeMirror(dir, ext string, write func(io.Writer) error) (path,
 		err = closeErr
 	}
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, nil, err
 	}
 	sum = hex.EncodeToString(h.Sum(nil))
 	path = filepath.Join(dir, sum+ext)
+	release = s.pinMirror(path)
 	if err := os.Rename(tmp.Name(), path); err != nil {
-		return "", "", 0, err
+		release()
+		return "", "", 0, nil, err
 	}
 	s.used(path)
 	s.evictMirrors(dir)
-	return path, sum, counter.n, nil
+	return path, sum, counter.n, release, nil
+}
+
+// pinMirror excludes path from eviction until the caller has opened or read it.
+func (s *Store) pinMirror(path string) func() {
+	s.mu.Lock()
+	s.mirrorPins[path]++
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		if s.mirrorPins[path]--; s.mirrorPins[path] == 0 {
+			delete(s.mirrorPins, path)
+		}
+		s.mu.Unlock()
+		s.evictMirrors(filepath.Dir(path))
+	}
 }
 
 type byteCounter struct{ n int64 }
@@ -193,11 +217,15 @@ func (s *Store) evictMirrors(dir string) {
 		if total <= s.opts.MirrorMaxBytes {
 			return
 		}
+		s.mu.Lock()
+		if s.mirrorPins[c.path] > 0 {
+			s.mu.Unlock()
+			continue
+		}
 		if err := os.Remove(c.path); err == nil || os.IsNotExist(err) {
 			total -= c.size
-			s.mu.Lock()
 			delete(s.mirrorUsed, c.path)
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
 	}
 }

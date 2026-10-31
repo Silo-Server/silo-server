@@ -687,7 +687,8 @@ func (c *renditionCueCache) add(key renditionCueKey, cues []byte) {
 // by file version, up to a count; it forgets them all when full. Concurrent
 // misses for one version share one ffprobe run. Errors are not kept.
 type renditionStartCache struct {
-	max int
+	max   int
+	slots chan struct{}
 
 	mu      sync.Mutex
 	times   map[renditionStartKey]time.Duration
@@ -706,7 +707,7 @@ type renditionStartLoad struct {
 }
 
 func newRenditionStartCache(maxEntries int) *renditionStartCache {
-	return &renditionStartCache{max: maxEntries, times: map[renditionStartKey]time.Duration{}, loading: map[renditionStartKey]*renditionStartLoad{}}
+	return &renditionStartCache{max: maxEntries, slots: make(chan struct{}, renditionConversions), times: map[renditionStartKey]time.Duration{}, loading: map[renditionStartKey]*renditionStartLoad{}}
 }
 
 // get returns the start time of the file version idx describes, running
@@ -721,12 +722,19 @@ func (c *renditionStartCache) get(ctx context.Context, ffmpegPath, path string, 
 	}
 	load, loading := c.loading[key]
 	if !loading {
+		select {
+		case c.slots <- struct{}{}:
+		default:
+			c.mu.Unlock()
+			return 0, ErrSegmentNotFound
+		}
 		load = &renditionStartLoad{done: make(chan struct{})}
 		c.loading[key] = load
 	}
 	c.mu.Unlock()
 	if !loading {
 		go func() {
+			defer func() { <-c.slots }()
 			probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subtitleOriginProbeTimeout)
 			defer cancel()
 			start, err := SubtitleSourceStartTime(probeCtx, ffmpegPath, path)

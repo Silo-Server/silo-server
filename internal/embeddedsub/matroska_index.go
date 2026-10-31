@@ -57,7 +57,7 @@ var errBadElement = fmt.Errorf("%w: bad element", ErrMalformed)
 // a failed read returns the read's error.
 func ReadIndex(ctx context.Context, path string) (*Index, error) {
 	start := time.Now()
-	f, info, err := openFile(path)
+	f, info, err := openFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +450,9 @@ func newTrack(e matroska.TrackEntry) Track {
 		// FFmpeg scales the track's timestamps again by it.
 		t.Unsupported = "TrackTimestampScale"
 	}
+	if e.CodecDelay != 0 {
+		t.Unsupported = "CodecDelay"
+	}
 	// FFmpeg applies a single ContentEncoding and ignores a chain of them.
 	switch len(e.Encodings) {
 	case 0:
@@ -561,6 +564,11 @@ func collectCues(cues []byte, tracks []Track, segStart, scale int64) bool {
 			return
 		}
 		c := Cue{Time: t, ClusterPosition: segStart + pos.ClusterPosition, RelativePosition: pos.RelativePosition}
+		if pos.RelativePosition < 0 && pos.BlockNumber > 1 {
+			// The cluster scan matches by timestamp, not CueBlockNumber.
+			// Let FFmpeg preserve simultaneous blocks with distinct identities.
+			tracks[i].Unsupported = "CueBlockNumber without CueRelativePosition"
+		}
 		if pos.Duration >= 0 {
 			if d, ok := ticksDuration(pos.Duration, scale); ok {
 				c.Duration = d
