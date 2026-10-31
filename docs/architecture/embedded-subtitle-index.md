@@ -134,6 +134,7 @@ or, for an on-demand segment, with an empty segment.
 | Index cache | 64 MiB by estimate, counting cues, samples, kept boxes and compression settings |
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
+| Whole-track flights | 16 running or queued per store, including canceled workers until they exit; callers may join an admitted track at capacity; additional tracks fall back to demux |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
 | One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept track's whole read, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
 | Blocks and samples | 16 MiB each, compressed or not |
