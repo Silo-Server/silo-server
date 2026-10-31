@@ -208,7 +208,9 @@ jobs:
           fi
           if [[ "$order" != "behind" ]]; then
             tags+=" -t ${REGISTRY}/${IMAGE_LC}:dev"
-            if [[ -z "$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" ]]; then
+            # A failed lookup stops the job rather than reading as "no release yet".
+            release_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" || exit 1
+            if [[ -z "$release_tags" ]]; then
               tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
             fi
           else

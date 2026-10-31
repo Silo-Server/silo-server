@@ -77,8 +77,8 @@ announcing a release.
 
 ## Publishing a release
 
-1. Wait until the **Docker Image** workflow has published the `main` commit you
-   want to release. The release reuses that image.
+1. Wait until CI has passed on the `main` commit you want to release and the
+   **Docker Image** workflow has published it. The release reuses that image.
 2. Open **Actions > Release > Run workflow** from the `main` branch and enter the
    version, for example `0.24.0` or `1.0.0-rc.1`. A version with `-rc.N` is a
    prerelease.
@@ -89,7 +89,7 @@ announcing a release.
 
 Release refuses an invalid version, a version that already exists or is older
 than the newest release, a run from a branch other than `main`, and a commit
-whose image has not been published. Generated notes start at the previous
+that CI hasn't passed or whose image hasn't been published. Generated notes start at the previous
 release for a release candidate, and at the previous non-candidate release
 otherwise, so `v1.0.0` covers everything since the last `0.x` release. If
 tagging the image fails, run **Release published** again with the release's tag.

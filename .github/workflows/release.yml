@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write # create the draft release
+      actions: read # find the commit's CI run
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -47,11 +48,22 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
-      # The release reuses this commit's image, so it must exist. The Docker
-      # Image workflow publishes it under the full commit SHA only after CI
-      # passes on main. Ask the registry, not the workflow's run list: a
-      # workflow_run build records main's head at trigger time, which can be a
-      # later commit than the one it publishes.
+      # A push run of CI records the commit it tested, so it can be looked up
+      # by this commit. A manual Docker Image run skips CI, so the image
+      # existing doesn't prove CI passed.
+      - name: Require CI to have passed on this commit
+        run: |
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push \
+            --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::CI has not passed on ${GITHUB_SHA::9} (${conclusion:-still running or missing})."
+            exit 1
+          fi
+
+      # The release reuses this commit's image, so it must exist. Ask the
+      # registry, not the Docker Image workflow's run list: a workflow_run
+      # build records main's head at trigger time, which can be a later commit
+      # than the one it publishes.
       - name: Require the commit's image to be published
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
