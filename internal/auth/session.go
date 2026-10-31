@@ -246,7 +246,11 @@ func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check 
 	if err != nil {
 		return fmt.Errorf("beginning session revocation: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
 	// The audit row's account locks come before the session lock, the order
 	// RevokeAsAdmin takes them in.
 	if err := auditmutation.LockActors(ctx, tx); err != nil {
@@ -394,7 +398,11 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
 	// The audit row's accounts, an impersonator included, join that id order.
 	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
 		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
