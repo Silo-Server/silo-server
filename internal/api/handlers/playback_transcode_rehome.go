@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -312,7 +313,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 // recorded plan (the protocol store is absent or lost it) has no plan, which
 // applies no other capability filter, as at that session's own start.
 func (h *PlaybackHandler) rehomePlanV3(ctx context.Context, session *playback.Session, card *playback.RecipeCard) playback.PlannerResultV3 {
-	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind, SubtitleRendition: card.SubtitleRendition, TargetVideoCodec: card.TargetCodecVideo}
+	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind, SubtitleRendition: card.SubtitleRendition, SubtitleRenditionTracks: card.SubtitleRenditionTracks, SubtitleRenditionSource: card.SubtitleRenditionSource, TargetVideoCodec: card.TargetCodecVideo}
 	if h.PlanStoreV3 == nil {
 		return result
 	}
@@ -337,6 +338,7 @@ func (h *PlaybackHandler) rehomeRecipeCardV3(
 ) (*playback.RecipeCard, bool) {
 	if tokenCard != nil && rehomeRecipeServesV3(*tokenCard, session, transportID) {
 		card := *tokenCard
+		h.withRecordedRenditionTracksV3(ctx, &card)
 		return &card, false
 	}
 	if h.NodeRecipeStore != nil && h.NodeRecipeStore.Enabled() {
@@ -346,6 +348,30 @@ func (h *PlaybackHandler) rehomeRecipeCardV3(
 		}
 	}
 	return nil, false
+}
+
+// withRecordedRenditionTracksV3 gives the on-demand renditions of a card
+// rebuilt from a stream token, which knows them only by number, the names,
+// languages and FORCED of the attempt's frozen recipe, when that lists the
+// same tracks in the same order. Without such a record they stay numbers.
+func (h *PlaybackHandler) withRecordedRenditionTracksV3(ctx context.Context, card *playback.RecipeCard) {
+	if h == nil || h.PlanStoreV3 == nil || card == nil || len(card.SubtitleRenditionTracks) == 0 {
+		return
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, card.SessionID)
+	if err != nil || record == nil {
+		return
+	}
+	frozen := record.FrozenRecipe.SubtitleRenditionTracks
+	if !slices.EqualFunc(frozen, card.SubtitleRenditionTracks, func(a, b playback.SubtitleRenditionTrack) bool {
+		return a.TrackNumber == b.TrackNumber
+	}) {
+		return
+	}
+	card.SubtitleRenditionTracks = slices.Clone(frozen)
+	if card.SubtitleRenditionSource.IsZero() {
+		card.SubtitleRenditionSource = record.FrozenRecipe.SubtitleRenditionSource
+	}
 }
 
 // rehomeRecipeServesV3 accepts only a complete transcode recipe for exactly the
@@ -587,6 +613,7 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 		ThrottleSeconds:            card.ThrottleSeconds,
 		RequireReady:               true,
 	}
+	req.SubtitleRenditionTracks, req.SubtitleRenditionSource = card.SubtitleRenditionTracks, card.SubtitleRenditionSource
 	if segment, seekSeconds, ok := playback.ReconstructResumePoint(card, requestedSegment); ok {
 		req.StartSegmentNumber = segment
 		req.SeekSeconds = seekSeconds

@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -591,6 +593,37 @@ func TestCacheKeysOnFileVersion(t *testing.T) {
 	}
 	if len(small.entries) != 1 || small.used > small.maxBytes {
 		t.Fatalf("cache holds %d entries, %d of %d bytes", len(small.entries), small.used, small.maxBytes)
+	}
+}
+
+// A read that hangs fails its callers at the load deadline and doesn't hold
+// the next caller: opening a FIFO with no writer blocks, as a stalled mount
+// does.
+func TestCacheGivesUpOnAHungRead(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "stalled.mkv")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	t.Cleanup(func() {
+		// Let the abandoned reads finish.
+		for range 2 {
+			if f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+				_ = f.Close()
+			}
+		}
+	})
+	previous := indexLoadTimeout
+	indexLoadTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { indexLoadTimeout = previous })
+	c := NewCache(1 << 20)
+	for attempt := range 2 {
+		started := time.Now()
+		if _, err := c.Index(context.Background(), fifo); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("attempt %d: err = %v, want the load deadline", attempt, err)
+		}
+		if elapsed := time.Since(started); elapsed > 5*time.Second {
+			t.Fatalf("attempt %d waited %v", attempt, elapsed)
+		}
 	}
 }
 

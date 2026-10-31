@@ -65,8 +65,6 @@ const (
 	// defaultPollInterval is how often a request waiting on another
 	// server's read looks for its result.
 	defaultPollInterval = time.Second
-	// defaultIndexCacheBytes holds the indexes of a few thousand files.
-	defaultIndexCacheBytes = 64 << 20
 	// startTimesKept bounds the source start times remembered.
 	startTimesKept = 4096
 )
@@ -126,7 +124,7 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 	s := &Store{
 		repo:         repo,
 		blobs:        blobs,
-		indexes:      embeddedsub.NewCache(defaultIndexCacheBytes),
+		indexes:      playback.SubtitleIndexes(),
 		opts:         opts,
 		pollInterval: defaultPollInterval,
 		flights:      map[flightKey]*flight{},

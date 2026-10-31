@@ -99,6 +99,25 @@ func TestV1IgnoresLimitationsAndHidesInventoryIdentity(t *testing.T) {
 	}
 }
 
+// The frozen /api/v1 decision carries no field the on-demand renditions
+// added, should a plan built for /api/v2 ever be answered there.
+func TestFrozenV1DecisionHidesOnDemandRenditions(t *testing.T) {
+	rendition := &playback.HLSSubtitleRenditionV3{GroupID: "subs", Name: "English", Format: "vtt", MIMEType: "text/vtt", Index: 2}
+	plan := &playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{
+		HLSRendition: rendition,
+		Inventory: []playback.SubtitleInventoryItemV3{
+			{TrackID: "file:42:subtitle:0", HLSRendition: &playback.SubtitleInventoryHLSRenditionV3{GroupID: "subs", Name: "English", Index: 2}},
+		},
+	}}
+	frozen := frozenV1DecisionV3(playback.DecisionResponseV3{PlaybackPlan: plan}).PlaybackPlan
+	if frozen.Subtitle.Inventory[0].HLSRendition != nil || frozen.Subtitle.HLSRendition.Index != 0 {
+		t.Fatalf("v1 decision = %+v %+v", frozen.Subtitle.Inventory[0], frozen.Subtitle.HLSRendition)
+	}
+	if plan.Subtitle.Inventory[0].HLSRendition == nil || rendition.Index != 2 {
+		t.Fatal("freezing changed the plan it was given")
+	}
+}
+
 // rokuStyleStartV3 is a start for an MKV with one embedded SubRip track,
 // selected, from a client whose native entry declares Roku's limitations.
 func rokuStyleStartV3(t *testing.T) (*PlaybackHandler, *models.MediaFile, playback.StartRequestV3) {

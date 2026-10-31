@@ -3772,6 +3772,11 @@ func main() {
 		}
 		deps.SubtitlePrefetch = keptsub.NewPrefetcher(deps.KeptSubtitles, nextEpisode)
 		deps.SubtitlePrefetch.Start(appCtx)
+		// The HLS streams this server runs read their on-demand subtitle
+		// renditions from kept tracks too.
+		if deps.KeptSubtitles != nil {
+			playback.SetRenditionKeptTracks(deps.KeptSubtitles)
+		}
 	}
 
 	router := api.NewRouter(deps)
