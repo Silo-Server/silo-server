@@ -60,6 +60,12 @@ case "${MODE:-integrated}" in
       echo "MODE=$MODE needs DATABASE_URL and REDIS_URL pointing at the main server's PostgreSQL and Redis" >&2
       exit 1
     fi
+    # Silo falls back to a URL built from its listen port, so two nodes
+    # without one would share session keys and acceleration overrides.
+    if [[ "$MODE" == proxy || "$MODE" == transcode ]] && [[ -z "${NODE_URL:-}" ]]; then
+      echo "MODE=$MODE needs NODE_URL, the URL the main server reaches this node on" >&2
+      exit 1
+    fi
     for name in ENABLE_REDIS ENABLE_MEILISEARCH ENABLE_NODE_ACCESS; do
       if truthy "${!name:-false}"; then warn "$name has no effect with MODE=$MODE"; fi
     done

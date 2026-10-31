@@ -150,7 +150,7 @@ doctor)
 		printf 'FAIL — psql as %s on %s failed; check SILO_POSTGRES_SERVICE, SILO_DB_USER, and SILO_DB_NAME\n' \
 			"$SILO_DB_USER" "$SILO_DB_NAME"
 		if [[ "$SILO_POSTGRES_SERVICE" == postgres ]]; then
-			printf '         the default docker-compose.yml now runs PostgreSQL in the silo service, and its postgres service exits after the migration; set SILO_POSTGRES_SERVICE, SILO_DB_USER, and SILO_DB_NAME to silo in .silo-dev.env\n'
+			printf '         the default docker-compose.yml runs PostgreSQL in the silo service; set SILO_POSTGRES_SERVICE, SILO_DB_USER, and SILO_DB_NAME to silo in .silo-dev.env, or keep postgres with docker-compose.split.yml\n'
 		fi
 		status=1
 	fi

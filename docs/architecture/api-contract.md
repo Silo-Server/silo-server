@@ -1282,7 +1282,7 @@ tombstone. The retained contract is:
   finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
-container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
+container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
 root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
@@ -1687,12 +1687,12 @@ overwrite newer progress; every item needs a stable event time before automatic 
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
 resume position while keeping its watched state and history, answers `204` (also when there is
-nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
-kind `markWatched` does not handle, and is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for an
+audiobook or a kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
 `clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
-v2 `markWatched` on a watched movie or episode with a resume position records another play and
+v2 `markWatched` on a watched movie, episode or audiobook with a resume position records another play and
 clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
 no-op. Semantics are in
 [the progress API](../progress-api.md#clearing-a-resume-position).

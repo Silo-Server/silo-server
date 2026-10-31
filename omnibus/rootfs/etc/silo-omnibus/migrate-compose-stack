@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Copy an install of the multi-container Compose stack, which ran PostgreSQL,
 # Redis, and Meilisearch in containers of their own, into the omnibus layout
-# under SILO_DATA_ROOT/config. docker-compose.yml runs this as its postgres
-# service before Silo starts, with SILO_DATA_ROOT mounted at /silo-data.
+# under SILO_DATA_ROOT/config, so docker-compose.yml's single container runs
+# on it. An administrator runs it once, with SILO_DATA_ROOT mounted at
+# /silo-data, after stopping the earlier stack; see "Moving from the
+# multi-container stack" in docs/architecture/omnibus-image.md. Nothing runs
+# it on its own: docker-compose.split.yml keeps an install on the earlier
+# layout.
 #
 # The PostgreSQL cluster is copied and Silo's plugins, artwork, and compat
 # directories are hard-linked, so the earlier Compose file still starts on the
@@ -23,25 +27,14 @@ pg_stage="$config/postgres/.data.migrating"
 # Both in /config, which only root writes, like the image's other markers.
 # done: written last; the source cluster's identifier and latest checkpoint,
 # or "none" when Silo's database is elsewhere. pending: present while staged
-# results move into place. checked: this step finished, whatever it found;
-# under REQUIRE_COMPOSE_MIGRATION, init-postgres creates no cluster without it,
-# since one would come up empty beside an earlier install this step has yet
-# to move.
+# results move into place; init-postgres refuses to start while it exists.
 done_marker="$config/.compose-cluster-copied"
 pending_marker="$config/.compose-migration-pending"
-checked_marker="$config/.compose-migration-checked"
 silo_dirs=(plugins artwork compat)
 
 fail() {
   printf '[omnibus] error: %s\n' "$*" >&2
   exit 1
-}
-
-# mark_checked: record that this step ran. /config stays root's, as
-# init-config lays it out.
-mark_checked() {
-  install -d -o root -g root -m 0755 "$config"
-  : > "$checked_marker"
 }
 
 # host PATH: PATH under /silo-data as the host names it.
@@ -73,21 +66,16 @@ control_fingerprint() {
   printf '%s' "$out"
 }
 
-# set_aside PATH: move a result an earlier attempt left at PATH out of the way.
+# set_aside PATH: move what an earlier start or attempt left at PATH out of
+# the way.
 set_aside() {
   local dest
   dest="${1%/*}/.${1##*/}.before-$(date -u +%Y%m%dT%H%M%SZ)"
   mv -T "$1" "$dest"
-  log "set aside $(host "$1") from an unfinished earlier attempt as $(host "$dest")"
+  log "set aside $(host "$1"), left by an earlier start or attempt, as $(host "$dest")"
 }
 
 [[ -d "$root" ]] || fail "mount SILO_DATA_ROOT at $root"
-
-# The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
-# would otherwise follow aio past a pinned build.
-if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
-  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
-fi
 
 # --- What is there. ----------------------------------------------------------
 
@@ -122,6 +110,12 @@ if [[ -d "$config" ]]; then
   fi
 fi
 
+# The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
+# would otherwise follow aio past a pinned build.
+if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
+  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
+fi
+
 # Migrated before: refuse if the earlier stack has run on the original since,
 # since starting on the copy would drop what it wrote.
 if [[ -s "$done_marker" ]]; then
@@ -133,35 +127,28 @@ if [[ -s "$done_marker" ]]; then
       fail "the earlier stack has used $(host "${clusters[0]}") since it was copied to $(host "$pgdata"). To copy it again, move $(host "$config") aside; to keep the copy, delete $(host "${clusters[0]}")"
     fi
   fi
-  mark_checked
+  log "the earlier install in $host_root was already moved into $(host "$config"); nothing to do"
   exit 0
 fi
 # An omnibus install of its own. Beside an earlier install this step has not
-# moved, its cluster was created first, most likely by Silo started on its
-# own: copying over it would drop what it holds, and going on without the
-# earlier install would leave that data behind unannounced.
+# moved, its cluster was created first, most likely by docker-compose.yml
+# started on this SILO_DATA_ROOT before the move: copying over it would drop
+# what it holds, and going on without the earlier install would leave that
+# data behind unannounced.
 if [[ -e "$pgdata/PG_VERSION" ]]; then
   if (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; then
     found=()
     for name in postgres "${silo_dirs[@]}"; do
       [[ -e "$root/$name" || -L "$root/$name" ]] && found+=("$name")
     done
-    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root (${found[*]}) was moved, likely by starting Silo before this step (docker compose up --no-deps). If $(host "$pgdata") holds nothing you need, move it aside and start again. To keep it, delete the earlier stack's directories in $host_root"
+    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root (${found[*]}) was moved, likely by starting docker-compose.yml first. If $(host "$pgdata") holds nothing you need, move it aside and run this again. To keep it, delete the earlier stack's directories in $host_root"
   fi
-  mark_checked
+  log "$host_root holds an omnibus install and no earlier one; nothing to move"
   exit 0
 fi
 
 if (( ${#clusters[@]} == 0 )) && [[ "$earlier_install" == false ]]; then
-  # Nothing of the earlier stack here. An .env written for it means its data
-  # is in named volumes or at paths this file does not mount, and starting
-  # would make an empty server beside it.
-  if [[ -z "${DATABASE_URL:-}" ]] && ! truthy "${ENABLE_NODE_ACCESS:-false}" &&
-    [[ -n "${POSTGRES_PASSWORD_SET:-}" || -n "${SILO_IMAGE:-}" ]]; then
-    fail ".env sets POSTGRES_PASSWORD or SILO_IMAGE, which only the earlier stack used, but $host_root has none of its data. If its data is in named volumes or other paths, move it to $host_root (postgres, plugins, artwork, compat) and start again. If this is a new install, remove those two settings from .env"
-  fi
-  mark_checked
-  exit 0
+  fail "found no install of the multi-container stack in $host_root (postgres, plugins, artwork, compat). If its data is in named volumes or other paths, move it to $host_root and run this again"
 fi
 
 # --- An earlier install is here. ---------------------------------------------
@@ -349,7 +336,7 @@ SQL
   if ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
     nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled")"
     if (( nodes > 0 )); then
-      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Layer docker-compose.node-access.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
+      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
     fi
   fi
 
@@ -442,8 +429,6 @@ printf '%s\n' "$fingerprint" > "$done_marker.new"
 mv -T "$done_marker.new" "$done_marker"
 sync -f "$config"
 rm -f "$pending_marker"
-# Last: init-postgres may create a cluster once this exists.
-mark_checked
 trap - EXIT
 [[ -z "$work" ]] || rm -rf "$work"
 
@@ -457,6 +442,6 @@ for dir in "$config"/postgres/.*.before-* "$config"/silo/.*.before-*; do
   [[ -e "$dir" ]] && aside+=("$(host "$dir")")
 done
 if (( ${#aside[@]} > 0 )); then
-  log "unfinished earlier attempts were set aside as ${aside[*]}. Delete them once this install works"
+  log "what earlier starts or attempts left was set aside as ${aside[*]}. Delete it once this install works"
 fi
 log "Silo now runs as uid ${PUID:-911} instead of root, so that account needs read access to the media"

@@ -552,6 +552,54 @@ exec sleep 30
 	}
 }
 
+// A segment request whose context ends while it waits for FFmpeg stops waiting
+// at once, instead of holding the request until the wait times out. It still
+// answers 404: net/http also ends the context of a client that only
+// half-closed, and writing nothing would reach it as an empty 200.
+func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
+	const sessionID = "departed-segment"
+	transcodeSession, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
+		SessionID:          sessionID,
+		InputPath:          "/media/slow.mkv",
+		OutputDir:          t.TempDir(),
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		FFmpegPath:         writePlaybackTestFFmpegNeverReady(t),
+		HWAccel:            "none",
+		AudioTrackIndex:    -1,
+		SubtitleTrackIndex: -1,
+	})
+	if err != nil {
+		t.Fatalf("StartTranscode: %v", err)
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+
+	sessions := playback.NewSessionManager(0, 0)
+	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
+	handler := NewPlaybackHandler(sessions)
+	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
+
+	// No playlist yet, so the first segment would wait for FFmpeg's startup.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00000.ts", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", sessionID)
+	routeCtx.URLParams.Add("name", "seg_00000.ts")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+
+	started := time.Now()
+	handler.HandleGetTranscodeSegment(rr, req)
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("segment request waited %v after it ended", elapsed)
+	}
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d %q, want 404", rr.Code, rr.Body.String())
+	}
+}
+
 func withPlaybackRouteParam(req *http.Request, key, value string) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add(key, value)

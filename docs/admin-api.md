@@ -1048,6 +1048,7 @@ client tells "this deployment is older than my build" from "the request failed".
 | `watch_providers` | `GET /admin/stats` carries the per-provider `watch_providers` array. |
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
+| `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
 
 ```json
 {
@@ -1059,7 +1060,8 @@ client tells "this deployment is older than my build" from "the request failed".
   "log_level_list": true,
   "watch_providers": true,
   "downloads_stats": true,
-  "egress_totals": true
+  "egress_totals": true,
+  "egress_by_source": true
 }
 ```
 
@@ -1210,6 +1212,14 @@ without it a deployment with no stream nodes would chart zero egress forever.
 Relay traffic is excluded, so bytes a proxy node passes through the API node are
 not counted twice.
 
+The per-node split lives in `dashboard_node_egress_samples`: one row per node
+serving traffic, written in the same statement as the shared row and only by
+the replica whose shared row won the minute, so the split and the total come
+from one snapshot. It breaks down egress the shared row already holds, and it
+is kept out of `dashboard_metric_samples` so a reader that sums that table,
+including an older build during a rolling upgrade or after a rollback, never
+counts node egress twice.
+
 Stream counts in a point therefore come from the shared row, while `egress_kbps`
 sums every source for a minute before the peak minute of the bucket is taken.
 Precision is mixed by design: node egress is a 30-second rolling average and
@@ -1230,6 +1240,23 @@ subset as separate series rather than deriving a playback series. Samples
 written before the split report `0` — read that as "not measured yet", not
 "no downloads".
 
+`egress_by_source` splits `egress_kbps` by the keys `egress_sources` lists,
+read in the same database snapshot as the points:
+`api` for every API process together and `node:<node_id>` for one stream node,
+named from `stream_nodes` (a node deleted since is named `Removed node <id>`).
+Unlike the other columns, the split is read from the minute whose
+`egress_kbps` peaked in the bucket, so its values add up to no more than that
+point's `egress_kbps`. The remainder is egress no source accounts for: minutes
+sampled before per-node rows existed still carry their `api` entry, but their
+node egress is unattributed. Nodes with no traffic in the bucket's peak minute
+are absent from its split.
+
+`egress_sources` lists every source with samples anywhere in the window, so it
+also covers sources that never served at a bucket's peak minute. Each carries
+`egress_bytes`, what it served over the whole window, integrated from every
+sampled minute like the window's own `egress_bytes`. Rank sources by that, not
+by summing the per-point split, which only sees peak minutes.
+
 A bucket with no sample in it is absent from `points` rather than zero — a gap
 (a restart, a stopped server) and an idle bucket are different facts. Stream
 telemetry being disabled means no `proc:` rows, not an error.
@@ -1244,6 +1271,10 @@ fresh install renders "collecting data" instead of an empty chart.
   "oldest_sample_at": "2026-08-24T09:31:00Z",
   "egress_bytes": 412500000000,
   "download_egress_bytes": 37800000000,
+  "egress_sources": [
+    { "key": "api", "kind": "api", "name": "API server", "egress_bytes": 41300000000 },
+    { "key": "node:4", "kind": "node", "node_id": "4", "name": "proxy-ams", "egress_bytes": 371200000000 }
+  ],
   "points": [
     {
       "t": "2026-08-26T11:55:00Z",
@@ -1252,7 +1283,8 @@ fresh install renders "collecting data" instead of an empty chart.
       "remux": 0,
       "transcode": 2,
       "egress_kbps": 48211,
-      "download_egress_kbps": 6100
+      "download_egress_kbps": 6100,
+      "egress_by_source": { "api": 9211, "node:4": 39000 }
     }
   ]
 }
@@ -2348,12 +2380,12 @@ invalidates the exact compatibility status scope only for the active authority.
 
 ### Dashboard capability discovery in v2
 
-`GET /api/v2/admin/dashboard/capabilities` returns the nine dashboard support
+`GET /api/v2/admin/dashboard/capabilities` returns the ten dashboard support
 flags to an acting administrator. These describe the v2 surface in the API build;
 they do not promise that a database or other runtime dependency is healthy.
 
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
-`downloads_stats` and `egress_totals` are true for the existing v2 dashboard operations.
+`downloads_stats`, `egress_totals` and `egress_by_source` are true for the existing v2 dashboard operations.
 `server_layouts` remains false while the v2 layout lifecycle is unavailable.
 `log_level_list` is true for the accepted multi-level application-log reader. Clients
 must not infer v2 support from the bridge's independently retained capabilities.

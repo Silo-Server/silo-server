@@ -16,6 +16,7 @@ const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceede
 const subscriptionUserNotEligible = "subscription_sharing_user_not_eligible"
 const subscriptionInvalidUser = "subscription_sharing_invalid_user"
 const responseFailedEvent = "response.failed"
+const responseServerError = "server_error"
 
 var ErrPlanIneligible = errors.New("this account cannot share ChatGPT plan usage; check ChatGPT usage settings")
 
@@ -56,12 +57,14 @@ type responseTextFormat struct {
 }
 
 type responseRequest struct {
-	Model     string              `json:"model"`
-	Input     []Message           `json:"input"`
-	Store     bool                `json:"store"`
-	Stream    bool                `json:"stream"`
-	Reasoning *responseReasoning  `json:"reasoning,omitempty"`
-	Text      *responseTextFormat `json:"text,omitempty"`
+	Model       string              `json:"model"`
+	Input       []Message           `json:"input"`
+	Store       bool                `json:"store"`
+	Stream      bool                `json:"stream"`
+	Reasoning   *responseReasoning  `json:"reasoning,omitempty"`
+	Text        *responseTextFormat `json:"text,omitempty"`
+	ServiceTier string              `json:"service_tier,omitempty"`
+	Temperature *float32            `json:"temperature,omitempty"`
 }
 
 func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, jsonObject bool) (string, error) {
@@ -197,7 +200,7 @@ func readResponseStream(data io.Reader) (string, error) {
 			if code == "subscription_sharing_user_unavailable" {
 				return errors.New("ChatGPT subscriber information is temporarily unavailable")
 			}
-			if code == "server_error" {
+			if code == responseServerError {
 				return errors.New("ChatGPT is temporarily unavailable")
 			}
 			if code == subscriptionUsageLimitExceeded {

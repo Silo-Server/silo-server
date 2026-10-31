@@ -495,6 +495,13 @@
           "chatgpt_sign_in": {
             "type": "boolean"
           },
+          "openai_service_tiers": {
+            "description": "Service-tier choices for OpenAI API-key text providers. Default omits the upstream parameter; availability and pricing depend on the OpenAI model and account.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "reasoning_levels": {
             "items": {
               "type": "string"
@@ -4988,6 +4995,9 @@
           "downloads_stats": {
             "type": "boolean"
           },
+          "egress_by_source": {
+            "type": "boolean"
+          },
           "egress_totals": {
             "type": "boolean"
           },
@@ -5037,6 +5047,7 @@
           "watch_providers",
           "downloads_stats",
           "egress_totals",
+          "egress_by_source",
           "revision",
           "state",
           "allowed"
@@ -5116,6 +5127,47 @@
           "username",
           "downloads",
           "total_bytes"
+        ],
+        "type": "object"
+      },
+      "AdminDashboardEgressSource": {
+        "additionalProperties": false,
+        "properties": {
+          "egress_bytes": {
+            "description": "Data this source served over the whole window, integrated from every sampled minute like the window's egress_bytes. Rank sources by this rather than by the per-point split, which shows only each bucket's peak minute.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "description": "The key used in a point's egress_by_source: \"api\" or \"node:\u003cnode_id\u003e\".",
+            "type": "string"
+          },
+          "kind": {
+            "description": "api is every API server process together; node is one stream node.",
+            "enum": [
+              "api",
+              "node"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name. A node deleted since it was sampled is named \"Removed node \u003cid\u003e\".",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "The stream node, for kind node.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "name",
+          "egress_bytes"
         ],
         "type": "object"
       },
@@ -5313,6 +5365,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "egress_sources": {
+            "description": "Every source with samples in the window, which covers every key a point's egress_by_source uses; the API source first, then nodes by name.",
+            "items": {
+              "$ref": "#/components/schemas/AdminDashboardEgressSource"
+            },
+            "type": "array"
+          },
           "from": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -5355,6 +5414,7 @@
           "oldest_sample_at",
           "egress_bytes",
           "download_egress_bytes",
+          "egress_sources",
           "points"
         ],
         "type": "object"
@@ -5369,6 +5429,14 @@
           "download_egress_kbps": {
             "format": "int64",
             "type": "integer"
+          },
+          "egress_by_source": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values.",
+            "type": "object"
           },
           "egress_kbps": {
             "format": "int64",
@@ -5401,7 +5469,8 @@
           "remux",
           "transcode",
           "egress_kbps",
-          "download_egress_kbps"
+          "download_egress_kbps",
+          "egress_by_source"
         ],
         "type": "object"
       },
@@ -44138,7 +44207,7 @@
             "type": "boolean"
           },
           "mark_watched_records_rewatch": {
-            "description": "Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op",
+            "description": "Whether markWatched on a watched movie, episode or audiobook that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op",
             "examples": [
               true
             ],
@@ -222377,12 +222446,12 @@
             }
           },
           {
-            "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+            "description": "A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+              "description": "A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes",
               "examples": [
                 "movie:heat-1995"
               ],
@@ -222526,12 +222595,12 @@
             }
           },
           {
-            "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+            "description": "A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+              "description": "A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes",
               "examples": [
                 "movie:heat-1995"
               ],
@@ -222640,7 +222709,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie or episode with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.",
+        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie, episode or audiobook with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.",
         "tags": [
           "watch"
         ],

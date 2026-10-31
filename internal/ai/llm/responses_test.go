@@ -374,3 +374,54 @@ func TestSubscriptionPermanentStreamFailuresDoNotRetry(t *testing.T) {
 		})
 	}
 }
+
+// Incomplete or refused translations must never replace the source text, even
+// when the provider includes partial output alongside its terminal status.
+func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
+	for name, body := range map[string]string{
+		"incomplete":     `{"status":"incomplete","output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`,
+		"failed":         `{"status":"failed","error":{"code":"invalid_prompt"}}`,
+		"refused":        `{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"no"}]}]}`,
+		"reasoning only": `{"status":"completed","output":[{"type":"reasoning","content":[{"type":"output_text","text":"private reasoning"}]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := chatConfig("https://api.openai.com")
+			cfg.ServiceTier = serviceTierUltrafast
+			client := NewClient(cfg)
+			calls := 0
+			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			})
+			content, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, true)
+			if err == nil || content != "" || calls != 1 {
+				t.Fatalf("content=%q err=%v calls=%d; want no output and one failed attempt", content, err, calls)
+			}
+		})
+	}
+}
+
+func TestAPIResponsesRetriesTransientFailure(t *testing.T) {
+	for _, code := range []string{"server_error", "rate_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := chatConfig("https://api.openai.com")
+				cfg.ServiceTier = serviceTierUltrafast
+				client := NewClient(cfg)
+				calls := 0
+				client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					body := `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"complete"}]}]}`
+					if calls == 1 {
+						body = fmt.Sprintf(`{"status":"failed","error":{"code":%q},"output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`, code)
+					}
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+				})
+				content, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, true)
+				if err != nil || content != "complete" || calls != 2 {
+					t.Fatalf("content=%q err=%v calls=%d; want complete output after retry", content, err, calls)
+				}
+			})
+		})
+	}
+}

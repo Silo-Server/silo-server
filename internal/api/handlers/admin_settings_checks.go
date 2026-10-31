@@ -37,7 +37,7 @@ const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to ano
 // key, Meilisearch refused for an authenticated request.
 const adminMeilisearchKeyRejectedMessage = "Meilisearch refused the API key, or requires one. Enter a key that can manage indexes and documents, such as the Default Admin API Key."
 
-const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
+const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
 
 type adminSettingsConnectionCheckRequest struct {
 	Values    map[string]string `json:"values"`
@@ -184,6 +184,7 @@ func aiClientConfig(cfg *config.Config) llm.Config {
 	return llm.Config{
 		AuthMode:        cfg.AI.AuthMode,
 		ReasoningEffort: cfg.AI.ReasoningEffort,
+		ServiceTier:     cfg.AI.ServiceTier,
 		BaseURL:         strings.TrimSpace(cfg.AI.BaseURL),
 		APIKey:          cfg.AI.APIKey,
 		ChatModel:       strings.TrimSpace(cfg.AI.ChatModel),

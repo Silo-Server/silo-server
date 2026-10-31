@@ -29,6 +29,7 @@ import type { components } from "@/api/v2/schema";
 import { v2, type V2Query } from "@/api/v2/request";
 import { sectionKeys } from "./keys";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
+import { artworkQuery, rowDrawsBackdrops, type ArtworkWidthQuery } from "@/lib/artworkWidths";
 import { HOME_ROW_ITEM_LIMIT, homeRowItemLimit, homeRowResponse } from "./homeRowLimit";
 import { runBulkDelete, type BulkDeleteProgress } from "./bulkDelete";
 
@@ -95,8 +96,18 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
   return queryOptions({
     queryKey: sectionKeys.homeLayout(),
     queryFn: async ({ signal }): Promise<HomeLayoutResponse> => {
-      const layout = await fetchHomeLayout(signal);
+      const artwork = artworkQuery("homeLayout");
+      const layout = await fetchHomeLayout(artwork, signal);
       for (const section of layout.included_sections) {
+        // The layout's backdrops are hero-sized. A row of wide cards loads
+        // its own at card size rather than drawing those.
+        if (
+          artwork.backdrop_width &&
+          !section.featured &&
+          rowDrawsBackdrops(section.section_type)
+        ) {
+          continue;
+        }
         const row = homeRowResponse(section);
         if (row.partial && section.featured) continue;
         const queryKey = sectionKeys.homeItems(section.id);
@@ -123,10 +134,14 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
  * during a rolling upgrade) answers 422 and is asked again without it, so its
  * included rows come whole. One that also predates include_items, or allows
  * fewer rows, answers 422 again; the layout is then read alone and Home loads
- * every row itself.
+ * every row itself. The layout alone carries no artwork, so that read sends no
+ * widths either.
  */
-async function fetchHomeLayout(signal?: AbortSignal): Promise<V2HomeLayout> {
-  const included = { include_items: HOME_LAYOUT_INCLUDED_ROWS };
+async function fetchHomeLayout(
+  artwork: ArtworkWidthQuery,
+  signal?: AbortSignal,
+): Promise<V2HomeLayout> {
+  const included = { include_items: HOME_LAYOUT_INCLUDED_ROWS, ...artwork };
   try {
     return await v2("GET /api/v2/home/layout", {
       query: { ...included, item_limit: HOME_ROW_ITEM_LIMIT },
@@ -155,6 +170,14 @@ export function useHomeLayout(enabled = true) {
   return useQuery({ ...homeLayoutQueryOptions(queryClient), enabled });
 }
 
+interface SectionItemsOptions {
+  signal?: AbortSignal;
+  /** The section draws as the hero, so its backdrops load at hero size. */
+  featured?: boolean;
+  /** Read at most this many cards (see homeRowLimit). */
+  itemLimit?: number;
+}
+
 /**
  * Fetches one home section with its items, at most `itemLimit` of them when
  * set (see homeRowLimit). Answers in the same `{ section }` shape as the
@@ -164,12 +187,15 @@ export function useHomeLayout(enabled = true) {
  */
 export async function fetchHomeSectionItems(
   sectionId: string,
-  options?: { signal?: AbortSignal; itemLimit?: number },
+  options?: SectionItemsOptions,
 ): Promise<HomeSectionItemsResponse> {
   const read = (itemLimit?: number) =>
     v2("GET /api/v2/home/sections/{id}/items", {
       path: { id: sectionId },
-      query: itemLimit === undefined ? undefined : { item_limit: itemLimit },
+      query: {
+        ...artworkQuery(options?.featured ? "hero" : "row"),
+        ...(itemLimit === undefined ? {} : { item_limit: itemLimit }),
+      },
       signal: options?.signal,
     }).then(homeRowResponse);
   try {
@@ -189,10 +215,11 @@ export async function fetchHomeSectionItems(
 export function fetchLibrarySectionItems(
   libraryId: number,
   sectionId: string,
-  options?: { signal?: AbortSignal },
+  options?: SectionItemsOptions,
 ): Promise<HomeSectionItemsResponse> {
   return v2("GET /api/v2/library/{id}/sections/{section_id}/items", {
     path: { id: String(libraryId), section_id: sectionId },
+    query: artworkQuery(options?.featured ? "hero" : "row"),
     signal: options?.signal,
   }).then((section) => ({ section: sectionFromV2(section) }));
 }

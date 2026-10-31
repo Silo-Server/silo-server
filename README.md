@@ -105,17 +105,22 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-An install from before the omnibus image moves to it on the first
-`docker compose up -d` with this Compose file. Its earlier data directories stay
-in place until you delete them. Remove any `docker-compose.override.yml`
-entries for the old `postgres`, `redis`, or `meilisearch` services first. The
-earlier stack ran Silo as root; the omnibus image runs it as `PUID` (default
-1000), so set `PUID` and `PGID` in `.env` to an account that can read
-`MEDIA_ROOT`. If its
-`.env` sets `SILO_SEARCH_PROVIDER`,
-`SILO_MEILISEARCH_URL`, or `SILO_MEILISEARCH_API_KEY` for the separate
-Meilisearch service, remove them and set `ENABLE_MEILISEARCH=true` to use the
-bundled one.
+Hardware transcoding (VA-API or NVIDIA) and access for proxy or transcode
+nodes on other hosts are commented out in `docker-compose.yml`; uncomment the
+lines you need.
+
+### Updating an install from before the omnibus image
+
+An install that runs Silo, PostgreSQL, and Redis in separate containers keeps
+that layout when its `.env` sets `COMPOSE_FILE=docker-compose.split.yml`; set
+it before updating. `docker-compose.yml` is an example of a new install and
+does not look for an earlier one: started on that data folder, it replaces
+the old `silo` container and comes up on a new, empty database with setup
+open, while the earlier PostgreSQL and Redis keep running with their data
+untouched. Moving into the single container is a separate step. The separate GPU and node Compose files are gone, so a `COMPOSE_FILE`
+that names one fails until it names only the deployment file you use, with
+the matching lines in it uncommented. See [Moving from the multi-container
+stack](docs/architecture/omnibus-image.md#moving-from-the-multi-container-stack).
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,

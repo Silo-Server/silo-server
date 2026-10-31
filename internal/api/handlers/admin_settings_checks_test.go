@@ -892,6 +892,7 @@ func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
 		config.AIProvidersSettingKey: testAIProviders(t,
 			config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://saved.example.test", APIKey: "saved-secret", Capabilities: both},
 			config.AIProvider{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", APIKey: "other-secret", Capabilities: both},
+			config.AIProvider{ID: "openai", Type: config.AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com", APIKey: "openai-secret", Capabilities: both},
 		),
 		config.AITextProviderSettingKey:    "saved",
 		config.AISpeechProviderSettingKey:  "saved",
@@ -905,12 +906,14 @@ func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
 	}
 	forged := testAIProviders(t, config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://attacker.example.test", Capabilities: both})
 	for _, tc := range []struct {
-		name, kind, wantURL, wantKey string
-		values                       map[string]string
+		name, kind, wantURL, wantKey, wantTier string
+		values                                 map[string]string
 	}{
 		{name: "text uses the bound provider", kind: "ai_chat", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
 		{name: "text draft switches provider", kind: "ai_chat", values: map[string]string{config.AITextProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
 		{name: "text draft registry ignored", kind: "ai_chat", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "OpenAI draft tier", kind: "ai_chat", values: map[string]string{config.AITextProviderSettingKey: "openai", config.AIServiceTierSettingKey: "ultrafast"}, wantURL: "https://api.openai.com", wantKey: "openai-secret", wantTier: "ultrafast"},
+		{name: "other provider ignores tier", kind: "ai_chat", values: map[string]string{config.AIServiceTierSettingKey: "priority"}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
 		{name: "speech uses the bound provider", kind: "ai_transcription", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
 		{name: "speech draft switches provider", kind: "ai_transcription", values: map[string]string{config.AISpeechProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
 		{name: "speech draft registry ignored", kind: "ai_transcription", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
@@ -940,6 +943,9 @@ func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
 			}
 			if gotURL != tc.wantURL || gotKey != tc.wantKey {
 				t.Fatalf("checked %q with %q, want %q with %q", gotURL, gotKey, tc.wantURL, tc.wantKey)
+			}
+			if capturedAI.ServiceTier != tc.wantTier {
+				t.Fatalf("checked service tier %q, want %q", capturedAI.ServiceTier, tc.wantTier)
 			}
 		})
 	}

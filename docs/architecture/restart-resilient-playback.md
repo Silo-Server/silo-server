@@ -845,6 +845,14 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   (`Planner.MarkTranscodeNodeUnreachable`), so neither new sessions nor other
   moves select it. The next health sweep overwrites the mark with whatever the
   node answers.
+- **Body failure.** If the node hangs after headers, the same liveness watch
+  runs only while a body read is pending. It ends that read after two missed
+  health probes, or one if the node is already remembered as hung. The relay
+  logs the node and playback session and aborts the partial response, so a
+  chunked client does not mistake it for a complete one. It cannot move a
+  response already sent to the client.
+  On the client's next request, the header watch probes the remembered hung
+  node at once; one missed probe triggers the move described here.
 - **Recipe.** The same recipe the restart paths use: the client's `?st` token
   when it names the session's current transport, otherwise the
   `internal/noderecipe` card stored under the transport id for tokenless

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -90,5 +93,43 @@ func TestEnrichItemRetriesProviderErrorBeforeAuthorMismatch(t *testing.T) {
 	})
 	if !errors.Is(err, providerErr) {
 		t.Fatalf("enrichment error = %v, want provider failure to remain retryable", err)
+	}
+}
+
+type recordingAudiobookItemRepo struct {
+	updates []*catalog.MetadataUpdate
+}
+
+func (r *recordingAudiobookItemRepo) UpdateMetadata(_ context.Context, _ string, upd *catalog.MetadataUpdate) error {
+	r.updates = append(r.updates, upd)
+	return nil
+}
+
+func (r *recordingAudiobookItemRepo) UpdateMetadataTx(_ context.Context, _ pgx.Tx, _ string, upd *catalog.MetadataUpdate) error {
+	r.updates = append(r.updates, upd)
+	return nil
+}
+
+func (r *recordingAudiobookItemRepo) ReplacePeople(context.Context, string, []models.ItemPerson) error {
+	return nil
+}
+
+// A provider's runtime describes whichever edition it matched, so it must not
+// replace the length the scanner measured from the book's own files.
+func TestPersistKeepsScannedRuntimeOverProviderRuntime(t *testing.T) {
+	repo := &recordingAudiobookItemRepo{}
+	e := &Enricher{itemRepo: repo}
+
+	err := e.persist(context.Background(), enrichmentItemRow{ContentID: "book"}, nil, &metadata.MetadataResult{
+		HasMetadata: true, Overview: "About the book", Runtime: 481,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.updates) != 1 {
+		t.Fatalf("metadata updates = %d, want 1", len(repo.updates))
+	}
+	if got := repo.updates[0].Runtime; got != nil {
+		t.Fatalf("update runtime = %d, want the scanned runtime left alone", *got)
 	}
 }

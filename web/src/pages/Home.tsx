@@ -182,6 +182,7 @@ export default function Home() {
             const cached = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
             const response = await fetchHomeSectionItems(sectionId, {
               signal,
+              featured,
               itemLimit: homeRowItemLimit(featured, cached),
             });
             // A row the viewer extended comes back whole; the duplicate

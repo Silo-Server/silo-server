@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func (m *memoryStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
@@ -169,6 +171,31 @@ func TestTextConfigPinsAccountAndModelAcrossLaterSwitch(t *testing.T) {
 	}
 	if store.values["ai.chat_model"] != "b-model" {
 		t.Fatal("new account model not persisted")
+	}
+}
+
+func TestTextConfigReadsServiceTierWithProvider(t *testing.T) {
+	registry := config.AIProviderRegistry{Providers: []config.AIProvider{
+		{ID: "openai", Type: config.AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com", APIKey: "test-key", Capabilities: []config.AICapability{config.AICapabilityChat}},
+		{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", Capabilities: []config.AICapability{config.AICapabilityChat}},
+	}}
+	s, store := selectionFixture(t, map[string]string{
+		config.AIProvidersSettingKey: registry.Encode(), config.AITextProviderSettingKey: "openai",
+		config.AIServiceTierSettingKey: "priority", "ai.auth_mode": "api_key",
+	})
+	first, err := s.TextConfig(t.Context())
+	if err != nil || first.ServiceTier != "priority" {
+		t.Fatalf("first tier = %q, error = %v", first.ServiceTier, err)
+	}
+	store.values[config.AIServiceTierSettingKey] = "ultrafast"
+	second, err := s.TextConfig(t.Context())
+	if err != nil || second.ServiceTier != "ultrafast" || first.ServiceTier != "priority" {
+		t.Fatalf("tier change: first=%q second=%q error=%v", first.ServiceTier, second.ServiceTier, err)
+	}
+	store.values[config.AITextProviderSettingKey] = "other"
+	other, err := s.TextConfig(t.Context())
+	if err != nil || other.ServiceTier != "" {
+		t.Fatalf("other provider received tier %q: %v", other.ServiceTier, err)
 	}
 }
 

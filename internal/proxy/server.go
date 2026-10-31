@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,6 +35,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -764,8 +766,8 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
-	s.tracker.Track(r.Context(), info)
-	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	release := s.tracker.Hold(r.Context(), info)
+	defer release(context.WithoutCancel(r.Context()))
 
 	// Serve through the same path the integrated server uses rather than a bare
 	// http.ServeFile: direct_stream_resume_v1 requires the strong ETag that
@@ -797,8 +799,8 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	// the API's reservation before the client starts its GET.
 	if s.tracker != nil && r.Method != http.MethodHead {
 		info := sessionInfo(s.tracker, claims, "download")
-		s.tracker.Track(r.Context(), info)
-		defer s.tracker.Remove(context.WithoutCancel(r.Context()), claims.SessionID)
+		release := s.tracker.Hold(r.Context(), info)
+		defer release(context.WithoutCancel(r.Context()))
 	}
 	if remoteArtifact {
 		s.relayDownloadArtifact(w, r, claims)
@@ -964,8 +966,8 @@ func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
-	s.tracker.Track(r.Context(), info)
-	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	release := s.tracker.Hold(r.Context(), info)
+	defer release(context.WithoutCancel(r.Context()))
 	s.proxyToTranscodeNode(w, r, claims, "/remux/"+transcodeTransportIDFromClaims(claims), forwardToken)
 }
 
@@ -987,11 +989,10 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	// A HEAD probe returns before the remux starts, so it is not an active
-	// stream: counting it would consume capacity, and its Remove would drop
-	// the entry of a GET already playing the same session.
+	// stream and must not count against this proxy's capacity.
 	if r.Method != http.MethodHead {
-		s.tracker.Track(r.Context(), sessionInfo(s.tracker, claims, "remux"))
-		defer s.tracker.Remove(r.Context(), claims.SessionID)
+		release := s.tracker.Hold(r.Context(), sessionInfo(s.tracker, claims, "remux"))
+		defer release(context.WithoutCancel(r.Context()))
 	}
 
 	seekSeconds := 0.0
@@ -1203,6 +1204,13 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
+			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "proxy", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(claims.TranscodeNode), "playback_session_id", claims.SessionID)
+		}
+		if r.Context().Err() == nil {
+			// A clean end would let a chunked client accept the short body as complete.
+			panic(http.ErrAbortHandler)
+		}
 		return
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&

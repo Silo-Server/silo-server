@@ -282,7 +282,7 @@ database; with the PostgreSQL service from
 running under the Compose defaults:
 
 ```sh
-docker compose -f docker-compose.dev.yml exec postgres createdb -U silo silo_pins
+docker compose -f dev/compose.yml exec postgres createdb -U silo silo_pins
 export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
 DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only

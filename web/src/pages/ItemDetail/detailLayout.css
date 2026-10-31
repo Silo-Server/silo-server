@@ -478,35 +478,18 @@
 }
 
 @layer utilities {
-  /* Desktop: size the hero to its copy first so the overview and credits stay
-     readable, and give navigation the rest. Navigation never drops below
-     --detail-navigation-min; past that, the hero's copy scrolls instead. */
   @media (min-width: 1024px) {
     .episode-detail-viewport {
-      --detail-navigation-min: 16rem;
       grid-template-rows: minmax(max-content, 1fr) minmax(0, max-content);
-    }
-    .episode-detail-viewport:has(> .episode-detail-navigation, > .series-detail-navigation)
-      > .item-detail-hero {
-      max-height: calc(100cqh - var(--detail-navigation-min));
     }
     .item-detail-hero[data-viewport-bounded="true"] .detail-hero-information > img {
       height: 5rem;
     }
   }
 
-  @media (min-width: 1024px) and (max-height: 650px) {
-    .episode-detail-viewport {
-      --detail-navigation-min: 13rem;
-    }
-  }
-
   @media (max-height: 650px) and (orientation: landscape) {
     .episode-detail-viewport {
       grid-template-rows: minmax(0, 1fr);
-    }
-    .episode-detail-viewport > .item-detail-hero {
-      max-height: none;
     }
   }
 }
@@ -543,13 +526,15 @@
     overflow: visible;
   }
 
-  /* On desktop, series and season pages fill the screen but grow past it when
-     the hero copy and the navigation don't both fit, so the page scrolls
-     instead of either one. The navigation is the season rail or a season's
-     episode grid; the grid caps itself at four rows (useGridRowCap). Short
-     desktop viewports use the side-by-side landscape layout. */
+  /* On desktop, episode, series and season pages fill the screen but grow
+     past it when the hero copy and the navigation don't both fit, so the page
+     scrolls instead of either one. The navigation is the More Episodes rail,
+     the season rail or a season's episode grid; the grid caps itself at four
+     rows (useGridRowCap). Short desktop viewports use the side-by-side
+     landscape layout. */
   @media (min-width: 1024px) and (min-height: 651px) {
-    .series-detail-viewport {
+    .series-detail-viewport,
+    .episode-detail-viewport:has(> .episode-detail-navigation) {
       height: auto;
       min-height: calc(100dvh - var(--detail-header-height, 0px) - var(--detail-player-height));
       container-type: normal;
@@ -569,7 +554,8 @@
     .series-detail-viewport .item-detail-hero .detail-hero-primary-content > .media-card-image {
       height: 330px;
     }
-    .series-detail-viewport > .series-detail-navigation {
+    .series-detail-viewport > .series-detail-navigation,
+    .episode-detail-viewport > .episode-detail-navigation {
       height: auto;
       overflow: visible;
     }

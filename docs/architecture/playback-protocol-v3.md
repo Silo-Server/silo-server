@@ -538,6 +538,20 @@ claims that decoder handles every variant of it. That is a strong claim, and on
 `exact` it is the client's job not to make it carelessly: the server will honour
 it and hand back a direct route. Report what the platform actually enumerated.
 
+**What `max_frame_rate` means depends on the evidence tier.** On `exact`, it is
+the rate the decoder sustains at the entry's `max_width` x `max_height`, as
+Android measures it. When both sizes are present, a copy route (playback, or a
+download keeping the original) lets a smaller frame run faster within the same
+rate of 16x16 macroblocks (`mbs(width, height) * fps <= mbs(max_width,
+max_height) * max_frame_rate`), up to 60 fps: a 4K30 decoder takes 1080p60 but
+not 1080p120 or 720p120, and a 1080p30 one takes 720p60 but not 1080p60. The
+60 fps stop exists because Android also caps a smaller frame's rate by the
+codec's overall frame-rate range, which the entry does not carry. On
+`platform_attested` and `declared`, the entry is a tested envelope and its rate
+is an absolute limit. On every tier the sizes always bind, and so does the rate
+without both sizes. Choosing the size of an H.264 playback encode applies the
+macroblock-rate rule, without the 60 fps stop, on both detailed tiers.
+
 The three list bounds are also not matched the same way, which matters when
 populating them:
 

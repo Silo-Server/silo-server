@@ -76,7 +76,7 @@ function AudiobookAxisTabs({
     <div
       role="radiogroup"
       aria-label="Browse audiobooks by"
-      className="surface-panel inline-flex items-center gap-1 rounded-full p-1"
+      className="surface-panel inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {AUDIOBOOK_BROWSE_AXES.map((axis) => {
         const isActive = axis === value;
@@ -92,7 +92,7 @@ function AudiobookAxisTabs({
               }
             }}
             className={cn(
-              "rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+              "shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",

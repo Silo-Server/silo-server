@@ -87,6 +87,8 @@
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestAudiobookMarkListenedPostgres
+./internal/api/handlers TestAudiobookMarkListenedBoundariesPostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
@@ -103,6 +105,10 @@
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
+
+# Audiobookshelf-compatible tokens minted while the account is signed out everywhere do not outlive it.
+./internal/audiobooks TestABSTokensMintedDuringSignOutEverywhereDB
+./internal/audiobooks TestABSTokenIssuanceWaitsForTheAccountDB
 
 # Scoped administrator keys cannot redirect recovery through either API version.
 ./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
@@ -147,6 +153,9 @@
 
 # The person name fallback never merges namesakes with different provider IDs.
 ./internal/catalog TestPersonNameFallbackKeepsNamesakesApartPostgres
+
+# Concurrent name-only FindOrCreate calls resolve to one person.
+./internal/catalog TestPersonFindOrCreateConcurrentNameOnlyPostgres
 
 # An NFO actor photo takes a person's photo source only while the stored source
 # is the one the caller read.
@@ -198,6 +207,10 @@
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
 ./internal/metadata TestLadderBackfillCandidatesDB
+# A ladder candidate whose job is queued, running, or parked after failing stays
+# out of the next batch, so the sweep neither spins on work already in hand nor
+# stops at parked rows.
+./internal/metadata TestLadderBackfillSkipsCandidatesHeldByJobsDB
 # The database fence reopens a finished backfill only for artwork published
 # without the current ladder's new rung, on every surface it regenerates.
 ./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
@@ -366,6 +379,9 @@
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
+
+# Expired partition drops give up on a busy parent instead of queueing its traffic.
+./internal/partman TestDropExpiredPartitionsGivesUpOnABusyParentDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
 ./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
@@ -612,6 +628,10 @@
 # keeps a value an administrator chose.
 ./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
 
+# The access-token lifetime moves from the old 1h seed to 8h and keeps a value
+# an administrator chose.
+./migrations TestAccessTokenExpiryMigrationPostgres
+
 # A stored collection's Jellyfin BoxSet page skips members the viewer can't see
 # without shortening the page or shifting later pages.
 ./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB
@@ -629,4 +649,23 @@
 # drain spacing, and retention.
 ./internal/catalog TestCatalogItemChangeOutboxDB
 
+# Existing audiobooks take the runtime their active files add up to instead of
+# a metadata provider's runtime for some other edition.
+./migrations TestAudiobookRuntimeFromFilesBackfillPostgres
+
+# An audiobook with duplicate copies keeps its longest active copy's runtime
+# whichever copy a scan writes last.
+./internal/scanner TestAudiobookRuntimeTakesLongestCopyPostgres
+./internal/scanner TestAudiobookRuntimeConcurrentCopiesPostgres
+./internal/scanner TestAudiobookRuntimeConcurrentFileWritesPostgres
+./internal/scanner TestAudiobookRuntimeConcurrentMetadataAndMissingPostgres
 ./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB
+
+# Dashboard egress splits by stream node and API server without adding the
+# per-node rows to the total, and a wide bucket's split comes from its peak minute.
+./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
+./internal/api/handlers TestQueryAdminTimeseriesSplitsEgressBySourceDB
+
+# Clearing admin collection artwork commits the cleared reference even when a
+# stored variant fails to delete.
+./internal/api/handlers TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB
