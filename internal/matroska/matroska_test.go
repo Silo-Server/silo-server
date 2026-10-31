@@ -198,4 +198,10 @@ func TestParseTrackEntry(t *testing.T) {
 		!bytes.Equal(got.Encodings[0].CompSettings, want[0].CompSettings) {
 		t.Fatalf("encodings = %+v", got.Encodings)
 	}
+	// A crafted entry of many empty encodings keeps only the first few.
+	empty := bytes.Repeat(AppendElement(nil, IDContentEncoding, nil), 10_000)
+	got = ParseTrackEntry(AppendElement(nil, IDContentEncodings, empty))
+	if len(got.Encodings) != MaxContentEncodings {
+		t.Fatalf("kept %d of 10000 encodings", len(got.Encodings))
+	}
 }

@@ -473,8 +473,10 @@ func TestReadIndexRejectsOtherFiles(t *testing.T) {
 		"text":                         {[]byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"), ErrNotSupportedContainer},
 		"webm-ish but another doctype": {el(matroska.IDEBML, strEl(matroska.IDDocType, "notmkv")), ErrNotSupportedContainer},
 		// Damage the caller falls back to FFmpeg for, unlike a failed read.
-		"Matroska without a segment":   {slices.Concat(header, el(matroska.IDVoid, make([]byte, 8))), ErrMalformed},
-		"Matroska without tracks":      {slices.Concat(header, el(matroska.IDSegment, el(matroska.IDInfo))), ErrMalformed},
+		"Matroska without a segment": {slices.Concat(header, el(matroska.IDVoid, make([]byte, 8))), ErrMalformed},
+		"Matroska without tracks":    {slices.Concat(header, el(matroska.IDSegment, el(matroska.IDInfo))), ErrMalformed},
+		"Matroska with too many track entries": {slices.Concat(header, el(matroska.IDSegment, slices.Concat(el(matroska.IDInfo),
+			el(matroska.IDTracks, bytes.Repeat(el(matroska.IDTrackEntry), maxTrackEntries+1))))), ErrMalformed},
 		"MP4 box running past the end": {mp4Box("ftyp", []byte("isom"))[:10], ErrMalformed},
 		"MP4 without a moov":           {slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("mdat", make([]byte, 64))), ErrMalformed},
 	} {
