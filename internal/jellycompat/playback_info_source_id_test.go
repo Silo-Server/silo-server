@@ -394,10 +394,10 @@ func TestPlaybackInfoTranscodingURLNamesRefusedCopies(t *testing.T) {
 		name, query, body string
 		want, absent      []string
 	}{
-		{"copy allowed", "", `{"EnableDirectPlay":false,"SubtitleStreamIndex":-1}`, nil, []string{"allowvideostreamcopy", "allowaudiostreamcopy"}},
+		{"copy allowed", "", `{"EnableDirectPlay":false,"EnableDirectStream":false,"SubtitleStreamIndex":-1}`, nil, []string{"allowvideostreamcopy", "allowaudiostreamcopy"}},
 		{"first fallback refuses video copy", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false"}, []string{"allowaudiostreamcopy"}},
 		{"second fallback refuses both", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
-		{"body refuses both", "", `{"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AllowAudioStreamCopy":false,"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
+		{"body refuses both", "", `{"EnableDirectPlay":false,"EnableDirectStream":false,"AllowVideoStreamCopy":false,"AllowAudioStreamCopy":false,"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, routeID := newSubtitleSelectionHandler(t)
@@ -426,6 +426,37 @@ func TestPlaybackInfoTranscodingURLNamesRefusedCopies(t *testing.T) {
 				if strings.Contains(url, absent) {
 					t.Fatalf("TranscodingUrl = %q, want no %q", url, absent)
 				}
+			}
+		})
+	}
+}
+
+// Jellyfin sets TranscodingUrl only when it chooses to transcode, and Swiftfin
+// plays any TranscodingUrl before the direct URL, so a source the client can
+// direct play or direct stream must not carry one.
+func TestMediaSourceDTOOmitsTranscodingURLOnDirectSources(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		directPlay, directStream bool
+		wantTranscodingURL       bool
+	}{
+		{"direct play", true, false, false},
+		{"direct stream", false, true, false},
+		{"direct play and direct stream", true, true, false},
+		{"transcode only", false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+			source.SupportsDirectPlay, source.SupportsDirectStream = tc.directPlay, tc.directStream
+			dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+			if (dto.TranscodingURL != "") != tc.wantTranscodingURL {
+				t.Fatalf("TranscodingURL = %q, want present=%v", dto.TranscodingURL, tc.wantTranscodingURL)
+			}
+			if !tc.wantTranscodingURL && dto.TranscodingContainer != "" {
+				t.Fatalf("TranscodingContainer = %q on a source with no TranscodingURL", dto.TranscodingContainer)
+			}
+			if tc.wantTranscodingURL != (dto.TranscodingSubProtocol == compatStreamProtocolHLS) {
+				t.Fatalf("TranscodingSubProtocol = %q, want hls only on a transcode-only source", dto.TranscodingSubProtocol)
 			}
 		})
 	}
