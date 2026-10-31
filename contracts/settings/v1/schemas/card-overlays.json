@@ -68,6 +68,7 @@
         "content_rating",
         "advisory_age",
         "request_status",
+        "unwatched_episodes",
         "year",
         "runtime",
         "original_language",

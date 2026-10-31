@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 
+import { useUnwatchedEpisodeCount } from "@/hooks/queries/watchCounts";
 import { useLanguageNamesLoaded } from "@/lib/languageNamesLoader";
 import { OverlayIcon, WORDMARK_TEXT, getPreset, orderedOverlaysForPosition } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
@@ -266,7 +267,29 @@ function BadgeStack({
 // persistent on coarse ones) render on top of them. The layer is
 // pointer-events-none end to end, so a badge can never swallow a click aimed
 // at an action underneath it.
-export default function CardOverlays({
+export default function CardOverlays(props: CardOverlaysProps) {
+  const seriesId = props.data.unwatched_episodes_series_id;
+  if (
+    seriesId &&
+    props.data.unwatched_episodes === undefined &&
+    props.prefs.items.unwatched_episodes?.enabled === true
+  ) {
+    return <CardOverlaysWithUnwatchedCount {...props} seriesId={seriesId} />;
+  }
+  return <CardOverlayLayer {...props} />;
+}
+
+// Only a card that shows the unwatched-episodes badge looks up its series'
+// count, so the lookup lives in its own component and never runs on the rest.
+function CardOverlaysWithUnwatchedCount({
+  seriesId,
+  ...props
+}: CardOverlaysProps & { seriesId: string }) {
+  const count = useUnwatchedEpisodeCount(seriesId);
+  return <CardOverlayLayer {...props} data={{ ...props.data, unwatched_episodes: count }} />;
+}
+
+function CardOverlayLayer({
   data,
   prefs,
   variant = "poster",

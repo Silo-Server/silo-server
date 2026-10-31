@@ -8849,6 +8849,28 @@
       "body_file": "get_trailers_capability_ok.json"
     },
     {
+      "name": "get_watch_counts_capability_ok",
+      "operation_id": "getWatchCountsCapability",
+      "scenario": "The watch-counts read is available and takes up to 250 series a request.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"a18bbf8a6ad3c3c7b2ad4a157a176a063215483ad6393a0cd0ecaf7d69ab873b\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchCountsCapability",
+      "body_file": "get_watch_counts_capability_ok.json"
+    },
+    {
       "name": "get_watch_state_not_playable",
       "operation_id": "getWatchState",
       "scenario": "A series is not directly playable: a validation failure naming the path parameter, where v1 answered 400 invalid_watch_target.",
@@ -13592,6 +13614,71 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CatalogLetters",
       "body_file": "query_catalog_letters_ok.json"
+    },
+    {
+      "name": "query_catalog_watch_counts_empty",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "A request that names no series is refused.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "query_catalog_watch_counts_empty.json"
+    },
+    {
+      "name": "query_catalog_watch_counts_ok",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "Episode watch counts for the series on a page of cards; the movie ID has none and is left out.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:severance\",\"movie:heat-1995\",\"series:the-office\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogWatchCountCollection",
+      "body_file": "query_catalog_watch_counts_ok.json"
+    },
+    {
+      "name": "query_catalog_watch_counts_profile_header_required",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "Watch counts without X-Profile-Id.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"series_ids\":[\"series:severance\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "query_catalog_watch_counts_profile_header_required.json"
     },
     {
       "name": "rate_limited",

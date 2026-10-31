@@ -9,6 +9,7 @@ import {
   mediaSurfaceKeys,
   requestKeys,
   sectionKeys,
+  watchCountKeys,
 } from "@/hooks/queries/keys";
 import {
   createCatalogInvalidationScheduler,
@@ -242,6 +243,7 @@ describe("invalidateAccessDependentState", () => {
       calendarKeys.week("2026-09-28", "all"),
       requestKeys.status(),
       downloadKeys.capability(),
+      watchCountKeys.series("series-1"),
     ];
     for (const key of keys) queryClient.setQueryData(key, {});
 

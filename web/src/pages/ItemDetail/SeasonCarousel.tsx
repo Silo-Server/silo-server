@@ -5,7 +5,9 @@ import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -14,6 +16,10 @@ interface SeasonCarouselProps {
 export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
   const prefetchSeason = usePrefetchCatalogSeason();
+  const { prefs: overlayPrefs } = useOverlayPrefs();
+  // The season list already carries each season's counts, so its posters can
+  // show the viewer's unwatched-episodes badge without another request.
+  const unwatchedBadgePrefs = overlayPrefs?.items.unwatched_episodes?.enabled ? overlayPrefs : null;
 
   if (sorted.length === 0) {
     return null;
@@ -80,6 +86,14 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
                         }}
                       />
                     </div>
+                  )}
+
+                  {unwatchedBadgePrefs && (
+                    <CardOverlays
+                      data={{ unwatched_episodes: userData?.unplayed_count ?? null }}
+                      prefs={unwatchedBadgePrefs}
+                      hasProgressBar={isCompleted || hasProgress}
+                    />
                   )}
                 </ViewTransitionLink>
                 {season.play_content_id ? (

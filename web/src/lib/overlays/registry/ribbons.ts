@@ -56,4 +56,20 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
     getIcon: (d) => d.request_status_icon ?? null,
     getAccent: (d) => (d.request_status_attention ? ATTENTION_ACCENT : null),
   },
+  {
+    id: "unwatched_episodes",
+    category: "ribbons",
+    label: "Unwatched Episodes",
+    description:
+      "How many episodes of a series or season you haven't finished, counting down as you watch; hidden once you've seen them all",
+    defaultPosition: "top-right",
+    defaultEnabled: false,
+    iconId: "tv",
+    iconCapable: true,
+    introducedInManifest: 25,
+    getValue: (d) =>
+      d.unwatched_episodes != null && d.unwatched_episodes > 0
+        ? String(d.unwatched_episodes)
+        : null,
+  },
 ];

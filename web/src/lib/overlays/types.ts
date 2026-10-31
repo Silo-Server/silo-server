@@ -39,6 +39,7 @@ export type OverlayId =
   // ribbons (status / awards)
   | "show_status"
   | "request_status"
+  | "unwatched_episodes"
   | "imdb_top_250"
   | "rt_certified_fresh";
 
@@ -79,6 +80,11 @@ export interface OverlayData {
   request_status_icon?: OverlayIconId | null;
   request_status_attention?: boolean; // TMDB lost the title; paints amber
   request_download_percent?: number | null; // drives the card's download bar
+  // unwatched episodes: a series card names its series and CardOverlays
+  // fetches the count when the badge is on; a surface that already has the
+  // count (a season poster, the settings preview) passes it instead.
+  unwatched_episodes?: number | null;
+  unwatched_episodes_series_id?: string;
 }
 
 // Per-overlay user configuration. accentColor and showIcon are optional

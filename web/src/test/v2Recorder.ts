@@ -41,6 +41,7 @@ import getRatingsCapabilityOk from "../../../contracts/api/v2/fixtures/get_ratin
 import getSettingsContractCapabilitiesOk from "../../../contracts/api/v2/fixtures/get_settings_contract_capabilities_ok.json";
 import listCollectionsOk from "../../../contracts/api/v2/fixtures/list_collections_ok.json";
 import queryCatalogItemsOk from "../../../contracts/api/v2/fixtures/query_catalog_items_ok.json";
+import queryCatalogWatchCountsOk from "../../../contracts/api/v2/fixtures/query_catalog_watch_counts_ok.json";
 
 export interface RecordedCall {
   /** The `METHOD /api/v2/...` operation key, with its path template. */
@@ -89,6 +90,7 @@ const GUARDED_OPERATIONS = new Set([
 // POSTs that only read; they neither count as writes nor change a revision.
 const READ_ONLY_POSTS = new Set([
   "POST /api/v2/catalog/query",
+  "POST /api/v2/catalog/watch-counts",
   "POST /api/v2/collections/preview",
   "POST /api/v2/admin/collections/preview",
 ]);
@@ -124,6 +126,7 @@ const FIXTURE_ANSWERS: Record<string, unknown> = {
   "POST /api/v2/collections/import/tmdb-list": personalImport,
   "GET /api/v2/library/{id}/collections": getLibraryCollectionsOk,
   "POST /api/v2/catalog/query": queryCatalogItemsOk,
+  "POST /api/v2/catalog/watch-counts": queryCatalogWatchCountsOk,
   "GET /api/v2/catalog/filters": getCatalogFiltersOk,
   "GET /api/v2/catalog/search/capabilities": getCatalogSearchCapabilitiesOk,
   "GET /api/v2/settings/overlay-config": getOverlayConfigOk,
