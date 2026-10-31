@@ -123,7 +123,7 @@ func TestMediaSourceDTOEmitsStableAudioV2HLSRoute(t *testing.T) {
 	// can select the surround track without requesting PlaybackInfo again.
 	source.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks))
 
-	dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+	dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
 	if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/audio-v2/master.m3u8?") {
 		t.Fatalf("surround-capable HLS URL = %q, want audio-v2 route", dto.TranscodingURL)
 	}
@@ -142,7 +142,7 @@ func TestMediaSourceDTOEmitsStableAudioV2HLSRoute(t *testing.T) {
 		stereoVersion.AudioTracks[index].Channels = 2
 	}
 	stereo := testCompatSource(NewResourceIDCodec(), stereoVersion)
-	stereoDTO := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-2", "token-1", stereo)
+	stereoDTO := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-2", stereo)
 	if !strings.HasPrefix(stereoDTO.TranscodingURL, "/Videos/item-1/master.m3u8?") {
 		t.Fatalf("all-stereo HLS URL = %q, want legacy route", stereoDTO.TranscodingURL)
 	}
@@ -155,7 +155,7 @@ func TestMediaSourceDTOEmitsDedicatedMPEGTSRemuxRoute(t *testing.T) {
 		source.HLSRemuxMPEGTS = true
 		source.TranscodeAudio = transcodeAudio
 
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
 		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-ts-v1/master.m3u8?") {
 			t.Fatalf("TranscodeAudio=%v MPEG-TS URL = %q, want dedicated remux-ts-v1 route", transcodeAudio, dto.TranscodingURL)
 		}
@@ -169,7 +169,7 @@ func TestMediaSourceDTOEmitsDedicatedDolbyVisionStripRoute(t *testing.T) {
 		source.TranscodeAudio = transcodeAudio
 		source.DVStripToHDR10 = true
 
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
 		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-dv-v1/master.m3u8?") {
 			t.Fatalf("TranscodeAudio=%v strip URL = %q, want dedicated remux-dv-v1 route", transcodeAudio, dto.TranscodingURL)
 		}
