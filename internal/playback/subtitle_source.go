@@ -286,7 +286,7 @@ func (c *SubtitleCache) demuxAndKeep(ctx context.Context, opts StreamExtractOpts
 	if err != nil {
 		return extract(ctx, opts)
 	}
-	src, err := fspath.Stat(opts.InputPath)
+	src, err := fspath.StatContext(ctx, opts.InputPath)
 	if err != nil {
 		return extract(ctx, opts)
 	}

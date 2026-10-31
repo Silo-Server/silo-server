@@ -570,6 +570,13 @@ func TestCacheKeysOnFileVersion(t *testing.T) {
 	if a != b {
 		t.Fatal("second lookup read the index again")
 	}
+	// Every lookup stats the file within its context, cached or not, so a
+	// stat on a stalled mount can't hold a caller whose context ended.
+	ended, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := c.Index(ended, path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lookup with an ended context: err = %v", err)
+	}
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(path, later, later); err != nil {
 		t.Fatal(err)
