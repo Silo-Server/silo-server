@@ -90,13 +90,17 @@ const (
 	// renditionConversions bounds the FFmpeg conversions on-demand segments
 	// run at once in this process.
 	renditionConversions = 8
+	// renditionLoads bounds the windows being read at once, queued for a
+	// conversion slot or holding one. A miss past it answers 404 for the
+	// player to retry.
+	renditionLoads = 256
 	// renditionStartTimes bounds the source start times kept for copy remux
 	// renditions.
 	renditionStartTimes = 1024
 )
 
 var (
-	renditionCues   = newRenditionCueCache(renditionCueCacheBytes)
+	renditionCues   = newRenditionCueCache(renditionCueCacheBytes, renditionLoads)
 	renditionSlots  = make(chan struct{}, renditionConversions)
 	renditionStarts = newRenditionStartCache(renditionStartTimes)
 	// renditionKept holds the kept tracks (SetRenditionKeptTracks).
@@ -293,6 +297,11 @@ func (s *TranscodeSession) subtitleTrackSegmentVTT(ctx context.Context, number u
 		return nil, ErrSegmentNotFound
 	}
 	if _, ok := renditionTrack(opts, number); !ok {
+		return nil, ErrSegmentNotFound
+	}
+	// An encode's playlist is the synthetic grid; a segment past it has no
+	// window to read. A copy's segments are those its spans place.
+	if segNum < 0 || !strings.EqualFold(opts.TargetCodecVideo, "copy") && segNum >= syntheticSegmentCount(opts.TotalDuration, opts.SegmentDuration) {
 		return nil, ErrSegmentNotFound
 	}
 	started := time.Now()
@@ -549,10 +558,12 @@ type renditionCueKey struct {
 }
 
 // renditionCueCache keeps converted windows up to a byte budget, evicting the
-// least recently used. Concurrent misses for one window share one read.
-// Errors are not kept.
+// least recently used. Concurrent misses for one window share one read, which
+// stops when the last of them gives up, and at most maxLoads reads run at
+// once. Errors are not kept.
 type renditionCueCache struct {
 	maxBytes int64
+	maxLoads int
 
 	mu      sync.Mutex
 	used    int64
@@ -568,13 +579,21 @@ type renditionCueEntry struct {
 
 type renditionCueLoad struct {
 	done chan struct{}
-	cues []byte
-	err  error
+	// cancel stops the read; waiters counts the callers waiting on it.
+	// Both are guarded by the cache's mu.
+	cancel  context.CancelFunc
+	waiters int
+	cues    []byte
+	err     error
 }
 
-func newRenditionCueCache(maxBytes int64) *renditionCueCache {
+// errRenditionLoadsBusy reports a miss while maxLoads reads are running.
+var errRenditionLoadsBusy = errors.New("too many on-demand subtitle reads")
+
+func newRenditionCueCache(maxBytes int64, maxLoads int) *renditionCueCache {
 	return &renditionCueCache{
 		maxBytes: maxBytes,
+		maxLoads: maxLoads,
 		lru:      list.New(),
 		entries:  map[renditionCueKey]*renditionCueEntry{},
 		loading:  map[renditionCueKey]*renditionCueLoad{},
@@ -583,7 +602,7 @@ func newRenditionCueCache(maxBytes int64) *renditionCueCache {
 
 // get returns the window under key, reading it with read on a miss. The
 // read runs on its own, within subtitleSegmentProductionWait, so a caller
-// that gives up doesn't fail the others.
+// that gives up doesn't fail the others; it stops once every caller has.
 func (c *renditionCueCache) get(ctx context.Context, key renditionCueKey, read func(context.Context) ([]byte, error)) ([]byte, error) {
 	c.mu.Lock()
 	if e, ok := c.entries[key]; ok {
@@ -593,22 +612,37 @@ func (c *renditionCueCache) get(ctx context.Context, key renditionCueKey, read f
 	}
 	load, loading := c.loading[key]
 	if !loading {
-		load = &renditionCueLoad{done: make(chan struct{})}
-		c.loading[key] = load
-	}
-	c.mu.Unlock()
-	if !loading {
+		if len(c.loading) >= c.maxLoads {
+			c.mu.Unlock()
+			return nil, errRenditionLoadsBusy
+		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subtitleSegmentProductionWait)
+		load = &renditionCueLoad{done: make(chan struct{}), cancel: cancel}
+		c.loading[key] = load
 		go func() {
 			defer cancel()
 			c.load(readCtx, key, load, read)
 		}()
 	}
+	load.waiters++
+	c.mu.Unlock()
 	select {
 	case <-load.done:
 		return load.cues, load.err
 	case <-ctx.Done():
+		c.leave(key, load)
 		return nil, ctx.Err()
+	}
+}
+
+// leave drops a caller that gave up on load, stopping the read when nobody
+// else waits on it. The next request for the window reads it again.
+func (c *renditionCueCache) leave(key renditionCueKey, load *renditionCueLoad) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if load.waiters--; load.waiters == 0 && c.loading[key] == load {
+		delete(c.loading, key)
+		load.cancel()
 	}
 }
 
@@ -618,9 +652,11 @@ func (c *renditionCueCache) load(ctx context.Context, key renditionCueKey, load 
 			load.cues, load.err = nil, fmt.Errorf("on-demand subtitle read panicked: %v", r)
 		}
 		c.mu.Lock()
-		delete(c.loading, key)
-		if load.err == nil {
-			c.add(key, load.cues)
+		if c.loading[key] == load {
+			delete(c.loading, key)
+			if load.err == nil {
+				c.add(key, load.cues)
+			}
 		}
 		c.mu.Unlock()
 		close(load.done)
