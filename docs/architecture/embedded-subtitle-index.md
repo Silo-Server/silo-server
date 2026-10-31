@@ -102,7 +102,10 @@ reads hold at most `WindowMaxBytes` (16 MiB): a rendition segment's read,
 which holds one of eight conversion slots, so on-demand segments hold at most
 128 MiB at once, and a kept-track or source window, which the subtitle cache
 demuxes instead when it is refused. A window open to the end is most of the
-track and gets a whole read's 128 MiB.
+track and gets a whole read's 128 MiB. An index keeps at most 2^20 cue
+entries or MP4 samples across its tracks, and a file of more than 1,000
+tracks is malformed; past the cue bound a Matroska file's Cues aren't trusted,
+and past the sample bound an MP4 file is malformed, so either is demuxed.
 
 HLS streams read their on-demand subtitle renditions through it
 (`playback/subtitle_rendition_tracks.go`): one window per segment, from the
