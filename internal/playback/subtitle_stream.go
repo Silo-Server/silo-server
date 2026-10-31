@@ -162,15 +162,10 @@ func windowFromCachedSup(opts StreamExtractOpts, firstCue float64) StreamExtract
 }
 
 // readSupFirstCue returns the time, in seconds, of the first segment in a
-// .sup file.
-func readSupFirstCue(path string) (float64, error) {
-	f, err := fspath.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = f.Close() }()
+// .sup stream.
+func readSupFirstCue(r io.Reader) (float64, error) {
 	header := make([]byte, 13)
-	if _, err := io.ReadFull(f, header); err != nil {
+	if _, err := io.ReadFull(r, header); err != nil {
 		return 0, err
 	}
 	if header[0] != 'P' || header[1] != 'G' {
