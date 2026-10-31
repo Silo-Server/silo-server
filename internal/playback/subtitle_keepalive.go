@@ -49,7 +49,8 @@ type prefixKeepalive struct {
 
 	mu sync.Mutex
 	// sent counts the prefix bytes sent ahead; matched those the output has
-	// repeated since. started stops the keepalive once output arrives.
+	// repeated since. started stops the keepalive once output past the
+	// prefix reaches w.
 	sent, matched int
 	started       bool
 	err           error
@@ -107,7 +108,6 @@ func (k *prefixKeepalive) Write(p []byte) (int, error) {
 	if k.err != nil {
 		return 0, k.err
 	}
-	k.started = true
 	n := len(p)
 	for k.matched < k.sent && len(p) > 0 {
 		if p[0] != k.prefix[k.matched] {
@@ -118,8 +118,11 @@ func (k *prefixKeepalive) Write(p []byte) (int, error) {
 		k.matched++
 	}
 	if len(p) == 0 {
+		// Only the header has come, as from a demux that has yet to reach
+		// its first cue: the keepalive goes on.
 		return n, nil
 	}
+	k.started = true
 	if _, err := k.w.Write(p); err != nil {
 		k.err = err
 		return 0, err

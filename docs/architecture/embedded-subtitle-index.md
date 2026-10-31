@@ -241,7 +241,8 @@ with `WEBVTT\n`, so while a WebVTT response's output is late, those seven
 bytes go ahead one at a time, the first after five seconds and the rest
 twelve seconds apart, and are dropped from the output when it comes, which
 must start with them. Once the header is sent, blank lines continue at the
-same interval until output arrives, including during a slow fallback demux.
+same interval until output past the header arrives, including during a slow
+fallback demux, whose FFmpeg writes the header long before its first cue.
 Those extra empty WebVTT blocks preserve the cues. A failure after the
 first of them aborts the response instead of answering 500. ASS and SUP
 output have no constant prefix (an ASS header is the track's own, and a SUP
