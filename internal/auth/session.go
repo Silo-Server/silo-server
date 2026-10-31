@@ -395,8 +395,9 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// The audit row's accounts, an impersonator included, join that id order.
 	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
-		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{actorID, userID})
+		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
 	if err != nil {
 		return 0, err
 	}

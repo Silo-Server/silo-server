@@ -171,12 +171,12 @@ func Recording(ctx context.Context) bool {
 	return lc != nil && lc.Request != nil && recordsDomainActions(ctx, lc.Request.URL.Path)
 }
 
-// LockActors takes KEY SHARE locks, in id order, on the accounts a domain row
-// for this request names (its user and impersonator). The row's foreign keys
-// take those locks at insert time anyway. A transaction that locks another row
-// before it records must take them first: a writer that locks the account and
-// then that row would otherwise deadlock against it.
-func LockActors(ctx context.Context, tx pgx.Tx) error {
+// ActorIDs returns the accounts a domain row for this request names (its user
+// and impersonator), or none when the request records no domain row. A
+// transaction that locks accounts itself locks these with them, in one id
+// order: the row's foreign keys lock them at insert time, and an impersonator
+// locked last could deadlock with an ownership transfer that locks it first.
+func ActorIDs(ctx context.Context) []int {
 	if !Recording(ctx) {
 		return nil
 	}
@@ -187,6 +187,16 @@ func LockActors(ctx context.Context, tx pgx.Tx) error {
 			ids = append(ids, *id)
 		}
 	}
+	return ids
+}
+
+// LockActors takes KEY SHARE locks, in id order, on the ActorIDs accounts.
+// The row's foreign keys take those locks at insert time anyway. A
+// transaction that locks another row before it records must take them first:
+// a writer that locks the account and then that row would otherwise deadlock
+// against it.
+func LockActors(ctx context.Context, tx pgx.Tx) error {
+	ids := ActorIDs(ctx)
 	if len(ids) == 0 {
 		return nil
 	}

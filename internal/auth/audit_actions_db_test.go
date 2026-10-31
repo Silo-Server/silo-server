@@ -423,3 +423,81 @@ func TestSessionRevocationQueuesBehindAccountLockDB(t *testing.T) {
 	}
 	noRows(t, d.pool, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser, strconv.Itoa(user))
 }
+
+// TestImpersonatedWritesQueueBehindOwnershipTransferDB runs audited writes as
+// an admin the Owner is viewing as, while another transaction holds the
+// Owner's account the way an ownership transfer to that admin locks it first.
+// Each write must wait for the Owner's account before locking the admin's, or
+// its audit row's impersonator key closes a deadlock with the transfer.
+func TestImpersonatedWritesQueueBehindOwnershipTransferDB(t *testing.T) {
+	d := newAuditActionsDB(t)
+	// Ids ascend in creation order, so the Owner's account sorts first. Only
+	// its lock matters here, so it carries no is_owner flag.
+	owner, admin, user := d.account(t, "admin", false), d.account(t, "admin", false), d.account(t, "user", false)
+	_ = d.session(t, user)
+	adminSession := d.session(t, admin)
+	viewing := func(method, pattern, path string, optIn bool) context.Context {
+		ctx, _ := audittest.Context(t, d.pool, audittest.Request{Method: method, Pattern: pattern, Path: path,
+			UserID: &admin, Impersonator: &owner, OptIn: optIn})
+		return ctx
+	}
+	writes := []struct {
+		name  string
+		write func() error
+	}{
+		{"api key", func() error {
+			_, err := d.keys.CreateAsActor(viewing(http.MethodPost, "/api/v2/account/api-keys", "/api/v2/account/api-keys", true), admin, admin, "Viewed", nil)
+			return err
+		}},
+		{"sign out everywhere", func() error {
+			path := "/api/v2/admin/users/" + strconv.Itoa(user) + "/login-sessions"
+			_, err := d.sessions.RevokeAsAdmin(viewing(http.MethodDelete, "/api/v2/admin/users/{id}/login-sessions", path, false), admin, user, nil)
+			return err
+		}},
+		{"password change", func() error {
+			return d.svc.ChangePassword(viewing(http.MethodPost, "/api/v2/account/password", "/api/v2/account/password", true),
+				admin, adminSession, "password", "margin fossil quench", false)
+		}},
+	}
+	for _, tc := range writes {
+		t.Run(tc.name, func(t *testing.T) {
+			transfer, err := d.pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = transfer.Rollback(context.WithoutCancel(t.Context())) }()
+			var holder int
+			if err := transfer.QueryRow(t.Context(), `SELECT pg_backend_pid() FROM users WHERE id = $1 FOR UPDATE`, owner).Scan(&holder); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- tc.write() }()
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for waiting := false; !waiting; {
+				if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("%s finished while the Owner's account was locked: %v", tc.name, err)
+				case <-deadline.C:
+					t.Fatalf("%s never waited for the Owner's account", tc.name)
+				case <-tick.C:
+				}
+			}
+			// The transfer locks the admin's account next.
+			if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, admin); err != nil {
+				t.Fatalf("ownership transfer behind %s: %v", tc.name, err)
+			}
+			if err := transfer.Rollback(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("%s behind an ownership transfer: %v", tc.name, err)
+			}
+		})
+	}
+}
