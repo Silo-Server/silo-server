@@ -1,7 +1,8 @@
 # Omnibus image
 
-The omnibus image is the regular Silo image plus PostgreSQL, and optional Redis
-and Meilisearch, in one container supervised by
+The omnibus image is Silo's Docker image, published as
+`ghcr.io/silo-server/silo-server`: the base Silo image plus PostgreSQL, and
+optional Redis and Meilisearch, in one container supervised by
 [s6-overlay](https://github.com/just-containers/s6-overlay). It serves
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
@@ -9,27 +10,31 @@ with its own PostgreSQL, and proxy and transcode nodes that use it (see
 main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
 and `NODE_URL`. Hardware transcoding and node access are commented out in it.
 `docker-compose.split.yml` is the earlier multi-container file, kept for
-installs that stay on that layout; it runs the regular image.
+installs that stay on that layout; it runs the same image, whose bundled
+services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 
 ## Build
 
-The `omnibus` job in `.github/workflows/docker.yml` runs after the regular
-image's manifest list is pushed. It builds `omnibus/Dockerfile` with
-`SILO_IMAGE` set to that commit's regular image and publishes the regular tags
-with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`), and
-moves both `latest` and `aio`. The regular image's mutable pointer is `split`,
-which `docker-compose.split.yml` and `omnibus/Dockerfile` default to.
+The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
+from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
+names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
+set to that tag and publishes the result as `<full SHA>`, plus `build-N` and
+`latest` on the default branch or `apiv2` on the `apiv2` branch.
 
-The omnibus image is not a drop-in replacement for the regular one, which an
-install that pulled `latest` before the change ran. It runs Silo as `PUID`
-(911 unless set) instead of root, so media that only root could read becomes
-unreadable; re-owns the bind-mounted Silo, transcode, and download directories
-to that account on first start; needs root to start, so a container `user:` or
-a Kubernetes `runAsUser` stops it; refuses a proxy or transcode node without
-`NODE_URL`; and starts `/init` rather than `silo`. Such an install either
-fixes those or moves to `split`.
+Builds from before this layout published the base image under those tags and
+the omnibus image under the same tags with `-aio` added, with `aio` in place of
+`latest`. Those tags still exist and `aio` no longer moves. Rolling back to
+such a build means pinning its `build-N-aio`: its `build-N` is the base image,
+which has no PostgreSQL or s6.
 
-Because the omnibus image starts from the regular one, both run the same Silo
+The omnibus image is not a drop-in replacement for the base image, which an
+install that pulled `latest` before this layout ran. It runs Silo as `PUID` (911 unless set) instead of root, so media that only root could
+read becomes unreadable; re-owns the bind-mounted Silo, transcode, and download
+directories to that account on first start; needs root to start, so a
+container `user:` or a Kubernetes `runAsUser` stops it; refuses a proxy or
+transcode node without `NODE_URL`; and starts `/init` rather than `silo`.
+
+Because the omnibus image starts from the base one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
 it that way: a runtime dependency Silo needs belongs in the root `Dockerfile`,
 and `omnibus/Dockerfile` adds only the bundled services and s6. The base changes
@@ -289,9 +294,9 @@ here. It refuses, before anything is moved into place, when:
 
 - No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
   or other paths, which have to move there first.
-- A pinned `SILO_IMAGE` (other than `latest`, `split`, or `aio`) is set
+- A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
-  `aio` past the pin.
+  `latest` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
   the earlier stack's cluster or Silo directories are here: Silo created that
   database first, most likely when `docker-compose.yml` started before the move.

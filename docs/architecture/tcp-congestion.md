@@ -140,9 +140,8 @@ The helper changes owned sockets without changing a sysctl.
 ## Capability Containment
 
 The shipped `docker-compose.yml`, which also runs proxy and transcode nodes, and
-`docker-compose.split.yml`, which runs the regular image as root, grant
-`cap_add: [NET_ADMIN]` to `silo`. Proxy nodes serve clients directly and use the
-same socket policy. Transcode nodes configure no client listener; startup drops
+`docker-compose.split.yml` grant `cap_add: [NET_ADMIN]` to `silo`. Proxy nodes
+serve clients directly and use the same socket policy. Transcode nodes configure no client listener; startup drops
 their capability and releases the helper after the standalone bind.
 
 In a Linux cgo build, a C constructor runs before the Go runtime. It counts

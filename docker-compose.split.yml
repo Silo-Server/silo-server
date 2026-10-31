@@ -1,9 +1,15 @@
 # Silo, PostgreSQL, Redis, and optionally Meilisearch, each in a container of
-# its own: the layout docker-compose.yml ran before it moved to the omnibus
-# image. An install of that layout keeps running on it unchanged when its .env
+# its own: the layout docker-compose.yml ran before Silo moved to one
+# container. An install of that layout keeps running on it when its .env
 # selects this file:
 #
 #   COMPOSE_FILE=docker-compose.split.yml
+#
+# Silo's Docker image bundles PostgreSQL and Redis, and leaves both off here
+# because DATABASE_URL and REDIS_URL name the services below. It runs Silo as
+# PUID:PGID rather than root, so that account needs read access to MEDIA_ROOT,
+# and it takes ownership of the plugins, artwork, compat, transcode, and
+# download directories on start.
 #
 # Hardware transcoding (VA-API or NVIDIA) is commented out in the silo service.
 # New installs should use docker-compose.yml. Moving an install of this layout
@@ -66,10 +72,7 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/meilisearch:/meili_data
 
   silo:
-    # The regular image. latest is the omnibus image, which this layout does
-    # not run: a SILO_IMAGE in .env, or an older copy of this file, that names
-    # latest needs split instead.
-    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:split}
+    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests. Docker kills a container
@@ -92,6 +95,10 @@ services:
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
+      # The account that runs Silo and owns its directories. It needs read
+      # access to the media.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       # Master key for at-rest credential encryption. The server refuses to
       # start without it. Generate one with: openssl rand -base64 48
       # Back it up apart from your database dumps; without it, encrypted

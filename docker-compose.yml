@@ -1,4 +1,4 @@
-# Silo in one container. The omnibus image runs Silo with a bundled
+# Silo in one container. Silo's Docker image runs Silo with a bundled
 # PostgreSQL and Redis, and starts the bundled Meilisearch when
 # ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
 # docs/architecture/omnibus-image.md describes the image.
@@ -19,7 +19,7 @@
 
 services:
   silo:
-    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests, and PostgreSQL shuts

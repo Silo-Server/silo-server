@@ -111,44 +111,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
-          # latest belongs to the omnibus image; the regular image's mutable
-          # pointer is split, after docker-compose.split.yml, which runs it.
-          flavor: |
-            latest=false
-          tags: |
-            type=raw,value=split,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
-            type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
-
+      # The base image is the omnibus build's starting point, not a published
+      # image: its only tag is the commit SHA with -base added. latest,
+      # build-N, apiv2, and the bare SHA belong to the omnibus image.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
+        env:
+          BASE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}-base
         run: |
           # shellcheck disable=SC2046
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create -t "${REGISTRY}/${IMAGE_LC}:${BASE_TAG}" \
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${BASE_TAG}"
 
-      - name: Inspect manifest list
-        env:
-          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}"
-          if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" || "${{ github.event.workflow_run.head_branch }}" == "${DEFAULT_BRANCH}" ]]; then
-            docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:build-${BUILD_NUMBER}"
-          fi
-
-  # The omnibus image layers PostgreSQL, Redis, Meilisearch, and s6-overlay on
-  # the image this run just published, so it needs the merged manifest list.
-  # Its tags are the regular tags with an -aio suffix, and it moves both latest
-  # and aio. Its digest artifacts are named so the regular merge's digests-*
-  # pattern never picks them up.
+  # The published image: PostgreSQL, Redis, Meilisearch, and s6-overlay
+  # layered on the base image the merge job just pushed. It carries latest,
+  # build-N, apiv2, and the commit SHA. Its digest artifacts are named so the
+  # merge job's digests-* pattern never picks them up.
   omnibus:
     needs: [prepare, merge]
     if: "!cancelled() && needs.merge.result == 'success'"
@@ -162,7 +141,7 @@ jobs:
     uses: Silo-Server/silo-server/.github/workflows/omnibus-build.yml@main
     with:
       platform: ${{ matrix.platform }}
-      base_tag: ${{ github.event.workflow_run.head_sha || github.sha }}
+      base_tag: ${{ github.event.workflow_run.head_sha || github.sha }}-base
       build_number: ${{ needs.prepare.outputs.build_number }}
       built_at: ${{ needs.prepare.outputs.built_at }}
       image_version: ${{ needs.prepare.outputs.image_version }}
@@ -199,10 +178,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
           flavor: |
             latest=false
-            suffix=-aio
           tags: |
-            type=raw,value=latest,suffix=,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=aio,suffix=,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
+            type=raw,value=latest,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
             type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
             type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
@@ -216,4 +193,11 @@ jobs:
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
 
       - name: Inspect manifest list
-        run: docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}-aio"
+        env:
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}"
+          if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" || "${{ github.event.workflow_run.head_branch }}" == "${DEFAULT_BRANCH}" ]]; then
+            docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:build-${BUILD_NUMBER}"
+          fi

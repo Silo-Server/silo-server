@@ -111,9 +111,9 @@ if [[ -d "$config" ]]; then
 fi
 
 # The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
-# would otherwise follow aio past a pinned build.
-if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:split && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
-  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
+# would otherwise follow latest past a pinned build.
+if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
+  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the image to run (for a build before latest moved to this image, its tag with -aio added), or remove SILO_IMAGE to follow latest"
 fi
 
 # Migrated before: refuse if the earlier stack has run on the original since,
