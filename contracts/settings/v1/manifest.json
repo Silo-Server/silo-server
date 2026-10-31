@@ -1321,7 +1321,7 @@
       "value_schema": {
         "type": "boolean"
       },
-      "default_value": false,
+      "default_value": true,
       "platforms": [
         "web"
       ],

@@ -537,7 +537,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopes: ["profile", "profile_device"],
     scopeIntroducedIn: [25, 25],
     resolutionOrder: ["profile_device", "profile", "default"],
-    defaultValue: false,
+    defaultValue: true,
     adminDefault: true,
     label: "Hero trailers",
     description:

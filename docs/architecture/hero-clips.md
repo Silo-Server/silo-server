@@ -96,10 +96,10 @@ actually shown.
 
 An administrator turns generation off by disabling the task; nothing else needs a
 switch. Whether a *viewer* sees moving heroes is a separate, per-profile choice:
-`hero.trailers_enabled` in the settings contract, default **off**, with an admin
-default so one decision can cover a household. Playback is what that setting
-gates, so a deployment that never generates clips behaves exactly as it did
-before this feature existed.
+`hero.trailers_enabled` in the settings contract, default **on**, with a
+per-device override and an admin default so one decision can cover a household.
+Playback is what that setting gates, so a deployment that never generates clips
+behaves exactly as it did before this feature existed.
 
 The downloader is `yt-dlp`, installed in the image, and `SILO_YTDLP_PATH` points
 at somewhere else when a deployment keeps its own. A server whose IP a provider

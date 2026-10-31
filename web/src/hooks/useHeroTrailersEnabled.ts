@@ -8,8 +8,10 @@ const KEY = SETTING_KEYS.HERO_TRAILERS_ENABLED;
  * while the first read is in flight so the hero holds its backdrop instead of
  * starting something the profile may not have asked for.
  *
- * The default is off: a clip is bandwidth a viewer should opt into, exactly like
- * theme music, and its absence is what the hero already handles.
+ * The default is on: a clip behind the featured row is what the row is for. A
+ * profile or a device turns it off when it would rather keep the still backdrop,
+ * and a deployment can move the default for its whole household with the admin
+ * default.
  */
 export function useHeroTrailersEnabled(): boolean | undefined {
   const setting = useSettingValue<boolean>(KEY);

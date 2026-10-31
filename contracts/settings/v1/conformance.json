@@ -1067,12 +1067,12 @@
       "expected": [{"key": "ui.theme_music_enabled", "value": false, "source": "profile_device"}]
     },
     {
-      "name": "hero_trailers_are_off_until_asked_for",
-      "description": "A profile that never chose shows the still backdrop, on every device it uses.",
+      "name": "hero_trailers_play_until_a_profile_turns_them_off",
+      "description": "A profile that never chose plays clips, on every device it uses.",
       "keys": ["hero.trailers_enabled"],
       "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [],
-      "expected": [{"key": "hero.trailers_enabled", "value": false, "source": "default"}]
+      "expected": [{"key": "hero.trailers_enabled", "value": true, "source": "default"}]
     },
     {
       "name": "hero_trailers_device_overrides_profile",
