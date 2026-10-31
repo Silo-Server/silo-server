@@ -119,8 +119,10 @@ type Store struct {
 	// reads holds a slot per whole read running (wholeReads).
 	reads chan struct{}
 
-	mu               sync.Mutex
-	flights          map[flightKey]*flight
+	mu      sync.Mutex
+	flights map[flightKey]*flight
+	// activeFlights includes canceled workers removed from flights until they exit.
+	activeFlights    int
 	starts           map[sourceVersion]time.Duration
 	mirrors          map[string]*mirrorFetch
 	mirrorUsed       map[string]time.Time

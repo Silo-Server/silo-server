@@ -3,9 +3,11 @@ package keptsub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +31,88 @@ func stallSecondLookup(repo *memRepo, release <-chan struct{}) *atomic.Int32 {
 		}
 	}
 	return &calls
+}
+
+func TestSharedBoundsDetachedFlights(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(fmt.Sprintf("background=%t", background), func(t *testing.T) {
+			s := &Store{flights: make(map[flightKey]*flight)}
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			var admitted []*flight
+			defer func() {
+				unblock()
+				for _, f := range admitted {
+					<-f.done
+				}
+			}()
+			const limit = 16
+			for i := range 2 * limit {
+				ctx, cancel := context.WithCancel(t.Context())
+				entered := make(chan *flight, 1)
+				done := make(chan error, 1)
+				key := flightKey{fileID: 1, stream: i}
+				if background {
+					// A canceled prefetch leaves the join map before its
+					// worker stops; retries must still count toward the cap.
+					key = flightKey{fileID: 1}
+				}
+				go func() {
+					_, err := s.shared(ctx, key, background, 0, func(_ context.Context, f *flight) (*Track, error) {
+						entered <- f
+						<-release
+						return nil, nil
+					})
+					done <- err
+				}()
+				select {
+				case f := <-entered:
+					admitted = append(admitted, f)
+					cancel()
+					if err := <-done; !errors.Is(err, context.Canceled) {
+						t.Fatalf("canceled waiter: %v", err)
+					}
+				case err := <-done:
+					cancel()
+					if err == nil || errors.Is(err, context.Canceled) {
+						t.Fatalf("admission refusal: %v", err)
+					}
+				}
+			}
+			if len(admitted) != limit {
+				t.Errorf("admitted %d detached workers, want %d", len(admitted), limit)
+			}
+			if !background {
+				ctx, leave := context.WithCancel(t.Context())
+				defer leave()
+				joined := make(chan error, 1)
+				go func() {
+					_, err := s.shared(ctx, flightKey{fileID: 1}, false, 0,
+						func(context.Context, *flight) (*Track, error) {
+							return nil, errors.New("started another read instead of joining")
+						})
+					joined <- err
+				}()
+				waitFor(t, "a caller to join at capacity", func() bool {
+					s.mu.Lock()
+					defer s.mu.Unlock()
+					return admitted[0].waiters == 1
+				})
+				leave()
+				if err := <-joined; !errors.Is(err, context.Canceled) {
+					t.Errorf("join at capacity: %v", err)
+				}
+			}
+			unblock()
+			for _, f := range admitted {
+				<-f.done
+			}
+			if _, err := s.shared(t.Context(), flightKey{fileID: 100}, false, 0,
+				func(context.Context, *flight) (*Track, error) { return nil, nil }); err != nil {
+				t.Fatalf("capacity after workers finish: %v", err)
+			}
+		})
+	}
 }
 
 // A request for a track a prefetch on the same node is reading joins that

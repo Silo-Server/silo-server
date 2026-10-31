@@ -12,6 +12,12 @@ import (
 // errStillReading means a caller stopped waiting for a read that goes on.
 var errStillReading = errors.New("keptsub: the track is still being read")
 
+// maxWholeFlights bounds reads running, queued, or finishing after cancellation.
+// Admitted foreground reads may continue after their callers leave.
+const maxWholeFlights = 16
+
+var errReadLimit = errors.New("keptsub: too many whole-track reads")
+
 // flightKey names one read of a track: of one source version.
 type flightKey struct {
 	fileID  int
@@ -51,10 +57,18 @@ func (s *Store) isForeground(f *flight) bool {
 // caller that waits longer than wait, when wait is set, gets
 // errStillReading and leaves the read running.
 func (s *Store) shared(ctx context.Context, key flightKey, background bool, wait time.Duration, fn func(context.Context, *flight) (*Track, error)) (*Track, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	f := s.flights[key]
 	switch {
 	case f == nil:
+		if s.activeFlights >= maxWholeFlights {
+			s.mu.Unlock()
+			return nil, errReadLimit
+		}
+		s.activeFlights++
 		readCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		f = &flight{done: make(chan struct{}), cancel: cancel, foreground: !background}
 		if background {
@@ -102,6 +116,7 @@ func (s *Store) run(ctx context.Context, key flightKey, f *flight, fn func(conte
 		}
 		f.cancel()
 		s.mu.Lock()
+		s.activeFlights--
 		if s.flights[key] == f {
 			delete(s.flights, key)
 		}
