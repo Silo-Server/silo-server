@@ -351,8 +351,7 @@ function AppChrome() {
     const returnPath = loadStoredImpersonationAdminSession()?.returnPath ?? "/admin/users";
 
     try {
-      await endImpersonation();
-      navigate(returnPath, { replace: true });
+      if (await endImpersonation()) navigate(returnPath, { replace: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to end impersonation");
     }
