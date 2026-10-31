@@ -668,13 +668,17 @@ function rawBytesToString(uint8Array) {
     return result
 }
 
-// Run section markup through the book's `data` transform, as EPUB does for its
-// sections, so the host can sanitize it before it is rendered (Silo patch).
-const transformSection = async (target, data, type) => {
+// Run sections and resources through the book's `data` transform, as EPUB
+// does, so the host can sanitize them before they are rendered (Silo patch).
+const transformData = async (target, data, type) => {
     const detail = { data, type }
     const event = new CustomEvent('data', { detail })
     target.dispatchEvent(event)
-    return new Blob([await event.detail.data], { type: await event.detail.type })
+    return { data: await event.detail.data, type: await event.detail.type }
+}
+const transformToBlob = async (target, data, type) => {
+    const result = await transformData(target, data, type)
+    return new Blob([result.data], { type: result.type })
 }
 
 class MOBI6 {
@@ -799,7 +803,7 @@ class MOBI6 {
     async loadResource(index) {
         if (this.#resourceCache.has(index)) return this.#resourceCache.get(index)
         const raw = await this.mobi.loadResource(index)
-        const url = URL.createObjectURL(new Blob([raw]))
+        const url = URL.createObjectURL(await transformToBlob(this.transformTarget, raw, ''))
         this.#resourceCache.set(index, url)
         return url
     }
@@ -880,7 +884,7 @@ class MOBI6 {
         await this.replaceResources(doc)
         const result = this.serializer.serializeToString(doc)
         const url = URL.createObjectURL(
-            await transformSection(this.transformTarget, result, this.#type))
+            await transformToBlob(this.transformTarget, result, this.#type))
         this.#cache.set(section, url)
         return url
     }
@@ -1103,13 +1107,10 @@ class KF8 {
             : await this.mobi.loadResource(id - 1)
         const result = [MIME.XHTML, MIME.HTML, MIME.CSS, MIME.SVG].includes(type)
             ? await this.replaceResources(this.mobi.decode(raw)) : raw
-        const detail = { data: result, type }
-        const event = new CustomEvent('data', { detail })
-        this.transformTarget.dispatchEvent(event)
-        const newData = await event.detail.data
-        const newType = await event.detail.type
+        const { data: newData, type: newType } =
+            await transformData(this.transformTarget, result, type)
         const doc = newType === MIME.SVG ? this.parser.parseFromString(newData, newType) : null
-        return [new Blob([newData], { newType }),
+        return [new Blob([newData], { type: newType }),
             // SVG wrappers need to be inlined
             // as browsers don't allow external resources when loading SVG as an image
             doc?.getElementsByTagNameNS('http://www.w3.org/2000/svg', 'image')?.length
@@ -1199,7 +1200,7 @@ class KF8 {
             for (const el of doc.querySelectorAll(`img[src="${url}"]`))
                 el.replaceWith(node)
         }
-        const url = URL.createObjectURL(await transformSection(this.transformTarget,
+        const url = URL.createObjectURL(await transformToBlob(this.transformTarget,
             this.serializer.serializeToString(doc), this.#type))
         this.#cache.set(section, url)
         return url

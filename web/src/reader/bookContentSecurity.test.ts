@@ -2,8 +2,12 @@ import * as webStreams from "node:stream/web";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BOOK_DOCUMENT_CSP, sanitizeBookDocument } from "@/reader/bookContentSecurity";
-import { DocumentLoader } from "@/reader/readest/libs/document";
+import {
+  BOOK_DOCUMENT_CSP,
+  protectBookContent,
+  sanitizeBookDocument,
+} from "@/reader/bookContentSecurity";
+import { type BookDoc, DocumentLoader } from "@/reader/readest/libs/document";
 
 const CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -68,12 +72,26 @@ async function fixtureEpub(): Promise<File> {
   return new File([await writer.close()], "fixture.epub", { type: "application/epub+zip" });
 }
 
-function expectInert(markup: string) {
-  expect(markup).not.toMatch(/<(?:\w+:)?script/i);
-  expect(markup).not.toMatch(/\son\w+=/i);
-  expect(markup).not.toMatch(/(?:href|src|action)="\s*java\s*script:/i);
-  expect(markup).not.toContain("srcdoc");
-  expect(markup).not.toContain("<set");
+// Reads `markup` the way a srcdoc frame does (as HTML) and checks the result:
+// nothing that could run, and the policy first in <head>.
+function expectInertFrame(markup: string) {
+  const doc = new DOMParser().parseFromString(markup, "text/html");
+  const roots: ParentNode[] = [doc];
+  for (let root = roots.pop(); root; root = roots.pop()) {
+    for (const el of Array.from(root.querySelectorAll("*"))) {
+      expect(el.localName).not.toMatch(/^(?:script|noscript|set)$/);
+      for (const attr of Array.from(el.attributes)) {
+        expect(attr.name).not.toMatch(/^on|^srcdoc$|^shadowrootmode$/i);
+        if (/^(?:href|src|action|formaction)$/.test(attr.localName)) {
+          expect(attr.value.replace(/\s/g, "")).not.toMatch(/^(?:javascript|vbscript):/i);
+        }
+      }
+      const content = el.localName === "template" ? (el as HTMLTemplateElement).content : null;
+      if (content) roots.push(content);
+    }
+  }
+  const policy = doc.head.querySelector('meta[http-equiv="Content-Security-Policy"]');
+  expect(policy?.getAttribute("content")).toBe(BOOK_DOCUMENT_CSP);
 }
 
 describe("book content security", () => {
@@ -107,8 +125,7 @@ describe("book content security", () => {
     const blob = blobs.get(url)!;
     expect(blob.type).toBe("application/xhtml+xml");
     expect(await blob.text()).toBe(srcdoc);
-    expectInert(srcdoc);
-    expect(srcdoc).toContain(`content="${BOOK_DOCUMENT_CSP}"`);
+    expectInertFrame(srcdoc);
     expect(srcdoc).not.toContain("noscript");
     // Ordinary book content survives.
     expect(srcdoc).toContain("p { color: red; }");
@@ -119,45 +136,98 @@ describe("book content security", () => {
     expect(srcdoc).toMatch(/<img src="blob:book\/\d+"/);
     expect(srcdoc).toContain("<text>svg link</text>");
 
-    // The untyped resource behind the iframe must not be sniffed as HTML.
-    const untyped = srcdoc.match(/<iframe src="(blob:book\/\d+)"/)?.[1];
-    expect(blobs.get(untyped!)?.type).toBe("application/octet-stream");
+    // The untyped page behind the iframe is typed from its name and sanitized,
+    // never left for the browser to sniff.
+    const untyped = blobs.get(srcdoc.match(/<iframe src="(blob:book\/\d+)"/)![1]!)!;
+    expect(untyped.type).toBe("text/html");
+    expectInertFrame(await untyped.text());
 
     // A document type the vendored loader does not recognise is still sanitized.
     const secondBlob = blobs.get(await second!.load())!;
-    expect(secondBlob.type).toBe("text/html; charset=utf-8");
+    expect(secondBlob.type).toBe("text/html");
     const secondMarkup = await secondBlob.text();
-    expectInert(secondMarkup);
+    expectInertFrame(secondMarkup);
     expect(secondMarkup).toContain("<p>Two</p>");
-    expect(secondMarkup).toContain(`content="${BOOK_DOCUMENT_CSP}"`);
+  });
+
+  // Each payload is XHTML that the sanitizer reads as XML but a srcdoc frame
+  // reads as HTML; none may come out active.
+  it.each([
+    ["comment", `<p><!--><img src="x" onerror="steal()"/>--></p>`],
+    ["CDATA in style", `<style><![CDATA[</style><img src=x onerror=steal()>]]></style>`],
+    ["processing instruction", `<p><?x ><img src=x onerror=steal()>?></p>`],
+    [
+      "template shadow root",
+      `<template shadowrootmode="open"><img src="x" onerror="steal()"/></template>`,
+    ],
+    [
+      "noscript",
+      `<noscript><p title="&lt;/noscript&gt;&lt;img src=x onerror=steal()&gt;">x</p></noscript>`,
+    ],
+    [
+      "SVG script and href animation",
+      `<svg xmlns="http://www.w3.org/2000/svg"><script>steal()</script><a><set attributeName="href" to="javascript:steal()"/></a></svg>`,
+    ],
+    [
+      "script URL",
+      `<a href=" java&#x09;script:steal()">x</a><form action="vbscript:x"><button formaction="javascript:steal()">b</button></form>`,
+    ],
+  ])("keeps a %s inert in a srcdoc frame", (_name, body) => {
+    const xhtml = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body>${body}</body></html>`;
+    const result = sanitizeBookDocument(xhtml, "application/xhtml+xml");
+    expectInertFrame(result);
   });
 
   it.each([
     [
-      "XSLT stylesheet",
-      "application/xml",
-      `<?xml-stylesheet type="text/xsl" href="x.xsl"?><?xml-stylesheet type="text/css" href="a.css"?><root/>`,
+      "head after body",
+      `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>x</p></body><head><title>t</title></head></html>`,
+    ],
+    [
+      "CSS stylesheet PI",
+      `<?xml-stylesheet type="text/css" href="><img src=x onerror=steal()>"?><html xmlns="http://www.w3.org/1999/xhtml"><head/><body/></html>`,
+    ],
+    [
+      "doctype identifier",
+      `<!DOCTYPE html SYSTEM "x><img src=x onerror=steal()>"><html xmlns="http://www.w3.org/1999/xhtml"><head/><body/></html>`,
+    ],
+  ])("puts the policy first with a %s", (_name, xhtml) => {
+    const result = sanitizeBookDocument(xhtml, "application/xhtml+xml");
+    expectInertFrame(result);
+    const doc = new DOMParser().parseFromString(result, "text/html");
+    expect(doc.head.firstElementChild?.getAttribute("charset")).toBe("utf-8");
+  });
+
+  it.each([
+    ["an XSLT", `<?xml-stylesheet type="text/xsl" href="x.xsl"?><root/>`, "x.xsl"],
+    [
+      "a disguised XSLT",
+      `<?xml-stylesheet foo="type='text/css'" type="text/xsl" href="x.xsl"?><root/>`,
       "x.xsl",
-      "a.css",
     ],
-    [
-      "SVG document",
-      "image/svg+xml",
-      `<svg xmlns="http://www.w3.org/2000/svg"><script>steal()</script><animate attributeName="href" values="#a;javascript:steal()"/><rect width="1"/></svg>`,
-      "steal()",
-      '<rect width="1"/>',
-    ],
-    [
-      "HTML without a head",
-      "text/html",
-      `<p onmouseover="steal()">x</p><form action="javascript:steal()"><button formaction="vbscript:x">b</button></form>`,
-      "steal()",
-      `<head><meta http-equiv="Content-Security-Policy" content="${BOOK_DOCUMENT_CSP}"`,
-    ],
-  ])("sanitizes %s", (_name, type, markup, removed, kept) => {
-    const result = sanitizeBookDocument(markup, type);
+  ])("drops %s stylesheet but keeps CSS ones", (_name, xml, removed) => {
+    const result = sanitizeBookDocument(
+      `<?xml-stylesheet type="text/css" href="a.css"?>${xml}`,
+      "application/xml",
+    );
     expect(result).not.toContain(removed);
-    expect(result).not.toContain("vbscript");
-    expect(result).toContain(kept);
+    expect(result).toContain('href="a.css"');
+  });
+
+  it.each([
+    ["a type hidden in a parameter", "image/png;x=,text/html", undefined, "image/png", false],
+    ["a charset parameter", "text/html; charset=shift_jis", undefined, "text/html", true],
+    ["XSLT", "text/xsl", undefined, "text/xsl", true],
+    ["an untyped stylesheet", undefined, "OEBPS/style.css", "text/css", false],
+    ["an untyped page", "", "OEBPS/extra.html", "text/html", true],
+    ["an unknown type", "unknown/unknown", "OEBPS/blob.bin", "application/octet-stream", false],
+  ])("labels %s safely", async (_name, type, name, expected, sanitized) => {
+    const target = new EventTarget();
+    protectBookContent({ transformTarget: target } as unknown as BookDoc);
+    const original = `<html><body><script>steal()</script></body></html>`;
+    const detail: { data: unknown; type: unknown; name?: string } = { data: original, type, name };
+    target.dispatchEvent(new CustomEvent("data", { detail }));
+    expect(detail.type).toBe(expected);
+    expect((await detail.data) !== original).toBe(sanitized);
   });
 });
