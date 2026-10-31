@@ -76,8 +76,20 @@ export function completeHomeRow(
   return {
     section: { ...whole.section, items: [...current.section.items, ...rest].slice(0, length) },
     shown: current.section.items.length,
-    shownAt: Date.now(),
+    shownAt: nextShownAt(),
   };
+}
+
+let lastShownAt = 0;
+
+/**
+ * A completion time later than every earlier one, even within the same
+ * millisecond: Home restores its rows' duplicate-filter order by it, and a
+ * tie would fall back to layout order.
+ */
+function nextShownAt(): number {
+  lastShownAt = Math.max(Date.now(), lastShownAt + 1);
+  return lastShownAt;
 }
 
 /**

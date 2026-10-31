@@ -197,4 +197,16 @@ describe("home row limit", () => {
       "y",
     ]);
   });
+
+  it("orders rows completed within the same millisecond", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000_000_000);
+    const shown = { section: row(["a"]), partial: true };
+    const whole = { section: row(["a", "b"], { item_limit: 100, total_count: 2 }) };
+
+    const first = completeHomeRow(shown, whole);
+    const second = completeHomeRow(shown, whole);
+
+    expect(second.shownAt).toBeGreaterThan(first.shownAt ?? Infinity);
+    vi.restoreAllMocks();
+  });
 });
