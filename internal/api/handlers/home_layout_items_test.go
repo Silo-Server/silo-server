@@ -270,6 +270,10 @@ func TestHomeRowReportsHasMore(t *testing.T) {
 			section:     sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 100},
 			hideWatched: true, cap: 3, source: movies("watched", "a", "b", "c", "d"),
 			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "card the access filter removes after the fetch limit",
+			section: sections.ResolvedSection{ID: "shelf", SectionType: sections.SectionCollection, ItemLimit: 100},
+			cap:     3, source: movies("blocked", "a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
 		{name: "uncapped read",
 			section:   sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 3},
 			source:    movies("a", "b", "c", "d"),
@@ -287,6 +291,9 @@ func TestHomeRowReportsHasMore(t *testing.T) {
 			if sections.HidesNotInterested(s.SectionType) {
 				items = slices.DeleteFunc(slices.Clone(items), func(item *models.MediaItem) bool { return item.ContentID == "movie:dismissed" })
 			}
+			// Like an unsorted collection rail, which limits its members
+			// before the access filter runs.
+			items = slices.DeleteFunc(slices.Clone(items), func(item *models.MediaItem) bool { return item.ContentID == "movie:blocked" })
 			return sections.SectionWithItems{ResolvedSection: s, Items: items, TotalCount: len(items)}, nil
 		}
 		viewer := SectionViewer{Access: catalog.AccessFilter{UserID: 1, ProfileID: "profile-1"}, ItemLimitCap: tc.cap}
