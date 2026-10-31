@@ -288,6 +288,17 @@ func TestReadPacketsRefusals(t *testing.T) {
 	if _, err := ReadPackets(context.Background(), path, idx, pgsTrack, WholeFrom, WholeTo, ReadOptions{MaxBytes: 8 << 10}); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("over the memory limit: err = %v", err)
 	}
+	// A limit hit while walking a cluster for cues without relative
+	// positions is the same refusal, never a partial read reported as damage.
+	for limit := int64(1); limit <= 64; limit++ {
+		res, err := ReadPackets(context.Background(), path, idx, scannedTrack, WholeFrom, WholeTo, ReadOptions{MaxBytes: limit})
+		if err == nil && len(res.Packets) == 2 {
+			continue
+		}
+		if !errors.Is(err, ErrTooLarge) || errors.Is(err, ErrDamaged) {
+			t.Fatalf("scanned read with a %d-byte limit: %d packets, err = %v", limit, len(res.Packets), err)
+		}
+	}
 	tests := []struct {
 		number uint64
 		want   error
