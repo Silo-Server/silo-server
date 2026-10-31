@@ -668,9 +668,19 @@ function rawBytesToString(uint8Array) {
     return result
 }
 
+// Run section markup through the book's `data` transform, as EPUB does for its
+// sections, so the host can sanitize it before it is rendered (Silo patch).
+const transformSection = async (target, data, type) => {
+    const detail = { data, type }
+    const event = new CustomEvent('data', { detail })
+    target.dispatchEvent(event)
+    return new Blob([await event.detail.data], { type: await event.detail.type })
+}
+
 class MOBI6 {
     parser = new DOMParser()
     serializer = new XMLSerializer()
+    transformTarget = new EventTarget()
     #resourceCache = new Map()
     #textCache = new Map()
     #cache = new Map()
@@ -869,7 +879,8 @@ class MOBI6 {
 
         await this.replaceResources(doc)
         const result = this.serializer.serializeToString(doc)
-        const url = URL.createObjectURL(new Blob([result], { type: this.#type }))
+        const url = URL.createObjectURL(
+            await transformSection(this.transformTarget, result, this.#type))
         this.#cache.set(section, url)
         return url
     }
@@ -1188,8 +1199,8 @@ class KF8 {
             for (const el of doc.querySelectorAll(`img[src="${url}"]`))
                 el.replaceWith(node)
         }
-        const url = URL.createObjectURL(
-            new Blob([this.serializer.serializeToString(doc)], { type: this.#type }))
+        const url = URL.createObjectURL(await transformSection(this.transformTarget,
+            this.serializer.serializeToString(doc), this.#type))
         this.#cache.set(section, url)
         return url
     }
