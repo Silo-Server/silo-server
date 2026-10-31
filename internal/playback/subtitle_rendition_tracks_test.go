@@ -824,6 +824,32 @@ func TestOnDemandSegmentFailures(t *testing.T) {
 		t.Fatalf("segment over its read budget = %q, %v", body, err)
 	}
 
+	// A conversion that yields no cue from the window's packets answers an
+	// empty segment and isn't kept: the next request converts them again.
+	quiet := t.TempDir()
+	if err := os.WriteFile(filepath.Join(quiet, "ffmpeg"), []byte("#!/bin/sh\ncat >/dev/null\nprintf 'WEBVTT\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if err := os.Symlink(ffprobe, filepath.Join(quiet, "ffprobe")); err != nil {
+		t.Fatal(err)
+	}
+	previousCues = renditionCues
+	renditionCues = newRenditionCueCache(renditionCueCacheBytes, renditionLoads)
+	body, err = session(filepath.Join(quiet, "ffmpeg"), planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0)
+	if err != nil || strings.Contains(string(body), " --> ") {
+		renditionCues = previousCues
+		t.Fatalf("segment of a quiet conversion = %q, %v", body, err)
+	}
+	body, err = session(ffmpeg, planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0)
+	renditionCues = previousCues
+	if err != nil || !strings.Contains(string(body), "Early A") {
+		t.Fatalf("segment after a quiet conversion = %q, %v", body, err)
+	}
+
 	// A segment past the encode's grid (15 segments of 2 s) is not read,
 	// however long the live span runs.
 	live := session(ffmpeg, planned)
