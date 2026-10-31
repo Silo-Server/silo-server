@@ -76,6 +76,18 @@ import SubtitlesPopover from "./SubtitlesPopover";
 const responsivePrimaryActionClass =
   "transform-gpu transition-transform duration-150 motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
 const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
+/**
+ * The Play pill's geometry, shared by every state it is drawn in — enabled, in
+ * flight, play-choice, disabled — and by the Request pill that takes its place
+ * on a title the library does not have yet.
+ *
+ * It is the row's widest control: 40px a side past the secondary pills' px-5,
+ * because it leads the row. Handset widths keep their own geometry, where
+ * `[data-compact-mobile] .detail-primary-actions > button` in detailLayout.css
+ * outranks these utilities with 14px.
+ */
+const PLAY_PILL_CLASS =
+  "relative h-11 gap-2.5 overflow-hidden rounded-full px-[72px] text-[0.9375rem] font-bold tracking-wide";
 const staticGlassActionClass = "transition-none";
 const overflowMenuClass =
   "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
@@ -147,7 +159,7 @@ function PrimaryActionButton({ action }: { action: ActionBarPrimaryAction }) {
       onClick={action.onClick}
       disabled={inert}
       aria-busy={action.pending || undefined}
-      className={`${interactiveClass} relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide`}
+      className={`${interactiveClass} ${PLAY_PILL_CLASS}`}
     >
       {Icon && (
         <Icon
@@ -992,7 +1004,7 @@ export default function ActionBar({
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} ${PLAY_PILL_CLASS} cursor-pointer shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -1001,7 +1013,7 @@ export default function ActionBar({
           ) : selectedVersion ? (
             <Button
               onClick={() => handleSelectedVersionPlay(false)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} ${PLAY_PILL_CLASS} cursor-pointer shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -1010,7 +1022,7 @@ export default function ActionBar({
           ) : (
             <Button
               onClick={() => startPlaybackFromHref(playHref)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} ${PLAY_PILL_CLASS} cursor-pointer shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -1018,10 +1030,7 @@ export default function ActionBar({
             </Button>
           )
         ) : (
-          <Button
-            disabled
-            className="h-11 gap-2.5 rounded-full px-8 text-[0.9375rem] font-bold tracking-wide"
-          >
+          <Button disabled className={PLAY_PILL_CLASS}>
             <Play className="size-[18px] fill-current" />
             {playLabel}
           </Button>
