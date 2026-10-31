@@ -210,6 +210,7 @@ func fixtureFile(t *testing.T, ffmpeg string, cues bool) (string, *models.MediaF
 	}}
 	if info, err := os.Stat(out); err == nil {
 		file.FileSize = info.Size()
+		file.FileModifiedAt = new(info.ModTime())
 	}
 	return out, file
 }

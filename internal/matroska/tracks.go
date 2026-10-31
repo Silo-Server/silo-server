@@ -61,6 +61,8 @@ type TrackEntry struct {
 	HearingImpaired bool
 	// DefaultDuration is in nanoseconds, 0 when absent.
 	DefaultDuration uint64
+	// CodecDelay is subtracted from timestamps, in nanoseconds.
+	CodecDelay uint64
 	// TimestampScale is the deprecated TrackTimestampScale, 1 when absent.
 	TimestampScale float64
 	// Encodings holds at most MaxContentEncodings entries.
@@ -98,6 +100,8 @@ func ParseTrackEntry(entry []byte) TrackEntry {
 			t.HearingImpaired = Uint(v) != 0
 		case IDDefaultDuration:
 			t.DefaultDuration = Uint(v)
+		case IDCodecDelay:
+			t.CodecDelay = Uint(v)
 		case IDTrackTimestampScale:
 			t.TimestampScale = Float(v)
 		case IDContentEncodings:

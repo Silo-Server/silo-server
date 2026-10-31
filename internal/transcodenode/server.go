@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2096,6 +2097,23 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 				return (*playback.TranscodeSession)(nil), nil
 			}
 			resolved = *fetched
+		} else if s.recipeStore != nil && len(resolved.SubtitleRenditionTracks) > 0 {
+			// Tokens carry track identity and selection; the stored card supplies
+			// presentation metadata only, without changing token authority.
+			fetched, ok := s.recipeStore.Get(r.Context(), sessionID)
+			if ok && fetched != nil && recipeServesTransport(*fetched, sessionID) &&
+				fetched.SessionID == resolved.SessionID && fetched.UserID == resolved.UserID &&
+				fetched.ProfileID == resolved.ProfileID && fetched.MediaFileID == resolved.MediaFileID &&
+				fetched.InputPath == resolved.InputPath && fetched.SubtitleRenditionSource == resolved.SubtitleRenditionSource &&
+				slices.EqualFunc(fetched.SubtitleRenditionTracks, resolved.SubtitleRenditionTracks, func(a, b playback.SubtitleRenditionTrack) bool {
+					return a.TrackNumber == b.TrackNumber
+				}) {
+				tracks := slices.Clone(fetched.SubtitleRenditionTracks)
+				for i := range tracks {
+					tracks[i].Default = resolved.SubtitleRenditionTracks[i].Default
+				}
+				resolved.SubtitleRenditionTracks = tracks
+			}
 		}
 		return s.spawnReconstruct(r, sessionID, requestedSegment, resolved)
 	})

@@ -3,8 +3,10 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +22,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1818,4 +1821,67 @@ func realSegmentStart(ctx context.Context, t *testing.T, session *TranscodeSessi
 		}
 	}
 	return first - float64(offset90k)/90_000
+}
+
+func TestCanceledSubtitleSegmentHasErrorStatus(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	session := &TranscodeSession{running: true, opts: TranscodeOpts{
+		SubtitleRendition: true, SubtitleTrackIndex: -1,
+		SubtitleRenditionTracks: []SubtitleRenditionTrack{{TrackNumber: 3}},
+		TotalDuration:           120, SegmentDuration: 4, TargetCodecVideo: "h264",
+	}}
+	recorder := httptest.NewRecorder()
+	session.ServeSubtitleSegment(recorder, httptest.NewRequest(http.MethodGet, "/segment/sub_3_00000.vtt", nil).WithContext(ctx), "sub_3_00000.vtt")
+	if got := recorder.Result().StatusCode; got != http.StatusNotFound {
+		t.Fatalf("canceled subtitle segment returned status %d with %d body bytes; want 404", got, recorder.Body.Len())
+	}
+}
+
+func TestRenditionColdProbesExceedConversionLimit(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/usr/bin/env python3\nimport socket\ns=socket.create_connection(('127.0.0.1', %d))\ns.recv(1)\nprint('0.000000')\n", listener.Addr().(*net.TCPAddr).Port)
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cache := newRenditionStartCache(1)
+	var wg sync.WaitGroup
+	results := make(chan error, renditionConversions+1)
+	const requests = renditionConversions + 1
+	for i := 0; i < requests; i++ {
+		wg.Go(func() {
+			_, err := cache.get(t.Context(), filepath.Join(dir, "ffmpeg"), fmt.Sprintf("source-%d", i), &embeddedsub.Index{Size: 1, ModTime: time.Unix(1, 0)})
+			results <- err
+		})
+	}
+	var connections []net.Conn
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+		wg.Wait()
+	}()
+	if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for range renditionConversions {
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Fatalf("only %d probes started: %v", len(connections), err)
+		}
+		connections = append(connections, conn)
+	}
+	select {
+	case err := <-results:
+		if !errors.Is(err, ErrSegmentNotFound) {
+			t.Fatalf("overloaded probe: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("excess probe was not rejected while the slots were occupied")
+	}
 }

@@ -12,9 +12,9 @@ import (
 // seconds on network storage before its first byte, and players give up on
 // a silent response long before the server's stall window: Android's player
 // client reads with a 30 s timeout, Apple's after about a minute. A WebVTT
-// response can show progress without changing a byte: every WebVTT output
-// FFmpeg writes starts with the same header, so the header can go ahead a
-// byte at a time and be dropped from the output when it comes.
+// response can show progress by sending its constant header ahead a byte at
+// a time, then blank lines until output arrives. WebVTT ignores those empty
+// blocks. The header is dropped from the output when it comes.
 //
 // SubRip, ASS and SUP outputs start with no constant prefix (ASS's script
 // header is the track's own, SUP's first bytes carry a timestamp), so their
@@ -29,8 +29,8 @@ var (
 	// keepaliveDelay is how long output may be silent before the first
 	// prefix byte goes ahead; a kept track converts well within it.
 	keepaliveDelay = 5 * time.Second
-	// keepaliveInterval spaces the prefix bytes: the seven of WEBVTT\n cover
-	// past a minute, and no gap nears a 30 s read timeout.
+	// keepaliveInterval spaces prefix bytes and subsequent blank lines so
+	// no gap nears a 30 s read timeout.
 	keepaliveInterval = 12 * time.Second
 )
 
@@ -81,18 +81,24 @@ func (k *prefixKeepalive) run(delay, interval time.Duration) {
 func (k *prefixKeepalive) tick() bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if k.started || k.err != nil || k.sent == len(k.prefix) {
+	if k.started || k.err != nil {
 		return false
 	}
-	if _, err := k.w.Write([]byte{k.prefix[k.sent]}); err != nil {
+	next := byte('\n')
+	if k.sent < len(k.prefix) {
+		next = k.prefix[k.sent]
+	}
+	if _, err := k.w.Write([]byte{next}); err != nil {
 		k.err = err
 		return false
 	}
-	k.sent++
+	if k.sent < len(k.prefix) {
+		k.sent++
+	}
 	if f, ok := k.w.(http.Flusher); ok {
 		f.Flush()
 	}
-	return k.sent < len(k.prefix)
+	return true
 }
 
 func (k *prefixKeepalive) Write(p []byte) (int, error) {

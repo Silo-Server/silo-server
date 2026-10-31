@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -48,13 +49,14 @@ func (f *fileFacts) load() {
 }
 
 func (f *fileFacts) OverrideTags(file *models.MediaFile, track models.SubtitleTrack) playback.SubtitleFactV3 {
-	if file == nil || file.ID != f.file.ID {
+	if file == nil || file.ID != f.file.ID || file.FileModifiedAt == nil {
 		return playback.SubtitleFactUnknownV3
 	}
 	f.once.Do(f.load)
 	t, ok := f.tracks[track.Index]
 	if !ok || t.HasOverrideTags == nil || t.ContainerTrackID != track.ContainerTrackID ||
-		codecFamily(t.Codec) != codecFamily(track.Codec) || t.SourceSize != file.FileSize {
+		codecFamily(t.Codec) != codecFamily(track.Codec) || t.SourceSize != file.FileSize ||
+		!models.NormalizeFileModifiedAt(time.Unix(0, t.SourceModTime)).Equal(models.NormalizeFileModifiedAt(*file.FileModifiedAt)) {
 		return playback.SubtitleFactUnknownV3
 	}
 	if *t.HasOverrideTags {

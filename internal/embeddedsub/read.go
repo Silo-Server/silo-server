@@ -120,7 +120,7 @@ func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, fr
 	if err := t.readable(opts); err != nil {
 		return nil, err
 	}
-	f, info, err := openFile(path)
+	f, info, err := openFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}

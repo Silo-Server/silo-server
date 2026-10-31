@@ -145,10 +145,11 @@ func TestLocalCopiesAreNotTouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	kept, _ := repo.Track(t.Context(), file.ID, 1)
-	local, err := s.mirror(t.Context(), kept)
+	local, release, err := s.mirror(t.Context(), kept)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
 	before, _ := os.Stat(local)
 	time.Sleep(10 * time.Millisecond) //nolint:forbidigo // lets a touch show in the modification time
 	for range 3 {

@@ -16,7 +16,9 @@ bytes don't change.
   reads go out together: the block read starts where the block would be with
   the shortest cluster header and covers the seven bytes a longer one adds.
   A cue without CueRelativePosition costs a walk of its cluster's element
-  headers instead.
+  headers instead. Nonzero CodecDelay, nondefault TrackTimestampScale, or
+  CueBlockNumber greater than one without CueRelativePosition makes the
+  track unsupported, so FFmpeg preserves its timing and block identity.
 - **MP4 and MOV.** `ReadIndex` walks the top-level boxes to `moov` and
   expands each text track's sample table (stsd, stts, stsc, stsz, stco or
   co64). Edit lists are mapped when they are leading empty edits plus one
@@ -106,6 +108,10 @@ track and gets a whole read's 128 MiB. An index keeps at most 2^20 cue
 entries or MP4 samples across its tracks, and a file of more than 1,000
 tracks is malformed; past the cue bound a Matroska file's Cues aren't trusted,
 and past the sample bound an MP4 file is malformed, so either is demuxed.
+The packet budget reserves buffer capacity before decompression allocates it,
+and cache accounting includes compression prefixes. Open and fstat observe
+cancellation; unfinished kernel calls are limited to 32 per process and one
+per path until they return.
 
 HLS streams read their on-demand subtitle renditions through it
 (`playback/subtitle_rendition_tracks.go`): one window per segment, from the
@@ -114,6 +120,8 @@ servers that keep tracks) or else the source, through that `Cache`, converted
 by `playback.ExtractSubtitlePacketsWebVTT`
 with the options of the stream's own cue output. The planner checks with
 `playback.CueIndexedSubtitleTracks` which tracks qualify before it lists them.
+Source-start probes share one run per file version, with at most eight runs
+in flight. An excess cold request answers 404 for the player to retry.
 
 Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
 `ErrNoCues`, `ErrIncompleteCues`, `ErrUnsupported` and `ErrTooLarge` describe
@@ -182,7 +190,9 @@ fetched copy must match its hash. Copies never go stale, since the name is the
 content. A copy's file is never touched after it is written, so the index
 cache, keyed by path, size and modification time, keeps its index; recency is
 kept in memory, and copies are held to 1 GiB, least recently used first. A
-node without a transcode directory keeps no tracks.
+copy stays pinned during persistence, window reads, and opening a stream;
+eviction resumes when the caller releases it. A node without a transcode
+directory keeps no tracks.
 
 **Storing.** A read writes the kept stream to a local copy, not to memory,
 and the object is streamed from it. The key goes into `blob_gc_queue`, due a
@@ -218,7 +228,9 @@ Apple's player gives up after about a minute. Every WebVTT output starts
 with `WEBVTT\n`, so while a WebVTT response's output is late, those seven
 bytes go ahead one at a time, the first after five seconds and the rest
 twelve seconds apart, and are dropped from the output when it comes, which
-must start with them. The response stays byte-identical. A failure after the
+must start with them. Once the header is sent, blank lines continue at the
+same interval until output arrives, including during a slow fallback demux.
+Those extra empty WebVTT blocks preserve the cues. A failure after the
 first of them aborts the response instead of answering 500. ASS and SUP
 output have no constant prefix (an ASS header is the track's own, and a SUP
 stream starts with a timestamp), so their first byte waits on the read, as

@@ -424,9 +424,6 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 		if err != nil {
 			return nil, fmt.Errorf("block at %d: %w", at, err)
 		}
-		if err := m.budget.take(len(data)); err != nil {
-			return nil, err
-		}
 		pts, ok := ticksDuration(ticks, scale)
 		if !ok {
 			return nil, corrupt("block at %d has timestamp %d", at, ticks)
@@ -454,9 +451,12 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 // payload returns a frame's data as the codec sees it, in its own memory.
 func (m *matroskaRead) payload(frame []byte) ([]byte, error) {
 	if m.t.Compression == nil {
+		if err := m.budget.take(len(frame)); err != nil {
+			return nil, err
+		}
 		return bytes.Clone(frame), nil
 	}
-	return decompress(m.t.Compression, frame)
+	return decompressBudget(m.t.Compression, frame, m.budget)
 }
 
 // scanCluster walks the cluster of cues that have no relative position for
