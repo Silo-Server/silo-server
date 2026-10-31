@@ -1334,8 +1334,10 @@ const cueIndexedSubtitleTrackTimeoutV3 = 3 * time.Second
 // alternate versions and fallbacks plan the same files again.
 type cueIndexReadsV3 struct {
 	deadline time.Time
-	mu       sync.Mutex
-	byPath   map[string]func() *playback.CueIndexedSubtitles
+	// lookup reads a source's index (playback.CueIndexedSubtitleTracks).
+	lookup func(ctx context.Context, path string) (playback.CueIndexedSubtitles, error)
+	mu     sync.Mutex
+	byPath map[string]func() *playback.CueIndexedSubtitles
 }
 
 type cueIndexReadsKeyV3 struct{}
@@ -1348,6 +1350,7 @@ func withCueIndexReadsV3(ctx context.Context) context.Context {
 func newCueIndexReadsV3() *cueIndexReadsV3 {
 	return &cueIndexReadsV3{
 		deadline: time.Now().Add(cueIndexedSubtitleTrackTimeoutV3),
+		lookup:   playback.CueIndexedSubtitleTracks,
 		byPath:   map[string]func() *playback.CueIndexedSubtitles{},
 	}
 }
@@ -1371,7 +1374,7 @@ func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) fun
 	read := sync.OnceValue(func() *playback.CueIndexedSubtitles {
 		readCtx, cancel := context.WithDeadline(ctx, reads.deadline)
 		defer cancel()
-		indexed, err := playback.CueIndexedSubtitleTracks(readCtx, file.FilePath)
+		indexed, err := reads.lookupWithin(readCtx, file.FilePath)
 		if err != nil {
 			slog.InfoContext(ctx, "protocol v3 source index unreadable for on-demand subtitle renditions",
 				logComponentKey, playbackLogValueV3, "media_file_id", file.ID, "error", err)
@@ -1381,6 +1384,27 @@ func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) fun
 	})
 	reads.byPath[file.FilePath] = read
 	return read
+}
+
+// lookupWithin answers lookup for path by ctx's deadline. The lookup stats
+// the file before it can wait on ctx, and a stat on a stalled mount ignores
+// ctx, so it runs on its own; one that outlives ctx finishes unobserved.
+func (reads *cueIndexReadsV3) lookupWithin(ctx context.Context, path string) (playback.CueIndexedSubtitles, error) {
+	type answer struct {
+		indexed playback.CueIndexedSubtitles
+		err     error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		indexed, err := reads.lookup(ctx, path)
+		done <- answer{indexed, err}
+	}()
+	select {
+	case a := <-done:
+		return a.indexed, a.err
+	case <-ctx.Done():
+		return playback.CueIndexedSubtitles{}, ctx.Err()
+	}
 }
 
 func (snapshot *hlsPlanningSnapshotV3) progressiveRemuxRegistry() *playback.TransformationRegistryV3 {
