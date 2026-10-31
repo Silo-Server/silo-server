@@ -16363,6 +16363,10 @@
             "description": "Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing",
             "type": "boolean"
           },
+          "routing_series_status": {
+            "description": "Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -16378,6 +16382,7 @@
           "available",
           "guarded_configuration",
           "routing",
+          "routing_series_status",
           "discover_layout",
           "discover_list_order",
           "revision",
@@ -17037,6 +17042,20 @@
             },
             "type": "array"
           },
+          "exclude_series_statuses": {
+            "description": "Series only: match series whose status is none of these; a series with no TMDB status matches",
+            "items": {
+              "enum": [
+                "returning",
+                "in_production",
+                "upcoming",
+                "ended",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "genre_ids": {
             "description": "TMDB genre IDs",
             "items": {
@@ -17099,6 +17118,20 @@
             "items": {
               "format": "int64",
               "type": "integer"
+            },
+            "type": "array"
+          },
+          "series_statuses": {
+            "description": "Series only: the series' status when the request was made, or, for a request made before Silo captured status, the first time it is routed while a rule checks status (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them",
+            "items": {
+              "enum": [
+                "returning",
+                "in_production",
+                "upcoming",
+                "ended",
+                "cancelled"
+              ],
+              "type": "string"
             },
             "type": "array"
           },
@@ -17187,6 +17220,13 @@
           },
           "original_language": {
             "description": "The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx)",
+            "type": "string"
+          },
+          "series_status": {
+            "description": "A series' status as series_statuses names it (returning, in_production, upcoming, ended, cancelled), or a newer TMDB status in lower case; absent for a movie or a series with no TMDB status",
+            "examples": [
+              "ended"
+            ],
             "type": "string"
           },
           "year": {
