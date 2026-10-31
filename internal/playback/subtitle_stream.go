@@ -155,8 +155,9 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		return copyErr
 	}
 	if waitErr != nil {
-		return fmt.Errorf("ffmpeg subtitle stream failed: %w (stderr: %s)",
-			waitErr, truncateStderr(stderrBuf.String()))
+		// A write that failed first is why FFmpeg failed; callers look for it.
+		return errors.Join(fmt.Errorf("ffmpeg subtitle stream failed: %w (stderr: %s)",
+			waitErr, truncateStderr(stderrBuf.String())), feedErr)
 	}
 	if feedErr != nil {
 		// ffmpeg converted what it got, but not the whole track.

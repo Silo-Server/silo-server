@@ -147,8 +147,10 @@ func runSubtitleExtract(ctx context.Context, ffmpeg string, args []string, in *S
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
 	if waitErr, feedErr := wait(); waitErr != nil {
-		return nil, fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
-			waitErr, truncateStderr(stderr.String()))
+		// A write that failed first, such as one refusing its packets, is
+		// why FFmpeg failed; callers look for it.
+		return nil, errors.Join(fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
+			waitErr, truncateStderr(stderr.String())), feedErr)
 	} else if feedErr != nil {
 		return nil, fmt.Errorf("write subtitle packets to ffmpeg: %w", feedErr)
 	}

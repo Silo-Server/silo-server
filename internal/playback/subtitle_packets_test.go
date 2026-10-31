@@ -1,8 +1,13 @@
 package playback
 
 import (
+	"errors"
+	"io"
+	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 )
 
 func TestParseFFprobeSeconds(t *testing.T) {
@@ -28,5 +33,21 @@ func TestParseFFprobeSeconds(t *testing.T) {
 	}
 	if _, err := parseFFprobeSeconds("1.5x"); err == nil {
 		t.Error("parsed a malformed time")
+	}
+}
+
+// A conversion whose packets were refused before FFmpeg got any reports the
+// refusal, not only FFmpeg's failure on empty input, so callers can tell
+// that the file, not the conversion, is at fault.
+func TestConversionReportsARefusedWrite(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	in := &SubtitlePacketInput{StreamFormat: "matroska", Stream: func() (io.ReadCloser, error) {
+		return nil, embeddedsub.ErrTooLarge
+	}}
+	if _, err := ExtractSubtitlePacketsWebVTT(t.Context(), in, ffmpeg); !errors.Is(err, embeddedsub.ErrTooLarge) {
+		t.Fatalf("err = %v, want it to carry ErrTooLarge", err)
 	}
 }
