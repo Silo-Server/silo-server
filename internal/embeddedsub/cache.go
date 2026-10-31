@@ -3,6 +3,7 @@ package embeddedsub
 import (
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,17 +11,25 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
-// indexLoadTimeout bounds a shared index read. A read that hangs, as on a
-// stalled network mount, then fails the callers waiting on it, and the next
-// caller starts another, instead of every later caller waiting on it.
+// indexLoadTimeout bounds how long callers wait for a shared index read.
+// A timed-out read stays registered until its filesystem work finishes.
 var indexLoadTimeout = 30 * time.Second
+
+const maxIndexReads = 8
+
+var errIndexReadBusy = errors.New("embeddedsub: index read limit reached")
+
+// indexReads bounds outstanding cached reads, including ones still blocked
+// in the kernel after their callers have received the load deadline.
+var indexReads = make(chan struct{}, maxIndexReads)
 
 // Cache keeps recently read indexes in memory, keyed by path, size and
 // modification time, so a file that changes gets a fresh index. It holds
 // up to a byte budget, evicting the least recently used. Concurrent misses
 // for one file share a single read. It is safe for concurrent use.
 type Cache struct {
-	maxBytes int64
+	maxBytes  int64
+	readIndex func(context.Context, string) (*Index, error)
 
 	mu      sync.Mutex
 	used    int64
@@ -51,16 +60,18 @@ type cacheLoad struct {
 // estimate. A typical file's index is a few kilobytes to a few hundred.
 func NewCache(maxBytes int64) *Cache {
 	return &Cache{
-		maxBytes: maxBytes,
-		lru:      list.New(),
-		entries:  map[cacheKey]*cacheEntry{},
-		loading:  map[cacheKey]*cacheLoad{},
+		maxBytes:  maxBytes,
+		readIndex: ReadIndex,
+		lru:       list.New(),
+		entries:   map[cacheKey]*cacheEntry{},
+		loading:   map[cacheKey]*cacheLoad{},
 	}
 }
 
 // Index returns the file's index, reading it on a miss (ReadIndex). It
 // stats the file on every call, within ctx: a stat on a stalled mount
-// doesn't hold a caller past its context. Errors aren't cached.
+// doesn't hold a caller past its context. Failed loads can be retried after
+// their filesystem work finishes.
 func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
@@ -76,6 +87,12 @@ func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 	}
 	load, loading := c.loading[key]
 	if !loading {
+		select {
+		case indexReads <- struct{}{}:
+		default:
+			c.mu.Unlock()
+			return nil, errIndexReadBusy
+		}
 		load = &cacheLoad{done: make(chan struct{})}
 		c.loading[key] = load
 	}
@@ -97,8 +114,14 @@ func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 // load reads the index for key and publishes it to the callers waiting on
 // load, within indexLoadTimeout. A panic fails them rather than leaving them
 // waiting. A read still blocked at the deadline is left to finish on its own
-// and its result dropped.
+// and its result dropped; its entry and slot remain held until it finishes.
 func (c *Cache) load(ctx context.Context, key cacheKey, load *cacheLoad) {
+	release := func() {
+		c.mu.Lock()
+		delete(c.loading, key)
+		<-indexReads
+		c.mu.Unlock()
+	}
 	ctx, cancel := context.WithTimeout(ctx, indexLoadTimeout)
 	defer cancel()
 	type result struct {
@@ -112,23 +135,31 @@ func (c *Cache) load(ctx context.Context, key cacheKey, load *cacheLoad) {
 				read <- result{err: fmt.Errorf("embeddedsub: index read panicked: %v", r)}
 			}
 		}()
-		idx, err := ReadIndex(ctx, key.path)
+		idx, err := c.readIndex(ctx, key.path)
 		read <- result{idx: idx, err: err}
 	}()
 	var res result
+	finished := false
 	select {
 	case res = <-read:
+		finished = true
 	case <-ctx.Done():
 		res.err = fmt.Errorf("embeddedsub: index read: %w", ctx.Err())
 	}
 	c.mu.Lock()
-	delete(c.loading, key)
 	if res.err == nil {
 		c.add(cacheKey{path: key.path, size: res.idx.Size, mtime: res.idx.ModTime.UnixNano()}, res.idx)
 	}
 	c.mu.Unlock()
 	load.idx, load.err = res.idx, res.err
+	if finished {
+		release()
+	}
 	close(load.done)
+	if !finished {
+		<-read
+		release()
+	}
 }
 
 // add stores idx under key and evicts down to the budget. c.mu is held.
