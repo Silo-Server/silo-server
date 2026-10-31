@@ -407,7 +407,7 @@ export default function TopNav() {
               <DropdownMenuContent
                 align="end"
                 sideOffset={10}
-                className="bg-popover border-border/60 w-auto min-w-[21rem] rounded-[24px] p-5"
+                className="weflix-account-menu bg-popover border-border/60 w-auto min-w-[21rem] rounded-[24px] p-5"
               >
                 <div className="flex gap-5">
                   <MenuColumn
@@ -429,7 +429,7 @@ export default function TopNav() {
           ) : (
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>{avatarButton}</SheetTrigger>
-              <SheetContent side="top" className="bg-popover border-border/60 p-0">
+              <SheetContent side="top" className="weflix-account-menu bg-popover border-border/60 p-0">
                 <SheetHeader className="sr-only">
                   <SheetTitle>Account menu</SheetTitle>
                 </SheetHeader>
