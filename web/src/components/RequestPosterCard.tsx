@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Bookmark, BookmarkCheck, Library, Loader2, Plus } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Bookmark, BookmarkCheck, Download, Library, Loader2, Plus } from "lucide-react";
 import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -13,12 +13,14 @@ import {
 } from "@/lib/mediaRequests";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import MediaCardArtwork, {
   MEDIA_CARD_CAPTION_CLASS,
   MEDIA_CARD_CENTER_ACTION_CLASS,
   MEDIA_CARD_META_CLASS,
   MEDIA_CARD_TITLE_CLASS,
 } from "@/components/MediaCardArtwork";
+import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import { RequestReasonBadge, RequestStatusBadge } from "@/components/RequestStatusBadge";
 import { Button } from "@/components/ui/button";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -27,9 +29,9 @@ import {
   mediaItemMenuTriggerClassName,
 } from "@/components/mediaItemMenuTrigger";
 
-// The badge takes the top-right corner and truncates before it reaches the
-// Library chip on the left.
-const BADGE_CLASS = "ml-auto max-w-full shrink-0";
+// The badge takes the top-left corner and truncates before it reaches the
+// In library chip on the right.
+const BADGE_CLASS = "max-w-full shrink-0";
 const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
 type DiscoverProps = {
@@ -91,12 +93,18 @@ function DiscoverCard({
   fluid,
 }: Omit<DiscoverProps, "variant">) {
   const requestable = item.request.requestable;
-  const availableInLibrary = item.availability === "available" && !item.request.status;
   const state: RequestDisplayState | undefined = item.request.status
     ? requestDisplayState(item.request.status, undefined, item.request.state)
-    : availableInLibrary
-      ? "available"
-      : undefined;
+    : undefined;
+  // A title the library has carries the In library chip. A badge reading
+  // Available, or a reason saying the same, would only repeat it, so those are
+  // the states the chip leaves out.
+  const badge =
+    state && state !== "available" ? (
+      <RequestStatusBadge state={state} overlay className={BADGE_CLASS} />
+    ) : !requestable && item.request.reason !== "already_available" ? (
+      <RequestReasonBadge reason={item.request.reason} overlay className={BADGE_CLASS} />
+    ) : null;
 
   return (
     <ExternalTitleCard
@@ -108,21 +116,20 @@ function DiscoverCard({
       libraryContentId={item.library_content_id}
       fluid={fluid}
       dim={!requestable}
-      badge={
-        state ? (
-          <RequestStatusBadge state={state} overlay className={BADGE_CLASS} />
-        ) : !requestable ? (
-          <RequestReasonBadge reason={item.request.reason} overlay className={BADGE_CLASS} />
-        ) : null
-      }
+      badge={badge}
       cornerAction={
-        onToggleWatchlist ? (
-          <WatchlistAction
-            title={item.title}
-            inWatchlist={Boolean(item.in_watchlist)}
-            pending={Boolean(isWatchlistPending)}
-            onToggle={onToggleWatchlist}
-          />
+        requestable || onToggleWatchlist ? (
+          <>
+            {requestable ? <RequestCornerAction item={item} /> : null}
+            {onToggleWatchlist ? (
+              <WatchlistAction
+                title={item.title}
+                inWatchlist={Boolean(item.in_watchlist)}
+                pending={Boolean(isWatchlistPending)}
+                onToggle={onToggleWatchlist}
+              />
+            ) : null}
+          </>
         ) : null
       }
     />
@@ -154,7 +161,12 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
       libraryContentId={request.library_content_id}
       fluid={fluid}
       dim={isClosed}
-      badge={state ? <RequestStatusBadge state={state} overlay className={BADGE_CLASS} /> : null}
+      // Available is what the In library chip already says; see DiscoverCard.
+      badge={
+        state && state !== "available" ? (
+          <RequestStatusBadge state={state} overlay className={BADGE_CLASS} />
+        ) : null
+      }
     >
       {hasDetails ? (
         <>
@@ -196,8 +208,9 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
 
 /**
  * The library poster card for a title outside the library: the same artwork
- * frame and caption, with a request badge where library cards carry their
- * overlay badges. Requesting happens on the title's detail page.
+ * frame and caption, with the request's state where library cards carry their
+ * overlay badges and an In library chip when the library has the title. The
+ * request action in the corner does what the title's detail page does.
  */
 function ExternalTitleCard({
   title,
@@ -222,7 +235,7 @@ function ExternalTitleCard({
   fluid?: boolean;
   dim?: boolean;
   badge?: ReactNode;
-  /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
+  /** Hover actions in the poster's bottom-right corner, where library cards keep their menu. */
   cornerAction?: ReactNode;
   /** Request details below the caption; pass null for none. */
   children?: ReactNode;
@@ -252,14 +265,14 @@ function ExternalTitleCard({
             dim={dim}
           />
         </ViewTransitionLink>
-        {libraryContentId || badge ? (
+        {badge || libraryContentId ? (
           <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex flex-wrap items-center gap-1.5">
-            {libraryContentId ? <LibraryChip contentID={libraryContentId} title={title} /> : null}
             {badge}
+            {libraryContentId ? <LibraryChip contentID={libraryContentId} title={title} /> : null}
           </div>
         ) : null}
         {cornerAction ? (
-          <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
+          <div className="absolute right-1.5 bottom-1.5 z-20 flex items-center gap-1.5 sm:right-2.5 sm:bottom-2.5">
             {cornerAction}
           </div>
         ) : null}
@@ -319,6 +332,55 @@ export function RequestAction({
   );
 }
 
+/**
+ * The Request action in a TMDB title's poster corner, beside the watchlist
+ * toggle: the request the title's detail page makes. A movie goes out
+ * straight away; a series opens the season picker instead, because only the
+ * series detail lists the seasons the server can be asked for.
+ */
+export function RequestCornerAction({ item }: { item: RequestMediaResult }) {
+  const { submit, isSubmitting } = useSubmitMediaRequest();
+  const [pickSeasons, setPickSeasons] = useState(false);
+  const pending = isSubmitting(item);
+  const Icon = pending ? Loader2 : Download;
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        aria-label={pending ? `Sending request for ${item.title}` : `Request ${item.title}`}
+        title={pending ? "Requesting" : "Request"}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (item.media_type === "series") setPickSeasons(true);
+          else submit(item);
+        }}
+        className={cn(
+          mediaItemMenuTriggerClassName("poster"),
+          // Keep the pending state in view after the pointer leaves the card.
+          pending && "pointer-events-auto opacity-100",
+        )}
+      >
+        <Icon
+          className={cn(mediaItemMenuIconClassName("poster"), pending && "animate-spin")}
+          aria-hidden
+        />
+      </button>
+      {pickSeasons ? (
+        <RequestSeasonsDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setPickSeasons(false);
+          }}
+          tmdbID={item.tmdb_id}
+          title={item.title}
+        />
+      ) : null}
+    </>
+  );
+}
+
 /** The hover watchlist toggle in a TMDB title's poster corner. */
 export function WatchlistAction({
   title,
@@ -366,10 +428,10 @@ function LibraryChip({ contentID, title }: { contentID: string; title: string })
     <ViewTransitionLink
       to={`/item/${encodeURIComponent(contentID)}`}
       aria-label={`Open ${title} in library`}
-      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
+      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
     >
       <Library className="size-3 shrink-0" strokeWidth={2.4} aria-hidden />
-      Library
+      In library
     </ViewTransitionLink>
   );
 }

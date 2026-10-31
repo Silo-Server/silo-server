@@ -1,9 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import type { MediaRequest, RequestMediaDetail, RequestMediaResult } from "@/api/types";
+
+const mocks = vi.hoisted(() => ({
+  submit: vi.fn(),
+  isSubmitting: vi.fn(() => false),
+  seriesDetail: undefined as RequestMediaDetail | undefined,
+}));
+
+vi.mock("@/hooks/useSubmitMediaRequest", () => ({
+  useSubmitMediaRequest: () => ({ submit: mocks.submit, isSubmitting: () => mocks.isSubmitting() }),
+}));
+
+// A series' Request action opens the seasons picker, which reads the series
+// detail on its own; that read is not this file's business.
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useCreateMediaRequest: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRequestMediaDetail: () => ({ data: mocks.seriesDetail, isFetching: false, isError: false }),
+}));
+
 import RequestPosterCard from "./RequestPosterCard";
-import type { MediaRequest, RequestMediaResult } from "@/api/types";
 
 const requestable: RequestMediaResult = {
   media_type: "movie",
@@ -13,18 +30,59 @@ const requestable: RequestMediaResult = {
   request: { requestable: true },
 };
 
+beforeEach(() => {
+  mocks.submit.mockReset();
+  mocks.isSubmitting.mockReset().mockReturnValue(false);
+  mocks.seriesDetail = undefined;
+});
+
 describe("RequestPosterCard (discover variant)", () => {
-  it("offers no Request action on the card", () => {
-    const markup = renderToStaticMarkup(
+  it("requests a movie from the corner action", () => {
+    render(
       <MemoryRouter>
         <RequestPosterCard variant="discover" item={requestable} />
       </MemoryRouter>,
     );
 
-    expect(markup).not.toContain("<button");
+    const request = screen.getByRole("button", { name: "Request Test Movie" });
+    expect(request).toHaveAttribute("title", "Request");
+    fireEvent.click(request);
+
+    expect(mocks.submit).toHaveBeenCalledWith(requestable);
   });
 
-  it("marks a title already in the library as Available and links to it", () => {
+  it("opens the seasons picker for a series instead of requesting it", () => {
+    render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={{ ...requestable, media_type: "series", tmdb_id: 7, title: "Test Series" }}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Request Test Series" }));
+
+    // Only the series detail lists seasons, so the picker chooses them.
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Request seasons" })).toBeInTheDocument();
+  });
+
+  it("offers no Request action for a title it cannot request", () => {
+    render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={{ ...requestable, request: { requestable: false, reason: "quota_exceeded" } }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Request Test Movie" })).toBeNull();
+    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
+  });
+
+  it("says the library has it instead of badging it Available", () => {
     render(
       <MemoryRouter>
         <RequestPosterCard
@@ -39,15 +97,13 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
 
-    const badge = screen.getByText("Available").closest("[data-request-state]");
-    expect(badge).toHaveAttribute("data-request-state", "available");
-    // The badge overlays the artwork; it is not part of a link.
-    expect(badge?.closest(".group\\/media")).not.toBeNull();
-    expect(badge?.closest("a")).toBeNull();
-    expect(screen.getByRole("link", { name: "Open Test Movie in library" })).toHaveAttribute(
-      "href",
-      "/item/movie%20tmdb%2042",
-    );
+    // The chip carries the news; an Available badge or reason would repeat it.
+    expect(screen.queryByText("Available")).toBeNull();
+    const chip = screen.getByRole("link", { name: "Open Test Movie in library" });
+    expect(chip).toHaveAttribute("href", "/item/movie%20tmdb%2042");
+    expect(chip).toHaveTextContent("In library");
+    // The chip overlays the artwork; it is not part of the poster link.
+    expect(chip.closest(".group\\/media")).not.toBeNull();
   });
 
   it("shows the default artwork in place of a poster that fails to load", () => {

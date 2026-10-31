@@ -17,6 +17,8 @@ vi.mock("@/hooks/useCanRequest", () => ({
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: (...args: unknown[]) => mocks.useRequestSearch(...args),
+  // The grid's cards request a title from the poster's own Request action.
+  useCreateMediaRequest: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
