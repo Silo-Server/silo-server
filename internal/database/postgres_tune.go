@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -748,6 +749,22 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
+	}
+	// A syntax error or an unknown parameter name stops PostgreSQL before it
+	// compares any value, leaving every other entry without an error. Only an
+	// entry for a setting no file sets any more (no name, no file) may carry
+	// one then.
+	var unreadable bool
+	if err := pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM pg_file_settings f
+  WHERE f.error IS NOT NULL
+    AND (f.name IS NULL AND f.sourcefile IS NOT NULL
+      OR f.name IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_settings s WHERE s.name = lower(f.name))))`).Scan(&unreadable); err != nil {
+		return nil, err
+	}
+	if unreadable {
+		return nil, errors.New("postgres configuration files contain errors")
 	}
 	rows, err := pool.Query(ctx, `
 SELECT s.name
