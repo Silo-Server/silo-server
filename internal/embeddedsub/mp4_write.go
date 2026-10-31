@@ -12,6 +12,10 @@ import (
 // emptyTextSample is a tx3g sample with no text: it shows nothing.
 var emptyTextSample = []byte{0, 0}
 
+// maxMP4GapSamples bounds samples synthesized from decode-time gaps, which
+// are absent from the packet read's memory budget. Ordinary gaps need one.
+const maxMP4GapSamples = 4096
+
 // writeMP4 writes an MP4 text track's packets as an MP4 file of that one
 // track, moov first so FFmpeg reads it from a pipe. The source's ftyp,
 // movie header, track header, edit list, media header, handler, media
@@ -33,9 +37,17 @@ func writeMP4(w io.Writer, t *Track, packets []Packet) error {
 		now     int64
 		size    int64
 	)
+	gapSamplesLeft := maxMP4GapSamples
 	for _, p := range packets {
 		if p.mp4DTS < now {
 			return errors.New("embeddedsub: MP4 packets overlap or are out of order")
+		}
+		if gap := p.mp4DTS - now; gap > 0 {
+			count := 1 + (gap-1)/math.MaxUint32
+			if count > int64(gapSamplesLeft) {
+				return ErrTooLarge
+			}
+			gapSamplesLeft -= int(count)
 		}
 		for gap := p.mp4DTS - now; gap > 0; {
 			d := min(gap, math.MaxUint32)

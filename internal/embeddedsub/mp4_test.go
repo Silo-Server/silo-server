@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -284,5 +286,37 @@ func TestMP4IndexBoundsKeptBoxesAcrossTracks(t *testing.T) {
 	}
 	if refused == 0 || kept > maxMP4KeptBytes {
 		t.Fatalf("%d tracks refused, %d bytes kept; want refusals and at most %d", refused, kept, maxMP4KeptBytes)
+	}
+}
+
+func TestMP4WriteBoundsSyntheticSamples(t *testing.T) {
+	// An edit can map this decode time near zero on the presentation
+	// timeline. One tiny window must not expand it to a million samples.
+	for _, tt := range []struct {
+		name         string
+		gaps         []int64
+		wantTooLarge bool
+	}{
+		{"one large gap", []int64{1<<20 - 1}, true},
+		{"gaps share the limit", []int64{2049, 2049}, true},
+		{"gaps at the limit", []int64{2048, 2048}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var packets []Packet
+			var now int64
+			for _, gap := range tt.gaps {
+				now += gap * math.MaxUint32
+				packets = append(packets, Packet{Data: textSample("x"), mp4DTS: now, mp4Delta: 1000})
+				now += 1000
+			}
+			err := writeMP4(io.Discard, &Track{mp4: testMP4Track(nil)}, packets)
+			if tt.wantTooLarge {
+				if !errors.Is(err, ErrTooLarge) {
+					t.Fatalf("write error = %v, want ErrTooLarge", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
