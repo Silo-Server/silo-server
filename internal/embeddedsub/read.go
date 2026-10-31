@@ -25,9 +25,9 @@ type ReadOptions struct {
 	// AllowIncomplete reads a track whose cues disagree with its
 	// NUMBER_OF_FRAMES tag instead of returning ErrIncompleteCues.
 	AllowIncomplete bool
-	// MaxBytes bounds the packet data one call holds, and the blocks it
-	// holds while reading; 0 means DefaultMaxBytes. A read that would hold
-	// more returns ErrTooLarge.
+	// MaxBytes bounds the packet data and blocks one call holds, plus
+	// conservative estimates for cue/job and packet metadata; 0 means
+	// DefaultMaxBytes. A read that would hold more returns ErrTooLarge.
 	MaxBytes int64
 	// Background, when set and not raised, makes this a read nobody waits
 	// on: its I/O goes at the idle priority on Linux, with
@@ -55,6 +55,10 @@ const (
 	// to minutes holds kilobytes of text and a few megabytes of bitmaps, so
 	// a crafted file can't make each one hold what a whole read may.
 	WindowMaxBytes = 16 << 20
+	// Metadata weights cover slice growth, job/results, cluster maps and
+	// channels, and copies of Packet structs retained while gathering output.
+	cueMetadataBytes    = 1024
+	packetMetadataBytes = 512
 )
 
 // budget counts the bytes a read may still hold.
@@ -177,7 +181,7 @@ func (t *Track) readable(opts ReadOptions) error {
 // in [from, to), given that none lasts longer than lookback beyond what its
 // cue says. A cue without a duration is also taken when it is the latest to
 // start by from: without a duration of its own, it shows until the next.
-func selectCues(cues []Cue, done []bool, from, to, lookback time.Duration) []int {
+func selectCues(cues []Cue, done []bool, from, to, lookback time.Duration, b *budget) ([]int, error) {
 	whole := from == WholeFrom && to == WholeTo
 	latest := WholeFrom
 	if !whole {
@@ -191,10 +195,13 @@ func selectCues(cues []Cue, done []bool, from, to, lookback time.Duration) []int
 	var sel []int
 	for i, c := range cues {
 		if !done[i] && (whole || cueWanted(c, from, to, earliest, latest)) {
+			if err := b.take(cueMetadataBytes); err != nil {
+				return nil, err
+			}
 			sel = append(sel, i)
 		}
 	}
-	return sel
+	return sel, nil
 }
 
 // cueWanted reports whether a cue's packet may show in [from, to): one
