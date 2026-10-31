@@ -43,7 +43,11 @@ func TestSignupRechecksLocalPolicyBeforeSpendingInviteDB(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `INSERT INTO invite_codes (code,max_uses,created_by) VALUES ($1,1,$2)`, code, creator.ID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = env.pool.Exec(context.Background(), `DELETE FROM invite_codes WHERE code=$1`, code) })
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_, _ = env.pool.Exec(cleanupCtx, `DELETE FROM invite_codes WHERE code=$1`, code)
+	})
 	users := NewUserRepository(env.pool)
 	sessions := NewSessionRepository(env.pool)
 	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-signup-secret-0123456789", time.Minute, time.Hour), sessions, users, NewInviteCodeRepository(env.pool), dbSettings{env}, nil)
