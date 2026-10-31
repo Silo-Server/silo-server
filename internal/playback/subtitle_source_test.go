@@ -336,6 +336,38 @@ func TestPrefixKeepalive(t *testing.T) {
 	if k.tick(); out.String() != converted {
 		t.Fatalf("output %q, want %q", out.String(), converted)
 	}
+	// A header that arrives before the timer sends all of it still needs
+	// heartbeats until cue output follows, including across partial writes.
+	for _, sent := range []int{0, 2} {
+		for name, parts := range map[string][]string{"whole": {webVTTPrefix}, "split": {"WE", "BV", "TT\n"}} {
+			t.Run(name, func(t *testing.T) {
+				var early strings.Builder
+				k := newPrefixKeepalive(&early, webVTTPrefix, time.Hour, time.Hour)
+				defer k.stop()
+				for range sent {
+					k.tick()
+				}
+				for i, part := range parts {
+					if _, err := k.Write([]byte(part)); err != nil {
+						t.Fatal(err)
+					}
+					if i+1 < len(parts) {
+						k.tick()
+					}
+				}
+				if !k.tick() || early.String() != webVTTPrefix+"\n" {
+					t.Fatalf("header after %d timer bytes in %q: %q", sent, parts, early.String())
+				}
+				if _, err := k.Write([]byte(converted[len(webVTTPrefix):])); err != nil {
+					t.Fatal(err)
+				}
+				more := k.tick()
+				if more || early.String() != webVTTPrefix+"\n"+converted[len(webVTTPrefix):] {
+					t.Fatalf("cue output after early header: %q", early.String())
+				}
+			})
+		}
+	}
 	// A wait past the whole header goes on with blank lines, also while the
 	// output has repeated only the header, as a demux of a sparse track does
 	// before its first cue; the cues follow unchanged.
