@@ -200,24 +200,33 @@ type EpisodeParentCompletionStore interface {
 // scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.
 func CompletedHistoryItemMap(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
+	result, err := completedHistoryItems(ctx, store, query)
+	if err != nil {
+		return map[string]CompletedHistoryItem{}
+	}
+	return result
+}
+
+// completedHistoryItems is CompletedHistoryItemMap that reports a failed lookup.
+func completedHistoryItems(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) (map[string]CompletedHistoryItem, error) {
 	result := map[string]CompletedHistoryItem{}
 	if store == nil || query.ProfileID == "" {
-		return result
+		return result, nil
 	}
 	query.MediaItemIDs = compactHistoryMediaItemIDs(query.MediaItemIDs)
 	if len(query.MediaItemIDs) == 0 {
-		return result
+		return result, nil
 	}
 	items, err := store.ListCompletedHistoryItems(ctx, query)
 	if err != nil {
-		return result
+		return nil, err
 	}
 	for _, item := range items {
 		if item.MediaItemID != "" {
 			result[item.MediaItemID] = item
 		}
 	}
-	return result
+	return result, nil
 }
 
 // GetProgressWithCompletedHistory returns normal progress overlaid with
@@ -260,6 +269,17 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 // completed history folded into the map. History is only queried for IDs that
 // are not already completed by a progress row.
 func ListProgressWithCompletedHistory(ctx context.Context, store ProgressCompletionStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
+	return listProgressWithCompletedHistory(ctx, store, profileID, mediaItemIDs, false)
+}
+
+// ListProgressWithCompletedHistoryStrict is ListProgressWithCompletedHistory
+// for callers that count watched items: a completed-history lookup that fails
+// is an error, where the lenient form would report those items unwatched.
+func ListProgressWithCompletedHistoryStrict(ctx context.Context, store ProgressCompletionStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
+	return listProgressWithCompletedHistory(ctx, store, profileID, mediaItemIDs, true)
+}
+
+func listProgressWithCompletedHistory(ctx context.Context, store ProgressCompletionStore, profileID string, mediaItemIDs []string, strict bool) (map[string]WatchProgress, error) {
 	mediaItemIDs = compactHistoryMediaItemIDs(mediaItemIDs)
 	if store == nil || profileID == "" || len(mediaItemIDs) == 0 {
 		return map[string]WatchProgress{}, nil
@@ -283,10 +303,16 @@ func ListProgressWithCompletedHistory(ctx context.Context, store ProgressComplet
 		return progressMap, nil
 	}
 
-	completed := CompletedHistoryItemMap(ctx, store, CompletedHistoryItemQuery{
+	completed, err := completedHistoryItems(ctx, store, CompletedHistoryItemQuery{
 		ProfileID:    profileID,
 		MediaItemIDs: candidates,
 	})
+	if err != nil {
+		if strict {
+			return nil, err
+		}
+		completed = nil
+	}
 	for mediaItemID, completedItem := range completed {
 		if progress, ok := progressMap[mediaItemID]; ok {
 			progress.Completed = true

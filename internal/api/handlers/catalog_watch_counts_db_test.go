@@ -24,13 +24,23 @@ type noRollupStore struct {
 	userstore.UserStore
 }
 
-// failingProgressStore folds like noRollupStore, but every progress read fails.
-type failingProgressStore struct {
+// countsProgressFailsStore folds like noRollupStore, but every progress read fails.
+type countsProgressFailsStore struct {
 	noRollupStore
 }
 
-func (failingProgressStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
+func (countsProgressFailsStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
 	return nil, errors.New("progress store unavailable")
+}
+
+// countsHistoryFailsStore folds like noRollupStore, but every completed-history
+// read fails.
+type countsHistoryFailsStore struct {
+	noRollupStore
+}
+
+func (countsHistoryFailsStore) ListCompletedHistoryItems(context.Context, userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
+	return nil, errors.New("history store unavailable")
 }
 
 // SeriesWatchCounts answers only the series the viewer may see that have
@@ -124,8 +134,10 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 	}{
 		{"rollup", pgStore, false},
 		{"fold", noRollupStore{pgStore}, false},
-		// A progress read that fails is an error, never counts left out.
-		{"fold progress fails", failingProgressStore{noRollupStore{pgStore}}, true},
+		// A progress or history read that fails is an error, never counts left
+		// out or episodes watched only in history counted as unwatched.
+		{"fold progress fails", countsProgressFailsStore{noRollupStore{pgStore}}, true},
+		{"fold history fails", countsHistoryFailsStore{noRollupStore{pgStore}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &CatalogResourceHandler{items: &ItemsHandler{

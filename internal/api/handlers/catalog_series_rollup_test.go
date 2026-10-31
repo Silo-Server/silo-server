@@ -87,4 +87,10 @@ func TestSeriesUserDataUsesEpisodeRollup(t *testing.T) {
 	if want := map[string]*catalog.SeasonUserData{"series-1": {WatchedCount: 2, UnplayedCount: 3, InProgressCount: 1}}; !reflect.DeepEqual(counts, want) {
 		t.Fatalf("series counts = %+v, want %+v", counts, want)
 	}
+
+	// A store that fails to open is an error, not series left without counts.
+	h.storeProvider = failingStoreProvider{}
+	if counts, err := h.seriesWatchCounts(ctx, viewer, []string{"series-1"}); err == nil {
+		t.Fatalf("series counts = %+v, want an error", counts)
+	}
 }

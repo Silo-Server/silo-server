@@ -2119,14 +2119,23 @@ func (h *ItemsHandler) seriesSeasonRollups(ctx context.Context, v ItemViewer, se
 // seriesWatchCounts is parentRollupUserData for many series at once, keyed by
 // series ID: one SQL rollup when the viewer's store has it, else the series'
 // episodes folded with their progress. A series without available episodes
-// is absent, and so is every series when the viewer's store is unreachable;
-// a progress read that fails is an error, never an absent count.
+// is absent, and so is every series when no store is configured; a store
+// that fails to open or to read progress or history is an error, never an
+// absent count.
 func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seriesIDs []string) (map[string]*catalog.SeasonUserData, error) {
 	out := make(map[string]*catalog.SeasonUserData, len(seriesIDs))
-	if len(seriesIDs) == 0 {
+	userID := apimw.GetUserID(ctx)
+	if len(seriesIDs) == 0 || h.storeProvider == nil || userID == 0 || v.ProfileID == "" {
 		return out, nil
 	}
-	if rollup, ok := h.episodeRollupStore(ctx, v); ok {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if store == nil {
+		return out, nil
+	}
+	if rollup, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
 		counts, err := rollup.SeriesEpisodeWatchCounts(ctx, v.ProfileID, seriesIDs)
 		if err == nil {
 			for id, series := range counts {
@@ -2139,10 +2148,6 @@ func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seri
 		}
 		slog.WarnContext(ctx, "series watch rollup failed, folding episodes instead", "component", "api", "error", err)
 	}
-	store, profileID, ok := h.viewerUserStore(ctx, v.ProfileID)
-	if !ok {
-		return out, nil
-	}
 	episodesBySeries, err := h.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
 	if err != nil {
 		return nil, err
@@ -2151,7 +2156,7 @@ func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seri
 	for _, seriesEpisodes := range episodesBySeries {
 		episodes = append(episodes, seriesEpisodes...)
 	}
-	progressMap, err := h.listProgressForEpisodeIDs(ctx, store, profileID, episodeContentIDs(episodes))
+	progressMap, err := listEpisodeProgress(ctx, store, v.ProfileID, episodeContentIDs(episodes), userstore.ListProgressWithCompletedHistoryStrict)
 	if err != nil {
 		return nil, err
 	}
@@ -2177,6 +2182,18 @@ func (h *ItemsHandler) progressMapForEpisodes(ctx context.Context, v ItemViewer,
 }
 
 func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store userstore.UserStore, profileID string, episodeIDs []string) (map[string]userstore.WatchProgress, error) {
+	return listEpisodeProgress(ctx, store, profileID, episodeIDs, userstore.ListProgressWithCompletedHistory)
+}
+
+// listEpisodeProgress reads episode progress in chunks through list, one of
+// the userstore progress-with-completed-history forms.
+func listEpisodeProgress(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	episodeIDs []string,
+	list func(context.Context, userstore.ProgressCompletionStore, string, []string) (map[string]userstore.WatchProgress, error),
+) (map[string]userstore.WatchProgress, error) {
 	const chunkSize = 500
 	progressMap := make(map[string]userstore.WatchProgress, len(episodeIDs))
 	for start := 0; start < len(episodeIDs); start += chunkSize {
@@ -2184,7 +2201,7 @@ func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store user
 		if end > len(episodeIDs) {
 			end = len(episodeIDs)
 		}
-		chunk, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, episodeIDs[start:end])
+		chunk, err := list(ctx, store, profileID, episodeIDs[start:end])
 		if err != nil {
 			return nil, err
 		}
