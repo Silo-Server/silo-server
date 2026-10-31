@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -71,7 +72,15 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 			}
 			paths = append(paths, path)
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		return paths
+	}
+	// A request whose domain row committed still reaches the writer, flagged
+	// Persisted so it counts as activity without a second stored row.
+	requestRows := func() int {
+		return len(slices.DeleteFunc(slices.Clone(w.entries), func(e LogEntry) bool { return e.Persisted }))
 	}
 	for _, tc := range []struct {
 		path        string
@@ -84,10 +93,10 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 		{path: "/api/v1/auth/account/password", requestRows: 1},
 		{path: "/api/v2/account/rolled-back", requestRows: 1},
 	} {
-		before, logged := len(domainRows()), len(w.entries)
+		before, logged := len(domainRows()), requestRows()
 		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, tc.path, nil))
 		rows := domainRows()
-		if got := len(w.entries) - logged; got != tc.requestRows {
+		if got := requestRows() - logged; got != tc.requestRows {
 			t.Fatalf("%s: %d request rows, want %d", tc.path, got, tc.requestRows)
 		}
 		if tc.domainPath == "" {

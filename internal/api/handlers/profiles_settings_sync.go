@@ -219,6 +219,14 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 	var changedKeys []string
 	var audit *auditmutation.Entry
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		audited, recording := profileAuditWriter(ctx, tx)
+		if recording {
+			// The audit row's account keys come before the acting profile's
+			// row lock, in the order deleting the account takes them.
+			if err := auditmutation.LockActors(ctx, audited.AuditTx()); err != nil {
+				return err
+			}
+		}
 		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
 			return err
 		}
@@ -244,7 +252,6 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 		if err != nil {
 			return err
 		}
-		audited, recording := profileAuditWriter(ctx, tx)
 		if !recording {
 			return nil
 		}
@@ -278,17 +285,19 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 	err := applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
 		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
 	}, writes, func(tx userstore.PreferenceSettingsWriter) error {
-		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
-			return err
-		}
 		audited, recording := profileAuditWriter(ctx, tx)
-		var before *userstore.Profile
 		if recording {
-			// The audit row's account keys come before the profile row lock,
-			// in the order deleting the account takes them.
+			// The audit row's account keys come before the acting and edited
+			// profiles' row locks, in the order deleting the account takes them.
 			if err := auditmutation.LockActors(ctx, audited.AuditTx()); err != nil {
 				return err
 			}
+		}
+		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
+			return err
+		}
+		var before *userstore.Profile
+		if recording {
 			var err error
 			if before, err = audited.GetProfile(ctx, profileID); err != nil {
 				return err
