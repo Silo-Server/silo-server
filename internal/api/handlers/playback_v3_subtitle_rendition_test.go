@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -567,5 +568,32 @@ func TestRehomeRestoresOnDemandRenditionNamesFromTheRecord(t *testing.T) {
 	card, _ = handler.rehomeRecipeCardV3(t.Context(), session, session.ID, tokenCard(other))
 	if card == nil || card.SubtitleRenditionTracks[0].Name != "" || card.SubtitleRenditionTracks[1].TrackNumber != 5 {
 		t.Fatalf("renditions of another plan = %+v", card)
+	}
+}
+
+// A lookup held up before it can see the deadline, as a stat on a stalled
+// mount is, still answers none by the deadline, so planning keeps the
+// pipeline rendition instead of waiting on it.
+func TestCueIndexReadsAnswerByTheDeadline(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	reads := newCueIndexReadsV3()
+	reads.deadline = time.Now().Add(20 * time.Millisecond)
+	reads.lookup = func(context.Context, string) (playback.CueIndexedSubtitles, error) {
+		<-release
+		return playback.CueIndexedSubtitles{}, nil
+	}
+	ctx := context.WithValue(t.Context(), cueIndexReadsKeyV3{}, reads)
+	answered := make(chan *playback.CueIndexedSubtitles, 1)
+	go func() {
+		answered <- cueIndexedSubtitleTracksV3(ctx, &models.MediaFile{ID: 7, FilePath: "/media/stalled.mkv"})()
+	}()
+	select {
+	case got := <-answered:
+		if got != nil {
+			t.Fatalf("stalled lookup answered %+v, want none", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("planning waited on a stalled lookup past its deadline")
 	}
 }

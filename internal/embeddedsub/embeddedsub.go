@@ -286,7 +286,7 @@ func (idx *Index) memSize() int64 {
 		n += trackSize + int64(len(t.CodecPrivate)+len(t.Language)+len(t.LanguageBCP47)+len(t.Name)+len(t.CodecID))
 		n += int64(len(t.Cues)) * cueSize
 		if t.mp4 != nil {
-			n += int64(len(t.mp4.samples))*sampleSize + int64(len(t.mp4.stsd)+len(t.mp4.edts)+len(t.mp4.tkhd)+len(t.mp4.mvhd))
+			n += int64(len(t.mp4.samples))*sampleSize + int64(t.mp4.boxBytes())
 		}
 	}
 	return n

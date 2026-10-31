@@ -238,7 +238,23 @@ func TestServeExtractWindowsFromTheSource(t *testing.T) {
 			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 				t.Fatalf("Cache-Control = %q", got)
 			}
-			if f, _, ok := c.lookup(source, 0, map[bool]string{true: "sup", false: "vtt"}[tc.sup]); ok {
+			if tc.sup {
+				// A PGS window answered from the source warms the whole
+				// track in the background; wait for the warm to finish, so
+				// its commit doesn't race the check or the temp dir cleanup.
+				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
+				f, _, ok := c.lookup(source, 0, "sup")
+				if !ok {
+					t.Fatal("the warm did not cache the whole track")
+				}
+				data, _ := io.ReadAll(f)
+				_ = f.Close()
+				if string(data) != "converted:kept" {
+					t.Fatalf("cached whole track = %q", data)
+				}
+				return
+			}
+			if f, _, ok := c.lookup(source, 0, "vtt"); ok {
 				_ = f.Close()
 				t.Fatal("a window was cached as the whole track")
 			}

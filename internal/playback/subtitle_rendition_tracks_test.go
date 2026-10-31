@@ -357,7 +357,12 @@ func TestOnDemandSubtitleRenditionsMatchThePipeline(t *testing.T) {
 			}},
 		)
 	}
-	for _, src := range []struct{ name, path string }{{"zero", base}, {"video-after-subtitles", shifted}} {
+	// TotalDuration is each source's length, which sets an encode's
+	// synthetic grid: the shifted source's video runs to 37 s.
+	for _, src := range []struct {
+		name, path string
+		duration   float64
+	}{{"zero", base, 30}, {"video-after-subtitles", shifted, 37}} {
 		numbers := subtitleTrackNumbers(t, src.path)
 		if len(numbers) != 2 {
 			t.Fatalf("%s: subtitle tracks %v", src.name, numbers)
@@ -368,7 +373,7 @@ func TestOnDemandSubtitleRenditionsMatchThePipeline(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%s/track%d", src.name, r.name, track), func(t *testing.T) {
 					opts := r.opts(src.path)
 					opts.OutputDir, opts.FFmpegPath, opts.HWAccel = t.TempDir(), ffmpeg, HWAccelNone
-					opts.TargetCodecAudio, opts.SegmentDuration, opts.TotalDuration = "aac", 2, 30
+					opts.TargetCodecAudio, opts.SegmentDuration, opts.TotalDuration = "aac", 2, src.duration
 					opts.SubtitleTrackIndex, opts.SubtitleCodec, opts.SubtitleRendition = track, "subrip", true
 					opts.subtitleCueFile = subtitleCueFileName(0)
 					if output, err := exec.CommandContext(ctx, ffmpeg, buildFFmpegArgs(opts)...).CombinedOutput(); err != nil {
@@ -808,6 +813,62 @@ func TestOnDemandSegmentFailures(t *testing.T) {
 	if body, err := session(ffmpeg, planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0); err != nil || !strings.Contains(string(body), "Early A") {
 		t.Fatalf("segment of the planned source = %q, %v", body, err)
 	}
+
+	// A segment past the encode's grid (15 segments of 2 s) is not read,
+	// however long the live span runs.
+	live := session(ffmpeg, planned)
+	live.subtitleSpans[0].end = -1
+	if body, err := live.subtitleTrackSegmentVTT(ctx, numbers[0], 15); !errors.Is(err, ErrSegmentNotFound) {
+		t.Fatalf("segment past the grid = %q, %v, want ErrSegmentNotFound", body, err)
+	}
+}
+
+// A window's read stops once every request waiting on it has given up, and a
+// miss past the cache's limit on running reads is refused rather than queued.
+func TestRenditionCueCacheStopsAbandonedReads(t *testing.T) {
+	c := newRenditionCueCache(1<<20, 1)
+	key := renditionCueKey{path: "/media/a.mkv", track: 3, to: time.Minute}
+	stopped := make(chan struct{})
+	read := func(ctx context.Context) ([]byte, error) {
+		<-ctx.Done()
+		close(stopped)
+		return nil, ctx.Err()
+	}
+	first, cancelFirst := context.WithCancel(t.Context())
+	second, cancelSecond := context.WithCancel(t.Context())
+	defer cancelSecond()
+	errs := make(chan error, 2)
+	go func() { _, err := c.get(first, key, read); errs <- err }()
+	waitForCondition(t, func() bool { return loadWaiters(c, key) == 1 }, func() {})
+	go func() { _, err := c.get(second, key, read); errs <- err }()
+	waitForCondition(t, func() bool { return loadWaiters(c, key) == 2 }, func() {})
+
+	if _, err := c.get(t.Context(), renditionCueKey{path: "/media/b.mkv"}, read); !errors.Is(err, errRenditionLoadsBusy) {
+		t.Fatalf("a second window's miss: err = %v, want errRenditionLoadsBusy", err)
+	}
+	cancelFirst()
+	if err := <-errs; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first request: err = %v", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("the read stopped while a request still waited on it")
+	default:
+	}
+	cancelSecond()
+	if err := <-errs; !errors.Is(err, context.Canceled) {
+		t.Fatalf("second request: err = %v", err)
+	}
+	<-stopped
+}
+
+func loadWaiters(c *renditionCueCache, key renditionCueKey) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if load := c.loading[key]; load != nil {
+		return load.waiters
+	}
+	return 0
 }
 
 // keptWindowsV3 stands in for kept tracks (keptsub): it keeps a track the
@@ -910,7 +971,7 @@ func TestOnDemandSegmentsReadFromKeptTracksMatchTheSource(t *testing.T) {
 					session.copyPlan = &copySegmentPlan{durations: slices.Repeat([]float64{2}, 15)}
 				}
 				segments := func(kept EmbeddedSubtitleSource) map[string]string {
-					renditionCues = newRenditionCueCache(renditionCueCacheBytes)
+					renditionCues = newRenditionCueCache(renditionCueCacheBytes, renditionLoads)
 					SetRenditionKeptTracks(kept)
 					got := map[string]string{}
 					for _, number := range numbers {

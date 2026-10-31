@@ -552,20 +552,26 @@ func (s *clusterScan) step(at int64) (next int64, more bool, err error) {
 		s.damage = append(s.damage, corrupt("block at %d is cut off", at))
 		return 0, false, nil
 	}
-	s.match(blockElement{id: id, data: data[hl:]}, at)
+	if err := s.match(blockElement{id: id, data: data[hl:]}, at); err != nil {
+		return 0, false, err
+	}
 	return at + int64(total), true, nil
 }
 
-// match adds a block the scan found when a cue wants its time.
-func (s *clusterScan) match(e blockElement, at int64) {
-	blk, err := parseBlockElement(e.id, e.data)
-	if err != nil || blk.track != s.m.t.Number {
-		return
+// match adds a block the scan found when a cue wants its time. A damaged
+// block is recorded as damage; any other error, such as ErrTooLarge, ends
+// the read, as it does for a block a cue points at directly.
+func (s *clusterScan) match(e blockElement, at int64) error {
+	// A block that doesn't parse can't be matched to a cue; a cue left
+	// without a block is reported as damage after the walk.
+	blk, parseErr := parseBlockElement(e.id, e.data)
+	if ours := parseErr == nil && blk.track == s.m.t.Number; !ours {
+		return nil
 	}
 	t, ok := ticksDuration(s.h.timestamp+int64(blk.rel), s.m.idx.TimestampScale)
 	list := s.want[t]
 	if !ok || len(list) == 0 {
-		return
+		return nil
 	}
 	cue := s.m.t.Cues[list[0]]
 	if len(list) == 1 {
@@ -576,10 +582,14 @@ func (s *clusterScan) match(e blockElement, at int64) {
 	s.remaining--
 	ps, err := s.m.blockPackets(e, at, s.h, &cue)
 	if err != nil {
+		if !errors.Is(err, errCorrupt) {
+			return err
+		}
 		s.damage = append(s.damage, err)
-		return
+		return nil
 	}
 	s.packets = append(s.packets, ps...)
+	return nil
 }
 
 // peekBlockTrack reads a block's track number from its first bytes; known

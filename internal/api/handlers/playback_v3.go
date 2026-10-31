@@ -1334,8 +1334,10 @@ const cueIndexedSubtitleTrackTimeoutV3 = 3 * time.Second
 // alternate versions and fallbacks plan the same files again.
 type cueIndexReadsV3 struct {
 	deadline time.Time
-	mu       sync.Mutex
-	byPath   map[string]func() *playback.CueIndexedSubtitles
+	// lookup reads a source's index (playback.CueIndexedSubtitleTracks).
+	lookup func(ctx context.Context, path string) (playback.CueIndexedSubtitles, error)
+	mu     sync.Mutex
+	byPath map[string]func() *playback.CueIndexedSubtitles
 }
 
 type cueIndexReadsKeyV3 struct{}
@@ -1348,6 +1350,7 @@ func withCueIndexReadsV3(ctx context.Context) context.Context {
 func newCueIndexReadsV3() *cueIndexReadsV3 {
 	return &cueIndexReadsV3{
 		deadline: time.Now().Add(cueIndexedSubtitleTrackTimeoutV3),
+		lookup:   playback.CueIndexedSubtitleTracks,
 		byPath:   map[string]func() *playback.CueIndexedSubtitles{},
 	}
 }
@@ -1371,7 +1374,7 @@ func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) fun
 	read := sync.OnceValue(func() *playback.CueIndexedSubtitles {
 		readCtx, cancel := context.WithDeadline(ctx, reads.deadline)
 		defer cancel()
-		indexed, err := playback.CueIndexedSubtitleTracks(readCtx, file.FilePath)
+		indexed, err := reads.lookupWithin(readCtx, file.FilePath)
 		if err != nil {
 			slog.InfoContext(ctx, "protocol v3 source index unreadable for on-demand subtitle renditions",
 				logComponentKey, playbackLogValueV3, "media_file_id", file.ID, "error", err)
@@ -1381,6 +1384,27 @@ func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) fun
 	})
 	reads.byPath[file.FilePath] = read
 	return read
+}
+
+// lookupWithin answers lookup for path by ctx's deadline. The lookup stats
+// the file before it can wait on ctx, and a stat on a stalled mount ignores
+// ctx, so it runs on its own; one that outlives ctx finishes unobserved.
+func (reads *cueIndexReadsV3) lookupWithin(ctx context.Context, path string) (playback.CueIndexedSubtitles, error) {
+	type answer struct {
+		indexed playback.CueIndexedSubtitles
+		err     error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		indexed, err := reads.lookup(ctx, path)
+		done <- answer{indexed, err}
+	}()
+	select {
+	case a := <-done:
+		return a.indexed, a.err
+	case <-ctx.Done():
+		return playback.CueIndexedSubtitles{}, ctx.Err()
+	}
 }
 
 func (snapshot *hlsPlanningSnapshotV3) progressiveRemuxRegistry() *playback.TransformationRegistryV3 {
@@ -5820,6 +5844,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	trackChange := operation == playback.ReplanOperationTrackChangeV3
+	// A subtitle switch the client already made on the playing stream, and
+	// reports as a failure recovery, is expressed in the mounted file's
+	// inventory like a track_change, and its answer must be the same media:
+	// it stays on the effective file as a track_change does.
+	pinnedTrackChange := trackChange ||
+		(operation == playback.ReplanOperationFailureRecoveryV3 && req.Failure.Classification == failureSubtitleTrackChangedV3)
 	qualityChange := operation == playback.ReplanOperationQualityChangeV3
 	outputChange := operation == playback.ReplanOperationOutputChangeV3
 	// User-intent operations replace the legacy audio PATCH and client-recipe
@@ -5886,7 +5916,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// is expressed in the mounted alternate's inventory and must stay pinned to
 		// that file or its combined ordinals can select unrelated tracks.
 		start.FileID = record.EffectiveMediaFileID
-		if intentChange && !trackChange {
+		if intentChange && !pinnedTrackChange {
 			start.FileID = record.RequestedMediaFileID
 		}
 		if strings.TrimSpace(req.QualityPreference) != "" {
@@ -5975,8 +6005,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if intentChange && !trackChange {
 		// Prefer returning to the requested edition, but a quality/output/track
 		// change must not abandon a healthy active alternate merely because the
-		// inactive original has gone missing since playback started.
-		if requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
+		// inactive original has gone missing since playback started. A reported
+		// subtitle switch stays on the version playing.
+		if !pinnedTrackChange && requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
 			effectiveFile = requestedFile
 		}
 		// Track identities only need remapping when the effective edition
@@ -6104,7 +6135,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
-	choosesVersion := qualityChange || (intentChange && !trackChange)
+	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -6178,7 +6209,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// when the limit lowered that plan, it still lowers this one. Any other
 	// label stands only if the same replan without the limit plays more, as
 	// bitrates alone cannot tell whether the requested file could play.
-	staysLimited := (!intentChange || trackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
+	staysLimited := (!intentChange || pinnedTrackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
 		var readingErr error
 		if !seekScopedRecovery {
