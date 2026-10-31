@@ -84,7 +84,9 @@
     scrollbar-width: none; /* Firefox: hide vertical scrollbar */
   }
 
-  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar::-webkit-scrollbar {
+  .item-detail-hero[data-viewport-bounded="true"]
+    .detail-hero-copy
+    > .detail-action-bar::-webkit-scrollbar {
     display: none; /* Chrome, Safari, Edge: hide vertical scrollbar */
   }
 
