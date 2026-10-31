@@ -140,9 +140,38 @@ type Attempt struct {
 	// hwdecode.go). It needs a video output (Images, Stats, or Sheets); audio
 	// always decodes in software.
 	Hardware bool `json:"hardware,omitempty"`
-	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
-	// bounds it.
+	// TimeoutSeconds bounds the attempt, except for a Sheets run's
+	// reference-picture read, which may take longer (see AttemptSeconds).
+	// Zero means only the caller's context bounds it.
 	TimeoutSeconds float64 `json:"timeout_seconds,omitempty"`
+}
+
+// AttemptSeconds is the longest attempt of r can run: its timeout, plus, for
+// Sheets of Samples, the time a read of every reference picture over the
+// sampled span may add (see referenceReadSeconds). Zero means attempt has no
+// timeout.
+func (r Request) AttemptSeconds(attempt Attempt) float64 {
+	if attempt.TimeoutSeconds <= 0 {
+		return 0
+	}
+	if r.Sheets == nil || r.Samples == nil || len(r.Samples.Seconds) == 0 {
+		return attempt.TimeoutSeconds
+	}
+	return attempt.TimeoutSeconds + referenceReadSeconds(sampledWindow(r.Samples.Seconds))
+}
+
+// referenceReadSeconds is what a read of every reference picture over window
+// adds to its attempt's timeout: the window's playing time. That read decodes
+// the whole span, so its cost follows the span's duration and bitrate, while
+// attempt timeouts are sized for the samples, and an open-GOP Blu-ray remux
+// needs more than a timeout for its keyframes allows. A host decodes the
+// files it transcodes at least as fast as they play, and software reads of
+// 40 Mb/s 1080p remuxes ran three to five times faster than that on a busy
+// host, so a read still going at its deadline has almost always stalled. A
+// host too busy to keep up fails the attempt as timed out and tries again
+// later.
+func referenceReadSeconds(window Window) float64 {
+	return max(window.DurationSeconds, 0)
 }
 
 // Bounds Validate enforces. They reject nonsense rather than tune anything.
