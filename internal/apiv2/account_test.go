@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestGetAccountPasswordCapability(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
 	// The admin with no profile declared may change the password.
 	rec := do(t, h, http.MethodGet, "/api/v2/account/password/capability", "", bearer(adminToken))
-	want := `{"revision":"1","state":"available","allowed":true,"requires_current_password":true,"minimum_password_length":8,"maximum_password_bytes":72}` + "\n"
+	want := `{"revision":"1","state":"available","allowed":true,"requires_current_password":true,"minimum_password_length":8,"maximum_password_bytes":72,"sign_out_other_sessions":true}` + "\n"
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != cachePrivateNoCache || !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 	}
@@ -31,7 +32,12 @@ func TestGetAccountPasswordCapability(t *testing.T) {
 }
 
 func TestChangePassword(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
+	deps := pilotDeps(nil, nil)
+	var signOuts []bool
+	accounts := deps.Accounts.(fakeAccounts)
+	accounts.signOuts = &signOuts
+	deps.Accounts = accounts
+	h := newTestHandler(t, deps)
 	const path = "/api/v2/account/password"
 	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
 	rec := do(t, h, http.MethodPost, path, `{"current_password":"pw","new_password":"margin fossil quench"}`, primary)
@@ -42,9 +48,26 @@ func TestChangePassword(t *testing.T) {
 	if rec = do(t, h, http.MethodPost, path, `{"current_password":"pw","new_password":"margin fossil quench"}`, bearer(adminToken)); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	// sign_out_other_sessions reaches the service; omitted or false keeps
+	// the other sessions, and null is not a value for it.
+	for _, body := range []string{
+		`{"current_password":"pw","new_password":"margin fossil quench","sign_out_other_sessions":true}`,
+		`{"current_password":"pw","new_password":"margin fossil quench","sign_out_other_sessions":false}`,
+	} {
+		if rec = do(t, h, http.MethodPost, path, body, primary); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if want := []bool{false, false, true, false}; !slices.Equal(signOuts, want) {
+		t.Fatalf("signOutOtherSessions = %v, want %v", signOuts, want)
+	}
+	p := requireProblem(t, do(t, h, http.MethodPost, path, `{"current_password":"pw","new_password":"margin fossil quench","sign_out_other_sessions":null}`, primary), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.sign_out_other_sessions" || len(signOuts) != 4 {
+		t.Fatalf("errors = %+v, calls = %v", p.Errors, signOuts)
+	}
 	// A missing or blank member is refused by the schema before authority is
 	// judged.
-	p := requireProblem(t, do(t, h, http.MethodPost, path, `{"new_password":"margin fossil quench"}`, primary), TypeValidationFailed)
+	p = requireProblem(t, do(t, h, http.MethodPost, path, `{"new_password":"margin fossil quench"}`, primary), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.current_password" || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
@@ -86,7 +109,7 @@ func TestChangePassword(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, path, body, with(bearer(adminToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	requireProblem(t, do(t, h, http.MethodPost, path, body, with(bearer(adminToken), "X-Profile-Id", "p-missing")), TypeNotFound)
 	// The service itself failing is an internal error with no detail leaked.
-	deps := pilotDeps(nil, nil)
+	deps = pilotDeps(nil, nil)
 	deps.Accounts = fakeAccounts{err: errStore}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, path, body, primary), TypeInternalError)
 }
