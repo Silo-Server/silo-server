@@ -28,10 +28,6 @@ bytes don't change.
 The parsing primitives shared with `mediaprobe` and `playback/keyframes` live
 in `internal/matroska`.
 
-Matroska codec-private decompression shares a 16 MiB allocation budget across
-all tracks in an index, including old and new buffers during growth. A track
-that exceeds the budget is unsupported and falls back to FFmpeg.
-
 ## Completeness
 
 A Matroska track's cues are trusted only as far as the file can vouch for
@@ -94,35 +90,14 @@ each frame with the ones after it in view.
 ## Use
 
 An `Index` is immutable and safe for concurrent use; `Cache` keeps them by
-path, size and modification time. Concurrent misses share one read, whose
-callers get a result within 30 s. A timed-out read stays registered until its
-filesystem work finishes, so retries of that file version share the timeout
-instead of starting more blocked readers. At most eight cached index reads
-run across the process, including timed-out workers. Saturation fails a new
-load immediately so its caller can retry or fall back to demux. A process keeps
-one `Cache` (`playback.SubtitleIndexes`, 64 MiB), for sources and kept tracks
-alike, which kept-track serving, on-demand renditions and the planner all
-read through. `ReadPackets` opens the file itself, sets
+path, size and modification time, and concurrent misses share one read. A
+process keeps one `Cache` (`playback.SubtitleIndexes`, 64 MiB), for sources
+and kept tracks alike, which kept-track serving, on-demand renditions and the
+planner all read through. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each
-small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
-data by default (`ErrTooLarge`), and refuses a file whose size or
-modification time changed since it was indexed (`ErrFileChanged`). Window
-reads hold at most `WindowMaxBytes` (16 MiB): a rendition segment's read,
-which holds one of eight conversion slots, so on-demand segments share at most
-128 MiB in read budgets, and a kept-track or source window, which the subtitle cache
-demuxes instead when it is refused. A window open to the end is most of the
-track and gets a whole read's 128 MiB. An index keeps at most 2^20 cue
-entries or MP4 samples across its tracks, and a file of more than 1,000
-tracks is malformed; past the cue bound a Matroska file's Cues aren't trusted,
-and past the sample bound an MP4 file is malformed, so either is demuxed.
-The packet budget reserves buffer capacity before decompression allocates it,
-and cache accounting includes compression prefixes. Reads also reserve
-conservative metadata weights before allocation: 1 KiB per selected cue or
-sample and 512 bytes per packet, plus visited flags and cue times used by
-Matroska windows. This bounds jobs, result arrays and laced packet structs
-even when payloads are empty. Open and fstat observe
-cancellation; unfinished kernel calls are limited to 32 per process and one
-per path until they return.
+small read, keeps up to 16 reads in flight, and refuses a file whose size or
+modification time changed since it was indexed (`ErrFileChanged`). What
+indexes and reads may hold is bounded as [Bounds](#bounds) lists.
 
 HLS streams read their on-demand subtitle renditions through it
 (`playback/subtitle_rendition_tracks.go`): one window per segment, from the
@@ -139,6 +114,27 @@ Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
 the file: fall back to FFmpeg. `ErrFileChanged` means index the file again. A
 `DamagedError` comes with the packets that were readable; a whole-track
 reader falls back. Any other error is a failed read or the caller's context.
+
+## Bounds
+
+A crafted file can declare far more than it holds, so every allocation sized
+from file data is bounded before it is made. A read past a bound fails with
+`ErrTooLarge` or `ErrMalformed`, which callers answer by demuxing with FFmpeg,
+or, for an on-demand segment, with an empty segment.
+
+| What | Bound |
+| --- | --- |
+| Matroska metadata reads | EBML header 4 KiB, SeekHead and Info 1 MiB, Tracks and Cues 16 MiB, Tags 8 MiB |
+| Matroska tracks | 1,000 TrackEntries; 8 ContentEncodings kept per entry |
+| Codec-private data | 16 MiB of decompression shared by an index's tracks, old and new buffers counted while one grows; a track past it is unsupported |
+| MP4 metadata | `moov` 64 MiB; 1,000 tracks |
+| Index entries | 2^20 cues (Matroska) or samples (MP4) across an index's tracks, checked before any is kept; past it the Cues aren't trusted, or the MP4 index is malformed |
+| Index cache | 64 MiB by estimate, counting cues, samples, kept boxes and compression settings |
+| Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
+| Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
+| One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept track's whole read, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
+| Blocks and samples | 16 MiB each, compressed or not |
+| On-demand segments | eight conversion slots, each holding one read, so 128 MiB of read budget at once; 256 window reads running or queued; eight start-time probes |
 
 ## Kept tracks
 
