@@ -1,7 +1,9 @@
 package streamtoken
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -191,8 +193,16 @@ func (c *Claims) StartedAt() (time.Time, StartedAtSource) {
 	return time.Time{}, StartedAtSourceNone
 }
 
+// ErrNoSecret reports that no signing secret is configured. An empty HMAC key
+// is one anyone can sign with, so Sign and Verify refuse it rather than mint
+// or accept tokens that grant arbitrary media paths.
+var ErrNoSecret = errors.New("stream token: signing secret is not configured")
+
 // Sign creates a signed JWT string from the given claims.
 func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
+	if strings.TrimSpace(secret) == "" {
+		return "", ErrNoSecret
+	}
 	now := time.Now()
 	c.RegisteredClaims = jwt.RegisteredClaims{
 		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -204,6 +214,9 @@ func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
 
 // Verify parses and validates a stream token JWT string.
 func Verify(tokenString, secret string) (*Claims, error) {
+	if strings.TrimSpace(secret) == "" {
+		return nil, ErrNoSecret
+	}
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
