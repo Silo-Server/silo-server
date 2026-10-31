@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -98,7 +99,7 @@ func (d resetDB) issue(t *testing.T, userID int, token string, expiresAt time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), nil, expiresAt); err != nil {
+	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), Issuer{}, expiresAt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -253,30 +254,11 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 					}
 					done <- err
 				} else {
-					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", nil, time.Now().Add(time.Hour))
+					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", Issuer{}, time.Now().Add(time.Hour))
 				}
 			}()
 			// Observe the real database lock before committing the email change.
-			deadline := time.NewTimer(3 * time.Second)
-			defer deadline.Stop()
-			tick := time.NewTicker(10 * time.Millisecond)
-			defer tick.Stop()
-			for {
-				var waiting bool
-				if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
-					t.Fatal(err)
-				}
-				if waiting {
-					break
-				}
-				select {
-				case err := <-done:
-					t.Fatalf("issuance did not wait for the pending email change: %v", err)
-				case <-deadline.C:
-					t.Fatal("issuance never waited for the account")
-				case <-tick.C:
-				}
-			}
+			d.awaitBlocked(t, blocker, done)
 			if err := tx.Commit(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -291,5 +273,166 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 				t.Fatalf("stale link survived the email change: %v", err)
 			}
 		})
+	}
+}
+
+// awaitBlocked waits until a session is blocked on a lock held by backend
+// blocker, failing if done reports first.
+func (d resetDB) awaitBlocked(t *testing.T, blocker int, done <-chan error) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var waiting bool
+		if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("issuance did not wait for the locked account: %v", err)
+		case <-deadline.C:
+			t.Fatal("issuance never waited for the account")
+		case <-tick.C:
+		}
+	}
+}
+
+// TestResetIssuanceSerializesPromotionDB holds the real promotion with the
+// account locked and starts issuance behind it, so the link is judged after
+// the promotion deleted the account's links: only the Owner, without a scoped
+// key, may still store one for the new admin.
+func TestResetIssuanceSerializesPromotionDB(t *testing.T) {
+	d := newResetDB(t)
+	owner := d.account(t, "owner", true, true)
+	admin := d.account(t, "admin", true, true)
+	if _, err := d.pool.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = ANY($1)`, []int{owner, admin}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(t.Context(), `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	for i, tc := range []struct {
+		name      string
+		owner     bool
+		scopedKey bool
+		want      error
+	}{
+		{"admin", false, false, auth.ErrAdminProtected},
+		{"owner with a scoped key", true, true, ErrScopedKeyAdmin},
+		{"owner", true, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			name := fmt.Sprintf("target-%d", i)
+			target := d.account(t, name, true, true)
+			token := name + "-link"
+			issuer := Issuer{ID: admin, ScopedKey: tc.scopedKey}
+			if tc.owner {
+				issuer.ID = owner
+			}
+
+			locked := make(chan int, 1)
+			release := make(chan struct{})
+			releaseOnce := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(releaseOnce)
+			promoted := make(chan error, 1)
+			go func() {
+				_, err := auth.NewUserRepository(d.pool).MutateAdminAccount(ctx, target, -1, &models.UpdateUserInput{Role: new(models.RoleAdmin)},
+					func(_ *models.User, tx pgx.Tx) (bool, error) {
+						var pid int
+						if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+							return false, err
+						}
+						locked <- pid
+						<-release
+						return false, nil
+					})
+				promoted <- err
+			}()
+			var blocker int
+			select {
+			case blocker = <-locked:
+			case err := <-promoted:
+				t.Fatalf("promotion ended before locking the account: %v", err)
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				done <- d.repo.Issue(ctx, target, name+"@example.invalid", token, issuer, time.Now().Add(time.Hour))
+			}()
+			d.awaitBlocked(t, blocker, done)
+			releaseOnce()
+			if err := <-promoted; err != nil {
+				t.Fatal("promotion:", err)
+			}
+			if err := <-done; !errors.Is(err, tc.want) {
+				t.Fatalf("issuance after promotion: %v, want %v", err, tc.want)
+			}
+			_, err := d.repo.Lookup(ctx, token)
+			if tc.want == nil && err != nil {
+				t.Fatal("the Owner's link for the new admin is unusable:", err)
+			}
+			if tc.want != nil && !errors.Is(err, ErrNotFound) {
+				t.Fatalf("a link issued against the pre-promotion role survived: %v", err)
+			}
+		})
+	}
+}
+
+// TestResetIssuanceSerializesOwnershipMoveDB holds an ownership move away from
+// the issuing Owner, with the locks and writes TransferOwnership makes (it
+// cannot be paused from a test), so issuance waits on the issuer and then
+// judges it as the admin it has become.
+func TestResetIssuanceSerializesOwnershipMoveDB(t *testing.T) {
+	d := newResetDB(t)
+	ctx := t.Context()
+	owner := d.account(t, "owner", true, true)
+	successor := d.account(t, "successor", true, true)
+	target := d.account(t, "target", true, true)
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = ANY($1)`, []int{owner, successor, target}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	for _, stmt := range []struct {
+		sql string
+		arg any
+	}{
+		{`SELECT 1 FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{owner, successor}},
+		{`UPDATE users SET is_owner = false WHERE id = $1`, owner},
+		{`UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, successor},
+	} {
+		if _, err := tx.Exec(ctx, stmt.sql, stmt.arg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var blocker int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blocker); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- d.repo.Issue(ctx, target, "target@example.invalid", "moved-link", Issuer{ID: owner}, time.Now().Add(time.Hour))
+	}()
+	d.awaitBlocked(t, blocker, done)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, auth.ErrAdminProtected) {
+		t.Fatalf("issuance after the ownership move: %v, want %v", err, auth.ErrAdminProtected)
+	}
+	if _, err := d.repo.Lookup(ctx, "moved-link"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the former Owner holds a link for another admin: %v", err)
 	}
 }
