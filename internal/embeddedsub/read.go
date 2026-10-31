@@ -90,6 +90,63 @@ type Result struct {
 	Stats   ReadStats
 }
 
+const maxPacketReads = 8
+
+var errPacketReadBusy = errors.New("embeddedsub: packet read limit reached")
+
+type packetReadKey struct {
+	source   cacheKey
+	number   uint64
+	from, to time.Duration
+}
+
+// packetReads counts operations until all their workers finish, including
+// reads whose callers have canceled. One file version's window holds one slot.
+var packetReads = struct {
+	sync.Mutex
+	running map[packetReadKey]struct{}
+}{running: map[packetReadKey]struct{}{}}
+
+// runPacketRead lets the caller cancel without releasing the operation's
+// slot or key while any of its packet workers still hold buffers or a file.
+func runPacketRead(ctx context.Context, key packetReadKey, read func() (*Result, error)) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	packetReads.Lock()
+	_, running := packetReads.running[key]
+	if running || len(packetReads.running) >= maxPacketReads {
+		packetReads.Unlock()
+		return nil, errPacketReadBusy
+	}
+	packetReads.running[key] = struct{}{}
+	packetReads.Unlock()
+	type result struct {
+		res *Result
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out result
+		defer func() {
+			if r := recover(); r != nil {
+				out = result{err: fmt.Errorf("embeddedsub: packet read panicked: %v", r)}
+			}
+			packetReads.Lock()
+			delete(packetReads.running, key)
+			packetReads.Unlock()
+			done <- out
+		}()
+		out.res, out.err = read()
+	}()
+	select {
+	case out := <-done:
+		return out.res, out.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // ReadPackets returns the packets of subtitle track number (see
 // Index.Track) that show at any time in [from, to) on the container's
 // timeline: packets that start before from are included while they still
@@ -111,9 +168,10 @@ type Result struct {
 // minutes may be missed.
 //
 // When ctx ends ReadPackets returns at once; reads already issued finish in
-// the background.
+// the background and keep their slot until every worker exits. At most eight
+// packet operations run process-wide, with one per file version/track/window;
+// a saturated limit or an already running window fails the new call promptly.
 func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, from, to time.Duration, opts ReadOptions) (*Result, error) {
-	start := time.Now()
 	if idx == nil {
 		return nil, errors.New("embeddedsub: nil index")
 	}
@@ -124,6 +182,16 @@ func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, fr
 	if err := t.readable(opts); err != nil {
 		return nil, err
 	}
+	key := packetReadKey{source: cacheKey{path: path, size: idx.Size, mtime: idx.ModTime.UnixNano()}, number: number, from: from, to: to}
+	return runPacketRead(ctx, key, func() (*Result, error) {
+		return readPackets(ctx, path, idx, t, from, to, opts)
+	})
+}
+
+// readPackets keeps the descriptor and budget alive until all jobs have exited.
+// Only runPacketRead may stop waiting for this operation on cancellation.
+func readPackets(ctx context.Context, path string, idx *Index, t *Track, from, to time.Duration, opts ReadOptions) (*Result, error) {
+	start := time.Now()
 	f, info, err := openFile(ctx, path)
 	if err != nil {
 		return nil, err
@@ -243,9 +311,9 @@ func windowPackets(packets []Packet, times []time.Duration, from, to time.Durati
 }
 
 // runJobs calls fn for each of n jobs, up to concurrency at once, and
-// returns the results in job order. It returns as soon as ctx ends; jobs
-// already running finish in the background. A job that panics fails the
-// call rather than the process.
+// returns the results in job order. Cancellation stops new jobs, but this
+// waits for running jobs so their buffers and file stay within runPacketRead's
+// limit. A job that panics fails the call rather than the process.
 func runJobs[T any](ctx context.Context, n, concurrency int, fn func(int) T) ([]T, error) {
 	results := make([]T, n)
 	next := make(chan int)
@@ -281,16 +349,7 @@ func runJobs[T any](ctx context.Context, n, concurrency int, fn func(int) T) ([]
 			}
 		}
 	}()
-	finished := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(finished)
-	}()
-	select {
-	case <-finished:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

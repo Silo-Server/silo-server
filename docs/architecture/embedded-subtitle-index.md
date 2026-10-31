@@ -131,10 +131,16 @@ or, for an on-demand segment, with an empty segment.
 | Index entries | 2^20 cues (Matroska) or samples (MP4) across an index's tracks, checked before any is kept; past it the Cues aren't trusted, or the MP4 index is malformed |
 | Index cache | 64 MiB by estimate, counting cues, samples, kept boxes and compression settings |
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
+| Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
 | One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept track's whole read, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
 | Blocks and samples | 16 MiB each, compressed or not |
 | On-demand segments | eight conversion slots, each holding one read, so 128 MiB of read budget at once; 256 window reads running or queued; eight start-time probes |
+
+Packet-read callers return promptly on cancellation. The operation keeps its
+descriptor, budget and key until all its workers exit, so retries cannot start
+duplicate blocked reads. A busy read is retryable for renditions; extraction
+can fall back to demux.
 
 ## Kept tracks
 

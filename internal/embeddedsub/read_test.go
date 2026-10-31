@@ -882,6 +882,109 @@ func TestPacketBudgetBoundsDecompression(t *testing.T) {
 	}
 }
 
+func TestPacketJobsWaitForCanceledWorkers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		defer func() {
+			unblock()
+			synctest.Wait()
+		}()
+		started := make(chan struct{}, 2)
+		finished := make(chan error, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go func() {
+			_, err := runJobs(ctx, 2, 2, func(int) bool {
+				started <- struct{}{}
+				<-release // a packet read blocked in the kernel cannot observe ctx
+				return true
+			})
+			finished <- err
+		}()
+		for range 2 {
+			<-started
+		}
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-finished:
+			t.Fatalf("packet jobs returned with two workers still blocked: %v", err)
+		default:
+		}
+		unblock()
+		if err := <-finished; !errors.Is(err, context.Canceled) {
+			t.Fatalf("completed canceled packet jobs: %v", err)
+		}
+	})
+}
+
+func TestPacketReadsBoundAbandonedWork(t *testing.T) {
+	for _, sameWindow := range []bool{true, false} {
+		name := "across windows"
+		if sameWindow {
+			name = "repeated window"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				release := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer func() {
+					unblock()
+					synctest.Wait()
+				}()
+				var started atomic.Int32
+				key := packetReadKey{source: cacheKey{path: "/media/a.mkv"}, number: 3}
+				for i := range maxPacketReads + 1 {
+					if !sameWindow {
+						key.from = time.Duration(i) * time.Second
+					}
+					ctx, cancel := context.WithCancel(t.Context())
+					done := make(chan error, 1)
+					go func() {
+						_, err := runPacketRead(ctx, key, func() (*Result, error) {
+							_, err := runJobs(ctx, 2, 2, func(int) bool {
+								started.Add(1)
+								<-release
+								return true
+							})
+							return nil, err
+						})
+						done <- err
+					}()
+					synctest.Wait()
+					cancel()
+					wantErr := context.Canceled
+					if (sameWindow && i > 0) || i == maxPacketReads {
+						wantErr = errPacketReadBusy
+					}
+					if err := <-done; !errors.Is(err, wantErr) {
+						t.Fatalf("window %d: %v, want %v", i, err, wantErr)
+					}
+				}
+				want := int32(2 * maxPacketReads)
+				if sameWindow {
+					want = 2
+				}
+				if got := started.Load(); got != want {
+					t.Fatalf("started %d blocked packet workers, want %d", got, want)
+				}
+				unblock()
+				synctest.Wait()
+				if _, err := runPacketRead(t.Context(), key, func() (*Result, error) { return &Result{}, nil }); err != nil {
+					t.Fatalf("read after blocked workers exit: %v", err)
+				}
+				if _, err := runPacketRead(t.Context(), key, func() (*Result, error) { panic("bad packet") }); err == nil {
+					t.Fatal("packet read panic did not fail the caller")
+				}
+				if _, err := runPacketRead(t.Context(), key, func() (*Result, error) { return &Result{}, nil }); err != nil {
+					t.Fatalf("read after a panic: %v", err)
+				}
+			})
+		})
+	}
+}
+
 func TestReadBudgetIncludesMetadata(t *testing.T) {
 	t.Run("cue jobs", func(t *testing.T) {
 		cues := make([]Cue, 1024)
