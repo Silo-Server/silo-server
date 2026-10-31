@@ -76,7 +76,7 @@ func writeMP4(w io.Writer, t *Track, packets []Packet) error {
 	}
 	ftyp := m.ftyp
 	if ftyp == nil {
-		ftyp = mp4Box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2mp41"))
+		ftyp = mp4Box(mp4BoxFtyp, []byte("isom\x00\x00\x02\x00isomiso2mp41"))
 	}
 	mdatHeader := 8
 	if 8+size > math.MaxUint32 {
@@ -142,7 +142,7 @@ func mp4Moov(m *mp4Track, stts, stsc, stsz []byte, offset uint64) []byte {
 	minf := mp4Box("minf", mediaHeader, dinf, stbl)
 	mdia := mp4Box("mdia", m.mdhd, m.hdlr, minf)
 	trak := mp4Box("trak", m.tkhd, m.edts, mdia)
-	return mp4Box("moov", m.mvhd, trak)
+	return mp4Box(mp4BoxMoov, m.mvhd, trak)
 }
 
 // mp4Box encodes a box of the parts.

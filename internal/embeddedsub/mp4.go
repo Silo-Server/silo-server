@@ -15,7 +15,10 @@ import (
 // Bounds on reading an MP4 index. The sample tables of a film's moov are a
 // few megabytes at most; a text track has a few thousand samples.
 const (
-	maxMoovSize      = 64 << 20
+	maxMoovSize = 64 << 20
+	// maxMP4Samples bounds the samples of all an index's text tracks
+	// together, checked before each track's table is expanded: uniform
+	// sample tables are cheap to declare and cost 24 bytes a sample.
 	maxMP4Samples    = 1 << 20
 	maxTopLevelBoxes = 64
 	// mp4ReadGap and mp4MaxRead bound merging samples into one read: text
@@ -25,6 +28,9 @@ const (
 )
 
 const (
+	// mp4BoxFtyp and mp4BoxMoov are the file type and movie boxes.
+	mp4BoxFtyp = "ftyp"
+	mp4BoxMoov = "moov"
 	// mp4KindText is QuickTime text: a handler and a sample entry type.
 	mp4KindText = "text"
 	// unsupportedEditList is Track.Unsupported for an edit list the
@@ -129,7 +135,7 @@ func isMP4(head []byte) bool {
 	}
 	size := binary.BigEndian.Uint32(head)
 	switch string(head[4:8]) {
-	case "ftyp", "moov", "mdat", "free", "skip", "wide", "pnot":
+	case mp4BoxFtyp, mp4BoxMoov, "mdat", "free", "skip", "wide", "pnot":
 		return size == 1 || size == 0 || size >= 8
 	}
 	return false
@@ -161,13 +167,20 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: MP4 movie header missing or invalid", ErrMalformed)
 	}
+	if len(traks) > maxTrackEntries {
+		return nil, fmt.Errorf("%w: MP4 movie has more than %d tracks", ErrMalformed, maxTrackEntries)
+	}
 	idx := &Index{Container: ContainerMP4, TimestampScale: 1}
+	samplesLeft := maxMP4Samples
 	// The boxes a track keeps are copied out of moov, which also holds
 	// every other track's sample tables and would otherwise stay alive with
 	// a cached index.
 	ftyp, mvhd = bytes.Clone(ftyp), bytes.Clone(mvhd)
 	for _, trak := range traks {
-		t, ok := parseMP4Track(trak, movieTimescale, size)
+		t, ok := parseMP4Track(trak, movieTimescale, size, &samplesLeft)
+		if samplesLeft < 0 {
+			return nil, fmt.Errorf("%w: MP4 text tracks list more than %d samples", ErrMalformed, maxMP4Samples)
+		}
 		if !ok {
 			continue
 		}
@@ -214,13 +227,13 @@ func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err er
 			return nil, nil, fmt.Errorf("%w: MP4 box at %d has bad size %d", ErrMalformed, pos, boxSize)
 		}
 		switch string(hdr[4:8]) {
-		case "ftyp":
+		case mp4BoxFtyp:
 			if boxSize <= 4096 {
 				if ftyp, err = readBox(r, head, pos, boxSize); err != nil {
 					return nil, nil, err
 				}
 			}
-		case "moov":
+		case mp4BoxMoov:
 			if boxSize > maxMoovSize {
 				return nil, nil, fmt.Errorf("%w: MP4 moov of %d bytes is over the limit", ErrMalformed, boxSize)
 			}
@@ -271,7 +284,9 @@ type stblBoxes struct {
 
 // parseMP4Track reads a trak box; ok is false for a track that isn't a
 // subtitle track.
-func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64) (Track, bool) {
+// samplesLeft is what remains of the index's sample budget; a track that
+// would exceed it sets it negative without expanding its table.
+func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLeft *int) (Track, bool) {
 	tkhd, tkhdPayload := childBox(trak, "tkhd")
 	edts, edtsPayload := childBox(trak, "edts")
 	_, mdia := childBox(trak, "mdia")
@@ -327,7 +342,7 @@ func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64) (Track, b
 		}
 	}
 	if t.Unsupported == "" {
-		samples, err := expandSamples(stbl, fileSize)
+		samples, err := expandSamples(stbl, fileSize, samplesLeft)
 		if err != nil {
 			t.Unsupported = err.Error()
 		}
@@ -479,13 +494,13 @@ func tableLen(p []byte, entrySize int) (int, bool) {
 
 // expandSamples lists every sample's offset, size and decode time from the
 // sample table.
-func expandSamples(s stblBoxes, fileSize int64) ([]mp4Sample, error) {
+func expandSamples(s stblBoxes, fileSize int64, samplesLeft *int) ([]mp4Sample, error) {
 	if len(s.stsz) < 12 || s.stts == nil || s.stsc == nil || s.stco == nil {
 		return nil, errors.New("MP4 sample table incomplete")
 	}
 	uniform := binary.BigEndian.Uint32(s.stsz[4:])
 	count := int(binary.BigEndian.Uint32(s.stsz[8:]))
-	if count > maxMP4Samples {
+	if *samplesLeft -= count; *samplesLeft < 0 {
 		return nil, fmt.Errorf("MP4 track with %d samples", count)
 	}
 	if uniform == 0 && count*4 > len(s.stsz)-12 {

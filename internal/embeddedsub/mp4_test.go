@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func testMP4Track(elst []byte) *mp4Track {
 	tx3g := slices.Concat(make([]byte, 6), []byte{0, 1}, be32(0x80000000), []byte{1, 0xFF}, be32(0),
 		be32(0, 0), []byte{0, 0, 0, 0, 0, 1, 0, 18}, be32(0xFFFFFFFF), mp4Box("ftab", []byte{0, 1, 0, 1, 5}, []byte("Serif")))
 	m := &mp4Track{
-		ftyp: mp4Box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2mp41")),
+		ftyp: mp4Box(mp4BoxFtyp, []byte("isom\x00\x00\x02\x00isomiso2mp41")),
 		mvhd: mp4Box("mvhd", mvhd), tkhd: mp4Box("tkhd", tkhd), mdhd: mp4Box("mdhd", mdhd), hdlr: mp4Box("hdlr", hdlr),
 		stsd: mp4FullBox("stsd", slices.Concat(be32(1), mp4Box("tx3g", tx3g))),
 	}
@@ -158,7 +159,53 @@ func TestExpandSamplesRejectsOffsetsPastTheFile(t *testing.T) {
 		// A chunk offset whose end overflows int64.
 		stco: slices.Concat(be32(0, 1), be32(0x7FFFFFFF, 0xFFFFFF00)), co64: true,
 	}
-	if _, err := expandSamples(stbl, 1<<20); err == nil {
+	left := maxMP4Samples
+	if _, err := expandSamples(stbl, 1<<20, &left); err == nil {
 		t.Fatal("a sample past the end of the file was listed")
+	}
+}
+
+// Uniform sample tables are cheap to declare, so the samples of all an
+// index's text tracks share one budget, checked before a table is expanded.
+func TestMP4IndexBoundsSamplesAcrossTracks(t *testing.T) {
+	var file bytes.Buffer
+	if err := writeMP4(&file, &Track{mp4: testMP4Track(nil)}, []Packet{{Data: textSample("x"), mp4Delta: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	var ftyp, mvhd, trak []byte
+	walkBoxes(file.Bytes(), func(kind string, box, payload []byte) bool {
+		switch kind {
+		case mp4BoxFtyp:
+			ftyp = box
+		case mp4BoxMoov:
+			walkBoxes(payload, func(kind string, box, _ []byte) bool {
+				switch kind {
+				case "mvhd":
+					mvhd = box
+				case "trak":
+					trak = bytes.Clone(box)
+				}
+				return true
+			})
+		}
+		return true
+	})
+	// The track declares 600,000 one-byte samples in its stsz, in place.
+	at := bytes.Index(trak, []byte("stsz"))
+	if ftyp == nil || mvhd == nil || at < 0 {
+		t.Fatal("written MP4 lacks its boxes")
+	}
+	copy(trak[at+8:], be32(1, 600_000))
+	movie := func(traks int) string {
+		return writeFixture(t, slices.Concat(ftyp, mp4Box(mp4BoxMoov, append([][]byte{mvhd}, slices.Repeat([][]byte{trak}, traks)...)...)))
+	}
+	if _, err := ReadIndex(context.Background(), movie(1)); errors.Is(err, ErrMalformed) {
+		t.Fatalf("one track within the budget: err = %v", err)
+	}
+	if _, err := ReadIndex(context.Background(), movie(2)); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("two tracks over the budget: err = %v, want ErrMalformed", err)
+	}
+	if _, err := ReadIndex(context.Background(), movie(maxTrackEntries+1)); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("%d tracks: err = %v, want ErrMalformed", maxTrackEntries+1, err)
 	}
 }

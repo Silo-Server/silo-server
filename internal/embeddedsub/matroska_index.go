@@ -36,6 +36,11 @@ const (
 	// mediaprobe does; a crafted element of tiny entries would otherwise
 	// make subtitleTracks allocate far more than the element's size.
 	maxTrackEntries = 1000
+	// maxIndexCues bounds the cue entries an index keeps across its
+	// subtitle tracks, 32 bytes each. Real files have a few thousand a
+	// track; a crafted Cues element of tiny entries would otherwise expand
+	// to four times its size.
+	maxIndexCues = 1 << 20
 )
 
 const docTypeMatroska = "matroska"
@@ -532,11 +537,13 @@ func collectCues(cues []byte, tracks []Track, segStart, scale int64) bool {
 		byNumber[t.Number] = i
 	}
 	counts := make([]int, len(tracks))
+	total := 0
 	if !matroska.WalkCuePoints(cues, func(_ uint64, hasTime bool, pos matroska.CueTrackPosition) {
 		if i, ok := byNumber[pos.Track]; ok && hasTime && pos.ClusterPosition >= 0 {
 			counts[i]++
+			total++
 		}
-	}) {
+	}) || total > maxIndexCues {
 		return false
 	}
 	for i := range tracks {

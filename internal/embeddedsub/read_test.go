@@ -490,13 +490,30 @@ func TestReadIndexRejectsOtherFiles(t *testing.T) {
 		"Matroska without tracks":    {slices.Concat(header, el(matroska.IDSegment, el(matroska.IDInfo))), ErrMalformed},
 		"Matroska with too many track entries": {slices.Concat(header, el(matroska.IDSegment, slices.Concat(el(matroska.IDInfo),
 			el(matroska.IDTracks, bytes.Repeat(el(matroska.IDTrackEntry), maxTrackEntries+1))))), ErrMalformed},
-		"MP4 box running past the end": {mp4Box("ftyp", []byte("isom"))[:10], ErrMalformed},
-		"MP4 without a moov":           {slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("mdat", make([]byte, 64))), ErrMalformed},
+		"MP4 box running past the end": {mp4Box(mp4BoxFtyp, []byte("isom"))[:10], ErrMalformed},
+		"MP4 without a moov":           {slices.Concat(mp4Box(mp4BoxFtyp, []byte("isom")), mp4Box("mdat", make([]byte, 64))), ErrMalformed},
 	} {
 		path := writeFixture(t, tt.data)
 		if _, err := ReadIndex(context.Background(), path); !errors.Is(err, tt.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tt.want)
 		}
+	}
+}
+
+// Cue entries are bounded across an index's subtitle tracks before any is
+// kept: past the bound the Cues element isn't trusted, as a malformed one
+// isn't, and the tracks read as having none.
+func TestCollectCuesBoundsEntries(t *testing.T) {
+	// CueTrackPositions for track 2 at cluster 0, in eight bytes.
+	position := []byte{0xB7, 0x86, 0xF7, 0x81, 0x02, 0xF1, 0x81, 0x00}
+	cues := func(n int) []byte {
+		return el(matroska.IDCuePoint, uintEl(matroska.IDCueTime, 1), bytes.Repeat(position, n))
+	}
+	if tracks := []Track{{Number: 2}}; !collectCues(cues(10), tracks, 0, 1_000_000) || len(tracks[0].Cues) == 0 {
+		t.Fatalf("a few cues: %+v", tracks)
+	}
+	if tracks := []Track{{Number: 2}}; collectCues(cues(maxIndexCues+1), tracks, 0, 1_000_000) || tracks[0].Cues != nil {
+		t.Fatal("cues past the bound were kept")
 	}
 }
 
