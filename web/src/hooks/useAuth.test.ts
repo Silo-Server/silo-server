@@ -236,7 +236,7 @@ describe("endImpersonationWithRecovery", () => {
         returnPath: "/admin/users/42",
       });
       const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-      const clearAuthState = vi.fn();
+      const followBrowserSession = vi.fn();
       const clearActiveAuthState = vi.fn();
 
       await endImpersonationWithRecovery({
@@ -244,7 +244,7 @@ describe("endImpersonationWithRecovery", () => {
         endImpersonationRequest,
         loadStoredImpersonationAdminSession,
         restoreAdminUser,
-        clearAuthState,
+        followBrowserSession,
         clearActiveAuthState,
       });
 
@@ -255,7 +255,7 @@ describe("endImpersonationWithRecovery", () => {
         refreshToken: "admin-refresh",
         returnPath: "/admin/users/42",
       });
-      expect(clearAuthState).not.toHaveBeenCalled();
+      expect(followBrowserSession).not.toHaveBeenCalled();
       expect(clearActiveAuthState).not.toHaveBeenCalled();
     },
   );
@@ -269,7 +269,7 @@ describe("endImpersonationWithRecovery", () => {
       returnPath: "/admin/users/42",
     });
     const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const clearAuthState = vi.fn();
+    const followBrowserSession = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await expect(
@@ -278,21 +278,21 @@ describe("endImpersonationWithRecovery", () => {
         endImpersonationRequest,
         loadStoredImpersonationAdminSession,
         restoreAdminUser,
-        clearAuthState,
+        followBrowserSession,
         clearActiveAuthState,
       }),
     ).rejects.toBe(error);
 
     expect(restoreAdminUser).not.toHaveBeenCalled();
-    expect(clearAuthState).not.toHaveBeenCalled();
+    expect(followBrowserSession).not.toHaveBeenCalled();
     expect(clearActiveAuthState).not.toHaveBeenCalled();
   });
 
-  it("clears auth when ending impersonation succeeds without a preserved admin session", async () => {
+  it("follows the browser session when ending impersonation succeeds without a preserved admin session", async () => {
     const endImpersonationRequest = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue(null);
     const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const clearAuthState = vi.fn();
+    const followBrowserSession = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await endImpersonationWithRecovery({
@@ -300,11 +300,11 @@ describe("endImpersonationWithRecovery", () => {
       endImpersonationRequest,
       loadStoredImpersonationAdminSession,
       restoreAdminUser,
-      clearAuthState,
+      followBrowserSession,
       clearActiveAuthState,
     });
 
-    expect(clearAuthState).toHaveBeenCalledTimes(1);
+    expect(followBrowserSession).toHaveBeenCalledTimes(1);
     expect(restoreAdminUser).not.toHaveBeenCalled();
     expect(clearActiveAuthState).not.toHaveBeenCalled();
   });
@@ -317,7 +317,7 @@ describe("endImpersonationWithRecovery", () => {
       returnPath: "/admin/users/42",
     });
     const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const clearAuthState = vi.fn();
+    const followBrowserSession = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await endImpersonationWithRecovery({
@@ -325,7 +325,7 @@ describe("endImpersonationWithRecovery", () => {
       endImpersonationRequest,
       loadStoredImpersonationAdminSession,
       restoreAdminUser,
-      clearAuthState,
+      followBrowserSession,
       clearActiveAuthState,
     });
 
@@ -334,7 +334,7 @@ describe("endImpersonationWithRecovery", () => {
       refreshToken: "admin-refresh",
       returnPath: "/admin/users/42",
     });
-    expect(clearAuthState).not.toHaveBeenCalled();
+    expect(followBrowserSession).not.toHaveBeenCalled();
     expect(clearActiveAuthState).not.toHaveBeenCalled();
   });
 });

@@ -433,7 +433,9 @@ describe("AuthProvider returning to the preserved administrator session", () => 
         expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-laura");
       },
     },
-    // This tab's session is still current, so it ends with the other tab's.
+    // In the cases below another tab finished the impersonation first. This
+    // tab's own session is still current, so it follows the browser's stored
+    // session, as a reload would, and leaves that session in place.
     "a sign-out in another tab": {
       outcome: "ended",
       overtake: async () => {
@@ -446,13 +448,55 @@ describe("AuthProvider returning to the preserved administrator session", () => 
         expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
       },
     },
-  };
+    "another tab restoring the administrator": {
+      outcome: "ended",
+      overtake: async () => {
+        storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-admin-tab-2");
+        clearStoredImpersonationAdminSession();
+      },
+      settle: async () => {
+        const refresh = await server.held("POST /api/v2/auth/refresh");
+        expect(refresh.body).toEqual({ refresh_token: "refresh-admin-tab-2" });
+        await server.answer(refresh, 200, {
+          access_token: "access-admin-tab-2",
+          refresh_token: "refresh-admin-tab-2",
+          expires_in: 3600,
+        });
+        await server.answer(
+          await server.held("GET /api/v2/account/me", "Bearer access-admin-tab-2"),
+          200,
+          admin,
+        );
+        await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:admin"));
+      },
+      expectSession: () => {
+        expect(getAccessToken()).toBe("access-admin-tab-2");
+        expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-admin-tab-2");
+      },
+    },
+  } satisfies Record<
+    string,
+    {
+      outcome: string;
+      overtake: () => Promise<void>;
+      settle?: () => Promise<void>;
+      expectSession: () => void;
+    }
+  >;
 
   it.each([
     ["a sign-out", "the administrator's account read", 200, admin],
     ["another sign-in", "the administrator's account read", 500, internalError],
     ["another sign-in", "the end request", 204, null],
     ["a sign-out in another tab", "the administrator's account read", 200, admin],
+    ["another tab restoring the administrator", "the administrator's account read", 200, admin],
+    [
+      "another tab restoring the administrator",
+      "the administrator's account read",
+      500,
+      internalError,
+    ],
+    ["another tab restoring the administrator", "the end request", 204, null],
   ] as const)(
     "leaves %s alone when %s answers %i late",
     async (overtaker, lateRequest, status, body) => {
@@ -467,12 +511,14 @@ describe("AuthProvider returning to the preserved administrator session", () => 
 
       await overtakers[overtaker].overtake();
       await server.answer(late, status, body);
+      const expected: { outcome: string; settle?: () => Promise<void>; expectSession: () => void } =
+        overtakers[overtaker];
       await waitFor(() =>
-        expect(screen.getByTestId("outcome")).toHaveTextContent(overtakers[overtaker].outcome),
+        expect(screen.getByTestId("outcome")).toHaveTextContent(expected.outcome),
       );
+      await expected.settle?.();
 
-      overtakers[overtaker].expectSession();
-      expect(screen.getByTestId("auth")).not.toHaveTextContent(":admin");
+      expected.expectSession();
       expect(loadStoredImpersonationAdminSession()).toBeNull();
     },
   );
@@ -508,6 +554,30 @@ describe("AuthProvider returning to the preserved administrator session", () => 
         request.authorization === "Bearer access-admin",
     );
     expect(adminReads).toHaveLength(1);
+  });
+
+  it("keeps another tab's restored administrator when the boot recovery reads late", async () => {
+    // This tab boots on the impersonated session, which the server has ended.
+    storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-sam");
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <ImpersonationProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 401, {
+      type: "https://siloserver.org/problems/session_expired",
+      title: "Session expired",
+      status: 401,
+    });
+    const adminRead = await server.held("GET /api/v2/account/me", "Bearer access-admin");
+
+    await overtakers["another tab restoring the administrator"].overtake();
+    await server.answer(adminRead, 200, admin);
+    await overtakers["another tab restoring the administrator"].settle();
+
+    overtakers["another tab restoring the administrator"].expectSession();
   });
 
   it("keeps a sign-in that lands while the boot recovery reads the administrator's account", async () => {
