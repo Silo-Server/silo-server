@@ -102,16 +102,17 @@ func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, token
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
 
-	// The issuer is held FOR KEY SHARE: ownership moves lock both accounts
-	// FOR UPDATE before changing is_owner, so this waits for them, but not
-	// for other writers of the issuer's row, such as access-group updates
-	// that lock many rows in no fixed order and would otherwise deadlock
-	// with this pair.
-	ids := []int{userID}
-	if issuer.ID > 0 && issuer.ID != userID {
+	// The issuer, and the audit row's accounts (an impersonator included),
+	// are held FOR KEY SHARE: ownership moves lock both accounts FOR UPDATE
+	// before changing is_owner, so this waits for them, but not for other
+	// writers of the issuer's row, such as access-group updates that lock
+	// many rows in no fixed order and would otherwise deadlock with this set.
+	ids := append([]int{userID}, auditmutation.ActorIDs(ctx)...)
+	if issuer.ID > 0 {
 		ids = append(ids, issuer.ID)
-		slices.Sort(ids)
 	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
 	actor := auth.OwnerActor{ID: issuer.ID}
 	var target *models.User
 	for _, id := range ids {

@@ -103,8 +103,9 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 		defer cancel()
 		_ = tx.Rollback(cleanupCtx)
 	}()
+	// The audit row's accounts, an impersonator included, join that id order.
 	rows, err := tx.Query(ctx, `SELECT id, role, is_owner FROM users
-		WHERE id = ANY($1) ORDER BY id FOR SHARE`, []int{actorID, userID})
+		WHERE id = ANY($1) ORDER BY id FOR SHARE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
 	if err != nil {
 		return nil, fmt.Errorf("locking api key accounts: %w", err)
 	}

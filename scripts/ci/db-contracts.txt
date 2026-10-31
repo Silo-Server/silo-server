@@ -388,6 +388,7 @@
 ./internal/auth TestPasswordChangeAuditDB
 ./internal/auth TestLoginSessionRevocationAuditDB
 ./internal/auth TestSessionRevocationQueuesBehindAccountLockDB
+./internal/auth TestImpersonatedWritesQueueBehindOwnershipTransferDB
 ./internal/auth TestAPIKeyAuditDB
 ./internal/passwordreset TestPasswordResetAuditDB
 ./internal/userstore/pgstore TestPostgresDeleteProfileAuditedSeesConcurrentUpdate

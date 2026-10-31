@@ -634,6 +634,11 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("begin password update: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	// The account is one of the audit row's accounts; an impersonator is
+	// locked with it in id order rather than after the account's update.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		SET password_hash = $1, password_change_required = false, updated_at = NOW()
