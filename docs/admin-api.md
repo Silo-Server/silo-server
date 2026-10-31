@@ -2858,10 +2858,13 @@ returns503; source errors are masked. No scan/worker execution changes.
 
 Completed runs carry `result`: `new`, `updated`, `unchanged`, `missing`,
 `missing_skipped_protected`, `files_deleted`, `items_deleted`,
-`memberships_removed`, `errors` and `skipped`, read from the run's stored result. `missing` counts the files the run
+`memberships_removed`, `errors`, `skipped` and `unsupported_files`, read from the run's stored result. `missing` counts the files the run
 newly marked missing; files an earlier scan already marked are not counted again.
 `skipped` is non-zero when the run did no work because an overlapping scan of the
-same scope was already in progress.
+same scope was already in progress. `unsupported_files` counts the files the run
+found but did not catalog because of their type (`listUnsupportedFiles` lists
+them); every scan that finds such a file counts it again, so it is not a change.
+Runs stored before this counter existed report 0.
 Queued, running, failed and cancelled runs omit `result`, because a running run's
 stored value is progress, not an outcome.
 

@@ -13976,6 +13976,11 @@ export interface components {
       unchanged: number;
       /**
        * Format: int64
+       * @description Files the run found but did not catalog because of their type; listUnsupportedFiles lists them. Counted again on every scan that finds them, so not a change.
+       */
+      unsupported_files: number;
+      /**
+       * Format: int64
        * @description Files whose catalog entry changed.
        */
       updated: number;

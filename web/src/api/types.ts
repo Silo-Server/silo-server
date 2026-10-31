@@ -2451,6 +2451,8 @@ export interface AutoscanScanResult {
   errors: number;
   /** Non-zero when the run did not scan because an overlapping scan was in progress. */
   skipped: number;
+  /** Files the run found but did not catalog because of their type. */
+  unsupported_files: number;
 }
 
 export type AutoscanChangeOutcome =

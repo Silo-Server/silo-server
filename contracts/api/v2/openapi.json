@@ -2932,6 +2932,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "unsupported_files": {
+            "description": "Files the run found but did not catalog because of their type; listUnsupportedFiles lists them. Counted again on every scan that finds them, so not a change.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "updated": {
             "description": "Files whose catalog entry changed.",
             "format": "int64",
@@ -2949,7 +2955,8 @@
           "items_deleted",
           "memberships_removed",
           "errors",
-          "skipped"
+          "skipped",
+          "unsupported_files"
         ],
         "type": "object"
       },
