@@ -127,6 +127,8 @@
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
 ./internal/passwordreset TestResetIssuanceRejectsChangedRecoveryEmailDB
 ./internal/passwordreset TestResetIssuanceSerializesEmailChangeDB
+./internal/passwordreset TestResetIssuanceSerializesPromotionDB
+./internal/passwordreset TestResetIssuanceSerializesOwnershipMoveDB
 
 # Task locks and bounded history cleanup.
 ./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
