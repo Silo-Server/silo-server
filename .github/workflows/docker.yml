@@ -31,7 +31,6 @@ jobs:
       build_number: ${{ steps.identity.outputs.build_number }}
       built_at: ${{ steps.identity.outputs.built_at }}
       image_version: ${{ steps.identity.outputs.image_version }}
-      latest_follows_main: ${{ steps.latest.outputs.follows_main }}
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
@@ -68,18 +67,6 @@ jobs:
             echo "built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo "image_version=${image_version}"
           } >> "$GITHUB_OUTPUT"
-
-      # latest follows every main build only until the first release. From
-      # then on release-published.yml moves it, and main builds move dev
-      # alone, so any release tag switches them over.
-      - name: Decide whether latest follows main
-        id: latest
-        shell: bash
-        run: |
-          release_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')"
-          follows_main=true
-          [[ -n "$release_tags" ]] && follows_main=false
-          echo "follows_main=${follows_main}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare]
@@ -139,8 +126,9 @@ jobs:
   # The published image: PostgreSQL, Redis, Meilisearch, and s6-overlay
   # layered on the base image the merge job just pushed. It carries dev,
   # build-N, the commit SHA, and latest until the first release
-  # (release-published.yml adds version tags and moves latest after that). Its digest artifacts are named so the
-  # merge job's digests-* pattern never picks them up.
+  # (release-published.yml adds version tags and moves latest after that).
+  # Its digest artifacts are named so the merge job's digests-* pattern never
+  # picks them up.
   omnibus:
     needs: [prepare, merge]
     if: "!cancelled() && needs.merge.result == 'success'"
@@ -193,16 +181,22 @@ jobs:
             latest=false
           tags: |
             type=raw,value=dev
-            type=raw,value=latest,enable=${{ needs.prepare.outputs.latest_follows_main == 'true' }}
             type=raw,value=build-${{ needs.prepare.outputs.build_number }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
 
+      # latest follows main builds only until the first release; after that,
+      # release-published.yml moves it. Decide right before pushing, not when
+      # the build started, so a build that began before the first release
+      # can't overwrite the release's latest.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
         run: |
-          # shellcheck disable=SC2046
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          tags="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          if [[ -z "$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" ]]; then
+            tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
+          fi
+          # shellcheck disable=SC2046,SC2086
+          docker buildx imagetools create $tags \
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
 
       - name: Inspect manifest list

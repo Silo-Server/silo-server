@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write # create the draft release
-      actions: read # find the commit's Docker Image run
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -49,13 +48,15 @@ jobs:
         run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
       # The release reuses this commit's image, so it must exist. The Docker
-      # Image workflow runs only after CI passes on main.
-      - name: Require the commit's image to be built
+      # Image workflow publishes it under the full commit SHA only after CI
+      # passes on main. Ask the registry, not the workflow's run list: a
+      # workflow_run build records main's head at trigger time, which can be a
+      # later commit than the one it publishes.
+      - name: Require the commit's image to be published
         run: |
-          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow docker.yml \
-            --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
-          if [[ "$conclusion" != "success" ]]; then
-            echo "::error::Docker Image has not published ${GITHUB_SHA::9} (${conclusion:-still running or missing}). Release once it has."
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          if ! docker buildx imagetools inspect "$image" > /dev/null; then
+            echo "::error::$image isn't published yet. Release once the Docker Image workflow has published ${GITHUB_SHA::9}."
             exit 1
           fi
 
