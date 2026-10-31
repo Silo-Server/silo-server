@@ -12,12 +12,16 @@ import { RedisGroup, type RedisUrlEditors } from "./RedisGroup";
 import { REDIS_KEYS } from "./redisDraft";
 import { useBranding } from "@/hooks/useBranding";
 
-// Identity (server name, login subtitle) used to live on the Branding tab; it is
-// a plain server-wide value an admin looks for under General, so it saves with
-// everything else on this page. Public signups and password reset live on
-// Sign-in, since both only work with Silo passwords, and the log level on
-// Logging.
-const IDENTITY_KEYS = ["branding.server_name", "branding.login_subtitle"];
+// Identity (server name, login subtitle, footer tagline) used to live on the
+// Branding tab; it is a plain server-wide value an admin looks for under
+// General, so it saves with everything else on this page. Public signups and
+// password reset live on Sign-in, since both only work with Silo passwords, and
+// the log level on Logging.
+const IDENTITY_KEYS = [
+  "branding.server_name",
+  "branding.login_subtitle",
+  "branding.footer_tagline",
+];
 
 // Trusted proxies sit beside the public URL, the way the setup wizard asks for
 // them: both are what an install behind a reverse proxy needs to get right.
@@ -133,6 +137,14 @@ export default function GeneralSettings() {
             value={form.getValue("branding.login_subtitle")}
             onChange={(v) => form.setValue("branding.login_subtitle", v)}
             restartRequired={restartKeys.has("branding.login_subtitle")}
+          />
+          <SettingField
+            label="Footer tagline"
+            dirty={form.isDirty("branding.footer_tagline")}
+            description="Shown after the copyright line at the bottom of every page. Empty hides it."
+            value={form.getValue("branding.footer_tagline")}
+            onChange={(v) => form.setValue("branding.footer_tagline", v)}
+            restartRequired={restartKeys.has("branding.footer_tagline")}
           />
         </FieldGroup>
 

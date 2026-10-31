@@ -21,6 +21,7 @@ type BrandingConfiguration struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
 	AccentColor      string `json:"accent_color,omitempty"`
+	FooterTagline    string `json:"footer_tagline,omitempty"`
 	WordmarkURL      string `json:"wordmark_url,omitempty" format:"uri-reference"`
 	MarkURL          string `json:"mark_url,omitempty" format:"uri-reference"`
 	FaviconURL       string `json:"favicon_url,omitempty" format:"uri-reference"`
@@ -65,7 +66,7 @@ func registerBranding(reg *Registry) {
 			snap = reg.deps.Branding.Load(ctx)
 			storage = reg.deps.Branding.HasStorage()
 		}
-		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), MarkURL: brandingAssetURL(snap, branding.KindMark), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
+		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, FooterTagline: snap.FooterTagline, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), MarkURL: brandingAssetURL(snap, branding.KindMark), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
 	})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		id := "getBrandingAsset"

@@ -58,6 +58,7 @@ func (s *Service) Load(ctx context.Context) Snapshot {
 		LoginSubtitle: firstNonEmpty(get(KeyLoginSubtitle), DefaultLoginSubtitle),
 		AccentColor:   get(KeyAccentColor),
 		DefaultTheme:  get(KeyDefaultTheme),
+		FooterTagline: get(KeyFooterTagline),
 		assets:        make(map[AssetKind]string, len(assetSpecs)),
 	}
 	for kind, spec := range assetSpecs {
@@ -81,7 +82,7 @@ func (s *Service) ServerName(ctx context.Context) (string, error) {
 
 // readSettings returns every branding setting that has a value.
 func (s *Service) readSettings(ctx context.Context) map[string]string {
-	keys := []string{KeyServerName, KeyLoginSubtitle, KeyAccentColor, KeyDefaultTheme}
+	keys := []string{KeyServerName, KeyLoginSubtitle, KeyAccentColor, KeyDefaultTheme, KeyFooterTagline}
 	for _, spec := range assetSpecs {
 		keys = append(keys, spec.settingKey)
 	}

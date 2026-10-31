@@ -19,6 +19,8 @@ interface BrandingApiResponse {
   mark_url?: string;
   favicon_url?: string;
   login_bg_url?: string;
+  /** Optional line the footer shows after the copyright. */
+  footer_tagline?: string;
   storage_available?: boolean;
 }
 
@@ -32,6 +34,8 @@ export interface BrandingContextValue {
   markUrl: string | null;
   faviconUrl: string | null;
   loginBgUrl: string | null;
+  /** The footer's optional line after the copyright, or null when unset. */
+  footerTagline: string | null;
   /** Whether the running server has an active object-store client for assets. */
   storageAvailable: boolean;
   /** The server's branding has arrived; until then every field is a default. */
@@ -46,6 +50,7 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   markUrl: null,
   faviconUrl: null,
   loginBgUrl: null,
+  footerTagline: null,
   storageAvailable: false,
   loaded: false,
 };
@@ -63,6 +68,7 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     markUrl: data?.mark_url || null,
     faviconUrl: data?.favicon_url || null,
     loginBgUrl: data?.login_bg_url || null,
+    footerTagline: data?.footer_tagline || null,
     storageAvailable: data?.storage_available ?? false,
     loaded: data !== undefined,
   };

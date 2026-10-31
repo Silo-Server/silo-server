@@ -21557,6 +21557,7 @@ export interface components {
       accent_color?: string;
       /** Format: uri-reference */
       favicon_url?: string;
+      footer_tagline?: string;
       /** Format: uri-reference */
       login_bg_url?: string;
       login_subtitle: string;

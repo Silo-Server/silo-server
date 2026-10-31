@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
+import { AppFooter } from "@/components/AppFooter";
 import TopNav from "@/components/TopNav";
 import { useAppTheme } from "@/themes/appThemeContext";
 import { isTopNavTheme } from "@/themes/theme";
@@ -538,6 +539,7 @@ export default function Layout({ children }: LayoutProps) {
               {children}
             </div>
           )}
+          <AppFooter />
         </main>
       </div>
     </SidebarItemNavigationProvider>

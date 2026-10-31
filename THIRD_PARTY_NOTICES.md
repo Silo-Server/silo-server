@@ -27,6 +27,14 @@ direction, so both products render identical numerals. The digit shapes follow
 the numeral treatment of a commercial streaming service's top-ten row. They are
 silhouettes only: no third party's logo, wordmark, or artwork is reproduced.
 
+## Footer Popcorn Mark
+
+`web/src/components/AppFooter.tsx` carries the SVG path data for the popcorn
+mark that sits under the wordmark in the page footer. The paths were copied
+from the project owner's own `plex-custom-frontend` (weflix) repository at the
+owner's direction, so both products close a page identically. The mark is the
+owner's own artwork; no third party's logo, wordmark, or artwork is reproduced.
+
 ## FFmpeg audio decoders (WebAssembly)
 
 `web/src/player/engine/wasm/silo-audio-decoders.wasm` and its JavaScript glue

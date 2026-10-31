@@ -23330,6 +23330,9 @@
             "format": "uri-reference",
             "type": "string"
           },
+          "footer_tagline": {
+            "type": "string"
+          },
           "login_bg_url": {
             "format": "uri-reference",
             "type": "string"

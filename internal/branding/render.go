@@ -16,6 +16,10 @@ type Snapshot struct {
 	// DefaultTheme is reported only by the frozen /api/v1 branding response.
 	// It is not rendered into the shell and so is not part of RenderKey.
 	DefaultTheme string // "" when unset
+	// FooterTagline is the optional line the client shows after the copyright
+	// in the page footer. Like DefaultTheme it is API-only — the client reads
+	// it from the branding response — so it is not part of RenderKey.
+	FooterTagline string // "" when unset
 
 	assets map[AssetKind]string // kind -> content ref ("<hash><ext>")
 }

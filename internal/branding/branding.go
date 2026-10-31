@@ -40,6 +40,10 @@ const (
 	KeyServerName    = "branding.server_name"
 	KeyLoginSubtitle = "branding.login_subtitle"
 	KeyAccentColor   = "branding.accent_color"
+	// KeyFooterTagline is the optional short line the web client shows after
+	// the copyright in the page footer, e.g. "Zero rights. Maximum
+	// entertainment.". Empty closes the footer with the copyright alone.
+	KeyFooterTagline = "branding.footer_tagline"
 	// KeyDefaultTheme is the retired admin default theme. The web client has
 	// one theme and ignores it; only the frozen /api/v1 branding response still
 	// reports it, until v1 retires.
@@ -55,6 +59,9 @@ const (
 	// DefaultThemeColor is used for the PWA manifest theme/background color when
 	// no accent color is configured.
 	DefaultThemeColor = "#0b0b0f"
+	// DefaultFooterTagline is empty: the footer closes with the copyright line
+	// until an admin sets a tagline.
+	DefaultFooterTagline = ""
 )
 
 // assetURLBase is the public, stable path prefix for serving branding assets.
