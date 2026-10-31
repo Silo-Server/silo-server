@@ -612,3 +612,19 @@ func TestKeepaliveCoversSlowWholeReadAndFallback(t *testing.T) {
 		}
 	})
 }
+
+// A WebVTT or SubRip cue counts only with text after its timing line.
+func TestHasCueNeedsText(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"WEBVTT\n":                                     false,
+		"WEBVTT\n\n00:01.000 --> 00:02.000\n":          false,
+		"WEBVTT\n\n00:01.000 --> 00:02.000\n\n":        false,
+		"WEBVTT\n\n00:01.000 --> 00:02.000\n  \n":      false,
+		"WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n":   true,
+		"1\r\n00:00:01,000 --> 00:00:02,000\r\nHi\r\n": true,
+	} {
+		if got := hasCue(subtitleMuxerWebVTT, []byte(doc)); got != want {
+			t.Errorf("hasCue(%q) = %v, want %v", doc, got, want)
+		}
+	}
+}

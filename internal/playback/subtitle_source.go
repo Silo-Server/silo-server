@@ -214,15 +214,32 @@ func convertPackets(ctx context.Context, w io.Writer, opts StreamExtractOpts, in
 var errNoCueConverted = errors.New("subtitle conversion yielded no cue from a track with packets")
 
 // hasCue reports whether converted output in format holds a cue: a timing
-// line for WebVTT and SubRip, an event line for ASS, any byte for SUP.
+// line with text after it for WebVTT and SubRip, an event line for ASS, any
+// byte for SUP.
 func hasCue(format string, data []byte) bool {
 	switch format {
 	case subtitleMuxerWebVTT, SubtitleFormatVTTV3, subtitleFormatSRT:
-		return bytes.Contains(data, []byte("-->"))
+		return hasTimedText(data)
 	case subtitleFormatASS:
 		return bytes.Contains(data, []byte("\nDialogue:")) //nolint:misspell // the ASS event keyword
 	}
 	return len(data) > 0
+}
+
+// hasTimedText reports whether a WebVTT or SubRip document has a timing line
+// followed by a line of text.
+func hasTimedText(data []byte) bool {
+	for len(data) > 0 {
+		var line []byte
+		line, data, _ = bytes.Cut(data, []byte{'\n'})
+		if !bytes.Contains(line, []byte("-->")) {
+			continue
+		}
+		if text, _, _ := bytes.Cut(data, []byte{'\n'}); len(bytes.TrimSpace(text)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // spillWriter holds writes until limit bytes, then passes everything on.

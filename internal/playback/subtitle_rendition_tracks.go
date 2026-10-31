@@ -402,7 +402,7 @@ func renditionReadPermanent(err error) bool {
 	for _, target := range []error{
 		embeddedsub.ErrNotSupportedContainer, embeddedsub.ErrMalformed, embeddedsub.ErrNoCues,
 		embeddedsub.ErrIncompleteCues, embeddedsub.ErrUnsupported, embeddedsub.ErrTooLarge,
-		embeddedsub.ErrTrackNotFound, embeddedsub.ErrFileChanged,
+		embeddedsub.ErrTrackNotFound, embeddedsub.ErrFileChanged, errNoCueConverted,
 	} {
 		if errors.Is(err, target) {
 			return true
@@ -519,8 +519,20 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 		if len(res.Packets) == 0 {
 			return nil, nil
 		}
-		return ExtractSubtitlePacketsWebVTT(ctx, &SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: clockStart}, opts.FFmpegPath)
+		return convertRenditionWindow(ctx, &SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: clockStart}, opts.FFmpegPath)
 	})
+}
+
+// convertRenditionWindow converts a window's packets to WebVTT. Packets that
+// convert to no cue may be a conversion that failed quietly, so they answer
+// errNoCueConverted: the segment is empty this time and isn't kept, and the
+// next request converts them again.
+func convertRenditionWindow(ctx context.Context, in *SubtitlePacketInput, ffmpegPath string) ([]byte, error) {
+	cues, err := ExtractSubtitlePacketsWebVTT(ctx, in, ffmpegPath)
+	if err == nil && len(in.Packets) > 0 && !hasCue(subtitleMuxerWebVTT, cues) {
+		return nil, errNoCueConverted
+	}
+	return cues, err
 }
 
 // convertKeptRenditionWindow converts a window read from a kept track. Kept
@@ -533,7 +545,7 @@ func convertKeptRenditionWindow(ctx context.Context, opts TranscodeOpts, in *Sub
 		return nil, nil
 	}
 	in.SourceStartTime = clockStart
-	return ExtractSubtitlePacketsWebVTT(ctx, in, opts.FFmpegPath)
+	return convertRenditionWindow(ctx, in, opts.FFmpegPath)
 }
 
 // ticks90kDuration converts 90 kHz ticks to a Duration without overflowing
