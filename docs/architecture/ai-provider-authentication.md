@@ -274,3 +274,31 @@ metadata, or Jellyfin response contract changes.
 - [Profiles and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
 - [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)
 - [Reasoning effort](https://developers.openai.com/api/docs/guides/reasoning)
+
+## Known compatible providers
+
+### OpenCode Go (API-key, OpenAI-compatible)
+
+- Base URL: `https://opencode.ai/zen/go/v1`
+- Default model: `deepseek-v4.1-flash`
+- Auth: API key (Bearer token)
+- Reasoning: DeepSeek models accept `low`, `high` and `max`
+- Transcription: not offered. The gateway serves chat, responses and messages
+  routes, and answers 404 on `/v1/audio/transcriptions`
+
+### xAI / Grok (API-key, OpenAI-compatible)
+
+- Base URL: `https://api.x.ai/v1`
+- Default model: `grok-4.5`
+- Auth: API key (Bearer token). The xAI OAuth device flow is tracked in
+  [#3148](https://github.com/Silo-Server/silo-server/issues/3148) and is not
+  implemented here
+- Reasoning: `grok-4.5`, `grok-4.6` and `grok-4.7` accept `low`, `medium`,
+  `high` and `xhigh`; earlier `grok-4` names accept `low`, `medium` and `high`.
+  Reasoning cannot be disabled, so neither family offers `none`
+- Transcription: not offered at `/v1/audio/transcriptions`
+
+Both providers are reachable through the existing OpenAI-compatible endpoint
+fields; no provider registry or provider type is specific to them. `temperature`
+is left out only for the OpenAI reasoning families that reject it, so requests to
+these providers keep the configured sampling settings.

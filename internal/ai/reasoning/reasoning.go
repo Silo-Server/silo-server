@@ -62,6 +62,19 @@ func ForModel(model string) []string {
 		return []string{levelMinimal, levelLow, levelMedium, levelHigh}
 	case strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
 		return []string{levelLow, levelMedium, levelHigh}
+	// xAI: grok-4.5 and later accept reasoning_effort and cannot disable
+	// reasoning, so "none" is not offered. grok-4.6/4.7 add "xhigh"; on
+	// grok-4.5 that value is documented and coerced to "high" where it has
+	// no native level.
+	case strings.HasPrefix(model, "grok-4.5"), strings.HasPrefix(model, "grok-4.6"), strings.HasPrefix(model, "grok-4.7"):
+		return []string{levelLow, levelMedium, levelHigh, levelExtraHigh}
+	case strings.HasPrefix(model, "grok-4"):
+		return []string{levelLow, levelMedium, levelHigh}
+	// DeepSeek switches thinking off through its thinking parameter, not
+	// through reasoning_effort, so "none" is not offered. medium and xhigh
+	// are mapped onto high by the API, so only the real levels are listed.
+	case strings.HasPrefix(model, "deepseek"):
+		return []string{levelLow, levelHigh, levelMax}
 	default:
 		return slices.Clone(Levels)
 	}
