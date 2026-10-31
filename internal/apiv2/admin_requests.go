@@ -178,7 +178,7 @@ type AdminRequestCapabilitiesOutputBody struct {
 	Available            bool `json:"available"`
 	GuardedConfiguration bool `json:"guarded_configuration"`
 	Routing              bool `json:"routing" doc:"Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing"`
-	RoutingSeriesStatus  bool `json:"routing_series_status" doc:"Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true"`
+	RoutingSeriesStatus  bool `json:"routing_series_status" doc:"Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none"`
 	DiscoverLayout       bool `json:"discover_layout" doc:"Whether the Requests Discover page's layout can be edited under /admin/request-discover"`
 	DiscoverListOrder    bool `json:"discover_list_order" doc:"Whether an mdblist Discover row takes list.order. Send it only when true"`
 }

@@ -84,7 +84,7 @@ type AdminRequestRouteConditions struct {
 	NetworkIDs        []int    `json:"network_ids,omitempty" doc:"TMDB network IDs (series)"`
 	CompanyIDs        []int    `json:"company_ids,omitempty" doc:"TMDB production company IDs (movies)"`
 	RequesterUserIDs  []int    `json:"requester_user_ids,omitempty" doc:"Accounts whose requests the route applies to"`
-	SeriesStatuses    []string `json:"series_statuses,omitempty" enum:"returning,in_production,upcoming,ended,cancelled" doc:"Series only: the series' status when the request was made (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them"` //nolint:misspell // the catalog's show_status spelling
+	SeriesStatuses    []string `json:"series_statuses,omitempty" enum:"returning,in_production,upcoming,ended,cancelled" doc:"Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them"` //nolint:misspell // the catalog's show_status spelling
 
 	ExcludeGenreIDs          []int    `json:"exclude_genre_ids,omitempty" doc:"Match titles with none of these TMDB genre IDs"`
 	ExcludeKeywordIDs        []int    `json:"exclude_keyword_ids,omitempty" doc:"Match titles with none of these TMDB keyword IDs"`

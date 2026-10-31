@@ -16356,7 +16356,7 @@
             "type": "boolean"
           },
           "routing_series_status": {
-            "description": "Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true",
+            "description": "Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none",
             "type": "boolean"
           },
           "state": {
@@ -17114,7 +17114,7 @@
             "type": "array"
           },
           "series_statuses": {
-            "description": "Series only: the series' status when the request was made (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them",
+            "description": "Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them",
             "items": {
               "enum": [
                 "returning",

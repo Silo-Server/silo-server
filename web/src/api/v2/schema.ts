@@ -19001,7 +19001,7 @@ export interface components {
       revision: string;
       /** @description Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing */
       routing: boolean;
-      /** @description Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true */
+      /** @description Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none */
       routing_series_status: boolean;
       /**
        * @description Support and configuration state, not health
@@ -19292,7 +19292,7 @@ export interface components {
       original_languages?: string[];
       /** @description Accounts whose requests the route applies to */
       requester_user_ids?: number[];
-      /** @description Series only: the series' status when the request was made (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them */
+      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them */
       series_statuses?: ("returning" | "in_production" | "upcoming" | "ended" | "cancelled")[];
       /**
        * Format: int64
