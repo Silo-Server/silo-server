@@ -1439,7 +1439,7 @@ can be up to 15 minutes late, and keeps them for 30 days.
 
 | Parameter | Type | Meaning |
 |---|---|---|
-| `hours` | int | Window in hours, counting the current hour. Default 24, accepted range 1..720. |
+| `hours` | int | Window in hours. The read starts at the beginning of the hour the window begins in, so a 1-hour window at 13:10 reads the 12:00 and 13:00 summaries. Default 24, accepted range 1..720. |
 | `limit` | int | Sessions returned. Default 10, accepted range 1..25. |
 
 | Field | Type | Meaning |
@@ -1899,7 +1899,9 @@ late result presentation. No native or Jellyfin caller consumes this operation.
 
 `GET /api/v2/admin/rate-limits/config` returns desired rate-limit settings with a
 strong, administrator/profile-bound ETag and conditional read support. It includes
-API-key tiers and authentication endpoint budgets. Map entries remain extensible.
+API-key tiers, authentication endpoint budgets, and `session_quota` (`mode` of
+`off`, `log` or `enforce`, `requests_per_hour`, `burst`; see Session quota in
+[auth-api.md](auth-api.md#session-quota)). Map entries remain extensible.
 `GET /api/v2/admin/rate-limits/status` returns process-local `active`, optional
 `active_backend`, and `redis_available`. The latter reflects valid persisted or
 bootstrap Redis configuration, not a successful reachability probe. Both reads
@@ -1918,7 +1920,8 @@ An `If-Match` validator is required. Both conditional headers are evaluated agai
 the canonical configuration inside the same settings transaction that validates
 and saves changes, including wildcard conditions and Redis backend eligibility.
 A stale request returns 412 with the current validator. Invalid budgets or backend
-selection return 422. Success returns `status` and `restart_required`; this receipt
+selection return 422, as does a `session_quota` with an unknown mode or a burst that
+would take more than a week to refill (more than 168 times `requests_per_hour`). Success returns `status` and `restart_required`; this receipt
 is not the canonical configuration and does not carry an ETag. Read config again
 for the next edit.
 

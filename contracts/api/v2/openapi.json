@@ -122586,13 +122586,13 @@
             }
           },
           {
-            "description": "Window in hours, counting the current hour.",
+            "description": "Window in hours: the last hours hours, read from the start of the hour the window begins in.",
             "explode": false,
             "in": "query",
             "name": "hours",
             "schema": {
               "default": 24,
-              "description": "Window in hours, counting the current hour.",
+              "description": "Window in hours: the last hours hours, read from the start of the hour the window begins in.",
               "format": "int64",
               "maximum": 720,
               "minimum": 1,
@@ -122764,13 +122764,13 @@
             }
           },
           {
-            "description": "Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day.",
+            "description": "Window in hours, up to the request. It reads one session's activity log rows, so it covers at most a day.",
             "explode": false,
             "in": "query",
             "name": "hours",
             "schema": {
               "default": 24,
-              "description": "Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day.",
+              "description": "Window in hours, up to the request. It reads one session's activity log rows, so it covers at most a day.",
               "format": "int64",
               "maximum": 24,
               "minimum": 1,

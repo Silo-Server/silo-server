@@ -508,7 +508,8 @@ The quota counts native API requests made with a login session's access token. I
 does not count anything under `/api/v1/stream`, `/api/v2/stream`, `/api/v1/playback`
 or `/api/v2/playback`, so a player keeps reporting progress, replanning and stopping
 after its session runs out; the other media transfer routes (downloads, direct
-downloads, theme audio and ebook reads); API-key requests, which have their own tiers;
+downloads, theme audio and ebook reads); `GET /api/v2/auth/provider-logout` and `POST /api/v2/auth/logout`, so a
+session that spent its quota can still sign out; API-key requests, which have their own tiers;
 admins; or requests made while impersonating. `ratelimit.QuotaExemptPathPattern`
 defines the exempt routes and must match every route in `internal/api`'s native media
 route list. The Jellyfin-compatible listener has its own sessions and is not counted.

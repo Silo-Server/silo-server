@@ -417,10 +417,12 @@ func (mw *Middleware) logOverQuota(r *http.Request, claims *auth.Claims, q Sessi
 // progress, replanning and stopping after its session runs out, and the
 // other native media transfer routes (internal/api's nativeMediaRoutes):
 // downloads, direct downloads, theme audio and ebook reads. Playback is
-// bounded by stream limits instead. The pattern uses only syntax Go and
-// PostgreSQL read alike, so the API usage summary leaves out the same
-// requests in SQL.
+// bounded by stream limits instead. Signing out (the provider sign-out lookup
+// and the logout) is not counted either, so a session that spent its quota
+// can still end itself. The pattern uses only syntax Go and PostgreSQL read
+// alike, so the API usage summary leaves out the same requests in SQL.
 const QuotaExemptPathPattern = `^/api/v[12]/(stream|playback)(/|$)` +
+	`|^/api/v[12]/auth/(provider-)?logout$` +
 	`|^/api/v[12]/direct-download(-proxy)?$` +
 	`|^/api/v[12]/downloads/[^/]+/(file|file-proxy)$` +
 	`|^/api/v[12]/downloads/[^/]+/subtitles/` +

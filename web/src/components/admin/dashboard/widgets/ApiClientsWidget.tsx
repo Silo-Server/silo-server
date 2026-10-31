@@ -172,6 +172,8 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
         <div>Loading routes…</div>
       ) : endpoints.error ? (
         <div>Couldn&apos;t load the routes this session called.</div>
+      ) : endpoints.data?.endpoints.length === 0 ? (
+        <div>No requests in that time.</div>
       ) : (
         <ol className="space-y-0.5">
           {(endpoints.data?.endpoints ?? []).map((endpoint) => (

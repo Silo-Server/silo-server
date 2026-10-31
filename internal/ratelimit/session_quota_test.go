@@ -79,6 +79,8 @@ func TestSessionQuotaMiddleware(t *testing.T) {
 		{"log serves a session over its quota", SessionQuotaLog, user, "/api/v2/catalog/items/x", []int{204, 204, 204}},
 		{"off counts nothing", SessionQuotaOff, user, "/api/v2/catalog/items/x", []int{204, 204, 204}},
 		{"media transfer is not counted", SessionQuotaEnforce, user, "/api/v2/stream/x", []int{204, 204, 204}},
+		{"signing out is not counted", SessionQuotaEnforce, user, "/api/v2/auth/logout", []int{204, 204, 204}},
+		{"the provider sign-out lookup is not counted", SessionQuotaEnforce, user, "/api/v2/auth/provider-logout", []int{204, 204, 204}},
 		{"admins are not counted", SessionQuotaEnforce, with(func(c *auth.Claims) { c.Role = "admin" }), "/api/v2/catalog/items/x", []int{204, 204, 204}},
 		{"impersonating admins are not counted", SessionQuotaEnforce, with(func(c *auth.Claims) { c.ImpersonatorUserID = &admin }), "/api/v2/catalog/items/x", []int{204, 204, 204}},
 		{"API keys keep their own tiers", SessionQuotaEnforce, with(func(c *auth.Claims) { c.TokenType = auth.TokenTypeAPIKey; c.APIKeyID = 9 }), "/api/v2/catalog/items/x", []int{204, 204, 204}},

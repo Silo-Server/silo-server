@@ -3274,7 +3274,7 @@ func main() {
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
-		taskMgr.Register(tasks.NewSummarizeAPIUsageTask(deps.APIUsage))
+		taskMgr.Register(tasks.NewSummarizeAPIUsageTask(deps.DB, deps.APIUsage))
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
 			// Wired outside the autoscan service so events left by a disabled

@@ -152,6 +152,12 @@ func TestAPIUsageSummaryDB(t *testing.T) {
 		t.Fatalf("other clients = %v", summary)
 	}
 
+	// A one-hour window also reads the hour it starts in, so it is not empty
+	// while the current hour is still being summarized.
+	if hour, err := store.TopClients(ctx, f.now, 1, 10); err != nil || len(hour.Clients) == 0 || hour.Clients[0].Requests != 7 {
+		t.Fatalf("one-hour window: %+v, %v; want the busy session's 7 requests", hour, err)
+	}
+
 	endpoints, err := store.ClientEndpoints(ctx, f.now, f.busy, 24)
 	if err != nil {
 		t.Fatal(err)

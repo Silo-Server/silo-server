@@ -59,11 +59,16 @@ func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
 	if err := s.pool.QueryRow(ctx, `SELECT max(hour) FROM api_client_usage_hourly`).Scan(&last); err != nil {
 		return 0, fmt.Errorf("read last summarized hour: %w", err)
 	}
-	// A last hour after now (a clock that stepped back) would stall every
-	// pass until the clock caught up, so it is ignored.
+	// A last hour later than the current one (another server's clock is
+	// ahead, or this one stepped back) is read as the current hour, so the
+	// pass neither stalls nor rescans the whole catch-up window.
 	from := now.Add(-catchUp).Truncate(time.Hour)
-	if last != nil && !last.After(now) {
-		if redo := last.Add(-time.Hour); redo.After(from) {
+	if last != nil {
+		redo := last.Truncate(time.Hour)
+		if nowHour := now.Truncate(time.Hour); redo.After(nowHour) {
+			redo = nowHour
+		}
+		if redo = redo.Add(-time.Hour); redo.After(from) {
 			from = redo
 		}
 	}
@@ -182,10 +187,10 @@ type Endpoint struct {
 // account's index and filters the session's rows, so it answers for one
 // session at a time over a short window.
 func (s *Store) ClientEndpoints(ctx context.Context, now time.Time, sessionID string, hours int) ([]Endpoint, error) {
-	from := windowStart(now, min(hours, MaxEndpointHours))
+	hours = min(hours, MaxEndpointHours)
 	var userID *int
 	err := s.pool.QueryRow(ctx,
-		`SELECT max(user_id) FROM api_client_usage_hourly WHERE session_id = $1 AND hour >= $2`, sessionID, from,
+		`SELECT max(user_id) FROM api_client_usage_hourly WHERE session_id = $1 AND hour >= $2`, sessionID, windowStart(now, hours),
 	).Scan(&userID)
 	if err != nil {
 		return nil, fmt.Errorf("read API client: %w", err)
@@ -200,7 +205,7 @@ func (s *Store) ClientEndpoints(ctx context.Context, now time.Time, sessionID st
 		  AND impersonator_user_id IS NULL AND path !~ $4
 		GROUP BY 1, 2
 		ORDER BY 3 DESC, 1, 2
-		LIMIT $5`, *userID, from, sessionID, ratelimit.QuotaExemptPathPattern, endpointLimit)
+		LIMIT $5`, *userID, now.Add(-time.Duration(hours)*time.Hour), sessionID, ratelimit.QuotaExemptPathPattern, endpointLimit)
 	if err != nil {
 		return nil, fmt.Errorf("read API client endpoints: %w", err)
 	}
@@ -215,8 +220,10 @@ func (s *Store) ClientEndpoints(ctx context.Context, now time.Time, sessionID st
 	return endpoints, nil
 }
 
-// windowStart is the first hour a window of hours hours reads, counting the
-// current, partly summarized hour as one of them.
+// windowStart is the first summarized hour a window of the last hours hours
+// reads: the hour that window starts in. A one-hour window at 13:10 reads the
+// 12:00 and 13:00 rows, so it is not empty while the current hour is still
+// being summarized.
 func windowStart(now time.Time, hours int) time.Time {
-	return now.Truncate(time.Hour).Add(-time.Duration(hours-1) * time.Hour)
+	return now.Add(-time.Duration(hours) * time.Hour).Truncate(time.Hour)
 }

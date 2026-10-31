@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { captureAdminAuthority, requireAdminAuthority } from "@/api/v2/adminAuthority";
-import { v2, type V2Result } from "@/api/v2/request";
+import { isNotFoundProblem, v2, type V2Result } from "@/api/v2/request";
 import { adminKeys } from "../keys";
 
 export type AdminApiClients = V2Result<"GET /api/v2/admin/stats/api-clients">;
@@ -38,7 +38,11 @@ export function useAdminApiClients(hours: number) {
   });
 }
 
-/** The routes one session called most, over at most a day; fetched only when its row is open. */
+/**
+ * The routes one session called most, over at most a day; fetched only when its row is open.
+ * A session the card lists for a longer range may have made no requests in that day, which the
+ * server answers with 404; that is an empty list, not a failure.
+ */
 export function useAdminApiClientEndpoints(sessionId: string | null, hours: number) {
   const window = Math.min(normalizeApiClientHours(hours), MAX_ENDPOINT_HOURS);
   return useQuery({
@@ -46,11 +50,17 @@ export function useAdminApiClientEndpoints(sessionId: string | null, hours: numb
     enabled: sessionId !== null,
     queryFn: async (): Promise<AdminApiClientEndpoints> => {
       const authority = captureAdminAuthority();
-      const result = await v2("GET /api/v2/admin/stats/api-clients/{session_id}/endpoints", {
-        profileContext: authority,
-        path: { session_id: sessionId ?? "" },
-        query: { hours: window },
-      });
+      let result: AdminApiClientEndpoints;
+      try {
+        result = await v2("GET /api/v2/admin/stats/api-clients/{session_id}/endpoints", {
+          profileContext: authority,
+          path: { session_id: sessionId ?? "" },
+          query: { hours: window },
+        });
+      } catch (error) {
+        if (!isNotFoundProblem(error)) throw error;
+        result = { session_id: sessionId ?? "", hours: window, endpoints: [] };
+      }
       requireAdminAuthority(authority);
       return result;
     },
