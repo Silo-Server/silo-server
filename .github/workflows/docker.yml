@@ -152,6 +152,7 @@ jobs:
     needs: [prepare, omnibus]
     if: "!cancelled() && needs.prepare.result == 'success' && needs.omnibus.result == 'success'"
     permissions:
+      contents: read # compare commits
       packages: write
 
     steps:
@@ -180,20 +181,37 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=raw,value=dev
             type=raw,value=build-${{ needs.prepare.outputs.build_number }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
 
-      # latest follows main builds only until the first release; after that,
-      # release-published.yml moves it. Decide right before pushing, not when
-      # the build started, so a build that began before the first release
-      # can't overwrite the release's latest.
+      # dev, and latest until the first release, only move forward: a re-run of
+      # an older CI run gets its own build-N and SHA tags but leaves them on the
+      # newer commit. Once a release exists, release-published.yml owns latest.
+      # Both are decided right before pushing, so a build that started before
+      # the first release can't overwrite its latest. One that checks in the
+      # seconds before that release pushes still could; re-running Release
+      # published puts it back.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           tags="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
-          if [[ -z "$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" ]]; then
-            tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
+          dev_revision="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:dev" --format '{{json .Image}}' 2>/dev/null |
+            jq -r 'if has("linux/amd64") then ."linux/amd64" else . end | .config.Labels["org.opencontainers.image.revision"] // ""')" || dev_revision=""
+          order="ahead"
+          if [[ -n "$dev_revision" && "$dev_revision" != "$HEAD_SHA" ]]; then
+            # A dev revision GitHub can't compare (rewritten history) doesn't hold dev back.
+            order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${dev_revision}...${HEAD_SHA}" --jq .status)" || order="ahead"
+          fi
+          if [[ "$order" == "ahead" || "$order" == "identical" ]]; then
+            tags+=" -t ${REGISTRY}/${IMAGE_LC}:dev"
+            if [[ -z "$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" ]]; then
+              tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
+            fi
+          else
+            echo "::notice::dev holds ${dev_revision::9}, which is newer than ${HEAD_SHA::9}; leaving dev and latest there."
           fi
           # shellcheck disable=SC2046,SC2086
           docker buildx imagetools create $tags \

@@ -61,8 +61,7 @@ PostgreSQL, Redis, and Meilisearch; see [Omnibus image](architecture/omnibus-ima
 
 A release image is the image CI built and tested for that commit, plus one file,
 `/usr/share/silo/version`, from which the server reads its version. Release
-candidates after `v1.0.0`, such as `v1.1.0-rc.1`, get only their own tag, and a
-fix to an older line, such as `0.24.1` after `0.25.0`, never moves `latest`.
+candidates after `v1.0.0`, such as `v1.1.0-rc.1`, get only their own tag.
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a release tag, `build-N`, commit-SHA tag, or image
@@ -92,8 +91,8 @@ Release refuses an invalid version, a version that already exists or is older
 than the newest release, a run from a branch other than `main`, and a commit
 whose image has not been published. Generated notes start at the previous
 release for a release candidate, and at the previous non-candidate release
-otherwise, so `v1.0.0` covers everything since `v0.24.0`. If tagging the image
-fails, run **Release published** again with the release's tag.
+otherwise, so `v1.0.0` covers everything since the last `0.x` release. If
+tagging the image fails, run **Release published** again with the release's tag.
 
 GitHub's manual-workflow permission is the release access boundary: only users
 with repository write access can dispatch it. If Silo later requires a second

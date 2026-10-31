@@ -66,7 +66,7 @@ func readVersion(override, path string) string {
 	if v := strings.TrimSpace(override); v != "" {
 		return validVersion(v)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: versionFile in production, a temp file in tests
 	if err != nil {
 		return ""
 	}
