@@ -163,6 +163,9 @@ window and offset comes from the existing conversion:
   stream has its sample table anyway. Timestamps stay on the source's
   timeline and `start_time_us` holds the source's start time, which the
   conversion subtracts.
+  Matroska writing makes two passes over the packets: one records cluster
+  offsets and cue metadata, then one encodes and writes each cluster. The
+  encoded track is never retained whole alongside its input packets.
 - **Demuxed** (`method = ffmpeg`), for a file the index can't read: the
   demux that serves the request also copies the track, unconverted
   (`-c:s copy`, Matroska, or MP4 for `mov_text`), into a temporary file.

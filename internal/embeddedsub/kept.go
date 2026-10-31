@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/matroska"
 )
@@ -34,23 +35,21 @@ func WriteKept(w io.Writer, idx *Index, t *Track, packets []Packet) error {
 const keptCuePositionSize = 8
 
 // writeKeptMKS writes WriteMKS's stream with Cues between Tracks and the
-// first cluster. The clusters are built first, since the cues point into
-// them.
+// first cluster. A first pass records their layout for the cues; a second
+// encodes and writes each cluster without retaining the whole encoded track.
 func writeKeptMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	if scale <= 0 {
 		return fmt.Errorf("embeddedsub: invalid timestamp scale %d", scale)
 	}
 	head := mksHead(t, scale)
 	var (
-		clusters  [][]byte
 		positions []int64 // each cluster's offset from the first
 		blocks    [][]mksBlock
 		offset    int64
 	)
 	if err := mksClusters(packets, scale, func(cluster []byte, bs []mksBlock) error {
-		clusters = append(clusters, cluster)
 		positions = append(positions, offset)
-		blocks = append(blocks, append([]mksBlock(nil), bs...))
+		blocks = append(blocks, slices.Clone(bs))
 		offset += int64(len(cluster))
 		return nil
 	}); err != nil {
@@ -62,12 +61,15 @@ func writeKeptMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	cues := keptCues(blocks, positions, 0, scale)
 	base := int64(len(head)) - segmentData + int64(len(cues))
 	cues = keptCues(blocks, positions, base, scale)
-	for _, part := range append([][]byte{head, cues}, clusters...) {
+	for _, part := range [][]byte{head, cues} {
 		if _, err := w.Write(part); err != nil {
 			return err
 		}
 	}
-	return nil
+	return mksClusters(packets, scale, func(cluster []byte, _ []mksBlock) error {
+		_, err := w.Write(cluster)
+		return err
+	})
 }
 
 // mksSegmentDataStart returns where the segment's data starts in head:
