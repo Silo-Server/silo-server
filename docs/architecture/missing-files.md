@@ -61,7 +61,8 @@ the title is only hidden between the two.
 Sonarr's `SeriesDelete` and Radarr's `MovieDelete` with `deletedFiles: true`
 become a scoped scan of the series or movie folder. Arr sends them before it
 deletes the folder, so the delivery waits in the webhook queue, rechecked
-every 10 to 25 seconds, until the folder is gone (`ENOENT`) while its parent
+every 10 to 25 seconds for two minutes and about once a minute after that,
+until the folder is gone (`ENOENT`) while its parent
 is still a directory, and only then scans. A scan any earlier would find the
 files and nothing would scan again. Each check is a bounded stat, so a stalled
 mount keeps the delivery waiting. A folder not confirmed gone an hour after
