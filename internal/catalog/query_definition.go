@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -162,6 +163,12 @@ func validateRuleValue(rule QueryRule) error {
 		_, err := ruleInterval(rule)
 		return err
 	}
+	if booleanRuleFields[rule.Field] {
+		if _, ok := ruleBool(rule.Value); !ok {
+			return fmt.Errorf("%s requires true or false", rule.Field)
+		}
+		return nil
+	}
 	switch rule.Field {
 	case querySortTitle, ruleFieldShowTitle:
 		// An empty value would make contains, begins_with and ends_with match
@@ -192,6 +199,28 @@ func validateRuleValue(rule QueryRule) error {
 		}
 	}
 	return nil
+}
+
+// booleanRuleFields take true or false.
+var booleanRuleFields = map[string]bool{
+	"watched": true, "in_progress": true, "favorited": true,
+	"in_watchlist": true, "hdr": true, "dolby_vision": true,
+}
+
+// ruleBool reads a boolean rule's value. Released clients (Android TV
+// v1.0.0-beta.27) send the JSON strings "true" and "false", and saved
+// definitions may hold them, so exactly those two strings count as booleans.
+func ruleBool(value any) (bool, bool) {
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		// Exactly "true" or "false": ParseBool alone would also take "1" or "T".
+		if parsed, err := strconv.ParseBool(v); err == nil && strconv.FormatBool(parsed) == v {
+			return parsed, true
+		}
+	}
+	return false, false
 }
 
 // isRuleDate reports whether a date rule's bound is a calendar date
@@ -465,6 +494,12 @@ func (q QueryDefinition) Normalize() QueryDefinition {
 			}
 			normalized.Groups[i].Rules[j].Field = field
 			normalized.Groups[i].Rules[j].Op = strings.ToLower(strings.TrimSpace(normalized.Groups[i].Rules[j].Op))
+			if booleanRuleFields[field] {
+				// The SQL builder reads only real booleans.
+				if value, ok := ruleBool(normalized.Groups[i].Rules[j].Value); ok {
+					normalized.Groups[i].Rules[j].Value = value
+				}
+			}
 		}
 	}
 
