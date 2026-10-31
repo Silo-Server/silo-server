@@ -48,15 +48,42 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// Summarize rewrites the hourly rows from the hour before the last summarized
+// refreshLock spells "SILOAPIU".
+const refreshLock int64 = 0x53494C4F41504955
+
+// Refresh summarizes recent activity and prunes old summaries. Every API
+// process runs the task that calls it, so it takes a transaction-scoped
+// advisory lock first and returns ran false when another server holds it:
+// overlapping passes would rescan the same activity log and upsert the same
+// rows. The lock and both statements share one connection, so a pool of one
+// connection cannot deadlock on it.
+func (s *Store) Refresh(ctx context.Context, now time.Time) (written, pruned int64, ran bool, err error) {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, refreshLock).Scan(&ran); err != nil {
+			return fmt.Errorf("take API usage summary lock: %w", err)
+		}
+		if !ran {
+			return nil
+		}
+		var err error
+		if written, err = summarize(ctx, tx, now); err != nil {
+			return err
+		}
+		pruned, err = prune(ctx, tx, now)
+		return err
+	})
+	return written, pruned, ran, err
+}
+
+// summarize rewrites the hourly rows from the hour before the last summarized
 // one, or from catchUp ago if that is later, through now. Rewriting those two
 // hours completes the hour the previous pass caught part of and picks up rows
 // the activity log wrote late: a row carries its request's start time and is
 // written after the request ends. Hours are UTC, as the reads count them. It
 // returns how many session-hours it wrote.
-func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
+func summarize(ctx context.Context, tx pgx.Tx, now time.Time) (int64, error) {
 	var last *time.Time
-	if err := s.pool.QueryRow(ctx, `SELECT max(hour) FROM api_client_usage_hourly`).Scan(&last); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT max(hour) FROM api_client_usage_hourly`).Scan(&last); err != nil {
 		return 0, fmt.Errorf("read last summarized hour: %w", err)
 	}
 	// A last hour later than the current one (another server's clock is
@@ -72,7 +99,7 @@ func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
 			from = redo
 		}
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO api_client_usage_hourly (hour, session_id, user_id, user_agent, requests, refused)
 		SELECT date_trunc('hour', a."timestamp", 'UTC'), a.session_id, max(a.user_id),
 		       left(coalesce(mode() WITHIN GROUP (ORDER BY a.user_agent), ''), 256),
@@ -94,9 +121,9 @@ func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// Prune deletes summaries older than Retention.
-func (s *Store) Prune(ctx context.Context, now time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM api_client_usage_hourly WHERE hour < $1`, now.Add(-Retention))
+// prune deletes summaries older than Retention.
+func prune(ctx context.Context, tx pgx.Tx, now time.Time) (int64, error) {
+	tag, err := tx.Exec(ctx, `DELETE FROM api_client_usage_hourly WHERE hour < $1`, now.Add(-Retention))
 	if err != nil {
 		return 0, fmt.Errorf("prune API usage: %w", err)
 	}

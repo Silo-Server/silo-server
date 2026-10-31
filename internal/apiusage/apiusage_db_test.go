@@ -118,15 +118,15 @@ func TestAPIUsageSummaryDB(t *testing.T) {
 	f.log(t, "", f.currentHour, "/api/v2/system/info", "/api/v2/system/info", 200, 2) // no session: not counted
 	f.log(t, f.busy, f.now.Add(-72*time.Hour), catalog, catalog, 200, 4)              // before the catch-up window
 
-	if _, err := store.Summarize(ctx, f.now); err != nil {
-		t.Fatal(err)
+	if _, _, ran, err := store.Refresh(ctx, f.now); err != nil || !ran {
+		t.Fatalf("refresh: ran %v, %v", ran, err)
 	}
 	// A later request in the current hour lands on the next pass, and so does
 	// a row the activity log wrote late for the hour before.
 	f.log(t, f.quiet, f.now.Add(-5*time.Minute), home, home, 200, 1)
 	f.log(t, f.quiet, f.lastHour, home, home, 200, 1)
-	if _, err := store.Summarize(ctx, f.now); err != nil {
-		t.Fatal(err)
+	if _, _, ran, err := store.Refresh(ctx, f.now); err != nil || !ran {
+		t.Fatalf("refresh: ran %v, %v", ran, err)
 	}
 
 	got, err := store.TopClients(ctx, f.now, 24, 10)
@@ -169,7 +169,37 @@ func TestAPIUsageSummaryDB(t *testing.T) {
 		t.Fatalf("endpoints of an unknown session: err = %v, want ErrSessionNotFound", err)
 	}
 
-	if _, err := store.Prune(ctx, f.now.Add(Retention+2*time.Hour)); err != nil {
+	// The lock and the pass share one connection, so a one-connection pool
+	// finishes; while another server holds the lock, the pass is skipped.
+	single := f.pool.Config()
+	single.MaxConns = 1
+	singlePool, err := pgxpool.NewWithConfig(ctx, single)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singlePool.Close()
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, _, ran, err := NewStore(singlePool).Refresh(bounded, f.now); err != nil || !ran {
+		t.Fatalf("refresh on a one-connection pool: ran %v, %v", ran, err)
+	}
+	holder, err := f.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_lock($1)`, refreshLock); err != nil {
+		t.Fatal(err)
+	}
+	_, _, ran, err := store.Refresh(ctx, f.now)
+	if _, unlockErr := holder.Exec(ctx, `SELECT pg_advisory_unlock($1)`, refreshLock); unlockErr != nil {
+		t.Fatal(unlockErr)
+	}
+	holder.Release()
+	if err != nil || ran {
+		t.Fatalf("refresh while another server holds the lock: ran %v, %v; want skipped", ran, err)
+	}
+
+	if _, _, _, err := store.Refresh(ctx, f.now.Add(Retention+2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if after, err := store.TopClients(ctx, f.now, 24, 10); err != nil || after.TotalRequests != 0 {
