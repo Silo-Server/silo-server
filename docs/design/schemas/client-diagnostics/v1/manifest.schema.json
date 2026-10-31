@@ -81,6 +81,12 @@
         "profile_id": {
           "type": "string",
           "maxLength": 128
+        },
+        "occurrence_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "description": "How many times the client saw this issue before sending the report. Clients group repeats of one issue that happen within a short window into a single pending report. Absent means one occurrence."
         }
       },
       "additionalProperties": true
@@ -156,7 +162,8 @@
             "ueh",
             "exit_info",
             "metrickit",
-            "exit_sentinel"
+            "exit_sentinel",
+            "watchdog"
           ],
           "maxLength": 32
         },
