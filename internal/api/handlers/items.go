@@ -2119,7 +2119,8 @@ func (h *ItemsHandler) seriesSeasonRollups(ctx context.Context, v ItemViewer, se
 // seriesWatchCounts is parentRollupUserData for many series at once, keyed by
 // series ID: one SQL rollup when the viewer's store has it, else the series'
 // episodes folded with their progress. A series without available episodes
-// is absent, and so is every series when the viewer's store is unreachable.
+// is absent, and so is every series when the viewer's store is unreachable;
+// a progress read that fails is an error, never an absent count.
 func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seriesIDs []string) (map[string]*catalog.SeasonUserData, error) {
 	out := make(map[string]*catalog.SeasonUserData, len(seriesIDs))
 	if len(seriesIDs) == 0 {
@@ -2138,6 +2139,10 @@ func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seri
 		}
 		slog.WarnContext(ctx, "series watch rollup failed, folding episodes instead", "component", "api", "error", err)
 	}
+	store, profileID, ok := h.viewerUserStore(ctx, v.ProfileID)
+	if !ok {
+		return out, nil
+	}
 	episodesBySeries, err := h.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
 	if err != nil {
 		return nil, err
@@ -2146,9 +2151,9 @@ func (h *ItemsHandler) seriesWatchCounts(ctx context.Context, v ItemViewer, seri
 	for _, seriesEpisodes := range episodesBySeries {
 		episodes = append(episodes, seriesEpisodes...)
 	}
-	progressMap, ok := h.progressMapForEpisodes(ctx, v, episodes)
-	if !ok {
-		return out, nil
+	progressMap, err := h.listProgressForEpisodeIDs(ctx, store, profileID, episodeContentIDs(episodes))
+	if err != nil {
+		return nil, err
 	}
 	for id, seriesEpisodes := range episodesBySeries {
 		if len(seriesEpisodes) > 0 {

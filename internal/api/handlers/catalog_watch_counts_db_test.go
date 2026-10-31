@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -21,6 +22,15 @@ import (
 // series' episodes with their progress instead.
 type noRollupStore struct {
 	userstore.UserStore
+}
+
+// failingProgressStore folds like noRollupStore, but every progress read fails.
+type failingProgressStore struct {
+	noRollupStore
+}
+
+func (failingProgressStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
+	return nil, errors.New("progress store unavailable")
 }
 
 // SeriesWatchCounts answers only the series the viewer may see that have
@@ -107,14 +117,29 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 		started:  {WatchedCount: 1, UnplayedCount: 3, InProgressCount: 1},
 		finished: {WatchedCount: 2, Played: true},
 	}
-	for name, store := range map[string]userstore.UserStore{"rollup": pgStore, "fold": noRollupStore{pgStore}} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		store   userstore.UserStore
+		wantErr bool
+	}{
+		{"rollup", pgStore, false},
+		{"fold", noRollupStore{pgStore}, false},
+		// A progress read that fails is an error, never counts left out.
+		{"fold progress fails", failingProgressStore{noRollupStore{pgStore}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			h := &CatalogResourceHandler{items: &ItemsHandler{
 				itemRepo:      catalog.NewItemRepository(pool),
 				episodeRepo:   catalog.NewEpisodeRepository(pool),
-				storeProvider: testUserStoreProvider{store: store},
+				storeProvider: testUserStoreProvider{store: tc.store},
 			}}
 			got, err := h.SeriesWatchCounts(authCtx, viewer, []string{started, finished, hidden, movie, podcast, prefix + "-unknown"})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("counts = %+v, want an error", got)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
