@@ -59,6 +59,10 @@ function PopcornMark() {
  */
 export function AppFooter() {
   const { serverName, footerTagline } = useBranding();
+  // Two lines: the copyright, then the tagline under it. A tagline that shares
+  // the copyright's line reads as one long sentence; set apart, it reads as the
+  // footer's own voice.
+  const year = new Date().getFullYear();
 
   return (
     <footer className="from-background/0 to-background text-muted-foreground mt-[30px] bg-gradient-to-b px-10 pb-10 text-sm max-md:mt-[5px] max-md:px-5 max-md:pt-10 max-md:pb-[30px]">
@@ -66,10 +70,8 @@ export function AppFooter() {
         <SiloBrand className="h-10 w-[94px] max-md:h-8 max-md:w-[75px]" />
         <PopcornMark />
         <div className="pt-2.5 text-center text-[0.8rem]">
-          <p>
-            © {new Date().getFullYear()} {serverName}
-            {footerTagline ? `. ${footerTagline}` : ""}
-          </p>
+          <p>© {year} {serverName}.</p>
+          {footerTagline ? <p>{footerTagline}</p> : null}
         </div>
       </div>
     </footer>
