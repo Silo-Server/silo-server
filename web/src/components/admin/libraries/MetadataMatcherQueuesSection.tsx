@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { Wrench } from "lucide-react";
 
-import type { Library } from "@/api/types";
+import type { Library, LibraryMetadataMatchFailureDetail } from "@/api/types";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,35 @@ import {
 
 function formatFailureKind(kind: string): string {
   return kind.replace(/_/g, " ");
+}
+
+type MatchDecision = NonNullable<LibraryMetadataMatchFailureDetail["decision"]>;
+
+/** Why the matcher turned the candidates down, for a candidate_rejected decision. */
+function describeRejection(decision: MatchDecision): string | undefined {
+  if (decision.outcome !== "candidate_rejected") return undefined;
+  switch (decision.rejection) {
+    case "below_floor":
+      return "No eligible result reached the minimum score.";
+    case "lone_candidate":
+      return "A single result needs a higher score when nothing else, such as a matching year, confirms it.";
+    case "year_mismatch":
+      return "The best result's year is more than 2 years from the year in the name.";
+    case "ambiguous":
+      return "The top results scored too close together to choose one automatically.";
+    case "trusted_id_missing":
+      return "No result has the provider ID set for this item in its name or NFO.";
+    default:
+      return undefined;
+  }
+}
+
+/** The score a candidate had to reach, or undefined when the rule is not a score bar. */
+function scoreBar(decision: MatchDecision): number | undefined {
+  if (decision.required_score) return decision.required_score;
+  // A year mismatch or a tie has no score bar. Decisions recorded before the
+  // rule was named fall back to the acceptance floor.
+  return decision.rejection ? undefined : decision.threshold;
 }
 
 export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library[] }) {
@@ -156,6 +185,8 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                         <div className="space-y-2">
                           {detailEntries.map((entry) => {
                             const { path, failureKind, message, decision } = entry;
+                            const rejection = decision ? describeRejection(decision) : undefined;
+                            const bar = decision ? scoreBar(decision) : undefined;
                             return (
                               <div
                                 key={entry.key}
@@ -176,8 +207,10 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                     </Badge>
                                   </div>
                                 </div>
-                                {message ? (
-                                  <p className="text-muted-foreground mt-1">{message}</p>
+                                {rejection || message ? (
+                                  <p className="text-muted-foreground mt-1">
+                                    {rejection ?? message}
+                                  </p>
                                 ) : null}
                                 {decision?.top_candidates?.length ? (
                                   <div className="mt-2 space-y-1 border-t pt-2">
@@ -191,7 +224,8 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                           {candidate.year ? ` (${candidate.year})` : ""}
                                         </span>
                                         <span className="tabular-nums">
-                                          score {candidate.score.toFixed(1)} / {decision.threshold}
+                                          score {candidate.score.toFixed(1)}
+                                          {bar === undefined ? "" : ` / ${bar}`}
                                         </span>
                                         {candidate.matched_title &&
                                         candidate.matched_title !== candidate.title ? (

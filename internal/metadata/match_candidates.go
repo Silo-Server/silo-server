@@ -157,8 +157,14 @@ func sanitizedMatchHintProviderIDs(hints *MatchHints) *MatchHints {
 
 const (
 	automaticMatchAcceptanceFloor = 55
-	minimumDetailTieBreakScore    = 20
-	minimumDetailTieBreakGap      = 12
+	// automaticMatchLoneCandidateScore is the score a single candidate needs
+	// when nothing else, such as a matching year, corroborates it.
+	automaticMatchLoneCandidateScore = 70
+	// automaticMatchTieWindow is how close two scores must be to count as a
+	// tie; the best candidate needs this lead to win outright.
+	automaticMatchTieWindow    = 15
+	minimumDetailTieBreakScore = 20
+	minimumDetailTieBreakGap   = 12
 )
 
 func duplicateTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
@@ -170,7 +176,7 @@ func duplicateTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCa
 	contenders := []scoredMatchCandidate{best}
 	for i := 1; i < len(scoredCandidates); i++ {
 		next := scoredCandidates[i]
-		if best.score-next.score >= 15 {
+		if best.score-next.score >= automaticMatchTieWindow {
 			break
 		}
 		if duplicateTieBreakComparable(hints, best.candidate, next.candidate) {
@@ -736,7 +742,7 @@ func topTieGroup(scored []scoredMatchCandidate) []scoredMatchCandidate {
 	}
 	group := []scoredMatchCandidate{scored[0]}
 	for _, c := range scored[1:] {
-		if scored[0].score-c.score < 15 {
+		if scored[0].score-c.score < automaticMatchTieWindow {
 			group = append(group, c)
 		}
 	}
@@ -850,9 +856,24 @@ func absYearDelta(a, b int) int {
 	return b - a
 }
 
+// candidateRejection names the selection rule that turned every candidate
+// down, and the score that rule required when it is a score bar.
+type candidateRejection struct {
+	rule          MatchRejection
+	requiredScore float64
+}
+
 func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool) {
+	winner, ok, _ := selectInitialMatch(hints, candidates, providerPriority)
+	return winner, ok
+}
+
+// selectInitialMatch chooses the automatic winner like
+// selectInitialMatchCandidate and, when it chooses none, reports which rule
+// rejected the candidates so the match queue can explain the failure.
+func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool, candidateRejection) {
 	if len(candidates) == 0 {
-		return nil, false
+		return nil, false, candidateRejection{}
 	}
 
 	scoredCandidates := make([]scoredMatchCandidate, 0, len(candidates))
@@ -867,43 +888,10 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 		return scoredCandidates[i].score > scoredCandidates[j].score
 	})
 
-	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-		// hints can be nil on some callers (scoreMatchCandidate tolerates it).
-		// Guard the debug log so DEBUG-enabled runs don't panic on a nil deref.
-		hintTitle, hintType := "", ""
-		hintYear := 0
-		if hints != nil {
-			hintTitle = hints.Title
-			hintYear = hints.Year
-			hintType = hints.Type
-		}
-		for rank, sc := range scoredCandidates {
-			slog.Debug("match candidate scoring",
-				"hint_title", hintTitle,
-				"hint_year", hintYear,
-				"hint_type", hintType,
-				"rank", rank,
-				"candidate_title", sc.candidate.Title,
-				"candidate_year", sc.candidate.Year,
-				"candidate_type", sc.candidate.ContentType,
-				"sources", strings.Join(sc.candidate.Sources, ","),
-				"provider_ids", fmt.Sprintf("%v", sc.candidate.ProviderIDs),
-				"score", sc.score,
-			)
-		}
-	}
+	logScoredMatchCandidates(hints, scoredCandidates)
 
 	if trustedHintIDsPresent(hints) {
-		// Provider searches can return noisy title-ranked results even for an ID
-		// query. A trusted local ID is decisive, so choose the highest-scored
-		// candidate that actually carries the matching ID instead of requiring
-		// the provider's first result to be correct.
-		for i := range scoredCandidates {
-			if candidateMatchesTrustedIDs(hints, scoredCandidates[i].candidate) {
-				return &scoredCandidates[i].candidate, true
-			}
-		}
-		return nil, false
+		return trustedIDWinner(hints, scoredCandidates)
 	}
 
 	// A title-only local sidecar is useful metadata, but it is not an
@@ -922,12 +910,12 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 		scoredCandidates = eligible
 	}
 	if len(scoredCandidates) == 0 {
-		return nil, false
+		return nil, false, candidateRejection{}
 	}
 
 	best := scoredCandidates[0]
 	if best.score < automaticMatchAcceptanceFloor {
-		return nil, false
+		return nil, false, candidateRejection{rule: MatchRejectionBelowFloor, requiredScore: automaticMatchAcceptanceFloor}
 	}
 	// A known local year that conflicts with the provider by more than the
 	// tolerated release-date window is negative evidence, not something a high
@@ -936,7 +924,7 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 	// providers return the same canonical item.
 	if hints != nil && hints.Year != 0 && best.candidate.Year != 0 &&
 		absYearDelta(best.candidate.Year, hints.Year) > 2 {
-		return nil, false
+		return nil, false, candidateRejection{rule: MatchRejectionYearMismatch}
 	}
 	// A search that resolves to a single distinct show (one candidate, or the
 	// same title+year returned once per source) whose year matches the parsed
@@ -976,26 +964,77 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 			// high source/provider score can auto-accept an unrelated same-year result.
 			hintTitleCoherent := titleSimilarity > 0
 			if (hintTitleCoherent && (yearCorroborated || multiSourceCorroborated)) || titleCorroborated {
-				return pickByProviderPriority(topGroup, providerPriority), true
+				return pickByProviderPriority(topGroup, providerPriority), true, candidateRejection{}
 			}
 		}
 	}
 	if len(scoredCandidates) == 1 {
-		if best.score < 70 {
-			return nil, false
+		if best.score < automaticMatchLoneCandidateScore {
+			return nil, false, candidateRejection{rule: MatchRejectionLoneCandidate, requiredScore: automaticMatchLoneCandidateScore}
 		}
-		return &best.candidate, true
+		return &best.candidate, true, candidateRejection{}
 	}
-	if best.score-scoredCandidates[1].score < 15 {
-		if winner, ok := tmdbTVDBTitleConsensusWinner(hints, scoredCandidates); ok {
-			return winner, true
+	if best.score-scoredCandidates[1].score < automaticMatchTieWindow {
+		if winner, ok := tieBreakWinner(hints, scoredCandidates); ok {
+			return winner, true, candidateRejection{}
 		}
-		if winner, ok := duplicateTieBreakWinner(hints, scoredCandidates); ok {
-			return winner, true
-		}
-		return providerOrderExactTieBreakWinner(hints, scoredCandidates)
+		return nil, false, candidateRejection{rule: MatchRejectionAmbiguous}
 	}
-	return &best.candidate, true
+	return &best.candidate, true, candidateRejection{}
+}
+
+// trustedIDWinner picks the highest-scored candidate that carries the trusted
+// local ID. Provider searches can return noisy title-ranked results even for
+// an ID query, and a trusted local ID is decisive, so the provider's first
+// result does not have to be the right one.
+func trustedIDWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool, candidateRejection) {
+	for i := range scoredCandidates {
+		if candidateMatchesTrustedIDs(hints, scoredCandidates[i].candidate) {
+			return &scoredCandidates[i].candidate, true, candidateRejection{}
+		}
+	}
+	return nil, false, candidateRejection{rule: MatchRejectionTrustedIDMissing}
+}
+
+// tieBreakWinner settles top candidates that scored within the tie window,
+// trying each tie-breaker in order.
+func tieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
+	if winner, ok := tmdbTVDBTitleConsensusWinner(hints, scoredCandidates); ok {
+		return winner, true
+	}
+	if winner, ok := duplicateTieBreakWinner(hints, scoredCandidates); ok {
+		return winner, true
+	}
+	return providerOrderExactTieBreakWinner(hints, scoredCandidates)
+}
+
+func logScoredMatchCandidates(hints *MatchHints, scoredCandidates []scoredMatchCandidate) {
+	if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	// hints can be nil on some callers (scoreMatchCandidate tolerates it).
+	// Guard the debug log so DEBUG-enabled runs don't panic on a nil deref.
+	hintTitle, hintType := "", ""
+	hintYear := 0
+	if hints != nil {
+		hintTitle = hints.Title
+		hintYear = hints.Year
+		hintType = hints.Type
+	}
+	for rank, sc := range scoredCandidates {
+		slog.Debug("match candidate scoring",
+			"hint_title", hintTitle,
+			"hint_year", hintYear,
+			"hint_type", hintType,
+			"rank", rank,
+			"candidate_title", sc.candidate.Title,
+			"candidate_year", sc.candidate.Year,
+			"candidate_type", sc.candidate.ContentType,
+			"sources", strings.Join(sc.candidate.Sources, ","),
+			"provider_ids", fmt.Sprintf("%v", sc.candidate.ProviderIDs),
+			"score", sc.score,
+		)
+	}
 }
 
 // tmdbTVDBTitleConsensusWinner resolves a narrow series-only ambiguity when
@@ -1068,7 +1107,7 @@ func providerOrderExactTieBreakWinner(hints *MatchHints, scoredCandidates []scor
 	contenders := []scoredMatchCandidate{best}
 	for i := 1; i < len(scoredCandidates); i++ {
 		next := scoredCandidates[i]
-		if best.score-next.score >= 15 {
+		if best.score-next.score >= automaticMatchTieWindow {
 			break
 		}
 		contenders = append(contenders, next)
