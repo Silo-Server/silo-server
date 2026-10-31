@@ -6,7 +6,7 @@ on:
         required: true
         type: string
       base_tag:
-        description: Tag of the regular Silo image in this registry that the omnibus layers on
+        description: Tag of the base Silo image in this registry that the omnibus layers on
         required: true
         type: string
       build_number:
@@ -77,9 +77,9 @@ jobs:
           labels: |
             org.opencontainers.image.created=${{ inputs.built_at }}
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
-            org.opencontainers.image.version=${{ inputs.image_version }}-omnibus
+            org.opencontainers.image.version=${{ inputs.image_version }}
 
-      # No layer cache: every layer sits on this commit's regular image, so a
+      # No layer cache: every layer sits on this commit's base image, so a
       # cached layer could never match, and rebuilding is what keeps the
       # PostgreSQL and Redis packages current.
       - name: Build and push by digest
