@@ -27,6 +27,7 @@ import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/en
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -71,6 +72,7 @@ const AUTO_QUALITY_DESCRIPTION =
  * value that means the same thing, and no longer offers it.
  */
 function QualitySetting() {
+  const { serverName } = useBranding();
   const { data: effective } = useEffectiveSettings({
     keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY, SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS],
   });
@@ -125,7 +127,7 @@ function QualitySetting() {
 
       <SettingRow
         label="Maximum bitrate"
-        description="Cap how much bandwidth playback may use. No limit means Silo picks for the chosen resolution."
+        description={`Cap how much bandwidth playback may use. No limit means ${serverName} picks for the chosen resolution.`}
         control={(id) => (
           <Select
             value={bitrateValue === "" ? NO_BITRATE_LIMIT : bitrateValue}
@@ -364,6 +366,7 @@ function LegacyAudiobookImportRow({ prefs }: { prefs: ReturnType<typeof useSeekP
  * check renders nothing writable rather than a guess.
  */
 function SeekControls() {
+  const { serverName } = useBranding();
   const video = useSeekPreferences("video");
   const audiobook = useSeekPreferences("audiobook");
   const supported = video.supported && audiobook.supported;
@@ -375,7 +378,7 @@ function SeekControls() {
         <h3 className="text-base font-semibold tracking-tight">Seek controls</h3>
         <p className="text-muted-foreground max-w-2xl text-[13px] leading-relaxed">
           How far rewind and fast-forward jump. These belong to the active profile and follow it
-          across supported Silo apps.
+          across supported {serverName} apps.
         </p>
       </div>
 
@@ -410,6 +413,7 @@ function SeekControls() {
 }
 
 export default function PlaybackSettings() {
+  const { serverName } = useBranding();
   const capabilities = useSettingsCapabilities();
   const supportsIntroSkipMode = settingsCapabilitiesSupportKey(
     capabilities.data,
@@ -548,7 +552,7 @@ export default function PlaybackSettings() {
           // whose position would be a guess the user could act on.
           <SettingRow
             label="Skip intros"
-            description="Available once Silo has checked what this server supports."
+            description={`Available once ${serverName} has checked what this server supports.`}
             control={(id) => (
               <Select disabled>
                 <SelectTrigger id={id} className="w-full sm:w-[220px]">
@@ -567,7 +571,7 @@ export default function PlaybackSettings() {
         ) : (
           <SettingRow
             label="Auto-skip intros"
-            description="Jump past intros automatically when Silo can detect them."
+            description={`Jump past intros automatically when ${serverName} can detect them.`}
             control={(id) => (
               <Switch
                 id={id}
@@ -619,7 +623,7 @@ export default function PlaybackSettings() {
 
         <SettingRow
           label="Auto-skip recaps"
-          description="Skip 'previously on…' recaps automatically when Silo can detect them."
+          description={`Skip 'previously on…' recaps automatically when ${serverName} can detect them.`}
           control={(id) => (
             <Switch
               id={id}

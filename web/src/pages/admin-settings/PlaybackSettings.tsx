@@ -40,6 +40,7 @@ import {
   parseHWDeviceList,
   toggleHWDevice,
 } from "./playbackSettings.utils";
+import { useBranding } from "@/hooks/useBranding";
 
 // Shown without a disclosure: the controls a household admin actually
 // touches, including the HDR tone mapping switches, throttling and where
@@ -149,6 +150,7 @@ const KEYS = [
 ];
 
 export default function PlaybackSettings() {
+  const { serverName } = useBranding();
   const supportsTrickplay = useLibraryCapabilities().data?.trickplay === true;
   const keys = useMemo(
     () =>
@@ -335,7 +337,7 @@ export default function PlaybackSettings() {
           <SettingField
             label="Video transcoding"
             type="toggle"
-            description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
+            description={`Off never re-encodes video. ${serverName} still repackages files and converts audio for devices that need it.`}
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
@@ -508,7 +510,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Complete playlists for copied video"
               type="toggle"
-              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+              description={`Experimental. When ${serverName} copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as ${serverName} copies. Stops Safari freezing partway through. A seek ahead of what ${serverName} has copied waits for it to get there.`}
               value={form.getValue("playback.copy_keyframe_playlist") || "false"}
               onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
               restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
@@ -581,7 +583,7 @@ export default function PlaybackSettings() {
           <SettingField
             label="Chapter thumbnail workers"
             type="number"
-            description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
+            description={`How many files ${serverName} extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue.`}
             value={form.getValue("playback.chapter_thumbnail_workers")}
             onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
             restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
@@ -674,7 +676,7 @@ export default function PlaybackSettings() {
           <SettingField
             label="Marker source"
             type="select"
-            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
+            description={`Online markers take priority. ${serverName} skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU.`}
             className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
             options={[
               { value: "off", label: "Off" },
@@ -714,7 +716,7 @@ export default function PlaybackSettings() {
               type="select"
               description={
                 onlineMarkerStorage === "stored"
-                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
+                  ? `${serverName} saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default.`
                   : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
               }
               options={[
@@ -737,7 +739,7 @@ export default function PlaybackSettings() {
               description={
                 onlineMarkersEnabled
                   ? markerMode === "both"
-                    ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
+                    ? `Check online first when playback starts. ${serverName} detects only the intro or credits online providers don't have, using this server's CPU.`
                     : "Check online for missing or outdated markers when playback starts."
                   : "Detect missing markers when playback starts. Local analysis uses CPU."
               }
@@ -751,7 +753,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Detection workers"
               type="number"
-              description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              description={`How many seasons or movies ${serverName} analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room.`}
               value={form.getValue("markers.detection_workers")}
               onChange={(value) => form.setValue("markers.detection_workers", value)}
               restartRequired={restartKeys.has("markers.detection_workers")}

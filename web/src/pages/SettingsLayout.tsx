@@ -20,6 +20,7 @@ import {
   userSettingsHref,
   type UserSettingsNavGroup,
 } from "@/lib/userSettingsNav";
+import { useBranding } from "@/hooks/useBranding";
 
 /** Where `Layout` swaps the app sidebar for the settings sidebar. */
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
@@ -93,6 +94,7 @@ export default function SettingsLayout() {
 }
 
 function SettingsIndex({ groups }: { groups: readonly UserSettingsNavGroup[] }) {
+  const { serverName } = useBranding();
   const [search, setSearch] = useState("");
   const filteredGroups = useMemo(
     () => filterSettingsSearchGroups(groups, search),
@@ -106,7 +108,7 @@ function SettingsIndex({ groups }: { groups: readonly UserSettingsNavGroup[] }) 
       <PageHeader
         className="mt-10 sm:mt-12"
         title="Settings"
-        subtitle="Make Silo work the way you like."
+        subtitle={`Make ${serverName} work the way you like.`}
       />
       <CurrentProfileLink className="surface-panel-subtle min-h-14 rounded-2xl px-4 py-3" />
       <SettingsSearchInput

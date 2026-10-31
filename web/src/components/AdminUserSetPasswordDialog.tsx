@@ -17,6 +17,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { useUpdateAdminUserSignIn } from "@/hooks/queries/admin/externalSignIn";
 import { adminSignInErrorText } from "@/lib/externalSignInAdmin";
 import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Sets a Silo password on an account that has no password sign-in, such as
@@ -41,6 +42,7 @@ export function AdminUserSetPasswordDialog({
   onClose: () => void;
   onDone?: (message: string) => void;
 }) {
+  const { serverName } = useBranding();
   const update = useUpdateAdminUserSignIn();
   const [password, setPassword] = useState("");
   const [temporary, setTemporary] = useState(true);
@@ -98,7 +100,7 @@ export function AdminUserSetPasswordDialog({
           <DialogHeader>
             <DialogTitle>Set a password</DialogTitle>
             <DialogDescription>
-              {user.username} can't sign in with a Silo password now. Setting one turns password
+              {user.username} can't sign in with a {serverName} password now. Setting one turns password
               sign-in back on for this account. A connected sign-in provider keeps working.
               {waitsForServer
                 ? " Password sign-in is off for the server, so the password works only once it's turned back on in Settings → Sign-in."

@@ -45,8 +45,10 @@ import {
 import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { formatDateTime } from "@/lib/datetime";
+import { useBranding } from "@/hooks/useBranding";
 
 export default function AdminCatalogMaintenance() {
+  const { serverName } = useBranding();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [execution, setExecution] = useState<"queued" | "synchronous">("queued");
   const exportJobsQuery = useCatalogExportJobs();
@@ -310,7 +312,7 @@ export default function AdminCatalogMaintenance() {
                       </SelectContent>
                     </Select>
                     <p className="text-muted-foreground text-xs">
-                      Silo will load the selected seed directly from the configured operational S3
+                      {serverName} will load the selected seed directly from the configured operational S3
                       bucket.
                     </p>
                   </div>
@@ -383,7 +385,7 @@ export default function AdminCatalogMaintenance() {
                     />
                     <p className="text-muted-foreground text-xs">
                       Paste a public <span className="font-mono">.json.gz</span> catalog seed URL.
-                      Silo will download it server-side before importing.
+                      {serverName} will download it server-side before importing.
                     </p>
                   </div>
                 )}

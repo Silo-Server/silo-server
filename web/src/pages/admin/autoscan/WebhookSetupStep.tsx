@@ -16,6 +16,7 @@ import {
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 import { settingsPathFor, triggersFor } from "./webhookSetup";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * The copy-the-URL-into-your-arr half of webhook setup.
@@ -33,6 +34,7 @@ export function WebhookInstructions({
   url: string;
   provider: AutoscanWebhookProvider | "auto";
 }) {
+  const { serverName } = useBranding();
   const [copied, setCopied] = useState(false);
   const triggers = triggersFor(provider);
 
@@ -97,13 +99,13 @@ export function WebhookInstructions({
           ))}
         </ul>
         <p className="text-muted-foreground text-xs">
-          Leave every other trigger unchecked — Silo ignores them.
+          Leave every other trigger unchecked — {serverName} ignores them.
         </p>
       </div>
 
       <p className="text-muted-foreground text-xs">
         Save the connection in your download manager. You can use its
-        <span className="font-medium"> Test </span> button — Silo accepts test payloads and will
+        <span className="font-medium"> Test </span> button — {serverName} accepts test payloads and will
         show the delivery on this source.
       </p>
     </div>

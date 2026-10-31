@@ -83,6 +83,7 @@ import {
   type RequestRouterInstallation,
 } from "./requestServerModel";
 import { SETTINGS_CONTROL_WIDTH, SettingFieldRow } from "./SettingField";
+import { useBranding } from "@/hooks/useBranding";
 
 const KIND_TILE_CLASSES: Record<string, string> = {
   radarr: "bg-amber-500/20 text-amber-700 dark:text-amber-300",
@@ -482,6 +483,7 @@ export function RequestServerEditor({
   standard: boolean;
   onDone: () => void;
 }) {
+  const { serverName } = useBranding();
   const sole = installations.length === 1 ? installations[0] : undefined;
   const [form, setForm] = useState<ServerFormState>(() => serverForm(source, sole));
   const [pluginConfig, setPluginConfig] = useState<Record<string, unknown>>(() => ({
@@ -984,7 +986,7 @@ export function RequestServerEditor({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {source?.name || "server"}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Silo stops sending requests to it, and Autoscan connections that reuse it lose their
+              {serverName} stops sending requests to it, and Autoscan connections that reuse it lose their
               connection details.
               {clearsFallback
                 ? ` Everything else for ${mediaTypePlural(clearsFallback)} goes with it, so those requests have nowhere to go until you add another server.`

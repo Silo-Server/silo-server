@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+import { useBranding } from "@/hooks/useBranding";
 
 type LoginAttempt = { id: string; confirmed: boolean };
 
@@ -53,6 +54,7 @@ function ChatGPTConnectionPanel({
   onConnectionConfirmed?: () => void;
   onSettingsTransitionStarted?: () => (change: ChatGPTSettingsChange) => void;
 }) {
+  const { serverName } = useBranding();
   const authority = captureProfileRequestContext();
   const authorityActive = () => authority !== null && isCapturedProfileAuthorityActive(authority);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -388,7 +390,7 @@ function ChatGPTConnectionPanel({
           </DialogHeader>
           <ol className="list-decimal space-y-3 pl-5 text-sm">
             <li>
-              Open ChatGPT and allow Silo to use your plan.
+              Open ChatGPT and allow {serverName} to use your plan.
               <div className="mt-2">
                 <Button asChild size="sm">
                   <a href={start.data?.authorization_url} target="_blank" rel="noopener noreferrer">
@@ -438,7 +440,7 @@ function ChatGPTConnectionPanel({
             </Button>
           </form>
           <p className="text-muted-foreground text-xs">
-            Finish within ten minutes. Silo stores the connected account’s credentials securely on
+            Finish within ten minutes. {serverName} stores the connected account’s credentials securely on
             your server.
           </p>
           <Button variant="outline" disabled={complete.isPending} onClick={clearLogin}>
@@ -451,7 +453,7 @@ function ChatGPTConnectionPanel({
           <DialogHeader>
             <DialogTitle>You’re using your ChatGPT plan</DialogTitle>
             <DialogDescription>
-              Eligible text AI requests in Silo use your ChatGPT plan. You can manage Silo’s access
+              Eligible text AI requests in {serverName} use your ChatGPT plan. You can manage {serverName}’s access
               and usage limits in ChatGPT settings.
             </DialogDescription>
           </DialogHeader>

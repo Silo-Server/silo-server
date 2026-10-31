@@ -36,6 +36,7 @@ import { CardOverlaySettings } from "./CardOverlaySettings";
 import { ChoiceButtons } from "./ChoiceButtons";
 import { PosterCardPreview } from "./PosterCardPreview";
 import { ResetButton } from "./ResetButton";
+import { useBranding } from "@/hooks/useBranding";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 const DEVICE_SCOPE = { scope: "profile_device" } as const;
@@ -276,6 +277,7 @@ function PosterSettings() {
  * Saves on every edit.
  */
 function MenuSettings() {
+  const { serverName } = useBranding();
   const { data: libraries = [] } = useUserLibraries();
   const customization = useUICustomization();
   const adminSettings = useAdminServerSettings();
@@ -398,7 +400,7 @@ function MenuSettings() {
   return (
     <SettingsGroup
       title="Menu"
-      description="The links along the top of Silo, for every profile. Search and your profile are always there."
+      description={`The links along the top of ${serverName}, for every profile. Search and your profile are always there.`}
       actions={
         sharedMenuSet ? (
           <ResetButton

@@ -62,6 +62,7 @@ import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import ServerNotificationChannels from "./ServerNotificationChannels";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Operator kill switches for the whole pipeline. Both default on and only
@@ -323,6 +324,7 @@ function RegisterRelayRow({
   urlEdited: boolean;
   onRegistered: (submittedRelayURL: string) => void;
 }) {
+  const { serverName } = useBranding();
   const queryClient = useQueryClient();
   const authority = captureProfileRequestContext();
   const inFlight = useRef(false);
@@ -340,13 +342,13 @@ function RegisterRelayRow({
   const expirationValid = expiration != null && !Number.isNaN(expiration.getTime());
   const renewalStatus = expirationValid
     ? expiration.getTime() <= Date.now()
-      ? "Expired; Silo renews it before the next delivery."
+      ? `Expired; ${serverName} renews it before the next delivery.`
       : `Expires ${expiration.toLocaleString()}; Silo renews automatically.`
     : configured
-      ? "Expiration unknown; Silo refreshes the credential on its next renewal."
+      ? `Expiration unknown; ${serverName} refreshes the credential on its next renewal.`
       : reregistrationRequired
         ? "No relay credential is registered."
-        : "Not registered yet; Silo registers on its first push.";
+        : `Not registered yet; ${serverName} registers on its first push.`;
 
   const registerRelay = async () => {
     if (inFlight.current) return;
@@ -488,6 +490,7 @@ function discordInviteUrl(clientId: string): string {
 }
 
 function DiscordSetupGuide() {
+  const { serverName } = useBranding();
   return (
     <AdvancedSection id="notifications.discord.setup-guide" title="Setup guide">
       <div className="text-muted-foreground space-y-1.5 py-3 text-xs leading-relaxed">
@@ -504,7 +507,7 @@ function DiscordSetupGuide() {
           </li>
           <li>
             Bot page: reset and copy the <strong>Token</strong>. Leave all Privileged Gateway
-            Intents (Presence, Server Members, Message Content) <strong>off</strong> — Silo never
+            Intents (Presence, Server Members, Message Content) <strong>off</strong> — {serverName} never
             connects to the gateway; it only sends DMs.
           </li>
           <li>
@@ -779,6 +782,7 @@ function DiscordAppCredentials({
 }
 
 export default function NotificationsAdminSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
   const { data: serverChannels } = useServerNotificationChannels();
@@ -941,8 +945,8 @@ export default function NotificationsAdminSettings() {
 
           <ChannelCard
             icon={RadioTower}
-            title="Silo Push Relay"
-            description="Mobile push through Silo's relay, delivered by APNs or FCM."
+            title={`${serverName} Push Relay`}
+            description={`Mobile push through ${serverName}'s relay, delivered by APNs or FCM.`}
             enabled={mobilePushOn}
             onEnabledChange={(enabled) => {
               form.setValue("notifications.apple_push_delivery_enabled", String(enabled));
@@ -1242,7 +1246,7 @@ export default function NotificationsAdminSettings() {
                 />
                 <SettingField
                   label="Mention the requester on Discord"
-                  description="Unlinked accounts show their Silo username instead."
+                  description={`Unlinked accounts show their ${serverName} username instead.`}
                   type="toggle"
                   value={form.getValue("notifications.server_channels.mention_requesters")}
                   onChange={(v) =>
@@ -1258,7 +1262,7 @@ export default function NotificationsAdminSettings() {
         {/* ── Processing: everything here has a working default ── */}
         <FieldGroup
           label="Processing"
-          description="How Silo notices new content, groups it into messages, and how long it keeps them."
+          description={`How ${serverName} notices new content, groups it into messages, and how long it keeps them.`}
           restartAll={allRestart(PROCESSING_KEYS)}
           dirty={anyDirty(PROCESSING_KEYS)}
         >
@@ -1334,7 +1338,7 @@ export default function NotificationsAdminSettings() {
               />
               <SettingField
                 label="Sent history"
-                description="Record of what Silo already notified about."
+                description={`Record of what ${serverName} already notified about.`}
                 unit="days"
                 type="number"
                 value={numberValue("notifications.retention.event_days", "30")}

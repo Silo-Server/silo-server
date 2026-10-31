@@ -43,6 +43,7 @@ import { useRowDialog, useRowLinks } from "@/components/homeRows/useRowLinks";
 import { libraryPagesOf, pageLabel, pageParam } from "@/lib/homeRows/pages";
 import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
+import { useBranding } from "@/hooks/useBranding";
 
 function rowCount(count: number) {
   return count === 1 ? "1 row" : `${count} rows`;
@@ -107,6 +108,7 @@ function reportRestore(
 }
 
 export default function AdminHomeRows() {
+  const { serverName } = useBranding();
   const adapter = useAdminHomeRows();
   const { scope, serverCapabilities: capabilities } = adapter;
   const capabilitiesFailed = useAdminSectionCapabilities().isError;
@@ -395,7 +397,7 @@ export default function AdminHomeRows() {
     {
       key: "restore",
       label: "Restore defaults…",
-      help: "Put back the rows Silo starts with on this page.",
+      help: `Put back the rows ${serverName} starts with on this page.`,
       icon: RotateCcw,
       // The restore itself is an admin row write, so `pending` covers it.
       disabled: !canManageCurrentScope || snapshotLoading || adapter.pending,

@@ -38,6 +38,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { CHECKBOX, LoadMoreButton, SearchField } from "./controls";
 import { formatStorageBytes } from "./downloadStoragePresentation";
+import { useBranding } from "@/hooks/useBranding";
 
 type Sort = "last_seen" | "size";
 
@@ -395,6 +396,7 @@ function RevokeDialog({
   cacheHours: number | undefined;
   onClose: () => void;
 }) {
+  const { serverName } = useBranding();
   const revoke = useRevokeAdminDownloads();
   const [pauseMonitors, setPauseMonitors] = useState(true);
   const [reason, setReason] = useState("");
@@ -456,7 +458,7 @@ function RevokeDialog({
             Revoke {subject} on {device?.device_name || "this device"}?
           </AlertDialogTitle>
           <AlertDialogDescription>
-            The Silo app on {device?.profile_name ? `${device.profile_name}'s ` : "the "}
+            The {serverName} app on {device?.profile_name ? `${device.profile_name}'s ` : "the "}
             {device?.device_name || "device"} deletes {count === 1 ? "it" : "them"} the next time it
             connects.
             {device?.stale

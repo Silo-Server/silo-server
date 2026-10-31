@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import type { AudiobookPrefs } from "./useAudiobookPrefs";
+import { useBranding } from "@/hooks/useBranding";
 
 interface PlayerSettingsMenuProps {
   prefs: AudiobookPrefs;
@@ -8,6 +9,7 @@ interface PlayerSettingsMenuProps {
 
 /** Skip-interval and smart-rewind preferences, anchored to the player bar. */
 export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
+  const { serverName } = useBranding();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   // Intervals are unavailable while the server's support is still being
@@ -20,7 +22,7 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
       ? "Saved on this browser only"
       : prefs.sharedSkipIntervalsError
         ? "Couldn't load your profile's intervals; showing defaults"
-        : "Saved to your profile for every Silo app";
+        : `Saved to your profile for every ${serverName} app`;
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {

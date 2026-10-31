@@ -68,6 +68,7 @@ import { WebhookEndpointSection } from "./WebhookEndpoint";
 import { absoluteWebhookURL } from "./webhookURL";
 import { WebhookInstructions, WebhookProviderSelect, WebhookTriggerHint } from "./WebhookSetupStep";
 import { hasUsableMapping, newMapping, seedMappings, usableMappings } from "./webhookSetup";
+import { useBranding } from "@/hooks/useBranding";
 
 // ---------------------------------------------------------------------------
 // Add and edit share one dialog.
@@ -120,6 +121,7 @@ type SourceDialogProps = {
 );
 
 export function SourceDialog(props: SourceDialogProps) {
+  const { serverName } = useBranding();
   const { open, onOpenChange, connectionOptions, globalPollInterval } = props;
   const editSource = props.mode === "edit" ? props.source : null;
   const isEdit = editSource !== null;
@@ -782,7 +784,7 @@ export function SourceDialog(props: SourceDialogProps) {
           <DialogDescription>
             {createdWebhookSource
               ? "The source is created and listening. Paste this into your download manager to finish."
-              : "Pick what you want Silo to watch. Each source only asks for what it actually needs."}
+              : `Pick what you want ${serverName} to watch. Each source only asks for what it actually needs.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -838,7 +840,7 @@ export function SourceDialog(props: SourceDialogProps) {
             <StepTrail steps={steps} />
 
             <div className="space-y-2">
-              <Label>What should Silo watch?</Label>
+              <Label>What should {serverName} watch?</Label>
               <div className="grid gap-2 sm:grid-cols-2">
                 {plugins.map((p) => {
                   const key = pluginKey(p.plugin_id, p.capability_id);
@@ -866,7 +868,7 @@ export function SourceDialog(props: SourceDialogProps) {
 
             {showDeliveryChoice && (
               <div className="space-y-2">
-                <Label>How should Silo hear about changes?</Label>
+                <Label>How should {serverName} hear about changes?</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {descriptor.delivery_modes.map((mode) => {
                     const copy = DELIVERY_MODE_COPY[mode];

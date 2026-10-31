@@ -31,6 +31,7 @@ import {
 } from "./playbackSettings.utils";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDefaults";
+import { useBranding } from "@/hooks/useBranding";
 
 // Skip markers are on Playback, search on its own Search page, and saving
 // provider artwork on Storage; none of their keys are loaded here.
@@ -86,6 +87,7 @@ const KEYS = [
 ];
 
 export default function LibraryMetadataSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   // An older API node has no rating source list, so the Ratings group shows
@@ -223,7 +225,7 @@ export default function LibraryMetadataSettings() {
           <SettingField
             label="Scanner workers"
             type="number"
-            description="How many files Silo reads at once."
+            description={`How many files ${serverName} reads at once.`}
             value={form.getValue("scanner.workers")}
             onChange={(value) => form.setValue("scanner.workers", value)}
             restartRequired={restartKeys.has("scanner.workers")}
@@ -231,7 +233,7 @@ export default function LibraryMetadataSettings() {
           <SettingField
             label="Matcher workers"
             type="number"
-            description="How many items Silo looks up at once."
+            description={`How many items ${serverName} looks up at once.`}
             value={form.getValue("matcher.workers")}
             onChange={(value) => form.setValue("matcher.workers", value)}
             restartRequired={restartKeys.has("matcher.workers")}
@@ -239,7 +241,7 @@ export default function LibraryMetadataSettings() {
           <SettingField
             label="Image encoding workers"
             type="number"
-            description="How many artwork images Silo encodes at once. 0 uses one per CPU core."
+            description={`How many artwork images ${serverName} encodes at once. 0 uses one per CPU core.`}
             value={form.getValue("metadata.image_workers")}
             onChange={(value) => form.setValue("metadata.image_workers", value)}
             restartRequired={restartKeys.has("metadata.image_workers")}

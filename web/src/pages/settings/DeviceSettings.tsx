@@ -38,6 +38,7 @@ import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * "Your devices" — see and change how Silo behaves on each device you watch on.
@@ -264,6 +265,7 @@ function DeviceDetail({
 }) {
   // Acting for someone else changes the copy throughout: the banner, the reset
   // labels, and every mutation's identity.
+  const { serverName } = useBranding();
   const forSomeoneElse = Boolean(device.profile_id) && device.profile_id !== actingProfileId;
   const ownerLabel = forSomeoneElse ? `${device.profile_name}'s` : "your";
   const targetProfileId = forSomeoneElse ? device.profile_id : undefined;
@@ -482,7 +484,7 @@ function DeviceDetail({
           <div>
             <p className="text-sm font-semibold">Couldn&apos;t check settings compatibility</p>
             <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
-              Device controls stay unavailable until Silo confirms which settings this server
+              Device controls stay unavailable until {serverName} confirms which settings this server
               supports.
             </p>
           </div>
@@ -564,7 +566,7 @@ function DeviceDetail({
       {forSomeoneElse ? (
         <Callout tone="muted" icon={<ShieldCheck className="h-4 w-4" />}>
           <strong className="text-foreground font-semibold">What you can&apos;t see here.</strong>{" "}
-          This page shows how Silo is set up on each device — not what anyone watched. Viewing
+          This page shows how {serverName} is set up on each device — not what anyone watched. Viewing
           history stays private to each profile.
         </Callout>
       ) : null}

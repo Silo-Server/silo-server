@@ -18,6 +18,7 @@ import {
 } from "@/hooks/queries/useAutoscan";
 import { useRequestIntegrations } from "@/hooks/queries/admin/requests";
 import type { RequestIntegration } from "@/api/types";
+import { useBranding } from "@/hooks/useBranding";
 
 export interface ConnectionOption {
   id: string;
@@ -65,6 +66,7 @@ export function InlineConnectionPicker({
   connectionKinds: string[];
   idPrefix?: string;
 }) {
+  const { serverName } = useBranding();
   const createConnection = useCreateAutoscanConnection();
   const testConnection = useTestAutoscanConnection();
   const requestIntegrations = useRequestIntegrations();
@@ -241,7 +243,7 @@ export function InlineConnectionPicker({
                 </SelectContent>
               </Select>
               <p className="text-muted-foreground text-xs">
-                Silo already has these credentials — no need to enter them again.
+                {serverName} already has these credentials — no need to enter them again.
               </p>
             </div>
           )}

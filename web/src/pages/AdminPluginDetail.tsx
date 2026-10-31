@@ -72,6 +72,7 @@ import {
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
 import { pluginStatus } from "@/lib/pluginStatus";
 import { cn } from "@/lib/utils";
+import { useBranding } from "@/hooks/useBranding";
 
 const UPDATE_POLICY_LABELS: Record<string, string> = {
   auto: "Update automatically",
@@ -85,6 +86,7 @@ const UPDATE_POLICY_LABELS: Record<string, string> = {
  * the manifest plugin ID, which deep links from other admin pages use too.
  */
 export default function AdminPluginDetail() {
+  const { serverName } = useBranding();
   const { pluginId = "" } = useParams<{ pluginId: string }>();
   const [searchParams] = useSearchParams();
   const selectedRepository = searchParams.get("repository");
@@ -121,7 +123,7 @@ export default function AdminPluginDetail() {
     return (
       <PageUnavailable
         title="Couldn't load plugins"
-        description="Silo couldn't read the installed plugins. Try again in a moment."
+        description={`${serverName} couldn't read the installed plugins. Try again in a moment.`}
         onRetry={() => void installationsQuery.refetch()}
         retrying={installationsQuery.isFetching}
       >
@@ -137,7 +139,7 @@ export default function AdminPluginDetail() {
     return (
       <PageUnavailable
         title="Couldn't load the plugin catalog"
-        description="This plugin isn't installed, and Silo couldn't read the catalog to look it up."
+        description={`This plugin isn't installed, and ${serverName} couldn't read the catalog to look it up.`}
         onRetry={() => void catalogQuery.refetch()}
         retrying={catalogQuery.isFetching}
       >
@@ -149,7 +151,7 @@ export default function AdminPluginDetail() {
   return (
     <PageUnavailable
       title="Plugin not found"
-      description="This plugin isn't installed and isn't in any catalog Silo can see."
+      description={`This plugin isn't installed and isn't in any catalog ${serverName} can see.`}
     >
       <AllPluginsLink />
     </PageUnavailable>
@@ -265,6 +267,7 @@ function InstalledPluginPage({
   installation: PluginInstallation;
   catalogEntry?: PluginCatalogEntry;
 }) {
+  const { serverName } = useBranding();
   const navigate = useNavigate();
   const updateInstallation = useUpdatePluginInstallation();
   const applyUpdate = useApplyPluginUpdate();
@@ -436,7 +439,7 @@ function InstalledPluginPage({
                   ? `${name} stopped and won't restart on its own.`
                   : `${name} keeps stopping.`}
               </strong>{" "}
-              Silo has restarted it {runtime.restart_count}{" "}
+              {serverName} has restarted it {runtime.restart_count}{" "}
               {runtime.restart_count === 1 ? "time" : "times"}
               {runtime.state === "backoff" && runtime.next_restart_at
                 ? `. The next attempt is at ${formatDateTime(runtime.next_restart_at)}.`
@@ -444,7 +447,7 @@ function InstalledPluginPage({
             </p>
           ) : (
             <p>
-              <strong className="font-semibold">{name} failed to start.</strong> Silo tries again
+              <strong className="font-semibold">{name} failed to start.</strong> {serverName} tries again
               the next time it needs the plugin.
             </p>
           )}
@@ -487,7 +490,7 @@ function InstalledPluginPage({
           }
         >
           <p>
-            <strong className="font-semibold">Update checks are paused.</strong> {pausedBy}, so Silo
+            <strong className="font-semibold">Update checks are paused.</strong> {pausedBy}, so {serverName}
             doesn't look for new versions of {name}.{" "}
             <ViewTransitionLink
               to="/admin/plugins?tab=catalog"
@@ -524,7 +527,7 @@ function InstalledPluginPage({
           <AlertDialogHeader>
             <AlertDialogTitle>Uninstall {name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Silo will stop the plugin, then remove its installation, configuration, and installed
+              {serverName} will stop the plugin, then remove its installation, configuration, and installed
               files. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

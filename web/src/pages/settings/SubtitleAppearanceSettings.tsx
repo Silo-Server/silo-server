@@ -41,6 +41,7 @@ import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
 import { ResetButton } from "./ResetButton";
+import { useBranding } from "@/hooks/useBranding";
 
 /* Languages, subtitle behavior and subtitle appearance are profile preferences. */
 /**
@@ -183,6 +184,7 @@ function SettingRow({ label, description, labelForControl = true, children }: Se
 }
 
 export default function SubtitleAppearanceSettings() {
+  const { serverName } = useBranding();
   const {
     appearance: effectiveSettings,
     isCustomized,
@@ -362,7 +364,7 @@ export default function SubtitleAppearanceSettings() {
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Subtitles" description="Which subtitles Silo picks for this profile.">
+      <SettingsGroup title="Subtitles" description={`Which subtitles ${serverName} picks for this profile.`}>
         <SettingRow
           label="Subtitle language"
           description="Pick a subtitle language or leave subtitles off by default."

@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { useAdminNodes, useUpdateNode } from "@/hooks/queries/admin/nodes";
 import { formatStorageBytes, preparedBytes } from "./downloadStoragePresentation";
+import { useBranding } from "@/hooks/useBranding";
 
 const BYTES_PER_GB = 1e9;
 
@@ -179,6 +180,7 @@ function NodeLocationFields({
   storage: AdminDownloadStorage;
   onClose: () => void;
 }) {
+  const { serverName } = useBranding();
   const update = useUpdateNode();
   const dirId = useId();
   const budgetId = useId();
@@ -306,7 +308,7 @@ function NodeLocationFields({
           ) : null}
           {gbError ? <p className="text-destructive text-xs">{gbError}</p> : null}
           <p className="text-muted-foreground text-xs">
-            {formatStorageBytes(indexed)} stored now. Over budget, Silo deletes cached files early,
+            {formatStorageBytes(indexed)} stored now. Over budget, {serverName} deletes cached files early,
             least recently used first. Files a device is still waiting on stay.
           </p>
         </div>

@@ -15,6 +15,7 @@ import { RequestRoutingList } from "./RequestRoutingList";
 import { RoutingModeChoice, StandardRoutingSummary } from "./RequestRoutingMode";
 import { adminLanguage } from "./requestRoutingPresets";
 import { serverServesMediaType, type RequestRouterInstallation } from "./requestServerModel";
+import { useBranding } from "@/hooks/useBranding";
 
 /** TMDB ID → name. Networks and studios get one map each: their IDs overlap. */
 function brandMap(brands: readonly DiscoverBrandCard[] | undefined): Map<number, string> {
@@ -61,6 +62,7 @@ export function RequestRoutingGroup({
   /** "Also request a 4K version of every title", as saved. */
   forceDual: boolean;
 }) {
+  const { serverName } = useBranding();
   const [tab, setTab] = useState<RequestRouteMediaType>("movie");
   const routing = useRequestRouting();
   const switchRouting = useUpdateRequestRouting();
@@ -114,8 +116,8 @@ export function RequestRoutingGroup({
       label="Where requests go"
       description={
         advanced
-          ? "Silo checks the rules from the top. The first rule that matches a request decides where it goes; anything no rule matches goes to Everything else. Changes save right away."
-          : "Choose how Silo picks the server for each request. Changes save right away."
+          ? `${serverName} checks the rules from the top. The first rule that matches a request decides where it goes; anything no rule matches goes to Everything else. Changes save right away.`
+          : `Choose how ${serverName} picks the server for each request. Changes save right away.`
       }
     >
       {routesLoading || serversLoading || routing.isPending ? (

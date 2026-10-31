@@ -44,6 +44,7 @@ import {
   type SignInSetupLayout,
 } from "./signInSetup";
 import type { SignInProviderDrafts } from "./useSignInProviderDrafts";
+import { useBranding } from "@/hooks/useBranding";
 
 const CATALOG_PATH = "/admin/plugins?tab=catalog";
 
@@ -370,6 +371,7 @@ function ProviderPanel({
   connectionTestServed,
   otherActive,
 }: ProviderPanelProps) {
+  const { serverName } = useBranding();
   const capability = authCapabilityOf(installation)!;
   const binding = authBindingOf(installation);
   // Turning the binding on or off is about the provider people sign in
@@ -486,7 +488,7 @@ function ProviderPanel({
       label="Create accounts on first sign-in"
       htmlFor={autoProvisionId}
       dirty={autoProvision !== savedAutoProvision(installation)}
-      description="People the provider lets in get a Silo account the first time they sign in. Off: only people whose Silo account is already connected can sign in."
+      description={`People the provider lets in get a ${serverName} account the first time they sign in. Off: only people whose ${serverName} account is already connected can sign in.`}
       descriptionId={autoProvisionDescription}
     >
       <Switch
@@ -502,8 +504,8 @@ function ProviderPanel({
   if (mode === "oauth") {
     steps.push({
       key: "register",
-      title: "Register Silo at your provider",
-      description: "Create a confidential client for Silo and add this redirect URI to it.",
+      title: `Register ${serverName} at your provider`,
+      description: `Create a confidential client for ${serverName} and add this redirect URI to it.`,
       body: (
         <>
           {!publicUrlSet ? (
@@ -804,10 +806,11 @@ function NoProviderPanel({
   localLoginOn: boolean;
   pageSaving: boolean;
 }) {
+  const { serverName } = useBranding();
   if (!active) {
     return (
       <p className="text-muted-foreground pt-5 text-sm">
-        No sign-in provider is on, so people sign in with Silo passwords. Pick a provider above to
+        No sign-in provider is on, so people sign in with {serverName} passwords. Pick a provider above to
         set it up.
       </p>
     );
@@ -826,6 +829,7 @@ function TurnOffActiveProvider({
   localLoginOn: boolean;
   pageSaving: boolean;
 }) {
+  const { serverName } = useBranding();
   const [feedback, setFeedback] = useState<Feedback>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   const label = authProviderLabel(active);
@@ -843,7 +847,7 @@ function TurnOffActiveProvider({
     <div className="pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm">
-          {label} is on. Turn it off to sign in with Silo passwords only.
+          {label} is on. Turn it off to sign in with {serverName} passwords only.
         </p>
         <Button
           type="button"
@@ -887,6 +891,7 @@ export function SignInProviderSlot({
   publicUrlSet,
   connectionTestServed,
 }: SignInProviderSlotProps) {
+  const { serverName } = useBranding();
   const [picked, setPicked] = useState<Selection | null>(null);
   const groupLabelId = useId();
 
@@ -945,7 +950,7 @@ export function SignInProviderSlot({
         state: providerState(installation, missingSignInSetup(layout)),
       };
     }),
-    { id: "none", title: "None", detail: "Only Silo passwords." },
+    { id: "none", title: "None", detail: `Only ${serverName} passwords.` },
   ];
 
   return (

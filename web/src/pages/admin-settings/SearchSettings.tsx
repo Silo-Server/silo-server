@@ -18,6 +18,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { SearchStatusPanel, SearchStatusSummary } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+import { useBranding } from "@/hooks/useBranding";
 
 const PROVIDER_KEY = "catalog.search.provider";
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
@@ -57,6 +58,7 @@ const MEILI_KEYS = [...MEILI_SHOWN_KEYS, ...MEILI_ADVANCED_KEYS];
 const KEYS = [PROVIDER_KEY, ...MEILI_KEYS];
 
 export default function SearchSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   const checkConnection = useCheckAdminSettingsConnection();
@@ -231,7 +233,7 @@ export default function SearchSettings() {
                 status={
                   enablingSemanticSearch ? (
                     <SettingFieldStatus tone="warn">
-                      Enabling this changes the index format. After you save and restart, Silo
+                      Enabling this changes the index format. After you save and restart, {serverName}
                       rebuilds the index automatically. Keyword search stays available while it
                       rebuilds.
                     </SettingFieldStatus>
@@ -256,7 +258,7 @@ export default function SearchSettings() {
                   label="Index name prefix"
                   value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
-                  description="Only needed when Silo servers share one Meilisearch."
+                  description={`Only needed when ${serverName} servers share one Meilisearch.`}
                   disabled={!meiliEnabled}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
                 />

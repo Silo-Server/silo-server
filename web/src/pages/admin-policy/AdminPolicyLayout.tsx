@@ -9,6 +9,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { PolicyDecisionLogTable } from "./PolicyDecisionLogTable";
 import { PolicyDocumentList } from "./PolicyDocumentList";
 import { PolicyVendorViewer } from "./PolicyVendorViewer";
+import { useBranding } from "@/hooks/useBranding";
 
 // Tab ids are stable URL contract (?tab=); labels are presentation only.
 const POLICY_TABS = new Set(["documents", "vendor", "decisions"]);
@@ -60,6 +61,7 @@ function PolicyPipelineStrip() {
 }
 
 export default function AdminPolicyLayout() {
+  const { serverName } = useBranding();
   useDocumentTitle("Policy");
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveTab(searchParams.get("tab"));
@@ -85,7 +87,7 @@ export default function AdminPolicyLayout() {
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Policy"
-        subtitle="Household access rules: what Silo allows by default, and where you tighten it."
+        subtitle={`Household access rules: what ${serverName} allows by default, and where you tighten it.`}
       />
 
       {capability.isLoading && (

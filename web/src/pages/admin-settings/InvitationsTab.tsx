@@ -68,6 +68,7 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
+import { useBranding } from "@/hooks/useBranding";
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
 // every level matters: the URL is one unbreakable token, and without them it
@@ -167,6 +168,7 @@ export default function InvitationsTab() {
   return <InvitationManager key={invitationScope()} />;
 }
 function InvitationManager() {
+  const { serverName } = useBranding();
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const capabilities = useInvitationCapabilities();
@@ -401,7 +403,7 @@ function InvitationManager() {
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
           <p className="text-[13px] leading-relaxed">
-            Set the Silo public URL to create invitation links.{" "}
+            Set the {serverName} public URL to create invitation links.{" "}
             <Link
               to="/admin/settings/general"
               className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"

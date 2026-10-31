@@ -88,6 +88,7 @@ import {
   enableWebPush,
   webPushSupport,
 } from "@/lib/webPush";
+import { useBranding } from "@/hooks/useBranding";
 
 const REASON_FIELDS = [
   { key: "notify_favorites", label: "Favorites" },
@@ -397,6 +398,7 @@ const DISCORD_LINK_ERRORS: Record<string, string> = {
 };
 
 function DiscordSection() {
+  const { serverName } = useBranding();
   const { profile } = useCurrentProfile();
   const canManage = profile?.is_primary === true;
   const authority = captureProfileRequestContext();
@@ -460,7 +462,7 @@ function DiscordSection() {
   return (
     <SettingsGroup
       title="Discord Notifications"
-      description="Account-wide: the Silo bot sends direct messages covering every profile on this account. You must share a Discord server with the bot."
+      description={`Account-wide: the ${serverName} bot sends direct messages covering every profile on this account. You must share a Discord server with the bot.`}
     >
       {!canManage && (
         <p className="text-muted-foreground text-sm">
@@ -570,6 +572,7 @@ function webPushSubtitle(sub: WebPushSubscriptionView): { text: string; failing:
 }
 
 function WebPushSection() {
+  const { serverName } = useBranding();
   const queryClient = useQueryClient();
   const capability = useNotificationCapability();
   const webPushCap = capability.data?.web_push;
@@ -647,7 +650,7 @@ function WebPushSection() {
   return (
     <SettingsGroup
       title="Browser Notifications"
-      description="Get notified even when Silo is closed. Notifications are encrypted end-to-end — the browser vendor's push service never sees their content."
+      description={`Get notified even when ${serverName} is closed. Notifications are encrypted end-to-end — the browser vendor's push service never sees their content.`}
     >
       {support === "unsupported" ? (
         <div className="text-muted-foreground text-sm">

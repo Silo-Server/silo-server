@@ -31,6 +31,7 @@ import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingF
 import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
+import { useBranding } from "@/hooks/useBranding";
 
 const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
 const CONFIDENCE_PERCENT_FORMAT = new Intl.NumberFormat("en-US", {
@@ -185,6 +186,7 @@ function MarkerProviderTile({
   result: MarkerValidation | undefined;
   onValidated: (result: MarkerValidation | undefined) => void;
 }) {
+  const { serverName } = useBranding();
   const updateProvider = useUpdateMarkerProvider();
   const validateProvider = useValidateMarkerProvider();
   const displayName = provider.display_name || provider.provider;
@@ -372,7 +374,7 @@ function MarkerProviderTile({
         <SettingFieldRow
           label="Provider priority"
           htmlFor={priorityID}
-          description="Silo uses the marker with the highest confidence. When two providers are equally confident, it prefers the lower number."
+          description={`${serverName} uses the marker with the highest confidence. When two providers are equally confident, it prefers the lower number.`}
         >
           <Input
             id={priorityID}

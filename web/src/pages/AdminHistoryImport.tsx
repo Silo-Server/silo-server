@@ -90,6 +90,7 @@ import type {
 } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { useBranding } from "@/hooks/useBranding";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -460,6 +461,7 @@ function TokenDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { serverName } = useBranding();
   const [source, setSource] = useState(initialSource);
   const [conflict, setConflict] = useState(false);
   const reload = async () => {
@@ -576,7 +578,7 @@ function TokenDialog({
               <p className="text-muted-foreground text-sm">
                 {isPlex
                   ? "Paste your Plex auth token directly."
-                  : "This key is used to discover users on the server and import their watch history into Silo."}
+                  : `This key is used to discover users on the server and import their watch history into ${serverName}.`}
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="admin-token">API key / Token</Label>
@@ -662,6 +664,7 @@ function DiscoverDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { serverName } = useBranding();
   const { data: externalUsers, isFetching, refetch, error } = useDiscoverExternalUsers(source.id);
   const { data: users = [] } = useAdminUsers();
   const createMapping = useCreateAdminMapping();
@@ -820,12 +823,12 @@ function DiscoverDialog({
               {mappingTarget && (
                 <div className="surface-panel-subtle space-y-4 rounded-xl border-0 p-4">
                   <p className="text-sm font-medium">
-                    Map <span className="text-primary">{mappingTarget.name}</span> to a Silo user
+                    Map <span className="text-primary">{mappingTarget.name}</span> to a {serverName} user
                     and profile:
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Silo user</Label>
+                      <Label className="text-xs">{serverName} user</Label>
                       <Select
                         value={userId}
                         onValueChange={(v) => {
@@ -1048,6 +1051,7 @@ function MappingsSection({
   source: HistoryImportSource;
   mappings: HistoryImportUserMapping[];
 }) {
+  const { serverName } = useBranding();
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const deleteMapping = useDeleteAdminMapping();
   const createRun = useCreateAdminRunForMapping();
@@ -1148,7 +1152,7 @@ function MappingsSection({
                 <TableHead className="hidden sm:table-cell">
                   <ArrowRight className="h-3.5 w-3.5" />
                 </TableHead>
-                <TableHead>Silo user</TableHead>
+                <TableHead>{serverName} user</TableHead>
 
                 <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
@@ -1480,6 +1484,7 @@ export default function AdminHistoryImport() {
 }
 
 function AdminHistoryImportPage() {
+  const { serverName } = useBranding();
   useEventChannel("history_import");
   const capabilities = useAdminHistoryImportCapabilities();
   const {
@@ -1532,7 +1537,7 @@ function AdminHistoryImportPage() {
     <div className="space-y-8 pb-4 sm:pb-6">
       <PageHeader
         title="History Import"
-        subtitle="Import watch history from external servers into Silo user profiles."
+        subtitle={`Import watch history from external servers into ${serverName} user profiles.`}
       />
 
       {/* Source selector */}
@@ -1625,6 +1630,7 @@ function AdminHistoryImportPage() {
 // session history only records finished plays; resume points, titles marked
 // watched, and watchlists are per-user state that only the user's own sign-in reaches.
 function PlexAdminImportLimits() {
+  const { serverName } = useBranding();
   const headingId = useId();
   return (
     <div
@@ -1638,7 +1644,7 @@ function PlexAdminImportLimits() {
           Plex admin imports only bring over finished plays
         </p>
         <p>
-          Silo reads this server&apos;s play history, which records each title a person played
+          {serverName} reads this server&apos;s play history, which records each title a person played
           through, and when. It can&apos;t see anything else, so these are not imported:
         </p>
         <ul className="list-disc space-y-0.5 pl-5">

@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
+import { useBranding } from "@/hooks/useBranding";
 
 const STATUS_CONFIG = {
   queued: {
@@ -88,6 +89,7 @@ const STATUS_CONFIG = {
 } as const;
 
 export default function HistoryImportSettings() {
+  const { serverName } = useBranding();
   useEventChannel("history_import");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -359,7 +361,7 @@ export default function HistoryImportSettings() {
     <div className="space-y-6">
       <PageHeader
         title="History Import"
-        subtitle="Import watch history from an external media server into a Silo profile."
+        subtitle={`Import watch history from an external media server into a ${serverName} profile.`}
       />
 
       {/* ── New import ──────────────────────────────────── */}

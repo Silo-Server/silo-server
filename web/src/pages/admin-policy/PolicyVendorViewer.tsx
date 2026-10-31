@@ -12,6 +12,7 @@ import { usePolicyVendor } from "@/hooks/queries/admin/policy";
 
 import { policyDomainMeta } from "./policyPresentation";
 import { groupVendorModules, parseRankLadder, type LadderTier } from "./vendorBaseline";
+import { useBranding } from "@/hooks/useBranding";
 
 const DOMAIN_ORDER = ["scope", "permission", "action"] as const;
 
@@ -82,6 +83,7 @@ function LadderCard({ title, caption, module }: LadderCardProps) {
 }
 
 export function PolicyVendorViewer() {
+  const { serverName } = useBranding();
   const { data: modules, isLoading, error } = usePolicyVendor();
 
   if (isLoading) {
@@ -109,7 +111,7 @@ export function PolicyVendorViewer() {
   return (
     <div className="space-y-5">
       <p className="text-muted-foreground max-w-prose text-sm">
-        These rules ship with each Silo release and always apply — upgrading Silo updates them
+        These rules ship with each {serverName} release and always apply — upgrading {serverName} updates them
         without touching your overrides. Summaries below; the Rego source under each card is the
         authoritative version.
       </p>

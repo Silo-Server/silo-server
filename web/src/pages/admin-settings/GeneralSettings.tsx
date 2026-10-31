@@ -10,6 +10,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { RedisGroup, type RedisUrlEditors } from "./RedisGroup";
 import { REDIS_KEYS } from "./redisDraft";
+import { useBranding } from "@/hooks/useBranding";
 
 // Identity (server name, login subtitle) used to live on the Branding tab; it is
 // a plain server-wide value an admin looks for under General, so it saves with
@@ -41,6 +42,7 @@ const DATABASE_KEYS = ["database.max_connections"];
 const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...DATABASE_KEYS, ...REDIS_KEYS];
 
 export default function GeneralSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
 
@@ -118,7 +120,7 @@ export default function GeneralSettings() {
           <SettingField
             label="Server name"
             dirty={form.isDirty("branding.server_name")}
-            hint="Silo"
+            hint={`${serverName}`}
             value={form.getValue("branding.server_name")}
             onChange={(v) => form.setValue("branding.server_name", v)}
             restartRequired={restartKeys.has("branding.server_name")}
@@ -140,7 +142,7 @@ export default function GeneralSettings() {
           dirty={anyDirty(NETWORK_KEYS)}
         >
           <SettingField
-            label="Silo public URL"
+            label={`${serverName} public URL`}
             dirty={form.isDirty("server.public_url")}
             description="The HTTPS address users open. Used for websocket origins and links in email notifications."
             hint="https://silo.example.com"
@@ -152,7 +154,7 @@ export default function GeneralSettings() {
             label="Show on the local network"
             dirty={form.isDirty("server.lan_discovery")}
             type="toggle"
-            description="Silo apps on the same network list this server when adding one, so nobody has to type its address. Needs a network that passes multicast (Docker host networking, not the default bridge)."
+            description={`${serverName} apps on the same network list this server when adding one, so nobody has to type its address. Needs a network that passes multicast (Docker host networking, not the default bridge).`}
             value={form.getValue("server.lan_discovery")}
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
@@ -160,7 +162,7 @@ export default function GeneralSettings() {
           <SettingField
             label="Local network address"
             dirty={form.isDirty(LOCAL_URL_KEY)}
-            description="Where devices on your home network reach Silo directly: the host's IP and the port Silo listens on, or the published port under Docker. Signed-in apps switch to it on their own while they can reach it, over an encrypted connection. Leave empty when apps already find the server on the local network."
+            description={`Where devices on your home network reach ${serverName} directly: the host's IP and the port ${serverName} listens on, or the published port under Docker. Signed-in apps switch to it on their own while they can reach it, over an encrypted connection. Leave empty when apps already find the server on the local network.`}
             hint="http://192.168.1.20:8080"
             value={form.getValue(LOCAL_URL_KEY)}
             onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}

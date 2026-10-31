@@ -40,6 +40,7 @@ import { PolicySimulatePanel } from "./PolicySimulatePanel";
 import { PolicyVersionHistory } from "./PolicyVersionHistory";
 import { compileIssuesFromError, defaultPolicySource, messageFromError } from "./policyPageUtils";
 import { PolicyStatusPill, policyDocumentStatus, policyDomainMeta } from "./policyPresentation";
+import { useBranding } from "@/hooks/useBranding";
 
 interface PolicyEditorPanelProps {
   documentId?: string;
@@ -265,6 +266,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
   onStateChange,
   newerSeed,
 }: PolicyEditorStateProps) {
+  const { serverName } = useBranding();
   const [draft, setDraft] = useState(initialSource);
   const [captured, setCaptured] = useState(document);
   const [reviewRequired, setReviewRequired] = useState(false);
@@ -487,7 +489,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
         )}
         {!document.enabled && (
           <p className="text-warning mt-3 text-sm">
-            This override is disabled: the Silo baseline applies unchanged until it is re-enabled
+            This override is disabled: the {serverName} baseline applies unchanged until it is re-enabled
             from the overrides list.
           </p>
         )}

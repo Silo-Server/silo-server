@@ -40,6 +40,7 @@ import {
   sortInstalledPlugins,
   type InstalledFilter,
 } from "@/lib/pluginStatus";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * `/admin/plugins`. Configuration used to be a dialog opened by
@@ -97,6 +98,7 @@ function ResultCount({ shown, total }: { shown: number; total: number }) {
 }
 
 function PluginsBoard() {
+  const { serverName } = useBranding();
   const { installations, catalog, catalogSettings, repositories, repositoriesError, isLoading } =
     useAdminPlugins();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -141,7 +143,7 @@ function PluginsBoard() {
   const header = (
     <PageHeader
       title="Plugins"
-      subtitle="Add metadata sources, playback markers, request routing, and watch sync to Silo."
+      subtitle={`Add metadata sources, playback markers, request routing, and watch sync to ${serverName}.`}
       actions={
         <Button
           variant="outline"

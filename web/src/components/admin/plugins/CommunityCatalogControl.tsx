@@ -14,12 +14,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useUpdatePluginCatalogSettings } from "@/hooks/queries/admin/plugins";
+import { useBranding } from "@/hooks/useBranding";
 
 export function CommunityCatalogControl({
   settings,
 }: {
   settings: PluginCatalogSettings & { etag: string };
 }) {
+  const { serverName } = useBranding();
   const updateSettings = useUpdatePluginCatalogSettings();
   const [confirmDisable, setConfirmDisable] = useState(false);
 
@@ -45,7 +47,7 @@ export function CommunityCatalogControl({
             Include approved community plugins
           </label>
           <p className="text-muted-foreground text-[13px] leading-relaxed">
-            Reviewed by Silo maintainers to work as described and be safe for their documented use.
+            Reviewed by {serverName} maintainers to work as described and be safe for their documented use.
             These plugins remain maintained and supported by community contributors.
           </p>
           {settings.migrated_plugin_count > 0 ? (

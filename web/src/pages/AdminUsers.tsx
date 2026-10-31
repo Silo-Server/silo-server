@@ -88,6 +88,7 @@ import {
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { useBranding } from "@/hooks/useBranding";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -107,6 +108,7 @@ export default function AdminUsers() {
   return <AdminUsersPage key={adminUserScope()} />;
 }
 function AdminUsersPage() {
+  const { serverName } = useBranding();
   const usersQuery = useAdminUsers();
   const { data: users = [], isLoading } = usersQuery;
   const viewerId = useAuth().user?.id;
@@ -226,7 +228,7 @@ function AdminUsersPage() {
       )}
       <PageHeader
         title="Users"
-        subtitle="Manage access, defaults, and invite flow for the people using Silo."
+        subtitle={`Manage access, defaults, and invite flow for the people using ${serverName}.`}
         actions={
           <>
             {serverSettings !== undefined && (

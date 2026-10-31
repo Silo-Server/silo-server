@@ -13,6 +13,7 @@ import {
   useUpdatePluginRepository,
 } from "@/hooks/queries/admin/plugins";
 import { cn } from "@/lib/utils";
+import { useBranding } from "@/hooks/useBranding";
 
 const PANEL = "rounded-xl border bg-card px-4 py-4";
 
@@ -76,6 +77,7 @@ export function PluginRepositoriesPanel({
   repositories: PluginRepository[];
   repositoriesError: unknown;
 }) {
+  const { serverName } = useBranding();
   const createRepository = useCreatePluginRepository();
   const updateRepository = useUpdatePluginRepository();
   const deleteRepository = useDeletePluginRepository();
@@ -107,7 +109,7 @@ export function PluginRepositoriesPanel({
           <h2 id="plugin-repositories-heading" className="text-[15px] font-semibold">
             Repositories
           </h2>
-          <p className="text-muted-foreground text-[13px]">Where Silo finds plugins.</p>
+          <p className="text-muted-foreground text-[13px]">Where {serverName} finds plugins.</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowForm(!showForm)}>
           {showForm ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}

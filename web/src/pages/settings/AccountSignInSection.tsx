@@ -38,6 +38,7 @@ import {
   oauthFailureText,
   oauthLinkFailureText,
 } from "@/lib/externalSignIn";
+import { useBranding } from "@/hooks/useBranding";
 
 // Where a web linking flow comes back to, with linked=1 or
 // error=oauth_link_failed&reason=<reason>.
@@ -309,6 +310,7 @@ function ConnectForm({
   onCancel: () => void;
   onLinked: () => void;
 }) {
+  const { serverName } = useBranding();
   const startLink = useStartAccountIdentityLink();
   const linkCredentials = useLinkAccountIdentityWithCredentials();
   const linkNetwork = useLinkAccountIdentityWithNetwork();
@@ -374,11 +376,11 @@ function ConnectForm({
         <p className="font-medium">Connect {provider.display_name}</p>
         <p className="text-muted-foreground">
           {connectIntro(provider)} Afterwards you sign in with {provider.display_name} instead of
-          your Silo password.
+          your {serverName} password.
         </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-password`}>Silo password</Label>
+        <Label htmlFor={`${idPrefix}-password`}>{serverName} password</Label>
         <PasswordInput
           id={`${idPrefix}-password`}
           autoComplete="current-password"
@@ -442,6 +444,7 @@ function DisconnectDialog({
   identity: AccountIdentity | null;
   onClose: () => void;
 }) {
+  const { serverName } = useBranding();
   const unlink = useUnlinkAccountIdentity();
   const [error, setError] = useState<string | null>(null);
   const name = identity ? identityProviderName(identity) : "";
@@ -482,7 +485,7 @@ function DisconnectDialog({
           <AlertDialogTitle>Disconnect {name}?</AlertDialogTitle>
           <AlertDialogDescription>
             You won&apos;t be able to sign in with {name} anymore. Afterwards, sign in with your
-            Silo password. The server only allows this while your account can still sign in another
+            {serverName} password. The server only allows this while your account can still sign in another
             way.
           </AlertDialogDescription>
         </AlertDialogHeader>

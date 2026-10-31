@@ -46,6 +46,7 @@ import {
   storageFileUsage,
 } from "./downloadStoragePresentation";
 import { CHECKBOX, LoadMoreButton, SearchField } from "./controls";
+import { useBranding } from "@/hooks/useBranding";
 
 const ALL = "all";
 
@@ -372,6 +373,7 @@ function DeleteFilesDialog({
   files: AdminDownloadStorageFile[] | null;
   onClose: (deleted: boolean) => void;
 }) {
+  const { serverName } = useBranding();
   const remove = useDeleteAdminDownloadStorageFiles();
   const [includeInUse, setIncludeInUse] = useState(false);
   const checkboxId = useId();
@@ -461,7 +463,7 @@ function DeleteFilesDialog({
             <div className="text-xs">
               {inUse.length === 1 ? "A device is" : "Devices are"} still waiting on{" "}
               {inUse.length === 1 ? "it" : "them"}. If you delete{" "}
-              {inUse.length === 1 ? "it" : "them"}, Silo prepares{" "}
+              {inUse.length === 1 ? "it" : "them"}, {serverName} prepares{" "}
               {inUse.length === 1 ? "it" : "them"} again for those devices. To free the space for
               good, revoke the downloads on the Device copies tab instead.
             </div>

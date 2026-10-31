@@ -28,6 +28,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { formatDateTime } from "@/lib/datetime";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Rows in the Jellyfin Advanced section. The server ID is among them but is
@@ -154,6 +155,7 @@ function StatusLine({
 }
 
 export default function CompatibilityProxiesSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
@@ -371,7 +373,7 @@ export default function CompatibilityProxiesSettings() {
               )}
               {missingPrerequisites.length > 0 && (
                 <span className="text-muted-foreground text-sm">
-                  Silo cannot download it until these commands are installed on the server:{" "}
+                  {serverName} cannot download it until these commands are installed on the server:{" "}
                   {missingPrerequisites.map((item) => item.command).join(", ")}
                 </span>
               )}
@@ -474,7 +476,7 @@ export default function CompatibilityProxiesSettings() {
             />
             <SettingField
               label="Web player install folder"
-              description="The default is the folder Silo manages."
+              description={`The default is the folder ${serverName} manages.`}
               value={form.getValue("jellyfin_compat.web_install_dir")}
               onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_install_dir")}

@@ -47,6 +47,7 @@ import {
 } from "@/lib/externalSignInAdmin";
 import { cn } from "@/lib/utils";
 import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
+import { useBranding } from "@/hooks/useBranding";
 
 function Panel({
   title,
@@ -172,6 +173,7 @@ function LinkIdentityDialog({
   onClose: () => void;
   onLinked: (message: string) => void;
 }) {
+  const { serverName } = useBranding();
   const installations = useAdminPluginInstallations();
   const link = useLinkAdminUserIdentity();
   const candidates = useMemo(
@@ -307,9 +309,9 @@ function LinkIdentityDialog({
               placeholder="https://id.example.com|8f14e45f"
             />
             <p id={subjectHintId} className="text-muted-foreground text-xs">
-              The provider's exact ID for the person, as Silo stores it. OpenID Connect: the issuer
+              The provider's exact ID for the person, as {serverName} stores it. OpenID Connect: the issuer
               and subject joined by | (Entra ID: tenant ID and object ID). LDAP: the directory's
-              unique ID, such as entryUUID or objectGUID. Silo never matches on a name or email.
+              unique ID, such as entryUUID or objectGUID. {serverName} never matches on a name or email.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">

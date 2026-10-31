@@ -34,6 +34,7 @@ import {
   type StorageWarning,
 } from "./downloadStoragePresentation";
 import EditLocationDialog from "./EditLocationDialog";
+import { useBranding } from "@/hooks/useBranding";
 
 const SEGMENT_CLASS: Record<MeterSegmentKind, string> = {
   in_use: "bg-chart-1",
@@ -60,6 +61,7 @@ export default function StorageTab({
 }: {
   onNavigate: (target: StorageTabTarget) => void;
 }) {
+  const { serverName } = useBranding();
   const storage = useAdminDownloadStorage();
   const [editing, setEditing] = useState<AdminDownloadStorageLocation | null>(null);
   const [untrackedTarget, setUntrackedTarget] = useState<AdminDownloadStorageLocation | null>(null);
@@ -146,7 +148,7 @@ export default function StorageTab({
               {formatStorageBytes(totals.untracked)}
             </span>
           }
-          detail="not in Silo's records"
+          detail={`not in ${serverName}'s records`}
         />
         <StatTile
           label="Freed, 30 days"
@@ -293,6 +295,7 @@ function LocationCard({
   onReviewUntracked: () => void;
   onBrowse: () => void;
 }) {
+  const { serverName } = useBranding();
   const usage = location.usage;
   const segments = meterSegments(location);
   const fill = diskFillPercent(location);
@@ -410,7 +413,7 @@ function LocationCard({
         ) : null}
         {location.untracked_bytes > 0 ? (
           <p className="text-warning">
-            Silo's records show {formatStorageBytes(indexed)} ·{" "}
+            {serverName}'s records show {formatStorageBytes(indexed)} ·{" "}
             {formatStorageBytes(location.untracked_bytes)} untracked ·{" "}
             <button
               type="button"
@@ -422,12 +425,12 @@ function LocationCard({
           </p>
         ) : drift !== 0 ? (
           <p className="text-warning">
-            Silo's records show {formatStorageBytes(indexed)}; the directory holds{" "}
+            {serverName}'s records show {formatStorageBytes(indexed)}; the directory holds{" "}
             {formatStorageBytes(usage?.bytes)}.
           </p>
         ) : usage ? (
           <p className="text-muted-foreground">
-            On disk matches Silo's records{measured ? ` · measured ${measured}` : ""}
+            On disk matches {serverName}'s records{measured ? ` · measured ${measured}` : ""}
           </p>
         ) : null}
         {location.storage_full ? (

@@ -58,6 +58,7 @@ import {
   savedTitle,
   toTMDBChart,
 } from "./discoverLayoutModel";
+import { useBranding } from "@/hooks/useBranding";
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -138,6 +139,7 @@ function SourceControl({
   /** An MDBList pick, which also names the row. */
   onPick: (pick: SyncedPick) => void;
 }) {
+  const { serverName } = useBranding();
   const id = useId();
   const [changing, setChanging] = useState(!editing);
   const picker = useRef<HTMLDivElement>(null);
@@ -206,7 +208,7 @@ function SourceControl({
       <TMDBListURLField
         id={`${id}-tmdb-list`}
         label="TMDB list link"
-        help="Paste a public list from themoviedb.org. Silo reads it again about every 12 hours."
+        help={`Paste a public list from themoviedb.org. ${serverName} reads it again about every 12 hours.`}
         value={typedLink}
         onChange={(raw) => {
           setTypedLink(raw);

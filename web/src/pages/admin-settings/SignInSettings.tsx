@@ -28,6 +28,7 @@ import { SettingField, SettingFieldStatus } from "./SettingField";
 import { NetworkSignInSection } from "./NetworkSignInSection";
 import { SignInProviderSlot } from "./SignInProviderSlot";
 import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
+import { useBranding } from "@/hooks/useBranding";
 
 export const LOCAL_LOGIN_KEY = "auth.local_password_login";
 export const EMAIL_MATCH_KEY = "auth.email_auto_match";
@@ -51,6 +52,7 @@ const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, EMAIL_MATCH_KEY, "serve
  * docs/architecture/external-sign-in.md.
  */
 export default function SignInSettings() {
+  const { serverName } = useBranding();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
   const capabilities = useExternalSignInCapabilities();
@@ -156,12 +158,12 @@ export default function SignInSettings() {
       <div className="flex-1 space-y-5">
         {capabilities.isError || (caps && !supported) ? (
           <p className="text-muted-foreground text-sm" role="status">
-            External sign-in isn't available on this server, so only Silo passwords sign in.
+            External sign-in isn't available on this server, so only {serverName} passwords sign in.
           </p>
         ) : null}
 
         <FieldGroup
-          label="Silo passwords"
+          label={`${serverName} passwords`}
           dirty={[LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS].some((key) => form.isDirty(key))}
           actions={
             <Link
@@ -257,12 +259,12 @@ export default function SignInSettings() {
               label="Match existing accounts by email"
               dirty={form.isDirty(EMAIL_MATCH_KEY)}
               type="toggle"
-              description="A first sign-in connects to the regular Silo account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched."
+              description={`A first sign-in connects to the regular ${serverName} account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched.`}
               value={emailMatchOn ? "true" : "false"}
               onChange={(value) => form.setValue(EMAIL_MATCH_KEY, value)}
               status={
                 <SettingFieldStatus tone={emailMatchOn ? "warn" : "muted"}>
-                  Whoever controls that email at the provider takes over the Silo account. Silo
+                  Whoever controls that email at the provider takes over the {serverName} account. {serverName}
                   doesn't verify account emails, so the account matched is whichever one registered
                   or set the address first; matching signs it out everywhere and deletes its API
                   keys. Turn this on only if the provider verifies every email and people can't

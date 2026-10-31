@@ -15,6 +15,7 @@ import {
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
 import { showRunNow } from "@/pages/admin/autoscan/runNow";
 import { legacyAutoscanPageTarget } from "@/pages/autoscanSearchParams";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Autoscan › Sources: what Autoscan watches, with the switch that turns it on
@@ -29,6 +30,7 @@ export default function AdminAutoscan() {
 }
 
 function AutoscanSourcesPage() {
+  const { serverName } = useBranding();
   const trigger = useTriggerAutoscan();
   const settings = useAutoscanSettings();
   const readAuthority = captureProfileRequestContext();
@@ -51,7 +53,7 @@ function AutoscanSourcesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Autoscan"
-        subtitle="Silo re-scans a library as soon as something changes, instead of waiting for the next scheduled scan. Add a source for each thing you want watched."
+        subtitle={`${serverName} re-scans a library as soon as something changes, instead of waiting for the next scheduled scan. Add a source for each thing you want watched.`}
         actions={
           <>
             {settings.data &&
