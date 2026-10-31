@@ -825,7 +825,7 @@
         },
         "native_selectable": {
           "type": "boolean",
-          "description": "Embedded tracks only, omitted when false: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url stays the fallback."
+          "description": "Embedded tracks only, omitted when false: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none."
         }
       },
       "additionalProperties": true

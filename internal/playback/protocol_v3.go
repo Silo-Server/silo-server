@@ -672,7 +672,7 @@ type NativeEmbeddedSubtitleCapabilityV3 struct {
 	// Limitations narrows the entry to the tracks its player shows correctly.
 	// Planning skips an entry that names a value it does not know, rather than
 	// guess what that player gets wrong.
-	Limitations []string `json:"limitations,omitempty" maxItems:"16" doc:"Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection."`
+	Limitations []string `json:"limitations,omitempty" maxItems:"16" minLength:"1" maxLength:"64" doc:"Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection."`
 }
 
 type DeliverySubtitleCapabilitiesV3 struct {
