@@ -99,6 +99,10 @@ type PlannerInputV3 struct {
 	Now                              time.Time
 	AttemptedKeys                    []string
 	AdditionalSubtitles              []SubtitleInventoryEntryV3
+	// SubtitleTrackFacts answers what the server learned about embedded tracks
+	// by reading them, for the native_embedded limitations a client declares.
+	// Nil means nothing is known, which never rules a track out.
+	SubtitleTrackFacts SubtitleTrackFactsV3
 	// LocalNetwork reports that the request came from the server's local
 	// network (streamlocation.Local). False is treated as remote.
 	LocalNetwork bool
@@ -225,6 +229,11 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	defer func() {
 		if result.Plan != nil {
 			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+			file := input.EffectiveFile
+			if file == nil {
+				file = input.RequestedFile
+			}
+			markNativeSelectableV3(result.Plan, file, input)
 		}
 	}()
 	if input.RequestedFile == nil {
@@ -290,9 +299,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// validated against the capabilities of the delivery class that would
 	// execute it. A refusal on original_http must not suppress a viable
 	// progressive or HLS subtitle renderer.
-	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassOriginalHTTPV3, input.AdditionalSubtitles)
-	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassProgressiveV3, input.AdditionalSubtitles)
-	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassHLSV3, input.AdditionalSubtitles)
+	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassOriginalHTTPV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
+	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassProgressiveV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
+	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassHLSV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
 	if subtitle.Terminal != nil && remuxSubtitle.Terminal != nil && hlsSubtitle.Terminal != nil {
 		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 	}
@@ -2154,17 +2163,25 @@ func audioSelectionUsesContainerDefaultV3(file *models.MediaFile, audioIndex int
 	if file == nil || len(file.AudioTracks) == 0 {
 		return true
 	}
-	defaultIndex := 0
+	return playedAudioIndexV3(file, audioIndex) == playedAudioIndexV3(file, -1)
+}
+
+// playedAudioIndexV3 is the audio ordinal a plan selecting audioIndex plays:
+// that track when the file has it, otherwise the container default (the first
+// default-flagged track, else the first). It is -1 for a file without audio.
+func playedAudioIndexV3(file *models.MediaFile, audioIndex int) int {
+	if file == nil || len(file.AudioTracks) == 0 {
+		return -1
+	}
+	if audioIndex >= 0 && audioIndex < len(file.AudioTracks) {
+		return audioIndex
+	}
 	for index, track := range file.AudioTracks {
 		if track.Default {
-			defaultIndex = index
-			break
+			return index
 		}
 	}
-	if audioIndex < 0 || audioIndex >= len(file.AudioTracks) {
-		audioIndex = defaultIndex
-	}
-	return audioIndex == defaultIndex
+	return 0
 }
 
 func finalizePlanIdentityV3(plan *PlanV3, attemptID string, outputContextID string) {
