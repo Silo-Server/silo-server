@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "report": {
+    "type": "manual",
+    "captured_at": "2026-07-19T23:50:00Z",
+    "capture_session_id": "run_roku_manual_008",
+    "app_version": "0.1.0",
+    "app_build": "0",
+    "platform": "roku",
+    "os_version": "15.3.4"
+  },
+  "destination": {
+    "server_instance_id": "srv_home_01"
+  },
+  "consent": {
+    "mode": "manual",
+    "notice_version": 1
+  },
+  "device_summary": {
+    "manufacturer": "TCL",
+    "model": "55R625",
+    "os": "15.3.4",
+    "form_factor": "tv"
+  },
+  "playback_session_ids": [],
+  "log_summary": {
+    "lines": 48,
+    "bytes_gz": 4200,
+    "dropped_lines": 0,
+    "categories": [
+      "browse",
+      "network"
+    ],
+    "debug_logging": false
+  },
+  "archive": {
+    "entries": [
+      "manifest.json",
+      "device.json",
+      "logs.jsonl"
+    ],
+    "bytes": 7000,
+    "uncompressed_bytes": 36000,
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+  }
+}
