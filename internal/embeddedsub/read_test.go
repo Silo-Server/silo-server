@@ -1030,3 +1030,42 @@ func TestMatroskaMetadataSharesABudget(t *testing.T) {
 		t.Fatalf("element within the budget: %d bytes, %v", len(data), err)
 	}
 }
+
+// A kept Matroska stream is written as it is encoded: when its first byte
+// goes out, it holds where its clusters and blocks go but not a second,
+// encoded copy of the packets, which a whole track's read already holds.
+func TestWriteKeptHoldsNoSecondCopy(t *testing.T) {
+	const packetBytes, packets = 64 << 10, 512 // 32 MiB of packet data
+	tr := &Track{Number: 1, UID: 1, CodecID: "S_TEXT/UTF8", Language: "eng", Enabled: true}
+	ps := make([]Packet, packets)
+	for i := range ps {
+		ps[i] = Packet{PTS: time.Duration(i) * time.Second, Duration: time.Second, Data: bytes.Repeat([]byte{'a' + byte(i%26)}, packetBytes)}
+	}
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	w := &firstWriteHeap{}
+	if err := WriteKept(w, &Index{Container: ContainerMatroska, TimestampScale: 1_000_000}, tr, ps); err != nil {
+		t.Fatal(err)
+	}
+	if grown := int64(w.heap) - int64(before.HeapAlloc); grown > 8<<20 {
+		t.Fatalf("live heap grew %d bytes before the first write, over a quarter of the %d bytes of packets", grown, packetBytes*packets)
+	}
+	runtime.KeepAlive(ps)
+}
+
+// firstWriteHeap records the live heap when it is first written to.
+type firstWriteHeap struct {
+	heap   uint64
+	writes int
+}
+
+func (w *firstWriteHeap) Write(p []byte) (int, error) {
+	if w.writes++; w.writes == 1 {
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		w.heap = m.HeapAlloc
+	}
+	return len(p), nil
+}
