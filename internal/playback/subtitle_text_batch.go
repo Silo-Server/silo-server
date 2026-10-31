@@ -216,7 +216,8 @@ func (c *SubtitleCache) beginTextFills(inputPath string, tracks []TextSubtitleTr
 			continue
 		}
 		seen[track] = true
-		if _, _, ok := c.cachedFormatEntryPath(inputPath, track.Ordinal, track.Format); ok {
+		if f, _, ok := c.lookup(inputPath, track.Ordinal, track.Format); ok {
+			_ = f.Close()
 			continue
 		}
 		if fill := c.beginFill(inputPath, track.Ordinal, track.Format); fill != nil {
