@@ -98,6 +98,7 @@ func newFeedsHarness(t *testing.T, knownItems ...string) (*Handler, *memRSSFeedS
 		set("1", "", catalog.AccessFilter{UserID: 1}).
 		set("2", "", catalog.AccessFilter{UserID: 2})
 	h := New(Dependencies{MediaStore: &stubMediaStore{known: known}, RSSFeedStore: store, AccessResolver: resolver})
+	h.SetDownloads(newDownloadService(true, &downloadAccounts{}))
 	return h, store
 }
 
@@ -180,6 +181,7 @@ func (s *accessMediaStore) GetMediaFiles(_ context.Context, id string, filter ca
 type ownerFeedFixture struct {
 	h        *Handler
 	resolver *fakeOwnerResolver
+	accounts *downloadAccounts
 	owner    catalog.AccessFilter
 	body     []byte
 }
@@ -209,7 +211,9 @@ func newOwnerFeedFixture(t *testing.T) ownerFeedFixture {
 		t.Fatal(err)
 	}
 	h := New(Dependencies{MediaStore: media, RSSFeedStore: feeds, AccessResolver: resolver})
-	return ownerFeedFixture{h: h, resolver: resolver, owner: owner, body: body}
+	accounts := &downloadAccounts{denied: map[int]bool{}}
+	h.SetDownloads(newDownloadService(true, accounts))
+	return ownerFeedFixture{h: h, resolver: resolver, accounts: accounts, owner: owner, body: body}
 }
 
 func (fx ownerFeedFixture) getFeed() *httptest.ResponseRecorder {
@@ -238,6 +242,18 @@ func TestFeed_Open_Collision_409(t *testing.T) {
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, body, "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409", rec.Code)
+	}
+}
+
+// A public feed hands its files to any podcast app, so an account that may
+// not download cannot open one.
+func TestFeed_Open_WithoutDownloadPermission_403(t *testing.T) {
+	h, store := newFeedsHarness(t, "book-1")
+	h.SetDownloads(newDownloadService(true, &downloadAccounts{denied: map[int]bool{1: true}}))
+	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
+		map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+	if rec.Code != http.StatusForbidden || len(store.rows) != 0 {
+		t.Errorf("status = %d, feeds stored = %d; want 403 and none", rec.Code, len(store.rows))
 	}
 }
 
@@ -291,6 +307,9 @@ func TestPublicFeed_FollowsOwnerCurrentAccess(t *testing.T) {
 		},
 		"owner disabled": func(fx ownerFeedFixture) {
 			fx.resolver.remove("1", "kid")
+		},
+		"download permission revoked": func(fx ownerFeedFixture) {
+			fx.accounts.denied[1] = true
 		},
 	}
 	closed := newOwnerFeedFixture(t)

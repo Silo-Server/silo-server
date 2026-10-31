@@ -1182,6 +1182,15 @@ func (s *Service) List(ctx context.Context, userID int, profileID, deviceID stri
 	return s.repo.ListEphemeral(ctx, userID)
 }
 
+// CheckDownloadAllowed reports whether userID may download originals now,
+// before any file is chosen: ErrFeatureDisabled or ErrDownloadNotAllowed when
+// not. It is the check ResolveDirectFile starts with, for surfaces that
+// advertise or hand out downloads without serving one themselves.
+func (s *Service) CheckDownloadAllowed(ctx context.Context, userID int) error {
+	_, _, err := s.downloadConfigForUser(ctx, userID, "")
+	return err
+}
+
 // ServeDirect validates permissions and serves a file directly for browser
 // download. No persistent download record is created.
 func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error {
