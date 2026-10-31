@@ -3,7 +3,7 @@
 Silo uses GitHub Releases as the public record of shipped versions and their
 changes. There is no historical Silo release series yet: the repository has no
 release tags. Newly published default-branch container images are identified by
-an ordered `build-N`, `latest`, and the full commit SHA.
+an ordered `build-N`, a mutable pointer, and the full commit SHA.
 
 ## Version format
 
@@ -51,13 +51,15 @@ tags that identify the same multi-platform image:
 | Tag | Meaning |
 | --- | --- |
 | `build-N` | Ordered build identifier. A larger number is a newer published build; gaps from unsuccessful or non-publishing workflow runs are expected. |
-| `latest` | Mutable pointer updated by successful default-branch publications. |
+| `split` | Mutable pointer updated by successful default-branch publications. |
 | Full commit SHA | Exact source identity for the build. |
 
 The omnibus image, which bundles PostgreSQL, Redis, and Meilisearch, is
 published from the same build under `build-N-aio` and the commit SHA with
-`-aio` added. Its mutable pointer is `aio`, not `latest`, until it replaces the
-regular image there.
+`-aio` added. Its mutable pointers are `latest` and `aio`, which move together.
+Before the omnibus image took over `latest`, `latest` was the regular image;
+see [Omnibus image](architecture/omnibus-image.md#build) for what changes for
+an install that followed it.
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a `build-N`, commit-SHA tag, or image digest when a

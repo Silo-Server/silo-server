@@ -66,7 +66,10 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/meilisearch:/meili_data
 
   silo:
-    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
+    # The regular image. latest is the omnibus image, which this layout does
+    # not run: a SILO_IMAGE in .env, or an older copy of this file, that names
+    # latest needs split instead.
+    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:split}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests. Docker kills a container

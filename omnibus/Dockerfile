@@ -7,7 +7,7 @@
 # runtimes. This file adds only what the regular image does not carry. The
 # base changes on every build, so no layer here outlives a package update.
 
-ARG SILO_IMAGE=ghcr.io/silo-server/silo-server:latest
+ARG SILO_IMAGE=ghcr.io/silo-server/silo-server:split
 FROM ${SILO_IMAGE}
 ARG TARGETARCH
 ARG S6_OVERLAY_VERSION=3.2.3.2

@@ -16,9 +16,18 @@ installs that stay on that layout; it runs the regular image.
 The `omnibus` job in `.github/workflows/docker.yml` runs after the regular
 image's manifest list is pushed. It builds `omnibus/Dockerfile` with
 `SILO_IMAGE` set to that commit's regular image and publishes the regular tags
-with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`). In place
-of `latest` it moves `aio`; it takes over `latest` only once validated for
-every install, in a later change.
+with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`), and
+moves both `latest` and `aio`. The regular image's mutable pointer is `split`,
+which `docker-compose.split.yml` and `omnibus/Dockerfile` default to.
+
+The omnibus image is not a drop-in replacement for the regular one, which an
+install that pulled `latest` before the change ran. It runs Silo as `PUID`
+(911 unless set) instead of root, so media that only root could read becomes
+unreadable; re-owns the bind-mounted Silo, transcode, and download directories
+to that account on first start; needs root to start, so a container `user:` or
+a Kubernetes `runAsUser` stops it; refuses a proxy or transcode node without
+`NODE_URL`; and starts `/init` rather than `silo`. Such an install either
+fixes those or moves to `split`.
 
 Because the omnibus image starts from the regular one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
@@ -280,7 +289,7 @@ here. It refuses, before anything is moved into place, when:
 
 - No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
   or other paths, which have to move there first.
-- A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
+- A pinned `SILO_IMAGE` (other than `latest`, `split`, or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `aio` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
