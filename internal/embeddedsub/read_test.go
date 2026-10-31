@@ -1016,3 +1016,17 @@ func TestReadBudgetIncludesMetadata(t *testing.T) {
 		}
 	})
 }
+
+// The Info, Tracks, Cues and Tags one index read holds share one budget: an
+// element read past it fails the index as malformed instead of allocating.
+func TestMatroskaMetadataSharesABudget(t *testing.T) {
+	// Larger than the first read, so the element needs its own buffer.
+	size := 4 * elementProbeSize
+	r := bytes.NewReader(el(matroska.IDInfo, make([]byte, size)))
+	if _, err := readTopElement(r, nil, 0, matroska.IDInfo, maxInfoSize, newBudget(int64(size)-1)); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("element over the shared budget: err = %v, want ErrMalformed", err)
+	}
+	if data, err := readTopElement(r, nil, 0, matroska.IDInfo, maxInfoSize, newBudget(int64(size))); err != nil || len(data) != size {
+		t.Fatalf("element within the budget: %d bytes, %v", len(data), err)
+	}
+}
