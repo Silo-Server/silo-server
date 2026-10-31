@@ -18,7 +18,7 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - silo-dev-postgres:/var/lib/postgresql
-    command: ["postgres", "-c", "listen_addresses=*"]
+    command: ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=pg_stat_statements"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
       interval: 5s

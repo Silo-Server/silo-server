@@ -133,7 +133,10 @@ the database role.
 PostgreSQL listens only on `/run/postgresql`. The `silo` role is the cluster's
 superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
-migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
+migrations create the `vector`, `pg_trgm`, and `citext` extensions.
+`00-omnibus.conf` preloads `pg_stat_statements`, as the shipped Compose files
+do, and a migration creates that extension only on a server that preloads it,
+so an external PostgreSQL without it is left alone. The cluster
 uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the earlier
 multi-container Compose stack. Each database records the C library collation version it was built
 under, and an index on text sorted under another version can miss rows. On
