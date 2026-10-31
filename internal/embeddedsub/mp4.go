@@ -54,6 +54,23 @@ type mp4Sample struct {
 	delta uint32
 }
 
+// detach copies the boxes the track keeps out of the moov they were parsed
+// from.
+func (m *mp4Track) detach() {
+	for _, box := range []*[]byte{&m.tkhd, &m.edts, &m.mdhd, &m.hdlr, &m.mediaHeader, &m.dinf, &m.stsd} {
+		*box = bytes.Clone(*box)
+	}
+}
+
+// boxBytes is the size of the boxes the track keeps.
+func (m *mp4Track) boxBytes() int {
+	n := 0
+	for _, box := range [][]byte{m.ftyp, m.mvhd, m.tkhd, m.edts, m.mdhd, m.hdlr, m.mediaHeader, m.dinf, m.stsd} {
+		n += len(box)
+	}
+	return n
+}
+
 // pts is a sample's presentation time on the container's timeline.
 func (m *mp4Track) pts(dts int64) time.Duration {
 	return m.delay + ticksToDuration(dts-m.mediaTime, int64(m.timescale))
@@ -145,11 +162,16 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 		return nil, fmt.Errorf("%w: MP4 movie header missing or invalid", ErrMalformed)
 	}
 	idx := &Index{Container: ContainerMP4, TimestampScale: 1}
+	// The boxes a track keeps are copied out of moov, which also holds
+	// every other track's sample tables and would otherwise stay alive with
+	// a cached index.
+	ftyp, mvhd = bytes.Clone(ftyp), bytes.Clone(mvhd)
 	for _, trak := range traks {
 		t, ok := parseMP4Track(trak, movieTimescale, size)
 		if !ok {
 			continue
 		}
+		t.mp4.detach()
 		t.mp4.ftyp, t.mp4.mvhd = ftyp, mvhd
 		if fragmented && t.Unsupported == "" {
 			// Samples in movie fragments aren't in the sample table.

@@ -32,6 +32,10 @@ const (
 	maxSeekHeads       = 8
 	maxTagsElements    = 4
 	maxTopLevelVisited = 64
+	// maxTrackEntries bounds the TrackEntries of a Tracks element, as
+	// mediaprobe does; a crafted element of tiny entries would otherwise
+	// make subtitleTracks allocate far more than the element's size.
+	maxTrackEntries = 1000
 )
 
 const docTypeMatroska = "matroska"
@@ -107,7 +111,9 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 		return nil, fmt.Errorf("%w: Matroska Info has an invalid TimestampScale", ErrMalformed)
 	}
 	idx := &Index{Container: ContainerMatroska, TimestampScale: scale, segmentEnd: layout.end}
-	idx.Tracks = subtitleTracks(el.tracks)
+	if idx.Tracks, err = subtitleTracks(el.tracks); err != nil {
+		return nil, err
+	}
 	frames := map[uint64]int64{}
 	for _, tags := range el.tags {
 		parseFrameCounts(tags, frames)
@@ -402,17 +408,26 @@ func isSubtitleTrack(e matroska.TrackEntry) bool {
 }
 
 // subtitleTracks returns the subtitle TrackEntries of a Tracks element.
-func subtitleTracks(data []byte) []Track {
-	var tracks []Track
+func subtitleTracks(data []byte) ([]Track, error) {
+	var (
+		tracks  []Track
+		entries int
+	)
 	matroska.Children(data, func(id uint64, v []byte) {
 		if id != matroska.IDTrackEntry {
+			return
+		}
+		if entries++; entries > maxTrackEntries {
 			return
 		}
 		if e := matroska.ParseTrackEntry(v); isSubtitleTrack(e) {
 			tracks = append(tracks, newTrack(e))
 		}
 	})
-	return tracks
+	if entries > maxTrackEntries {
+		return nil, fmt.Errorf("%w: Matroska Tracks has more than %d entries", ErrMalformed, maxTrackEntries)
+	}
+	return tracks, nil
 }
 
 func newTrack(e matroska.TrackEntry) Track {
