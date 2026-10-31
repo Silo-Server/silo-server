@@ -191,8 +191,9 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: container, VideoCodec: "h264", AudioCodec: "aac", MaxAudioChannels: "1"}},
 			}
 			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 1}, true)
+			source.HLSRemuxMPEGTS = source.hlsRemuxInTS
 			dto := h.mediaSourceDTO("item", "play", "token", source)
-			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || source.HLSRemux != (container == "mp4") || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
+			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || !source.HLSRemux || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
 				t.Fatalf("wrong negotiated container: source=%+v dto=%+v", source, dto)
 			}
 			stereo := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 2}, true)

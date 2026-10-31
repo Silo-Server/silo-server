@@ -2020,6 +2020,16 @@ func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) 
 	return heightLabel(height), width, height
 }
 
+// HLSCopyFitsMPEGTS reports whether HLS can carry a copied video and audio
+// codec in MPEG-TS segments. An empty audio codec checks the video alone.
+func HLSCopyFitsMPEGTS(videoCodec, audioCodec string) bool {
+	switch normalizeCodecV3(videoCodec) {
+	case transcodeCodecH264, transcodeCodecHEVC:
+		return audioCodec == "" || hlsNativeAudioCodecV3(audioCodec)
+	}
+	return false
+}
+
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied
 // into an HLS delivery. The allowlist follows the HLS authoring spec (AAC,
 // AC-3, E-AC-3, MP3); everything else — DTS, TrueHD, PCM, Opus — must be
