@@ -123,6 +123,9 @@
 ./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
 ./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
 
+# Minting a key for another account holds the Owner rules against a concurrent promotion.
+./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
+
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
 ./internal/passwordreset TestResetIssuanceRejectsChangedRecoveryEmailDB

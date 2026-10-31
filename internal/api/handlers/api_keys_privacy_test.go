@@ -45,7 +45,7 @@ func apiKeyPrivacyRepository(t *testing.T) *auth.APIKeyRepository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY,username text NOT NULL);INSERT INTO users VALUES(7,'Owner');
+	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY,username text NOT NULL,role text NOT NULL DEFAULT 'admin',is_owner boolean NOT NULL DEFAULT false);INSERT INTO users VALUES(7,'Owner');
  CREATE TABLE api_keys(id bigserial PRIMARY KEY,user_id integer NOT NULL REFERENCES users(id),label text NOT NULL,api_key text NOT NULL UNIQUE,rate_tier text NOT NULL DEFAULT 'standard',scopes text[] NOT NULL DEFAULT '{}',created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz)`); err != nil {
 		t.Fatal(err)
 	}
