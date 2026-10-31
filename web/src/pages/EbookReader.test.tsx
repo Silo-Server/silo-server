@@ -61,9 +61,10 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         next: () => void;
         goTo: (href: string) => void;
         goToFraction: (fraction: number) => Promise<void>;
-        search: (
-          query: string,
-        ) => Promise<Array<{ cfi: string; label?: string; excerpt?: string }>>;
+        search: (query: string) => Promise<{
+          results: Array<{ cfi: string; label?: string; excerpt?: string }>;
+          truncated: boolean;
+        } | null>;
         clearSearch: () => void;
         clearSelection: () => void;
         createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
@@ -244,9 +245,10 @@ describe("EbookReader", () => {
     installStorage();
     for (const mock of Object.values(mocks)) if (typeof mock === "function") mock.mockReset();
     mocks.readerProgress = 0.421;
-    mocks.readerSearch.mockResolvedValue([
-      { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
-    ]);
+    mocks.readerSearch.mockResolvedValue({
+      results: [{ cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" }],
+      truncated: false,
+    });
     mocks.fetchEbookReaderConfig.mockResolvedValue({});
     mocks.saveEbookReaderConfig.mockResolvedValue({});
     mocks.fetchEbookReaderAnnotations.mockResolvedValue([]);
