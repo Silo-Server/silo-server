@@ -1406,7 +1406,9 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if signOutOtherSessions && s.sessionsRevoked != nil {
-		s.sessionsRevoked(ctx, userID)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		s.sessionsRevoked(cleanupCtx, userID)
 	}
 	return nil
 }
