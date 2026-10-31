@@ -1,8 +1,11 @@
 package abs
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -11,7 +14,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/fspath"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -51,8 +56,10 @@ func trackInoFor(contentID string, fileIdx int) string {
 //   - Validate ABS bearer token (bearerAuth middleware has already done this).
 //   - Look up the requested file in silo's media_files table.
 //   - Serve the bytes directly with Range-request support via playback.ServeDirectPlay.
-//   - Set Content-Disposition: attachment on /download paths to encourage
-//     browser save-to-disk / mobile offline-save behaviour.
+//   - Serve /download paths through serveFileDownload instead, which applies
+//     the download rules. As in real ABS, only /download needs the download
+//     permission: the bare route is a stream, which an account that may not
+//     download still plays, as on the native and Jellyfin-compatible APIs.
 func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok || a.UserID == "" {
@@ -101,15 +108,13 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mediaFile := files[fileIdx]
+	if strings.HasSuffix(r.URL.Path, "/download") {
+		h.serveFileDownload(w, r, a, mediaFile.ID, access)
+		return
+	}
 	// §4.2b: a bare file stream has a user but no stable playback session, so it
 	// is a Transfer, never cap-relevant and never subject to per-session rules.
 	attachABSTransfer(r.Context(), a.UserID, a.ProfileID, mediaFile.ID)
-
-	// /download variant: hint the client to save rather than stream.
-	if strings.HasSuffix(r.URL.Path, "/download") {
-		filename := fspath.Display(filepath.Base(mediaFile.FilePath))
-		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	}
 
 	// Set Content-Type for audio files. ServeDirectPlay uses MimeFromExtension
 	// which covers video containers; we override with audio-specific MIME
@@ -123,6 +128,71 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 		// ServeDirectPlay has already written an error response; just log.
 		return
 	}
+}
+
+// serveFileDownload serves the /download variant through Silo's native direct
+// download, as jellycompat's /Items/{id}/Download does, so it follows the same
+// rules (see Downloads) and answers 403 when they refuse. The direct download
+// sets Content-Disposition: attachment and an audio Content-Type.
+func (h *Handler) serveFileDownload(w http.ResponseWriter, r *http.Request, a ctxAuth, fileID int, access catalog.AccessFilter) {
+	userID, err := strconv.Atoi(a.UserID)
+	if h.downloads == nil || err != nil {
+		http.Error(w, "download not allowed", http.StatusForbidden)
+		return
+	}
+	ctx := downloads.WithServeAuthorized(r.Context(), func(target downloads.FileTarget) {
+		// §4.2b: a download has a user but no stable playback session, so it
+		// is a Transfer.
+		attachABSTransfer(r.Context(), a.UserID, a.ProfileID, target.MediaFileID)
+	})
+	// Keep the validator this route sent before it applied the download
+	// rules, so a client resuming with If-Range still matches.
+	ctx = downloads.WithServeEntityTag(ctx, playback.DirectPlayEntityTag)
+	err = h.downloads.ServeDirect(ctx, httpstream.NewRollingDeadlineWriter(w), r, userID, fileID, "", access)
+	switch {
+	case err == nil, errors.Is(err, downloads.ErrResponseCommitted):
+		// Served, or failed after the body started: an error body now would
+		// be appended to the file.
+	case downloadRefused(err):
+		http.Error(w, "download not allowed", http.StatusForbidden)
+	case errors.Is(err, catalog.ErrItemNotFound):
+		http.Error(w, "file not found", http.StatusNotFound)
+	default:
+		slog.ErrorContext(r.Context(), "abs download failed", "component", "audiobooks", "err", err, "user", a.UserID)
+		http.Error(w, "download failed", http.StatusInternalServerError)
+	}
+}
+
+// checkDownload returns nil when userID may download now. Without a download
+// service it refuses, as downloads.ErrFeatureDisabled.
+func (h *Handler) checkDownload(ctx context.Context, userID string) error {
+	if h.downloads == nil {
+		return downloads.ErrFeatureDisabled
+	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return downloads.ErrDownloadNotAllowed
+	}
+	return h.downloads.CheckDownloadAllowed(ctx, uid)
+}
+
+// mayDownload reports the account's download permission for the ABS user
+// object. A failed check reports false.
+func (h *Handler) mayDownload(ctx context.Context, userID string) bool {
+	err := h.checkDownload(ctx, userID)
+	if err != nil && !downloadRefused(err) {
+		slog.WarnContext(ctx, "abs download permission check failed", "component", "audiobooks", "err", err, "user", userID)
+	}
+	return err == nil
+}
+
+// downloadRefused reports whether err is a download-rule refusal rather than a
+// failure to check.
+func downloadRefused(err error) bool {
+	return errors.Is(err, downloads.ErrFeatureDisabled) ||
+		errors.Is(err, downloads.ErrDownloadNotAllowed) ||
+		errors.Is(err, downloads.ErrTranscodeDisabled) ||
+		errors.Is(err, downloads.ErrQualityUnavailable)
 }
 
 // handlePublicTrack serves audio bytes for ONE track of a playback session.

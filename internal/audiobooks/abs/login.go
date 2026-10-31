@@ -270,12 +270,15 @@ func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 // User.toOldJSONForBrowser (server/models/User.js) so every endpoint that
 // emits a user decodes with one client model — a missing key crashes strict
 // clients, so we emit the full set even where silo has no analog (email is
-// "", the flags are constant).
+// "", and every flag but download is constant).
 //
 // `token` is the caller's current access token — real ABS's deprecated
 // non-expiring `token` slot. The login/authorize caller additionally sets
 // user.accessToken / user.refreshToken; GET /me never carries those.
-func absUserObject(userID, displayName, token, defaultLibraryID string, now time.Time) map[string]any {
+// mayDownload is the account's download permission (Handler.mayDownload), so
+// clients that read permissions.download hide offline save when it is false;
+// the /download route enforces it either way.
+func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownload bool, now time.Time) map[string]any {
 	name := displayName
 	if name == "" {
 		name = userID
@@ -301,7 +304,7 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 		"lastSeen":                        nowMs,
 		"createdAt":                       nowMs,
 		"permissions": map[string]any{
-			"download":                  true,
+			"download":                  mayDownload,
 			"update":                    true,
 			"delete":                    true,
 			"upload":                    true,
@@ -353,7 +356,7 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, now)
+	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, h.mayDownload(ctx, a.UserID), now)
 
 	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
 	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY

@@ -75,6 +75,7 @@ func absTelemetryServer(t testing.TB, registry *streamtelemetry.Registry, deps D
 	t.Helper()
 	handler := New(deps)
 	handler.SetStreamTelemetry(registry)
+	handler.SetDownloads(newDownloadService(true, &downloadAccounts{}))
 	server := &absServer{registry: registry}
 	router := chi.NewRouter()
 	// Outermost on purpose: it returns only after every inner handler,

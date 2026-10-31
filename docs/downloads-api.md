@@ -699,7 +699,13 @@ should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
 The Jellyfin-compatible `/Items/{id}/Download` route serves through the same
-path and rules; see [jellycompat-api.md](jellycompat-api.md).
+path and rules; see [jellycompat-api.md](jellycompat-api.md). So does the
+Audiobookshelf-compatible (beta) `/api/items/{id}/file/{ino}/download` route,
+which answers `403` when they refuse; its sign-in and `/me` user object reports
+the outcome as `permissions.download`. Its bare `/api/items/{id}/file/{ino}`
+route is a stream, as in Audiobookshelf itself, and plays without download
+permission. An account that may not download cannot open an Audiobookshelf RSS
+feed, and an open feed answers `404` once its owner may no longer download.
 
 A browser navigation cannot send headers, so it opens a short-lived link
 instead. Mint one with an ordinary profile-scoped request:
