@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listAdminDiagnosticReports",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "1f6542b1993f82beafdb63afe392fac5272a3643a0353f2b2ffdfb9e462f85d6",
+      "reason": "Adds the roku client-diagnostics platform. Only the web admin reads this field, and this change teaches it roku.",
+      "approved_in": "#3298"
+    },
+    {
+      "operation_id": "getAdminDiagnosticReport",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "087b44f74b4203e933af56f91ed6edea9b99476f7479b359577e6363a379f3f0",
+      "reason": "Adds the roku client-diagnostics platform. Only the web admin reads this field, and this change teaches it roku.",
+      "approved_in": "#3298"
+    }
+  ]
 }
