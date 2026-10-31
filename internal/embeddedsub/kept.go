@@ -47,10 +47,10 @@ func writeKeptMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 		blocks    [][]mksBlock
 		offset    int64
 	)
-	if err := mksClusters(packets, scale, func(cluster []byte, bs []mksBlock) error {
+	if err := mksClusters(packets, scale, func(c *mksCluster, bs []mksBlock) error {
 		positions = append(positions, offset)
 		blocks = append(blocks, slices.Clone(bs))
-		offset += int64(len(cluster))
+		offset += c.elementSize()
 		return nil
 	}); err != nil {
 		return err
@@ -66,9 +66,8 @@ func writeKeptMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 			return err
 		}
 	}
-	return mksClusters(packets, scale, func(cluster []byte, _ []mksBlock) error {
-		_, err := w.Write(cluster)
-		return err
+	return mksClusters(packets, scale, func(c *mksCluster, _ []mksBlock) error {
+		return c.write(w)
 	})
 }
 
