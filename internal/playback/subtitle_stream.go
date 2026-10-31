@@ -61,6 +61,13 @@ type StreamExtractOpts struct {
 	// longer applies. Seeking such an input with -copyts re-emits its
 	// stored timestamps.
 	InputIsExtractedSup bool
+	// Packets, when set, is the source instead of InputPath: ffmpeg reads
+	// the track as a subtitle-only stream of these packets on its stdin and
+	// converts it as it would the track in the source file, to the same
+	// bytes. TrackIndex, SeekSeconds, DurationSeconds and
+	// InputIsExtractedSup don't apply; read a window's packets instead
+	// (embeddedsub.ReadPackets).
+	Packets *SubtitlePacketInput
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -82,7 +89,11 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	if opts.Writer == nil {
 		return errors.New("StreamExtractSubtitle: Writer is required")
 	}
-	if opts.InputPath == "" {
+	if opts.Packets != nil {
+		if err := opts.Packets.validate(); err != nil {
+			return fmt.Errorf("StreamExtractSubtitle: %w", err)
+		}
+	} else if opts.InputPath == "" {
 		return errors.New("StreamExtractSubtitle: InputPath is required")
 	}
 
@@ -102,7 +113,8 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	cmd.Stderr = stderrBuf
 
 	start := time.Now()
-	if err := cmd.Start(); err != nil {
+	wait, err := startSubtitleCommand(cmd, opts.Packets)
+	if err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
@@ -116,7 +128,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		cancel()
 	}
 
-	waitErr := cmd.Wait()
+	waitErr, feedErr := wait()
 	slog.DebugContext(ctx, "subtitle stream extract finished", "component", "playback",
 		"track", opts.TrackIndex,
 		"seek", opts.SeekSeconds,
@@ -133,6 +145,10 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	if waitErr != nil {
 		return fmt.Errorf("ffmpeg subtitle stream failed: %w (stderr: %s)",
 			waitErr, truncateStderr(stderrBuf.String()))
+	}
+	if feedErr != nil {
+		// ffmpeg converted what it got, but not the whole track.
+		return fmt.Errorf("write subtitle packets to ffmpeg: %w", feedErr)
 	}
 	return nil
 }
@@ -186,6 +202,11 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 
 	args := []string{
 		"-hide_banner", "-nostats", "-loglevel", "error",
+	}
+	if opts.Packets != nil {
+		// The packets are the whole extract: no seek, window or remap.
+		args = append(args, opts.Packets.inputArgs()...)
+		return append(args, "-map", "0:s:0", "-c:s", outCodec, "-f", outFormat, "pipe:1")
 	}
 
 	// Input seek (before -i) is the fast variant: ffmpeg jumps near the
