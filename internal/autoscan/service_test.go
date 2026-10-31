@@ -30,6 +30,8 @@ type fakeStore struct {
 	createEventErr error
 	deliveries     []WebhookDelivery
 	retried        []WebhookDelivery
+	retryDelays    []time.Duration // delay of each RetryWebhookDelivery call
+	retryMessages  []string        // last_error of each RetryWebhookDelivery call
 	completed      []int64
 	webhookErrors  map[string]string
 }
@@ -111,7 +113,9 @@ func (f *fakeStore) CompleteWebhookDelivery(_ context.Context, id int64, _ strin
 	f.completed = append(f.completed, id)
 	return nil
 }
-func (f *fakeStore) RetryWebhookDelivery(_ context.Context, id int64, lockedBy string, _ time.Duration, _ string) error {
+func (f *fakeStore) RetryWebhookDelivery(_ context.Context, id int64, lockedBy string, delay time.Duration, msg string) error {
+	f.retryDelays = append(f.retryDelays, delay)
+	f.retryMessages = append(f.retryMessages, msg)
 	for _, delivery := range f.deliveries {
 		if delivery.ID == id {
 			delivery.LockedBy = lockedBy
