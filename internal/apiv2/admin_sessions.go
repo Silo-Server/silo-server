@@ -34,7 +34,7 @@ type AdminPlaybackSession struct {
 	PlayMethod               string  `json:"play_method"`
 	ReportingNode            string  `json:"reporting_node"`
 	NodeDisplayName          string  `json:"node_display_name,omitempty"`
-	FileDuration             *int    `json:"file_duration"`
+	FileDuration             *int    `json:"file_duration" doc:"Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown"`
 	StartedAt                Instant `json:"started_at"`
 	UpdatedAt                Instant `json:"updated_at"`
 	PositionSeconds          float64 `json:"position_seconds"`
@@ -135,7 +135,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		PlayMethod:               v.PlayMethod,
 		ReportingNode:            v.ReportingNode,
 		NodeDisplayName:          v.NodeDisplayName,
-		FileDuration:             v.FileDuration,
+		FileDuration:             v.MeasuredDuration(),
 		StartedAt:                NewInstant(v.StartedAt),
 		UpdatedAt:                NewInstant(v.UpdatedAt),
 		PositionSeconds:          v.PositionSeconds,

@@ -1373,6 +1373,35 @@ func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
 	}
 }
 
+// An Audiobookshelf play runs on the book's first file but reports positions
+// in the whole book (#3098): the row takes the book's length, and an hour in
+// is not the end of a 44-second first track.
+func TestBuildAdminHistoryEntry_UsesTimelineDuration(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+		file: &models.MediaFile{ID: 42, ContentID: "book-1", Duration: 44},
+	})
+	handler.AdminStore = noopPlaybackAdminStore{}
+
+	entry, err := handler.buildAdminHistoryEntry(context.Background(), &playback.Session{
+		ID:               "session-1",
+		UserID:           1,
+		ProfileID:        "profile-1",
+		MediaFileID:      42,
+		Position:         3600,
+		TimelineDuration: 19830,
+		StartedAt:        time.Now().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("buildAdminHistoryEntry: %v", err)
+	}
+	if entry == nil || entry.DurationSeconds == nil || *entry.DurationSeconds != 19830 {
+		t.Fatalf("entry = %+v, want DurationSeconds 19830", entry)
+	}
+	if entry.Completed {
+		t.Fatal("entry completed an hour into a 5.5-hour book")
+	}
+}
+
 func TestPersistStopAndHistory_SkipsZeroProgressStops(t *testing.T) {
 	store := newPlaybackTestStore(t)
 	if err := store.SetProgress(context.Background(), "profile-1", "movie-1", 900, 3600, userstore.ProgressThresholds{}); err != nil {

@@ -60,6 +60,14 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 			Duration:   3600,
 			Bitrate:    128,
 			CodecAudio: "mp3",
+		}, {
+			ID:         43,
+			ContentID:  "book-1",
+			FilePath:   "/tmp/book-2.mp3",
+			FileSize:   512,
+			Duration:   1800,
+			Bitrate:    128,
+			CodecAudio: "mp3",
 		}},
 	}
 	absSessions := &fakePlaybackSessionStore{}
@@ -85,7 +93,7 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 		http.MethodPost,
 		"/api/items/book-1/play",
 		map[string]string{"libraryItemId": "book-1"},
-		nil,
+		[]byte(`{"deviceInfo":{"clientName":"AudioBooth","clientVersion":"1.2.0"}}`),
 		"1",
 		"profile-1",
 		h.handlePlayStart,
@@ -112,8 +120,16 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 	if !native.DisableProgressPersistence {
 		t.Fatalf("native session should disable progress persistence")
 	}
+	if native.ClientName != "AudioBooth" || native.ClientVersion != "1.2.0" {
+		t.Fatalf("native client = %q %q, want the deviceInfo's AudioBooth 1.2.0", native.ClientName, native.ClientVersion)
+	}
 	if native.Position != 123.5 {
 		t.Fatalf("native position = %v, want 123.5", native.Position)
+	}
+	// ABS positions are in the whole book, so the session measures them
+	// against every file, not the first one it was started on.
+	if native.TimelineDuration != 5400 {
+		t.Fatalf("native timeline duration = %v, want 5400", native.TimelineDuration)
 	}
 	if syncer.calls == 0 {
 		t.Fatalf("native session syncer was not called")
@@ -126,8 +142,8 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 		t.Fatalf("ABS session position = %v, want 123.5", absSession.CurrentPositionSeconds)
 	}
 	tracks, _ := body["audioTracks"].([]any)
-	if len(tracks) != 1 {
-		t.Fatalf("audioTracks length = %d, want 1", len(tracks))
+	if len(tracks) != 2 {
+		t.Fatalf("audioTracks length = %d, want 2", len(tracks))
 	}
 	track, _ := tracks[0].(map[string]any)
 	if got, _ := track["contentUrl"].(string); got == "" || !strings.Contains(got, "/abs/public/session/"+sessionID+"/track/1") {
@@ -136,50 +152,105 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 }
 
 func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
-	absSessions := &fakePlaybackSessionStore{}
-	nativeSessions := playback.NewSessionManager(0, 0)
-	var finished []string
-	nativeSessions.AddFinishHook(func(_ context.Context, s *playback.Session) {
-		finished = append(finished, s.ID)
-	})
-	native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("start native session: %v", err)
-	}
-	_ = absSessions.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
-		ID:        native.ID,
-		UserID:    "1",
-		ProfileID: "profile-1",
-		ContentID: "book-1",
-	})
-	syncer := &recordingPlaybackSessionSyncer{}
-	h := New(Dependencies{
-		MediaStore:           noopMediaStore{},
-		PlaybackSessionStore: absSessions,
-		NativeSessions:       nativeSessions,
-		NativeSessionSyncer:  syncer,
-	})
+	for _, tc := range []struct {
+		name         string
+		body         string
+		closed       bool
+		wantPosition float64
+	}{
+		{name: "empty body", wantPosition: 100},
+		// A close body is the client's final sync (#3099): the play is
+		// recorded where the listener stopped, not at the last sync.
+		{name: "final sync", body: `{"currentTime":3700,"timeListened":30}`, wantPosition: 3700},
+		// The final sync is best effort; the session closes regardless.
+		{name: "unreadable body", body: `not json`, wantPosition: 100},
+		// A body without a position is no final sync, not a sync to 0.
+		{name: "no position", body: `{}`, wantPosition: 100},
+		// A repeated close applies no stale final sync.
+		{name: "already closed", body: `{"currentTime":3700,"timeListened":30}`, closed: true, wantPosition: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			absSessions := &fakePlaybackSessionStore{}
+			nativeSessions := playback.NewSessionManager(0, 0)
+			var finished []playback.Session
+			nativeSessions.AddFinishHook(func(_ context.Context, s *playback.Session) {
+				finished = append(finished, *s)
+			})
+			native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
+			if err != nil {
+				t.Fatalf("start native session: %v", err)
+			}
+			if err := nativeSessions.UpdateProgress(native.ID, 100, false); err != nil {
+				t.Fatalf("seed native position: %v", err)
+			}
+			var closedAt *time.Time
+			if tc.closed {
+				closedAt = new(time.Now())
+			}
+			_ = absSessions.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
+				ID:        native.ID,
+				UserID:    "1",
+				ProfileID: "profile-1",
+				ContentID: "book-1",
+				ClosedAt:  closedAt,
+			})
+			syncer := &recordingPlaybackSessionSyncer{}
+			h := New(Dependencies{
+				MediaStore:           &playStartMediaStore{item: &models.MediaItem{ContentID: "book-1", Type: "audiobook"}},
+				PlaybackSessionStore: absSessions,
+				NativeSessions:       nativeSessions,
+				NativeSessionSyncer:  syncer,
+			})
 
-	rec := dispatchABSWithParams(
-		http.MethodPost,
-		"/api/session/"+native.ID+"/close",
-		map[string]string{"sid": native.ID},
-		nil,
-		"1",
-		"profile-1",
-		h.handleSessionClose,
-	)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+			var body []byte
+			if tc.body != "" {
+				body = []byte(tc.body)
+			}
+			rec := dispatchABSWithParams(
+				http.MethodPost,
+				"/api/session/"+native.ID+"/close",
+				map[string]string{"sid": native.ID},
+				body,
+				"1",
+				"profile-1",
+				h.handleSessionClose,
+			)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+			}
+			if _, err := nativeSessions.GetSession(native.ID); err == nil {
+				t.Fatalf("native session still exists after close")
+			}
+			// The finish hook is what records the play in admin playback history.
+			if len(finished) != 1 || finished[0].ID != native.ID {
+				t.Fatalf("finish hooks ran %d times, want once for %s", len(finished), native.ID)
+			}
+			if finished[0].Position != tc.wantPosition {
+				t.Fatalf("finished position = %v, want %v", finished[0].Position, tc.wantPosition)
+			}
+			if syncer.calls == 0 {
+				t.Fatalf("native session syncer was not called")
+			}
+		})
 	}
-	if _, err := nativeSessions.GetSession(native.ID); err == nil {
-		t.Fatalf("native session still exists after close")
-	}
-	// The finish hook is what records the play in admin playback history.
-	if len(finished) != 1 || finished[0] != native.ID {
-		t.Fatalf("finish hooks ran for %v, want [%s]", finished, native.ID)
-	}
-	if syncer.calls == 0 {
-		t.Fatalf("native session syncer was not called")
+}
+
+// A sync's listening time is added to the session's stored total, so it is
+// bounded: a negative value must not lower the total, and a huge one must not
+// overflow it.
+func TestSyncPayloadTimeDeltaIsBounded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		p    syncPayload
+		want float64
+	}{
+		{name: "timeListening", p: syncPayload{TimeListening: 20}, want: 20},
+		{name: "timeListened", p: syncPayload{TimeListened: 20}, want: 20},
+		{name: "negative", p: syncPayload{TimeListened: -500}, want: 0},
+		{name: "huge", p: syncPayload{TimeListened: 1e12}, want: maxSyncListeningSeconds},
+	} {
+		if got := tc.p.timeDelta(); got != tc.want {
+			t.Errorf("%s: timeDelta = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
