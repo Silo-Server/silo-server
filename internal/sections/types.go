@@ -151,9 +151,9 @@ type ResolvedSection struct {
 	DefaultTitle string `json:"-"`
 
 	// SuppressNextUp, when true on a continue-watching section, skips the
-	// next-up injection (and the combined series collapse/sort that pairs with
-	// it) so the section returns in-progress resume points only. Callers that
-	// need a strict "resume" view — e.g. the Jellyfin /UserItems/Resume
+	// next-up injection, the combined sort, and the one-card-per-series
+	// collapse, so the section returns every in-progress resume point. Callers
+	// that need a strict "resume" view — e.g. the Jellyfin /UserItems/Resume
 	// compatibility endpoint, which must never surface not-yet-started items —
 	// set this; admin/home rendering leaves it false to keep next-up cards.
 	SuppressNextUp bool `json:"-"`
