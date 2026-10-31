@@ -794,11 +794,45 @@ func removalConfirmed(ctx context.Context, path string) bool {
 	path = filepath.Clean(path)
 	ctx, cancel := context.WithTimeout(ctx, removalStatTimeout)
 	defer cancel()
-	if _, err := fspath.StatContext(ctx, path); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := removalStat(ctx, path); !errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
-	parent, err := fspath.StatContext(ctx, filepath.Dir(path))
+	parent, err := removalStat(ctx, filepath.Dir(path))
 	return err == nil && parent.IsDir()
+}
+
+// removalStatSlots caps the removal checks whose stat is still running. A
+// stat on a stalled mount keeps its goroutine blocked after the caller gives
+// up, so without a cap a stream of distinct paths could pile them up.
+var removalStatSlots = make(chan struct{}, 16)
+
+var errRemovalChecksBusy = errors.New("autoscan: too many removal checks in flight")
+
+// removalStat stats path, returning when ctx ends even if the stat is still
+// blocked. The stat holds a slot until it actually returns; with no slot
+// free it does not start, and the path reads as unconfirmed.
+func removalStat(ctx context.Context, path string) (fs.FileInfo, error) {
+	select {
+	case removalStatSlots <- struct{}{}:
+	default:
+		return nil, errRemovalChecksBusy
+	}
+	type result struct {
+		info fs.FileInfo
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		info, err := fspath.Stat(path)
+		<-removalStatSlots
+		done <- result{info, err}
+	}()
+	select {
+	case r := <-done:
+		return r.info, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // enqueueScanTargets enqueues targets in bounded chunks. With an event it also
