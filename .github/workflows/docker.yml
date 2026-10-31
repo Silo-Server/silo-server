@@ -202,10 +202,11 @@ jobs:
             jq -r 'if has("linux/amd64") then ."linux/amd64" else . end | .config.Labels["org.opencontainers.image.revision"] // ""')" || dev_revision=""
           order="ahead"
           if [[ -n "$dev_revision" && "$dev_revision" != "$HEAD_SHA" ]]; then
-            # A dev revision GitHub can't compare (rewritten history) doesn't hold dev back.
-            order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${dev_revision}...${HEAD_SHA}" --jq .status)" || order="ahead"
+            # Only a commit behind dev's holds dev back. Diverged history (a
+            # rewritten main) or a revision GitHub can't compare moves dev on.
+            order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${dev_revision}...${HEAD_SHA}" --jq .status)" || order="unknown"
           fi
-          if [[ "$order" == "ahead" || "$order" == "identical" ]]; then
+          if [[ "$order" != "behind" ]]; then
             tags+=" -t ${REGISTRY}/${IMAGE_LC}:dev"
             if [[ -z "$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" ]]; then
               tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
