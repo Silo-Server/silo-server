@@ -65,7 +65,8 @@ type EmbeddedSubtitleSource interface {
 	DemuxCopy(ctx context.Context, path string, ref EmbeddedSubtitleRef) (DemuxCopy, error)
 	// KeepDemuxed keeps the copy of the track that a demux of path wrote as
 	// demuxCopy describes. srcSize and srcModTime are the source's when the
-	// demux began. The copy's file belongs to the caller.
+	// demux began. It may move the copy's file; the caller removes the file
+	// if it is still there.
 	KeepDemuxed(ctx context.Context, path string, ref EmbeddedSubtitleRef, demuxCopy DemuxCopy, srcSize int64, srcModTime time.Time) error
 }
 

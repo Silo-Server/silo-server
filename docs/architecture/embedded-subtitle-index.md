@@ -181,9 +181,11 @@ window and offset comes from the existing conversion:
   response continues to completion. FFmpeg may flush buffered output or a
   trailer beyond that cutoff. Copies at or above it are discarded, so an
   output stopped early is never recorded as a complete track. `KeepDemuxed`
-  refuses such files before indexing them and independently limits the mirror
-  write to 128 MiB, deleting the temporary mirror on refusal even if the file
-  grew after its size check.
+  refuses such files before indexing them, then hashes the copy where it is
+  and renames it into the local copies, so it is written once. It refuses a
+  copy whose size changed after its check, and a copy on another file system
+  is copied with the same bound. A copy fetched from storage reads no more
+  than the row's recorded size.
 
 The row records the source version read (`source_size`, `source_mtime_ns`),
 the codec and `container_track_id`, the key, SHA-256, size and packet count,

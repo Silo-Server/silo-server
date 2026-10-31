@@ -109,7 +109,10 @@ func (s *Store) fetchMirror(ctx context.Context, dir string, t *Track) (string, 
 	}
 	defer func() { _ = r.Close() }()
 	path, sum, _, release, err := s.writeMirror(dir, streamExt(t.StreamFormat), func(w io.Writer) error {
-		_, err := io.Copy(w, r)
+		_, err := io.CopyN(w, r, t.Bytes)
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("keptsub: %s holds fewer than %d bytes", t.BlobKey, t.Bytes)
+		}
 		return err
 	})
 	if err != nil {
@@ -144,15 +147,53 @@ func (s *Store) writeMirror(dir, ext string, write func(io.Writer) error) (path,
 		return "", "", 0, nil, err
 	}
 	sum = hex.EncodeToString(h.Sum(nil))
-	path = filepath.Join(dir, sum+ext)
-	release = s.pinMirror(path)
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		release()
+	path, release, err = s.placeMirror(tmp.Name(), dir, sum, ext)
+	if err != nil {
 		return "", "", 0, nil, err
+	}
+	return path, sum, counter.n, release, nil
+}
+
+// adoptMirror makes the finished size-byte file f a copy: it hashes the
+// file where it is and moves it into dir, so a copy written beside the
+// copies isn't written twice. A file on another file system is copied. A
+// file that no longer holds size bytes is refused.
+func (s *Store) adoptMirror(dir, ext string, f *os.File, size int64) (path, sum string, release func(), err error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", "", nil, err
+	}
+	h := sha256.New()
+	if n, err := io.Copy(h, io.LimitReader(f, size+1)); err != nil {
+		return "", "", nil, err
+	} else if n != size {
+		return "", "", nil, fmt.Errorf("keptsub: %s is %d bytes, want %d", f.Name(), n, size)
+	}
+	sum = hex.EncodeToString(h.Sum(nil))
+	if path, release, err := s.placeMirror(f.Name(), dir, sum, ext); err == nil {
+		return path, sum, release, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", "", nil, err
+	}
+	path, sum, _, release, err = s.writeMirror(dir, ext, func(w io.Writer) error {
+		_, err := io.CopyN(w, f, size)
+		return err
+	})
+	return path, sum, release, err
+}
+
+// placeMirror moves the finished file at src to dir's copy named sum+ext,
+// pinned until the caller releases it.
+func (s *Store) placeMirror(src, dir, sum, ext string) (string, func(), error) {
+	path := filepath.Join(dir, sum+ext)
+	release := s.pinMirror(path)
+	if err := os.Rename(src, path); err != nil {
+		release()
+		return "", nil, err
 	}
 	s.used(path)
 	s.evictMirrors(dir)
-	return path, sum, counter.n, release, nil
+	return path, release, nil
 }
 
 // pinMirror excludes path from eviction until the caller has opened or read it.

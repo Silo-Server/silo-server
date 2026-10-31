@@ -1,6 +1,7 @@
 package keptsub
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -55,12 +56,21 @@ func TestWholeTrackKeepsWhatItReads(t *testing.T) {
 	if got := convert(t, ffmpeg, in); got != want || blobs.gets != 1 {
 		t.Fatalf("after a fetch (%d): %q", blobs.gets, got)
 	}
-	blobs.objects[kept.BlobKey] = []byte("tampered")
-	if err := os.RemoveAll(s.mirrorDir()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.WholeTrack(t.Context(), path, ref); err == nil || !strings.Contains(err.Error(), "SHA-256") {
-		t.Fatalf("a tampered object was used: %v", err)
+	original := blobs.objects[kept.BlobKey]
+	for _, tc := range []struct {
+		object []byte
+		want   string
+	}{
+		{bytes.Repeat([]byte("x"), len(original)), "SHA-256"},
+		{original[:len(original)-1], "fewer than"},
+	} {
+		blobs.objects[kept.BlobKey] = tc.object
+		if err := os.RemoveAll(s.mirrorDir()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.WholeTrack(t.Context(), path, ref); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("a tampered object was used: %v", err)
+		}
 	}
 }
 
@@ -288,6 +298,9 @@ func TestDemuxedCopyServesFilesWithoutCues(t *testing.T) {
 	if err := s.KeepDemuxed(t.Context(), path, ref, demuxCopy, info.Size(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(demuxCopy.Path); !os.IsNotExist(err) {
+		t.Fatalf("the copy was copied, not moved, to the local copies: %v", err)
+	}
 	kept, _ := repo.Track(t.Context(), file.ID, 1)
 	if kept == nil || kept.Method != MethodFFmpeg || kept.Completeness != CompletenessComplete || kept.HasOverrideTags == nil || !*kept.HasOverrideTags {
 		t.Fatalf("kept row = %+v", kept)
@@ -320,6 +333,13 @@ func TestDemuxedCopyServesFilesWithoutCues(t *testing.T) {
 		t.Fatalf("kept track without an ID: %v", err)
 	}
 	// A copy made while the source changed is never kept.
+	demuxCopy.Path = filepath.Join(t.TempDir(), "kept.part-3")
+	if err := playback.StreamExtractSubtitle(t.Context(), playback.StreamExtractOpts{
+		InputPath: path, SourceCodec: "subrip", FFmpegPath: ffmpeg, Writer: &strings.Builder{},
+		KeepPath: demuxCopy.Path, KeepFormat: demuxCopy.Format, KeepOffset: demuxCopy.StartTime,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.KeepDemuxed(t.Context(), path, ref, demuxCopy, info.Size()+1, info.ModTime()); !errors.Is(err, errSourceChanged) {
 		t.Fatalf("changed source: %v", err)
 	}
