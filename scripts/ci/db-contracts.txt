@@ -639,3 +639,7 @@
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
 ./internal/api/handlers TestQueryAdminTimeseriesSplitsEgressBySourceDB
+
+# Series watch counts answer only series the viewer may see (not podcast shows),
+# with the same counts from the SQL rollup and the per-episode fold.
+./internal/api/handlers TestSeriesWatchCountsPostgres
