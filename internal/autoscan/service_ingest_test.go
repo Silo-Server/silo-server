@@ -255,7 +255,8 @@ func TestIngestChangesWaitsForRemovedFolder(t *testing.T) {
 
 // A delivery stops waiting once the wait expires and never waits for a path
 // outside every library. A folder whose parent is gone too (a lost mount
-// below the library root) is not confirmed deleted, so it keeps waiting.
+// below the library root) is not confirmed deleted, so it keeps waiting; a
+// deleted folder arr names with a trailing separator is confirmed.
 func TestIngestChangesRemovalWaitBounds(t *testing.T) {
 	root := t.TempDir()
 	folder := filepath.Join(root, "Film (2024)")
@@ -273,6 +274,7 @@ func TestIngestChangesRemovalWaitBounds(t *testing.T) {
 		{"wait expired", folder, time.Now().Add(-removalWait - time.Minute), false, 1},
 		{"outside every library", outside, time.Now(), false, 0},
 		{"parent gone too", filepath.Join(root, "Show", "Season 01"), time.Now(), true, 0},
+		{"gone, sent with a trailing separator", filepath.Join(root, "Deleted (2024)") + string(filepath.Separator), time.Now(), false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := webhookTestStore()
