@@ -362,9 +362,13 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
-// files that live beneath that subtree.
+// files that live beneath that subtree. subtreePath must lie under one of
+// folder's roots.
 func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	cleanSubtree := filepath.Clean(subtreePath)
+	if err := requirePathInLibrary(cleanSubtree, folder); err != nil {
+		return nil, err
+	}
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
@@ -2682,8 +2686,29 @@ func pathWithinAnyRoot(path string, roots []string) bool {
 	return false
 }
 
-// ScanFile scans a single file and upserts it into the database.
+// ErrPathOutsideLibrary reports a scoped scan of a path that is not under any
+// of the library's configured roots.
+var ErrPathOutsideLibrary = errors.New("path is outside the library")
+
+// requirePathInLibrary returns ErrPathOutsideLibrary unless path lies
+// lexically under one of folder's roots. Walks keep the logical path below a
+// symlinked root, so this covers every path the catalog records. A physical
+// or aliased path that only resolves into a root is refused: scanning it would
+// record a second row for a file the catalog already holds under its logical
+// path.
+func requirePathInLibrary(path string, folder *models.MediaFolder) error {
+	if pathWithinAnyRoot(path, folder.Paths) {
+		return nil
+	}
+	return fmt.Errorf("%w: library %d, path %s", ErrPathOutsideLibrary, folder.ID, path)
+}
+
+// ScanFile scans a single file and upserts it into the database. filePath
+// must lie under one of folder's roots.
 func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error {
+	if err := requirePathInLibrary(filepath.Clean(filePath), folder); err != nil {
+		return err
+	}
 	var stopWatch context.CancelFunc
 	ctx, stopWatch = s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
