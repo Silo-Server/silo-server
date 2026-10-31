@@ -356,18 +356,11 @@ func TestWindowFromCachedSup(t *testing.T) {
 }
 
 func TestReadSupFirstCue(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "track.sup")
-	if err := os.WriteFile(path, testSupStream([]float64{91.88, 100}, 0), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := readSupFirstCue(path)
+	got, err := readSupFirstCue(bytes.NewReader(testSupStream([]float64{91.88, 100}, 0)))
 	if err != nil || got != 91.88 {
 		t.Fatalf("readSupFirstCue = %v, %v; want 91.88", got, err)
 	}
-	if err := os.WriteFile(path, []byte("not a sup stream"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readSupFirstCue(path); err == nil {
-		t.Fatal("a file without the PG magic should be refused")
+	if _, err := readSupFirstCue(strings.NewReader("not a sup stream")); err == nil {
+		t.Fatal("a stream without the PG magic should be refused")
 	}
 }

@@ -1012,6 +1012,167 @@ func countMatching(t *testing.T, c *SubtitleCache, match func(string) bool) int 
 	return n
 }
 
+// The cache must not use a cache dir another local account could control,
+// which could hold entries that account wrote, and an entry must not resolve
+// outside the cache dir or to anything but a regular file.
+func TestSubtitleCacheRefusesEntriesOthersControl(t *testing.T) {
+	const planted = "PLANTED-ENTRY"
+	for _, tc := range []struct {
+		name string
+		// prepare sets up the cache dir and returns the directory its
+		// entries resolve in, or "" to plant no entries.
+		prepare func(t *testing.T, dir string) string
+		// plant creates one entry from the file outside the cache.
+		plant func(t *testing.T, entry, outside string)
+		// usable reports whether the cache dir still takes fills.
+		usable bool
+	}{
+		{name: "entry symlinked outside the cache", plant: linkEntry, usable: true, prepare: func(t *testing.T, dir string) string {
+			mkdirMode(t, dir, 0o700)
+			return dir
+		}},
+		{name: "entry is a symlink to a directory", plant: linkEntryToDir, usable: true, prepare: func(t *testing.T, dir string) string {
+			mkdirMode(t, dir, 0o700)
+			return dir
+		}},
+		{name: "cache dir writable by other users", plant: copyEntry, prepare: func(t *testing.T, dir string) string {
+			mkdirMode(t, dir, 0o777)
+			return dir
+		}},
+		{name: "cache dir is a symlink", plant: copyEntry, prepare: func(t *testing.T, dir string) string {
+			target := t.TempDir()
+			if err := os.Symlink(target, dir); err != nil {
+				t.Fatal(err)
+			}
+			return target
+		}},
+		// Another account that can write the transcode dir could rename a
+		// private cache dir aside and put its own in its place.
+		{name: "transcode dir writable by other users", plant: copyEntry, prepare: func(t *testing.T, dir string) string {
+			if err := os.Chmod(filepath.Dir(dir), 0o777); err != nil {
+				t.Fatal(err)
+			}
+			mkdirMode(t, dir, 0o700)
+			return dir
+		}},
+		{name: "existing 0755 cache dir of this user", usable: true, prepare: func(t *testing.T, dir string) string {
+			mkdirMode(t, dir, 0o755)
+			return ""
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, source := newTestCache(t)
+			outside := filepath.Join(t.TempDir(), "private")
+			if err := os.WriteFile(outside, []byte(planted), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if plantDir := tc.prepare(t, c.dir()); plantDir != "" {
+				plantEntries(t, plantDir, source, outside, tc.plant)
+			}
+
+			if f, _, ok := c.Lookup(source, 0); ok {
+				t.Errorf("Lookup served %q", readAllAndClose(t, f))
+			}
+			if data, ok := c.LookupText(source, 0, "srt"); ok {
+				t.Errorf("LookupText served %q", data)
+			}
+			// Hold every warm slot so a windowed miss does not start a warm.
+			for range cap(c.warmSem) {
+				c.warmSem <- struct{}{}
+			}
+			var windowInput string
+			if err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1", nil),
+				windowedSupOpts(source, 0, 60, 600), func(_ context.Context, opts StreamExtractOpts) error {
+					windowInput = opts.InputPath
+					return nil
+				}); err != nil {
+				t.Fatal(err)
+			}
+			if windowInput != source {
+				t.Errorf("windowed extract read %q, want the source", windowInput)
+			}
+			for range cap(c.warmSem) {
+				<-c.warmSem
+			}
+
+			for _, opts := range []StreamExtractOpts{supExtractOpts(source, 0), {InputPath: source, SourceCodec: "subrip"}} {
+				fresh := "fresh " + opts.SourceCodec
+				rec := httptest.NewRecorder()
+				if err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+					_, err := io.WriteString(opts.Writer, fresh)
+					return err
+				}); err != nil || rec.Body.String() != fresh {
+					t.Errorf("%s served %q, %v; want a fresh extract", opts.SourceCodec, rec.Body.String(), err)
+				}
+			}
+			if f, _, ok := c.Lookup(source, 0); ok {
+				if got := readAllAndClose(t, f); !tc.usable || got != "fresh hdmv_pgs_subtitle" {
+					t.Errorf("after the fill Lookup served %q", got)
+				}
+			} else if tc.usable {
+				t.Error("the fill was not cached")
+			}
+			if data, err := os.ReadFile(outside); err != nil || string(data) != planted {
+				t.Errorf("file outside the cache now holds %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func mkdirMode(t *testing.T, dir string, perm os.FileMode) {
+	t.Helper()
+	if err := os.Mkdir(dir, perm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, perm); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// plantEntries plants the sup, srt and vtt entries for source's track 0 in
+// dir with plant.
+func plantEntries(t *testing.T, dir, source, outside string, plant func(t *testing.T, entry, outside string)) {
+	t.Helper()
+	src, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{"sup", "srt", "vtt"} {
+		plant(t, filepath.Join(dir, subtitleCacheFormatKey(source, 0, src.ModTime(), src.Size(), format)), outside)
+	}
+}
+
+func linkEntry(t *testing.T, entry, outside string) {
+	t.Helper()
+	if err := os.Symlink(outside, entry); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func copyEntry(t *testing.T, entry, outside string) {
+	t.Helper()
+	data, err := os.ReadFile(outside)
+	if err == nil {
+		err = os.WriteFile(entry, data, 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// linkEntryToDir plants a symlink that stays inside the cache dir but names
+// a directory.
+func linkEntryToDir(t *testing.T, entry, _ string) {
+	t.Helper()
+	target := filepath.Base(entry) + ".dir"
+	if err := os.Mkdir(filepath.Join(filepath.Dir(entry), target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, entry); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSubtitleCacheTextRejectsSourceChangedDuringExtraction(t *testing.T) {
 	cache, source := newTestCache(t)
 	data, err := cache.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) {
