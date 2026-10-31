@@ -536,6 +536,13 @@ const (
 
 	longVideoDurationAbsoluteToleranceSeconds = 1
 	longVideoDurationRelativeTolerance        = 0.001
+
+	// trackSpanToleranceSeconds and trackSpanRelativeTolerance bound how far
+	// a container duration and a track length may differ and still count as
+	// the same end: a subtitle track's length ends at its last cue while the
+	// container rounds to its last block, which can differ by a few seconds.
+	trackSpanToleranceSeconds  = 5
+	trackSpanRelativeTolerance = 0.01
 )
 
 // A video duration is implausible when it is either far too short in absolute
@@ -591,6 +598,9 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 		return truncatedDuration(formatDuration), true
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
+		if span, ok := audioVideoSpan(raw, formatDuration); ok && !durationLooksImplausible(raw, span) {
+			return truncatedDuration(span), true
+		}
 		return truncatedDuration(formatDuration), true
 	}
 
@@ -616,6 +626,94 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 		return truncatedDuration(duration), true
 	}
 	return 0, false
+}
+
+// audioVideoSpan returns how long a video file's video and audio run when a
+// subtitle or other non-A/V track is what made formatDuration longer. A
+// container duration covers every track (Matroska's segment duration does),
+// so a subtitle track that runs past the film, such as one holding its cue
+// list twice, stretches it, and every consumer of the stored duration (seek
+// previews, runtime, progress) then reaches past the end of the video.
+//
+// It answers only when every primary video and audio track reports a
+// length, the longest falls short of formatDuration by more than the
+// tolerance, and another track's own length accounts for formatDuration. A
+// missing or unparseable length is unknown, not short, and the last
+// condition keeps track lengths that understate the media (stale Matroska
+// statistics tags) from shortening a file on their own: with nothing else
+// explaining the container duration, it stands.
+//
+// A track that starts late ends at its offset plus its length. Muxers
+// disagree on whether a DURATION tag already counts that offset (ffmpeg
+// writes the end, mkvmerge the span), so video and audio take the later
+// reading, which can only keep a duration longer, and another track
+// accounts for the container duration under either reading.
+func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
+	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
+	formatStart := parseFloat(raw.Format.StartTime)
+	var audioVideo float64
+	hasVideo, accounted := false, false
+	for _, stream := range raw.Streams {
+		length, known := trackLength(stream)
+		end := max(0, parseFloat(stream.StartTime)-formatStart) + length
+		switch {
+		case mediaprobe.IsPrimaryVideoStream(stream) || stream.CodecType == "audio":
+			if !known {
+				return 0, false
+			}
+			hasVideo = hasVideo || stream.CodecType == "video"
+			audioVideo = max(audioVideo, end)
+		case stream.CodecType == "video":
+			// Attached pictures carry no timeline.
+		case known:
+			accounted = accounted || math.Abs(formatDuration-length) <= tolerance ||
+				math.Abs(formatDuration-end) <= tolerance
+		}
+	}
+	if !hasVideo || !accounted || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= tolerance {
+		return 0, false
+	}
+	return audioVideo, true
+}
+
+// trackLength is a stream's own length: ffprobe's duration when it reports
+// one, else the DURATION statistics tag Matroska muxers write per track.
+// ffprobe names a tag with a language DURATION-<language>; with several, the
+// longest counts, and one that does not parse leaves the length unknown.
+func trackLength(stream ffprobeStream) (float64, bool) {
+	if duration := parseFloat(stream.Duration); durationIsPositiveFinite(duration) {
+		return duration, true
+	}
+	var length float64
+	for key, value := range stream.Tags {
+		key = strings.ToUpper(key)
+		if key != "DURATION" && !strings.HasPrefix(key, "DURATION-") {
+			continue
+		}
+		parsed, ok := parseMatroskaTagDuration(value)
+		if !ok {
+			return 0, false
+		}
+		length = max(length, parsed)
+	}
+	return length, length > 0
+}
+
+// parseMatroskaTagDuration parses a Matroska DURATION tag,
+// HH:MM:SS.nnnnnnnnn.
+func parseMatroskaTagDuration(value string) (float64, bool) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	hours, errH := strconv.Atoi(parts[0])
+	minutes, errM := strconv.Atoi(parts[1])
+	seconds, errS := strconv.ParseFloat(parts[2], 64)
+	if errH != nil || errM != nil || errS != nil || hours < 0 || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60 {
+		return 0, false
+	}
+	duration := float64(hours)*3600 + float64(minutes)*60 + seconds
+	return duration, durationIsPositiveFinite(duration)
 }
 
 // corroboratedLongVideoDuration accepts an extended-range video duration only
