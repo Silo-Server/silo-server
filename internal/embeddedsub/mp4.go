@@ -21,6 +21,12 @@ const (
 	// sample tables are cheap to declare and cost 24 bytes a sample.
 	maxMP4Samples    = 1 << 20
 	maxTopLevelBoxes = 64
+	// maxMP4KeptBox bounds each box a track keeps (tkhd, edts, mdhd, hdlr,
+	// the media header, dinf, stsd) and the movie header: real ones are a
+	// few hundred bytes. maxMP4KeptBytes bounds what an index's tracks keep
+	// in all. A track over either keeps nothing and is unsupported.
+	maxMP4KeptBox   = 64 << 10
+	maxMP4KeptBytes = 16 << 20
 	// mp4ReadGap and mp4MaxRead bound merging samples into one read: text
 	// samples are small and often sit next to each other.
 	mp4ReadGap = 4 << 10
@@ -31,6 +37,11 @@ const (
 	// mp4BoxFtyp and mp4BoxMoov are the file type and movie boxes.
 	mp4BoxFtyp = "ftyp"
 	mp4BoxMoov = "moov"
+	mp4BoxMvhd = "mvhd"
+	mp4BoxTrak = "trak"
+	// unsupportedKeptBoxes is Track.Unsupported for a track whose boxes are
+	// over what an index keeps.
+	unsupportedKeptBoxes = "MP4 track headers too large"
 	// mp4KindText is QuickTime text: a handler and a sample entry type.
 	mp4KindText = "text"
 	// unsupportedEditList is Track.Unsupported for an edit list the
@@ -60,12 +71,30 @@ type mp4Sample struct {
 	delta uint32
 }
 
-// detach copies the boxes the track keeps out of the moov they were parsed
-// from.
-func (m *mp4Track) detach() {
-	for _, box := range []*[]byte{&m.tkhd, &m.edts, &m.mdhd, &m.hdlr, &m.mediaHeader, &m.dinf, &m.stsd} {
+// keep copies the boxes the track keeps out of the moov they were parsed
+// from, charging them to keptLeft. Boxes over maxMP4KeptBox, or over what is
+// left, aren't kept, and keep reports false.
+func (m *mp4Track) keep(keptLeft *int) bool {
+	boxes := []*[]byte{&m.tkhd, &m.edts, &m.mdhd, &m.hdlr, &m.mediaHeader, &m.dinf, &m.stsd}
+	total := 0
+	for _, box := range boxes {
+		if len(*box) > maxMP4KeptBox {
+			total = math.MaxInt
+			break
+		}
+		total += len(*box)
+	}
+	if total > *keptLeft {
+		for _, box := range boxes {
+			*box = nil
+		}
+		return false
+	}
+	*keptLeft -= total
+	for _, box := range boxes {
 		*box = bytes.Clone(*box)
 	}
+	return true
 }
 
 // boxBytes is the size of the boxes the track keeps.
@@ -154,11 +183,11 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	)
 	walkBoxes(moov, func(kind string, box, payload []byte) bool {
 		switch kind {
-		case "mvhd":
+		case mp4BoxMvhd:
 			mvhd = box
 		case "mvex":
 			fragmented = true
-		case "trak":
+		case mp4BoxTrak:
 			traks = append(traks, payload)
 		}
 		return true
@@ -170,21 +199,23 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	if len(traks) > maxTrackEntries {
 		return nil, fmt.Errorf("%w: MP4 movie has more than %d tracks", ErrMalformed, maxTrackEntries)
 	}
+	if len(mvhd) > maxMP4KeptBox {
+		return nil, fmt.Errorf("%w: MP4 movie header of %d bytes", ErrMalformed, len(mvhd))
+	}
 	idx := &Index{Container: ContainerMP4, TimestampScale: 1}
-	samplesLeft := maxMP4Samples
+	samplesLeft, keptLeft := maxMP4Samples, maxMP4KeptBytes
 	// The boxes a track keeps are copied out of moov, which also holds
 	// every other track's sample tables and would otherwise stay alive with
-	// a cached index.
+	// a cached index (mp4Track.keep).
 	ftyp, mvhd = bytes.Clone(ftyp), bytes.Clone(mvhd)
 	for _, trak := range traks {
-		t, ok := parseMP4Track(trak, movieTimescale, size, &samplesLeft)
+		t, ok := parseMP4Track(trak, movieTimescale, size, &samplesLeft, &keptLeft)
 		if samplesLeft < 0 {
 			return nil, fmt.Errorf("%w: MP4 text tracks list more than %d samples", ErrMalformed, maxMP4Samples)
 		}
 		if !ok {
 			continue
 		}
-		t.mp4.detach()
 		t.mp4.ftyp, t.mp4.mvhd = ftyp, mvhd
 		if fragmented && t.Unsupported == "" {
 			// Samples in movie fragments aren't in the sample table.
@@ -286,7 +317,8 @@ type stblBoxes struct {
 // subtitle track.
 // samplesLeft is what remains of the index's sample budget; a track that
 // would exceed it sets it negative without expanding its table.
-func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLeft *int) (Track, bool) {
+// keptLeft is what remains of the index's budget for kept boxes.
+func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLeft, keptLeft *int) (Track, bool) {
 	tkhd, tkhdPayload := childBox(trak, "tkhd")
 	edts, edtsPayload := childBox(trak, "edts")
 	_, mdia := childBox(trak, "mdia")
@@ -314,6 +346,8 @@ func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLe
 	t.Default = t.Enabled
 	var ok bool
 	if m.timescale, t.Language, ok = parseMDHD(mdhdPayload); !ok {
+		// Keep nothing of moov for a track nothing will read.
+		m.tkhd, m.edts, m.mdhd, m.hdlr = nil, nil, nil, nil
 		t.Unsupported = "MP4 media header"
 		return t, true
 	}
@@ -332,7 +366,12 @@ func parseMP4Track(trak []byte, movieTimescale uint32, fileSize int64, samplesLe
 		return true
 	})
 	m.stsd = stbl.stsd
-	t.CodecID, t.CodecPrivate, t.Forced, t.Unsupported = sampleEntry(stbl.stsd)
+	if !m.keep(keptLeft) {
+		t.Unsupported = unsupportedKeptBoxes
+		return t, true
+	}
+	// The codec's private data is read from the kept stsd, not copied again.
+	t.CodecID, t.CodecPrivate, t.Forced, t.Unsupported = sampleEntry(m.stsd)
 	if t.Unsupported == "" && stbl.compositionOffsets {
 		t.Unsupported = "MP4 composition offsets"
 	}
@@ -409,7 +448,8 @@ func parseSTBL(stbl []byte) stblBoxes {
 }
 
 // sampleEntry reads the sample description: its type, the data after the
-// SampleEntry header, and tx3g's "all samples forced" display flag. FFmpeg
+// SampleEntry header (a slice of stsd), and tx3g's "all samples forced"
+// display flag. FFmpeg
 // decodes both 3GPP timed text (tx3g) and QuickTime text (text) as
 // mov_text; their samples are the same length-prefixed text.
 func sampleEntry(stsd []byte) (kind string, private []byte, forced bool, unsupported string) {
@@ -427,7 +467,7 @@ func sampleEntry(stsd []byte) (kind string, private []byte, forced bool, unsuppo
 	if len(entry) < 8 {
 		return kind, nil, false, "MP4 sample description missing"
 	}
-	private = bytes.Clone(entry[8:])
+	private = entry[8:]
 	switch kind {
 	case "tx3g":
 		forced = len(private) >= 4 && binary.BigEndian.Uint32(private)&0x80000000 != 0

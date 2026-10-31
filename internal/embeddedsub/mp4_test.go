@@ -36,7 +36,7 @@ func testMP4Track(elst []byte) *mp4Track {
 		be32(0, 0), []byte{0, 0, 0, 0, 0, 1, 0, 18}, be32(0xFFFFFFFF), mp4Box("ftab", []byte{0, 1, 0, 1, 5}, []byte("Serif")))
 	m := &mp4Track{
 		ftyp: mp4Box(mp4BoxFtyp, []byte("isom\x00\x00\x02\x00isomiso2mp41")),
-		mvhd: mp4Box("mvhd", mvhd), tkhd: mp4Box("tkhd", tkhd), mdhd: mp4Box("mdhd", mdhd), hdlr: mp4Box("hdlr", hdlr),
+		mvhd: mp4Box(mp4BoxMvhd, mvhd), tkhd: mp4Box("tkhd", tkhd), mdhd: mp4Box("mdhd", mdhd), hdlr: mp4Box("hdlr", hdlr),
 		stsd: mp4FullBox("stsd", slices.Concat(be32(1), mp4Box("tx3g", tx3g))),
 	}
 	if elst != nil {
@@ -133,6 +133,8 @@ func TestMP4TracksTheReaderRefuses(t *testing.T) {
 		"edit at double speed": {elst: be32(1, 60_000, 0, 0x20000), unsupported: unsupportedEditList},
 		"two media edits":      {elst: be32(2, 1000, 0, 0x10000, 1000, 5000, 0x10000), unsupported: unsupportedEditList},
 		"WebVTT in MP4":        {stsd: mp4FullBox("stsd", slices.Concat(be32(1), mp4Box("wvtt", make([]byte, 8)))), unsupported: `MP4 sample entry "wvtt"`},
+		// A real sample description is a few hundred bytes.
+		"oversized sample description": {stsd: mp4FullBox("stsd", slices.Concat(be32(1), mp4Box("tx3g", make([]byte, maxMP4KeptBox)))), unsupported: unsupportedKeptBoxes},
 	}
 	for name, tt := range tests {
 		m := testMP4Track(tt.elst)
@@ -206,9 +208,9 @@ func TestMP4IndexBoundsSamplesAcrossTracks(t *testing.T) {
 		case mp4BoxMoov:
 			walkBoxes(payload, func(kind string, box, _ []byte) bool {
 				switch kind {
-				case "mvhd":
+				case mp4BoxMvhd:
 					mvhd = box
-				case "trak":
+				case mp4BoxTrak:
 					trak = bytes.Clone(box)
 				}
 				return true
@@ -233,5 +235,54 @@ func TestMP4IndexBoundsSamplesAcrossTracks(t *testing.T) {
 	}
 	if _, err := ReadIndex(context.Background(), movie(maxTrackEntries+1)); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("%d tracks: err = %v, want ErrMalformed", maxTrackEntries+1, err)
+	}
+}
+
+// What an index's tracks keep of their boxes is bounded in all: tracks past
+// maxMP4KeptBytes keep nothing and are unsupported, and the index still reads.
+func TestMP4IndexBoundsKeptBoxesAcrossTracks(t *testing.T) {
+	m := testMP4Track(nil)
+	m.stsd = mp4FullBox("stsd", slices.Concat(be32(1), mp4Box("tx3g", make([]byte, maxMP4KeptBox-4096))))
+	var file bytes.Buffer
+	if err := writeMP4(&file, &Track{mp4: m}, []Packet{{Data: textSample("x"), mp4Delta: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	var ftyp, mvhd, trak []byte
+	walkBoxes(file.Bytes(), func(kind string, box, payload []byte) bool {
+		switch kind {
+		case mp4BoxFtyp:
+			ftyp = box
+		case mp4BoxMoov:
+			walkBoxes(payload, func(kind string, box, _ []byte) bool {
+				switch kind {
+				case mp4BoxMvhd:
+					mvhd = box
+				case mp4BoxTrak:
+					trak = box
+				}
+				return true
+			})
+		}
+		return true
+	})
+	traks := 2 * maxMP4KeptBytes / len(trak)
+	idx, err := ReadIndex(context.Background(), writeFixture(t, slices.Concat(ftyp, mp4Box(mp4BoxMoov, append([][]byte{mvhd}, slices.Repeat([][]byte{trak}, traks)...)...))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, refused := 0, 0
+	for i := range idx.Tracks {
+		tr := &idx.Tracks[i]
+		if tr.Unsupported == unsupportedKeptBoxes {
+			refused++
+			if tr.mp4.boxBytes() != len(ftyp)+len(mvhd) || len(tr.CodecPrivate) != 0 {
+				t.Fatalf("a refused track kept %d bytes of boxes", tr.mp4.boxBytes())
+			}
+			continue
+		}
+		kept += tr.mp4.boxBytes() - len(ftyp) - len(mvhd)
+	}
+	if refused == 0 || kept > maxMP4KeptBytes {
+		t.Fatalf("%d tracks refused, %d bytes kept; want refusals and at most %d", refused, kept, maxMP4KeptBytes)
 	}
 }

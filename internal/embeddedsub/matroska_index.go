@@ -21,14 +21,17 @@ import (
 // The size limits are far above real files (the largest Cues in a library
 // survey was 1.07 MB) and keep a damaged file from allocating much.
 const (
-	headReadSize       = 64 << 10
-	elementProbeSize   = 16 << 10
-	maxEBMLHeaderSize  = 4 << 10
-	maxSeekHeadSize    = 1 << 20
-	maxInfoSize        = 1 << 20
-	maxTracksSize      = 16 << 20
-	maxTagsSize        = 8 << 20
-	maxCuesSize        = 16 << 20
+	headReadSize      = 64 << 10
+	elementProbeSize  = 16 << 10
+	maxEBMLHeaderSize = 4 << 10
+	maxSeekHeadSize   = 1 << 20
+	maxInfoSize       = 1 << 20
+	maxTracksSize     = 16 << 20
+	maxTagsSize       = 8 << 20
+	maxCuesSize       = 16 << 20
+	// maxMetadataBytes bounds the Info, Tracks, Cues and Tags one index
+	// read holds at once; each has its own limit above as well.
+	maxMetadataBytes   = 32 << 20
 	maxSeekHeads       = 8
 	maxTagsElements    = 4
 	maxTopLevelVisited = 64
@@ -192,9 +195,10 @@ func readSegmentElements(r io.ReaderAt, head []byte, layout segmentLayout) (segm
 	for _, at := range layout.tags {
 		reads = append(reads, &elementRead{at: at, want: matroska.IDTags, limit: maxTagsSize})
 	}
+	held := newBudget(maxMetadataBytes)
 	var wg sync.WaitGroup
 	for _, er := range reads {
-		wg.Go(func() { er.data, er.err = readTopElement(r, head, er.at, er.want, er.limit) })
+		wg.Go(func() { er.data, er.err = readTopElement(r, head, er.at, er.want, er.limit, held) })
 	}
 	wg.Wait()
 	var el segmentElements
@@ -287,7 +291,7 @@ func locateElements(r io.ReaderAt, head []byte, l *segmentLayout) error {
 	}
 
 	for i := 0; i < len(seekHeads); i++ {
-		data, err := readTopElement(r, head, seekHeads[i], matroska.IDSeekHead, maxSeekHeadSize)
+		data, err := readTopElement(r, head, seekHeads[i], matroska.IDSeekHead, maxSeekHeadSize, nil)
 		if err != nil {
 			if errors.Is(err, errBadElement) {
 				// A damaged seek head only loses what it points at.
@@ -343,8 +347,9 @@ type elementRead struct {
 
 // readTopElement returns the data of the element at at, which must be a
 // want element of at most limit bytes: from head when it holds it all,
-// otherwise in one read, or two for an element larger than a probe.
-func readTopElement(r io.ReaderAt, head []byte, at int64, want uint64, limit int64) ([]byte, error) {
+// otherwise in one read, or two for an element larger than a probe. held,
+// when set, is charged for the bytes it allocates.
+func readTopElement(r io.ReaderAt, head []byte, at int64, want uint64, limit int64, held *budget) ([]byte, error) {
 	first := tail(head, at)
 	id, size, hl, ok := matroska.ParseElementHeader(first)
 	if !ok || size < 0 || int64(hl)+size > int64(len(first)) {
@@ -366,6 +371,11 @@ func readTopElement(r io.ReaderAt, head []byte, at int64, want uint64, limit int
 	}
 	if int64(hl)+size <= int64(len(first)) {
 		return first[hl : int64(hl)+size], nil
+	}
+	if held != nil {
+		if err := held.take(int(size)); err != nil {
+			return nil, fmt.Errorf("%w: Matroska metadata over %d bytes", ErrMalformed, maxMetadataBytes)
+		}
 	}
 	data := make([]byte, size)
 	n := copy(data, first[hl:])

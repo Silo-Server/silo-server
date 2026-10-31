@@ -141,7 +141,7 @@ func mp4Moov(m *mp4Track, stts, stsc, stsz []byte, offset uint64) []byte {
 	}
 	minf := mp4Box("minf", mediaHeader, dinf, stbl)
 	mdia := mp4Box("mdia", m.mdhd, m.hdlr, minf)
-	trak := mp4Box("trak", m.tkhd, m.edts, mdia)
+	trak := mp4Box(mp4BoxTrak, m.tkhd, m.edts, mdia)
 	return mp4Box(mp4BoxMoov, m.mvhd, trak)
 }
 
