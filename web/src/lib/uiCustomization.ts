@@ -323,6 +323,61 @@ export function rankedCarouselNumeralClasses(size: PosterSize): string {
 }
 
 /**
+ * Rank 1's gutter, and the reason a ranked row is not one uniform card.
+ *
+ * The "1" is the only digit whose ink stops well short of the poster's left
+ * edge: the wide digits run to the edge of their own boxes, the 1 stops 30 units
+ * inside its. On the shared gutter it therefore sits in a gap where every other
+ * digit is cropped by the poster. Its card pads by less instead, which pulls the
+ * poster left over it — the same result weflix reaches with its `.rankedCardOne`
+ * rule.
+ *
+ * The values give the 1 the crop the wide digits already get: the poster takes
+ * roughly a sixth of its width (about 24px of a 140px poster), and the same
+ * proportion at every size. Keep in step with the two functions below.
+ */
+export function rankedCarouselOneGutterClasses(size: PosterSize): string {
+  switch (size) {
+    case "compact":
+      return "pl-[64px] sm:pl-[74px] lg:pl-[85px]";
+    case "large":
+      return "pl-[90px] sm:pl-[104px] lg:pl-[117px]";
+    default:
+      return "pl-[74px] sm:pl-[85px] lg:pl-[98px]";
+  }
+}
+
+/**
+ * Rank 1's card width: the poster plus its own narrower gutter, so rank 1 is
+ * narrower than its neighbours rather than the same width with a wasted gutter.
+ */
+export function rankedCarouselOneCardWidthClasses(size: PosterSize): string {
+  switch (size) {
+    case "compact":
+      return "w-[184px] shrink-0 sm:w-[214px] lg:w-[245px]";
+    case "large":
+      return "w-[260px] shrink-0 sm:w-[299px] lg:w-[337px]";
+    default:
+      return "w-[214px] shrink-0 sm:w-[245px] lg:w-[283px]";
+  }
+}
+
+/**
+ * Rank 1's numeral offset: its own gutter, negated, exactly like the shared
+ * pair above, so the digit still starts at the card's left edge.
+ */
+export function rankedCarouselOneNumeralClasses(size: PosterSize): string {
+  switch (size) {
+    case "compact":
+      return "-left-[64px] sm:-left-[74px] lg:-left-[85px]";
+    case "large":
+      return "-left-[90px] sm:-left-[104px] lg:-left-[117px]";
+    default:
+      return "-left-[74px] sm:-left-[85px] lg:-left-[98px]";
+  }
+}
+
+/**
  * The ranked width table, as [base, sm, lg] pixels. This is the drawer the
  * class strings above are written out from: the numeral takes roughly the
  * poster's own width, which is what makes the digits read as backdrop rather

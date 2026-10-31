@@ -16,7 +16,11 @@ import {
   rankedCarouselCardWidthClasses,
   rankedCarouselGutterClasses,
   rankedCarouselNumeralClasses,
+  rankedCarouselOneCardWidthClasses,
+  rankedCarouselOneGutterClasses,
+  rankedCarouselOneNumeralClasses,
 } from "./uiCustomization";
+import { RANK_ONE_INK_RIGHT_UNITS } from "./rankNumerals";
 
 /** The pixel values a set of `prefix-[NNpx]` utility classes carries, in order. */
 function pxValues(classes: string, prefix: string): number[] {
@@ -162,6 +166,53 @@ describe("UI customization contract helpers", () => {
         // The numeral is pulled left by that same gutter, or it sits on the
         // poster instead of in the gutter beside it.
         expect(numeral).toBe(gutter);
+      }
+    }
+  });
+
+  it("puts the poster over the narrow 1 instead of leaving it a gap", () => {
+    // The "1" is the only digit whose ink stops short of the poster's left edge.
+    // On the shared gutter it sits in a gap where every other digit is cropped
+    // by the poster, and the tables above cannot see that: they are consistent
+    // either way. So hold rank 1's own gutter to the glyph. The poster's left
+    // edge has to land inside the ink, and by roughly the share of the poster
+    // the wide digits lose to the crop.
+    const viewports = [500, 800, 1440];
+    /** A poster is 2:3, and the numeral is drawn to the poster's own height. */
+    const posterHeightPerWidth = 1.5;
+    /** Rank 1's viewBox height, the divisor that scales the glyph. */
+    const glyphHeight = 154;
+
+    for (const size of ["compact", "standard", "large"] as const) {
+      const gutters = pxValues(rankedCarouselOneGutterClasses(size), "pl");
+      const cardWidths = pxValues(rankedCarouselOneCardWidthClasses(size), "w");
+      const numerals = pxValues(rankedCarouselOneNumeralClasses(size), "left");
+
+      expect(gutters).toHaveLength(3);
+      expect(cardWidths).toHaveLength(3);
+      expect(numerals).toHaveLength(3);
+
+      for (const [index, viewportWidth] of viewports.entries()) {
+        const gutter = gutters[index];
+        const cardWidth = cardWidths[index];
+        const numeral = numerals[index];
+        if (gutter === undefined || cardWidth === undefined || numeral === undefined) {
+          throw new Error(`rank 1 has no ${size} width for a ${viewportWidth}px viewport`);
+        }
+        const posterWidth = carouselCardWidthPx(size, viewportWidth);
+
+        // Rank 1 is narrower than its neighbours, not wider.
+        expect(cardWidth).toBe(posterWidth + gutter);
+        expect(numeral).toBe(gutter);
+
+        // The ink's right edge, in pixels: the glyph sits in a box as tall as
+        // the poster, so it scales with the poster's height.
+        const inkRight =
+          (RANK_ONE_INK_RIGHT_UNITS * posterWidth * posterHeightPerWidth) / glyphHeight;
+        // The wide digits lose about a sixth of the poster to it (measured:
+        // 0.17 of the width at every size). A hairline meet is not an overlap,
+        // and a gap is what this is here to catch.
+        expect(inkRight - gutter).toBeGreaterThan(0.13 * posterWidth);
       }
     }
   });

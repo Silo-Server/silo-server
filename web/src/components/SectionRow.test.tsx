@@ -256,10 +256,20 @@ describe("SectionRow", () => {
     // caption under it are padded out of the numeral's way.
     expect(rankedMarkup).toContain("pl-[130px]");
 
+    // Rank 1's card is narrower than the other nine, so the poster pulls left
+    // over the "1" — the one digit the shared gutter would leave a gap beside.
+    const slides = rankedMarkup.split("transition-[width]");
+    expect(slides[1]).toContain("pl-[74px]");
+    expect(slides[1]).toContain("w-[214px]");
+    expect(slides[1]).not.toContain("pl-[130px]");
+    expect(slides[2]).toContain("pl-[130px]");
+    expect(slides[2]).toContain("w-[270px]");
+
     // A row of any other type is left exactly as it was, however many items it
     // has: no numerals, and no reserved gutter.
     const plainMarkup = renderRow(section("recently_added"));
     expect(plainMarkup).not.toContain("data-rank=");
     expect(plainMarkup).not.toContain("pl-[130px]");
+    expect(plainMarkup).not.toContain("pl-[74px]");
   });
 });

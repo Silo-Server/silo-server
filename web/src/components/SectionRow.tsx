@@ -15,6 +15,9 @@ import {
   rankedCarouselCardWidthClasses,
   rankedCarouselGutterClasses,
   rankedCarouselNumeralClasses,
+  rankedCarouselOneCardWidthClasses,
+  rankedCarouselOneGutterClasses,
+  rankedCarouselOneNumeralClasses,
   WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
   type CarouselSlideWidth,
 } from "@/lib/uiCustomization";
@@ -102,6 +105,14 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
       : carouselCardWidthClasses(posterSize);
   const rankedGutterClasses = isRanked ? rankedCarouselGutterClasses(posterSize) : "";
   const rankedNumeralClasses = isRanked ? rankedCarouselNumeralClasses(posterSize) : "";
+  // Rank 1's card is narrower than its neighbours': the "1" is the one digit the
+  // shared gutter would leave floating beside the poster instead of cropped by
+  // it. The other nine keep the shared gutter, and the row's windowed first
+  // commit is still measured with the shared width — one narrower slide only
+  // ever leans toward mounting one card more than fits.
+  const rankedOneWidthClasses = isRanked ? rankedCarouselOneCardWidthClasses(posterSize) : "";
+  const rankedOneGutterClasses = isRanked ? rankedCarouselOneGutterClasses(posterSize) : "";
+  const rankedOneNumeralClasses = isRanked ? rankedCarouselOneNumeralClasses(posterSize) : "";
   const expandedWidthClasses = isExpanding ? expandedCardWidthClasses(posterSize) : "";
   // Read once for the row rather than once per card. A clip is bandwidth a
   // profile opts into, and this is the same gate the hero reads.
@@ -176,7 +187,9 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
               className={`transition-[width] duration-300 ease-out ${
                 isExpanding && expandedKey === item.content_id
                   ? expandedWidthClasses
-                  : posterWidthClasses
+                  : isRanked && index === 0
+                    ? rankedOneWidthClasses
+                    : posterWidthClasses
               }`}
               role="listitem"
             >
@@ -187,8 +200,12 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
                 quickActionMode={quickActionMode}
                 priority={index < priorityCount}
                 rank={isRanked && index < MAX_RANKED_CARDS ? index + 1 : undefined}
-                rankedGutterClasses={rankedGutterClasses}
-                rankedNumeralClasses={rankedNumeralClasses}
+                rankedGutterClasses={
+                  isRanked && index === 0 ? rankedOneGutterClasses : rankedGutterClasses
+                }
+                rankedNumeralClasses={
+                  isRanked && index === 0 ? rankedOneNumeralClasses : rankedNumeralClasses
+                }
                 expandable={isExpanding}
                 expanded={isExpanding && expandedKey === item.content_id}
                 onExpand={() => setExpandedKey(item.content_id)}

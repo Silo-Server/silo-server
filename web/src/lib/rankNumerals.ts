@@ -64,6 +64,16 @@ export const RANK_NUMERALS: Record<number, RankNumeral> = {
   },
 };
 
+/**
+ * Where rank 1's ink stops, in the glyph's own viewBox units: x=72 of a
+ * 76-wide, 154-tall box. Every wide digit's ink reaches the edge of its own
+ * box, which is what lets the poster crop them; the 1 stops 30 units short, so
+ * on the shared gutter it floats in a gap instead. Its card therefore carries a
+ * narrower gutter of its own (rankedCarouselOneGutterClasses), and the rank-1
+ * gutter test reads this to check the poster really does land on the digit.
+ */
+export const RANK_ONE_INK_RIGHT_UNITS = 72;
+
 /** How many cards in a ranked row carry a numeral. */
 export const MAX_RANKED_CARDS = 10;
 
