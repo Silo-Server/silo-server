@@ -2602,16 +2602,24 @@ func (scrobbleCapableNonScrobbler) Capabilities() Capabilities {
 	return Capabilities{ScrobblePlayback: true}
 }
 
+// nonPlaybackScrobbler implements Scrobbler but does not claim playback
+// scrobbling, so only the capability check can skip it.
+type nonPlaybackScrobbler struct{ keyedScrobblerStub }
+
+func (nonPlaybackScrobbler) Capabilities() Capabilities { return Capabilities{} }
+
 // A connection whose provider cannot take the stop does not fail a confirmed
 // stop, and the profile's other providers still get it once.
 func TestServiceConfirmedStopSkipsConnectionsThatCannotScrobble(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		provider Provider
+		provider func(events chan ScrobbleEvent) Provider
 	}{
 		{"unregistered provider", nil},
-		{"provider without playback scrobbling", emptyPluginAPIKeyProvider{}},
-		{"provider without a scrobbler", scrobbleCapableNonScrobbler{}},
+		{"provider without playback scrobbling", func(events chan ScrobbleEvent) Provider {
+			return nonPlaybackScrobbler{keyedScrobblerStub{scrobblerStub{stopEvents: events}, "plugin:1:tracker"}}
+		}},
+		{"provider without a scrobbler", func(chan ScrobbleEvent) Provider { return scrobbleCapableNonScrobbler{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newServiceFakeRepo()
@@ -2622,7 +2630,7 @@ func TestServiceConfirmedStopSkipsConnectionsThatCannotScrobble(t *testing.T) {
 			events := make(chan ScrobbleEvent, 2)
 			reg := registryWith(t, scrobblerStub{stopEvents: events})
 			if tc.provider != nil {
-				if err := reg.Register(tc.provider); err != nil {
+				if err := reg.Register(tc.provider(events)); err != nil {
 					t.Fatal(err)
 				}
 			}
