@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"runtime"
 	"slices"
@@ -1031,41 +1032,43 @@ func TestMatroskaMetadataSharesABudget(t *testing.T) {
 	}
 }
 
-// A kept Matroska stream is written as it is encoded: when its first byte
-// goes out, it holds where its clusters and blocks go but not a second,
-// encoded copy of the packets, which a whole track's read already holds.
-func TestWriteKeptHoldsNoSecondCopy(t *testing.T) {
-	const packetBytes, packets = 64 << 10, 512 // 32 MiB of packet data
+// A Matroska stream is written from the packets: writing one allocates its
+// headers, not a second, encoded copy of the packets, which a whole track's
+// read already holds, nor a copy of a laced block's frames.
+func TestWriteMatroskaHoldsNoSecondCopy(t *testing.T) {
 	tr := &Track{Number: 1, UID: 1, CodecID: "S_TEXT/UTF8", Language: "eng", Enabled: true}
-	ps := make([]Packet, packets)
-	for i := range ps {
-		ps[i] = Packet{PTS: time.Duration(i) * time.Second, Duration: time.Second, Data: bytes.Repeat([]byte{'a' + byte(i%26)}, packetBytes)}
+	idx := &Index{Container: ContainerMatroska, TimestampScale: 1_000_000}
+	const total = 32 << 20
+	single := make([]Packet, 512)
+	for i := range single {
+		single[i] = Packet{PTS: time.Duration(i) * time.Second, Duration: time.Second, Data: bytes.Repeat([]byte{'a' + byte(i%26)}, total/len(single))}
 	}
-	runtime.GC()
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
-	w := &firstWriteHeap{}
-	if err := WriteKept(w, &Index{Container: ContainerMatroska, TimestampScale: 1_000_000}, tr, ps); err != nil {
-		t.Fatal(err)
+	// One source block of 256 frames, each decompressed on its own.
+	laced := make([]Packet, 256)
+	for i := range laced {
+		laced[i] = Packet{PTS: time.Second, Duration: time.Millisecond, Data: bytes.Repeat([]byte{'a' + byte(i%26)}, total/len(laced)),
+			pos: 4096, lace: i, laces: len(laced), nonKeyframe: i > 0}
 	}
-	if grown := int64(w.heap) - int64(before.HeapAlloc); grown > 8<<20 {
-		t.Fatalf("live heap grew %d bytes before the first write, over a quarter of the %d bytes of packets", grown, packetBytes*packets)
+	for _, packets := range []struct {
+		name string
+		ps   []Packet
+	}{{"a block per packet", single}, {"one laced block", laced}} {
+		for _, write := range []struct {
+			name string
+			f    func(io.Writer, *Index, *Track, []Packet) error
+		}{{"kept", WriteKept}, {"stream", WriteStream}} {
+			t.Run(packets.name+"/"+write.name, func(t *testing.T) {
+				runtime.GC()
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				if err := write.f(io.Discard, idx, tr, packets.ps); err != nil {
+					t.Fatal(err)
+				}
+				runtime.ReadMemStats(&after)
+				if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 4<<20 {
+					t.Fatalf("writing %d bytes of packets allocated %d bytes", total, allocated)
+				}
+			})
+		}
 	}
-	runtime.KeepAlive(ps)
-}
-
-// firstWriteHeap records the live heap when it is first written to.
-type firstWriteHeap struct {
-	heap   uint64
-	writes int
-}
-
-func (w *firstWriteHeap) Write(p []byte) (int, error) {
-	if w.writes++; w.writes == 1 {
-		runtime.GC()
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		w.heap = m.HeapAlloc
-	}
-	return len(p), nil
 }

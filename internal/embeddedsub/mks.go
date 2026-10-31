@@ -11,9 +11,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/matroska"
 )
 
-// maxMKSClusterData bounds one cluster's size, so writing a stream holds at
-// most this much beyond the packets.
+// maxMKSClusterData bounds one cluster's data before another starts.
 const maxMKSClusterData = 1 << 20
+
+// mksInlineFrame is the size from which a frame is written from its packet
+// instead of being copied into its cluster's bytes, so writing a stream
+// holds about maxMKSClusterData beyond the packets, however large a block.
+const mksInlineFrame = 4 << 10
 
 // WriteStream writes a track's packets as a small file of that one track
 // in a container FFmpeg reads from a pipe, so FFmpeg converts them as it
@@ -53,9 +57,8 @@ func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	if _, err := bw.Write(mksHead(t, scale)); err != nil {
 		return err
 	}
-	if err := mksClusters(packets, scale, func(cluster []byte, _ []mksBlock) error {
-		_, err := bw.Write(cluster)
-		return err
+	if err := mksClusters(packets, scale, func(c *mksCluster, _ []mksBlock) error {
+		return c.write(bw)
 	}); err != nil {
 		return err
 	}
@@ -96,17 +99,71 @@ type mksBlock struct {
 	duration time.Duration
 }
 
-// mksClusters encodes packets as Matroska clusters and passes each whole
-// Cluster element to emit with the blocks it holds. emit may keep neither.
-// Without packets it emits one empty cluster: FFmpeg can't open a Matroska
-// stream that ends before its first cluster, and a window can hold no
-// packets.
-func mksClusters(packets []Packet, scale int64, emit func(cluster []byte, blocks []mksBlock) error) error {
+// mksCluster is a cluster's data as it is written: its encoded bytes, with
+// frames of mksInlineFrame bytes or more left in their packets.
+type mksCluster struct {
+	// parts and then buf are the data in order; buf holds what was encoded
+	// since the last frame left in its packet.
+	parts [][]byte
+	buf   []byte
+	size  int64
+}
+
+// bytes adds encoded data.
+func (c *mksCluster) bytes(b []byte) {
+	c.buf = append(c.buf, b...)
+	c.size += int64(len(b))
+}
+
+// frame adds a frame's data, left in its packet when it is large.
+func (c *mksCluster) frame(data []byte) {
+	if len(data) < mksInlineFrame {
+		c.bytes(data)
+		return
+	}
+	if len(c.buf) > 0 {
+		c.parts = append(c.parts, c.buf)
+		c.buf = nil
+	}
+	c.parts = append(c.parts, data)
+	c.size += int64(len(data))
+}
+
+// header is the Cluster element's ID and size.
+func (c *mksCluster) header() []byte {
+	return matroska.AppendSize(matroska.AppendID(nil, matroska.IDCluster), uint64(c.size)) //nolint:gosec // G115: a size
+}
+
+// elementSize is the size of the whole Cluster element.
+func (c *mksCluster) elementSize() int64 {
+	return int64(len(c.header())) + c.size
+}
+
+// write writes the Cluster element to w.
+func (c *mksCluster) write(w io.Writer) error {
+	if _, err := w.Write(c.header()); err != nil {
+		return err
+	}
+	for _, part := range c.parts {
+		if _, err := w.Write(part); err != nil {
+			return err
+		}
+	}
+	_, err := w.Write(c.buf)
+	return err
+}
+
+// mksClusters encodes packets as Matroska clusters and passes each to emit
+// with the blocks it holds. emit may keep neither. Without packets it emits
+// one empty cluster: FFmpeg can't open a Matroska stream that ends before
+// its first cluster, and a window can hold no packets.
+func mksClusters(packets []Packet, scale int64, emit func(c *mksCluster, blocks []mksBlock) error) error {
+	var c mksCluster
 	if len(packets) == 0 {
-		return emit(matroska.AppendElement(nil, matroska.IDCluster, matroska.AppendUint(nil, matroska.IDClusterTimestamp, 0)), nil)
+		c.bytes(matroska.AppendUint(nil, matroska.IDClusterTimestamp, 0))
+		return emit(&c, nil)
 	}
 	var (
-		cluster   []byte
 		blocks    []mksBlock
 		clusterTS int64
 		open      bool
@@ -115,7 +172,7 @@ func mksClusters(packets []Packet, scale int64, emit func(cluster []byte, blocks
 		if !open {
 			return nil
 		}
-		return emit(matroska.AppendElement(nil, matroska.IDCluster, cluster), blocks)
+		return emit(&c, blocks)
 	}
 	for i := 0; i < len(packets); {
 		group := packets[i : i+lacedRun(packets[i:])]
@@ -123,14 +180,15 @@ func mksClusters(packets []Packet, scale int64, emit func(cluster []byte, blocks
 		p := group[0]
 		ticks := int64(p.PTS) / scale
 		rel := ticks - clusterTS
-		if !open || rel > math.MaxInt16 || rel < math.MinInt16 || len(cluster) > maxMKSClusterData {
+		if !open || rel > math.MaxInt16 || rel < math.MinInt16 || c.size > maxMKSClusterData {
 			if err := flush(); err != nil {
 				return err
 			}
 			// Cluster timestamps are unsigned; a packet before zero goes in a
 			// cluster at zero.
 			clusterTS, open = max(ticks, 0), true
-			cluster = matroska.AppendUint(cluster[:0], matroska.IDClusterTimestamp, uint64(clusterTS))
+			c = mksCluster{}
+			c.bytes(matroska.AppendUint(nil, matroska.IDClusterTimestamp, uint64(clusterTS)))
 			blocks = blocks[:0]
 			if rel = ticks - clusterTS; rel < math.MinInt16 {
 				return errors.New("embeddedsub: packet timestamp too far before zero for Matroska")
@@ -140,8 +198,8 @@ func mksClusters(packets []Packet, scale int64, emit func(cluster []byte, blocks
 		for _, f := range group {
 			duration += f.Duration
 		}
-		blocks = append(blocks, mksBlock{ticks: ticks, rel: int64(len(cluster)), duration: duration})
-		cluster = matroska.AppendElement(cluster, matroska.IDBlockGroup, mksBlockGroup(group, rel, scale))
+		blocks = append(blocks, mksBlock{ticks: ticks, rel: c.size, duration: duration})
+		c.blockGroup(group, rel, scale, duration)
 	}
 	return flush()
 }
@@ -162,44 +220,50 @@ func lacedRun(packets []Packet) int {
 	return first.laces
 }
 
-// mksBlockGroup encodes packets as one block, rel ticks into its cluster.
-// The frames of one source block go back into one Xiph-laced block: FFmpeg
-// keeps a laced block in one buffer, and its SubRip decoder reads a frame's
-// text on into the frames after it, so only the same layout converts the
-// same.
-func mksBlockGroup(group []Packet, rel, scale int64) []byte {
+// blockGroup adds packets as one block group, rel ticks into the cluster,
+// showing for duration. The frames of one source block go back into one
+// Xiph-laced block: FFmpeg keeps a laced block in one buffer, and its SubRip
+// decoder reads a frame's text on into the frames after it, so only the same
+// layout converts the same.
+func (c *mksCluster) blockGroup(group []Packet, rel, scale int64, duration time.Duration) {
 	p := group[0]
 	var flags byte
 	if len(group) > 1 {
 		flags = 1 << 1 // Xiph lacing
 	}
-	block := make([]byte, 0, 8+len(p.Data))
-	block = append(block, 0x81, byte(rel>>8), byte(rel), flags) //nolint:gosec // G115: rel fits an int16, stored as two's complement
-	var duration time.Duration
+	head := []byte{0x81, byte(rel >> 8), byte(rel), flags} //nolint:gosec // G115: rel fits an int16, stored as two's complement
+	frames := 0
 	if len(group) > 1 {
-		block = append(block, byte(len(group)-1)) //nolint:gosec // G115: a block holds at most 256 frames
+		head = append(head, byte(len(group)-1)) //nolint:gosec // G115: a block holds at most 256 frames
 		for _, f := range group[:len(group)-1] {
 			n := len(f.Data)
 			for ; n >= 0xFF; n -= 0xFF {
-				block = append(block, 0xFF)
+				head = append(head, 0xFF)
 			}
-			block = append(block, byte(n)) //nolint:gosec // G115: n < 255
+			head = append(head, byte(n)) //nolint:gosec // G115: n < 255
 		}
 	}
 	for _, f := range group {
-		block = append(block, f.Data...)
-		duration += f.Duration
+		frames += len(f.Data)
 	}
-	out := matroska.AppendElement(nil, matroska.IDBlock, block)
+	var tail []byte
 	// The frames' shares add up to the block's duration.
 	if duration > 0 && !p.inferredDuration {
-		out = matroska.AppendUint(out, matroska.IDBlockDuration, uint64(int64(duration)/scale)) //nolint:gosec // G115: positive
+		tail = matroska.AppendUint(tail, matroska.IDBlockDuration, uint64(int64(duration)/scale)) //nolint:gosec // G115: positive
 	}
 	if p.nonKeyframe {
 		// FFmpeg reads a block group with a reference as no keyframe.
-		out = matroska.AppendInt(out, matroska.IDReferenceBlock, -1)
+		tail = matroska.AppendInt(tail, matroska.IDReferenceBlock, -1)
 	}
-	return out
+	blockSize := uint64(len(head) + frames)
+	block := matroska.AppendSize(matroska.AppendID(nil, matroska.IDBlock), blockSize)
+	c.bytes(matroska.AppendSize(matroska.AppendID(nil, matroska.IDBlockGroup), uint64(len(block)+len(tail))+blockSize))
+	c.bytes(block)
+	c.bytes(head)
+	for _, f := range group {
+		c.frame(f.Data)
+	}
+	c.bytes(tail)
 }
 
 // mksTrackEntry is the TrackEntry WriteMKS writes for t, as track 1.
