@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -524,32 +525,69 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 	})
 }
 
-// convertRenditionWindow converts a window's packets to WebVTT. Known empty
-// MP4 text samples can legitimately produce no cue and their window is kept.
-// Other packets that convert to no cue answer errNoCueConverted: the segment
-// is empty this time and isn't kept, and the next request converts them again.
+// convertRenditionWindow converts a window's packets to WebVTT. A window
+// whose packets carry no text, such as MP4 clearing samples or empty SubRip
+// blocks, legitimately converts to no cue and is kept empty. Packets that
+// carry text but convert to no cue may be a conversion that failed quietly:
+// they answer errNoCueConverted, the segment is empty this time and isn't
+// kept, and the next request converts them again.
 func convertRenditionWindow(ctx context.Context, in *SubtitlePacketInput, ffmpegPath string) ([]byte, error) {
 	cues, err := ExtractSubtitlePacketsWebVTT(ctx, in, ffmpegPath)
-	if err == nil && len(in.Packets) > 0 && !hasCue(subtitleMuxerWebVTT, cues) && !emptyMP4TextWindow(in) {
+	if err == nil && !hasCue(subtitleMuxerWebVTT, cues) && windowCarriesText(in) {
 		return nil, errNoCueConverted
 	}
 	return cues, err
 }
 
-// emptyMP4TextWindow recognizes clearing samples by their zero text length.
-// A truncated sample or a different codec still needs a cue in the output.
-func emptyMP4TextWindow(in *SubtitlePacketInput) bool {
-	if in.Stream != nil || in.Index == nil || in.Index.Container != embeddedsub.ContainerMP4 || in.Track == nil {
-		return false
+// windowCarriesText reports whether any of a window's packets carries text
+// a conversion would show. A stream, or a track it can't tell, counts as text.
+func windowCarriesText(in *SubtitlePacketInput) bool {
+	if in.Stream != nil || in.Track == nil {
+		return true
 	}
-	switch in.Track.CodecID {
-	case subtitleCodecTx3g, subtitleCodecTextV3:
-	default:
-		return false
-	}
-	return !slices.ContainsFunc(in.Packets, func(p embeddedsub.Packet) bool {
-		return len(p.Data) < 2 || p.Data[0] != 0 || p.Data[1] != 0
+	return slices.ContainsFunc(in.Packets, func(p embeddedsub.Packet) bool {
+		return packetCarriesText(in.Track.CodecID, p.Data)
 	})
+}
+
+// packetCarriesText reports whether a packet of a track with codecID holds
+// text: an MP4 text sample's length-prefixed text, an ASS event's Text
+// field less its override blocks, or any other text packet's bytes, each
+// other than whitespace. A sample too short to read counts as text.
+func packetCarriesText(codecID string, data []byte) bool {
+	switch {
+	case codecID == subtitleCodecTx3g || codecID == subtitleCodecTextV3:
+		if len(data) < 2 {
+			return true
+		}
+		n := int(binary.BigEndian.Uint16(data))
+		data = data[2:min(len(data), 2+n)]
+	case strings.HasPrefix(codecID, "S_TEXT/ASS") || strings.HasPrefix(codecID, "S_TEXT/SSA"):
+		// ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text.
+		fields := bytes.SplitN(data, []byte(","), 9)
+		if len(fields) < 9 {
+			return true
+		}
+		data = stripASSOverrides(fields[8])
+	}
+	return len(bytes.TrimSpace(data)) > 0
+}
+
+// stripASSOverrides returns text without its {...} override blocks.
+func stripASSOverrides(text []byte) []byte {
+	var out []byte
+	for {
+		open := bytes.IndexByte(text, '{')
+		if open < 0 {
+			return append(out, text...)
+		}
+		end := bytes.IndexByte(text[open:], '}')
+		if end < 0 {
+			return append(out, text...)
+		}
+		out = append(out, text[:open]...)
+		text = text[open+end+1:]
+	}
 }
 
 // convertKeptRenditionWindow converts a window read from a kept track. Kept

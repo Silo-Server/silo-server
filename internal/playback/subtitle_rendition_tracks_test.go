@@ -1088,3 +1088,31 @@ func TestOnDemandEmptyMP4WindowIsCached(t *testing.T) {
 		t.Fatalf("later text window: %q, %v", data, err)
 	}
 }
+
+// Only packets that carry text make a cue-less conversion an error; empty
+// and clearing samples convert to no cue legitimately.
+func TestPacketCarriesText(t *testing.T) {
+	ass := "S_TEXT/ASS"
+	for _, tc := range []struct {
+		codec string
+		data  string
+		want  bool
+	}{
+		{subtitleCodecTx3g, "\x00\x00", false},
+		{subtitleCodecTx3g, "\x00\x02  ", false},
+		{subtitleCodecTx3g, "\x00\x02hi", true},
+		{subtitleCodecTx3g, "\x00", true}, // too short to read
+		{subtitleCodecTextV3, "\x00\x00", false},
+		{"S_TEXT/UTF8", "", false},
+		{"S_TEXT/UTF8", " \n", false},
+		{"S_TEXT/UTF8", "hello", true},
+		{ass, "0,0,Default,,0,0,0,,", false},
+		{ass, `0,0,Default,,0,0,0,,{\an8}`, false},
+		{ass, `0,0,Default,,0,0,0,,{\an8}Hello`, true},
+		{ass, "0,0,Default", true}, // not an event it can read
+	} {
+		if got := packetCarriesText(tc.codec, []byte(tc.data)); got != tc.want {
+			t.Errorf("packetCarriesText(%s, %q) = %v, want %v", tc.codec, tc.data, got, tc.want)
+		}
+	}
+}
