@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,23 +10,47 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-// compareVersions compares two dot-separated version strings numerically.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-// Non-numeric segments fall back to lexicographic comparison.
+// compareVersions orders two plugin versions, returning -1 if a < b, 0 if
+// a == b, and 1 if a > b. Versions are Semantic Versioning strings with an
+// optional leading "v": a pre-release sorts below its release and build
+// metadata is ignored. Manifests are not validated, so a version that is not
+// valid semver sorts below every valid one, which lets a catalog release
+// replace a hand-installed build with a free-form version. Two invalid
+// versions compare dot segment by dot segment, numerically when both segments
+// are integers and lexicographically otherwise.
 func compareVersions(a, b string) int {
+	semA, semB := semverString(a), semverString(b)
+	validA, validB := semver.IsValid(semA), semver.IsValid(semB)
+	switch {
+	case validA && validB:
+		return semver.Compare(semA, semB)
+	case validA:
+		return 1
+	case validB:
+		return -1
+	}
+	return compareVersionSegments(a, b)
+}
+
+// semverString adds the "v" prefix golang.org/x/mod/semver requires.
+func semverString(version string) string {
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
+func compareVersionSegments(a, b string) int {
 	partsA := strings.Split(a, ".")
 	partsB := strings.Split(b, ".")
 
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
-
-	for i := 0; i < maxLen; i++ {
+	for i := 0; i < max(len(partsA), len(partsB)); i++ {
 		var segA, segB string
 		if i < len(partsA) {
 			segA = partsA[i]
@@ -36,21 +61,12 @@ func compareVersions(a, b string) int {
 
 		numA, errA := strconv.Atoi(segA)
 		numB, errB := strconv.Atoi(segB)
-
 		if errA == nil && errB == nil {
-			if numA < numB {
-				return -1
+			if c := cmp.Compare(numA, numB); c != 0 {
+				return c
 			}
-			if numA > numB {
-				return 1
-			}
-		} else {
-			if segA < segB {
-				return -1
-			}
-			if segA > segB {
-				return 1
-			}
+		} else if c := strings.Compare(segA, segB); c != 0 {
+			return c
 		}
 	}
 	return 0
