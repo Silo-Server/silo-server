@@ -37,8 +37,17 @@ in the row and open the full list here. To download only the cards a row shows,
 `listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
 which caps every row's item limit for that request. Send it only when
 `getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
-the parameter. See the home section of
-[the native API contract](architecture/api-contract.md) for the details.
+the parameter. `getHomeSectionItems` and `getHomeLayout` (for the rows it
+includes) accept the same `item_limit`; send it only when `getHomeCapabilities`
+reports `row_item_limit_max`. A row they answer with `item_limit` carries
+`has_more: true` when it holds more cards than it answered. See the home section
+of [the native API contract](architecture/api-contract.md) for the details.
+
+This listing is not a continuation of a capped row. Query-backed rows page their
+source here, so a Home row that hides watched items lists them here, and a random
+row is drawn again. A client that shows a capped row reporting `has_more` and
+wants the rest of it in place reads the row again at its own limit
+(`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
 ## People search
 
@@ -626,7 +635,16 @@ rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
 
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
-matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
+matches no `runtime` bound. An audiobook's `runtime` uses its longest active
+recording copy across libraries: file durations are summed per library and
+canonical recording root, then rounded to the nearest minute (at least one).
+File changes and removals maintain this value; metadata enrichment and refresh
+preserve it. An admin runtime lock preserves the edited value instead; removing
+the lock restores the file-derived value immediately. Books
+without positive file durations retain their stored runtime. The `runtime` rule,
+sort and item field therefore use the same value. Audiobook group totals and
+Audiobookshelf responses retain their library-scoped duration calculations.
+`latest_episode_added` and `last_air_date` describe a
 show's newest episode with a file in a library, so movies never match them. An
 episode the metadata provider lists but no library has a file for does not count,
 even after its air date. The `last_air_date` sort follows the same rule. A show's

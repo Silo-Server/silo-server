@@ -3153,10 +3153,6 @@ func (h *LibraryCollectionHandler) processCollectionImage(
 	return uploadCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, fileData)
 }
 
-func (h *LibraryCollectionHandler) deleteCollectionImages(ctx context.Context, collectionID, imageType string) error {
-	return removeCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType)
-}
-
 // adminCollectionImagePath returns the stored path of one admin collection
 // image.
 func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context, collectionID, imageType string) (string, error) {
@@ -3171,7 +3167,7 @@ func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context,
 }
 
 // cleanUpReplacedCollectionImage removes the revision that a committed
-// replacement of an admin collection image superseded.
+// replacement or clear of an admin collection image superseded.
 func (h *LibraryCollectionHandler) cleanUpReplacedCollectionImage(ctx context.Context, collectionID, imageType, oldPath string) {
 	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
 		return h.adminCollectionImagePath(ctx, collectionID, imageType)

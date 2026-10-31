@@ -859,7 +859,9 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 	if ctx == nil || session == nil || err == nil {
 		return
 	}
-	if preflightErr := preflightPlaybackFile(ctx, file, h.MissingMarker, h.EventsHub); preflightErr != nil {
+	// A request that already ended cannot stat the file; keep the transport's
+	// own error for the log instead of the preflight's context error.
+	if preflightErr := preflightPlaybackFile(ctx, file, h.MissingMarker, h.EventsHub); preflightErr != nil && ctx.Err() == nil {
 		err = preflightErr
 	}
 	if isPlaybackFileMissing(err) || errors.Is(err, os.ErrNotExist) {

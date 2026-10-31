@@ -15,7 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -167,67 +170,75 @@ func TestAdminSettingsReadsHideMachineManagedCheckpoint(t *testing.T) {
 	})
 }
 
-func TestAdminSettingsWritesRejectMachineManagedCheckpoint(t *testing.T) {
-	const (
-		storedCheckpoint      = `{"baseline_identity":"old","target_identity":"new"}`
-		replacementCheckpoint = `{"baseline_identity":"wrong","target_identity":"wrong"}`
-	)
+// Machine-managed rows refuse every generic settings write. The signing keys
+// matter most: a non-Owner admin who set one could forge Owner tokens.
+func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
+	const stored, replacement = "stored-value", "attacker-chosen-value"
+	nonOwnerAdmin := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "s2"})
+	noGuard := func(AdminSettingsSnapshot) error { return nil }
 
-	t.Run("batch settings", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: replacementCheckpoint,
-		}})
-		if err != nil {
-			t.Fatalf("marshal request: %v", err)
-		}
-		rec := httptest.NewRecorder()
+	writes := map[string]func(t *testing.T, h *AdminHandler, key, value string) int{
+		"v1 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{key: value}})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(nonOwnerAdmin, http.MethodPut, "/admin/settings", bytes.NewReader(body))
+			h.HandleUpdateSettings(rec, req)
+			return rec.Code
+		},
+		"v1 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingRequest{Value: value})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(nonOwnerAdmin, http.MethodPut, "/admin/settings/"+key, bytes.NewReader(body))
+			h.HandleUpdateSetting(rec, withChiParam(req, "key", key))
+			return rec.Code
+		},
+		"v2 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSettings(nonOwnerAdmin, map[string]string{key: value}, noGuard)
+			return apiErrorStatus(t, err)
+		},
+		"v2 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSetting(nonOwnerAdmin, key, value, noGuard)
+			return apiErrorStatus(t, err)
+		},
+	}
 
-		handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", bytes.NewReader(body)))
+	for _, key := range []string{
+		config.ArtworkStorageReconcileCheckpointKey,
+		"auth.jwt_secret",
+		"audiobooks.abs.jwt_secret",
+	} {
+		for name, write := range writes {
+			for valueName, value := range map[string]string{"replace": replacement, "clear": ""} {
+				t.Run(key+"/"+name+"/"+valueName, func(t *testing.T) {
+					settings := &fakeServerSettingsStore{values: map[string]string{key: stored}}
+					if status := write(t, &AdminHandler{SettingsRepo: settings}, key, value); status != http.StatusBadRequest {
+						t.Fatalf("status = %d, want 400", status)
+					}
+					if got := settings.values[key]; got != stored {
+						t.Fatalf("%s = %q, want unchanged %q", key, got, stored)
+					}
+					if settings.atomicCalls != 0 {
+						t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
+					}
+				})
+			}
+		}
+	}
+}
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-		}
-		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
-			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
-		}
-		if settings.atomicCalls != 0 {
-			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
-		}
-	})
-
-	t.Run("single setting", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		body, err := json.Marshal(updateSettingRequest{Value: replacementCheckpoint})
-		if err != nil {
-			t.Fatalf("marshal request: %v", err)
-		}
-		req := httptest.NewRequest(
-			http.MethodPut,
-			"/admin/settings/"+config.ArtworkStorageReconcileCheckpointKey,
-			bytes.NewReader(body),
-		)
-		req = withChiParam(req, "key", config.ArtworkStorageReconcileCheckpointKey)
-		rec := httptest.NewRecorder()
-
-		handler.HandleUpdateSetting(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-		}
-		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
-			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
-		}
-		if settings.atomicCalls != 0 {
-			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
-		}
-	})
+func apiErrorStatus(t *testing.T, err error) int {
+	t.Helper()
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("error = %v, want *APIError", err)
+	}
+	return apiErr.Status
 }
 
 func TestAdminSettingsValidationIncludesEnvironmentManagedValues(t *testing.T) {

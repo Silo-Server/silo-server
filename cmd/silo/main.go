@@ -44,6 +44,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/apiusage"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
@@ -944,14 +945,17 @@ func main() {
 	}
 
 	// Step 5: Auto-generate secrets
-	if settings["auth.jwt_secret"] == "" {
+	if strings.TrimSpace(settings["auth.jwt_secret"]) == "" {
 		secret := make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
 			log.Fatalf("generating jwt secret: %v", err)
 		}
 		encoded := base64.StdEncoding.EncodeToString(secret)
+		// Fatal, not a warning: every process, this one too once its config
+		// watcher starts, reads the secret from the database, so a secret
+		// held only in memory would leave them with none.
 		if err := settingsRepo.Set(ctx, "auth.jwt_secret", encoded); err != nil {
-			slog.Warn("failed to persist generated JWT secret", "error", err)
+			log.Fatalf("persisting generated JWT secret: %v", err)
 		}
 		settings["auth.jwt_secret"] = encoded
 	}
@@ -1223,6 +1227,7 @@ func main() {
 		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
+			srv.SetDownloadBandwidth(pool, redisClient)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
 				log.Fatalf("load trusted CIDRs: %v", resolverErr)
@@ -1368,6 +1373,18 @@ func main() {
 	} else if apiRedisClient != nil {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
+	// Download bandwidth accounting bounds each budget call with a deadline,
+	// which only a deadline-enabled client honors through Sentinel discovery.
+	var downloadBandwidthRedis *redis.Client
+	if apiRedisClient != nil {
+		var bandwidthRedisErr error
+		downloadBandwidthRedis, bandwidthRedisErr = cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if bandwidthRedisErr != nil {
+			slog.Warn("redis client init failed; download bandwidth limits stay per API process", "error", bandwidthRedisErr)
+		} else if downloadBandwidthRedis != nil {
+			defer func() { _ = cache.CloseRedisClient(downloadBandwidthRedis) }()
+		}
+	}
 
 	// One TMDB client serves every feature in this process, so they share its
 	// response caches and spend one budget of tmdb.RequestsPerSecond: with
@@ -1429,6 +1446,7 @@ func main() {
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
 		TMDB:                         tmdbClient,
+		DownloadBandwidthRedis:       downloadBandwidthRedis,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -3068,6 +3086,7 @@ func main() {
 	defer stopActivityLog()
 	deps.ActivityLogWriter = activityWriter
 	deps.ActivityLogRepo = activitylog.NewRepo(pool)
+	deps.APIUsage = apiusage.NewStore(pool)
 	deps.NodeID = nodeID
 
 	// Create refresh worker early so the task manager can use it for FindCandidates.
@@ -3272,6 +3291,7 @@ func main() {
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		taskMgr.Register(tasks.NewSummarizeAPIUsageTask(deps.APIUsage))
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
 			// Wired outside the autoscan service so events left by a disabled

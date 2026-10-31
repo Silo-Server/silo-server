@@ -384,30 +384,129 @@ func (f *Filesystem) DeletePrefix(ctx context.Context, prefix string) (int, erro
 	if err = check(root, prefix); err != nil {
 		return 0, err
 	}
-	n := 0
-	err = fs.WalkDir(root.FS(), prefix, func(p string, d fs.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if e = ctx.Err(); e != nil {
-			return e
-		}
-		if d.Type().IsRegular() {
-			n++
-		}
-		return nil
-	})
-	if os.IsNotExist(err) {
+	if _, err = root.Lstat(prefix); os.IsNotExist(err) {
 		return 0, nil
 	}
-	if err != nil {
-		return 0, err
-	}
-	if err = root.RemoveAll(prefix); err != nil {
-		return 0, err
+	n := 0
+	if err = deleteTree(ctx, root, prefix, &n); err != nil {
+		return n, err
 	}
 	prune(root, path.Dir(prefix))
 	return n, nil
+}
+
+// deleteTree removes name, relative to dir, and everything below it,
+// post-order, so only the entries of the directories on the current path are
+// held in memory. Each directory is removed as soon as its children are gone.
+// It checks ctx before every entry and before every directory removal,
+// stopping with ctx.Err() and leaving the rest for a later call.
+//
+// Each directory is entered through its own *os.Root and its children are
+// removed relative to that handle, so swapping a directory for a symlink
+// mid-walk cannot redirect the removal to another part of the store.
+func deleteTree(ctx context.Context, dir *os.Root, name string, n *int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := dir.Lstat(name)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if err = deleteChildren(ctx, dir, name, info, n); err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+	}
+	if err = dir.Remove(name); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if info.Mode().IsRegular() {
+		*n++
+	}
+	return nil
+}
+
+// deleteBatch is how many directory entries deleteChildren reads at a time.
+var deleteBatch = 256
+
+// deleteChildren empties the directory name, which Lstat reported as want.
+// OpenRoot follows a symlink, so the opened directory must be the same file
+// Lstat saw, and name must still be that directory rather than a symlink to
+// it; otherwise name was replaced after Lstat and is left alone.
+func deleteChildren(ctx context.Context, parent *os.Root, name string, want fs.FileInfo, n *int) error {
+	sub, err := parent.OpenRoot(name)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sub.Close() }()
+	got, err := sub.Stat(".")
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(want, got) {
+		return fmt.Errorf("blobstore: %s changed during delete", name)
+	}
+	// A directory renamed elsewhere and replaced by a symlink to it passes
+	// the check above, so look at name itself again now that it is open.
+	now, err := parent.Lstat(name)
+	if err != nil || now.Mode()&fs.ModeSymlink != 0 || !os.SameFile(want, now) {
+		return fmt.Errorf("blobstore: %s changed during delete", name)
+	}
+	// Read the entries in batches, so a huge directory is not listed in full
+	// before ctx is checked again. As os.RemoveAll does, reopen the directory
+	// after each batch, because removing entries can make a continued read
+	// skip some, and read on past a batch in which nothing could be removed.
+	//
+	// Like RemoveAll, keep going past an entry that cannot be removed so it
+	// does not strand its siblings, and report the first error at the end.
+	// Cancellation still stops the walk at once.
+	var first error
+	for {
+		d, err := sub.Open(".")
+		if err != nil {
+			return err
+		}
+		var read int
+		for {
+			entries, err := d.ReadDir(deleteBatch)
+			if err != nil && !errors.Is(err, io.EOF) {
+				_ = d.Close()
+				return err
+			}
+			read = len(entries)
+			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+			failed := 0
+			for _, e := range entries {
+				err = deleteTree(ctx, sub, e.Name(), n)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					_ = d.Close()
+					return err
+				}
+				if err != nil {
+					failed++
+					if first == nil {
+						first = err
+					}
+				}
+			}
+			if read < deleteBatch || failed < read {
+				break
+			}
+		}
+		_ = d.Close()
+		if read < deleteBatch {
+			return first
+		}
+	}
 }
 func (f *Filesystem) List(ctx context.Context, prefix, cursor string, limit int) ([]ObjectInfo, string, error) {
 	if prefix != "" {

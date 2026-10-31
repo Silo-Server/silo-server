@@ -102,7 +102,7 @@ func TestCreateProfileWithSettingsSyncRecountsLimit(t *testing.T) {
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
 	err := handler.createProfileWithSettingsSync(context.Background(), store, 1,
-		userstore.Profile{ID: "profile-2", Name: "Late"}, 1, nil)
+		userstore.Profile{ID: "profile-2", Name: "Late"}, 1, nil, nil)
 	if !errors.Is(err, errProfileLimitReached) {
 		t.Fatalf("err = %v, want errProfileLimitReached", err)
 	}

@@ -46,7 +46,7 @@ func newAudiobookshelfListener(listen string, handler absMounter, artwork http.H
 		absRouter.Use(netaccess.Middleware(ingressTokens))
 	}
 	absRouter.Use(chimiddleware.Recoverer)
-	absRouter.Use(httpstream.CompressExcept(5, abs.SkipMediaCompression))
+	absRouter.Use(httpstream.CompressExcept(abs.SkipMediaCompression))
 	handler.Mount(absRouter)
 	if artwork != nil {
 		absRouter.Method(http.MethodGet, "/api/v2/artwork/*", artwork)

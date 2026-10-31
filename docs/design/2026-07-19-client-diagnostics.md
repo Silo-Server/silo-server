@@ -85,7 +85,7 @@ Today we are blind to client-side failures:
   beyond STATS on the clients are a separate product decision; v1 admin
   consumption is via API + web admin).
 - macOS. The Apple repo has a macOS target, but v1 scopes to
-  `android`, `android-tv`, `ios`, `tvos`; the platform enum reserves `macos`
+  `android`, `android-tv`, `ios`, `tvos`, `roku`; the platform enum reserves `macos`
   without accepting it.
 - Third-party telemetry, metrics aggregation, or fleet analytics. This is a
   support/debugging tool, not analytics.
@@ -239,7 +239,7 @@ additive fields.
     "capture_session_id": "run_c7d…",   // UUID per app run, also stamped on log lines
     "app_version": "1.4.2",
     "app_build": "20841",
-    "platform": "android-tv",     // android | android-tv | ios | tvos  (macos reserved)
+    "platform": "android-tv",     // android | android-tv | ios | tvos | roku  (macos reserved)
     "os_version": "11 (API 30)",
     "profile_id": "prof_…"        // capturing profile, attribution only
   },

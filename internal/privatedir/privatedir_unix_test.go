@@ -1,6 +1,6 @@
 //go:build unix
 
-package plugins
+package privatedir
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestEnsurePrivateCacheRootRefusesRootsOthersControl(t *testing.T) {
+func TestEnsureRefusesDirsOthersControl(t *testing.T) {
 	uid := os.Geteuid()
 	dirWithMode := func(mode os.FileMode) func(*testing.T, string) {
 		return func(t *testing.T, root string) {
@@ -50,19 +50,19 @@ func TestEnsurePrivateCacheRootRefusesRootsOthersControl(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), "silo-plugins")
+			root := filepath.Join(t.TempDir(), "silo-cache")
 			if tt.prepare != nil {
 				tt.prepare(t, root)
 			}
-			err := ensurePrivateCacheRoot(root, tt.uid)
+			_, err := ensure(root, tt.uid)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("ensurePrivateCacheRoot() error = %v, want it to contain %q", err, tt.wantErr)
+					t.Fatalf("ensure() error = %v, want it to contain %q", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ensurePrivateCacheRoot() error = %v", err)
+				t.Fatalf("ensure() error = %v", err)
 			}
 			if tt.prepare == nil {
 				info, err := os.Stat(root)

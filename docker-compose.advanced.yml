@@ -1,9 +1,16 @@
 # Silo, PostgreSQL, Redis, and optionally Meilisearch, each in a container of
-# its own: the layout docker-compose.yml ran before it moved to the omnibus
-# image. An install of that layout keeps running on it unchanged when its .env
-# selects this file:
+# its own: the layout docker-compose.yml ran before Silo moved to one
+# container, for installs that run or tune those services separately. An
+# install of that layout keeps running on it when its .env selects this file
+# (named docker-compose.split.yml in earlier builds):
 #
-#   COMPOSE_FILE=docker-compose.split.yml
+#   COMPOSE_FILE=docker-compose.advanced.yml
+#
+# Silo's Docker image bundles PostgreSQL and Redis, and leaves both off here
+# because DATABASE_URL and REDIS_URL name the services below. It runs Silo as
+# PUID:PGID rather than root, so that account needs read access to MEDIA_ROOT,
+# and it takes ownership of the plugins, artwork, compat, transcode, and
+# download directories on start.
 #
 # Hardware transcoding (VA-API or NVIDIA) is commented out in the silo service.
 # New installs should use docker-compose.yml. Moving an install of this layout
@@ -23,7 +30,7 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}/postgres:/var/lib/postgresql
-    command: ["postgres", "-c", "listen_addresses=*"]
+    command: ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=pg_stat_statements"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
       interval: 5s
@@ -89,6 +96,10 @@ services:
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
+      # The account that runs Silo and owns its directories. It needs read
+      # access to the media.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       # Master key for at-rest credential encryption. The server refuses to
       # start without it. Generate one with: openssl rand -base64 48
       # Back it up apart from your database dumps; without it, encrypted

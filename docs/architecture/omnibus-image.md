@@ -1,26 +1,40 @@
 # Omnibus image
 
-The omnibus image is the regular Silo image plus PostgreSQL, and optional Redis
-and Meilisearch, in one container supervised by
+The omnibus image is Silo's Docker image, published as
+`ghcr.io/silo-server/silo-server`: the base Silo image plus PostgreSQL, and
+optional Redis and Meilisearch, in one container supervised by
 [s6-overlay](https://github.com/just-containers/s6-overlay). It serves
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
 main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
 and `NODE_URL`. Hardware transcoding and node access are commented out in it.
-`docker-compose.split.yml` is the earlier multi-container file, kept for
-installs that stay on that layout; it runs the regular image.
+`docker-compose.advanced.yml` is the earlier multi-container file, kept for
+installs that stay on that layout; it runs the same image, whose bundled
+services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 
 ## Build
 
-The `omnibus` job in `.github/workflows/docker.yml` runs after the regular
-image's manifest list is pushed. It builds `omnibus/Dockerfile` with
-`SILO_IMAGE` set to that commit's regular image and publishes the regular tags
-with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`). In place
-of `latest` it moves `aio`; it takes over `latest` only once validated for
-every install, in a later change.
+The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
+from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
+names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
+set to that tag and publishes the result as `<full SHA>`, plus `build-N` and
+`latest` on the default branch or `apiv2` on the `apiv2` branch.
 
-Because the omnibus image starts from the regular one, both run the same Silo
+Builds from before this layout published the base image under those tags and
+the omnibus image under the same tags with `-aio` added, with `aio` in place of
+`latest`. Those tags still exist and `aio` no longer moves. Rolling back to
+such a build means pinning its `build-N-aio`: its `build-N` is the base image,
+which has no PostgreSQL or s6.
+
+The omnibus image is not a drop-in replacement for the base image, which an
+install that pulled `latest` before this layout ran. It runs Silo as `PUID` (911 unless set) instead of root, so media that only root could
+read becomes unreadable; re-owns the bind-mounted Silo, transcode, and download
+directories to that account on first start; needs root to start, so a
+container `user:` or a Kubernetes `runAsUser` stops it; refuses a proxy or
+transcode node without `NODE_URL`; and starts `/init` rather than `silo`.
+
+Because the omnibus image starts from the base one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
 it that way: a runtime dependency Silo needs belongs in the root `Dockerfile`,
 and `omnibus/Dockerfile` adds only the bundled services and s6. The base changes
@@ -133,7 +147,10 @@ the database role.
 PostgreSQL listens only on `/run/postgresql`. The `silo` role is the cluster's
 superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
-migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
+migrations create the `vector`, `pg_trgm`, and `citext` extensions.
+`00-omnibus.conf` preloads `pg_stat_statements`, as the shipped Compose files
+do, and a migration creates that extension only on a server that preloads it,
+so an external PostgreSQL without it is left alone. The cluster
 uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the earlier
 multi-container Compose stack. Each database records the C library collation version it was built
 under, and an index on text sorted under another version can miss rows. On
@@ -221,16 +238,18 @@ Before the omnibus image, `docker-compose.yml` ran PostgreSQL
 (`pgvector/pgvector:pg18`), Redis, and Meilisearch as services of their own,
 with data in `SILO_DATA_ROOT/postgres`, `redis`, and `meilisearch`, and Silo's
 state in `plugins`, `artwork`, and `compat`. That file is now
-`docker-compose.split.yml`, and an install of that layout keeps it by
-selecting it in `COMPOSE_FILE`.
+`docker-compose.advanced.yml` (briefly `docker-compose.split.yml`), and an
+install of that layout keeps it by selecting it in `COMPOSE_FILE`. A
+`COMPOSE_FILE` that still names `docker-compose.split.yml` fails until it names
+the new file.
 
 `docker-compose.yml` is an example of a new install and does not look for an
 earlier one. Started on its `SILO_DATA_ROOT`, it replaces the earlier `silo`
 container and creates a new, empty bundled database, with first-run setup open
 on the published ports. The earlier `postgres`, `redis`, and `meilisearch`
 containers keep running as orphans of the Compose project, their data
-untouched; selecting `docker-compose.split.yml` and running `docker compose up
--d` again brings the install back.
+untouched; selecting `docker-compose.advanced.yml` and running
+`docker compose up -d` again brings the install back.
 
 Moving an install into the single container is a separate step that an
 administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
@@ -238,7 +257,7 @@ earlier stack stopped. With `.env` still holding the earlier stack's
 settings, and `COMPOSE_FILE` removed from it once the stack is down:
 
 ```sh
-docker compose -f docker-compose.split.yml down
+docker compose -f docker-compose.advanced.yml down
 docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
   --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
 docker compose up -d
@@ -279,7 +298,7 @@ here. It refuses, before anything is moved into place, when:
   or other paths, which have to move there first.
 - A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
-  `aio` past the pin.
+  `latest` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
   the earlier stack's cluster or Silo directories are here: Silo created that
   database first, most likely when `docker-compose.yml` started before the move.
@@ -350,7 +369,7 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- Going back to `docker-compose.split.yml` after a move leaves the copy
+- Going back to `docker-compose.advanced.yml` after a move leaves the copy
   stale. Before using `docker-compose.yml` again, move `config` aside and run
   the move again; a run on the stale copy refuses (the done marker above).
 - Silo directories that `init-config` made, empty, before the move are

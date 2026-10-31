@@ -113,8 +113,8 @@ func (s *TranscodeSession) liveGenerationPlaylist() ([]byte, bool) {
 	s.mu.Lock()
 	inherited := s.inheritedManifest
 	s.mu.Unlock()
-	data, info, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"))
-	if err != nil || inherited != nil && sameManifestFile(info, inherited) {
+	data, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"), inherited)
+	if err != nil {
 		return nil, false
 	}
 	return data, true

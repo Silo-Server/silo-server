@@ -59,7 +59,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		MaxAge:           86400,
 	}))
 	r.Use(normalizeCompatPathMiddleware)
-	r.Use(httpstream.CompressExcept(5, skipCompatMediaCompression, "application/json"))
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
 	if debugPath := os.Getenv("JELLYCOMPAT_DEBUG_LOG"); debugPath != "" {
 		rotator := &lumberjack.Logger{
 			Filename:   debugPath,

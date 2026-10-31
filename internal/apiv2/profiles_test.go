@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestUpdateProfileOmittedVersusNull(t *testing.T) {
@@ -163,7 +164,7 @@ func TestUpdateProfileDecisions(t *testing.T) {
 	// login session, no profile token), so the v2 verifier refuses it too.
 	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
-	if err := profiles.last.VerifyProfile("p-primary-locked"); !errors.Is(err, access.ErrProfileUnverified) {
+	if err := profiles.last.VerifyProfile(&userstore.Profile{ID: "p-primary-locked"}); !errors.Is(err, access.ErrProfileUnverified) {
 		t.Fatalf("api key stood in for the PIN: %v", err)
 	}
 	// The same API key on an unlocked primary needs no PIN and manages the
@@ -171,14 +172,14 @@ func TestUpdateProfileDecisions(t *testing.T) {
 	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary")); rec.Code != 200 {
 		t.Fatalf("api key on unlocked primary: %d %s", rec.Code, rec.Body.String())
 	}
-	if err := profiles.last.VerifyProfile("p-primary"); err != nil {
+	if err := profiles.last.VerifyProfile(&userstore.Profile{ID: "p-primary"}); err != nil {
 		t.Fatalf("unlocked primary rejected: %v", err)
 	}
 	// A login session that presented the profile token is verified.
 	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 200 {
 		t.Fatalf("session with token: %d %s", rec.Code, rec.Body.String())
 	}
-	if err := profiles.last.VerifyProfile("p-primary-locked"); err != nil {
+	if err := profiles.last.VerifyProfile(&userstore.Profile{ID: "p-primary-locked"}); err != nil {
 		t.Fatalf("token-verified primary rejected: %v", err)
 	}
 }
@@ -214,7 +215,7 @@ func TestDeleteProfile(t *testing.T) {
 	if cmd == nil || cmd.UserID != 1 || cmd.ProfileID != "p-owner" || cmd.ActiveProfileID != "p-owner" {
 		t.Fatalf("command = %+v", cmd)
 	}
-	if err := cmd.VerifyProfile("p-owner"); err != nil {
+	if err := cmd.VerifyProfile(&userstore.Profile{ID: "p-owner"}); err != nil {
 		t.Fatalf("verified profile rejected: %v", err)
 	}
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-primary", "", auth), TypeConflict)

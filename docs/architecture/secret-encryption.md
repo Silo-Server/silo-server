@@ -107,9 +107,10 @@ example:
 - Decrypt the sensitive `server_settings` back to plaintext (run a one-off that
   reads each via the encrypting repo and writes the plaintext via the raw repo),
   **or**
-- At minimum, clear `auth.jwt_secret` so the older binary regenerates a fresh
-  plaintext one (this still logs everyone out), and re-enter any integration
-  credentials as plaintext.
+- At minimum, clear the `auth.jwt_secret` and `audiobooks.abs.jwt_secret` rows
+  in `server_settings` (the admin settings API refuses these keys) so the older
+  binary regenerates fresh plaintext keys. This logs everyone out and invalidates
+  existing ABS tokens. Re-enter any integration credentials as plaintext.
 
 There is no automatic "decrypt everything" downgrade path in this release; plan
 downgrades accordingly.

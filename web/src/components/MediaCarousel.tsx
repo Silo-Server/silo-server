@@ -65,6 +65,11 @@ interface MediaCarouselProps {
    */
   compact?: boolean;
   windowing?: MediaCarouselWindowing;
+  /**
+   * Called when the last slide comes within one viewport width of view, for a
+   * row that loads more of itself; it may fire again as the row scrolls.
+   */
+  onNearEnd?: () => void;
 }
 
 /**
@@ -91,11 +96,13 @@ const CarouselSlideList = memo(function CarouselSlideList({
   className,
   windowInitialCount,
   windowPlaceholderClassName,
+  onNearEnd,
 }: {
   slides: CarouselSlide[];
   className: string;
   windowInitialCount?: number;
   windowPlaceholderClassName?: string;
+  onNearEnd?: () => void;
 }) {
   const windowed = windowInitialCount !== undefined && windowPlaceholderClassName !== undefined;
   const [mountedCount, setMountedCount] = useState(() =>
@@ -153,6 +160,24 @@ const CarouselSlideList = memo(function CarouselSlideList({
     };
   }, [filling, total]);
 
+  useEffect(() => {
+    const list = listRef.current;
+    const viewport = list?.parentElement;
+    const last = list?.lastElementChild;
+    if (!onNearEnd || !viewport || !last || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onNearEnd();
+      },
+      // A whole row ahead: the rest of the row is a network read.
+      { root: viewport, rootMargin: "0px 100%" },
+    );
+    observer.observe(last);
+    return () => observer.disconnect();
+    // slides, not only total: a row reread at the same size (a cancelled
+    // completion) re-arms the observer, which reports again if still near.
+  }, [onNearEnd, slides]);
+
   return (
     <ul ref={listRef} role="list" className={className}>
       {slides.map((slide, index) =>
@@ -188,6 +213,7 @@ export default function MediaCarousel({
   edgePadding = true,
   compact = false,
   windowing,
+  onNearEnd,
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
@@ -302,6 +328,7 @@ export default function MediaCarousel({
             className={listClassName}
             windowInitialCount={windowing?.initialCount}
             windowPlaceholderClassName={windowing?.placeholderClassName}
+            onNearEnd={onNearEnd}
           />
         </div>
 

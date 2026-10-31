@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -76,6 +77,66 @@ func generateAPIKey() (string, error) {
 // owning user); callers should validate scopes with NormalizeAPIKeyScopes
 // first.
 func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
+	return insertAPIKey(ctx, r.pool, userID, label, scopes)
+}
+
+// CreateAsActor is Create for a key that actorID mints on account userID,
+// refused when CheckOwnerTarget refuses actorID acting on that account. Both
+// accounts stay share-locked, in id order as ownership transfers lock them,
+// until the key is inserted: a promotion or transfer that commits first is
+// what the check sees, and a later promotion of the account, or transfer of
+// ownership to it, deletes the key with the account's other keys. An unknown account passes the check and fails the
+// insert, as it does with Create.
+func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID int, label string, scopes []string) (*models.APIKey, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning api key creation: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	rows, err := tx.Query(ctx, `SELECT id, role, is_owner FROM users
+		WHERE id = ANY($1) ORDER BY id FOR SHARE`, []int{actorID, userID})
+	if err != nil {
+		return nil, fmt.Errorf("locking api key accounts: %w", err)
+	}
+	actor := OwnerActor{ID: actorID}
+	var target *models.User
+	for rows.Next() {
+		var user models.User
+		if err := rows.Scan(&user.ID, &user.Role, &user.IsOwner); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scanning api key account: %w", err)
+		}
+		if user.ID == actorID {
+			actor.IsOwner = user.IsOwner
+		}
+		if user.ID == userID {
+			target = &user
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("locking api key accounts: %w", err)
+	}
+	if err := CheckOwnerTarget(actor, target); err != nil {
+		return nil, err
+	}
+	created, err := insertAPIKey(ctx, tx, userID, label, scopes)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing api key creation: %w", err)
+	}
+	return created, nil
+}
+
+func insertAPIKey(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, userID int, label string, scopes []string) (*models.APIKey, error) {
 	key, err := generateAPIKey()
 	if err != nil {
 		return nil, err
@@ -88,7 +149,7 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING ` + apiKeyColumns
 
-	row := r.pool.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes)
+	row := db.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes)
 	created, err := scanAPIKey(row)
 	if err != nil {
 		return nil, err

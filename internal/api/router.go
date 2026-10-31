@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/apiusage"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -231,9 +232,11 @@ type Dependencies struct {
 	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
+	APIUsage                  *apiusage.Store // per-session API request summaries (nil without a database)
 	OpsLogRepo                *opslog.Repo
 	FFmpegLogSink             playback.FFmpegLogSink
 	RedisClient               *redis.Client              // for session listing (may be nil)
+	DownloadBandwidthRedis    *redis.Client              // deadline-enabled client for shared download budgets (may be nil)
 	TaskManager               *taskmanager.TaskManager   // task manager (may be nil)
 	ArtifactManager           *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry    *adminjob.CancelRegistry
@@ -660,6 +663,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			deps.UserStoreProvider,
 		)
+		authService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
 		}
@@ -2282,6 +2286,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.Config.Download.ServerBandwidthBPS,
 			deps.Config.Download.UserBandwidthBPS,
 		)
+		downloadBandwidth.SetSharedBudget(deps.DownloadBandwidthRedis, downloads.BandwidthRates(deps.DB))
 		downloadLimiter := downloads.NewQuantityLimiter(
 			downloadRepo,
 			deps.Config.Download.MaxConcurrentPerUser,
@@ -2910,6 +2915,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	})
 	v2deps.AdminTelemetryParity = &handlers.StreamTelemetryParityHandler{Registry: deps.StreamTelemetry, ViewCache: deps.StreamTelemetryViewCache, Pool: deps.DB, Redis: deps.RedisClient}
 	v2deps.AdminFilesystem = handlers.NewFilesystemHandler()
+	if deps.APIUsage != nil {
+		v2deps.AdminAPIClients = deps.APIUsage
+	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler
@@ -4888,7 +4896,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	// media routes unwrapped so their io.ReaderFrom/sendfile path survives,
 	// and serving validator-bearing v2 responses identity-encoded so a strong
 	// ETag names exactly one representation (apiv2.IdentityEncoded).
-	r.Use(httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded))
+	r.Use(httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded))
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {

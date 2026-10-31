@@ -2888,7 +2888,7 @@ export type DiagnosticReportType =
   | "hang"
   | "abnormal_exit"
   | "manual";
-export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos";
+export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos" | "roku";
 
 export interface ClientDiagnosticManifest {
   schema_version: number;
@@ -4554,6 +4554,22 @@ export interface LibraryLayoutResponse {
 
 export interface HomeSectionItemsResponse {
   section: ResolvedSection;
+  /**
+   * The row was read with an item_limit and the server reported it holds
+   * more cards than `section.items` (has_more; see homeRowLimit).
+   */
+  partial?: boolean;
+  /**
+   * The row was completed after showing this many of its first cards (see
+   * homeRowLimit's completeHomeRow).
+   */
+  shown?: number;
+  /**
+   * When the row was completed, in epoch milliseconds. Home restores its
+   * cached rows' duplicate-filter order by it, since a cache edit rewrites
+   * every row's updated time.
+   */
+  shownAt?: number;
 }
 
 export interface CollectionSectionConfig {
@@ -4870,6 +4886,8 @@ export interface RateLimitConfig {
   ip_requests_per_minute: number;
   ip_burst: number;
   auth_endpoints: Record<string, RateLimitAuthEndpointConfig>;
+  /** Hourly token bucket per sign-in session; absent from servers that predate it. */
+  session_quota?: RateLimitSessionQuota;
   /** Whether a limiter is running in this process (GET responses only). */
   active?: boolean;
   /** Backend the running limiter uses; may differ from `backend` until restart. */
@@ -4881,6 +4899,8 @@ export interface RateLimitConfig {
    */
   redis_available?: boolean;
 }
+
+export type RateLimitSessionQuota = V2Components["schemas"]["AdminRateLimitSessionQuota"];
 
 export interface RateLimitUpdateResponse {
   status: string;

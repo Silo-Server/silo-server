@@ -28,6 +28,10 @@ func (s *fakeAPIKeyStore) Create(_ context.Context, userID int, label string, sc
 	return &models.APIKey{ID: 1, UserID: userID, Label: label, Key: "sa_generated", RateTier: "standard", Scopes: scopes}, nil
 }
 
+func (s *fakeAPIKeyStore) CreateAsActor(ctx context.Context, _, userID int, label string, scopes []string) (*models.APIKey, error) {
+	return s.Create(ctx, userID, label, scopes)
+}
+
 func (s *fakeAPIKeyStore) ListByUser(context.Context, int) ([]*models.APIKeyMetadataWithUsage, error) {
 	return nil, nil
 }

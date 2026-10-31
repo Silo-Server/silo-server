@@ -29,9 +29,10 @@ type SectionViewer struct {
 	// native v2 API carries them.
 	ImageWidths imagesize.Widths
 	// ItemLimitCap lowers every row's item limit to at most this many items
-	// on the aggregate section reads (HomeSections, LibrarySections). Zero
-	// leaves each row at its own limit; only the native v2 API sets it, at
-	// most MaxSectionItemLimitCap.
+	// on the aggregate section reads (HomeSections, LibrarySections) and on
+	// the Home row reads (HomeSectionItems, HomeLayoutWithItems' included
+	// rows). Zero leaves each row at its own limit; only the native v2 API
+	// sets it, at most MaxSectionItemLimitCap.
 	ItemLimitCap int
 }
 
@@ -40,8 +41,8 @@ func (v SectionViewer) Artwork() imagesize.Request {
 	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
-// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 aggregate
-// section reads accept, advertised by getHomeCapabilities.
+// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 section reads
+// accept, advertised by getHomeCapabilities.
 const MaxSectionItemLimitCap = 100
 
 // capSectionItemLimits returns resolved with each row's effective item limit
@@ -55,11 +56,17 @@ func capSectionItemLimits(resolved []sections.ResolvedSection, limit int) []sect
 	}
 	out := slices.Clone(resolved)
 	for i := range out {
-		if effectiveHomeItemLimit(out[i].ItemLimit) > limit {
-			out[i].ItemLimit = limit
-		}
+		out[i] = capSectionItemLimit(out[i], limit)
 	}
 	return out
+}
+
+// capSectionItemLimit is capSectionItemLimits for one row.
+func capSectionItemLimit(s sections.ResolvedSection, limit int) sections.ResolvedSection {
+	if limit > 0 && effectiveHomeItemLimit(s.ItemLimit) > limit {
+		s.ItemLimit = limit
+	}
+	return s
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {

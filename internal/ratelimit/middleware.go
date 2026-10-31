@@ -8,11 +8,15 @@ import (
 	"math"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -25,15 +29,27 @@ type Middleware struct {
 	cfg      Config
 	perKey   RateLimiter
 	global   RateLimiter
+	quota    QuotaLimiter
 	store    SettingsStore
 	isMemory bool
+	// overQuotaLogged holds, per session, when the session quota last logged
+	// it, so a session over the quota logs once per overQuotaLogEvery.
+	overQuotaLogged sync.Map
 }
 
-// NewMiddleware creates the rate limit middleware.
+// NewMiddleware creates the rate limit middleware. Session quotas share the
+// per-key limiter's backend: Redis when it counts in Redis, else this process.
 func NewMiddleware(perKey RateLimiter, global RateLimiter, store SettingsStore, isMemory bool) *Middleware {
+	var quota QuotaLimiter
+	if rl, ok := perKey.(*RedisLimiter); ok {
+		quota = NewRedisQuotaLimiter(rl)
+	} else {
+		quota = NewMemoryQuotaLimiter()
+	}
 	return &Middleware{
 		perKey:   perKey,
 		global:   global,
+		quota:    quota,
 		store:    store,
 		isMemory: isMemory,
 	}
@@ -74,7 +90,10 @@ func (mw *Middleware) Init(ctx context.Context) error {
 	return mw.Reload(ctx)
 }
 
-// Reload re-reads config from server_settings and clears in-memory state.
+// Reload re-reads config from server_settings and clears the in-memory
+// per-second and per-minute state. Session quota buckets are kept: they read
+// their size and rate on every take, and clearing them on each settings change
+// would hand every session a fresh hour.
 func (mw *Middleware) Reload(ctx context.Context) error {
 	mw.reloadMu.Lock()
 	defer mw.reloadMu.Unlock()
@@ -187,6 +206,9 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 		}
 
 		if !mw.allowAccount(w, r, cfg, reject) {
+			return
+		}
+		if !mw.allowSession(w, r, cfg.Session, reject) {
 			return
 		}
 
@@ -340,6 +362,80 @@ func (mw *Middleware) allowAccount(w http.ResponseWriter, r *http.Request, cfg C
 		writeRateLimitResponse(w, result, reject)
 	}
 	return result.Allowed
+}
+
+// overQuotaLogEvery is how often a session over its quota is logged again.
+const overQuotaLogEvery = 10 * time.Minute
+
+// allowSession spends one request from the caller's sign-in session quota.
+// It counts what a client asks of the API, not what it plays or downloads:
+// playback and media transfer routes, API keys (which have their own tiers),
+// admins and impersonating admins are not counted. In log mode a session over the quota
+// is logged and served; in enforce mode it is refused.
+func (mw *Middleware) allowSession(w http.ResponseWriter, r *http.Request, q SessionQuotaConfig, reject RejectBodyWriter) bool {
+	if q.Mode != SessionQuotaLog && q.Mode != SessionQuotaEnforce {
+		return true
+	}
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.SessionID == "" || claims.TokenType != auth.TokenTypeAccess ||
+		claims.Role == models.RoleAdmin || claims.ImpersonatorUserID != nil || IsQuotaExemptPath(r.URL.Path) {
+		return true
+	}
+	result := mw.quota.Take(r.Context(), "session:"+claims.SessionID, q)
+	if result.Allowed {
+		return true
+	}
+	mw.logOverQuota(r, claims, q)
+	if q.Mode != SessionQuotaEnforce {
+		return true
+	}
+	writeRateLimitResponse(w, result, reject)
+	return false
+}
+
+func (mw *Middleware) logOverQuota(r *http.Request, claims *auth.Claims, q SessionQuotaConfig) {
+	now := time.Now()
+	if last, ok := mw.overQuotaLogged.Load(claims.SessionID); ok && now.Sub(last.(time.Time)) < overQuotaLogEvery { //nolint:errcheck,forcetypeassert // overQuotaLogged stores only time.Time
+		return
+	}
+	mw.overQuotaLogged.Store(claims.SessionID, now)
+	// Entries are dropped lazily: a session that stays over the quota keeps
+	// one, and the rest age out on the next log.
+	mw.overQuotaLogged.Range(func(key, value any) bool {
+		if now.Sub(value.(time.Time)) >= overQuotaLogEvery { //nolint:errcheck,forcetypeassert // overQuotaLogged stores only time.Time
+			mw.overQuotaLogged.Delete(key)
+		}
+		return true
+	})
+	slog.WarnContext(r.Context(), "sign-in session over its hourly request quota",
+		"component", "ratelimit", "mode", q.Mode, "user_id", claims.UserID, "session_id", claims.SessionID,
+		"requests_per_hour", q.RequestsPerHour, "burst", q.Burst, "user_agent", r.UserAgent(), "path", r.URL.Path)
+}
+
+// QuotaExemptPathPattern matches the routes session quotas do not count:
+// everything under /stream and /playback, so a player keeps reporting
+// progress, replanning and stopping after its session runs out, and the
+// other native media transfer routes (internal/api's nativeMediaRoutes):
+// downloads, direct downloads, theme audio and ebook reads. Playback is
+// bounded by stream limits instead. Signing out (the provider sign-out lookup
+// and the logout) is not counted either, so a session that spent its quota
+// can still end itself. The pattern uses only syntax Go and PostgreSQL read
+// alike, so the API usage summary leaves out the same requests in SQL.
+const QuotaExemptPathPattern = `^/api/v[12]/(stream|playback)(/|$)` +
+	`|^/api/v[12]/auth/(provider-)?logout$` +
+	`|^/api/v[12]/direct-download(-proxy)?$` +
+	`|^/api/v[12]/downloads/[^/]+/(file|file-proxy)$` +
+	`|^/api/v[12]/downloads/[^/]+/subtitles/` +
+	`|^/api/v2/catalog/items/[^/]+/themes/[^/]+/audio$` +
+	`|^/api/v1/ebooks/[^/]+/files/[^/]+/read$`
+
+var quotaExemptPath = regexp.MustCompile(QuotaExemptPathPattern)
+
+// IsQuotaExemptPath reports whether session quotas leave path uncounted.
+func IsQuotaExemptPath(path string) bool {
+	// Every exempt route is under the native API; the prefix check keeps the
+	// regexp off the other listeners' requests.
+	return strings.HasPrefix(path, "/api/v") && quotaExemptPath.MatchString(path)
 }
 
 // authPeerBudgetMultiplier sizes the budget that every forwarded client behind
