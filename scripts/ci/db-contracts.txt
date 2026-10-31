@@ -94,6 +94,7 @@
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
+./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
@@ -122,6 +123,9 @@
 ./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
 ./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
 ./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
+
+# Minting a key for another account holds the Owner rules against a concurrent promotion.
+./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -673,3 +677,6 @@
 
 # API usage summaries behind the admin API clients card.
 ./internal/apiusage TestAPIUsageSummaryDB
+
+# Household PIN proof must still match when the protected write transaction starts.
+./internal/userstore/pgstore TestPostgresProfilePINRevisionTransactions

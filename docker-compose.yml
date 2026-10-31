@@ -1,4 +1,4 @@
-# Silo in one container. The omnibus image runs Silo with a bundled
+# Silo in one container. Silo's Docker image runs Silo with a bundled
 # PostgreSQL and Redis, and starts the bundled Meilisearch when
 # ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
 # docs/architecture/omnibus-image.md describes the image.
@@ -10,7 +10,8 @@
 # section of .env.example.
 #
 # This file is an example of a new install. An existing install keeps its own
-# Compose file; docker-compose.split.yml is the earlier multi-container layout.
+# Compose file; docker-compose.advanced.yml runs PostgreSQL and Redis in
+# containers of their own, the layout this file used before.
 # This file does not look for an earlier install: started on one's
 # SILO_DATA_ROOT, Silo comes up on a new, empty database with first-run setup
 # open on the published ports. Moving an earlier install into this layout is a
@@ -19,7 +20,7 @@
 
 services:
   silo:
-    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests, and PostgreSQL shuts
