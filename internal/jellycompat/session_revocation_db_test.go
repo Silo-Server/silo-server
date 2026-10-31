@@ -160,7 +160,7 @@ func TestDeletedProfileCompatSessionsEndPostgres(t *testing.T) {
 // that read the profile list before the profile was deleted, and stores its
 // session after the delete purged the profile's sessions, is refused and
 // keeps no session. If dropping that session fails, the sign-in fails as a
-// server error whose message carries no storage detail.
+// server error whose message carries no storage detail; the drop is bounded.
 func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
 	pool, suffix := jellyfin12CompatPool(t)
 	ctx := context.Background()
@@ -201,8 +201,9 @@ func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
 				}
 			}
 			var repo sessionPersistence = NewSessionRepository(pool, cipher)
+			var deleteHadDeadline bool
 			if tc.deleteErr != nil {
-				repo = failingDelete{sessionPersistence: repo, err: tc.deleteErr}
+				repo = failingDelete{sessionPersistence: repo, err: tc.deleteErr, hadDeadline: &deleteHadDeadline}
 			}
 			resolver := NewLoginResolver(svc, deleteAfterListing{UserStoreProvider: stores, profileID: kid},
 				NewPersistentSessionStore(time.Hour, nil, repo), nil, nil)
@@ -224,6 +225,9 @@ func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
 			if !errors.Is(err, tc.deleteErr) || errors.Is(err, ErrProfileNotFound) {
 				t.Fatalf("sign-in whose session drop failed = %v, want the drop error and not ErrProfileNotFound", err)
 			}
+			if !deleteHadDeadline {
+				t.Fatal("the session drop ran without a deadline")
+			}
 			status, _, message := mapLoginError(err)
 			if status != http.StatusInternalServerError || strings.Contains(message, "10.0.0.5") {
 				t.Fatalf("response = %d %q, want 500 without the storage error", status, message)
@@ -232,13 +236,18 @@ func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
 	}
 }
 
-// failingDelete fails every session delete with err.
+// failingDelete fails every session delete with err, after recording
+// whether the delete had a deadline.
 type failingDelete struct {
 	sessionPersistence
-	err error
+	err         error
+	hadDeadline *bool
 }
 
-func (f failingDelete) DeleteByToken(context.Context, string) error { return f.err }
+func (f failingDelete) DeleteByToken(ctx context.Context, _ string) error {
+	_, *f.hadDeadline = ctx.Deadline()
+	return f.err
+}
 
 // deleteAfterListing deletes a profile right after a sign-in lists the
 // account's profiles, as a delete landing mid sign-in would.

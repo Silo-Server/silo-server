@@ -173,17 +173,26 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	// purged, so re-read it and drop the session just written.
 	current, err := store.GetProfile(ctx, profile.ID)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("re-reading profile: %w", err), r.sessions.Delete(session.Token))
+		return nil, errors.Join(fmt.Errorf("re-reading profile: %w", err), r.dropSession(ctx, session.Token))
 	}
 	if current == nil {
 		// A failed delete may leave the session behind, so it is not reported
 		// as a plain refusal, and its storage error stays off the response.
-		if err := r.sessions.Delete(session.Token); err != nil {
+		if err := r.dropSession(ctx, session.Token); err != nil {
 			return nil, fmt.Errorf("dropping the session of a deleted profile: %w", err)
 		}
 		return nil, ErrProfileNotFound
 	}
 	return &session, nil
+}
+
+// dropSession deletes a session the sign-in has just written. The delete
+// outlives a canceled request but is bounded, so a busy store cannot hold the
+// sign-in up.
+func (r *LoginResolver) dropSession(ctx context.Context, token string) error {
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signedOutDeleteTimeout)
+	defer cancel()
+	return r.sessions.delete(deleteCtx, token)
 }
 
 // ResolveQuickConnect exchanges an approved Quick Connect secret for a compat
