@@ -265,7 +265,8 @@ type PlaybackHandler struct {
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map
-	SubtitleRepo           subtitles.Repository // optional; enables downloaded subtitles in playback
+	SubtitleRepo           subtitles.Repository          // optional; enables downloaded subtitles in playback
+	SubtitleTrackFacts     playback.SubtitleTrackFactsV3 // optional; what reading embedded tracks taught the server, for native_embedded limitations
 	RealtimeHub            *playback.RealtimeHub
 	CommandTracker         *playback.CommandTracker
 	CommandDispatcher      *playback.CommandDispatcher

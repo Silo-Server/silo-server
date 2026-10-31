@@ -27812,6 +27812,8 @@ export interface components {
       codecs: string[];
       container: string;
       font_attachments: boolean;
+      /** @description Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection. */
+      limitations?: string[];
       track_identity: string;
     };
     NavigationShortcutMutation: {
@@ -32721,6 +32723,8 @@ export interface components {
       codec?: string;
       /** Format: int64 */
       combined_index: number;
+      /** @description Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown */
+      container_track_id?: string;
       default: boolean;
       delivery: string;
       /** Format: uri-reference */
@@ -32730,7 +32734,14 @@ export interface components {
       label?: string;
       /** @description Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value */
       language?: string;
+      /** @description Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none. */
+      native_selectable?: boolean;
       source: string;
+      /**
+       * Format: int64
+       * @description Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index
+       */
+      stream_index?: number;
       sync_key?: string;
       track_id: string;
       /** Format: uri-reference */

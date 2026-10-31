@@ -82,6 +82,15 @@ type SubtitleInventoryItemV3 struct {
 	// external and downloaded tracks whose timing can be corrected (SRT,
 	// WebVTT, ASS, SSA); stable across sessions and inventory reordering.
 	SyncKey string `json:"sync_key,omitempty"`
+	// StreamIndex and ContainerTrackID name an embedded track in the source
+	// itself, in the namespaces plan.subtitle.embedded uses, so a client can
+	// find the row's track in the stream it plays without counting tracks.
+	StreamIndex      *int   `json:"stream_index,omitempty" doc:"Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty" doc:"Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown"`
+	// NativeSelectable marks an embedded track the client may switch to on
+	// the stream it already plays: selecting it under this plan's
+	// capabilities, delivery and audio yields subtitle.embedded.
+	NativeSelectable bool `json:"native_selectable,omitempty" doc:"Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none."`
 	// downloadedSubtitleID is deliberately not serialized: clients address the
 	// opaque session URL, while the server uses the row ID to make that URL
 	// stable across inventory reordering and seek reanchors.
@@ -129,9 +138,14 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 		items = append(items, item)
 	}
 	for _, track := range file.SubtitleTracks {
-		items = append(items, subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceEmbeddedV3, track.Codec,
+		item := subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceEmbeddedV3, track.Codec,
 			track.Language, firstNonEmptySubtitleLabelV3(track.Title, track.EmbeddedTitle, track.Language),
-			track.Forced, track.Default, track.HearingImpaired))
+			track.Forced, track.Default, track.HearingImpaired)
+		if track.Index >= 0 {
+			item.StreamIndex = new(track.Index)
+		}
+		item.ContainerTrackID = track.ContainerTrackID
+		items = append(items, item)
 	}
 	for _, entry := range additional {
 		source := entry.Source
