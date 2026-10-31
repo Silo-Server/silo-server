@@ -226,7 +226,8 @@ Every Silo server is independent; there is no Silo-run service between them.
   collision or a wrong-server lookup is visible before anyone approves.
 - Links into the phone apps carry `server_id` so the app can find the saved
   server by identity rather than by URL. The web approval page (`/activate`)
-  offers "Open in the Silo app" on phones while signed out, linking to
+  offers an "Open in the <server name> app" button on phones while signed out,
+  naming the app after `branding.server_name`, linking to
   `silo://device?server=<server_id>&url=<origin>&code=<code>`: `server` is
   `getDeviceLogin`'s `server_id` (left out when absent), `url` the page's
   origin, for adding the server when it isn't saved, and `code` the user code

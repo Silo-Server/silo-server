@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { buildWatchPartyDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useBranding } from "@/hooks/useBranding";
 
 /**
  * Landing page for shared Watch Party invitations (`/rooms/join?token=`).
@@ -42,6 +43,7 @@ function hasWatchPartyApp(): boolean {
 }
 
 function AppHandoff({ appLink, hubHref }: { appLink: string; hubHref: string }) {
+  const { serverName } = useBranding();
   useDocumentTitle("Watch Party invitation");
   return (
     <div className="auth-shell">
@@ -52,13 +54,13 @@ function AppHandoff({ appLink, hubHref }: { appLink: string; hubHref: string }) 
             Join the Watch Party
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            Open this invitation in the Silo app, or continue in the browser.
+            Open this invitation in the {serverName} app, or continue in the browser.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
             <a href={appLink}>
-              <Smartphone className="mr-2 h-5 w-5" /> Open in the Silo app
+              <Smartphone className="mr-2 h-5 w-5" /> Open in the {serverName} app
             </a>
           </Button>
           <p className="text-muted-foreground text-center text-xs">

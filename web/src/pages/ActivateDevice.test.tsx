@@ -265,19 +265,19 @@ it("asks a signed-out approver to sign in and keeps the code", async () => {
   lookups = [{ ...pending, server_id: "3f2a9d5e-6b1c" }];
   mount("/activate?code=48217730");
   const link = await screen.findByRole("link", { name: "Sign in to approve" });
-  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Open in the Media Room app" })).toBeNull();
   expect(link.getAttribute("href")).toBe("/login?redirect=%2Factivate%3Fcode%3D48217730");
   expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
 });
 
-it("offers a phone the Silo app for a signed-out approval", async () => {
+it("offers a phone the app for a signed-out approval", async () => {
   auth.user = null;
   lookups = [{ ...pending, server_id: "3f2a9d5e-6b1c" }];
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
   );
   mount("/activate?code=48217730");
-  const app = await screen.findByRole("link", { name: "Open in the Silo app" });
+  const app = await screen.findByRole("link", { name: "Open in the Media Room app" });
   expect(app.getAttribute("href")).toBe(
     `silo://device?server=3f2a9d5e-6b1c&url=${encodeURIComponent(window.location.origin)}&code=48217730`,
   );
@@ -534,7 +534,7 @@ it("sends a remote-playback request back to the app and can decline it", async (
   mount("/activate?code=48217730");
   await screen.findByText("Play on Living room TV?");
   expect(
-    screen.getByText(/This request comes from the Silo app that sent playback to this TV/),
+    screen.getByText(/This request comes from the Media Room app that sent playback to this TV/),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
   expect(screen.queryByText(/Anyone using this TV can pick from your profiles/)).toBeNull();
@@ -553,7 +553,7 @@ it("follows a pending remote-playback request until the app approves it", async 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
   });
-  await screen.findByText("This request was approved in the Silo app.");
+  await screen.findByText("This request was approved in the Media Room app.");
   expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
 });
 
@@ -579,7 +579,7 @@ it("keeps a decline when a slower watch lookup answers after it", async () => {
   await screen.findByText("This request was declined.");
   await act(async () => answerWatch());
   expect(screen.getByText("This request was declined.")).toBeTruthy();
-  expect(screen.queryByText("This request was approved in the Silo app.")).toBeNull();
+  expect(screen.queryByText("This request was approved in the Media Room app.")).toBeNull();
 });
 
 it("doesn't send a phone to sign in, here or in the app, for a remote-playback request", async () => {
@@ -591,7 +591,7 @@ it("doesn't send a phone to sign in, here or in the app, for a remote-playback r
   );
   mount("/activate?code=48217730");
   await screen.findByText("Play on Living room TV?");
-  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Open in the Media Room app" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
 });
@@ -601,7 +601,7 @@ it.each(["approved", "consumed"])(
   async (status) => {
     lookups = [{ ...remotePlayback, status }];
     mount("/activate?code=48217730");
-    await screen.findByText("This request was approved in the Silo app.");
+    await screen.findByText("This request was approved in the Media Room app.");
     expect(screen.queryByText(/signed in|finishing sign-in/)).toBeNull();
   },
 );

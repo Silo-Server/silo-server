@@ -303,7 +303,7 @@ function ActivateDeviceRequest() {
   switch (details?.status) {
     case "approved":
       if (remotePlayback) {
-        resultMessage = "This request was approved in the Silo app.";
+        resultMessage = `This request was approved in the ${serverName} app.`;
       } else if (isQuickConnect) {
         resultMessage = approvedProfile
           ? `Done. ${deviceName} is signing in as ${approvedProfile}.`
@@ -316,7 +316,7 @@ function ActivateDeviceRequest() {
       break;
     case "consumed":
       if (remotePlayback) {
-        resultMessage = "This request was approved in the Silo app.";
+        resultMessage = `This request was approved in the ${serverName} app.`;
       } else if (isQuickConnect) {
         resultMessage = "That device is signed in.";
       } else {
@@ -328,12 +328,12 @@ function ActivateDeviceRequest() {
       break;
     case "canceled":
       resultMessage = remotePlayback
-        ? "The TV stopped waiting. Send playback from the Silo app again."
+        ? `The TV stopped waiting. Send playback from the ${serverName} app again.`
         : "This TV stopped waiting. Start again on the TV.";
       break;
     case "expired":
       if (remotePlayback) {
-        resultMessage = "This request expired. Send playback from the Silo app again.";
+        resultMessage = `This request expired. Send playback from the ${serverName} app again.`;
       } else if (isQuickConnect) {
         resultMessage = "This code expired. Start Quick Connect again in the app.";
       } else {
@@ -446,14 +446,14 @@ function ActivateDeviceRequest() {
                 remotePlayback ? (
                   <div className="space-y-4">
                     <p className="text-sm">
-                      This request comes from the Silo app that sent playback to this TV. Approve it
-                      in that app.
+                      This request comes from the {serverName} app that sent playback to this TV.
+                      Approve it in that app.
                     </p>
                     <p className="text-muted-foreground text-sm">
                       The TV plays with the profile chosen in the app instead of signing in, so this
                       page can&apos;t approve it.
                     </p>
-                    {/* No "Open in the Silo app": the apps' link opens their TV
+                    {/* No app hand-off button: the apps' link opens their TV
                         sign-in, which can't approve a handoff. */}
                     {user && !isImpersonating ? (
                       <>
@@ -479,7 +479,7 @@ function ActivateDeviceRequest() {
                     {appLink ? (
                       <Button asChild className="w-full">
                         <a href={appLink}>
-                          <Smartphone aria-hidden="true" /> Open in the Silo app
+                          <Smartphone aria-hidden="true" /> Open in the {serverName} app
                         </a>
                       </Button>
                     ) : null}
