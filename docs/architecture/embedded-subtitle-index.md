@@ -97,7 +97,12 @@ read through. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each
 small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
 data by default (`ErrTooLarge`), and refuses a file whose size or
-modification time changed since it was indexed (`ErrFileChanged`).
+modification time changed since it was indexed (`ErrFileChanged`). Window
+reads hold at most `WindowMaxBytes` (16 MiB): a rendition segment's read,
+which holds one of eight conversion slots, so on-demand segments hold at most
+128 MiB at once, and a kept-track or source window, which the subtitle cache
+demuxes instead when it is refused. A window open to the end is most of the
+track and gets a whole read's 128 MiB.
 
 HLS streams read their on-demand subtitle renditions through it
 (`playback/subtitle_rendition_tracks.go`): one window per segment, from the

@@ -105,6 +105,10 @@ var (
 	renditionStarts = newRenditionStartCache(renditionStartTimes)
 	// renditionKept holds the kept tracks (SetRenditionKeptTracks).
 	renditionKept atomic.Pointer[keptRenditionSource]
+	// renditionWindowMaxBytes bounds the packets one segment's read holds.
+	// A read holds a conversion slot, so on-demand segments hold at most
+	// renditionConversions times this at once.
+	renditionWindowMaxBytes int64 = embeddedsub.WindowMaxBytes
 )
 
 // keptRenditionSource wraps the EmbeddedSubtitleSource on-demand renditions
@@ -500,7 +504,7 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 			slog.InfoContext(ctx, "on-demand subtitle rendition window not read from the kept track; reading the source", "component", "playback",
 				"playback_session_id", opts.SessionID, "track_number", number, "error", err)
 		}
-		res, err := embeddedsub.ReadPackets(ctx, opts.InputPath, idx, number, from, to, embeddedsub.ReadOptions{})
+		res, err := embeddedsub.ReadPackets(ctx, opts.InputPath, idx, number, from, to, embeddedsub.ReadOptions{MaxBytes: renditionWindowMaxBytes})
 		var damaged *embeddedsub.DamagedError
 		if errors.As(err, &damaged) {
 			// A window keeps what it could read; the rest of the file's

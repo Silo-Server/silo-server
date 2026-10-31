@@ -78,6 +78,19 @@ var (
 	errSourceChanged    = errors.New("keptsub: source changed since the demux began")
 )
 
+// windowMaxBytes bounds the packets one window's read holds; a window too
+// large for it is demuxed by the subtitle cache instead.
+var windowMaxBytes int64 = embeddedsub.WindowMaxBytes
+
+// windowBudget is the MaxBytes of a window ending at to. A window open to
+// the end is most of the track, so it gets a whole read's budget.
+func windowBudget(to time.Duration) int64 {
+	if to == embeddedsub.WholeTo {
+		return keptMaxBytes
+	}
+	return windowMaxBytes
+}
+
 // Options configures a Store.
 type Options struct {
 	// FFmpegPath returns the configured ffmpeg binary; ffprobe is found
@@ -267,7 +280,7 @@ func (s *Store) sourceWindow(ctx context.Context, path string, ref playback.Embe
 	if err != nil {
 		return nil, err
 	}
-	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, shift(from, start), shift(to, start), embeddedsub.ReadOptions{})
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, shift(from, start), shift(to, start), embeddedsub.ReadOptions{MaxBytes: windowBudget(to)})
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +301,7 @@ func (s *Store) keptWindow(ctx context.Context, t *Track, from, to time.Duration
 		return nil, fmt.Errorf("%w: kept stream has %d tracks", embeddedsub.ErrMalformed, len(idx.Tracks))
 	}
 	track := &idx.Tracks[0]
-	res, err := embeddedsub.ReadPackets(ctx, local, idx, track.Number, shift(from, t.StartTime), shift(to, t.StartTime), embeddedsub.ReadOptions{})
+	res, err := embeddedsub.ReadPackets(ctx, local, idx, track.Number, shift(from, t.StartTime), shift(to, t.StartTime), embeddedsub.ReadOptions{MaxBytes: windowBudget(to)})
 	if err != nil {
 		return nil, err
 	}
