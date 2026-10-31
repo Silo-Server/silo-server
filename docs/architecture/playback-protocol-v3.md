@@ -960,7 +960,7 @@ parameter, and never carries a parameter across families.
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
 plus the fields in §5. A subtitle route never carries `seek`: a sidecar is
-fetched whole with absolute source timestamps and `subtitle.artifact.timing_origin_seconds: 0`. A receiver that cannot map its video clock may request a VTT-only `timestamp_offset` equal to the negative video timeline offset. The server shifts cues after reading the canonical artifact; this does not alter the extraction cache or the ordinary artifact contract. Shifted responses stream complete cues, omit cues that ended before time zero, clip overlapping cues at zero, and do not support byte ranges or conditional caching.
+fetched whole with absolute source timestamps and `subtitle.artifact.timing_origin_seconds: 0`. The server answers an embedded track's sidecar from its subtitle cache, a kept copy of the track, or the container's index before it demuxes the source, with the same bytes either way ([embedded-subtitle-index.md](embedded-subtitle-index.md#serving)). A receiver that cannot map its video clock may request a VTT-only `timestamp_offset` equal to the negative video timeline offset. The server shifts cues after reading the canonical artifact; this does not alter the extraction cache or the ordinary artifact contract. Shifted responses stream complete cues, omit cues that ended before time zero, clip overlapping cues at zero, and do not support byte ranges or conditional caching.
 
 `file_id` is required on a subtitle route because a plan can fall back to an
 alternate edition, so the session id alone does not fix which file's ordinal
@@ -1650,17 +1650,32 @@ Languages match on their primary subtag, case-insensitively and across ISO
 639-1 and 639-2 (`eng`, `en` and `en-US` match). Values with no readable
 language, such as `und`, match only when spelled the same. Request validation
 bounds the list (at most 16 values, each 1 to 64 characters) and lowercases
-the values, but it accepts values the server does not know. Planning then skips
-that whole entry, because the server cannot tell what its player gets wrong,
-and the track falls back to a sidecar or burn-in like any track without a
-native entry. Older clients send no limitations, and their entries plan as
-before.
+the values, but it accepts values the server does not know. When an entry
+names such a value, planning skips that whole entry, because the server cannot
+tell what its player gets wrong, and the track falls back to a sidecar or
+burn-in like any track without a native entry. Older clients send no
+limitations, and their entries plan as before.
+
+The frozen `/api/v1` surface never advertises the feature. It ignores
+`limitations` and plans an entry as it did before they existed, and its
+inventory rows carry no `stream_index`, `container_track_id` or
+`native_selectable`.
 
 Roku OS 16 declares `{"container": "mkv", "codecs": ["subrip"],
 "track_identity": "container_track_id", "ass_styling": false,
 "font_attachments": false, "limitations": ["forced_unlisted",
 "hidden_track_preemption", "literal_override_tags"]}` and selects the plan's
 track as `mkv/<container_track_id>`.
+
+The server learns whether a track carries override tags when it reads the
+track whole, which it keeps
+([embedded-subtitle-index.md](embedded-subtitle-index.md#kept-tracks)): for a
+sidecar, a download, a translation, or a prefetch. When a start's request
+declares `literal_override_tags` on any native entry, the server reads the
+playing file's plain-text tracks in the background, so a later plan or replan
+of that file, including a `subtitle_track_changed` replan after a local
+switch, knows their tags. Until then a track counts as clean, so the first
+play of a tagged track can go native and show its tags.
 
 **Switching on the playing stream.** `native_selectable` is computed with the
 same rules as the selected track, against the plan's own delivery, capabilities

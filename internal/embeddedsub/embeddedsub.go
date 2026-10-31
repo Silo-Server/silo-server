@@ -25,6 +25,8 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/matroska"
 )
 
 var (
@@ -195,6 +197,16 @@ type Track struct {
 	allCueDurations bool
 	// mp4 holds an MP4 track's sample table.
 	mp4 *mp4Track
+}
+
+// FFmpegCodec is the codec name FFmpeg gives the track: what a probe of the
+// source records as the stream's codec. It is "" for a Matroska CodecID
+// FFmpeg doesn't recognize.
+func (t *Track) FFmpegCodec() string {
+	if t.mp4 != nil {
+		return "mov_text"
+	}
+	return matroska.FFmpegSubtitleCodec(t.CodecID)
 }
 
 // Cue is one index entry: where one packet of the track is.

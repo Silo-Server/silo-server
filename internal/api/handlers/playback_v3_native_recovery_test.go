@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -283,7 +285,11 @@ func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
 				Limitations: []string{playback.NativeEmbeddedLimitationForcedUnlistedV3, playback.NativeEmbeddedLimitationHiddenTrackPreemptionV3, playback.NativeEmbeddedLimitationLiteralOverrideTagsV3},
 			}}
 			start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
-			started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+			// Limitations and the inventory's stream identity are /api/v2 only.
+			started, err := handler.startPlaybackV2ForTest(t, start)
+			if err != nil || started.PlaybackPlan == nil {
+				t.Fatalf("start: %+v, %v", started, err)
+			}
 			before := started.PlaybackPlan
 			if before.Delivery != playback.DeliveryOriginalHTTPV3 || before.Subtitle.Embedded == nil || before.Subtitle.Embedded.ContainerTrackID != "3" {
 				t.Fatalf("start plan = %+v subtitle = %+v, want native track 3", before, before.Subtitle)
@@ -303,10 +309,16 @@ func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
 				Capabilities:   start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext,
 			}
 			replan(&request)
-			after := postPlaybackReplanV3(t, handler, started.SessionID, request).PlaybackPlan
-			if after == nil {
-				t.Fatal("switch returned no plan")
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
 			}
+			rr := servePlaybackReplanNativeV3(handler, started.SessionID, body)
+			var switched playback.DecisionResponseV3
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &switched) != nil || switched.PlaybackPlan == nil {
+				t.Fatalf("switch status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			after := switched.PlaybackPlan
 			if after.EffectiveMediaFileID != before.EffectiveMediaFileID || after.Delivery != before.Delivery || after.Stream.URL != before.Stream.URL || !reflect.DeepEqual(after.EffectiveRecipe, before.EffectiveRecipe) || !reflect.DeepEqual(after.SelectedTracks.Audio, before.SelectedTracks.Audio) {
 				t.Fatalf("switch changed the media:\nbefore %+v\nafter  %+v", before, after)
 			}

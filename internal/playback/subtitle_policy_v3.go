@@ -359,17 +359,17 @@ func hiddenSubtitleTrackPreemptsV3(file *models.MediaFile, audioIndex int) bool 
 		if track.Default && isClientRenderableBitmapSubtitleV3(track.Codec) {
 			return true
 		}
-		if track.Forced && sameTrackLanguageV3(track.Language, audioLanguage) {
+		if track.Forced && SameTrackLanguageV3(track.Language, audioLanguage) {
 			return true
 		}
 	}
 	return false
 }
 
-// sameTrackLanguageV3 compares two track languages by primary subtag, so eng,
+// SameTrackLanguageV3 compares two track languages by primary subtag, so eng,
 // en and en-US match. Values with no readable language, such as und, match
 // only when spelled the same.
-func sameTrackLanguageV3(a, b string) bool {
+func SameTrackLanguageV3(a, b string) bool {
 	if primaryA, primaryB := lang.PrimaryLanguage(a), lang.PrimaryLanguage(b); primaryA != "" || primaryB != "" {
 		return primaryA == primaryB
 	}
@@ -402,6 +402,16 @@ func markNativeSelectableV3(plan *PlanV3, file *models.MediaFile, input PlannerI
 	if inventory != nil {
 		plan.Subtitle.Inventory = inventory
 	}
+}
+
+// SubtitleCodecFamilyV3 is the canonical FFmpeg name of the codec family a
+// subtitle codec belongs to: subrip for srt, ass for ssa, webvtt for vtt,
+// mov_text for tx3g, hdmv_pgs_subtitle for pgs; any other codec normalized.
+func SubtitleCodecFamilyV3(codec string) string {
+	if IsASS(normalizeCodecV3(codec)) {
+		return subtitleFormatASS
+	}
+	return normalizeNativeSubtitleCodecV3(codec)
 }
 
 func normalizeNativeSubtitleCodecV3(codec string) string {

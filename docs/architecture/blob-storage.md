@@ -32,6 +32,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
+| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}` |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
@@ -60,7 +61,11 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 
 Images generated from a media file (chapter thumbnails, under
 `chapter-images/<media_files.id>/`) are deleted with their file
-(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+(`internal/blobgc`). Kept embedded subtitle tracks go the same way: a trigger
+on `embedded_subtitle_tracks` queues a stream's exact key whenever its row
+goes, by replacement, by a rescan that finds the file changed, or by the
+cascade from the file's deletion, and the sweep lists them by file
+(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due groups whose namespace reports them

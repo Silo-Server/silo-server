@@ -68,6 +68,18 @@ type StreamExtractOpts struct {
 	// InputIsExtractedSup don't apply; read a window's packets instead
 	// (embeddedsub.ReadPackets).
 	Packets *SubtitlePacketInput
+	// Embedded names the track in the catalog. SubtitleCache, given an
+	// EmbeddedSubtitleSource, reads the track through it before demuxing
+	// InputPath. StreamExtractSubtitle ignores it.
+	Embedded *EmbeddedSubtitleRef
+	// KeepPath, on an unwindowed extract from InputPath, makes ffmpeg also
+	// copy the track, unconverted, into a file at KeepPath with the
+	// KeepFormat muxer ("matroska" or "mp4"), so the one demux both serves
+	// the track and keeps it (EmbeddedSubtitleSource.KeepDemuxed). The
+	// copy's timestamps get KeepOffset, the source's start time, back.
+	KeepPath   string
+	KeepFormat string
+	KeepOffset time.Duration
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -153,6 +165,9 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	return nil
 }
 
+// keepFormatMP4 is the KeepFormat of MP4 copies.
+const keepFormatMP4 = "mp4"
+
 // cachedSupSeekSlack is how far before a window's start an extract from a
 // cached .sup seeks, so a display set at the start is read whole. Its
 // segments are separate packets, and in a cache made from a Blu-ray transport
@@ -202,6 +217,12 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 
 	args := []string{
 		"-hide_banner", "-nostats", "-loglevel", "error",
+	}
+	keep := opts.KeepPath != "" && opts.KeepFormat != "" && opts.Packets == nil &&
+		!opts.InputIsExtractedSup && opts.SeekSeconds == 0 && opts.DurationSeconds == 0
+	if keep {
+		// The kept copy goes to a file the caller just created.
+		args = append(args, "-y")
 	}
 	if opts.Packets != nil {
 		// The packets are the whole extract: no seek, window or remap.
@@ -282,10 +303,25 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		args = append(args, "-to", strconv.FormatFloat(end, 'f', 3, 64))
 	}
 
-	return append(args,
+	args = append(args,
 		"-f", outFormat,
 		"pipe:1",
 	)
+	if keep {
+		// The demux takes the source's start time off; adding it back keeps
+		// the copy on the source's timeline, where no timestamp is negative,
+		// so the muxer has nothing to shift.
+		args = append(args, "-map", fmt.Sprintf("0:s:%d", trackIndex), "-c:s", "copy",
+			"-output_ts_offset", formatMicroseconds(opts.KeepOffset))
+		if opts.KeepFormat == keepFormatMP4 {
+			// The copy is converted from a pipe later, and FFmpeg's MP4
+			// demuxer can't seek back on one: past the first few dozen
+			// kilobytes of samples, a moov after the mdat is never read.
+			args = append(args, "-movflags", "+faststart")
+		}
+		args = append(args, "-f", opts.KeepFormat, "file:"+opts.KeepPath)
+	}
+	return args
 }
 
 // PGSWindowRequest reports whether a subtitle request explicitly opts in

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,12 @@ type ReadOptions struct {
 	// holds while reading; 0 means DefaultMaxBytes. A read that would hold
 	// more returns ErrTooLarge.
 	MaxBytes int64
+	// Background, when set and not raised, makes this a read nobody waits
+	// on: its I/O goes at the idle priority on Linux, with
+	// BackgroundConcurrency reads in flight. Raising it while the read runs
+	// (Priority.Raise) gives the rest of the read normal priority and
+	// Concurrency. Network filesystems ignore I/O priority.
+	Background *Priority
 }
 
 const (
@@ -35,6 +42,9 @@ const (
 	// Network storage serves small random reads in parallel; more doesn't
 	// shorten the slowest one.
 	DefaultConcurrency = 16
+	// BackgroundConcurrency is how many reads a background read keeps in
+	// flight until it is raised.
+	BackgroundConcurrency = 4
 	// DefaultLookback covers how long nearly every subtitle shows.
 	DefaultLookback = 30 * time.Second
 	maxLookback     = 10 * time.Minute
@@ -118,7 +128,16 @@ func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, fr
 	if concurrency <= 0 {
 		concurrency = DefaultConcurrency
 	}
-	r := newFileReader(ctx, f, concurrency)
+	var src io.ReaderAt = f
+	if opts.Background.background() {
+		idle := newIdleReader(f, BackgroundConcurrency, opts.Background)
+		defer idle.close()
+		src = idle
+	}
+	r := newFileReader(ctx, src, concurrency)
+	if opts.Background.background() {
+		r.background(opts.Background, BackgroundConcurrency)
+	}
 	b := newBudget(opts.MaxBytes)
 	var res *Result
 	switch idx.Container {

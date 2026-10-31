@@ -25,6 +25,17 @@ type SubtitlePacketInput struct {
 	Index   *embeddedsub.Index
 	Track   *embeddedsub.Track
 	Packets []embeddedsub.Packet
+	// Stream, when set, opens a subtitle-only stream that is already written,
+	// such as a kept track (embeddedsub.WriteKept, or FFmpeg's copy of the
+	// track), in the FFmpeg input format StreamFormat. FFmpeg reads it
+	// instead of Index, Track and Packets.
+	Stream       func() (io.ReadCloser, error)
+	StreamFormat string
+	// ExpectCues marks a whole track known to hold packets, so a conversion
+	// that yields no cue failed to read it, however FFmpeg exited; the
+	// caller then demuxes the source instead of serving or caching an empty
+	// track. A window can hold no packets and leaves it unset.
+	ExpectCues bool
 	// SourceStartTime is the source file's start time as FFmpeg reports it
 	// (SubtitleSourceStartTime). FFmpeg subtracts it from every timestamp
 	// when it demuxes the source; the packets keep the source's timestamps
@@ -40,13 +51,23 @@ const ffmpegCopyTS = "-copyts"
 // -itsoffset subtracts the source's start time from them, as a demux of the
 // source does.
 func (in *SubtitlePacketInput) inputArgs() []string {
+	format := in.StreamFormat
+	if in.Stream == nil {
+		format = in.Index.StreamFormat()
+	}
 	return []string{
 		ffmpegCopyTS, "-itsoffset", formatMicroseconds(-in.SourceStartTime),
-		"-f", in.Index.StreamFormat(), "-i", "pipe:0",
+		"-f", format, "-i", "pipe:0",
 	}
 }
 
 func (in *SubtitlePacketInput) validate() error {
+	if in.Stream != nil {
+		if in.StreamFormat == "" {
+			return errors.New("subtitle packet input stream needs a format")
+		}
+		return nil
+	}
 	if in.Index == nil || in.Track == nil {
 		return errors.New("subtitle packet input needs an index and a track")
 	}
@@ -55,8 +76,25 @@ func (in *SubtitlePacketInput) validate() error {
 
 // write writes the subtitle-only stream to w and closes it.
 func (in *SubtitlePacketInput) write(w io.WriteCloser) error {
-	err := embeddedsub.WriteStream(w, in.Index, in.Track, in.Packets)
+	var err error
+	if in.Stream != nil {
+		err = copyStream(w, in.Stream)
+	} else {
+		err = embeddedsub.WriteStream(w, in.Index, in.Track, in.Packets)
+	}
 	if closeErr := w.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+func copyStream(w io.Writer, open func() (io.ReadCloser, error)) error {
+	r, err := open()
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(w, r)
+	if closeErr := r.Close(); err == nil {
 		err = closeErr
 	}
 	return err

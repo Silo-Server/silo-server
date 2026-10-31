@@ -876,10 +876,12 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 	)
 }
 
-// streamEmbeddedSubtitle runs a dedicated ffmpeg for a single embedded
-// track, optionally windowed by explicit client parameters, and pipes its
-// stdout directly to w. Because this ffmpeg is independent of the video
-// pipeline, it works the same for direct play, remux, and transcode.
+// streamEmbeddedSubtitle serves a single embedded track, optionally windowed
+// by explicit client parameters: from the subtitle cache, a kept copy, or
+// the container's index when it can, else from a dedicated ffmpeg demux of
+// the source that pipes its stdout to w (SubtitleCache.ServeExtract).
+// Because none of these depends on the video pipeline, it works the same for
+// direct play, remux, and transcode.
 func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
@@ -920,6 +922,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
 		AllowWindow:     allowWindow,
+		Embedded:        playback.EmbeddedSubtitleRefFor(file, embeddedIndex),
 		FFmpegPath:      h.ffmpegPath(),
 	}
 	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {

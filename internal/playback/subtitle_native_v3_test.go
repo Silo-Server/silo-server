@@ -232,8 +232,8 @@ func TestSameTrackLanguageV3(t *testing.T) {
 		{"", "eng", false},
 		{"", "", false},
 	} {
-		if got := sameTrackLanguageV3(tc.a, tc.b); got != tc.want {
-			t.Errorf("sameTrackLanguageV3(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		if got := SameTrackLanguageV3(tc.a, tc.b); got != tc.want {
+			t.Errorf("SameTrackLanguageV3(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
 	}
 }
