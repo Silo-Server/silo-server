@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import {
   ROUTING_COUNTRIES,
   ROUTING_DECADES,
@@ -471,9 +472,12 @@ export function RuleConditionsEditor({
 }) {
   const headingId = useId();
   const brandKind: ConditionKind = mediaType === "series" ? "network" : "studio";
+  // A server without the status condition refuses it, so it is offered only
+  // where the server says it takes it. A saved status row still shows.
+  const statusSupported = useAdminRequestCapabilities().data?.routing_series_status ?? false;
   const menu: ConditionKind[] = [
     ...MENU_KINDS,
-    ...(mediaType === "series" ? (["status"] as const) : []),
+    ...(mediaType === "series" && statusSupported ? (["status"] as const) : []),
     brandKind,
     "requester",
   ];
