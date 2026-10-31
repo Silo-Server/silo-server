@@ -97,6 +97,7 @@ const (
 	// renditionStartTimes bounds the source start times kept for copy remux
 	// renditions.
 	renditionStartTimes = 1024
+	subtitleCodecTx3g   = "tx3g"
 )
 
 var (
@@ -523,16 +524,32 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 	})
 }
 
-// convertRenditionWindow converts a window's packets to WebVTT. Packets that
-// convert to no cue may be a conversion that failed quietly, so they answer
-// errNoCueConverted: the segment is empty this time and isn't kept, and the
-// next request converts them again.
+// convertRenditionWindow converts a window's packets to WebVTT. Known empty
+// MP4 text samples can legitimately produce no cue and their window is kept.
+// Other packets that convert to no cue answer errNoCueConverted: the segment
+// is empty this time and isn't kept, and the next request converts them again.
 func convertRenditionWindow(ctx context.Context, in *SubtitlePacketInput, ffmpegPath string) ([]byte, error) {
 	cues, err := ExtractSubtitlePacketsWebVTT(ctx, in, ffmpegPath)
-	if err == nil && len(in.Packets) > 0 && !hasCue(subtitleMuxerWebVTT, cues) {
+	if err == nil && len(in.Packets) > 0 && !hasCue(subtitleMuxerWebVTT, cues) && !emptyMP4TextWindow(in) {
 		return nil, errNoCueConverted
 	}
 	return cues, err
+}
+
+// emptyMP4TextWindow recognizes clearing samples by their zero text length.
+// A truncated sample or a different codec still needs a cue in the output.
+func emptyMP4TextWindow(in *SubtitlePacketInput) bool {
+	if in.Stream != nil || in.Index == nil || in.Index.Container != embeddedsub.ContainerMP4 || in.Track == nil {
+		return false
+	}
+	switch in.Track.CodecID {
+	case subtitleCodecTx3g, subtitleCodecTextV3:
+	default:
+		return false
+	}
+	return !slices.ContainsFunc(in.Packets, func(p embeddedsub.Packet) bool {
+		return len(p.Data) < 2 || p.Data[0] != 0 || p.Data[1] != 0
+	})
 }
 
 // convertKeptRenditionWindow converts a window read from a kept track. Kept
