@@ -2069,8 +2069,9 @@ refill a bucket. A transfer that starts with both limits at zero is served
 without the limiter and stays unlimited; later edits apply to new transfers. A
 failed settings read keeps the last known limits. A failed budget operation is
 retried for up to 10 seconds, sending no bytes meanwhile; after that the
-transfer stops without exposing uncharged bytes. Each attempt has a one-second
-deadline. Clients must handle incomplete bodies. Managed downloads retry
+transfer stops without exposing uncharged bytes. Each settings refresh and
+Redis budget call has a one-second deadline. Clients must handle incomplete
+bodies. Managed downloads retry
 through their existing Range/resume flow after dependency recovery. A stopped
 ephemeral original download marks its row `failed`, which later requests
 reject, so the client starts a new ephemeral download instead.
