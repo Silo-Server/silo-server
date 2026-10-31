@@ -235,11 +235,12 @@ describe("endImpersonationWithRecovery", () => {
         refreshToken: "admin-refresh",
         returnPath: "/admin/users/42",
       });
-      const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+      const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
       const clearAuthState = vi.fn();
       const clearActiveAuthState = vi.fn();
 
       await endImpersonationWithRecovery({
+        isCurrent: () => true,
         endImpersonationRequest,
         loadStoredImpersonationAdminSession,
         restoreAdminUser,
@@ -267,12 +268,13 @@ describe("endImpersonationWithRecovery", () => {
       refreshToken: "admin-refresh",
       returnPath: "/admin/users/42",
     });
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
     const clearAuthState = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await expect(
       endImpersonationWithRecovery({
+        isCurrent: () => true,
         endImpersonationRequest,
         loadStoredImpersonationAdminSession,
         restoreAdminUser,
@@ -289,11 +291,12 @@ describe("endImpersonationWithRecovery", () => {
   it("clears auth when ending impersonation succeeds without a preserved admin session", async () => {
     const endImpersonationRequest = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue(null);
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
     const clearAuthState = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await endImpersonationWithRecovery({
+      isCurrent: () => true,
       endImpersonationRequest,
       loadStoredImpersonationAdminSession,
       restoreAdminUser,
@@ -313,11 +316,12 @@ describe("endImpersonationWithRecovery", () => {
       refreshToken: "admin-refresh",
       returnPath: "/admin/users/42",
     });
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const restoreAdminUser = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
     const clearAuthState = vi.fn();
     const clearActiveAuthState = vi.fn();
 
     await endImpersonationWithRecovery({
+      isCurrent: () => true,
       endImpersonationRequest,
       loadStoredImpersonationAdminSession,
       restoreAdminUser,
