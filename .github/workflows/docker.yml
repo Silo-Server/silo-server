@@ -69,16 +69,16 @@ jobs:
             echo "image_version=${image_version}"
           } >> "$GITHUB_OUTPUT"
 
-      # latest follows every main build until the first 1.0.0 release
-      # candidate. From then on only release-published.yml moves it, so a
-      # v1-or-later release tag switches main builds over to dev alone.
+      # latest follows every main build only until the first release. From
+      # then on release-published.yml moves it, and main builds move dev
+      # alone, so any release tag switches them over.
       - name: Decide whether latest follows main
         id: latest
         shell: bash
         run: |
-          v1_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[1-9]*')"
+          release_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')"
           follows_main=true
-          [[ -n "$v1_tags" ]] && follows_main=false
+          [[ -n "$release_tags" ]] && follows_main=false
           echo "follows_main=${follows_main}" >> "$GITHUB_OUTPUT"
 
   build:
@@ -138,8 +138,8 @@ jobs:
 
   # The published image: PostgreSQL, Redis, Meilisearch, and s6-overlay
   # layered on the base image the merge job just pushed. It carries dev,
-  # build-N, the commit SHA, and latest until the first 1.0.0 release
-  # candidate (release-published.yml adds version tags). Its digest artifacts are named so the
+  # build-N, the commit SHA, and latest until the first release
+  # (release-published.yml adds version tags and moves latest after that). Its digest artifacts are named so the
   # merge job's digests-* pattern never picks them up.
   omnibus:
     needs: [prepare, merge]

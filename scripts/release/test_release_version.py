@@ -49,8 +49,9 @@ class CheckTest(unittest.TestCase):
 
 
 class DockerTagsTest(unittest.TestCase):
-    def test_before_one_zero_latest_stays_on_main(self):
-        self.assertEqual(["0.24.0", "0.24"], release.docker_tags([], "0.24.0"))
+    def test_zero_releases_move_latest(self):
+        self.assertEqual(["0.24.0", "0.24", "latest"], release.docker_tags([], "0.24.0"))
+        self.assertEqual(["0.25.0", "0.25", "latest"], release.docker_tags(["v0.24.0"], "0.25.0"))
 
     def test_one_zero_release_candidates_move_latest(self):
         self.assertEqual(["1.0.0-rc.1", "latest"], release.docker_tags(["v0.24.0"], "1.0.0-rc.1"))
@@ -65,8 +66,8 @@ class DockerTagsTest(unittest.TestCase):
         self.assertEqual(["1.1.0-rc.1"], release.docker_tags(["v1.0.0"], "1.1.0-rc.1"))
 
     def test_hotfix_to_an_older_line_keeps_only_its_minor_tag(self):
-        tags = ["v1.0.0", "v1.1.0"]
-        self.assertEqual(["1.0.1", "1.0"], release.docker_tags(tags, "1.0.1"))
+        self.assertEqual(["1.0.1", "1.0"], release.docker_tags(["v1.0.0", "v1.1.0"], "1.0.1"))
+        self.assertEqual(["0.24.1", "0.24"], release.docker_tags(["v0.24.0", "v0.25.0"], "0.24.1"))
 
     def test_republishing_is_stable(self):
         tags = ["v0.24.0", "v1.0.0-rc.1", "v1.0.0"]

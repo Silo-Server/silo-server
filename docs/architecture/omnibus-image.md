@@ -19,8 +19,8 @@ The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
 from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
 names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
 set to that tag and publishes the result as `<full SHA>`, `build-N`, and `dev`,
-plus `latest` until the first `v1.0.0` release candidate. A published release
-adds its version tags to that image; see
+plus `latest` until the first release. A published release adds its version
+tags and moves `latest`; see
 [release versioning](../release-versioning.md#container-tags).
 
 Builds from before this layout published the base image under those tags and

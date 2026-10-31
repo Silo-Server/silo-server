@@ -1,8 +1,8 @@
 # Release versioning
 
 Silo uses GitHub Releases as the public record of shipped versions and their
-changes. The first release is `v0.24.0`, followed by `v1.0.0-rc.1`, `v1.0.0-rc.2`,
-and so on until `v1.0.0`.
+changes. Releases start at `v0.24.0` and continue with `0.x` releases, then
+`v1.0.0-rc.1`, `v1.0.0-rc.2`, and so on until `v1.0.0`.
 
 ## Version format
 
@@ -51,17 +51,18 @@ PostgreSQL, Redis, and Meilisearch; see [Omnibus image](architecture/omnibus-ima
 
 | Tag | Moves on | Meaning |
 | --- | --- | --- |
-| `dev` | every successful `main` build | The newest build. |
+| `dev` | every successful `main` build | The newest build. Follow it to get every change as it merges. |
 | `build-N` | never | One `main` build. A larger number is newer; gaps from unsuccessful runs are expected. |
 | Full commit SHA | never | The exact source of one `main` build. |
-| `latest` | every `main` build until the first `v1.0.0` release candidate, then releases only | Before that candidate it is the same as `dev`. From `v1.0.0-rc.1` on it is the newest release: the 1.0.0 release candidates, then `v1.0.0` and later releases. |
+| `latest` | each release | The newest release: `0.x` releases, the `v1.0.0` release candidates, then `v1.0.0` and later releases. Until the first release it follows every `main` build. |
 | `X.Y.Z`, `X.Y.Z-rc.N` | never | One release, for example `0.24.0` or `1.0.0-rc.1`. |
 | `X.Y` | each release in that line | The newest `X.Y.Z` release, for example `0.24`. Release candidates never move it. |
 | `X` | each release in that major version, from 1 on | The newest `X.Y.Z` release, for example `1`. There is no `0` tag. |
 
 A release image is the image CI built and tested for that commit, plus one file,
 `/usr/share/silo/version`, from which the server reads its version. Release
-candidates after `v1.0.0`, such as `v1.1.0-rc.1`, get only their own tag.
+candidates after `v1.0.0`, such as `v1.1.0-rc.1`, get only their own tag, and a
+fix to an older line, such as `0.24.1` after `0.25.0`, never moves `latest`.
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a release tag, `build-N`, commit-SHA tag, or image
@@ -85,7 +86,7 @@ announcing a release.
 3. Edit the draft release. Add upgrade, configuration, and compatibility notes.
    The first release has no earlier tag, so its notes are written by hand.
 4. Publish the draft. **Release published** then tags the commit's image with the
-   version and the tags above.
+   version and the tags above, including `latest`.
 
 Release refuses an invalid version, a version that already exists or is older
 than the newest release, a run from a branch other than `main`, and a commit
