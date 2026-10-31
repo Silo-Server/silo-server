@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auditmutation/audittest"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -31,7 +32,7 @@ func (d profileAuditDB) request(method, pattern, path string) context.Context {
 func (d profileAuditDB) create(active string, req ProfileCreateRequest) ProfileView {
 	d.t.Helper()
 	view, err := d.h.CreateProfile(d.request(http.MethodPost, "/api/v2/profiles", "/api/v2/profiles"), ProfileCreateCommand{
-		UserID: d.account, ActiveProfileID: active, Request: req, VerifyProfile: func(string) error { return nil }})
+		UserID: d.account, ActiveProfileID: active, Request: req, VerifyProfile: func(*userstore.Profile) error { return nil }})
 	if err != nil {
 		d.t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestProfileAuditDB(t *testing.T) {
 	checkProfileUpdateAudit(t, d, parent.ID, child.ID, pin)
 
 	err := d.h.DeleteProfile(d.request(http.MethodDelete, "/api/v2/profiles/{id}", "/api/v2/profiles/"+child.ID),
-		ProfileDeleteCommand{UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(string) error { return nil }})
+		ProfileDeleteCommand{UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(*userstore.Profile) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func checkProfileUpdateAudit(t *testing.T, d profileAuditDB, parentID, childID, 
 	t.Helper()
 	update := func(req ProfileUpdateRequest) error {
 		_, err := d.h.UpdateProfile(d.request(http.MethodPatch, "/api/v2/profiles/{id}", "/api/v2/profiles/"+childID), ProfileUpdateCommand{
-			UserID: d.account, ProfileID: childID, ActiveProfileID: parentID, Request: req, VerifyProfile: func(string) error { return nil }})
+			UserID: d.account, ProfileID: childID, ActiveProfileID: parentID, Request: req, VerifyProfile: func(*userstore.Profile) error { return nil }})
 		return err
 	}
 	updates := func() []audittest.Row {
@@ -157,8 +158,9 @@ func checkProfileUpdateAudit(t *testing.T, d profileAuditDB, parentID, childID, 
 
 // TestProfileWritesQueueBehindAccountLockDB holds the account lock that
 // deleting the account takes before its delete cascades into the account's
-// profiles, and checks that an audited profile update or delete waits for it
-// instead of locking the profile first and deadlocking on its audit row's
+// profiles, and checks that an audited profile create, update or delete waits
+// for it instead of locking a profile first (the edited one, or the acting
+// parent the PIN revision check locks) and deadlocking on its audit row's
 // account key.
 func TestProfileWritesQueueBehindAccountLockDB(t *testing.T) {
 	d := newProfileAuditDB(t)
@@ -166,18 +168,24 @@ func TestProfileWritesQueueBehindAccountLockDB(t *testing.T) {
 	child := d.create(parent.ID, ProfileCreateRequest{Name: "Kid"})
 	path := "/api/v2/profiles/" + child.ID
 	writes := map[string]func() error{
+		"create": func() error {
+			_, err := d.h.CreateProfile(d.request(http.MethodPost, "/api/v2/profiles", "/api/v2/profiles"), ProfileCreateCommand{
+				UserID: d.account, ActiveProfileID: parent.ID, Request: ProfileCreateRequest{Name: "Sibling"},
+				VerifyProfile: func(*userstore.Profile) error { return nil }})
+			return err
+		},
 		"update": func() error {
 			_, err := d.h.UpdateProfile(d.request(http.MethodPatch, "/api/v2/profiles/{id}", path), ProfileUpdateCommand{
 				UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, Request: ProfileUpdateRequest{Name: new("Kiddo")},
-				VerifyProfile: func(string) error { return nil }})
+				VerifyProfile: func(*userstore.Profile) error { return nil }})
 			return err
 		},
 		"delete": func() error {
 			return d.h.DeleteProfile(d.request(http.MethodDelete, "/api/v2/profiles/{id}", path), ProfileDeleteCommand{
-				UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(string) error { return nil }})
+				UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(*userstore.Profile) error { return nil }})
 		},
 	}
-	for _, name := range []string{"update", "delete"} {
+	for _, name := range []string{"create", "update", "delete"} {
 		t.Run(name, func(t *testing.T) {
 			accountDelete, err := d.pool.Begin(t.Context())
 			if err != nil {
@@ -206,8 +214,9 @@ func TestProfileWritesQueueBehindAccountLockDB(t *testing.T) {
 				case <-tick.C:
 				}
 			}
-			// The account delete's cascade reaches the profile row next.
-			if _, err := accountDelete.Exec(t.Context(), `DELETE FROM user_profiles WHERE user_id = $1 AND id = $2`, d.account, child.ID); err != nil {
+			// The account delete's cascade reaches every profile row next,
+			// including the acting parent's that the PIN revision check locks.
+			if _, err := accountDelete.Exec(t.Context(), `DELETE FROM user_profiles WHERE user_id = $1`, d.account); err != nil {
 				t.Fatalf("account delete behind a profile %s: %v", name, err)
 			}
 			if err := accountDelete.Rollback(t.Context()); err != nil {
