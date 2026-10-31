@@ -82,7 +82,7 @@ type RouteConditions struct {
 	CompanyIDs       []int `json:"company_ids,omitempty"`
 	RequesterUserIDs []int `json:"requester_user_ids,omitempty"`
 	// SeriesStatuses match a series' status as the catalog spells it
-	// (showstatus.Known). A series TMDB gives no status has none of them, so
+	// (showstatus.Known). A series with no TMDB status has none of them, so
 	// it fails a status list and passes an exclude one.
 	SeriesStatuses []string `json:"series_statuses,omitempty"`
 

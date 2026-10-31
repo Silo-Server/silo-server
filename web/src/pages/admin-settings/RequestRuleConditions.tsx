@@ -373,7 +373,7 @@ function ConditionLine({
     body = <YearValues row={row} onChange={onChange} invalid={Boolean(error)} />;
   } else {
     if (row.kind === "status") {
-      hint = `Read when the request is made, so a show that ends later stays where it was sent. Series TMDB gives no status ${row.mode === "any" ? "don't match" : "match"}.`;
+      hint = `Read when the request is made, so a show that ends later stays where it was sent. A series with no TMDB status ${row.mode === "any" ? "doesn't match" : "matches"}.`;
     }
     control = (
       <Select
@@ -472,8 +472,9 @@ export function RuleConditionsEditor({
 }) {
   const headingId = useId();
   const brandKind: ConditionKind = mediaType === "series" ? "network" : "studio";
-  // A server without the status condition refuses it, so it is offered only
-  // where the server says it takes it. A saved status row still shows.
+  // A server without the status condition refuses it in a save and ignores
+  // it in a rule another server saved, so it is offered only where the server
+  // says it takes it. A saved status row still shows.
   const statusSupported = useAdminRequestCapabilities().data?.routing_series_status ?? false;
   const menu: ConditionKind[] = [
     ...MENU_KINDS,

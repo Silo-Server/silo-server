@@ -19257,7 +19257,7 @@ export interface components {
       exclude_original_languages?: string[];
       /** @description Match requests from none of these accounts */
       exclude_requester_user_ids?: number[];
-      /** @description Series only: match series whose status is none of these; a series TMDB gives no status matches */
+      /** @description Series only: match series whose status is none of these; a series with no TMDB status matches */
       exclude_series_statuses?: (
         | "returning"
         | "in_production"
@@ -19292,7 +19292,7 @@ export interface components {
       original_languages?: string[];
       /** @description Accounts whose requests the route applies to */
       requester_user_ids?: number[];
-      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series TMDB gives no status matches none of them */
+      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, when it is first submitted (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them */
       series_statuses?: ("returning" | "in_production" | "upcoming" | "ended" | "cancelled")[];
       /**
        * Format: int64
@@ -19332,7 +19332,7 @@ export interface components {
       /** @description The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx) */
       original_language?: string;
       /**
-       * @description A series' status as series_statuses names it (returning, in_production, upcoming, ended, cancelled), or a newer TMDB status in lower case; absent for a movie or a series TMDB gives no status
+       * @description A series' status as series_statuses names it (returning, in_production, upcoming, ended, cancelled), or a newer TMDB status in lower case; absent for a movie or a series with no TMDB status
        * @example ended
        */
       series_status?: string;

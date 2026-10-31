@@ -44,7 +44,7 @@ func TestExcludeAndRatingConditions(t *testing.T) {
 			t.Errorf("rating %v matched a ceiling", rating)
 		}
 	}
-	// A series TMDB gives no status has none: it fails a status list and
+	// A series with no TMDB status has none: it fails a status list and
 	// passes an exclude one.
 	for _, status := range []*string{nil, new("")} {
 		unknown := Request{MediaType: MediaTypeSeries, RoutingFacts: capturedFacts(RoutingFacts{SeriesStatus: status})}
