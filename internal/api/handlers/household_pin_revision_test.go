@@ -139,19 +139,24 @@ func pinLockedHousehold(t *testing.T) userstore.UserStore {
 	return store
 }
 
-// v1 handlers that decoded the body after the household check let a held
-// upload keep PIN proof that a PIN change revoked.
-func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
-	type v1Write struct {
-		store   userstore.UserStore
-		method  string
-		serve   http.HandlerFunc
-		target  string
-		body    string
-		written func() bool
-	}
-	tokens := access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
-	setups := map[string]func(t *testing.T) v1Write{
+// v1Write is one v1 household write whose body the request holds while the
+// primary PIN may change.
+type v1Write struct {
+	store   userstore.UserStore
+	method  string
+	serve   http.HandlerFunc
+	target  string
+	body    string
+	written func() bool
+	// admitted, when set, is the status a request that passed the
+	// household check ends with, for a handler with nothing to write to.
+	admitted int
+}
+
+// v1HouseholdWrites are the v1 handlers that check household authority and
+// then decode a body.
+func v1HouseholdWrites(tokens *access.ProfileTokenService) map[string]func(t *testing.T) v1Write {
+	return map[string]func(t *testing.T) v1Write{
 		"API key": func(t *testing.T) v1Write {
 			keys := &fakeAPIKeyStore{}
 			store := pinLockedHousehold(t)
@@ -162,6 +167,17 @@ func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
 				store: store, method: http.MethodPost, serve: h.HandleCreateAPIKey,
 				target: "/api/v1/api-keys", body: `{"label":"ci"}`,
 				written: func() bool { return keys.created },
+			}
+		},
+		"Discord delivery": func(t *testing.T) v1Write {
+			store := pinLockedHousehold(t)
+			h := NewDiscordNotificationsHandler(nil, "")
+			h.Stores = testUserStoreProvider{store: store}
+			h.ProfileTokens = tokens
+			return v1Write{
+				store: store, method: http.MethodPut, serve: h.HandleUpdatePreferences,
+				target: "/api/v1/notifications/discord-preferences", body: `{"mode":"off"}`,
+				admitted: http.StatusBadRequest, // No preference store: the mode is refused after admission.
 			}
 		},
 		"another profile's setting": func(t *testing.T) v1Write {
@@ -193,6 +209,13 @@ func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
 			}
 		},
 	}
+}
+
+// v1 handlers that decoded the body after the household check let a held
+// upload keep PIN proof that a PIN change revoked.
+func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
+	tokens := access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
+	setups := v1HouseholdWrites(tokens)
 	for name, setup := range setups {
 		for _, revoke := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/revoked=%v", name, revoke), func(t *testing.T) {
@@ -218,6 +241,16 @@ func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
 				req = req.WithContext(apimw.SetProfileID(ctx, "profile-1"))
 				rec := httptest.NewRecorder()
 				w.serve(rec, req)
+				if w.admitted != 0 {
+					want := w.admitted
+					if revoke {
+						want = http.StatusForbidden
+					}
+					if rec.Code != want {
+						t.Fatalf("revoked=%v: status=%d want=%d %s", revoke, rec.Code, want, rec.Body.String())
+					}
+					return
+				}
 				if revoke {
 					if rec.Code != http.StatusForbidden || w.written() {
 						t.Fatalf("revoked proof: status=%d written=%v %s", rec.Code, w.written(), rec.Body.String())

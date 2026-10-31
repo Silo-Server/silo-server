@@ -46,7 +46,7 @@ next request.
 
 Managing the household (creating, editing or deleting profiles, writing another
 profile's settings or devices, importing history for another profile, creating
-a personal API key) needs the primary profile's proof to still hold when the
+a personal API key, changing account-wide Discord delivery) needs the primary profile's proof to still hold when the
 write happens, not only when the request arrived. A request can sit on its body
 while another request changes the primary PIN.
 
@@ -63,8 +63,6 @@ while another request changes the primary PIN.
   the primary row in Postgres and runs in the writer transaction in SQLite, so a
   PIN change cannot commit between the check and the write. Other household
   writes keep the short gap between the check and the write.
-- `Scope.ProfilePINRevision` is excluded from JSON so scope fingerprints used by
-  the events socket and progress sync do not change with it.
 
 ## Upgrade and rolling deploys
 

@@ -111,6 +111,9 @@ func (h *DiscordNotificationsHandler) HandleGetPreferences(w http.ResponseWriter
 
 // HandleUpdatePreferences handles PUT /notifications/discord-preferences.
 func (h *DiscordNotificationsHandler) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
+	if !readHouseholdRequestBody(w, r) {
+		return
+	}
 	if err := h.requireManagement(r); err != nil {
 		writeAPIError(w, err)
 		return
