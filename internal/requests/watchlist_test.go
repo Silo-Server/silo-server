@@ -260,3 +260,43 @@ func TestWithdrawProfileWatchlistRequests(t *testing.T) {
 		}
 	}
 }
+
+// Watch provider sync retries the titles a quota refused: the queue follows a
+// title someone else requested, requests the rest in order while the quota
+// has room, and never re-requests a title whose request was declined.
+func TestRequestQueuedWatchlistTitlesFollowsQuotaAndHistory(t *testing.T) {
+	viewer := testViewer(1)
+	store := newFakeStore()
+	svc := newWatchlistTestService(store)
+	store.requests["declined"] = &Request{
+		ID: "declined", MediaType: MediaTypeMovie, TMDBID: 1, Outcome: OutcomeDeclined,
+		RequestedByUserID: viewer.UserID, RequestedByProfileID: viewer.ProfileID,
+	}
+	activeRequestFor(store, 4)
+	store.count = store.settings.GlobalMaxRequests - 1
+	titles := []WatchlistTitle{
+		{MediaType: MediaTypeMovie, TMDBID: 4, Title: "Someone else's request"},
+		{MediaType: MediaTypeMovie, TMDBID: 1, Title: "Declined"},
+		{MediaType: MediaTypeMovie, TMDBID: 2, Title: "First in line"},
+		{MediaType: MediaTypeMovie, TMDBID: 3, Title: "Over quota"},
+	}
+
+	if err := svc.RequestQueuedWatchlistTitles(context.Background(), viewer, titles); err != nil {
+		t.Fatalf("RequestQueuedWatchlistTitles: %v", err)
+	}
+	if len(store.created) != 1 || store.created[0].Input.TMDBID != 2 || store.created[0].Input.Source != SourceWatchlist {
+		t.Fatalf("created = %+v, want only the first unrequested title, from the watchlist", store.created)
+	}
+	if len(store.follows) != 1 {
+		t.Fatalf("follows = %v, want the viewer following the other request", store.follows)
+	}
+
+	// The window has room again: the next run requests the rest.
+	store.count = 0
+	if err := svc.RequestQueuedWatchlistTitles(context.Background(), viewer, titles); err != nil {
+		t.Fatalf("RequestQueuedWatchlistTitles: %v", err)
+	}
+	if len(store.created) != 2 || store.created[1].Input.TMDBID != 3 {
+		t.Fatalf("created = %+v, want the over-quota title requested on the next run", store.created)
+	}
+}
