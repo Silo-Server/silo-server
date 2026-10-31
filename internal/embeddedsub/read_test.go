@@ -762,6 +762,37 @@ func BenchmarkReadPackets(b *testing.B) {
 	}
 }
 
+func TestCodecPrivateBudgetSharedAcrossTracks(t *testing.T) {
+	private := bytes.Repeat([]byte("a"), 4<<20)
+	compressed := zlibBytes(t, private)
+	var fixture mkvFixture
+	for i := range 5 {
+		fixture.tracks = append(fixture.tracks, fixtureTrack{
+			number: uint64(i + 1), codec: "S_TEXT/ASS", private: compressed,
+			extra: [][]byte{encodingEl(matroska.ScopeCodecPrivate, matroska.CompressionZlib, nil)},
+		})
+	}
+	_, idx := readFixture(t, fixture)
+	var retained, supported, unsupported int
+	for _, track := range idx.Tracks {
+		retained += cap(track.CodecPrivate)
+		if track.Unsupported != "" {
+			unsupported++
+			if len(track.CodecPrivate) != 0 {
+				t.Fatal("unsupported track retained codec private data")
+			}
+		} else {
+			supported++
+			if !bytes.Equal(track.CodecPrivate, private) {
+				t.Fatal("supported track lost codec private data")
+			}
+		}
+	}
+	if retained > maxTracksSize || supported == 0 || unsupported == 0 {
+		t.Fatalf("codec private data retained %d bytes across %d supported and %d unsupported tracks; want at most %d bytes and fallback for overflow", retained, supported, unsupported, maxTracksSize)
+	}
+}
+
 func TestCompressionSettingsCountAgainstCacheBudget(t *testing.T) {
 	const prefixBytes = 2 << 20
 	track := newTrack(matroska.TrackEntry{
@@ -770,7 +801,7 @@ func TestCompressionSettingsCountAgainstCacheBudget(t *testing.T) {
 			Scope: matroska.ScopeFrames, CompAlgo: matroska.CompressionHeaderStripping,
 			CompSettings: bytes.Repeat([]byte("a"), prefixBytes),
 		}},
-	})
+	}, newBudget(maxTracksSize))
 	idx := &Index{Tracks: []Track{track}}
 	cache := NewCache(prefixBytes / 2)
 	cache.add(cacheKey{path: "fixture"}, idx)

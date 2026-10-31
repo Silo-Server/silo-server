@@ -28,6 +28,10 @@ bytes don't change.
 The parsing primitives shared with `mediaprobe` and `playback/keyframes` live
 in `internal/matroska`.
 
+Matroska codec-private decompression shares a 16 MiB allocation budget across
+all tracks in an index, including old and new buffers during growth. A track
+that exceeds the budget is unsupported and falls back to FFmpeg.
+
 ## Completeness
 
 A Matroska track's cues are trusted only as far as the file can vouch for
@@ -191,8 +195,9 @@ content. A copy's file is never touched after it is written, so the index
 cache, keyed by path, size and modification time, keeps its index; recency is
 kept in memory, and copies are held to 1 GiB, least recently used first. A
 copy stays pinned during persistence, window reads, and opening a stream;
-eviction resumes when the caller releases it. A node without a transcode
-directory keeps no tracks.
+if pinned copies leave the directory over budget, eviction resumes when a
+caller releases its last pin. Releases under budget do not scan the directory.
+A node without a transcode directory keeps no tracks.
 
 **Storing.** A read writes the kept stream to a local copy, not to memory,
 and the object is streamed from it. The key goes into `blob_gc_queue`, due a
