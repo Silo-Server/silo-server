@@ -265,6 +265,7 @@
 ./internal/keptsub TestKeptTracksGoWithTheirFileDB
 ./internal/keptsub TestSubtitleTrackClaimsDB
 ./internal/keptsub TestQueueCollectionDB
+./internal/blobgc TestCollectorDeletesFromTheNamespaceStoreS3DB
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
 ./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres
 ./migrations TestSubtitleTimingFileReplacePostgres

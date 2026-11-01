@@ -152,8 +152,8 @@ can fall back to demux.
 ## Kept tracks
 
 A track read whole is kept, so reading it costs the source once on any node.
-`internal/keptsub` stores it in the assets blob store
-([blob-storage.md](blob-storage.md)) as
+`internal/keptsub` stores it in a private blob store, the operational one when
+there is one ([blob-storage.md](blob-storage.md)), as
 `subtitles/embedded/<media_files.id>/<stream index>-<sha256>.<mks|mp4>` and
 records it in `embedded_subtitle_tracks`, one row per file and probed stream
 index.

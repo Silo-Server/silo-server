@@ -45,7 +45,8 @@ media (sidecars) are never stored here; their corrections live in
 `external_subtitle_timings` (see [subtitle sync](subtitle-sync.md#sidecar-subtitles)).
 
 Embedded tracks the server has read whole are kept under `subtitles/embedded/`
-in the same store, with rows in `embedded_subtitle_tracks`. They are a cache
+in a private store, the operational one when there is one (see
+[blob storage](blob-storage.md)), with rows in `embedded_subtitle_tracks`. They are a cache
 of the media file, not subtitles in their own right: their keys hold a content
 hash, a changed or deleted file retires them, and the blob collector deletes
 their objects. See
