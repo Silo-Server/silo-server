@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -44,7 +45,7 @@ func TestEncodedAudioBitrateConditions(t *testing.T) {
 					if source.SupportsTranscoding != tc.want {
 						t.Fatalf("transcoding=%v, want %v for %+v", source.SupportsTranscoding, tc.want, condition)
 					}
-					if tc.want && (source.HLSRemux != (container == "mp4") || source.TargetAudioChannels != tc.channels) {
+					if tc.want && (!source.HLSRemux || source.TargetAudioChannels != tc.channels) {
 						t.Fatalf("wrong output: remux=%v channels=%d", source.HLSRemux, source.TargetAudioChannels)
 					}
 				})
@@ -201,5 +202,53 @@ func TestH264EncodeLevelUsesTheConfiguredRate(t *testing.T) {
 	req.MaxStreamingBitrate = 0
 	if source := h.buildPlaybackSource("item", "play", version, profile, req, true); !source.SupportsTranscoding {
 		t.Fatal("SupportsTranscoding = false for an uncapped encode of a 4,000 kbps 1080p24 source")
+	}
+}
+
+// A client that lists the source codecs only for MPEG-TS gets a copy in MPEG-TS
+// instead of an encode. fMP4 stays the default when the client offers it.
+func TestHLSCopyPackagesForTheContainerTheClientLists(t *testing.T) {
+	const tsOnly, mp4Too = "ts", "mp4,ts"
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct {
+		name         string
+		video, audio string
+		fileAudio    string
+		containers   string
+		wantCopy     bool
+		wantTS       bool
+		wantAudioAAC bool
+	}{
+		{name: "TS only", video: "h264", audio: "aac", containers: tsOnly, wantCopy: true, wantTS: true},
+		{name: "fMP4 offered", video: "h264", audio: "aac", containers: mp4Too, wantCopy: true},
+		{name: "HEVC in TS", video: "hevc", audio: "aac", containers: tsOnly, wantCopy: true, wantTS: true},
+		{name: "TS cannot carry the audio", video: "h264", audio: "flac", containers: tsOnly, wantCopy: true, wantTS: true, wantAudioAAC: true},
+		{name: "untagged track is judged by the file codec", video: "h264", fileAudio: "flac", containers: tsOnly, wantCopy: true, wantTS: true, wantAudioAAC: true},
+		{name: "unlisted video encodes", video: "vc1", audio: "aac", containers: tsOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fileAudio := tc.audio
+			if tc.fileAudio != "" {
+				fileAudio = tc.fileAudio
+			}
+			version := catalog.FileVersion{
+				FileID: 42, Container: "mkv", CodecVideo: tc.video, CodecAudio: fileAudio, Bitrate: 8000, Resolution: "1080p",
+				VideoTracks: []models.VideoTrack{{Codec: tc.video, BitDepth: 8, Width: 1920, Height: 1080, FrameRate: "24"}},
+				AudioTracks: []models.AudioTrack{{Codec: tc.audio, Channels: 2, Default: true}},
+			}
+			var profile DeviceProfile
+			for _, container := range strings.Split(tc.containers, ",") {
+				profile.TranscodingProfiles = append(profile.TranscodingProfiles, TranscodingProfile{
+					Type: "Video", Protocol: "hls", Container: container, VideoCodec: "h264,hevc", AudioCodec: "aac,flac",
+				})
+			}
+			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableDirectPlay: new(false)}, true)
+			if !source.SupportsTranscoding {
+				t.Fatal("no playable route")
+			}
+			if source.HLSRemux != tc.wantCopy || source.hlsRemuxInTS != tc.wantTS || source.TranscodeAudio != tc.wantAudioAAC {
+				t.Fatalf("copy=%v ts=%v audio encode=%v, want %v %v %v", source.HLSRemux, source.hlsRemuxInTS, source.TranscodeAudio, tc.wantCopy, tc.wantTS, tc.wantAudioAAC)
+			}
+		})
 	}
 }

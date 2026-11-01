@@ -804,7 +804,12 @@ documents, and Roku clients list their MPEG-TS transcoding profile first. A
 video-copy HLS stream for a client whose user agent starts with `Roku/` and
 whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 `remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
-keeps fMP4. Other clients are unchanged.
+keeps fMP4.
+
+Any other client that lists the source codecs for MPEG-TS HLS but not for fMP4
+also gets a video copy as MPEG-TS, unless it can take a progressive remux. This
+covers H.264 and HEVC with AAC, AC-3, E-AC-3, or MP3 audio; other audio converts
+to AAC when the profile accepts it.
 
 ## AAC encodes
 

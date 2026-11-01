@@ -2349,7 +2349,8 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Subtitle metadata is temporarily unavailable")
 			return
 		}
-		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source) || compatRokuMPEGTS(r.UserAgent(), profile, source)
+		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source) || compatRokuMPEGTS(r.UserAgent(), profile, source) ||
+			source.hlsRemuxInTS && compatHLSCopiesVideo(source) && !source.DVStripToHDR10
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
 		// Only a copy stream is served from a keyframe playlist; subtitle
@@ -2656,25 +2657,40 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	if req.MaxAudioChannels == 1 {
 		targetAudioChannels = 1
 	}
+	// A copy is packaged as fMP4, or as MPEG-TS for a client that accepts the
+	// same codecs only there and has no progressive remux to take instead.
+	progressiveRemuxOK := enableDirectStream && allowVideoCopy && videoSupported && allowAudioCopy && audioSupported &&
+		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
+	remuxAudioCopyFMP4 := profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
+	remuxAudioCopyTS := !remuxAudioCopyFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
+		profile.supportsHLSRemuxIn(version, selectedAudioIndex, compatContainerTS)
 	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		allowAudioCopy &&
 		!supportsDirectPlay &&
-		profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
+		(remuxAudioCopyFMP4 || remuxAudioCopyTS)
+	remuxAudioEncodeFMP4 := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
+	remuxAudioEncodeTS := !remuxAudioEncodeFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, "") &&
+		profile.supportsHLSRemuxWithAudioTranscodeIn(version, selectedAudioIndex, targetAudioChannels, compatContainerTS)
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
 		(!allowAudioCopy || !audioSupported) &&
-		profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
+		(remuxAudioEncodeFMP4 || remuxAudioEncodeTS)
 	transcodeAudio := !hlsAudioCopy &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		hlsAudioTranscode
 	hlsRemux := hlsAudioCopy || transcodeAudio
+	hlsRemuxInTS := hlsAudioCopy && remuxAudioCopyTS || transcodeAudio && remuxAudioEncodeTS
 	var hlsRemuxAudioStreamIndexes []int
 	if hlsRemux && !transcodeAudio {
-		hlsRemuxAudioStreamIndexes = supportedHLSRemuxAudioStreamIndexes(version, profile, selectedAudioIndex)
+		container := compatContainerMP4
+		if hlsRemuxInTS {
+			container = compatContainerTS
+		}
+		hlsRemuxAudioStreamIndexes = supportedHLSRemuxAudioStreamIndexes(version, profile, selectedAudioIndex, container)
 	}
 	supportsDirectStream := !hlsRemux &&
 		enableDirectStream &&
@@ -2730,6 +2746,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		TargetVideoCodec:           targetVideoCodec,
 		h264TargetBitrateKbps:      max(h264BitrateKbps, 0),
 		h264TargetResolution:       h264Resolution,
+		hlsRemuxInTS:               hlsRemuxInTS,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -2770,7 +2787,7 @@ func compatEncodeTarget(profile DeviceProfile, videoCodec string, maxBitrate int
 // switch, so the client's SourceBuffer keeps the init segment negotiated for
 // the initial track; only tracks whose fMP4 init is interchangeable with it
 // (same codec and channel layout) are safe to switch without renegotiation.
-func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile DeviceProfile, selectedAudioIndex *int) []int {
+func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile DeviceProfile, selectedAudioIndex *int, container string) []int {
 	selected := compatAudioTrack(version, selectedAudioIndex)
 	indexes := make([]int, 0, len(version.AudioTracks))
 	for audioTrackIndex, track := range version.AudioTracks {
@@ -2778,7 +2795,7 @@ func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile De
 			continue
 		}
 		streamIndex := len(version.VideoTracks) + audioTrackIndex
-		if profile.SupportsHLSRemuxForAudioStream(version, &streamIndex) {
+		if profile.supportsHLSRemuxIn(version, &streamIndex, container) {
 			indexes = append(indexes, streamIndex)
 		}
 	}
