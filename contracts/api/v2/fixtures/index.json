@@ -7260,7 +7260,7 @@
     {
       "name": "get_home_capabilities_ok",
       "operation_id": "getHomeCapabilities",
-      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max, and listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max.",
+      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max, listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max, and getHomeSectionItems and getHomeLayout accept item_limit up to row_item_limit_max.",
       "request": {
         "method": "GET",
         "path": "/api/v2/home/capabilities",
@@ -7273,7 +7273,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"15a2545d2cf1995917e84822b36872575b71f3ea27d916b054aee2524d854bf6\""
+        "ETag": "\"d13e40a56af60133e079ed362f0b928b8fe0c6b5cff399307d25e1c791d74f6f\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -7299,6 +7299,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "get_home_layout_include_items_out_of_range.json"
+    },
+    {
+      "name": "get_home_layout_item_limit_out_of_range",
+      "operation_id": "getHomeLayout",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout?include_items=1&item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_layout_item_limit_out_of_range.json"
     },
     {
       "name": "get_home_layout_ok",
@@ -7361,6 +7382,48 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeLayout",
       "body_file": "get_home_layout_with_items_ok.json"
+    },
+    {
+      "name": "get_home_section_items_capped_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items?item_limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_capped_ok.json"
+    },
+    {
+      "name": "get_home_section_items_item_limit_out_of_range",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_section_items_item_limit_out_of_range.json"
     },
     {
       "name": "get_home_section_items_not_found",

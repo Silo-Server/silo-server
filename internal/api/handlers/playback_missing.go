@@ -103,7 +103,7 @@ func preflightPlaybackFile(
 		return &playbackFilePreflightError{notFound: true}
 	}
 
-	if _, err := fspath.Stat(file.FilePath); err != nil {
+	if _, err := fspath.StatContext(ctx, file.FilePath); err != nil {
 		if os.IsNotExist(err) {
 			markPlaybackFileMissing(ctx, file, marker, eventsHub)
 			return &playbackFilePreflightError{notFound: true, err: err}

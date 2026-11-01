@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -628,6 +629,16 @@ func (s *MetadataService) SetAutoTranslator(t AutoTranslator) {
 
 func (s *MetadataService) SetImageCacher(c ImageCacher) {
 	s.imageCacher = c
+}
+
+// AutoImageCacher returns the image cacher while metadata.cache_images is on
+// and an artwork store is configured, so other owners of provider artwork
+// (movie box sets) cache under the same switch as item artwork; nil otherwise.
+func (s *MetadataService) AutoImageCacher() ImageCacher {
+	if s == nil || s.imageCacher == nil || !s.autoCacheImages.Load() {
+		return nil
+	}
+	return s.imageCacher
 }
 
 func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
@@ -9212,7 +9223,7 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	// manga enrichment pipeline). Pass non-series values through untouched so
 	// a round-trip through itemToMetadataResult can never mangle them.
 	if contentType == "series" {
-		item.ShowStatus = NormalizeShowStatus(r.ShowStatus)
+		item.ShowStatus = showstatus.Normalize(r.ShowStatus)
 	} else {
 		item.ShowStatus = r.ShowStatus
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -34,7 +35,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -388,6 +388,7 @@ func compatRecipeMatchesSource(recipe *playback.RecipeCard, source PlaybackMedia
 		recipe.MediaFileID == source.FileID &&
 		compatRecipeTargetVideoMatchesSource(recipe, source) &&
 		recipe.AudioTrackIndex == compatAudioTrackIndexOrDefault(source) &&
+		compatAudioRequirementMatches(recipe.RequireAudioTrack, source) &&
 		recipe.SourceAudioChannels == compatHLSRecipeSourceAudioChannels(source) &&
 		recipe.CopyVideoMPEGTS == source.HLSRemuxMPEGTS &&
 		(!compatHLSCopiesVideo(source) || recipe.KeyframePlaylist == source.KeyframePlaylist) &&
@@ -1047,13 +1048,22 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	// Before ensureTranscodeManifest, for the same reason as the master manifest.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
-		manifest, relayErr := h.fetchRemoteCompatManifest(r.Context(), playSession.Recipe.TranscodeNodeURL, playSession.UpstreamSessionID)
+		var manifest []byte
+		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
+			var err error
+			manifest, err = h.fetchRemoteCompatManifest(r.Context(), nodeURL, playSession.UpstreamSessionID)
+			return err
+		})
 		if relayErr != nil {
 			writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode manifest is unavailable")
 			return
 		}
-		writeCompatManifest(w, manifest, playSession, *source, h.compatSegmentDuration())
-		return
+		if !local {
+			writeCompatManifest(w, manifest, playSession, *source, h.compatSegmentDuration())
+			return
+		}
+		// The transcode moved to this process; serve it locally below.
+		playSession = h.refreshPlaySession(playSession)
 	}
 
 	// Ensure the transcode process is running.
@@ -1115,8 +1125,23 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
 		segmentName := chiURLParam(r, "segmentId") + "." + chiURLParam(r, "segmentContainer")
-		h.proxyRemoteCompatSegment(w, r, playSession.Recipe.TranscodeNodeURL, playSession.UpstreamSessionID, segmentName)
-		return
+		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
+			return h.proxyRemoteCompatSegment(w, r, nodeURL, playSession.UpstreamSessionID, segmentName)
+		})
+		if relayErr != nil {
+			writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
+			return
+		}
+		if !local {
+			return
+		}
+		// The transcode moved to this process: serve the segment from the
+		// local reconstruction below, after the local capability checks.
+		playSession, err = h.prepareCompatSegmentRecipe(r.Context(), h.refreshPlaySession(playSession), *source)
+		if err != nil {
+			writeCompatTranscodeError(w, err)
+			return
+		}
 	}
 
 	name := chiURLParam(r, "segmentId")
@@ -1206,7 +1231,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
-				segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, decision.WaitTimeout)
+				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
 				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "jellycompat",
 						"segment", segmentName,
@@ -1231,7 +1256,8 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					transcodeSession,
 					segNum,
 				)
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
+				// A restart skipped because the request ended is not a failure.
+				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
 						"segment", segmentName,
@@ -1271,16 +1297,22 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
 
-					segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 30*time.Second)
+					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
 				}
 			}
 		} else if transcodeSession.IsRunning() {
 			// Non-numbered segment (e.g. init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 10*time.Second)
+			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
 		}
 	}
 	if err != nil {
+		if r.Context().Err() != nil {
+			// net/http also ends the context of a client that only
+			// half-closed and is still reading. Answer it as a timed-out
+			// wait would: writing nothing reaches it as an empty 200.
+			err = playback.ErrSegmentNotFound
+		}
 		status, code, message := hlsSegmentErrorResponse(err)
 		writeError(w, status, code, message)
 		return
@@ -1330,7 +1362,7 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
 		return nil, err
 	}
-	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
+	resp, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), req, nodeURL, "stream")
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return nil, err
@@ -1343,37 +1375,86 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 }
 
-func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *http.Request, nodeURL, upstreamSessionID, segmentName string) {
+// proxyRemoteCompatSegment relays one segment from a transcode node and writes
+// the answer. When the node cannot be reached at all it writes nothing and
+// returns the error (see nodepool.IsConnectFailure), so the caller can
+// move the transcode and retry; every other outcome is written and returns nil.
+func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *http.Request, nodeURL, upstreamSessionID, segmentName string) error {
 	path := "/transcode/" + url.PathEscape(upstreamSessionID) + "/segment/" + url.PathEscape(segmentName)
 	target := nodepool.NodeEndpoint(nodeURL, path)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
-		return
+		return nil
 	}
 	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
-		return
+		return nil
 	}
 	transcodeproxy.PrepareRequest(req, r)
-	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
+	resp, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), req, nodeURL, "stream")
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
+		if nodepool.IsConnectFailure(err) && r.Context().Err() == nil {
+			return err
+		}
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
-		return
+		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(sw, resp.Body); err != nil {
-		return
+	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
+			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "jellycompat", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(nodeURL), "playback_session_id", upstreamSessionID)
+		}
+		if r.Context().Err() == nil {
+			// A clean end would let a chunked client accept the short body as complete.
+			panic(http.ErrAbortHandler)
+		}
+		return nil
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
 		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.JWTSecret, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
+	}
+	return nil
+}
+
+// relayRemoteCompat runs relay against the transcode node that runs the play
+// session's transcode. When the node cannot be reached, the transcode moves to
+// another executor (moveCompatTranscodeOffNode) and relay runs again against
+// the new node. local is true when the transcode now runs in this process, and
+// the caller serves the request through its local path. err is the relay's own
+// error, joined with the move's when the move failed.
+func (h *PlaybackHandler) relayRemoteCompat(ctx context.Context, playSession *PlaybackSession, relay func(nodeURL string) error) (local bool, err error) {
+	nodeURL := playSession.Recipe.TranscodeNodeURL
+	// Nodes this request already found unreachable. The pool can list them as
+	// healthy until its next sweep, so each move leaves all of them out.
+	var failedNodes []string
+	for hop := 0; ; hop++ {
+		relayErr := relay(nodeURL)
+		if relayErr == nil || !nodepool.IsConnectFailure(relayErr) || ctx.Err() != nil || hop >= compatMaxMoveHops {
+			return false, relayErr
+		}
+		slog.WarnContext(ctx, "Jellyfin-compatible transcode node unreachable from the relay", "component", "jellycompat",
+			"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(relayErr.Error()),
+			"playback_session_id", playSession.UpstreamSessionID)
+		next, moveErr := h.moveCompatTranscodeOffNode(ctx, playSession.UpstreamSessionID, nodeURL, failedNodes...)
+		if moveErr != nil {
+			slog.WarnContext(ctx, "could not move a Jellyfin-compatible transcode off an unreachable node", "component", "jellycompat",
+				"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(moveErr.Error()),
+				"playback_session_id", playSession.UpstreamSessionID)
+			return false, errors.Join(relayErr, moveErr)
+		}
+		if next == "" {
+			return true, nil
+		}
+		failedNodes = append(failedNodes, nodeURL)
+		nodeURL = next
 	}
 }
 
@@ -1652,10 +1733,20 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 	_, _ = w.Write(data)
 }
 
-// extractEmbeddedTextSubtitle serves one embedded text track. A cache miss
-// extracts every text track of the file in the same demux, so switching to
+// extractEmbeddedTextSubtitle serves one embedded text track: from the cache,
+// a kept copy, or the file's index. When only a demux can produce it, the
+// demux extracts every text track of the file at once, so switching to
 // another track later does not read the whole source again.
 func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file *models.MediaFile, trackIndex int, format string) ([]byte, error) {
+	// A kept copy of the track, or one read through the file's index, needs
+	// no demux at all.
+	ref := playback.EmbeddedSubtitleRefFor(file, trackIndex)
+	if data, ok, err := h.SubtitleCache.ExtractSourcedText(ctx, file.FilePath, ref, trackIndex, format, h.FFmpegPath); ok || err != nil {
+		return data, err
+	}
+	if ref != nil && ref.IndexOnly {
+		return nil, playback.ErrSubtitleIndexOnly
+	}
 	want := playback.TextSubtitleTrack{Ordinal: trackIndex, Format: format}
 	return h.SubtitleCache.ExtractTextTracks(ctx, file.FilePath, want, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch,
 		func(ctx context.Context) ([]byte, error) {
@@ -1668,11 +1759,15 @@ func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPat
 }
 
 // compatTextSubtitleTracks lists the text renditions of a file's embedded
-// subtitle streams, indexed by their position among its subtitle streams.
+// subtitle streams, indexed by their position among its subtitle streams. An
+// index-only track is left out: FFmpeg can't demux it, and one stream it
+// can't read fails the batch for every other track.
 func compatTextSubtitleTracks(file *models.MediaFile) []playback.TextSubtitleTrack {
 	codecs := make([]string, len(file.SubtitleTracks))
 	for i, track := range file.SubtitleTracks {
-		codecs[i] = track.Codec
+		if !track.IndexOnly {
+			codecs[i] = track.Codec
+		}
 	}
 	return playback.TextSubtitleTracks(codecs)
 }
@@ -1696,7 +1791,9 @@ func (h *PlaybackHandler) warmCompatTextSubtitles(fileID int) {
 		if err != nil || file == nil {
 			return
 		}
-		h.SubtitleCache.WarmTextTracks(file.FilePath, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch)
+		h.SubtitleCache.WarmEmbeddedTextTracks(file.FilePath, compatTextSubtitleTracks(file), func(ordinal int) *playback.EmbeddedSubtitleRef {
+			return playback.EmbeddedSubtitleRefFor(file, ordinal)
+		}, h.extractTextSubtitleBatch, h.FFmpegPath)
 	}()
 }
 
@@ -1922,10 +2019,15 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
+	// The session lifecycle lock orders the delete after a transcode move that
+	// is rewriting the record (commitCompatTranscodeMove).
 	if h.RecipeNodeStore != nil {
+		unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
 		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
+		err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID)
+		cancel()
+		unlock()
+		if err != nil {
 			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.UpstreamSessionID)
 		}
@@ -2944,6 +3046,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		FFmpegPath:             h.FFmpegPath,
 		HWAccel:                h.HWAccel,
 		AudioTrackIndex:        audioTrackIndex,
+		RequireAudioTrack:      compatRequiresAudioTrack(source),
 		SourceAudioChannels:    sourceAudioChannels,
 		TotalDuration:          float64(source.Version.Duration),
 		FastStart:              true,
@@ -3230,6 +3333,7 @@ func compatLiveTranscodeMatchesAudioSource(transcodeSession *playback.TranscodeS
 	}
 	opts := transcodeSession.Opts()
 	return opts.AudioTrackIndex == compatAudioTrackIndexOrDefault(source) &&
+		compatAudioRequirementMatches(opts.RequireAudioTrack, source) &&
 		opts.SourceAudioChannels == compatHLSRecipeSourceAudioChannels(source) &&
 		opts.CopyVideoMPEGTS == source.HLSRemuxMPEGTS &&
 		(!compatHLSCopiesVideo(source) || opts.KeyframePlaylist == source.KeyframePlaylist) &&
@@ -3541,6 +3645,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		}
 		previousOpts := transcodeSession.Opts()
 		transcodeSession.SetAudioTrackIndex(audioTrackIndex)
+		// A new selection is always mandatory, even on a runtime rebuilt from a
+		// recipe written before negotiated audio was.
+		transcodeSession.SetRequireAudioTrack(compatRequiresAudioTrack(source))
 		transcodeSession.SetSourceAudioChannels(sourceAudioChannels)
 		startSegment := 0
 		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
@@ -3548,6 +3655,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		}
 		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			transcodeSession.SetAudioTrackIndex(previousOpts.AudioTrackIndex)
+			transcodeSession.SetRequireAudioTrack(previousOpts.RequireAudioTrack)
 			transcodeSession.SetSourceAudioChannels(previousOpts.SourceAudioChannels)
 			if errors.Is(err, playback.ErrSessionSuperseded) {
 				return false, err

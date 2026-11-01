@@ -37,7 +37,7 @@ const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to ano
 // key, Meilisearch refused for an authenticated request.
 const adminMeilisearchKeyRejectedMessage = "Meilisearch refused the API key, or requires one. Enter a key that can manage indexes and documents, such as the Default Admin API Key."
 
-const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
+const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
 
 type adminSettingsConnectionCheckRequest struct {
 	Values    map[string]string `json:"values"`
@@ -184,6 +184,7 @@ func aiClientConfig(cfg *config.Config) llm.Config {
 	return llm.Config{
 		AuthMode:        cfg.AI.AuthMode,
 		ReasoningEffort: cfg.AI.ReasoningEffort,
+		ServiceTier:     cfg.AI.ServiceTier,
 		BaseURL:         strings.TrimSpace(cfg.AI.BaseURL),
 		APIKey:          cfg.AI.APIKey,
 		ChatModel:       strings.TrimSpace(cfg.AI.ChatModel),
@@ -279,27 +280,22 @@ func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) con
 }
 
 func transcriptionCheckFailureMessage(err error) string {
-	if errors.Is(err, llm.ErrQuotaExhausted) {
+	switch llm.Classify(err) {
+	case llm.FailureQuotaExhausted:
 		return "Speech-to-text provider quota is exhausted. Check your provider balance and limits."
-	}
-	if status, ok := errors.AsType[*llm.HTTPError](err); ok {
-		switch status.StatusCode {
-		case http.StatusUnauthorized:
-			return "Speech-to-text authentication failed. Replace the provider's API key in AI Services."
-		case http.StatusForbidden:
-			return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
-		case http.StatusPaymentRequired:
-			return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
-		case http.StatusNotFound:
-			return "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."
-		case http.StatusTooManyRequests:
-			return "Speech-to-text provider is rate limiting requests. Try again later."
-		}
-		if status.StatusCode >= 500 {
-			return "Speech-to-text provider is temporarily unavailable. Try again later."
-		}
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	case llm.FailureUnauthorized:
+		return "Speech-to-text authentication failed. Replace the provider's API key in AI Services."
+	case llm.FailureForbidden:
+		return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
+	case llm.FailurePaymentRequired:
+		return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
+	case llm.FailureNotFound:
+		return "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."
+	case llm.FailureRateLimited:
+		return "Speech-to-text provider is rate limiting requests. Try again later."
+	case llm.FailureUnavailable:
+		return "Speech-to-text provider is temporarily unavailable. Try again later."
+	case llm.FailureTimeout:
 		return "Speech-to-text connection check timed out. Check provider availability and try again."
 	}
 	return ""

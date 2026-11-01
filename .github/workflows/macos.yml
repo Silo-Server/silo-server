@@ -97,6 +97,7 @@ jobs:
             -o "$package_dir/silo" ./cmd/silo/
 
           cp LICENSE "$package_dir/LICENSE"
+          cp PLATFORM-EXCEPTION.md "$package_dir/PLATFORM-EXCEPTION.md"
           go version -m "$package_dir/silo" > "$package_dir/build-info.txt"
           otool -L "$package_dir/silo" > "$package_dir/linked-libraries.txt"
           tar -czf "dist/$archive" -C dist silo-darwin-arm64

@@ -37,8 +37,17 @@ in the row and open the full list here. To download only the cards a row shows,
 `listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
 which caps every row's item limit for that request. Send it only when
 `getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
-the parameter. See the home section of
-[the native API contract](architecture/api-contract.md) for the details.
+the parameter. `getHomeSectionItems` and `getHomeLayout` (for the rows it
+includes) accept the same `item_limit`; send it only when `getHomeCapabilities`
+reports `row_item_limit_max`. A row they answer with `item_limit` carries
+`has_more: true` when it holds more cards than it answered. See the home section
+of [the native API contract](architecture/api-contract.md) for the details.
+
+This listing is not a continuation of a capped row. Query-backed rows page their
+source here, so a Home row that hides watched items lists them here, and a random
+row is drawn again. A client that shows a capped row reporting `has_more` and
+wants the rest of it in place reads the row again at its own limit
+(`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
 ## People search
 
@@ -102,6 +111,20 @@ the person without `prefetch` when the user actually opens them.
 `GET /api/v2/catalog/search/capabilities` advertises `person_prefetch: true` when
 the server accepts the parameter. Check it first: `/api/v2` rejects unknown query
 parameters, so an older server answers a prefetch read with `422`.
+
+## Filter values
+
+`GET /api/v2/catalog/filters` (`getCatalogFilters`) lists the facet values of a
+scope. The `technical` lists (resolutions, audio languages, and subtitle
+languages) come from the scope's files, and building them reads every present
+file in the scope. Each node keeps them for five minutes, keyed by the scope's
+full SQL and arguments like the typeahead lists below, so viewers with
+different access never share them. A value that only a newly added or removed
+file brings or takes away can take up to five minutes to appear in or leave
+`technical`. The other lists are read on every request. Pass
+`skip_technical=true` when a screen does not show the technical lists. The
+audio and subtitle language lists of the Jellyfin-compatible `/Items/Filters2`
+share these cached lists.
 
 ## Facet typeahead
 
@@ -625,7 +648,16 @@ rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
 
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
-matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
+matches no `runtime` bound. An audiobook's `runtime` uses its longest active
+recording copy across libraries: file durations are summed per library and
+canonical recording root, then rounded to the nearest minute (at least one).
+File changes and removals maintain this value; metadata enrichment and refresh
+preserve it. An admin runtime lock preserves the edited value instead; removing
+the lock restores the file-derived value immediately. Books
+without positive file durations retain their stored runtime. The `runtime` rule,
+sort and item field therefore use the same value. Audiobook group totals and
+Audiobookshelf responses retain their library-scoped duration calculations.
+`latest_episode_added` and `last_air_date` describe a
 show's newest episode with a file in a library, so movies never match them. An
 episode the metadata provider lists but no library has a file for does not count,
 even after its air date. The `last_air_date` sort follows the same rule. A show's
@@ -768,7 +800,65 @@ The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
 seek. It covers the query source only and takes no search text or
 `name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
-the operation is available.
+the operation is available. With `group: "box_set"` it counts a box set browse
+(see Movie box sets) the way `queryCatalogItems` pages it.
+
+## Movie box sets
+
+A movie or mixed library can browse the movies TMDB lists in one collection (a
+franchise such as Harry Potter) as one box set. An administrator turns it on
+with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
+2) is the fewest of a collection's movies the library must hold, and
+`box_sets_in_search` (default true) lists the library's box sets in search.
+`getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
+server supports them (`getLibraryCapabilities` reports the same to
+administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
+so a client knows which libraries to browse with `group=box_set`.
+
+`listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
+`source=query` browse of one library with box sets on and no search text,
+return a box set card in place of the collection's movies once the viewer can
+see at least `box_set_min_movies` of them there. The card has `type:
+"box_set"`, `content_id: "box_set:<tmdb collection id>"`, the collection's
+title, overview, and artwork, and a `box_set` object with its `id`,
+`library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
+The card stands at its first movie in the requested order and carries that
+movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
+`name_prefix` matches that first movie, so a box set is listed under one
+letter, the one the letter index files it under.
+Any other request with `group=box_set` returns the ordinary list. Send the
+same `group` to `queryCatalogLetters` so the letter index counts the grouped
+list. A collection's artwork is cached like item artwork when the server
+caches metadata images; until then its URLs point at TMDB.
+
+`GET /api/v2/catalog/box-sets/{id}?library_id=` (`getCatalogBoxSet`) answers a
+box set with its movies in that library that the viewer can see, in collection
+(release) order; it is `404` when the library has box sets off or the viewer
+can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
+(`searchCatalogBoxSets`) answers the box sets of libraries with
+`box_sets_in_search` whose name contains every word of `q`, or that have two
+or more movies in those libraries the viewer can see whose titles do, best
+match first. Movies the viewer cannot see never count toward a title match.
+`library_id` limits the search to one library. Search results keep listing the
+movies themselves; clients show matching box sets ahead of them.
+
+`GET /api/v2/catalog/items/{id}/box-set?library_id=` (`getCatalogItemBoxSet`)
+answers the box set a movie's page shows, as `getCatalogBoxSet` would answer
+it: from `library_id`, or else the first of the movie's libraries with box sets
+on, when the viewer can see the movie and at least `box_set_min_movies` of the
+collection's movies there. `box_set` is absent when there is none, including
+for a title that is not a movie (a series or an audiobook); like the
+membership reads (see personal-lists in the API contract), that ordinary
+answer is a `200`. `404` is kept for an ID that is missing, hidden from the
+viewer, or not a catalog title (an episode or season ID). Clients show it as a
+row of the box set's movies on the movie page, marking the movie being viewed.
+
+A box set's `title` is its TMDB collection name with a trailing "Collection"
+shown as "Box Set" ("Harry Potter Collection" is "Harry Potter Box Set"), so it
+does not read as one of Silo's own collections; other names are unchanged.
+Search finds it by either form ("harry potter box set" or "harry potter
+collection"), but "box", "set" or "collection" alone matches only names that
+contain the word themselves.
 
 ## History ordering
 

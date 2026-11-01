@@ -59,7 +59,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		MaxAge:           86400,
 	}))
 	r.Use(normalizeCompatPathMiddleware)
-	r.Use(httpstream.CompressExcept(5, skipCompatMediaCompression, "application/json"))
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
 	if debugPath := os.Getenv("JELLYCOMPAT_DEBUG_LOG"); debugPath != "" {
 		rotator := &lumberjack.Logger{
 			Filename:   debugPath,
@@ -194,6 +194,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
 	playbackHandler.PlaySync = deps.SubtitlePlaySync
+	if deps.KeptSubtitles != nil {
+		playbackHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
+	}
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
@@ -202,6 +205,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.ExternalTimings = timings
 		}
 	}
+	// Last: move requests run on the event bus's goroutine and read the
+	// handler's fields.
+	subscribeTranscodeMoveRequests(deps, playbackHandler)
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	if deps.DB != nil {
 		imagesHandler.extraRepo = catalog.NewExtraRepository(deps.DB)

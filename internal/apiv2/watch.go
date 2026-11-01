@@ -260,7 +260,7 @@ const (
 
 // WatchedInput names the item to mark.
 type WatchedInput struct {
-	ID ID `path:"id" doc:"A movie, ebook, episode, season or series; a season or series expands to its episodes" example:"movie:heat-1995"`
+	ID ID `path:"id" doc:"A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes" example:"movie:heat-1995"`
 }
 
 func registerWatch(reg *Registry) {
@@ -278,7 +278,7 @@ func registerWatch(reg *Registry) {
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
-		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie or episode with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.")
+		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie, episode or audiobook with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.")
 	mark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, true)
@@ -349,7 +349,8 @@ func watchTargetProblem(err error, location string) error {
 }
 
 // setWatched runs the same command as v1 POST/DELETE /watched/{id}, except
-// that marking a movie or episode watched mid-rewatch records another play.
+// that marking a movie, episode or audiobook watched mid-rewatch records
+// another play.
 func (reg *Registry) setWatched(ctx context.Context, in *WatchedInput, played bool) (*struct{}, error) {
 	if reg.deps.Watch == nil {
 		return nil, unavailable("watch")

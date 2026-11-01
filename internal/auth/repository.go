@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -598,10 +601,29 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 // lift the restriction; they are revoked in the same transaction, keeping
 // only keepSessionID, the session that chose the new password.
 func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
-	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, &keepSessionID)
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE auth_sessions SET revoked_at = NOW()
+			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, keepSessionID); err != nil {
+			return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		}
+		return nil
+	})
 }
 
-func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
+// ReplacePasswordSigningOutOthers is CompareAndSwapPassword that also signs
+// the account out everywhere except keepSessionID, the session that chose
+// the new password, in the same transaction (RevokeOtherSignInsInTransaction).
+// The caller runs the OnUserSessionsRevoked hook after it returns.
+func (r *UserRepository) ReplacePasswordSigningOutOthers(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		return RevokeOtherSignInsInTransaction(ctx, tx, id, keepSessionID)
+	})
+}
+
+// compareAndSwapPassword runs alsoInTx, when set, in the transaction that
+// replaced the hash.
+func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, alsoInTx func(pgx.Tx) error) error {
 	hash, err := passwordhash.Generate(ctx, []byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
@@ -612,6 +634,11 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("begin password update: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	// The account is one of the audit row's accounts; an impersonator is
+	// locked with it in id order rather than after the account's update.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		SET password_hash = $1, password_change_required = false, updated_at = NOW()
@@ -620,16 +647,20 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
-		if keepSessionID != nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE auth_sessions SET revoked_at = NOW()
-				WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, *keepSessionID); err != nil {
-				return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		if alsoInTx != nil {
+			if err := alsoInTx(tx); err != nil {
+				return err
 			}
+		}
+		audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser,
+			strconv.Itoa(id), http.StatusNoContent, auditmutation.SecretChanged(auditmutation.FieldPassword))
+		if err != nil {
+			return err
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit password update: %w", err)
 		}
+		auditmutation.CommitMutation(ctx, audit)
 		return nil
 	}
 

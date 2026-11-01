@@ -668,6 +668,9 @@ type VersionSubtitleTrack struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
 	FileName        string `json:"file_name,omitempty"`
+	// IndexOnly is models.SubtitleTrack.IndexOnly, for planners that read
+	// this projection.
+	IndexOnly bool `json:"-"`
 }
 
 // SubtitleInfo represents a subtitle track available for a media item.
@@ -4825,6 +4828,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			HearingImpaired: sub.HearingImpaired,
 			External:        sub.External,
 			FileName:        sub.FileName,
+			IndexOnly:       sub.IndexOnly,
 		})
 
 		index := sub.Index

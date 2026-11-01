@@ -106,7 +106,8 @@ func seedBoxSetPageCollection(t *testing.T) (*ItemsHandler, string) {
 // SQL over only what the viewer can see. Members hidden by library access or
 // by the rating ceiling sit in the middle of a page; they must neither shorten
 // that page nor shift later pages, and TotalRecordCount counts visible members
-// only, in curated order and with an explicit SortBy alike.
+// only, in curated order and with an explicit SortBy alike. Limit=0 returns
+// only that total.
 func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 	h, parentID := seedBoxSetPageCollection(t)
 
@@ -132,9 +133,12 @@ func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 		{"&StartIndex=3&Limit=3", []string{"Title B", "Title A"}},
 		{"&StartIndex=1&Limit=2", []string{"Title F", "Title D"}},
 		{"&StartIndex=5&Limit=3", []string{}},
+		{"&Limit=0", []string{}},
+		{"&StartIndex=2&Limit=0", []string{}},
 		{"", []string{"Title G", "Title F", "Title D", "Title B", "Title A"}},
 		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=0&Limit=3", []string{"Title A", "Title B", "Title D"}},
 		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=3&Limit=3", []string{"Title F", "Title G"}},
+		{"&SortBy=SortName&SortOrder=Ascending&Limit=0", []string{}},
 	} {
 		names, total := page(tc.query)
 		if !slices.Equal(names, tc.want) || total != 5 {

@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,6 +207,7 @@ type Dependencies struct {
 	AdminJobArtifactSigner        *artworkurl.Signer
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminAPIClients               AdminAPIClientsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService
 	AdminNodeDrain                AdminNodeDrainService
@@ -481,6 +483,8 @@ type Dependencies struct {
 	People PeopleService
 	// LiteraryWorks answers literary works (*handlers.LiteraryWorkHandler).
 	LiteraryWorks LiteraryWorkService
+	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
+	BoxSets BoxSetService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -801,6 +805,10 @@ func (b *bufferedWriter) flush() {
 		// so the listener leaves that to the server.
 		b.w.Header().Del("Content-Type")
 		b.body.Reset()
+	} else if b.w.Header().Get("Content-Length") == "" {
+		// The whole body is known, so it goes out unchunked, and the
+		// listener's compressor can leave a body too short to gain identity.
+		b.w.Header().Set("Content-Length", strconv.Itoa(b.body.Len()))
 	}
 	b.w.WriteHeader(b.status)
 	_, _ = b.w.Write(b.body.Bytes())
@@ -835,7 +843,7 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 type AccountService interface {
 	AccountPasswordCapability(context.Context, *auth.Claims, string) (handlers.AccountPasswordCapabilityView, error)
 	AuthorizePasswordChange(context.Context, *auth.Claims, string) error
-	ChangePassword(context.Context, *auth.Claims, string, string) error
+	ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string, signOutOtherSessions bool) error
 	NeedsSetup(ctx context.Context) (bool, error)
 	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)

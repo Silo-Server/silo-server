@@ -330,6 +330,7 @@ type RecommendationsConfig struct {
 type AIConfig struct {
 	AuthMode        string `yaml:"-"`
 	ReasoningEffort string `yaml:"-"`
+	ServiceTier     string `yaml:"-"`
 	// TextProviderID selects the API-key text provider in ai.providers;
 	// BaseURL and APIKey are its resolved chat endpoint and key.
 	TextProviderID string `yaml:"-"`

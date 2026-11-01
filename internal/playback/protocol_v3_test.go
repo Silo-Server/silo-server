@@ -1279,6 +1279,100 @@ func TestVideoEligibleV3SoftwareEntryCanFollowARejectingHardwareEntryForTheSameC
 	}
 }
 
+// An exact decoder's reported frame rate holds at its largest size, as for
+// encode targets, so a smaller source may run faster within the same
+// macroblock rate up to 60 fps, while the maximum size still binds. A platform-attested or
+// declared entry is a tested envelope whose rate stays absolute.
+func TestVideoEligibleV3DecoderFrameRateHoldsAtItsLargestSize(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		evidence            CapabilityEvidenceV3
+		maxWidth, maxHeight int
+		maxFrameRate        float64
+		width, height       int
+		frameRate           float64
+		want                bool
+	}{
+		{name: "4K30 decoder takes 1080p50", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50, want: true},
+		// 1080 rows code as 1088, so 1080p120 needs more macroblocks a second
+		// than 4K30 although its pixel rate ties.
+		{name: "4K30 decoder refuses 1080p120", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 120},
+		// 720p120 fits 4K30's macroblock rate, but the trade stops at 60 fps:
+		// the entry does not report the codec's overall frame-rate range.
+		{name: "4K30 decoder refuses 720p120", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1280, height: 720, frameRate: 120},
+		{name: "platform-attested 4K30 refuses 1080p50", evidence: EvidencePlatformAttestedV3, maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50},
+		{name: "declared 4K30 refuses 1080p50", evidence: EvidenceDeclaredV3, maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50},
+		{name: "4K30 decoder refuses 4K60", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 3840, height: 2160, frameRate: 60},
+		{name: "1080p30 decoder refuses 1080p60", maxWidth: 1920, maxHeight: 1080, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 60},
+		{name: "1080p30 decoder takes 720p60", maxWidth: 1920, maxHeight: 1080, maxFrameRate: 30, width: 1280, height: 720, frameRate: 60, want: true},
+		{name: "size still binds", maxWidth: 1920, maxHeight: 1080, maxFrameRate: 60, width: 2560, height: 1080, frameRate: 24},
+		{name: "rate without a size stays absolute", maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50},
+		{name: "unknown decoder rate", maxWidth: 1920, maxHeight: 1080, width: 1920, height: 1080, frameRate: 120, want: true},
+	} {
+		source := SourceDescriptorV3{
+			VideoCodec: "h264", VideoProfile: "high", VideoLevel: 42, BitDepth: 8,
+			Width: tc.width, Height: tc.height, FrameRate: tc.frameRate, BitrateKbps: 3_000,
+		}
+		req := validStartRequestV3()
+		req.Capabilities.CodecsVideo = []string{"h264"}
+		req.Capabilities.CodecsVideoHardware = []string{"h264"}
+		if tc.evidence != "" {
+			req.Capabilities.VideoEvidence = tc.evidence
+		}
+		req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+			Codec: "h264", Profiles: []string{"baseline", "high", "main"}, Levels: []int{51}, BitDepths: []int{8},
+			MaxWidth: tc.maxWidth, MaxHeight: tc.maxHeight, MaxFrameRate: tc.maxFrameRate, MaxBitrateKbps: 300_000, Hardware: true,
+		}}
+		if eligible, _ := videoEligibleV3(source, req); eligible != tc.want {
+			t.Errorf("%s: eligible = %v, want %v", tc.name, eligible, tc.want)
+		}
+	}
+}
+
+// The planner has to reach the same answer as the eligibility check: an exact
+// 4K30 decoder gets the 1080p50 original, and a tested envelope of the same
+// size does not.
+func TestPlanPlaybackV3DecoderFrameRateTradeFollowsEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		evidence     CapabilityEvidenceV3
+		wantDelivery DeliveryV3
+	}{
+		{name: "exact", evidence: EvidenceExactV3, wantDelivery: DeliveryOriginalHTTPV3},
+		{name: "platform attested", evidence: EvidencePlatformAttestedV3, wantDelivery: DeliveryTranscodeHLSV3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			file.CodecVideo = "h264"
+			file.Resolution = "1080p"
+			file.Bitrate = 3_000
+			file.VideoTracks[0] = models.VideoTrack{
+				Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080,
+				FrameRate: "50/1", Bitrate: 3_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR",
+			}
+
+			req := validStartRequestV3()
+			req.Capabilities.VideoEvidence = tc.evidence
+			req.Capabilities.CodecsVideo = []string{"h264"}
+			req.Capabilities.CodecsVideoHardware = []string{"h264"}
+			req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+				Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8},
+				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30, MaxBitrateKbps: 300_000, Hardware: true,
+			}}
+			original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			original.Containers = []string{"mkv"}
+			original.VideoCodecs = []string{"h264"}
+			original.AudioDecodeCodecs = []string{"aac"}
+			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+
+			result := planFileV3(req, file)
+			if result.Plan == nil || result.Plan.Delivery != tc.wantDelivery {
+				t.Fatalf("plan = %s, want delivery %s", ExplainPlannerResultV3(result), tc.wantDelivery)
+			}
+		})
+	}
+}
+
 func TestPlanPlaybackV3AppleSoftwareEnvelopeSelectsOriginalHTTP(t *testing.T) {
 	tests := []struct {
 		name, codec, sourceProfile, claimedProfile, resolution, frameRate string
@@ -2057,7 +2151,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	embeddedCombinedIndex := 1
 	req.SubtitleTrackIndex = &embeddedCombinedIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", embeddedCombinedIndex)
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if !result.RequiresBurn || result.SelectedIndex != 1 || result.TransportIndex != 0 {
 		t.Fatalf("embedded burn-in result = %#v", result)
 	}
@@ -2066,7 +2160,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	req.SubtitleTrackIndex = &externalIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", externalIndex)
 	req.SubtitleFidelityPreference = SubtitleFidelityPreserveV3
-	result = ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+	result = ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_burn_in_source_unsupported" {
 		t.Fatalf("external burn-in result = %#v", result)
 	}
@@ -2283,6 +2377,15 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 		{"subtitle_track_id_length", func(r *StartRequestV3) {
 			r.SubtitleTrackID = strings.Repeat("s", 129)
 		}},
+		{"native_subtitle_limitation_count", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, make([]string, 17))
+		}},
+		{"native_subtitle_limitation_length", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, []string{longValue})
+		}},
+		{"native_subtitle_limitation_empty", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, []string{" "})
+		}},
 	}
 	for _, value := range cases {
 		t.Run(value.name, func(t *testing.T) {
@@ -2292,6 +2395,28 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 				t.Fatal("oversized capability accepted")
 			}
 		})
+	}
+}
+
+// setNativeSubtitleLimitationsV3 gives r an otherwise valid original_http
+// native_embedded entry with these limitations.
+func setNativeSubtitleLimitationsV3(r *StartRequestV3, limitations []string) {
+	delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	delivery.Subtitles.NativeEmbedded = []NativeEmbeddedSubtitleCapabilityV3{{Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id", Limitations: limitations}}
+	r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
+}
+
+// A newer client may declare a limitation this server does not know. The
+// request stays valid; planning ignores that entry instead.
+func TestStartRequestV3AcceptsUnknownNativeSubtitleLimitations(t *testing.T) {
+	req := validStartRequestV3()
+	setNativeSubtitleLimitationsV3(&req, []string{" Forced_Unlisted ", "future_limitation"})
+	if _, err := req.NormalizeAndValidate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	got := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3].Subtitles.NativeEmbedded[0].Limitations
+	if len(got) != 2 || got[0] != NativeEmbeddedLimitationForcedUnlistedV3 || got[1] != "future_limitation" {
+		t.Fatalf("limitations = %q, want normalized values kept", got)
 	}
 }
 

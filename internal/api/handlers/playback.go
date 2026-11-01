@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -170,6 +171,19 @@ type PlaybackChapterThumbnailQueuer interface {
 	QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64)
 }
 
+// SubtitleTrackFactsLoaderV3 loads, for one plan, what reading a file's
+// embedded subtitle tracks taught the server (keptsub.Store).
+type SubtitleTrackFactsLoaderV3 interface {
+	SubtitleTrackFacts(ctx context.Context, file *models.MediaFile) playback.SubtitleTrackFactsV3
+}
+
+// SubtitlePrefetcherV3 reads, when a playback starts, the embedded subtitle
+// tracks it will likely want (keptsub.Prefetcher).
+type SubtitlePrefetcherV3 interface {
+	SessionStarted(req keptsub.PrefetchRequest)
+	SessionEnded(sessionID string)
+}
+
 // PlaybackOriginalLanguageLookup fetches the original language for a content item.
 type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
@@ -265,7 +279,9 @@ type PlaybackHandler struct {
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map
-	SubtitleRepo           subtitles.Repository // optional; enables downloaded subtitles in playback
+	SubtitleRepo           subtitles.Repository       // optional; enables downloaded subtitles in playback
+	SubtitleTrackFacts     SubtitleTrackFactsLoaderV3 // optional; what reading embedded tracks taught the server, for native_embedded limitations
+	SubtitlePrefetch       SubtitlePrefetcherV3       // optional; reads the subtitle tracks a playback will likely want, at its start
 	RealtimeHub            *playback.RealtimeHub
 	CommandTracker         *playback.CommandTracker
 	CommandDispatcher      *playback.CommandDispatcher
@@ -607,6 +623,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 			// reconstruction; plain cards just respawn the encode. Either way the
 			// atomic playback+runtime operation is the same front door.
 			card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+			h.withRecordedRenditionTracksV3(r.Context(), card)
 			if card == nil && session.RequireMediaAuthorization {
 				var recipeErr error
 				if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -636,6 +653,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	// decode so the recipe is available for reconstruction. A header-authenticated
 	// session carries no token; its recipe is the server-side recovery card.
 	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	h.withRecordedRenditionTracksV3(r.Context(), card)
 	if card == nil {
 		var recipeErr error
 		if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -2146,6 +2164,10 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "bad_request", "Playlist request query is too long")
 		return
 	}
+	if errors.Is(err, playback.ErrSubtitleRenditionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Subtitle rendition not found")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "build transcode manifest", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode manifest not ready")
@@ -2277,8 +2299,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	segmentName := chi.URLParam(r, "name")
 	if isSubtitleSegment {
 		// Subtitle rendition segments never wait out or restart the video
-		// pipeline: they are answered from the cues already on disk.
-		transcodeSession.ServeSubtitleSegment(w, r, subtitleSegment)
+		// pipeline: they are answered from the cues already on disk, or read
+		// through the source's index.
+		transcodeSession.ServeSubtitleSegment(w, r, segmentName)
 		return
 	}
 	segmentLease, err := transcodeSession.OpenSegment(segmentName)
@@ -2318,7 +2341,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					"session", sessionID,
 					"playback_session_id", sessionID,
 				)
-				segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, decision.WaitTimeout)
+				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
 				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "api",
 						"segment", segmentName,
@@ -2347,7 +2370,8 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					transcodeSession,
 					segNum,
 				)
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
+				// A restart skipped because the request ended is not a failure.
+				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "api", "error", restartErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
 				}
 
@@ -2382,7 +2406,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					)
 					// Throttler + exit monitor re-arm via the session's
 					// restart hook.
-					segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 30*time.Second)
+					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
 					if err == nil && strings.EqualFold(transcodeSession.Opts().TargetCodecVideo, "copy") {
 						// Copy-mode seeks can resume as soon as the target segment
 						// exists, but that sometimes leaves the player one segment
@@ -2390,7 +2414,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						// for a single lookahead fragment when available so the
 						// first resumed playback window is less brittle.
 						nextSegmentName := fmt.Sprintf("seg_%05d%s", segNum+1, filepath.Ext(segmentName))
-						if nextSegment, nextErr := transcodeSession.WaitForOpenSegment(nextSegmentName, 1200*time.Millisecond); nextErr == nil {
+						if nextSegment, nextErr := transcodeSession.WaitForOpenSegmentContext(r.Context(), nextSegmentName, 1200*time.Millisecond); nextErr == nil {
 							_ = nextSegment.Close()
 						}
 					}
@@ -2399,10 +2423,16 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		} else if transcodeSession.IsRunning() {
 			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 10*time.Second)
+			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
 		}
 	}
 	if err != nil {
+		if r.Context().Err() != nil {
+			// net/http also ends the context of a client that only
+			// half-closed and is still reading. Answer it as a timed-out
+			// wait would: writing nothing reaches it as an empty 200.
+			err = playback.ErrSegmentNotFound
+		}
 		if writePlaybackToneMapExecutionError(w, err) {
 			return
 		}
@@ -2583,6 +2613,13 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
+			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "api", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(transcodeNodeURL), "playback_session_id", sessionID)
+		}
+		if r.Context().Err() == nil {
+			// A clean end would let a chunked client accept the short body as complete.
+			panic(http.ErrAbortHandler)
+		}
 		return nil
 	}
 	fullSize := transcodeproxy.FullRepresentationSize(resp)

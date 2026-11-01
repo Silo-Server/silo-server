@@ -8,11 +8,15 @@ import (
 	"math"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -25,15 +29,30 @@ type Middleware struct {
 	cfg      Config
 	perKey   RateLimiter
 	global   RateLimiter
+	quota    QuotaLimiter
 	store    SettingsStore
 	isMemory bool
+	// overQuotaLogged holds, per session, when the session quota last logged
+	// it, so a session over the quota logs once per overQuotaLogEvery.
+	overQuotaLogged sync.Map
+	// overBudget holds, per endpoint budget, the check that admits a request
+	// the budget would refuse. See AdmitOverEndpointBudget.
+	overBudget map[string]func(*http.Request) bool
 }
 
-// NewMiddleware creates the rate limit middleware.
+// NewMiddleware creates the rate limit middleware. Session quotas share the
+// per-key limiter's backend: Redis when it counts in Redis, else this process.
 func NewMiddleware(perKey RateLimiter, global RateLimiter, store SettingsStore, isMemory bool) *Middleware {
+	var quota QuotaLimiter
+	if rl, ok := perKey.(*RedisLimiter); ok {
+		quota = NewRedisQuotaLimiter(rl)
+	} else {
+		quota = NewMemoryQuotaLimiter()
+	}
 	return &Middleware{
 		perKey:   perKey,
 		global:   global,
+		quota:    quota,
 		store:    store,
 		isMemory: isMemory,
 	}
@@ -74,7 +93,10 @@ func (mw *Middleware) Init(ctx context.Context) error {
 	return mw.Reload(ctx)
 }
 
-// Reload re-reads config from server_settings and clears in-memory state.
+// Reload re-reads config from server_settings and clears the in-memory
+// per-second and per-minute state. Session quota buckets are kept: they read
+// their size and rate on every take, and clearing them on each settings change
+// would hand every session a fresh hour.
 func (mw *Middleware) Reload(ctx context.Context) error {
 	mw.reloadMu.Lock()
 	defer mw.reloadMu.Unlock()
@@ -189,6 +211,9 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 		if !mw.allowAccount(w, r, cfg, reject) {
 			return
 		}
+		if !mw.allowSession(w, r, cfg.Session, reject) {
+			return
+		}
 
 		// Check global limiter (per-second only — spec says no per-minute global limit).
 		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
@@ -201,6 +226,52 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// AdmitOverEndpointBudget lets requests that admit accepts through once the
+// endpoint's own budget, or a forwarding peer's share of it, is spent. The
+// per-address request budget and the global budget still apply. admit runs
+// only for a request those budgets would refuse, so it may do a lookup the
+// handler repeats; those checks spend budgets of their own (see
+// admitOverBudget).
+//
+// It is for public endpoints whose callers prove themselves with a
+// high-entropy secret the middleware cannot see, such as an autoscan source
+// token: the endpoint budget keeps slowing guesses with unknown secrets while
+// a sender holding a valid one is never refused for sharing an address with
+// them. Call it while building the router, before serving requests.
+func (mw *Middleware) AdmitOverEndpointBudget(endpoint string, admit func(*http.Request) bool) {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	if mw.overBudget == nil {
+		mw.overBudget = map[string]func(*http.Request) bool{}
+	}
+	mw.overBudget[endpoint] = admit
+}
+
+// admitOverBudget runs the endpoint's admission check for a request its
+// endpoint budget refused. Each check costs the caller a lookup, so checks
+// spend budgets of their own before it runs. The client's budget is ten times
+// the endpoint's, so one prober cannot use up the checks of the senders it
+// shares a reverse proxy with. A client address taken from forwarding
+// headers can be rotated, so such a check also spends a cap on the
+// connection's own address, ten times that again; network access ingress
+// writes the header itself and skips it, as with the peer budget.
+func (mw *Middleware) admitOverBudget(r *http.Request, admit func(*http.Request) bool, clientIP, endpoint string, epRate Rate) bool {
+	if admit == nil {
+		return false
+	}
+	checkRate := authPeerRate(epRate)
+	if !mw.perKey.Allow(r.Context(), fmt.Sprintf("authadmit:%s:%s", SourceKey(clientIP), endpoint), checkRate).Allowed {
+		return false
+	}
+	if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+		peerKey := fmt.Sprintf("authadmitpeer:%s:%s", SourceKey(peer), endpoint)
+		if !mw.perKey.Allow(r.Context(), peerKey, authPeerRate(checkRate)).Allowed {
+			return false
+		}
+	}
+	return admit(r)
 }
 
 type rateLimitError struct {
@@ -223,6 +294,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			mw.mu.RLock()
 			cfg := mw.cfg
+			admit := mw.overBudget[endpoint]
 			mw.mu.RUnlock()
 
 			if !cfg.Enabled {
@@ -255,10 +327,6 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					}
 					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
-					if !epResult.Allowed {
-						writeRateLimitResponse(w, epResult, reject)
-						return
-					}
 
 					// A client IP taken from forwarding headers is a new
 					// budget whenever the sender names a new client, and every
@@ -266,13 +334,15 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					// connection's own address also spends a looser budget
 					// that all clients behind it share. Network access ingress
 					// writes the header itself and needs no such cap.
-					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
-						peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
-						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
-						if !peerResult.Allowed {
-							writeRateLimitResponse(w, peerResult, reject)
-							return
+					if epResult.Allowed {
+						if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+							peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
+							epResult = mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
 						}
+					}
+					if !epResult.Allowed && !mw.admitOverBudget(r, admit, clientIP, endpoint, epRate) {
+						writeRateLimitResponse(w, epResult, reject)
+						return
 					}
 				}
 			}
@@ -340,6 +410,80 @@ func (mw *Middleware) allowAccount(w http.ResponseWriter, r *http.Request, cfg C
 		writeRateLimitResponse(w, result, reject)
 	}
 	return result.Allowed
+}
+
+// overQuotaLogEvery is how often a session over its quota is logged again.
+const overQuotaLogEvery = 10 * time.Minute
+
+// allowSession spends one request from the caller's sign-in session quota.
+// It counts what a client asks of the API, not what it plays or downloads:
+// playback and media transfer routes, API keys (which have their own tiers),
+// admins and impersonating admins are not counted. In log mode a session over the quota
+// is logged and served; in enforce mode it is refused.
+func (mw *Middleware) allowSession(w http.ResponseWriter, r *http.Request, q SessionQuotaConfig, reject RejectBodyWriter) bool {
+	if q.Mode != SessionQuotaLog && q.Mode != SessionQuotaEnforce {
+		return true
+	}
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.SessionID == "" || claims.TokenType != auth.TokenTypeAccess ||
+		claims.Role == models.RoleAdmin || claims.ImpersonatorUserID != nil || IsQuotaExemptPath(r.URL.Path) {
+		return true
+	}
+	result := mw.quota.Take(r.Context(), "session:"+claims.SessionID, q)
+	if result.Allowed {
+		return true
+	}
+	mw.logOverQuota(r, claims, q)
+	if q.Mode != SessionQuotaEnforce {
+		return true
+	}
+	writeRateLimitResponse(w, result, reject)
+	return false
+}
+
+func (mw *Middleware) logOverQuota(r *http.Request, claims *auth.Claims, q SessionQuotaConfig) {
+	now := time.Now()
+	if last, ok := mw.overQuotaLogged.Load(claims.SessionID); ok && now.Sub(last.(time.Time)) < overQuotaLogEvery { //nolint:errcheck,forcetypeassert // overQuotaLogged stores only time.Time
+		return
+	}
+	mw.overQuotaLogged.Store(claims.SessionID, now)
+	// Entries are dropped lazily: a session that stays over the quota keeps
+	// one, and the rest age out on the next log.
+	mw.overQuotaLogged.Range(func(key, value any) bool {
+		if now.Sub(value.(time.Time)) >= overQuotaLogEvery { //nolint:errcheck,forcetypeassert // overQuotaLogged stores only time.Time
+			mw.overQuotaLogged.Delete(key)
+		}
+		return true
+	})
+	slog.WarnContext(r.Context(), "sign-in session over its hourly request quota",
+		"component", "ratelimit", "mode", q.Mode, "user_id", claims.UserID, "session_id", claims.SessionID,
+		"requests_per_hour", q.RequestsPerHour, "burst", q.Burst, "user_agent", r.UserAgent(), "path", r.URL.Path)
+}
+
+// QuotaExemptPathPattern matches the routes session quotas do not count:
+// everything under /stream and /playback, so a player keeps reporting
+// progress, replanning and stopping after its session runs out, and the
+// other native media transfer routes (internal/api's nativeMediaRoutes):
+// downloads, direct downloads, theme audio and ebook reads. Playback is
+// bounded by stream limits instead. Signing out (the provider sign-out lookup
+// and the logout) is not counted either, so a session that spent its quota
+// can still end itself. The pattern uses only syntax Go and PostgreSQL read
+// alike, so the API usage summary leaves out the same requests in SQL.
+const QuotaExemptPathPattern = `^/api/v[12]/(stream|playback)(/|$)` +
+	`|^/api/v[12]/auth/(provider-)?logout$` +
+	`|^/api/v[12]/direct-download(-proxy)?$` +
+	`|^/api/v[12]/downloads/[^/]+/(file|file-proxy)$` +
+	`|^/api/v[12]/downloads/[^/]+/subtitles/` +
+	`|^/api/v2/catalog/items/[^/]+/themes/[^/]+/audio$` +
+	`|^/api/v1/ebooks/[^/]+/files/[^/]+/read$`
+
+var quotaExemptPath = regexp.MustCompile(QuotaExemptPathPattern)
+
+// IsQuotaExemptPath reports whether session quotas leave path uncounted.
+func IsQuotaExemptPath(path string) bool {
+	// Every exempt route is under the native API; the prefix check keeps the
+	// regexp off the other listeners' requests.
+	return strings.HasPrefix(path, "/api/v") && quotaExemptPath.MatchString(path)
 }
 
 // authPeerBudgetMultiplier sizes the budget that every forwarded client behind

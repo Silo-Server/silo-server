@@ -177,7 +177,7 @@ S = "server"
 def go(file, line): return (S, file, line, [])
 internal = {
     # api listener
-    "api GET /api/v1/health": [go("Dockerfile", 90), go("docker-compose.dev.yml", 133)],
+    "api GET /api/v1/health": [go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "api POST /api/v1/autoscan/webhooks/{token}": [go("internal/api/handlers/autoscan.go", 389)],
     "api POST /api/v1/plex-sync/webhooks/{secret}": [go("internal/api/handlers/webhook_sync.go", 569)],
     "api POST /api/v1/webhook-sync/webhooks/{secret}": [go("internal/api/handlers/webhook_sync.go", 568), go("internal/webhooksync/types.go", 11)],
@@ -201,7 +201,7 @@ internal = {
     # The same image (ENTRYPOINT silo, mode flag in cmd/silo/main.go) runs in
     # proxy and transcode mode, so the container HEALTHCHECK sites apply to
     # the node listeners as well as to the API row.
-    "proxy GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("docker-compose.dev.yml", 133)],
+    "proxy GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "proxy GET /stream/direct/{token}": [go("internal/api/handlers/playback_v3.go", 3245), go("internal/jellycompat/handlers_playback.go", 1285)],
     "proxy HEAD /stream/direct/{token}": [go("internal/api/handlers/playback_v3.go", 3245), go("internal/jellycompat/handlers_playback.go", 1285)],
     "proxy GET /stream/remux/{token}": [go("internal/api/handlers/playback_v3.go", 3243), go("internal/jellycompat/handlers_playback.go", 1287)],
@@ -223,7 +223,7 @@ internal = {
     "proxy POST /admin/force-reload": [go("internal/api/handlers/nodes.go", 532), go("internal/api/handlers/nodes.go", 581)],
     "proxy POST /admin/reprobe-capabilities": [go("internal/api/handlers/nodes.go", 807)],
     # transcode node listener
-    "transcode_node GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("docker-compose.dev.yml", 133)],
+    "transcode_node GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "transcode_node POST /transcode/start": [go("internal/api/handlers/playback_transport.go", 40), go("internal/jellycompat/handlers_playback.go", 1538)],
     "transcode_node DELETE /transcode/{session_id}": [go("internal/playback/transcode_manager.go", 1058)],
     "transcode_node GET /transcode/{session_id}/master.m3u8": [go("internal/api/handlers/playback.go", 1636), go("internal/proxy/server.go", 895), go("internal/proxy/mediagrant.go", 181), go("internal/jellycompat/streams.go", 1227)],
@@ -435,7 +435,7 @@ for r in rows:
     if k in external: notes.append("External caller: " + external[k] + ".")
     if r['listener'] == 'root' and r['path'] == '/': notes.append("Serves the bundled web frontend; the browser is the consumer.")
     if disp == 'removed': notes.append("Administrator action: ship the bridge builds of the first-party clients before upgrading the server to 1.0; the Android and Apple builds cited in consumer_call_sites still call this route and must move to the typed settings contract (GET/PUT/DELETE /api/v1/settings/values/{key}, GET /api/v1/settings/values/effective) first. On a 1.0 server this route answers 410 client_upgrade_required.")
-    if r['listener'] == 'api' and r['path'] == '/api/v1/health': notes.append("Administrator action: rewrite the container HEALTHCHECK (Dockerfile, docker-compose.dev.yml) and every orchestrator liveness probe from /api/v1/health to /health before the 1.0 cutover; /api/v1/health answers 410 afterwards. Client action: Apple (ServerIdentityResolver, ConnectionMonitor) and Android (HealthApi, ServerReachabilityMonitor, PlaybackSessionLifecycle) probe this route for server identity and reachability; they move to the v2 discovery document GET /api/v2/system/info (decision register Decision 3), not to the operator probe.")
+    if r['listener'] == 'api' and r['path'] == '/api/v1/health': notes.append("Administrator action: rewrite the container HEALTHCHECK (Dockerfile, dev/compose.yml) and every orchestrator liveness probe from /api/v1/health to /health before the 1.0 cutover; /api/v1/health answers 410 afterwards. Client action: Apple (ServerIdentityResolver, ConnectionMonitor) and Android (HealthApi, ServerReachabilityMonitor, PlaybackSessionLifecycle) probe this route for server identity and reachability; they move to the v2 discovery document GET /api/v2/system/info (decision register Decision 3), not to the operator probe.")
     if r['listener'] == 'api' and r['path'] == '/api/v1/ready': notes.append("Administrator action: rewrite every orchestrator readiness probe from /api/v1/ready to /ready before the 1.0 cutover.")
     if r['listener'] in ('proxy', 'transcode_node') and r['path'] == '/api/v1/health': notes.append("Administrator action: rewrite the proxy/transcode-node container HEALTHCHECK and orchestrator probes from /api/v1/health to /health on the node listener, and upgrade API replicas and nodes together inside the homogeneous-version maintenance window (Decision 2). Internal consumer: internal/nodepool/health.go CheckNode builds NodeEndpoint(n.URL, \"/api/v1/health\") and must switch to /health in the same change; the node-listener /api/v1/health route is then retired individually (it is not under the main-API tombstone).")
     if k == 'api POST /api/v1/playback/start': notes.append("Administrator action: none beyond the coordinated upgrade. Client action: the v2 start body must declare protocol_version 3; a legacy or draft body receives 422 (protocol-version/input-schema problem) on v2 instead of the v1 426. The v3 payload semantics are unchanged and remain tier 1.")

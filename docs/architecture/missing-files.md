@@ -58,6 +58,18 @@ Arr webhooks report an upgrade as a delete followed by an import, in either
 order and possibly in separate deliveries. Neither order changes the outcome;
 the title is only hidden between the two.
 
+Sonarr's `SeriesDelete` and Radarr's `MovieDelete` with `deletedFiles: true`
+become a scoped scan of the series or movie folder. Arr sends them before it
+deletes the folder, so the delivery waits in the webhook queue, rechecked
+every 10 to 25 seconds for two minutes and about once a minute after that,
+until the folder is gone (`ENOENT`) while its parent
+is still a directory, and only then scans. A scan any earlier would find the
+files and nothing would scan again. Each check is a bounded stat, so a stalled
+mount keeps the delivery waiting. A folder not confirmed gone an hour after
+the delivery arrived is scanned as it stands. Deleting the last folder under a
+library root leaves that root suspect-empty, so its titles stay protected
+like any other emptied root.
+
 ## Renamed and moved files
 
 A video file that appears at a new path takes over the row of the file it was

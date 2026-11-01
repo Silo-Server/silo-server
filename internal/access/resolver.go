@@ -314,3 +314,12 @@ func cloneInts(values []int) []int {
 	copy(out, values)
 	return out
 }
+
+// CheckProfileVerification checks request proof against a freshly loaded profile.
+// PIN exemptions cannot authorize household management of a locked profile.
+func (s Scope) CheckProfileVerification(profile *userstore.Profile) error {
+	if profile == nil || s.ProfileID != profile.ID || !s.ProfileVerified || s.PINVerificationSkipped || s.ProfilePINRevision != profile.PINRevision {
+		return ErrProfileUnverified
+	}
+	return nil
+}

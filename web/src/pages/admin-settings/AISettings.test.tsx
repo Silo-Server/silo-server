@@ -313,14 +313,27 @@ describe("AISettings", () => {
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
   });
 
-  it("falls back to the legacy subtitle_ai chat model", async () => {
+  it.each([
+    ["an untouched setting", false, "legacy-chat-model"],
+    ["an explicitly cleared draft", true, ""],
+  ])("resolves the legacy chat model for %s", async (_name, edited, expectedModel) => {
     const user = userEvent.setup();
     values["ai.chat_model"] = "";
+    dirtyKeys = edited ? ["ai.chat_model"] : [];
+    dirtyCount = dirtyKeys.length;
 
     render(<AISettings />);
-    await openTile(user, "Text model");
+    const tile = edited
+      ? screen.getByRole("group", { name: "Text model" })
+      : await openTile(user, "Text model");
 
-    expect(screen.getByDisplayValue("legacy-chat-model")).toBeInTheDocument();
+    expect(within(tile).getByLabelText("Model")).toHaveValue(expectedModel);
+    if (edited) {
+      expect(within(tile).getByRole("button", { name: "Test text model" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(mocks.save).not.toHaveBeenCalled();
+      expect(mocks.toastError).toHaveBeenCalledWith("Choose a text provider and a model.");
+    }
   });
 
   it("tests and enables speech on a provider that serves it", async () => {

@@ -94,14 +94,17 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 
 // apiKeyScopesAllow reports whether a key carrying scopes may perform the
 // request. Unscoped keys (empty scopes) are always allowed — they keep the
-// pre-scopes behavior. The path is cleaned before matching so `..` or
-// duplicate-slash spellings cannot dodge the anchored patterns; matching uses
-// the cleaned path only and never rewrites the request.
+// pre-scopes behavior. A scoped key's path must be one the router reads the
+// same way the allowlist does (see unambiguousRequestPath); any other
+// spelling is refused rather than judged by a normalized form.
 func apiKeyScopesAllow(scopes []string, r *http.Request) bool {
 	if len(scopes) == 0 {
 		return true
 	}
-	requestPath := path.Clean("/" + r.URL.Path)
+	requestPath, ok := unambiguousRequestPath(r)
+	if !ok {
+		return false
+	}
 	for _, scope := range scopes {
 		for _, route := range apiKeyScopeRoutes[scope] {
 			if route.method == r.Method && route.pattern.MatchString(requestPath) {
@@ -110,4 +113,17 @@ func apiKeyScopesAllow(scopes []string, r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// unambiguousRequestPath returns r.URL.Path when a route allowlist and the
+// router are certain to read it as the same path. chi matches r.URL.RawPath
+// whenever it is set (an encoded slash or dot, say) and otherwise the path
+// exactly as sent, without cleaning it, so judging a decoded or cleaned form
+// could admit one route while the router serves another: `..%2Fusers%2F1`
+// decodes and cleans to a users route but routes as one opaque segment. ok is
+// false for an escaped path, an empty one, or one with dot segments,
+// doubled slashes or a trailing slash.
+func unambiguousRequestPath(r *http.Request) (p string, ok bool) {
+	p = r.URL.Path
+	return p, r.URL.RawPath == "" && p != "" && path.Clean(p) == p
 }

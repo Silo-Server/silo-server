@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -1035,6 +1036,38 @@ func TestWaitForSegment_RestartingSessionReturnsNotFoundInsteadOfTranscodeFailed
 	_, err := session.WaitForSegment("seg_00010.m4s", 5*time.Millisecond)
 	if !errors.Is(err, ErrSegmentNotFound) {
 		t.Fatalf("WaitForSegment error = %v, want ErrSegmentNotFound", err)
+	}
+}
+
+// A segment wait ends as soon as its request does, whether FFmpeg is running
+// or restarting, instead of polling until the timeout for a client that left.
+func TestWaitForOpenSegmentContextEndsWithTheRequest(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		restarting bool
+	}{
+		{name: "running"},
+		{name: "restarting", restarting: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				session := &TranscodeSession{outputDir: t.TempDir(), running: true}
+				if tt.restarting {
+					session.restarting = &restartFlight{done: make(chan struct{})}
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				time.AfterFunc(50*time.Millisecond, cancel)
+
+				started := time.Now()
+				_, err := session.WaitForOpenSegmentContext(ctx, "seg_00010.ts", 30*time.Second)
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("WaitForOpenSegmentContext error = %v, want context.Canceled", err)
+				}
+				if waited := time.Since(started); waited > 50*time.Millisecond {
+					t.Fatalf("wait returned %v after it started, want when the request ended at 50ms", waited)
+				}
+			})
+		})
 	}
 }
 
