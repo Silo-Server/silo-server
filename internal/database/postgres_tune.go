@@ -744,8 +744,11 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 // postgresSettingsPendingRestart returns, in order, the names whose configured
 // value differs from the one the server runs with. pg_file_settings re-reads
 // the configuration files and sets error on an entry the server cannot apply
-// without a restart. A setting no file sets any more returns to its built-in
-// default at the restart, so it is pending only while it runs on another value.
+// without a restart. Only the last entry for a name counts: a restart applies
+// it, and an earlier entry whose name differs only in case is still compared
+// and can carry an error of its own. A setting no file sets any more returns
+// to its built-in default at the restart, so it is pending only while it runs
+// on another value.
 // A setting given on the postgres command line (-c) outranks every file, so a
 // restart keeps its running value and it is never pending.
 func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
@@ -755,14 +758,17 @@ func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, nam
 	// A syntax error or an unknown parameter name stops PostgreSQL before it
 	// compares any value, leaving every other entry without an error. Only an
 	// entry for a setting no file sets any more (no name, no file) may carry
-	// one then.
+	// one then. A main file PostgreSQL cannot open also leaves an entry with no
+	// name and no file, but then no entry has a name, while ALTER SYSTEM has
+	// just written the tuned ones.
 	var unreadable bool
 	if err := pool.QueryRow(ctx, `
-SELECT EXISTS (
+SELECT NOT EXISTS (SELECT 1 FROM pg_file_settings f WHERE f.name IS NOT NULL)
+  OR EXISTS (
   SELECT 1 FROM pg_file_settings f
   WHERE f.error IS NOT NULL
     AND (f.name IS NULL AND f.sourcefile IS NOT NULL
-      OR f.name IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_settings s WHERE s.name = lower(f.name))))`).Scan(&unreadable); err != nil {
+      OR f.name IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_settings s WHERE lower(s.name) = lower(f.name))))`).Scan(&unreadable); err != nil {
 		return nil, err
 	}
 	if unreadable {
@@ -775,7 +781,7 @@ WHERE s.name = ANY($1::text[])
   AND s.source <> 'command line'
   AND CASE
         WHEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name)
-          THEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name AND f.error IS NOT NULL)
+          THEN (SELECT f.error IS NOT NULL FROM pg_file_settings f WHERE lower(f.name) = s.name ORDER BY f.seqno DESC LIMIT 1)
         ELSE s.source = 'configuration file' AND s.setting IS DISTINCT FROM s.boot_val
       END`, names)
 	if err != nil {
