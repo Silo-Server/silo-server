@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -165,6 +166,43 @@ done
 	cancel()
 	if _, err := ExtractAttachedSubtitleFont(ctx, "input.mkv", ffmpeg, 7); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled single-font extraction: %v", err)
+	}
+}
+
+// Fansub releases can attach more font data than the bundle limit. The bundle
+// must skip a font that does not fit and fill its place with later fonts,
+// rather than fail and leave none.
+func TestExtractAttachedSubtitleFontsSkipsFontsOverByteLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	streams := []string{fmt.Sprintf(`{"index":2,"extradata_size":%d,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"huge.ttf"}}`, maxSubtitleFontBytes+1)}
+	want := make([]string, 0, maxSubtitleFontAttachments)
+	for i := 3; i < 3+maxSubtitleFontAttachments; i++ {
+		streams = append(streams, fmt.Sprintf(`{"index":%d,"extradata_size":1,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"f%d.ttf"}}`, i, i))
+		want = append(want, fmt.Sprintf("f%d.ttf:1", i))
+	}
+	writeExecutable(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\nprintf '%s' '{\"streams\":["+strings.Join(streams, ",")+"]}'\n")
+	writeExecutable(t, ffmpeg, `#!/bin/sh
+for arg do
+ case "$arg" in
+  -dump_attachment:2) exit 42 ;;
+  -dump_attachment:*) printf f ;;
+ esac
+done
+`)
+	fonts, err := ExtractAttachedSubtitleFonts(t.Context(), "input.mkv", ffmpeg)
+	if err != nil {
+		t.Fatalf("ExtractAttachedSubtitleFonts returned error: %v", err)
+	}
+	got := make([]string, 0, len(fonts))
+	for _, font := range fonts {
+		got = append(got, fmt.Sprintf("%s:%d", font.Name, len(font.Data)))
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("fonts = %v, want %v", got, want)
 	}
 }
 
