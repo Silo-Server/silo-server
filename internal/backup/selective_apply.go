@@ -80,11 +80,14 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 		return fail(ErrDigestMismatch)
 	}
 
-	a := &applier{s: s, rs: rs, run: run, report: report, total: 1}
+	a := &applier{s: s, rs: rs, run: run, report: report, total: 1 + len(req.Users), users: map[string]UserSelection{}}
 	for _, ids := range req.Selection {
 		a.total += len(ids)
 	}
-	if len(req.Selection[SectionHomeSections]) > 0 {
+	for _, u := range req.Users {
+		a.users[u.Account] = u
+	}
+	if len(req.Users) > 0 || len(req.Selection[SectionHomeSections]) > 0 {
 		if a.serverID, err = s.serverID(work); err != nil {
 			return fail(err)
 		}
@@ -109,7 +112,14 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	defer op.end(work, nil)
 
 	for _, spec := range restoreSections {
-		for _, id := range req.Selection[spec.id] {
+		ids := req.Selection[spec.id]
+		if spec.id == SectionUsers {
+			ids = nil
+			for _, u := range req.Users {
+				ids = append(ids, u.Account)
+			}
+		}
+		for _, id := range ids {
 			if err := ctx.Err(); err != nil {
 				return report, err
 			}
@@ -131,17 +141,22 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 type applier struct {
 	s  *Service
 	rs *RestoreSet
-	// serverID is this server's identity; home sections match by id only
-	// when the backup is this server's.
+	// serverID is this server's identity; users match by id only when the
+	// backup is this server's.
 	serverID string
-	run      RestoreRun
-	report   *SelectiveReport
+	// users are the chosen accounts by backup account id.
+	users  map[string]UserSelection
+	run    RestoreRun
+	report *SelectiveReport
 	// current and total count items for the job's progress; the
 	// before-restore backup is the first.
 	current, total int
 	// claimed maps "kind:local id" to the item that wrote it, so two items
 	// never write the same section or collection here.
 	claimed map[string]string
+	// adminCollections caches how the accounts' data maps admin collection
+	// ids (collectionMap).
+	adminCollections map[string]string
 }
 
 // applied is one item's outcome before its transaction commits.
@@ -226,6 +241,8 @@ func (a *applier) applyItem(ctx context.Context, tx pgx.Tx, section, id string) 
 		return a.applyPlugin(ctx, tx, id)
 	case SectionSettings:
 		return a.applySettingsPage(ctx, tx, id)
+	case SectionUsers:
+		return a.applyAccount(ctx, tx, a.users[id])
 	case SectionCollections:
 		switch {
 		case strings.HasPrefix(id, "collection:"):

@@ -1,4 +1,4 @@
-import type { RestoreSet } from "@/api/v2/adminBackupRestore";
+import type { RestoreDataTypeId, RestoreSet } from "@/api/v2/adminBackupRestore";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 
@@ -15,6 +15,7 @@ export interface RestoreRefusal {
 export interface RestoreReviewProps {
   set: RestoreSet;
   selection: SelectionKeys;
+  dataTypes: ReadonlySet<RestoreDataTypeId>;
   onBack: () => void;
   onRestore: () => void;
   pending: boolean;
@@ -27,6 +28,7 @@ export interface RestoreReviewProps {
 export function RestoreReview({
   set,
   selection,
+  dataTypes,
   onBack,
   onRestore,
   pending,
@@ -34,7 +36,7 @@ export function RestoreReview({
   onOpenRunning,
   onReloadPreview,
 }: RestoreReviewProps) {
-  const plan = restorePlan(set, selection);
+  const plan = restorePlan(set, selection, dataTypes);
   const caveats = restoreCaveats(set, selection);
   return (
     <div className="max-w-[70rem] space-y-5">

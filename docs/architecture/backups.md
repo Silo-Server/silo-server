@@ -4,7 +4,9 @@
 the blobs that cannot be fetched again, and a restore set of versioned
 sections for selective restore. It lists, rotates, and deletes them; the
 `silo backup` command restores one in full, and the admin API restores chosen
-parts of one (see [Selective restore](#selective-restore)). The endpoints are in [backups-api.md](../backups-api.md).
+parts of one (see [Selective restore](#selective-restore)). A profile can
+also export and import its own data (see [Profile export](#profile-export)).
+The endpoints are in [backups-api.md](../backups-api.md).
 
 A backup is a recovery point for this server's own data. It does not include
 media files (Silo never manages them, see [non-goals](../non-goals.md)),
@@ -309,12 +311,14 @@ plugins/<plugin-id>/archive.bin
 settings.json
 collections.json
 home-sections.json                version 3 and later
+users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (3: version 3
-added the home sections section and template collections in
-`collections.json`), the source
+`restore-set.json` has `format: "silo-restore-set"`, `version` (3: version 2
+added the users section; version 3 the home sections section, template
+collections in `collections.json`, and an omitted item's `cause` and
+`error`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -326,15 +330,16 @@ restore request must carry.
 
 Sections are registered in one table in `internal/backup/restoreset.go`, in
 the order a restore applies them: libraries, plugins, settings, collections,
-home sections. Collections come before the home sections that name them.
-Each names its document (or per-item
+home sections, users. Collections come before the home sections that name
+them, and users last, so a profile's page layout resolves against the
+sections the same restore wrote. Each names its document (or per-item
 files) and the blob prefixes it may carry, which are disjoint across
 sections, and the first format version that may hold it. A reader refuses a
 section, and a document field, it does not know, so adding either is a new
 format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
-version while holding something added later (`home_sections` or template
-collections before version 3) is refused. Readers
+version while holding something added later (`users` in version 1,
+`home_sections` or template collections in version 2) is refused. Readers
 accept versions 1 to 3; version 3 is always written.
 
 | Section | Holds | Blob prefixes |
@@ -342,6 +347,7 @@ accept versions 1 to 3; version 3 is always written.
 | `libraries` | `media_folders` rows with their paths and per-library options, and the poster key | `library-posters/` |
 | `plugins` | per installation: plugin id, version, enabled state, installation id, the stored archive (`plugin_archives`), and `plugin_runtime_configs` rows as stored | none |
 | `settings` | `server_settings` rows the restore table offers, as stored | none |
+| `users` | one document per account: the account's fields, its profiles with their fields and data by data type, and the items that data names (see [Users](#users)) | `profile-avatars/` (operational store), `user-collection-images/` |
 | `collections` | manually managed admin collections with their library scope, group, and items; template-bundle collections (see below); uploaded item and season artwork (`upload://` sources); branding assets | `collection-images/`, `local/`, `branding/` |
 | `home_sections` | every admin `page_sections` row of the home page and each library page as it is now, and the collection a section manages | none |
 
@@ -385,7 +391,10 @@ prefixes and only keys the section references, or variants stored in a
 referenced artwork original's directory; branding entries only for a
 branding asset setting (`branding.AssetSettingKeys`) whose reference is one
 file name naming the entry's own blob, because a branding entry is written as
-a setting; documents that decode strictly
+a setting; user documents whose file names their own account, with a known
+role, bounded fields, unique profile ids, avatars only under
+`profile-avatars/` and listed for the section, and data only of registered
+data types, each passing its owner's strict checks; documents that decode strictly
 (unknown fields and trailing data refused) and match the index counts; and
 limits on entries (200,000), document size (64 MiB), plugin archive and blob
 size (256 MiB), total bytes (32 GiB), and JSON nesting (32). A plugin archive
@@ -542,7 +551,7 @@ So two such sections restore as two, and a re-run finds each by its id. A matche
 (title, position, featured, item limit, enabled, configuration, and missing
 items of its managed collection), and a restore replaces its configuration
 as an admin save would. A missing one is created, with its backup id when
-no section here has it. The
+no section here has it, so a profile override naming it by id resolves. The
 section editor's checks (`SectionHandler.CheckRestoredSection`: type,
 scope, configuration, recipe) run first, the write locks the collections it
 names as every section writer does (`sections.WriteSectionInTx`), and a
@@ -558,8 +567,8 @@ the selection and the preview's digest; one restore can be queued or running
 at a time (a partial unique index). The request takes the subsystem lock
 (409 while another backup or restore holds it), checks the source and its
 digest again, creates the job, and releases the lock. Backup deletion and
-rotation check the queued restore's source under the same lock, so either
-they see the job or the job's check sees the source gone; a source can never disappear between the check and the queue.
+rotation check the queued restore's source under the same lock, so either they see the job or the job's check sees the
+source gone; a source can never disappear between the check and the queue.
 Whichever API server claims it:
 
 1. takes the subsystem lock and holds it for the whole run;
@@ -632,6 +641,249 @@ The before-restore copy is a recovery point, not an undo: selective restore
 merges and never deletes, so restoring that copy selectively cannot remove
 what a restore added. Going back means restoring it in full with
 `silo backup restore`.
+
+### Users
+
+The users section carries each account (`users/<account id>.json`) read from
+the backup's snapshot, from the PostgreSQL user store; backups refuse to run
+on the SQLite store, and on a server using it the section's accounts cannot
+be chosen (`user_store_unsupported`). Each account is read under a savepoint
+of the snapshot transaction. An account the restore set cannot carry, because
+its document would exceed the 64 MiB document limit or reading it failed, is
+left out and recorded in the index's and the manifest's `omitted` list
+(`too_large` or `export_failed`); the backup is complete with warnings, and
+the backup list and the preview name it. The dump still holds it. A failed
+read also records `cause`, the part that failed and the step its error
+names (`notifications: reading notification preferences`), stable across
+backups so a client can group them, and `error`, the underlying error
+without ids.
+
+**Account fields:** username, email, password hash,
+`local_password_login_enabled`, `password_change_required`, `enabled`, role,
+permissions, and every policy override `internal/access/groups.go` resolves
+(`library_ids`, with NULL kept distinct from an empty list,
+`max_playback_quality`, `max_streams`, `max_transcodes`, both stream bitrate
+caps, `transcode_allowed`, `audio_transcode_allowed`, `max_profiles`,
+`download_allowed`, `download_transcode_allowed`, `requests_allowed`); the
+access group's name and policy; and the account's effective policy in the
+backup. `is_owner` and `break_glass` are never carried.
+
+**Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
+access resolver (`internal/access/resolver.go`) reads to decide access:
+`is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
+`library_restrictions_enabled`, the allowed libraries
+(`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
+revision is not carried; a restored profile starts its own.
+
+**Data types**, each owned by the package that owns its tables and
+implemented against the small interface in `internal/backup/userdata`
+(registered in `internal/backup/users_registry.go`). Every import runs in the
+caller's transaction, merges, and never deletes; running it again changes
+nothing.
+
+| Data type | Owner | Tables | Merge rule |
+|---|---|---|---|
+| `watch_history` | `watchstate` | `user_watch_progress`, `user_watch_history`, `user_history_hidden_items` | progress: one upsert takes the backup's row only when it is newer (`updated_at`) than the row as committed, so a playback heartbeat landing meanwhile wins; plays: added unless the profile has a play of the item at the same second, whatever its source; a play's source is a fixed one (`playback`, `import`, …) or a watch-sync plugin's, `plugin:<installation id>:<capability id>` (`userstore.ParsePluginWatchSource`; the capability id a lowercase slug of at most 128 characters), which stays on the server that wrote it, elsewhere names the one installation here of the same plugin (from the restore set's plugins section) with that capability, and otherwise becomes `import`, as does any source the reader would refuse when it is exported; history hides: `hidden_before` and `removed_before` each keep the later cutoff, independently (a legacy NULL `removed_before` reads as its `hidden_before`), and `-infinity`/`infinity` cutoffs round-trip as those strings. Plays and hides merge under the profile's history lock (`userstore.LockImportedHistory`) |
+| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating |
+| `favorites` | `watchlist` | `user_favorites`, `user_watchlist`, `user_watchlist_titles` | added where missing; restored watchlist entries sort as local additions; a watchlisted title outside the library travels by its TMDB, IMDb, and TVDB ids and display snapshot and is attached as the watchlist adds one (`watchlist.AddSnapshotInTx`): to the title here holding its TMDB id, current or former, or a new title the watchlist's TMDB checks then refresh |
+| `collections` | `usercollections` | `user_personal_collections`, `user_personal_collection_items`, `user_personal_collection_profiles`, `user_collection_groups` | by name among the profile's own collections: none creates it (new id, uploaded poster copied under it, in its shelf group, found by slug or label or created), one gains missing items, sharing, and its group when ungrouped here, several leave it out. The smart query, display filter, and sync source are all remapped to this server's libraries (`userdata.RemapQueryLibraries`); a definition that would lose its whole library scope leaves the collection out, never widened to every library |
+| `dismissals` | `userstore/pgstore` | `user_home_item_dismissals`, `user_not_interested`, `user_dropped_series` | added where missing |
+| `preferences` | `userstore/pgstore` | `user_setting_values` (profile, client-family, library, and series scopes), `user_audio_preferences`, `user_subtitle_preferences`, `user_library_playback_preferences`, `user_series_playback_preferences`, `user_collection_sort_preferences`, the home and library page layout (`user_settings` section overrides), and the preference columns of `user_profiles` | each differing value overwritten, under the account's preference-settings lock; setting keys, scopes, and values checked against this server's settings contract, others left out. A page layout replaces the profile's overrides of that page: the library is mapped, an admin section found by id (on another server only one of the same type, as a restore creates a section with its backup id) or else by type and title with one candidate, and library ids in section configuration remapped, and so are the collections it names (`library_collection_id`, `user_collection_id`, in `config` and `user_config`) through `Target.Collection`: an admin collection as the restore's collections and sections match it (a carried or template collection, a section-managed one through its section, and on the server that wrote the backup any collection still here by its id), a personal one as the account's personal collection import matches it (on the same server the account's collection by its id, else the one native collection with its name of its creator's profile here); an override with no counterpart is left out and counted, never written with a dangling id. Overrides are JSON no schema constrains, so an export leaves out one the reader would refuse, and one naming a section or collection that is gone, rather than make the document unreadable; a comparison leaves the same ones out of the layout here |
+| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences overwritten; mutes added |
+
+Never carried: login sessions, API keys, push and device registrations,
+device-scoped settings, watch-provider and history-import credentials,
+external sign-in links (OAuth, plugin identities, Discord), email delivery
+addresses (they must be verified here), webhooks, downloads, logs, derived
+state (aggregates, recommendation caches, collages, series interest),
+onboarding tours, and beta Books data. **`TestUserTablesCoveredDB` fails for any table with a
+`user_id` or `profile_id` column that no data type or account field set
+claims and `excludedUserTables` does not list with a reason**, so a new
+per-user table must be classified. No user-scoped value carried today is
+encrypted.
+
+**Lock order.** Both import entrypoints, a selective restore's account item
+and a profile import, take their locks in one order before writing any data
+row (`userdata.Preparer`, `internal/backup/users_locks.go`):
+
+1. the account locks (`pgstore.LockAccountForImport`): the account's
+   preference-settings lock, which profile creation and setting mutations
+   take, then its section-override lock, which section override writes take;
+   profile deletion takes both, in this order, right after it begins and
+   before it locks or deletes any row;
+2. each data type's own locks over every profile of the import: the
+   profiles' history locks in profile id order (`watch_history`), then every
+   watchlist title the import names, in media type and TMDB id order, created
+   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`);
+3. the data rows.
+
+Ordinary writers take a subset of these in the same order (checked: profile
+creation and setting mutations, device-setting resets, and section override
+writes take their account lock first), so an import
+never waits on a lock a writer holds while that writer waits on a row the
+import wrote. Locking watchlist titles before any watchlist row matters
+because watchlist promotion holds a title's lock while another connection
+writes the library watchlist entry, a cycle across connections Postgres would
+not detect; holding every title, including ones created for the import,
+before the first row means a title another writer creates mid-restore waits
+for the import rather than the reverse. A restore creates a missing account before taking its locks;
+nothing else can hold the locks of an id its transaction has not committed.
+
+**Items** are named by content id; each document lists every item its data
+names with its kind, title, year, and IMDb, TMDB, and TVDB ids (an episode
+with its series' ids and numbers). A content id this catalog holds is the same
+item. Any other goes through the history import matcher
+(`internal/historyimport`), whose reads run in the restore's or import's own
+transaction (`historyimport.NewMatcherOn`): the transaction already holds a
+connection, and a match that waited on the pool for another would wait
+forever on a pool of one. An item still unmatched is left out and listed in
+the report by title. Items the target profile may not see here are left out
+too and listed as hidden: each profile's data is merged through the canonical
+catalog visibility filter (`catalog.FilterAccessibleContentIDsInTransaction`)
+with its libraries under the account's policy (`access.ProfileLibraries`) and
+its content-rating and advisory limits (`access.ProfileMaturity`, with the
+server's `access.unrated_content`). File ids and external subtitle paths are
+restored only on the server that wrote them.
+
+**Matching.** The preview returns a mapping per account, and a restore
+request sends back the target it showed (`new` or the local account id), per
+profile too:
+
+- An account an earlier restore of this backup's server created
+  (`backup_restored_accounts`) maps to it, so running a restore again never
+  creates an account twice.
+- Otherwise, on the server that took the backup, the account id.
+- Otherwise by username and by email, case-insensitively, each checked
+  against both columns because they share one sign-in namespace. The match
+  needs exactly one candidate: either lookup finding several accounts, or the
+  two finding different ones, makes the account ambiguous and unselectable.
+  On the same server, a missing account whose sign-in another account now
+  holds is unselectable (`login_taken`).
+- Profiles match within the mapped account only: a profile an earlier
+  restore created (`backup_restored_profiles`), the profile id on the same
+  server, or else the name with exactly one candidate. Two backup profiles
+  matching one profile by name are both ambiguous.
+
+The job matches each account and profile again in the item's transaction and
+leaves out one whose target changed (`changed_since_preview`); a target of
+`new` that an earlier run of the restore has since created counts as
+unchanged.
+
+**New accounts.** The preview resolves the account's policy here with
+`access.ApplyGroupPolicy` (the backup's overrides, library ids mapped) and
+compares it field by field with its effective policy in the backup (library
+ids mapped) using `access.WiderThan`, where unrestricted libraries, no quality
+ceiling, and 0 caps are the open values. Any field this server would grant
+more of makes the account unselectable (`policy_wider`) and is listed. An
+administrator resolves against `AdminPolicy` on both sides and is marked
+`admin` in the preview. An account with no group in the backup is created
+with no group, compared against the no-group policy, and never given the
+default group. An account with a group joins the group of that name here, if
+there is one and it grants nothing more (`group_not_on_this_server`
+otherwise); groups themselves are never restored. A new account keeps its
+password hash, so it signs in with its old password.
+
+**Access never loosens.** A library id with no library here is dropped from
+an account's library list and from a profile's allowed libraries; a list
+never becomes NULL, and restriction flags stay as in the backup. A restricted
+profile left with no allowed library is restored with no library access, and
+the report says so. Hidden-library and library-order preferences are mapped
+the same way; navigation preferences that name libraries, sections, and
+collections are restored only on the same server.
+
+**Existing accounts and profiles** are never changed: not the password, role,
+permissions, group, login or owner flags, PIN, avatar, name, or access
+fields. A restore adds missing profiles and merges the chosen data types. A
+profile is created only within the account's profile limit here, counted
+under the same account lock ordinary profile creation counts under
+(`pgstore.LockProfilesInTx`), so a restore and a concurrent creation cannot
+both take the last place.
+
+**What a matched account would change.** A preview counts, for each data
+type of each matched profile, what a restore would add or change, by the
+same merge rules, without writing or locking: every data type implements
+`userdata.Type.Pending` beside `Import` (plays whose item and second are not
+here, progress newer than here, hides that would advance a cutoff, missing
+ratings, favorites, watchlist entries and titles, dismissals, and mutes,
+settings and preferences that differ, page layouts whose overrides differ,
+personal collections missing here or lacking items, shares, or their group,
+notification preferences that differ). The counts run in one read-only
+repeatable-read transaction over the whole users section, on the one
+connection the preview already uses. Each data type compares a profile's
+document with its rows in set-based queries (watch history's three in one
+round trip, a profile's settings read at once), by content id, and only the
+entries that would change are resolved through the profile's visibility
+(`userdata.SettleChanged`), so a comparison that finds nothing to change
+asks the catalog about nothing. Items resolve by content id and visibility
+only, without the provider-id fallback an import has, so on another server
+an item only that fallback finds counts as not here. A setting here is
+compared as the settings contract normalizes it, as the backup's value is
+(a stored `"eng"` and a normalized `"en"` are the same value, and the import
+does not rewrite it either), and a page layout here is compared without the
+overrides a backup cannot carry (an override of a section that is gone, or
+one the reader would refuse); an import leaves such a page as it is. A
+library id list here (`ui.disabled_library_ids`, `ui.library_order`) is
+compared without the ids of libraries deleted since, which the backup's list
+no longer names; the import then leaves it as it is too. The comparisons
+pass whole documents as arrays, from a few entries to tens of thousands, so
+the transaction sets `plan_cache_mode = force_custom_plan`: the connection
+caches the statements, and Postgres would otherwise reuse a generic plan
+that assumes ten array entries (an index probe and heap fetch per entry)
+instead of the hash or merge join a plan for the real arrays picks. Watch
+history documents, the large ones, are decoded ahead on a bounded number of
+goroutines (`PreparePending`, a split of `Pending` into decoding and
+comparing) while the comparison queries the connection, and the per-type
+counts come from the restore-set reader's validation rather than a second
+decode. On a local seed shaped like shared dev (184 accounts, 245 profiles,
+about 445,000 plays with one account at 105,000, 350,000 progress rows, and
+29,000 hides) the comparison takes about 1.6 seconds; one INFO line
+("compared the backup's accounts with this server") records its time per
+phase and data type, and a DEBUG line names the preference columns, setting
+keys, and kinds of preference that differ per profile (never values).
+
+A matched profile with nothing pending is `on_this_server` (`same`, not
+selectable), and so is a matched account whose profiles all are and that
+lacks none the restore could add; anything pending makes it `differs`. The
+counts depend on this server's current state, so they are never kept in the
+restore-set cache. The restore itself does not use them:
+it merges again by the rules and reports what it did.
+
+**Apply.** Each chosen account is one fenced item: the account, its new
+profiles, and their chosen data commit together. Avatars and personal
+collection posters are written under keys for the new ids
+(`profile-avatars/<account>/<profile>/`, `user-collection-images/<id>/`)
+with the exclusive create of [Blobs a restore writes](#blobs-a-restore-writes)
+before the rows that reference them. The report lists each account with
+`created`, its local id, the titles that did not match, and per profile the
+outcome and what each data type added, updated, left unchanged, and left out.
+A restore publishes no per-item realtime events for user data; clients read
+the merged data on their next request.
+
+### Profile export
+
+A signed-in profile downloads and imports its own data as a
+`silo-profile-export` document, version 1 (`internal/backup/profile_transfer.go`):
+`format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
+data type's document, as in a user document), and `items`. It never holds
+account fields, password or PIN hashes, access fields, or allowed libraries.
+Personal collection posters are not carried.
+
+An import writes only the profile of the session, never one the document
+names, in one transaction, with the merge rules above. It refuses a document
+that carries an account or access field (at the top level or among the
+profile preferences), unknown fields or data types, a newer version, nesting
+deeper than 32, or more than 64 MiB; each data type then applies its own
+strict checks. Items the profile may not see are left out and listed: outside
+its allowed libraries (libraries it hid itself still count as visible), or
+above its content-rating or advisory limits, through the same canonical
+filter; so are preferences of libraries it cannot see. Library references survive only on the server
+that wrote the export. A page layout's reference to a personal collection maps
+to the collection the export's collections import matches; one to an admin
+collection survives only on the server that wrote the export, while that
+collection is there, and is otherwise left out. A PIN-protected profile reached without its PIN (an
+API key is exempt from the gate's PIN check) cannot import. The import runs
+synchronously: a profile's data is small, the size cap bounds it, and a single
+transaction keeps it all-or-nothing without job bookkeeping.
 
 ## Full restore
 

@@ -1708,6 +1708,9 @@ func main() {
 	if needsWorkers && deps.DB != nil {
 		deps.Backups = newBackupService(pool, bc, settingsRepo, &deps)
 	}
+	if deps.DB != nil {
+		deps.ProfileTransfer = newProfileTransfer(pool, settingsRepo, cfg)
+	}
 	if storageAdmission != nil {
 		// While a failed admission session is replaced, no blob write may land:
 		// a transition elsewhere could otherwise miss it. Reads keep serving.

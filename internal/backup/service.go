@@ -68,7 +68,7 @@ type Options struct {
 	Settings    SettingsReader
 	// Stores are the blob stores backups copy blobs from. Destination is
 	// the default destination, the operational store on local storage; nil
-	// when none exists.
+	// when none exists. Uploads always use it.
 	Stores      blobstore.Stores
 	Destination Destination
 	Locker      Locker
@@ -80,6 +80,10 @@ type Options struct {
 	Cipher *secret.Cipher
 	// UserStoreBackend reports userdb.backend; backups refuse "sqlite".
 	UserStoreBackend func() string
+	// AllowUnratedContent reports access.unrated_content, which a restored
+	// profile's maturity limits read; nil hides unrated titles from a
+	// profile with a rating ceiling, the default.
+	AllowUnratedContent func(context.Context) bool
 	// Status publishes the active operation and the latest run for every
 	// API server. Nil publishes nothing.
 	Status StatusStore
@@ -154,10 +158,12 @@ type RunResult struct {
 	SizeBytes    int64         `json:"size_bytes,omitempty"`
 	DurationMs   int64         `json:"duration_ms,omitempty"`
 	MissingBlobs []MissingBlob `json:"missing_blobs,omitempty"`
-	Rotated      []string      `json:"rotated,omitempty"`
-	Swept        []string      `json:"swept,omitempty"`
-	Skipped      string        `json:"skipped,omitempty"`
-	Warnings     []string      `json:"warnings,omitempty"`
+	// Omitted lists restore-set items the backup could not carry.
+	Omitted  []OmittedItem `json:"omitted,omitempty"`
+	Rotated  []string      `json:"rotated,omitempty"`
+	Swept    []string      `json:"swept,omitempty"`
+	Skipped  string        `json:"skipped,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
 }
 
 // SkippedBusy is the reason a scheduled run records when the lock is held.
@@ -449,6 +455,9 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		return RunResult{}, err
 	}
 	result := RunResult{ID: id, Kind: kind, Status: manifest.Status(), SizeBytes: manifest.Size(), MissingBlobs: manifest.MissingBlobs}
+	if restoreSet != nil {
+		result.Omitted = restoreSet.Omitted
+	}
 	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, t, serverID, pinned)
 	result.DurationMs = s.opts.Now().Sub(started).Milliseconds()
 	progress(100, "Backed up "+id)

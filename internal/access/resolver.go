@@ -115,15 +115,13 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 			return Scope{}, ErrProfileNotFound
 		}
 
-		scope.MaxContentRating = profile.MaxContentRating
-		scope.MaxAdvisoryAge = profile.MaxAdvisoryAge
-		scope.RequireAdvisoryAge = profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0
+		scope.MaturityLimits = ProfileMaturity(profile, scope.AllowUnratedContent)
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.NextUpMode = preferences.NextUpMode
 		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
-		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
+		scope.AllowedLibraryIDs, scope.LibrariesRestricted = ProfileLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return Scope{}, err
@@ -255,6 +253,25 @@ func subtractInts(src, exclude []int) []int {
 		}
 	}
 	return out
+}
+
+// ProfileMaturity is the profile's maturity limits under the server's
+// unrated-content decision, as Resolve applies them.
+func ProfileMaturity(profile *userstore.Profile, allowUnrated bool) MaturityLimits {
+	return MaturityLimits{
+		MaxContentRating:    profile.MaxContentRating,
+		AllowUnratedContent: allowUnrated,
+		MaxAdvisoryAge:      profile.MaxAdvisoryAge,
+		RequireAdvisoryAge:  profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0,
+	}
+}
+
+// ProfileLibraries is the libraries a profile may see under its account's
+// effective library list, and whether that is a restriction, as Resolve
+// computes them. Libraries the profile hid itself are not subtracted: hiding
+// is not access.
+func ProfileLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]int, bool) {
+	return effectiveLibraries(accountLibraryIDs, profile)
 }
 
 func effectiveLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]int, bool) {

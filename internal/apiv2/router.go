@@ -208,7 +208,9 @@ type Dependencies struct {
 	AdminBackups                  AdminBackupService
 	// AdminBackupSigner signs backup object links for destinations that
 	// cannot presign.
-	AdminBackupSigner             *artworkurl.Signer
+	AdminBackupSigner *artworkurl.Signer
+	// ProfileTransfer exports and imports the acting profile's own data.
+	ProfileTransfer               ProfileTransferService
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminAPIClients               AdminAPIClientsService

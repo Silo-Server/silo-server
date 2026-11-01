@@ -78,6 +78,9 @@ type Manifest struct {
 type RestoreSetSummary struct {
 	FormatVersion int            `json:"format_version"`
 	Sections      map[string]int `json:"sections"`
+	// Omitted lists items the restore set could not carry; the backup is
+	// complete with warnings.
+	Omitted []OmittedItem `json:"omitted,omitempty"`
 }
 
 // ObjectEntry is one stored object: its size and the SHA-256 of the bytes as
@@ -112,7 +115,7 @@ type TableCount struct {
 
 // Status is complete, or complete with warnings when blobs were missing.
 func (m *Manifest) Status() Status {
-	if len(m.MissingBlobs) > 0 {
+	if len(m.MissingBlobs) > 0 || (m.RestoreSet != nil && len(m.RestoreSet.Omitted) > 0) {
 		return StatusCompleteWithWarnings
 	}
 	return StatusComplete

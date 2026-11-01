@@ -1,6 +1,10 @@
+import { DATA_TYPE_IDS, DATA_TYPE_PHRASES, pendingCount } from "@/lib/profileDataTypes";
 import type {
+  RestoreDataTypeId,
   RestoreErrorCode,
   RestoreItem,
+  RestorePolicyDifference,
+  RestoreProfile,
   RestoreReason,
   RestoreReport,
   RestoreSectionId,
@@ -30,6 +34,16 @@ export const REASON_SENTENCES: Record<RestoreReason, string> = {
   not_in_backup: "The backup doesn't have it.",
   changed_since_preview:
     "This server changed after the preview. Open the restore again to see it as it is now.",
+  ambiguous_account:
+    "More than one account here matches its username or email, so Silo can't tell which one it is.",
+  ambiguous_profile:
+    "More than one profile on the account here has this name, so Silo can't tell which one it is.",
+  policy_wider: "This server would give it more access than it had in the backup.",
+  group_not_on_this_server:
+    "Its access group isn't on this server. Create a group with the same name, then open the restore again.",
+  login_taken: "Another account here signs in with its username or email.",
+  profile_limit: "The account here has no room for another profile.",
+  user_store_unsupported: "Accounts can be restored only on the PostgreSQL user store.",
   template_not_available:
     "This server's starter packs don't have its template, or the template doesn't suit the library.",
   collection_not_mapped:
@@ -41,8 +55,43 @@ export const SECTION_TITLES: Record<RestoreSectionId, string> = {
   plugins: "Plugins",
   settings: "Settings",
   home_sections: "Home and library sections",
+  users: "Users",
   collections: "Collections and artwork",
 };
+
+/** On unless the admin turns them off: data a person would miss. Preferences overwrite, so they start off. */
+export const DEFAULT_DATA_TYPES: ReadonlySet<RestoreDataTypeId> = new Set([
+  "watch_history",
+  "ratings",
+  "favorites",
+  "collections",
+  "dismissals",
+]);
+
+const POLICY_FIELDS: Record<RestorePolicyDifference["field"], string> = {
+  library_ids: "libraries",
+  max_playback_quality: "playback quality",
+  max_streams: "streams at once",
+  max_transcodes: "transcodes at once",
+  max_remote_stream_bitrate_kbps: "remote streaming bitrate",
+  max_local_stream_bitrate_kbps: "local streaming bitrate",
+  max_profiles: "profiles",
+  download_allowed: "downloads",
+  download_transcode_allowed: "converted downloads",
+  transcode_allowed: "transcoding",
+  audio_transcode_allowed: "audio transcoding",
+  requests_allowed: "requests",
+  permissions: "permissions",
+};
+
+/** Why a new account can't be created: "This server's Kids group allows more streams at once than the backup did." */
+export function policyDifferenceSentence(
+  group: string | undefined,
+  difference: RestorePolicyDifference,
+): string {
+  const who = group ? `This server's ${group} group` : "This server's default access";
+  return `${who} allows more ${POLICY_FIELDS[difference.field]} than the backup did (${difference.here} here, ${difference.backup} in the backup).`;
+}
 
 /**
  * Why a restore stopped or never started, for every code the report gives.
@@ -72,33 +121,77 @@ function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-/** A selection is a set of `section:id` keys, the form `requires` uses. */
+/** "a", "a and b", "a, b, and c". */
+function listPhrase(parts: readonly string[]): string {
+  if (parts.length <= 2) return parts.join(" and ");
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * A selection is a set of keys: `section:id` for items (the form `requires`
+ * uses) and `users:<account>/profile:<profile>` for an account's profiles.
+ */
 export type SelectionKeys = ReadonlySet<string>;
 
 export function itemKey(section: RestoreSectionId, id: string): string {
   return `${section}:${id}`;
 }
 
-export interface IndexEntry {
+export function profileKey(accountId: string, profileId: string): string {
+  return `users:${accountId}/profile:${profileId}`;
+}
+
+export interface IndexedItem {
+  type: "item";
   section: RestoreSectionId;
   item: RestoreItem;
   key: string;
 }
 
-/** Every item of a preview by its key, in restore order. */
+/** A profile under an account; choosing it needs its account. */
+export interface IndexedProfile {
+  type: "profile";
+  section: "users";
+  account: RestoreItem;
+  accountKey: string;
+  profile: RestoreProfile;
+  key: string;
+}
+
+export type IndexEntry = IndexedItem | IndexedProfile;
+
+/** Every item and profile of a preview by its key, in restore order. */
 export function indexItems(set: RestoreSet): Map<string, IndexEntry> {
   const index = new Map<string, IndexEntry>();
   for (const section of set.sections) {
     for (const item of section.items) {
       const key = itemKey(section.id, item.id);
-      index.set(key, { section: section.id, item, key });
+      index.set(key, { type: "item", section: section.id, item, key });
+      for (const profile of item.account?.profiles ?? []) {
+        const pKey = profileKey(item.id, profile.id);
+        index.set(pKey, {
+          type: "profile",
+          section: "users",
+          account: item,
+          accountKey: key,
+          profile,
+          key: pKey,
+        });
+      }
     }
   }
   return index;
 }
 
 export function entrySelectable(entry: IndexEntry | undefined): boolean {
-  return entry?.item.selectable ?? false;
+  if (!entry) return false;
+  return entry.type === "item"
+    ? entry.item.selectable
+    : entry.profile.selectable && entry.account.selectable;
+}
+
+function entryRequires(entry: IndexEntry): readonly string[] {
+  return entry.type === "item" ? entry.item.requires : [entry.accountKey];
 }
 
 /**
@@ -135,6 +228,7 @@ export function displayLabel(item: { kind: RestoreItem["kind"]; label: string })
 }
 
 function itemName(entry: IndexEntry): string {
+  if (entry.type === "profile") return `the profile ${entry.profile.name}`;
   switch (entry.item.kind) {
     case "library":
       return `the ${entry.item.label} library`;
@@ -148,6 +242,8 @@ function itemName(entry: IndexEntry): string {
       return `the section ${entry.item.label}`;
     case "branding":
       return `the branding ${brandingName(entry.item.label)}`;
+    case "account":
+      return `the account ${entry.item.label}`;
     default:
       return entry.item.label;
   }
@@ -160,7 +256,8 @@ export interface SelectionChange {
 }
 
 /**
- * Chooses items and what they require (a collection's library). An item whose requirement cannot be chosen stays unchosen, and
+ * Chooses items and what they require (a collection's library, a profile's
+ * account). An item whose requirement cannot be chosen stays unchosen, and
  * the notice says why.
  */
 export function chooseItems(
@@ -174,7 +271,7 @@ export function chooseItems(
   for (const key of keys) {
     const entry = index.get(key);
     if (!entry || !entrySelectable(entry) || next.has(key)) continue;
-    const required = entry.item.requires.map((requiredKey) => index.get(requiredKey));
+    const required = entryRequires(entry).map((requiredKey) => index.get(requiredKey));
     const missing = required.some((dependency) => dependency === undefined);
     const unavailable = required.find(
       (dependency) => dependency !== undefined && !entrySelectable(dependency),
@@ -215,7 +312,7 @@ export function unchooseItems(
   const dependents: IndexEntry[] = [];
   for (const key of [...next]) {
     const entry = index.get(key);
-    if (entry && entry.item.requires.some((requiredKey) => !next.has(requiredKey))) {
+    if (entry && entryRequires(entry).some((requiredKey) => !next.has(requiredKey))) {
       next.delete(key);
       if (!keys.includes(key)) dependents.push(entry);
     }
@@ -240,21 +337,79 @@ function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** The chosen items, in restore order. */
-export function chosenItems(set: RestoreSet, selection: SelectionKeys): IndexEntry[] {
-  return [...indexItems(set).values()].filter((entry) => selection.has(entry.key));
+/** The keys an item's checkbox toggles: the item and, for an account, its choosable profiles. */
+export function toggleKeys(section: RestoreSectionId, item: RestoreItem): string[] {
+  const key = itemKey(section, item.id);
+  const profiles = (item.account?.profiles ?? [])
+    .filter((profile) => profile.selectable)
+    .map((profile) => profileKey(item.id, profile.id));
+  return [key, ...profiles];
 }
 
-/** The restore request's `selection` for the chosen keys. */
-export function selectionRequest(set: RestoreSet, selection: SelectionKeys): RestoreSelection {
+/** The chosen items (not profiles), in restore order. */
+export function chosenItems(set: RestoreSet, selection: SelectionKeys): IndexedItem[] {
+  return [...indexItems(set).values()].filter(
+    (entry): entry is IndexedItem => entry.type === "item" && selection.has(entry.key),
+  );
+}
+
+/** An account's chosen profiles. */
+export function chosenProfiles(account: RestoreItem, selection: SelectionKeys): RestoreProfile[] {
+  return (account.account?.profiles ?? []).filter(
+    (profile) => profile.selectable && selection.has(profileKey(account.id, profile.id)),
+  );
+}
+
+/** Whether any chosen profile carries at least one of the chosen data types. */
+function chosenDataTypes(
+  accounts: readonly IndexedItem[],
+  selection: SelectionKeys,
+  dataTypes: ReadonlySet<RestoreDataTypeId>,
+): RestoreDataTypeId[] {
+  const carried = new Set<RestoreDataTypeId>();
+  for (const entry of accounts) {
+    for (const profile of chosenProfiles(entry.item, selection)) {
+      for (const data of profile.data_types) if (pendingCount(data) > 0) carried.add(data.id);
+    }
+  }
+  return DATA_TYPE_IDS.filter((id) => dataTypes.has(id) && carried.has(id));
+}
+
+/**
+ * The restore request's `selection` for the chosen keys. Accounts and
+ * profiles carry the targets the preview showed, and each profile the chosen
+ * data types it has.
+ */
+export function selectionRequest(
+  set: RestoreSet,
+  selection: SelectionKeys,
+  dataTypes: ReadonlySet<RestoreDataTypeId>,
+): RestoreSelection {
   const request: Required<RestoreSelection> = {
     libraries: [],
     plugins: [],
     settings: [],
+    users: [],
     collections: [],
     home_sections: [],
   };
-  for (const entry of chosenItems(set, selection)) request[entry.section].push(entry.item.id);
+  for (const entry of chosenItems(set, selection)) {
+    if (entry.section === "users") {
+      request.users.push({
+        account: entry.item.id,
+        target: entry.item.account?.target ?? "new",
+        profiles: chosenProfiles(entry.item, selection).map((profile) => ({
+          profile: profile.id,
+          target: profile.target,
+          data_types: DATA_TYPE_IDS.filter(
+            (id) => dataTypes.has(id) && profile.data_types.some((data) => data.id === id),
+          ),
+        })),
+      });
+    } else {
+      request[entry.section].push(entry.item.id);
+    }
+  }
   return request;
 }
 
@@ -264,7 +419,7 @@ export function differingSettings(item: RestoreItem) {
 }
 
 /** What restoring one item does, as a sentence for "Silo will". */
-function itemSentence(entry: IndexEntry): string {
+function itemSentence(entry: IndexedItem): string {
   const { item } = entry;
   switch (item.kind) {
     case "library":
@@ -290,6 +445,10 @@ function itemSentence(entry: IndexEntry): string {
         : "";
       return `Replace ${plural(changed, "setting")} on the ${item.label} page${outside}`;
     }
+    case "account":
+      return item.account?.target === "new"
+        ? `Create the account ${item.label}`
+        : `Merge ${item.label} into the matching account here`;
     case "collection": {
       const collection = item.collection;
       if (item.status === "not_on_this_server") {
@@ -316,11 +475,47 @@ function itemSentence(entry: IndexEntry): string {
   }
 }
 
+/** The users section's sentences: accounts merged, accounts created, and the data restored. */
+function usersSentences(
+  accounts: readonly IndexedItem[],
+  selection: SelectionKeys,
+  dataTypes: ReadonlySet<RestoreDataTypeId>,
+): string[] {
+  const sentences: string[] = [];
+  const profileCount = (group: readonly IndexedItem[]) =>
+    group.reduce((sum, entry) => sum + chosenProfiles(entry.item, selection).length, 0);
+  const merged = accounts.filter((entry) => entry.item.account?.target !== "new");
+  const created = accounts.filter((entry) => entry.item.account?.target === "new");
+  if (merged.length > 0) {
+    const profiles = profileCount(merged);
+    sentences.push(
+      `Merge ${plural(merged.length, "account")}${profiles > 0 ? ` (${plural(profiles, "profile")})` : ""} into the matching ${merged.length === 1 ? "account" : "accounts"} here`,
+    );
+  }
+  if (created.length > 0) {
+    const profiles = profileCount(created);
+    sentences.push(
+      `Create ${created.length} new ${created.length === 1 ? "account" : "accounts"}${profiles > 0 ? ` with ${plural(profiles, "profile")}` : ""}`,
+    );
+  }
+  if (profileCount(accounts) > 0) {
+    const types = chosenDataTypes(accounts, selection, dataTypes);
+    sentences.push(
+      types.length > 0
+        ? `Restore their ${listPhrase(types.map((id) => DATA_TYPE_PHRASES[id]))}`
+        : dataTypes.size > 0
+          ? "Nothing to merge for the chosen data"
+          : "Restore the chosen profiles without their data",
+    );
+  }
+  return sentences;
+}
+
 /**
  * Starter-pack collections count up into one or two sentences; every other
  * item gets its own.
  */
-function itemSentences(entries: readonly IndexEntry[]): string[] {
+function itemSentences(entries: readonly IndexedItem[]): string[] {
   const templates = entries.filter((entry) => entry.item.kind === "template_collection");
   const recreated = templates.filter((entry) => !entry.item.collection?.local_id).length;
   const updated = templates.length - recreated;
@@ -341,7 +536,7 @@ function itemSentences(entries: readonly IndexEntry[]): string[] {
 }
 
 /** "Restore 3 home sections", or the pages they're on when mixed. */
-function homeSectionSentences(entries: readonly IndexEntry[]): string[] {
+function homeSectionSentences(entries: readonly IndexedItem[]): string[] {
   if (entries.length === 0) return [];
   const scopes = new Set(entries.map((entry) => entry.item.home_section?.scope ?? "home"));
   const count = entries.length;
@@ -357,7 +552,11 @@ export interface PlanSection {
 }
 
 /** The chosen items as sentences, grouped by section in restore order. */
-export function restorePlan(set: RestoreSet, selection: SelectionKeys): PlanSection[] {
+export function restorePlan(
+  set: RestoreSet,
+  selection: SelectionKeys,
+  dataTypes: ReadonlySet<RestoreDataTypeId>,
+): PlanSection[] {
   const chosen = chosenItems(set, selection);
   return set.sections
     .map((section) => {
@@ -366,9 +565,11 @@ export function restorePlan(set: RestoreSet, selection: SelectionKeys): PlanSect
         section: section.id,
         title: SECTION_TITLES[section.id],
         sentences:
-          section.id === "home_sections"
-            ? homeSectionSentences(inSection)
-            : itemSentences(inSection),
+          section.id === "users"
+            ? usersSentences(inSection, selection, dataTypes)
+            : section.id === "home_sections"
+              ? homeSectionSentences(inSection)
+              : itemSentences(inSection),
       };
     })
     .filter((group) => group.sentences.length > 0);
@@ -378,6 +579,10 @@ export interface Caveat {
   key: string;
   label: string;
   text: string;
+}
+
+function libraryAccessDropped(count: number): string {
+  return `${plural(count, "library", "libraries")} in its library access ${count === 1 ? "isn't" : "aren't"} on this server and ${count === 1 ? "is" : "are"} dropped. Nothing is widened.`;
 }
 
 /** What a chosen item leaves out or needs afterwards, for review's "Left out" list. */
@@ -422,6 +627,40 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
           ? `Applies after a restart: ${keys.join(", ")}.`
           : "Applies after a restart.",
       );
+    }
+    const account = item.account;
+    if (account) {
+      if (account.admin && account.target === "new") {
+        add("admin", "It's an administrator, so restoring it creates an administrator here.");
+      }
+      if (account.libraries_left_out > 0) {
+        add("account-libraries", libraryAccessDropped(account.libraries_left_out));
+      }
+      const profiles = chosenProfiles(item, selection);
+      const extra =
+        profiles.filter((profile) => profile.target === "new").length - account.profile_room;
+      if (extra > 0) {
+        add(
+          "room",
+          `There's room for ${plural(account.profile_room, "more profile")} on this account here, so ${plural(extra, "chosen profile is", "chosen profiles are")} left out.`,
+        );
+      }
+      for (const profile of profiles) {
+        const label = `${item.label}, ${profile.name}`;
+        if (profile.no_library_access) {
+          add(
+            `profile:${profile.id}:access`,
+            "None of its allowed libraries are on this server, so it's restored with no library access.",
+            label,
+          );
+        } else if (profile.libraries_left_out > 0) {
+          add(
+            `profile:${profile.id}:libraries`,
+            libraryAccessDropped(profile.libraries_left_out),
+            label,
+          );
+        }
+      }
     }
   }
   return caveats;

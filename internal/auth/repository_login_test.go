@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"strconv"
@@ -16,7 +17,9 @@ import (
 // TestUserWithoutEmailOrUsernameDB: an account may have only one of a
 // username and an email, and no password hash (the columns are nullable).
 // Reading one returns the missing values empty instead of failing, in the account reads and the
-// admin API key listings.
+// admin API key listings, and restoring two accounts
+// without an email stores NULL for both, so they never share the empty
+// sign-in identifier.
 func TestUserWithoutEmailOrUsernameDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -83,5 +86,21 @@ func TestUserWithoutEmailOrUsernameDB(t *testing.T) {
 	all2, err := keys.ListAll(ctx)
 	if err != nil || !listedKey(all2) {
 		t.Fatalf("ListAll with an email-only account's key = %v (listed %v)", err, listedKey(all2))
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for i := range 2 {
+		u, err := CreateRestoredAccountInTx(ctx, tx, RestoredAccount{Username: fmt.Sprintf("restored-%d-%s", i, suffix), Role: models.RoleUser, Enabled: true})
+		if err != nil {
+			t.Fatalf("restoring account %d without an email: %v", i, err)
+		}
+		var email *string
+		if err := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, u.ID).Scan(&email); err != nil || email != nil || u.Email != "" {
+			t.Fatalf("restored account %d stored email %v (%v), model %q", i, email, err, u.Email)
+		}
 	}
 }

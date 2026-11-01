@@ -1,6 +1,12 @@
 package userstore
 
-import "time"
+import (
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"time"
+)
 
 // Profile represents a user profile.
 type Profile struct {
@@ -177,6 +183,36 @@ const (
 	WatchHistorySourceSimkl       WatchHistorySource = "simkl"
 	WatchHistorySourceMDBList     WatchHistorySource = "mdblist"
 )
+
+// pluginWatchSource is the source of plays a watch-sync plugin imported:
+// plugin:<installation id>:<capability id>, the plugin provider key
+// (watchsync.PluginProviderKey). A watch-sync capability id is a lowercase
+// path-safe slug, as the plugin manifest requires.
+var pluginWatchSource = regexp.MustCompile(`^plugin:([1-9][0-9]{0,9}):([a-z0-9]+(?:[._-][a-z0-9]+)*)$`)
+
+// maxPluginCapabilityID bounds a plugin watch source's capability id.
+const maxPluginCapabilityID = 128
+
+// PluginWatchSource is the source of a play a watch-sync plugin capability
+// of an installation imported.
+func PluginWatchSource(installationID int, capabilityID string) WatchHistorySource {
+	return WatchHistorySource(fmt.Sprintf("plugin:%d:%s", installationID, capabilityID))
+}
+
+// ParsePluginWatchSource reads PluginWatchSource; false for anything else,
+// including a zero or overflowing installation id and an overlong or
+// malformed capability id.
+func ParsePluginWatchSource(source string) (installationID int, capabilityID string, ok bool) {
+	m := pluginWatchSource.FindStringSubmatch(source)
+	if m == nil || len(m[2]) > maxPluginCapabilityID {
+		return 0, "", false
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || id <= 0 || id > math.MaxInt32 {
+		return 0, "", false
+	}
+	return int(id), m[2], true
+}
 
 // WatchIdentity is the write-once archive payload stored with each history
 // row so that StableIdentityResolver can re-resolve a content ID after a

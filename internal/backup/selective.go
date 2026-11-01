@@ -154,6 +154,9 @@ type RestoreRequest struct {
 	BackupID  string              `json:"backup_id"`
 	Digest    string              `json:"digest"`
 	Selection map[string][]string `json:"selection"`
+	// Users are the chosen accounts of the users section, with their
+	// targets, profiles, and data types.
+	Users []UserSelection `json:"users,omitempty"`
 }
 
 // maxSelectedItems bounds one restore request.
@@ -283,9 +286,12 @@ func (s *Service) StartRestore(ctx context.Context, userID int, req RestoreReque
 	if req.BackupID == "" {
 		return nil, &SelectionError{Message: "a restore names a backup"}
 	}
-	total := 0
+	total := len(req.Users)
+	if err := validateUserSelection(req.Users); err != nil {
+		return nil, err
+	}
 	for section, ids := range req.Selection {
-		if _, known := sectionByID(section); !known {
+		if _, known := sectionByID(section); !known || section == SectionUsers {
 			return nil, &SelectionError{Message: fmt.Sprintf("section %q is not one a restore applies", section)}
 		}
 		seen := map[string]bool{}
@@ -416,4 +422,6 @@ type ReportItem struct {
 	RestartKeys     []string `json:"restart_keys,omitempty"`
 	Notes           []string `json:"notes,omitempty"`
 	MissingBlobs    []string `json:"missing_blobs,omitempty"`
+	// Account is a users item's outcome per profile.
+	Account *ReportAccount `json:"account,omitempty"`
 }
