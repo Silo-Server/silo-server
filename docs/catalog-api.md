@@ -698,11 +698,20 @@ servers ignore an unrecognized `type`, which searches every media type, and
 reject it as a people `media_scope`. A client that hides books must check the
 flag and send `video` when it is absent.
 
-`GET /api/v2/catalog/search/capabilities` reports the selected provider and, for
+`GET /api/v2/catalog/search/capabilities` reports the provider selected by the
+responding server's current ranking-availability checks and, for
 Meilisearch, `result_window_limit`, `session_ttl_seconds`, and
-`max_sessions_per_account`. Catalog query bodies default to 50 results per page. Search
-responses also expose the applicable window limit and fixed session expiry in
-`search_diagnostics`.
+`max_sessions_per_account`. While Meilisearch is configured but its index is
+unbuilt, unreachable, or on an incompatible schema, searches fall back to
+PostgreSQL and the read reports `provider: postgres` without the Meilisearch
+limits. These provider and limit fields are an explicit exception to the usual
+configuration-only capability contract: changes in availability affect the
+document's `revision` and `ETag`, and replicas can return different answers.
+This is a snapshot, not a dependency-health guarantee; a failed PostgreSQL
+index-state read can also select fallback even though searches cannot succeed.
+Clients use each search response's `search_diagnostics` for its actual provider,
+applicable window limit, and fixed session expiry. A later search can choose a
+different provider. Catalog query bodies default to 50 results per page.
 
 PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family

@@ -998,7 +998,8 @@ from the exact authorized representation, and conditional `If-None-Match` reques
 configuration before returning 304. Revision and validator identities cover the complete authorized
 representation, so permission and domain-field changes invalidate cached answers. Missing service
 wiring returns a `not_configured` document; a configured service failure remains a dependency
-error. `allowed` can be false while `state` remains `available`, including a denied download policy,
+error, except for the search-provider fallback described below. `allowed` can be false while
+`state` remains `available`, including a denied download policy,
 a child profile requesting email verification, or credentials without the bounded login session
 required by socket and Apple registration operations. A capability
 change publishes a best-effort, authorization-filtered invalidation event containing only a domain
@@ -1006,6 +1007,18 @@ scope such as `downloads`, `playback`, or `all`; the event never duplicates capa
 Clients refetch the REST document after an applicable event and also after login, profile changes,
 app foregrounding, and before important feature-specific UI. Server-wide changes invalidate all
 affected principals; account/profile changes are targeted and never disclose another user's state.
+
+Search discovery is an explicit exception to reporting configuration alone:
+`GET /api/v2/catalog/search/capabilities` reports the provider selected by the responding
+server's current ranking-availability checks, together with that provider's window and session
+limits. If those checks select PostgreSQL fallback, discovery succeeds with `provider: postgres`
+and omits Meilisearch limits. The feature flags remain usable during a Meilisearch outage.
+Provider and limit changes affect `revision` and `ETag`; replicas can return different answers,
+and a later search can select a different provider. Clients must use each search response's
+`search_diagnostics` for its actual provider and limits. This document does not certify dependency
+health: even a failed PostgreSQL index-state read can select fallback, so `state: available`
+and `provider: postgres` do not guarantee that the next search succeeds. Missing session storage
+and an unsupported result window retain their errors.
 
 ### Mutation retry safety
 

@@ -154,17 +154,15 @@ func (r *CatalogResolver) SearchContinuationCapabilities(ctx context.Context) (S
 	if provider.sessions == nil {
 		return result, ErrSearchContinuationUnavailable
 	}
-	state, _, err := provider.indexState(ctx)
+	_, _, window, err := provider.rankingIndex(ctx)
+	if errors.Is(err, ErrSearchProviderFallback) && !errors.Is(err, context.Canceled) {
+		// Ranking sessions fall back to PostgreSQL in this state, so report
+		// that path rather than failing feature detection.
+		return SearchContinuationCapabilities{Provider: SearchProviderPostgres}, nil
+	}
 	if err != nil {
 		return result, err
 	}
-	settings, err := provider.client.GetSettings(ctx, state.ActiveIndexUID)
-	if err != nil {
-		return result, err
-	}
-	result.ResultWindowLimit = settings.Pagination.MaxTotalHits
-	if result.ResultWindowLimit < 1 || result.ResultWindowLimit > meilisearchCandidateScanCap {
-		return result, ErrSearchWindowUnsupported
-	}
+	result.ResultWindowLimit = window
 	return result, nil
 }
