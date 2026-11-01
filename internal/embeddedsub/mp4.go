@@ -33,10 +33,20 @@ const (
 	mp4MaxRead = 1 << 20
 )
 
-// mp4IndexBytes bounds construction across readers and caches, before cache
-// eviction can apply. A blocked movie read keeps its reservation until the
-// parser returns, even after its callers have given up.
-var mp4IndexBytes = newBudget(256 << 20)
+// indexConstructionBytes bounds what index loads hold while they build an
+// index, across readers, caches and both containers, before cache eviction
+// can apply. A load past it fails with errIndexReadBusy, which callers retry.
+// A blocked movie read keeps its reservation until the parser returns, even
+// after its callers have given up.
+var indexConstructionBytes = newConstructionBudget(256 << 20)
+
+// newConstructionBudget returns a budget of maxBytes whose refusal is
+// errIndexReadBusy: it is shared, so a load past it may fit later.
+func newConstructionBudget(maxBytes int64) *budget {
+	b := newBudget(maxBytes)
+	b.full = errIndexReadBusy
+	return b
+}
 
 const (
 	// mp4BoxFtyp and mp4BoxMoov are the file type and movie boxes.
@@ -177,7 +187,7 @@ func isMP4(head []byte) bool {
 
 // readMP4Index reads an MP4 or MOV file's text tracks from its moov box.
 func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
-	b, reserved := mp4IndexBytes, 0
+	b, reserved := indexConstructionBytes, 0
 	defer func() { b.give(reserved) }()
 	reserve := func(moovBytes int) error {
 		// Cover the movie, every expanded 24-byte sample, and cloned boxes.

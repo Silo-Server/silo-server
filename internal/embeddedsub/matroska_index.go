@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/Silo-Server/silo-server/internal/matroska"
 )
@@ -110,7 +111,11 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	if layout.info < 0 || layout.tracks < 0 {
 		return nil, fmt.Errorf("%w: Matroska Info or Tracks not found", ErrMalformed)
 	}
-	el, err := readSegmentElements(r, head, layout)
+	// What this load builds draws on the process's construction budget
+	// (indexConstructionBytes) until it returns.
+	held := newBudgetWithin(maxMetadataBytes, indexConstructionBytes)
+	defer held.release()
+	el, err := readSegmentElements(r, head, layout, held)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +124,9 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 		return nil, fmt.Errorf("%w: Matroska Info has an invalid TimestampScale", ErrMalformed)
 	}
 	idx := &Index{Container: ContainerMatroska, TimestampScale: scale, segmentEnd: layout.end}
-	if idx.Tracks, err = subtitleTracks(el.tracks); err != nil {
+	privateBudget := newBudgetWithin(maxTracksSize, indexConstructionBytes)
+	defer privateBudget.release()
+	if idx.Tracks, err = subtitleTracks(el.tracks, privateBudget); err != nil {
 		return nil, err
 	}
 	frames := make(map[uint64]int64, len(idx.Tracks))
@@ -131,10 +138,18 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	for _, tags := range el.tags {
 		parseFrameCounts(tags, frames)
 	}
-	if el.cues != nil && !collectCues(el.cues, idx.Tracks, layout.start, scale) {
-		// A malformed Cues element could hide entries; don't trust any.
-		for i := range idx.Tracks {
-			idx.Tracks[i].Cues = nil
+	if el.cues != nil {
+		cueBudget := newBudgetWithin(int64(maxIndexCues)*int64(unsafe.Sizeof(Cue{})), indexConstructionBytes)
+		defer cueBudget.release()
+		ok, err := collectCues(el.cues, idx.Tracks, layout.start, scale, cueBudget)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			// A malformed Cues element could hide entries; don't trust any.
+			for i := range idx.Tracks {
+				idx.Tracks[i].Cues = nil
+			}
 		}
 	}
 	for i := range idx.Tracks {
@@ -189,7 +204,7 @@ type segmentElements struct {
 // are usually at the end of the file. Cues and Tags are optional, so a
 // misplaced or oversized one only costs the index; a failed read is
 // reported.
-func readSegmentElements(r io.ReaderAt, head []byte, layout segmentLayout) (segmentElements, error) {
+func readSegmentElements(r io.ReaderAt, head []byte, layout segmentLayout, held *budget) (segmentElements, error) {
 	reads := []*elementRead{
 		{at: layout.info, want: matroska.IDInfo, limit: maxInfoSize},
 		{at: layout.tracks, want: matroska.IDTracks, limit: maxTracksSize},
@@ -200,7 +215,6 @@ func readSegmentElements(r io.ReaderAt, head []byte, layout segmentLayout) (segm
 	for _, at := range layout.tags {
 		reads = append(reads, &elementRead{at: at, want: matroska.IDTags, limit: maxTagsSize})
 	}
-	held := newBudget(maxMetadataBytes)
 	var wg sync.WaitGroup
 	for _, er := range reads {
 		wg.Go(func() { er.data, er.err = readTopElement(r, head, er.at, er.want, er.limit, held) })
@@ -378,7 +392,9 @@ func readTopElement(r io.ReaderAt, head []byte, at int64, want uint64, limit int
 		return first[hl : int64(hl)+size], nil
 	}
 	if held != nil {
-		if err := held.take(int(size)); err != nil {
+		if err := held.take(int(size)); errors.Is(err, errIndexReadBusy) {
+			return nil, err
+		} else if err != nil {
 			return nil, fmt.Errorf("%w: Matroska metadata over %d bytes", ErrMalformed, maxMetadataBytes)
 		}
 	}
@@ -428,32 +444,40 @@ func isSubtitleTrack(e matroska.TrackEntry) bool {
 }
 
 // subtitleTracks returns the subtitle TrackEntries of a Tracks element.
-func subtitleTracks(data []byte) ([]Track, error) {
+// Compressed codec private data can be much larger than Tracks, so
+// privateBudget bounds its expansion across every track, including temporary
+// growth buffers.
+func subtitleTracks(data []byte, privateBudget *budget) ([]Track, error) {
 	var (
 		tracks  []Track
 		entries int
+		busy    error
 	)
-	// Compressed codec private data can be much larger than Tracks. Bound
-	// its expansion across every track, including temporary growth buffers.
-	privateBudget := newBudget(maxTracksSize)
 	matroska.Children(data, func(id uint64, v []byte) {
-		if id != matroska.IDTrackEntry {
+		if id != matroska.IDTrackEntry || busy != nil {
 			return
 		}
 		if entries++; entries > maxTrackEntries {
 			return
 		}
 		if e := matroska.ParseTrackEntry(v); isSubtitleTrack(e) {
-			tracks = append(tracks, newTrack(e, privateBudget))
+			t, err := newTrack(e, privateBudget)
+			tracks, busy = append(tracks, t), err
 		}
 	})
+	if busy != nil {
+		return nil, busy
+	}
 	if entries > maxTrackEntries {
 		return nil, fmt.Errorf("%w: Matroska Tracks has more than %d entries", ErrMalformed, maxTrackEntries)
 	}
 	return tracks, nil
 }
 
-func newTrack(e matroska.TrackEntry, privateBudget *budget) Track {
+// newTrack returns e as a Track. Its error is only errIndexReadBusy, when
+// the process's construction budget can't cover its codec private data now;
+// a track the index can't use otherwise is Unsupported.
+func newTrack(e matroska.TrackEntry, privateBudget *budget) (Track, error) {
 	t := Track{
 		Number: e.Number, UID: e.UID, CodecID: e.CodecID,
 		Language: e.Language, LanguageBCP47: e.LanguageBCP47, Name: e.Name,
@@ -488,20 +512,31 @@ func newTrack(e matroska.TrackEntry, privateBudget *budget) Track {
 				t.Compression = c
 			}
 			if enc.Scope&matroska.ScopeCodecPrivate != 0 && len(t.CodecPrivate) > 0 {
-				private, err := decompressBudget(c, t.CodecPrivate, privateBudget)
-				if err != nil {
-					t.Unsupported = "codec private data doesn't decompress"
-					if errors.Is(err, ErrTooLarge) {
-						t.Unsupported = "codec private data exceeds index budget"
-					}
+				if err := decompressPrivate(&t, c, privateBudget); err != nil {
+					return Track{}, err
 				}
-				t.CodecPrivate = private
 			}
 		}
 	default:
 		t.Unsupported = "multiple content encodings"
 	}
-	return t
+	return t, nil
+}
+
+// decompressPrivate undoes c on t's codec private data within privateBudget,
+// marking t Unsupported when it can't. Its error is only errIndexReadBusy.
+func decompressPrivate(t *Track, c *Compression, privateBudget *budget) error {
+	private, err := decompressBudget(c, t.CodecPrivate, privateBudget)
+	switch {
+	case errors.Is(err, errIndexReadBusy):
+		return err
+	case errors.Is(err, ErrTooLarge):
+		t.Unsupported = "codec private data exceeds index budget"
+	case err != nil:
+		t.Unsupported = "codec private data doesn't decompress"
+	}
+	t.CodecPrivate = private
+	return nil
 }
 
 // parseFrameCounts updates NUMBER_OF_FRAMES for the TrackUIDs already in
@@ -559,7 +594,7 @@ func parseFrameCounts(tags []byte, counts map[uint64]int64) {
 //
 // A crafted Cues element can hold over a million points, so it counts the
 // subtitle ones first and allocates each list once.
-func collectCues(cues []byte, tracks []Track, segStart, scale int64) bool {
+func collectCues(cues []byte, tracks []Track, segStart, scale int64, b *budget) (bool, error) {
 	byNumber := make(map[uint64]int, len(tracks))
 	for i, t := range tracks {
 		byNumber[t.Number] = i
@@ -572,7 +607,12 @@ func collectCues(cues []byte, tracks []Track, segStart, scale int64) bool {
 			total++
 		}
 	}) || total > maxIndexCues {
-		return false
+		return false, nil
+	}
+	if b != nil {
+		if err := b.take(total * int(unsafe.Sizeof(Cue{}))); err != nil {
+			return false, err
+		}
 	}
 	for i := range tracks {
 		if counts[i] > 0 {
@@ -613,7 +653,7 @@ func collectCues(cues []byte, tracks []Track, segStart, scale int64) bool {
 			}
 		}
 	}
-	return true
+	return true, nil
 }
 
 // compareCues orders cues by where their blocks are.
