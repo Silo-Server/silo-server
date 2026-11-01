@@ -7134,10 +7134,13 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 // so the scheduled refresh fetches its episode list. Debt that already carries
 // that reason keeps its own schedule and attempt count, so a series whose
 // provider never lists the episode backs off and parks like other episode debt
-// instead of being lifted back to due on every sweep. Parked debt is woken
-// only by a file that aired after its last attempt: that episode is news the
-// attempt could not have seen, so one file the provider never lists does not
-// hold back every later episode of a daily series.
+// instead of being lifted back to due on every sweep.
+//
+// Parked debt restarts with no attempts for a file that aired on or after the
+// day of its last attempt, which may not have seen that episode yet. The new
+// episode then gets the whole backoff, as a new scanner_fallback episode gets a
+// debt row of its own, and one file the provider never lists does not hold
+// back every later episode of a daily series.
 func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, seriesID, newestAirDate string, now time.Time) {
 	if s.refreshDebtRepo == nil {
 		return
@@ -7145,8 +7148,15 @@ func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, s
 	debt, err := s.refreshDebtRepo.GetTarget(ctx, RefreshTargetItem, seriesID)
 	switch {
 	case err == nil && debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete):
-		airedSinceAttempt := debt.LastAttemptAt != nil && newestAirDate > debt.LastAttemptAt.UTC().Format(time.DateOnly)
+		airedSinceAttempt := debt.LastAttemptAt != nil && newestAirDate >= debt.LastAttemptAt.UTC().Format(time.DateOnly)
 		if !isParkedEpisodeDebt(debt.ReasonMask, debt.AttemptCount) || !airedSinceAttempt {
+			return
+		}
+		// Parked debt carries no other reason, so dropping the row loses only
+		// its attempt count.
+		if err := s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetItem, seriesID); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to restart parked series refresh debt", "component", "metadata",
+				"series_id", seriesID, "error", err)
 			return
 		}
 	case err != nil && !errors.Is(err, ErrRefreshDebtNotFound):

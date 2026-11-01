@@ -120,8 +120,8 @@ the series completeness sweep (`refreshSeriesEpisodeMetadataState`) checks for a
 file in a matched series that aired after every stored episode and matches none. Such a file
 proves the stored episode list is behind, so the sweep marks the series episode-incomplete and
 queues episode-incomplete debt on the series item. An unknown date inside the stored range does
-not count. Existing episode-incomplete debt keeps its backoff; parked debt wakes only for a file
-that aired after the debt's last attempt. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`
+not count. Existing episode-incomplete debt keeps its backoff. Parked debt restarts with no
+attempts only for a file that aired on or after the day of the debt's last attempt. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`
 covers these rules.
 
 ## A changed root waits for a rescan
