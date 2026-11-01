@@ -157,6 +157,45 @@ func TestReadIndex(t *testing.T) {
 
 }
 
+func TestFrameCountsBoundsTargets(t *testing.T) {
+	statistic := func(value string) []byte {
+		return el(matroska.IDSimpleTag, strEl(matroska.IDTagName, "NUMBER_OF_FRAMES"), strEl(matroska.IDTagString, value))
+	}
+	for _, repeated := range []bool{false, true} {
+		name := "distinct unknown UIDs"
+		if repeated {
+			name = "repeated indexed UID"
+		}
+		t.Run(name, func(t *testing.T) {
+			targets := uintEl(matroska.IDTagTrackUID, 1)
+			for i := range 100_000 {
+				uid := uint64(i + 10)
+				if repeated {
+					uid = 1
+				}
+				targets = append(targets, uintEl(matroska.IDTagTrackUID, uid)...)
+			}
+			tags := bytes.Join([][]byte{
+				el(matroska.IDTag, statistic("7"), el(matroska.IDTargets, targets), statistic("0")),
+				el(matroska.IDTag, el(matroska.IDTargets, uintEl(matroska.IDTagTrackUID, 0), uintEl(matroska.IDTagTrackUID, 2)), statistic("2")),
+				el(matroska.IDTag, statistic("-1"), el(matroska.IDTargets, uintEl(matroska.IDTagTrackUID, 1))),
+			}, nil)
+			counts := map[uint64]int64{1: -1, 2: -1, 3: -1}
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			parseFrameCounts(tags, counts)
+			runtime.ReadMemStats(&after)
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 64<<10 {
+				t.Errorf("parsing %d bytes of targets allocated %d bytes for three indexed tracks", len(targets), allocated)
+			}
+			if len(counts) != 3 || counts[1] != 0 || counts[2] != 2 || counts[3] != -1 {
+				t.Errorf("frame counts: %d UIDs, known counts [%d %d %d]; want only the indexed UIDs with [0 2 -1]", len(counts), counts[1], counts[2], counts[3])
+			}
+		})
+	}
+}
+
 func TestReadIndexTrackFields(t *testing.T) {
 	_, idx := readFixture(t, libraryFixture(t))
 	forced, _ := idx.Track(forcedTrack)
