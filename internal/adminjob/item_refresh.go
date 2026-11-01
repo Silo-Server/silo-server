@@ -294,10 +294,10 @@ func (r *ItemRefreshResolver) buildRequest(ctx context.Context, folderID int, sc
 	if _, err := r.folderRepo.GetByID(ctx, folderID); err != nil {
 		return nil, err
 	}
-	// The scanner persists canonical file paths after following directory
-	// symlinks, so the derived scan path may not share a literal prefix with the
-	// configured library root. The folder ownership is established by the linked
-	// media file we selected above, not by a raw string-prefix match here.
+	// The scan path derives from the linked media file selected above, whose
+	// stored path keeps the logical form below the library root (walks do not
+	// replace it with a symlink target). Scanner.ScanSubtree refuses a path
+	// outside the folder's roots, so no prefix check is repeated here.
 	cleanPath := filepath.Clean(scanPath)
 	req.ScanFolderID = folderID
 	req.ScanPath = cleanPath
