@@ -347,6 +347,11 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
 func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
+	// Every branch below answers a fetch from the player page, which packaged
+	// TV apps make with an opaque Origin. The session token rides in the URL,
+	// not a cookie, so a wildcard grants nothing a cross-site page could use.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -935,8 +940,6 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		}
 		opts.TargetFormat = "vtt"
 	}
-
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Only complete successful extracts enter the cache; explicit windows
 	// remain streamed. Keep failures distinguishable from a clean subtitle EOF.
