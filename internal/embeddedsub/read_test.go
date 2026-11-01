@@ -107,6 +107,36 @@ func readFixture(t *testing.T, f mkvFixture) (string, *Index) {
 	return path, idx
 }
 
+// A Matroska load draws what it builds (metadata read past the file's head,
+// decompressed codec private data, cue lists) from the process's shared
+// construction budget: past it the load is busy, which callers retry, and
+// every byte comes back when the load returns.
+func TestMatroskaIndexDrawsOnTheConstructionBudget(t *testing.T) {
+	fixture := libraryFixture(t)
+	// Enough cued blocks that the Cues element is read past its first probe.
+	many := fixtureCluster{ticks: 10_000}
+	for i := range 1200 {
+		many.blocks = append(many.blocks, textBlock(textTrack, int16(i*20), 10, "x"))
+	}
+	fixture.clusters = append(fixture.clusters, many)
+	path := writeFixture(t, fixture.build())
+	previous := indexConstructionBytes
+	defer func() { indexConstructionBytes = previous }()
+	for _, tc := range []struct {
+		room int64
+		want error
+	}{{64 << 20, nil}, {1, errIndexReadBusy}} {
+		indexConstructionBytes = newConstructionBudget(tc.room)
+		idx, err := ReadIndex(t.Context(), path)
+		if !errors.Is(err, tc.want) || err == nil && len(idx.Tracks) == 0 {
+			t.Fatalf("load with %d bytes of room: %v, want %v", tc.room, err, tc.want)
+		}
+		if left := indexConstructionBytes.left.Load(); left != tc.room {
+			t.Fatalf("load with %d bytes of room left %d", tc.room, left)
+		}
+	}
+}
+
 func TestReadIndex(t *testing.T) {
 	path, idx := readFixture(t, libraryFixture(t))
 	info, err := os.Stat(path)
@@ -577,11 +607,13 @@ func TestCollectCuesBoundsEntries(t *testing.T) {
 	cues := func(n int) []byte {
 		return el(matroska.IDCuePoint, uintEl(matroska.IDCueTime, 1), bytes.Repeat(position, n))
 	}
-	if tracks := []Track{{Number: 2}}; !collectCues(cues(10), tracks, 0, 1_000_000) || len(tracks[0].Cues) == 0 {
-		t.Fatalf("a few cues: %+v", tracks)
+	tracks := []Track{{Number: 2}}
+	if ok, err := collectCues(cues(10), tracks, 0, 1_000_000, nil); !ok || err != nil || len(tracks[0].Cues) == 0 {
+		t.Fatalf("a few cues: %+v, %v", tracks, err)
 	}
-	if tracks := []Track{{Number: 2}}; collectCues(cues(maxIndexCues+1), tracks, 0, 1_000_000) || tracks[0].Cues != nil {
-		t.Fatal("cues past the bound were kept")
+	tracks = []Track{{Number: 2}}
+	if ok, err := collectCues(cues(maxIndexCues+1), tracks, 0, 1_000_000, nil); ok || err != nil || tracks[0].Cues != nil {
+		t.Fatalf("cues past the bound were kept: %v", err)
 	}
 }
 
@@ -872,13 +904,16 @@ func TestCodecPrivateBudgetSharedAcrossTracks(t *testing.T) {
 
 func TestCompressionSettingsCountAgainstCacheBudget(t *testing.T) {
 	const prefixBytes = 2 << 20
-	track := newTrack(matroska.TrackEntry{
+	track, err := newTrack(matroska.TrackEntry{
 		Number: 1, Type: matroska.TrackTypeSubtitle, CodecID: "S_TEXT/UTF8", TimestampScale: 1,
 		Encodings: []matroska.ContentEncoding{{
 			Scope: matroska.ScopeFrames, CompAlgo: matroska.CompressionHeaderStripping,
 			CompSettings: bytes.Repeat([]byte("a"), prefixBytes),
 		}},
 	}, newBudget(maxTracksSize))
+	if err != nil {
+		t.Fatal(err)
+	}
 	idx := &Index{Tracks: []Track{track}}
 	cache := NewCache(prefixBytes / 2)
 	cache.add(cacheKey{path: "fixture"}, idx)

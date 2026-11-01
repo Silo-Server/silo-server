@@ -133,6 +133,7 @@ or, for an on-demand segment, with an empty segment.
 | Index entries | 2^20 cues (Matroska) or samples (MP4) across an index's tracks, checked before any is kept; past it the Cues aren't trusted, or the MP4 index is malformed |
 | MP4 output gaps | 4,096 empty samples synthesized across a written track; larger decode-time gaps fail with `ErrTooLarge` before expansion |
 | Matroska output | clusters of about 1 MiB; a cluster holds its headers and frames under 4 KiB, and larger frames, a laced block's included, are written from their packets, never copied |
+| Index construction | 256 MiB across every index load in the process, both containers, held until the load returns: an MP4 load reserves its worst case (movie, sample table, kept boxes) before reading `moov`; a Matroska load draws metadata read past its first 16 KiB probe, decompressed codec private data and cue lists as it allocates them. A load past it fails with a busy error and is retried, never cached |
 | Index cache | 64 MiB by estimate, counting cues, samples, kept boxes and compression settings |
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |

@@ -62,7 +62,16 @@ const (
 )
 
 // budget counts the bytes a read may still hold.
-type budget struct{ left atomic.Int64 }
+type budget struct {
+	left atomic.Int64
+	// full is what take reports when the budget can't cover a claim; nil is
+	// ErrTooLarge.
+	full error
+	// parent, when set, is charged with every claim as well; held is what b
+	// holds of it, which release returns.
+	parent *budget
+	held   atomic.Int64
+}
 
 func newBudget(maxBytes int64) *budget {
 	b := &budget{}
@@ -70,17 +79,49 @@ func newBudget(maxBytes int64) *budget {
 	return b
 }
 
-// take claims n bytes, or reports ErrTooLarge and claims none.
+// newBudgetWithin returns a budget of maxBytes whose claims parent covers too.
+func newBudgetWithin(maxBytes int64, parent *budget) *budget {
+	b := newBudget(maxBytes)
+	b.parent = parent
+	return b
+}
+
+// take claims n bytes, or reports why it can't and claims none: ErrTooLarge
+// past b's own bound, or what a parent past its bound reports.
 func (b *budget) take(n int) error {
 	if b.left.Add(-int64(n)) < 0 {
 		b.left.Add(int64(n))
+		if b.full != nil {
+			return b.full
+		}
 		return ErrTooLarge
+	}
+	if b.parent != nil {
+		if err := b.parent.take(n); err != nil {
+			b.left.Add(int64(n))
+			return err
+		}
+		b.held.Add(int64(n))
 	}
 	return nil
 }
 
 // give returns n bytes claimed for data no longer held.
-func (b *budget) give(n int) { b.left.Add(int64(n)) }
+func (b *budget) give(n int) {
+	b.left.Add(int64(n))
+	if b.parent != nil {
+		b.held.Add(-int64(n))
+		b.parent.give(n)
+	}
+}
+
+// release returns to the parent everything b still holds of it, once what b
+// counted is no longer being built.
+func (b *budget) release() {
+	if b != nil && b.parent != nil {
+		b.parent.give(int(b.held.Swap(0)))
+	}
+}
 
 // Result is what ReadPackets read.
 type Result struct {

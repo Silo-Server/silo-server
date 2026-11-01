@@ -147,11 +147,11 @@ func TestMP4IndexBoundsDetachedConstruction(t *testing.T) {
 			name = "read failure"
 		}
 		t.Run(name, func(t *testing.T) {
-			previous := mp4IndexBytes
+			previous := indexConstructionBytes
 			// Two small movies fit, including the conservative sample-table
 			// allowance, without allocating large movie buffers in the test.
-			mp4IndexBytes = newBudget(60 << 20)
-			defer func() { mp4IndexBytes = previous }()
+			indexConstructionBytes = newConstructionBudget(60 << 20)
+			defer func() { indexConstructionBytes = previous }()
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				unblock := sync.OnceFunc(func() { close(release) })
@@ -207,7 +207,7 @@ func TestMP4IndexBoundsDetachedConstruction(t *testing.T) {
 				}
 				unblock()
 				synctest.Wait()
-				if got := mp4IndexBytes.left.Load(); got != 60<<20 {
+				if got := indexConstructionBytes.left.Load(); got != 60<<20 {
 					t.Fatalf("construction capacity after workers finish: %d", got)
 				}
 				// The busy result was not cached or recorded as unsupported.
@@ -218,7 +218,7 @@ func TestMP4IndexBoundsDetachedConstruction(t *testing.T) {
 				} else if err != nil || len(idx.Tracks) != 1 || idx.Tracks[0].Unsupported != "" {
 					t.Fatalf("retry after capacity returns: %+v, %v", idx, err)
 				}
-				if got := mp4IndexBytes.left.Load(); got != 60<<20 {
+				if got := indexConstructionBytes.left.Load(); got != 60<<20 {
 					t.Fatalf("construction capacity after retry: %d", got)
 				}
 			})
