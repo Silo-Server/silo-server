@@ -1,0 +1,8 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Slow down a crash loop (bad SECRET_KEY, unreachable database) so the logs
+# stay readable. $1 is the exit code, or 256 when a signal ended the process.
+if [[ "$1" != "0" && "$1" != "256" ]]; then
+  echo "[omnibus] silo exited with status $1; restarting in 5s" >&2
+  sleep 5
+fi

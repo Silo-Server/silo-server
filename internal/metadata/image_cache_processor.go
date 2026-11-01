@@ -120,7 +120,7 @@ type LibraryRootResolver interface {
 }
 
 type SeasonArtworkUpdater interface {
-	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error)
+	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
 type EpisodeStillUpdater interface {
@@ -968,7 +968,7 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 		if p.targets.Seasons == nil {
 			return false, errors.New("missing season updater")
 		}
-		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, thumbhash)
+		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			return false, errors.New("missing season localization updater")

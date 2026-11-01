@@ -19,6 +19,7 @@ GET /Episode/{id}/Timestamps	non-media
 GET /Genres	non-media
 GET /Genres/{name}	non-media
 GET /Items	non-media
+GET /Items/Counts	non-media
 GET /Items/Filters	non-media
 GET /Items/Filters2	non-media
 GET /Items/Latest	non-media
@@ -188,6 +189,7 @@ GET /Episode/{id}/Timestamps	non-media
 GET /Genres	non-media
 GET /Genres/{name}	non-media
 GET /Items	non-media
+GET /Items/Counts	non-media
 GET /Items/Filters	non-media
 GET /Items/Filters2	non-media
 GET /Items/Latest	non-media

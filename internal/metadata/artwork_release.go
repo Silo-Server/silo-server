@@ -162,8 +162,10 @@ var (
 	}
 	itemReleaseSlots = append(slices.Clone(itemLocalizationReleaseSlots),
 		releaseSlot("banner"), releaseSlot("thumb"), releaseSlot("clearart"), releaseSlot("disc"))
-	seasonReleaseSlots  = []artworkReleaseSlot{releaseSlot("poster")}
-	episodeReleaseSlots = []artworkReleaseSlot{releaseSlot("still")}
+	// Season localizations hold a poster only.
+	seasonLocalizationReleaseSlots = []artworkReleaseSlot{releaseSlot("poster")}
+	seasonReleaseSlots             = append(slices.Clone(seasonLocalizationReleaseSlots), releaseSlot("backdrop"))
+	episodeReleaseSlots            = []artworkReleaseSlot{releaseSlot("still")}
 )
 
 const (
@@ -233,7 +235,7 @@ func storedArtworkReleaseTables() []artworkReleaseTable {
 		},
 		{table: seasons, owner: releaseSeriesOwnerSQL, slots: seasonReleaseSlots, needsRefresh: needs(seasonReleaseSlots...)},
 		{
-			table: seasons, owner: releaseSeriesOwnerSQL, slots: seasonReleaseSlots,
+			table: seasons, owner: releaseSeriesOwnerSQL, slots: seasonLocalizationReleaseSlots,
 			localized: "season_localizations", localizedKey: "season_content_id",
 		},
 		{table: releaseEpisodesTable, owner: releaseSeriesOwnerSQL, slots: episodeReleaseSlots, needsRefresh: needs(episodeReleaseSlots...)},

@@ -510,11 +510,17 @@ func UpdateProgressHints(db *sql.DB, profileID, mediaItemID string, hints userst
 	return err
 }
 
+// updatePlaybackProgressHints reports whether a hint changed. Heartbeats and
+// stops repeat the hints of the file being played, so an unchanged write
+// matches no row: the stamp trigger restamps synced_seq on every update, which
+// would resend an unchanged row to every offline-sync device.
 func updatePlaybackProgressHints(db preferenceSettingsExecutor, profileID, mediaItemID string, hints userstore.VersionHints) (bool, error) {
 	result, err := db.Exec(`
 		UPDATE watch_progress
-		SET last_file_id = ?, last_resolution = ?, last_hdr = ?, last_codec_video = ?, last_edition_key = ?
-		WHERE profile_id = ? AND media_item_id = ?`,
+		SET last_file_id = ?1, last_resolution = ?2, last_hdr = ?3, last_codec_video = ?4, last_edition_key = ?5
+		WHERE profile_id = ?6 AND media_item_id = ?7
+		  AND (last_file_id IS NOT ?1 OR last_resolution IS NOT ?2 OR last_hdr IS NOT ?3
+		       OR last_codec_video IS NOT ?4 OR last_edition_key IS NOT ?5)`,
 		hints.FileID, hints.Resolution, hints.HDR, hints.CodecVideo, nilIfBlank(hints.EditionKey),
 		profileID, mediaItemID,
 	)

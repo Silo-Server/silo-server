@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"slices"
 	"testing"
@@ -515,9 +516,11 @@ func makeBrowseTestMediaItems(count int) []*models.MediaItem {
 // chunked ListProgressByMediaItems path must not run at all.
 type seriesRollupCountingStore struct {
 	*progressCountingStore
-	counts      map[string]userstore.SeriesWatchCounts
-	err         error
-	rollupCalls int
+	counts            map[string]userstore.SeriesWatchCounts
+	seasonCounts      map[int]userstore.SeriesWatchCounts
+	err               error
+	rollupCalls       int
+	seasonRollupCalls int
 }
 
 func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, _ string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
@@ -535,7 +538,11 @@ func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, 
 }
 
 func (s *seriesRollupCountingStore) SeriesSeasonWatchCounts(context.Context, string, string) (map[int]userstore.SeriesWatchCounts, error) {
-	return map[int]userstore.SeriesWatchCounts{}, nil
+	s.seasonRollupCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return maps.Clone(s.seasonCounts), nil
 }
 
 func (s *seriesRollupCountingStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {

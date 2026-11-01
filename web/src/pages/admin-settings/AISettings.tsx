@@ -26,7 +26,8 @@ import { cn } from "@/lib/utils";
 import { SaveBar } from "@/components/SaveBar";
 
 import { providerOptions } from "@/lib/aiProviders";
-import { AIProvidersList, ModelField } from "./AIProviders";
+import { AIProvidersList } from "./AIProviders";
+import { ModelField } from "./AIModelField";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import {
@@ -45,6 +46,7 @@ const TEXT_AI_KEYS = [
   "ai.chat_model",
   "ai.auth_mode",
   "ai.reasoning_effort",
+  "ai.service_tier",
 ] as const;
 const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
 /** Shown here, chosen on Recommendations next to the embedding lock. */
@@ -222,6 +224,9 @@ function TextModelTile({
   reasoningEffort,
   reasoningLevels,
   reasoningAttention,
+  serviceTier,
+  serviceTiers,
+  serviceTierDirty,
   chatGPTSupported,
   chatModel,
   ready,
@@ -249,6 +254,9 @@ function TextModelTile({
    * use; either holds the tile's Advanced section open.
    */
   reasoningAttention: boolean;
+  serviceTier: string;
+  serviceTiers: string[];
+  serviceTierDirty: boolean;
   chatGPTSupported: boolean;
   chatModel: string;
   ready: boolean;
@@ -277,6 +285,7 @@ function TextModelTile({
   const chatGPT = authMode === CHATGPT_PROVIDER;
   const provider = providers.find((candidate) => candidate.id === providerID);
   const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
+  const supportsServiceTier = !chatGPT && provider?.type === "openai" && serviceTiers.length > 0;
 
   return (
     <ProviderTile
@@ -331,10 +340,14 @@ function TextModelTile({
           kind="chat"
           value={chatModel}
           onChange={(next) => onChange("ai.chat_model", next)}
-          placeholder="gpt-4o-mini, gemini-2.5-flash, llama3.1"
+          placeholder="gpt-6-luna, gemini-2.5-flash, llama3.1"
         />
       )}
-      <AdvancedSection id="ai.text-model" count={1} forceOpen={reasoningAttention}>
+      <AdvancedSection
+        id="ai.text-model"
+        count={supportsServiceTier ? 2 : 1}
+        forceOpen={reasoningAttention || (supportsServiceTier && serviceTierDirty)}
+      >
         <SettingField
           label="Reasoning level"
           type="select"
@@ -364,6 +377,26 @@ function TextModelTile({
               : []),
           ]}
         />
+        {supportsServiceTier && (
+          <SettingField
+            label="Service tier"
+            type="select"
+            value={serviceTier || "default"}
+            description="Default uses your OpenAI project's setting. Fast and Ultrafast cost more and require model support."
+            onChange={(next) => onChange("ai.service_tier", next === "default" ? "" : next)}
+            options={serviceTiers.map((tier) => ({
+              value: tier,
+              label:
+                (
+                  {
+                    default: "Default",
+                    priority: "Fast/Priority",
+                    ultrafast: "Ultrafast",
+                  } as Record<string, string>
+                )[tier] ?? tier,
+            }))}
+          />
+        )}
       </AdvancedSection>
       <ModelPanelActions
         testLabel="Test text model"
@@ -548,9 +581,12 @@ export default function AISettings() {
   const [expandedTile, setExpandedTile] = useState<string | null>(null);
 
   const authMode = form.getValue("ai.auth_mode") || "api_key";
-  const configuredChatModel =
-    form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
-  const currentModel = configuredChatModel || "gpt-4o-mini";
+  const chatModelEdited = form.isDirty("ai.chat_model");
+  const configuredChatModel = chatModelEdited
+    ? form.getValue("ai.chat_model")
+    : form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
+  // A cleared draft must stay empty; only untouched settings inherit defaults.
+  const currentModel = chatModelEdited ? configuredChatModel : configuredChatModel || "gpt-6-luna";
   const capabilityModel = useDebounce(currentModel, 300);
   const capabilities = useAdminAICapabilities(capabilityModel);
   const chatGPTSupported = capabilities.data?.chatgpt_sign_in === true;
@@ -588,10 +624,12 @@ export default function AISettings() {
 
   const providers = providerList.data?.providers ?? [];
   const providerTypes = providerList.data?.types ?? [];
-  const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-4o-mini");
+  const chatModel = currentModel;
   const textProviderID = value("ai.text_provider_id");
   const speechProviderID = value("ai.speech_provider_id");
-  const asrModel = value("ai.asr_model", "whisper-1");
+  const asrModel = form.isDirty("ai.asr_model")
+    ? form.getValue("ai.asr_model")
+    : value("ai.asr_model", "whisper-1");
   const serves = (id: string, capability: AIProvider["capabilities"][number]) =>
     providers.some((provider) => provider.id === id && provider.capabilities.includes(capability));
   const textReady =
@@ -804,6 +842,9 @@ export default function AISettings() {
               reasoningEffort={reasoningEffort}
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
               reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
+              serviceTier={value("ai.service_tier")}
+              serviceTiers={capabilities.data?.openai_service_tiers ?? []}
+              serviceTierDirty={form.isDirty("ai.service_tier")}
               chatGPTSupported={chatGPTSupported}
               chatModel={chatModel}
               ready={textReady}

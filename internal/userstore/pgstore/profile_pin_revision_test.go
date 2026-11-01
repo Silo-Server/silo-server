@@ -19,6 +19,13 @@ func TestPostgresProfilePINRevision(t *testing.T) {
 	})
 }
 
+func TestPostgresProfilePINRevisionTransactions(t *testing.T) {
+	storetest.RunProfilePINRevisionTransactions(t, func(t *testing.T) userstore.UserStore {
+		pool, userID := newConstraintTestUser(t)
+		return newStore(pool, userID)
+	})
+}
+
 // The account-wide access_policy_revision keeps its existing bumps: scope
 // caches, events-socket access_changed and policy evaluation still read it.
 // Only the profile token stopped depending on it.

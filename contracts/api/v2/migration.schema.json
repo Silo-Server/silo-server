@@ -170,7 +170,7 @@
         },
         {
           "if": { "properties": { "repo": { "const": "server" } } },
-          "then": { "properties": { "file": { "pattern": "^(cmd/|internal/|Dockerfile|docker-compose[A-Za-z0-9_.-]*\\.ya?ml$)" } } }
+          "then": { "properties": { "file": { "pattern": "^(cmd/|internal/|Dockerfile|dev/compose\\.yml$|docker-compose[A-Za-z0-9_.-]*\\.ya?ml$)" } } }
         }
       ]
     },

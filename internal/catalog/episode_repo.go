@@ -807,6 +807,54 @@ func (r *EpisodeRepository) GetByIDs(ctx context.Context, contentIDs []string) (
 	return scanEpisodes(rows)
 }
 
+// EpisodeCardContext is what a listing card needs about an episode beyond its
+// catalog row: its numbers, its own still, its series' title, and its season's
+// and series' artwork.
+type EpisodeCardContext struct {
+	SeriesID      string
+	SeriesTitle   string
+	SeasonNumber  int
+	EpisodeNumber int
+	StillPath     string
+	ParentArtwork models.EpisodeParentArtwork
+}
+
+// ListCardContexts loads the card context of each episode in one query,
+// keyed by episode content ID. Unknown IDs are absent.
+func (r *EpisodeRepository) ListCardContexts(ctx context.Context, contentIDs []string) (map[string]EpisodeCardContext, error) {
+	out := make(map[string]EpisodeCardContext, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, e.series_id, COALESCE(si.title, ''), e.season_number, e.episode_number, COALESCE(e.still_path, ''),
+			COALESCE(si.poster_path, ''), COALESCE(si.poster_thumbhash, ''),
+			COALESCE(si.backdrop_path, ''), COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, '')
+		FROM episodes e
+		LEFT JOIN media_items si ON si.content_id = e.series_id
+		LEFT JOIN seasons s ON s.content_id = e.season_id
+		WHERE e.content_id = ANY($1::text[])`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing episode card contexts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id string
+			c  EpisodeCardContext
+			p  = &c.ParentArtwork
+		)
+		if err := rows.Scan(&id, &c.SeriesID, &c.SeriesTitle, &c.SeasonNumber, &c.EpisodeNumber, &c.StillPath,
+			&p.SeriesPosterPath, &p.SeriesPosterThumbhash, &p.SeriesBackdropPath, &p.SeriesBackdropThumbhash,
+			&p.SeasonPosterPath, &p.SeasonPosterThumbhash); err != nil {
+			return nil, fmt.Errorf("scanning episode card context: %w", err)
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
 // ListBySeriesAndNumbers returns the requested episode rows for one series in a
 // single query. It intentionally does not apply episodeAvailabilityPredicate:
 // metadata persistence must see provider-only episodes before library links
@@ -841,16 +889,16 @@ func (r *EpisodeRepository) ListBySeriesAndNumbers(
 }
 
 // HasFilesByIDs reports which of the given episodes are backed by at least one
-// live (non-missing) media file. Episodes absent from the result map have no
-// file — e.g. provider-metadata-only entries for unaired episodes.
+// live (non-missing) media file, including a multi-episode file spanning them.
+// Episodes absent from the result map have no file — e.g.
+// provider-metadata-only entries for unaired episodes.
 func (r *EpisodeRepository) HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT episode_id FROM media_files
-		WHERE episode_id = ANY($1) AND missing_since IS NULL
-		GROUP BY episode_id`
+	query := `SELECT DISTINCT served.episode_id
+		FROM (` + ServedEpisodeFilesSQL + `) served(episode_id, file_id)`
 	rows, err := r.pool.Query(ctx, query, contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("checking episode file presence: %w", err)
@@ -1321,11 +1369,26 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 }
 
 // BrowseEpisodes applies catalog and profile predicates before counting and
-// paging, so a long series only hydrates the selected page.
+// paging, so a long series only hydrates the selected page. An empty seriesID
+// browses the episodes of every series, by default in series sort-title order,
+// and filters.LibraryID narrows it to one library. A zero filters.Limit only
+// counts.
 func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters BrowseFilters, access AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
-	conditions := []string{"e.series_id = $1", "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)"}
-	args := []any{seriesID}
-	index := 2
+	conditions := []string{}
+	args := []any{}
+	index := 1
+	if seriesID != "" {
+		conditions = append(conditions, "e.series_id = $1")
+		args = append(args, seriesID)
+		index++
+	}
+	if filters.LibraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id AND el.media_folder_id=$%d)", index))
+		args = append(args, filters.LibraryID)
+		index++
+	} else {
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
+	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)
 	if seasonID != "" {
@@ -1342,7 +1405,11 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	// Language predicates count only the episode files this viewer may play.
 	filters.LibraryIDs, filters.DisabledLibraryIDs, filters.MaxPlaybackQuality = access.AllowedLibraryIDs, access.DisabledLibraryIDs, access.MaxPlaybackQuality
 	appendCompatBrowsePredicates(filters, &extra, &args, &index)
-	rewrite := strings.NewReplacer("mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
+	// Episode fields stand in for an item's own; studios, genres and ratings
+	// come from the series.
+	rewrite := strings.NewReplacer(premiereDateKeyExpr, "e.air_date::text", sortTitleKeyExpr, "LOWER(e.title)",
+		"mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.studios", "s.studios", "mi.content_rating", "s.content_rating",
+		"mi.rating_imdb", "e.rating_imdb", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
 	for _, condition := range extra {
 		conditions = append(conditions, rewrite.Replace(condition))
 	}
@@ -1365,6 +1432,9 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		conditions = append(conditions, "COALESCE(s.backdrop_path,'') <> ''")
 	}
 	order := "e.season_number, e.episode_number, e.content_id"
+	if seriesID == "" {
+		order = "series_sort, e.series_id, " + order
+	}
 	switch filters.Sort {
 	case BrowseSortTitle:
 		order = "LOWER(e.title), e.content_id"
@@ -1373,9 +1443,14 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		order = "e.air_date, e.season_number, e.episode_number, e.content_id"
 	case BrowseSortCreatedAt:
 		order = "e.created_at, e.content_id"
+	case BrowseSortRatingIMDB:
+		order = "e.rating_imdb, e.season_number, e.episode_number, e.content_id"
+	case BrowseSortYear:
+		order = "EXTRACT(YEAR FROM e.air_date), e.air_date, e.season_number, e.episode_number, e.content_id"
 	}
 	if filters.Order == BrowseOrderDescending {
-		order = strings.ReplaceAll(order, ",", " DESC,") + " DESC"
+		// Unrated and undated episodes stay last, as they do ascending.
+		order = strings.ReplaceAll(order, ",", " DESC NULLS LAST,") + " DESC NULLS LAST"
 	}
 	if startItemID != "" {
 		// StartItemId uses the natural episode queue. Other sorting still orders the
@@ -1391,9 +1466,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 			return nil, 0, err
 		}
 	}
-	args = append(args, min(max(filters.Limit, 0), MaxEpisodePageSize), max(filters.Offset, 0))
+	if filters.Limit <= 0 {
+		return []*models.Episode{}, total, nil
+	}
+	args = append(args, min(filters.Limit, MaxEpisodePageSize), max(filters.Offset, 0))
 	pageOrder := strings.ReplaceAll(order, "e.", "episode_page.")
-	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
+	pageOrder = strings.ReplaceAll(pageOrder, "series_sort", "episode_page.series_sort")
+	query := "SELECT " + episodeColumns + " FROM (SELECT e.*, " + strings.ReplaceAll(sortTitleKeyExpr, "mi.", "s.") + " AS series_sort" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err

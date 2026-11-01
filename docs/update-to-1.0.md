@@ -105,6 +105,12 @@ unavailable.
   other native client that will connect after cutover.
 - [ ] If users are waiting on verification, invitation, unsubscribe, or other emailed links,
   expect to resend them after 1.0 is running.
+- [ ] Optional: copy the `cap_add: [NET_ADMIN]` line and its comment from the new
+  `docker-compose.yml` into your Compose file. With it, Silo uses kernel BBR on its client
+  connections and a larger TCP send buffer for remote clients on long, fast links. Read its risk
+  in [TCP congestion control](architecture/tcp-congestion.md) first. Without it, Silo still asks
+  for BBR where the host allows it, keeps the kernel's send buffer limits, and logs at start what
+  it could not change and how to fix it.
 
 ## Perform the update
 

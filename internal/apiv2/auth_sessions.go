@@ -212,7 +212,7 @@ func registerAuthSessions(reg *Registry) {
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
 	del.Errors = []int{http.StatusNotFound}
-	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.deleteSession)
+	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
 	setup.DefaultStatus = http.StatusCreated

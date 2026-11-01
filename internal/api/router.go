@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/apiusage"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -45,6 +47,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/invitations"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -72,6 +75,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -89,6 +93,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
+	"github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
@@ -180,11 +185,14 @@ type Dependencies struct {
 	NodeCapabilityInvalidator func(nodeURL string)
 	ResourceSampler           *nodemetrics.Sampler           // this host's own resource sampler (may be nil)
 	SessionSyncer             handlers.PlaybackSessionSyncer // optional; immediate playback session sync trigger
-	EventBus                  cache.EventBus
-	AdminStatsProvider        handlers.AdminStatsSource
-	Recommender               recommendations.Recommender // nil when disabled
-	RecWorker                 *recommendations.Worker     // nil when disabled
-	CatalogSearchVectorizer   catalog.CatalogSearchQueryVectorizer
+	// LiveSessionRowJSON renders a session as the live row a sync would
+	// store for it, so a session.started event can carry it before a sync.
+	LiveSessionRowJSON      func(*playback.Session) (json.RawMessage, error)
+	EventBus                cache.EventBus
+	AdminStatsProvider      handlers.AdminStatsSource
+	Recommender             recommendations.Recommender // nil when disabled
+	RecWorker               *recommendations.Worker     // nil when disabled
+	CatalogSearchVectorizer catalog.CatalogSearchQueryVectorizer
 	// CatalogSearchSettings is the process-lifetime startup snapshot shared by
 	// every native/jellycompat provider and the index maintenance worker.
 	CatalogSearchSettings *catalog.CatalogSearchSettings
@@ -223,12 +231,16 @@ type Dependencies struct {
 	Trickplay                 interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
 	TrickplayReader           *trickplay.Reader              // published seek previews for players (nil when not configured)
 	TrickplayAdmin            *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
+	KeptSubtitles             *keptsub.Store                 // embedded subtitle tracks kept in the assets store, read before demuxing a source (nil without a database or blob storage)
+	SubtitlePrefetch          *keptsub.Prefetcher            // reads the subtitle tracks a playback will likely want, at playback start (nil without KeptSubtitles)
 	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
+	APIUsage                  *apiusage.Store // per-session API request summaries (nil without a database)
 	OpsLogRepo                *opslog.Repo
 	FFmpegLogSink             playback.FFmpegLogSink
 	RedisClient               *redis.Client              // for session listing (may be nil)
+	DownloadBandwidthRedis    *redis.Client              // deadline-enabled client for shared download budgets (may be nil)
 	TaskManager               *taskmanager.TaskManager   // task manager (may be nil)
 	ArtifactManager           *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry    *adminjob.CancelRegistry
@@ -315,6 +327,11 @@ type Dependencies struct {
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
 	MDBListClient *mdblist.Client
+
+	// TMDB is the process's one TMDB client, built in main.go: request
+	// discovery, the collection sources, and their syncs share its response
+	// caches and its request budget. Nil builds one for this router.
+	TMDB *tmdb.Client
 
 	// Admin dashboard aggregates, cached like AdminStatsProvider. Each is
 	// optional: without one, the matching route queries Postgres per request.
@@ -439,6 +456,14 @@ func NewRouter(deps Dependencies) http.Handler {
 func newChiRouter(deps Dependencies) chi.Router {
 	declareNativeMediaRoutes()
 	r := chi.NewRouter()
+
+	if deps.TMDB == nil {
+		tmdbAPIKey := ""
+		if deps.Config != nil {
+			tmdbAPIKey = deps.Config.TMDBAPIKey
+		}
+		deps.TMDB = tmdb.NewClient(tmdbAPIKey, tmdb.RequestsPerSecond)
+	}
 
 	useBaseMiddleware(r, deps)
 	if overlay := deps.overlayOrigins(); overlay != nil {
@@ -642,6 +667,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			deps.UserStoreProvider,
 		)
+		authService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
 		}
@@ -794,6 +820,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
 		libraryHandler.RealtimeMonitor = deps.LibraryMonitor
 		libraryHandler.Trickplay = deps.Trickplay
+		if deps.TaskManager != nil {
+			libraryHandler.BoxSets = boxSetSyncStarter{tasks: deps.TaskManager}
+		}
 		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
 		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
 		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
@@ -1006,15 +1035,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 				ebookReaderHandler.Conversion = conv
 			}
 		}
-		tmdbAPIKey := ""
-		if deps.Config != nil {
-			tmdbAPIKey = deps.Config.TMDBAPIKey
-		}
-		requestsTMDB := tmdb.NewClient(tmdbAPIKey, 40)
 		// deps.UserStoreProvider is the notification-wrapped provider, so a
 		// promoted series queues an interest recompute. The promotion effects
 		// are the personal data handler, wired once it exists.
-		watchlistTitles = watchlist.NewTitles(deps.DB, itemRepo, deps.UserStoreProvider, requestsTMDB, nil)
+		watchlistTitles = watchlist.NewTitles(deps.DB, itemRepo, deps.UserStoreProvider, deps.TMDB, nil)
 
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
@@ -1027,14 +1051,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		catalogHandler = handlers.NewCatalogHandler(catalogResolver, itemsHandler)
 		shuffleService = shuffle.NewService(deps.DB, catalogResolver)
 		catalogHandler.SetWorkSummaryProvider(literaryRepo)
+		catalogHandler.SetBoxSetRepository(catalog.NewBoxSetRepository(deps.DB))
 
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
-			requestsTMDB,
+			deps.TMDB,
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		requestSvc.SetTitleObserver(watchlistTitles)
+		discoverLists := discoverrows.NewSnapshotRepository(deps.DB)
+		requestSvc.SetDiscoverLists(discoverLists, discoverrows.NewRefresher(requestsRepo, discoverLists, deps.TMDB))
 		watchlistRequestWithdrawer = requestSvc
 		requestSvc.SetWatchlistPreference(mediarequests.StoreWatchlistPreference{Stores: deps.UserStoreProvider})
 		AttachRequestRouter(requestSvc, deps.PluginService)
@@ -1123,6 +1150,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			// Fully qualify webhook URLs when the public base URL is known.
 			autoscanHandler.SetPublicURL(deps.PublicURL)
+			// The v1 and v2 webhook routes share the autoscan_webhook budget,
+			// which only refuses unknown tokens: arr does not retry a refused
+			// delivery, so one with a real token over it is still admitted.
+			if deps.RateLimitMW != nil {
+				deps.RateLimitMW.AdmitOverEndpointBudget("autoscan_webhook", autoscanHandler.KnowsWebhookToken)
+			}
 		}
 
 		if deps.PersonRepo != nil {
@@ -1158,6 +1191,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Personal collections without an uploaded or imported poster show a
 	// collage of their titles; it needs artwork storage and poster signing.
 	var personalCollages *catalog.PersonalCollectionCollages
+	var personalMemberCounts *catalog.PersonalCollectionMemberCounts
+	if deps.DB != nil {
+		personalMemberCounts = catalog.NewPersonalCollectionMemberCounts(deps.DB)
+	}
 	if deps.DB != nil && detailSvc != nil {
 		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
 			personalCollages = deps.PersonalCollectionCollages
@@ -1230,6 +1267,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			progressHandler.LibraryLookup = catalog.NewLibraryItemRepository(deps.DB)
 		}
+		if episodeRepo != nil {
+			progressHandler.EpisodeLookup = episodeRepo
+		}
 		collectionHandler = handlers.NewCollectionHandler(deps.UserStoreProvider)
 		if deps.DB != nil {
 			collectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -1241,6 +1281,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.CollectionOwners = collectionOwners
 		collectionHandler.Collages = personalCollages
+		collectionHandler.MemberCounts = personalMemberCounts
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -1413,6 +1454,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		playbackHandler.AdminStore = playbackAdminStore
 		playbackHandler.EventsHub = deps.EventsHub
+		playbackHandler.LifecycleEncoder = apiv2.PlaybackLifecycleEncoder{}
+		playbackHandler.LiveRowJSON = deps.LiveSessionRowJSON
 		if deps.FileRepo != nil {
 			playbackHandler.MissingMarker = deps.FileRepo
 		}
@@ -1426,6 +1469,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			streamHandler.TM = playbackHandler.TranscodeManager()
 			streamHandler.StreamDeny = playbackHandler.StreamDeny
 			streamHandler.PlanStoreV3 = playbackHandler.PlanStoreV3
+			streamHandler.FinishOtherEnd = playbackHandler.FinishOtherEnd
 			if deps.Config != nil {
 				streamHandler.JWTSecret = deps.Config.Auth.JWTSecret
 			}
@@ -1487,6 +1531,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
+		}
+		if deps.KeptSubtitles != nil {
+			playbackHandler.SubtitleTrackFacts = deps.KeptSubtitles
+			playbackHandler.SubtitlePrefetch = deps.SubtitlePrefetch
 		}
 		if deps.RecWorker != nil {
 			playbackHandler.SetSignalsChangedNotifier(deps.RecWorker)
@@ -1648,6 +1696,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		streamHandler.SubtitleCache = playback.NewSubtitleCache(func() string {
 			return deps.CurrentConfig().Playback.TranscodeDir
 		})
+		// Downloads and translation share this cache, so they read kept
+		// tracks too.
+		if deps.KeptSubtitles != nil {
+			streamHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
+		}
 	}
 
 	restartStatus := deps.ServerRestartStatus
@@ -1683,6 +1736,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.RestartStatus = restartStatus
 		adminHandler.CatalogSearchStatus = catalogSearchService
 		adminHandler.DiagnosticsStore = diagnosticsStore
+		if profileHandler != nil {
+			adminHandler.ProfileAvatars = profileHandler
+		}
 		if watchlistTitles != nil && deps.DB != nil {
 			adminHandler.WatchlistTitlesSweeper = watchlistTitles
 		}
@@ -2108,40 +2164,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 			)
 		}
 		if libraryCollectionService.TMDBCollections == nil {
-			apiKey := ""
-			if deps.Config != nil {
-				apiKey = deps.Config.TMDBAPIKey
-			}
-			libraryCollectionService.TMDBCollections = &tmdbCollectionAdapter{
-				client: tmdb.NewClient(apiKey, 40),
-			}
+			libraryCollectionService.TMDBCollections = &tmdbCollectionAdapter{client: deps.TMDB}
 		}
 		if libraryCollectionService.TMDBFranchises == nil {
-			apiKey := ""
-			if deps.Config != nil {
-				apiKey = deps.Config.TMDBAPIKey
-			}
-			libraryCollectionService.TMDBFranchises = &tmdbFranchiseAdapter{
-				client: tmdb.NewClient(apiKey, 40),
-			}
+			libraryCollectionService.TMDBFranchises = &tmdbFranchiseAdapter{client: deps.TMDB}
 		}
 		if libraryCollectionService.TMDBDiscovers == nil {
-			apiKey := ""
-			if deps.Config != nil {
-				apiKey = deps.Config.TMDBAPIKey
-			}
-			libraryCollectionService.TMDBDiscovers = &tmdbDiscoverAdapter{
-				client: tmdb.NewClient(apiKey, 40),
-			}
+			libraryCollectionService.TMDBDiscovers = &tmdbDiscoverAdapter{client: deps.TMDB}
 		}
 		if libraryCollectionService.TMDBLists == nil {
-			apiKey := ""
-			if deps.Config != nil {
-				apiKey = deps.Config.TMDBAPIKey
-			}
-			libraryCollectionService.TMDBLists = &tmdbListAdapter{
-				client: tmdb.NewClient(apiKey, 40),
-			}
+			libraryCollectionService.TMDBLists = &tmdbListAdapter{client: deps.TMDB}
 		}
 		// Propagate the now-wired TMDB fetchers to the user-side sync service
 		// (constructed earlier in main.go before settingsRepo existed, so its
@@ -2180,6 +2212,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.UserCollectionPool = deps.DB
 		libraryCollectionHandler.CollectionOwners = collectionOwners
 		libraryCollectionHandler.PersonalCollages = personalCollages
+		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
@@ -2282,6 +2315,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.Config.Download.ServerBandwidthBPS,
 			deps.Config.Download.UserBandwidthBPS,
 		)
+		downloadBandwidth.SetSharedBudget(deps.DownloadBandwidthRedis, downloads.BandwidthRates(deps.DB))
 		downloadLimiter := downloads.NewQuantityLimiter(
 			downloadRepo,
 			deps.Config.Download.MaxConcurrentPerUser,
@@ -2534,7 +2568,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ScanControls = libraryHandler
 	}
 	if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil && deps.LogStreamHub != nil && sessionRepo != nil && userRepo != nil {
-		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
+		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient, evt.SocketAudienceAdminLogs), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 		v2deps.AdminLogsSocket = socket
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2738,6 +2772,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.AdminWatchSummary = adminHandler
 		}
 		v2deps.AdminPlaybackSessions = adminHandler
+		if playbackHandler != nil && deps.DB != nil {
+			playbackHandler.LifecycleViews = adminHandler
+			v2deps.PlaybackLifecycleEvents = deps.EventsHub != nil
+		}
 		if deps.DB != nil && deps.ArtifactManager != nil {
 			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
 			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
@@ -2804,7 +2842,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
+			var socketKeys handlers.SocketAPIKeys
+			if apiKeyRepo != nil {
+				socketKeys = apiKeyRepo
+			}
+			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient, evt.SocketAudienceEvents), sessionRepo, userRepo, viewerResolver, actingAdmin, socketKeys, deps.PublicURL)
 			v2deps.EventsSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2902,6 +2944,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	})
 	v2deps.AdminTelemetryParity = &handlers.StreamTelemetryParityHandler{Registry: deps.StreamTelemetry, ViewCache: deps.StreamTelemetryViewCache, Pool: deps.DB, Redis: deps.RedisClient}
 	v2deps.AdminFilesystem = handlers.NewFilesystemHandler()
+	if deps.APIUsage != nil {
+		v2deps.AdminAPIClients = deps.APIUsage
+	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler
@@ -2948,6 +2993,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.AdminItemMetadata = adminHandler
 	if adminHandler != nil {
 		v2deps.AdminUnmatchedFiles = adminHandler
+	}
+	if itemRepo != nil {
+		v2deps.AdminCatalogItems = itemRepo
 	}
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler
@@ -3025,6 +3073,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if catalogHandler != nil {
 		v2deps.CatalogBrowse = catalogHandler
+		v2deps.BoxSets = catalogHandler
 	}
 	if catalogResourceHandler != nil {
 		v2deps.CatalogItems = catalogResourceHandler
@@ -3139,12 +3188,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.PluginHTTPProxy != nil {
 		v2deps.AuthProviderIconPublic = deps.PluginHTTPProxy.PublicGETRoute
 	}
+	pluginRouteAccess := newPluginAccessResolver(jwtService, sessionRepo, authService, apiKeyRepo, userRepo, viewerResolver, actingAdmin)
+	// Assets keep their JWT-only access: API keys never reached them. Their
+	// callers keep only authenticated and admin, so they never renew the
+	// launch cookie.
+	pluginAssetAccess := newPluginAccessResolver(jwtService, sessionRepo, nil, nil, nil, viewerResolver, actingAdmin)
+	pluginAssetAccess.noRenewal = true
 	v2deps.PluginContent = plugins.NewContentHandler(deps.PluginHTTPProxy, func(r *http.Request) plugins.ContentAccess {
-		authenticated, admin, userID, profileID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo)
-		return plugins.ContentAccess{Authenticated: authenticated, Admin: admin, UserID: userID, ProfileID: profileID}
+		resolved := pluginRouteAccess.resolve(r)
+		return plugins.ContentAccess{
+			Authenticated: resolved.authenticated, Admin: resolved.admin, UserID: resolved.userID, ProfileID: resolved.profileID,
+			RenewedCookie: renewedPluginCookie(r, resolved, plugins.ContentPrefix),
+		}
 	}, func(r *http.Request) plugins.ContentAccess {
-		authenticated, admin := resolveOptionalPluginAccess(r, jwtService, sessionRepo)
-		return plugins.ContentAccess{Authenticated: authenticated, Admin: admin}
+		resolved := pluginAssetAccess.resolve(r)
+		return plugins.ContentAccess{Authenticated: resolved.authenticated, Admin: resolved.admin}
 	})
 	if deps.BrandingService != nil {
 		v2deps.AdminBrandingAssets = handlers.NewBrandingHandler(deps.BrandingService)
@@ -3199,9 +3257,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 					http.Error(w, "invalid installation id", http.StatusBadRequest)
 					return
 				}
-				authenticated, admin, userID, profileID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo)
-				ctx := plugins.WithPluginAccessUser(r.Context(), authenticated, admin, userID, profileID)
-				deps.PluginHTTPProxy.ServeRoute(w, r.WithContext(ctx), installationID, authenticated, admin)
+				resolved := pluginRouteAccess.resolve(r)
+				w = plugins.WithRenewedCookie(w, renewedPluginCookie(r, resolved, "/api/v1"))
+				ctx := plugins.WithPluginAccessUser(r.Context(), resolved.authenticated, resolved.admin, resolved.userID, resolved.profileID)
+				deps.PluginHTTPProxy.ServeRoute(w, r.WithContext(ctx), installationID, resolved.authenticated, resolved.admin)
 			})
 			r.Get("/plugin-assets/{installation_id}/*", func(w http.ResponseWriter, r *http.Request) {
 				installationID, err := strconv.Atoi(chi.URLParam(r, "installation_id"))
@@ -3214,8 +3273,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 					http.NotFound(w, r)
 					return
 				}
-				authenticated, admin := resolveOptionalPluginAccess(r, jwtService, sessionRepo)
-				deps.PluginHTTPProxy.ServeAsset(w, r.WithContext(plugins.WithPluginAccess(r.Context(), authenticated, admin)), installationID, assetPath)
+				resolved := pluginAssetAccess.resolve(r)
+				deps.PluginHTTPProxy.ServeAsset(w, r.WithContext(plugins.WithPluginAccess(r.Context(), resolved.authenticated, resolved.admin)), installationID, assetPath)
 			})
 		}
 
@@ -3319,6 +3378,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Silo session; the URL's bearer token authenticates the delivery and
 		// maps it to its Autoscan source. Rate limited per-IP (plus the
 		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
+		// The per-endpoint limit only refuses unknown tokens (see
+		// AdmitOverEndpointBudget where the handler is built).
 		if autoscanHandler != nil {
 			if deps.RateLimitMW != nil {
 				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).
@@ -4823,6 +4884,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
 	}
+	// The sweep ends sessions through the handler's fields, so it starts
+	// once every route above has finished wiring them.
+	playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 	return r
 }
 
@@ -4864,7 +4928,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	// media routes unwrapped so their io.ReaderFrom/sendfile path survives,
 	// and serving validator-bearing v2 responses identity-encoded so a strong
 	// ETag names exactly one representation (apiv2.IdentityEncoded).
-	r.Use(httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded))
+	r.Use(httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded))
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
@@ -4938,7 +5002,8 @@ func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, 
 			COALESCE(mi.year, 0),
 			COALESCE(mi.imdb_id, ''),
 			COALESCE(e.season_number, 0),
-			COALESCE(e.episode_number, 0)
+			COALESCE(e.episode_number, 0),
+			COALESCE(mf.multi_episode_end, 0)
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		LEFT JOIN episodes e ON e.content_id = mf.episode_id
@@ -4956,6 +5021,7 @@ func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, 
 		&meta.IMDbID,
 		&meta.Season,
 		&meta.Episode,
+		&meta.EpisodeEnd,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -4966,94 +5032,10 @@ func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, 
 	return &meta, nil
 }
 
-func resolveOptionalPluginAccess(
-	r *http.Request,
-	jwtService *auth.JWTService,
-	sessionRepo *auth.SessionRepository,
-) (bool, bool) {
-	authenticated, admin, _, _ := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, nil, nil)
-	return authenticated, admin
-}
-
-// resolveOptionalPluginAccessUser is like resolveOptionalPluginAccess but also
-// returns the authenticated user's ID, and accepts API-key bearer tokens
-// (sa_*) when apiKeyRepo + userRepo are provided.
-func resolveOptionalPluginAccessUser(
-	r *http.Request,
-	jwtService *auth.JWTService,
-	sessionRepo *auth.SessionRepository,
-	apiKeyRepo *auth.APIKeyRepository,
-	userRepo *auth.UserRepository,
-) (bool, bool, int, string) {
-	if jwtService == nil || sessionRepo == nil {
-		return false, false, 0, ""
-	}
-
-	token := ""
-	if header := r.Header.Get("Authorization"); header != "" {
-		parts := strings.SplitN(header, " ", 2)
-		if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
-			token = strings.TrimSpace(parts[1])
-		}
-	}
-	if token == "" {
-		token = strings.TrimSpace(r.URL.Query().Get("token"))
-	}
-	if token == "" {
-		if cookie, err := r.Cookie(auth.PluginAccessCookieName); err == nil {
-			token = strings.TrimSpace(cookie.Value)
-		}
-	}
-	if token == "" {
-		return false, false, 0, ""
-	}
-
-	if strings.HasPrefix(token, "sa_") {
-		if apiKeyRepo == nil || userRepo == nil {
-			return false, false, 0, ""
-		}
-		apiKey, err := apiKeyRepo.GetByKey(r.Context(), token)
-		if err != nil {
-			return false, false, 0, ""
-		}
-		// Scoped keys are allowlist credentials for the routes their scopes
-		// name; plugin access is not on any scope's allowlist.
-		if len(apiKey.Scopes) > 0 {
-			return false, false, 0, ""
-		}
-		user, err := userRepo.GetByID(r.Context(), apiKey.UserID)
-		if err != nil || !user.Enabled {
-			return false, false, 0, ""
-		}
-		return true, user.Role == "admin", user.ID, ""
-	}
-
-	claims, err := jwtService.ValidateToken(token)
-	if err != nil || (claims.TokenType != auth.TokenTypeAccess && claims.TokenType != auth.TokenTypePluginAccess) {
-		return false, false, 0, ""
-	}
-	// A session holding a temporary password may only change it.
-	if claims.PasswordChangeRequired {
-		return false, false, 0, ""
-	}
-	// Plugin launch tokens copy the role of the access token they were minted
-	// from, and a role change keeps the session, so admin access follows the
-	// account's current role rather than the token's.
-	// A remote-playback handoff only plays on its device; plugins are not
-	// part of that.
-	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
-	if err != nil || !active || authority.IsRemotePlayback() {
-		return false, false, 0, ""
-	}
-	return true, authority.Role == "admin", claims.UserID, claims.ProfileID
-}
-
-// NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.
+// NewTMDBCollectionFetcher adapts client to a TMDBCollectionFetcher.
 // Exported so main.go can construct it for the collection sync scheduler.
-func NewTMDBCollectionFetcher(apiKey string) catalog.TMDBCollectionFetcher {
-	return &tmdbCollectionAdapter{
-		client: tmdb.NewClient(apiKey, 40),
-	}
+func NewTMDBCollectionFetcher(client *tmdb.Client) catalog.TMDBCollectionFetcher {
+	return &tmdbCollectionAdapter{client: client}
 }
 
 // tmdbCollectionAdapter adapts the tmdb.Client to the catalog.TMDBCollectionFetcher interface.
@@ -5267,6 +5249,7 @@ func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
 		AuthMode:        cfg.AI.AuthMode,
 		ReasoningEffort: cfg.AI.ReasoningEffort,
+		ServiceTier:     cfg.AI.ServiceTier,
 		BaseURL:         cfg.AI.BaseURL,
 		APIKey:          cfg.AI.APIKey,
 		ChatModel:       cfg.AI.ChatModel,
@@ -5432,4 +5415,16 @@ func newDiscordNotificationsHandler(deps Dependencies, tokens *access.ProfileTok
 	h.Stores = deps.UserStoreProvider
 	h.ProfileTokens = tokens
 	return h
+}
+
+// boxSetSyncStarter starts the box set sync task when a library turns box
+// sets on. A run already in progress looks the library up before it ends.
+type boxSetSyncStarter struct {
+	tasks *taskmanager.TaskManager
+}
+
+func (s boxSetSyncStarter) SyncBoxSetsSoon() {
+	if _, err := s.tasks.StartTask(tasks.SyncMovieBoxSetsTaskKey); err != nil {
+		slog.Debug("box set sync not started", "component", "api", "error", err)
+	}
 }

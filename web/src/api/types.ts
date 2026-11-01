@@ -812,10 +812,29 @@ export interface BrowseItemSortMetrics {
   series_name?: string;
 }
 
+/**
+ * A movie box set: the movies TMDB lists in one collection that a viewer can
+ * see in one library. `id` is the TMDB collection ID.
+ */
+export interface BoxSetSummary {
+  id: string;
+  library_id: string;
+  title: string;
+  overview?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
+  movie_count: number;
+  played_count: number;
+  first_year?: number;
+  last_year?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "box_set";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -856,6 +875,8 @@ export interface BrowseItem {
   // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
+  /** Set on a box set card (type box_set) of a group=box_set browse. */
+  box_set?: BoxSetSummary;
 }
 
 export interface BrowseResponse {
@@ -1061,6 +1082,15 @@ export interface SubtitleTrackSignature {
 export interface TimeRange {
   start: number;
   end: number;
+  /**
+   * Where the marked range came from, carried through the v1-shaped view model
+   * the player reads. Absent for a server that does not report provenance, and
+   * absent rather than 0 for a marker nobody rated.
+   */
+  source?: string | null;
+  provider?: string | null;
+  confidence?: number | null;
+  algorithm?: string | null;
 }
 
 /** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */
@@ -2003,7 +2033,20 @@ export interface RequestDiscoverySection extends RequestMediaPage {
   next_page?: number;
 }
 
-export interface RequestDiscoveryResponse {
+/** One row of the Discover layout, in page order. */
+export interface RequestDiscoverRowRef {
+  key: string;
+  /**
+   * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
+   * studios, networks or genres for a brand row. The server may add more.
+   */
+  type: string;
+  title: string;
+}
+
+/** The Discover page: every row in order, and each title row's first page. */
+export interface RequestDiscoverLayout {
+  rows: RequestDiscoverRowRef[];
   sections: RequestDiscoverySection[];
 }
 
@@ -2866,7 +2909,7 @@ export type DiagnosticReportType =
   | "hang"
   | "abnormal_exit"
   | "manual";
-export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos";
+export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos" | "roku";
 
 export interface ClientDiagnosticManifest {
   schema_version: number;
@@ -3426,6 +3469,12 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
+  /** Browse movies of one TMDB collection as a box set. Absent from servers without box sets. */
+  box_sets_enabled?: boolean;
+  /** The fewest of a collection's movies that form a box set. */
+  box_set_min_movies?: number;
+  /** List matching box sets in search. */
+  box_sets_in_search?: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
   /**
@@ -3573,6 +3622,10 @@ export interface CreateLibraryRequest {
   intro_detection_enabled?: boolean;
   /** Sent only when it changes, so a server without seek previews never sees it. */
   trickplay_enabled?: boolean;
+  /** The box set settings are sent only when they change, like trickplay_enabled. */
+  box_sets_enabled?: boolean;
+  box_set_min_movies?: number;
+  box_sets_in_search?: boolean;
   trailer_kinds?: string[];
   /** Omitted on create means on. */
   realtime_monitoring?: boolean;
@@ -4433,6 +4486,8 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
+  /** The library browses a TMDB collection's movies as one box set; browse it with group=box_set. */
+  box_sets_enabled?: boolean;
 }
 
 // Sections
@@ -4532,6 +4587,22 @@ export interface LibraryLayoutResponse {
 
 export interface HomeSectionItemsResponse {
   section: ResolvedSection;
+  /**
+   * The row was read with an item_limit and the server reported it holds
+   * more cards than `section.items` (has_more; see homeRowLimit).
+   */
+  partial?: boolean;
+  /**
+   * The row was completed after showing this many of its first cards (see
+   * homeRowLimit's completeHomeRow).
+   */
+  shown?: number;
+  /**
+   * When the row was completed, in epoch milliseconds. Home restores its
+   * cached rows' duplicate-filter order by it, since a cache edit rewrites
+   * every row's updated time.
+   */
+  shownAt?: number;
 }
 
 export interface CollectionSectionConfig {
@@ -4848,6 +4919,8 @@ export interface RateLimitConfig {
   ip_requests_per_minute: number;
   ip_burst: number;
   auth_endpoints: Record<string, RateLimitAuthEndpointConfig>;
+  /** Hourly token bucket per sign-in session; absent from servers that predate it. */
+  session_quota?: RateLimitSessionQuota;
   /** Whether a limiter is running in this process (GET responses only). */
   active?: boolean;
   /** Backend the running limiter uses; may differ from `backend` until restart. */
@@ -4859,6 +4932,8 @@ export interface RateLimitConfig {
    */
   redis_available?: boolean;
 }
+
+export type RateLimitSessionQuota = V2Components["schemas"]["AdminRateLimitSessionQuota"];
 
 export interface RateLimitUpdateResponse {
   status: string;
@@ -5030,6 +5105,23 @@ export interface AdminTimeseriesPoint {
   // and 0 on samples written before the split — "not measured", not "no
   // downloads".
   download_egress_kbps?: number;
+  // `egress_kbps` split by `AdminTimeseries.egress_sources` key, read from the
+  // bucket's peak-egress minute. The parts add up to no more than
+  // `egress_kbps`; the remainder is egress no source accounts for. v2 only
+  // (the `egress_by_source` dashboard capability).
+  egress_by_source?: Record<string, number>;
+}
+
+// One key of `AdminTimeseriesPoint.egress_by_source`: every API process
+// together ("api") or one stream node ("node:<node_id>").
+export interface AdminTimeseriesEgressSource {
+  key: string;
+  kind: "api" | "node";
+  node_id?: string;
+  name: string;
+  // Served over the whole window, integrated from every sampled minute. Rank
+  // sources by this: the per-point split shows only each bucket's peak minute.
+  egress_bytes: number;
 }
 
 // `oldest_sample_at` is null until the sampler has written anything, which is
@@ -5048,6 +5140,8 @@ export interface AdminTimeseries {
   // because older servers do not send it.
   egress_bytes?: number;
   download_egress_bytes?: number;
+  // The API source first, then nodes by name. v2 only.
+  egress_sources?: AdminTimeseriesEgressSource[];
   points: AdminTimeseriesPoint[];
 }
 

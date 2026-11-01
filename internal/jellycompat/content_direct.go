@@ -999,27 +999,10 @@ func (s *directContentService) ListSeasons(ctx context.Context, session *Session
 		return nil, fmt.Errorf("list seasons: %w", err)
 	}
 
-	// Single batched fetch for every available episode in the series, replacing
-	// the previous per-season ListBySeason loop (audit 2026-05-01 §2.2).
-	groupedEpisodes, err := s.episodeRepo.ListBySeriesGroupedBySeason(ctx, seriesID)
+	rollups, err := s.seasonEpisodeRollups(ctx, session, seriesID)
 	if err != nil {
-		return nil, fmt.Errorf("list seasons episodes: %w", err)
+		return nil, err
 	}
-
-	// Collect every episode ID for a single batched progress fetch.
-	totalEpisodes := 0
-	for _, eps := range groupedEpisodes {
-		totalEpisodes += len(eps)
-	}
-	allEpisodeIDs := make([]string, 0, totalEpisodes)
-	for _, eps := range groupedEpisodes {
-		for _, ep := range eps {
-			if ep != nil && ep.ContentID != "" {
-				allEpisodeIDs = append(allEpisodeIDs, ep.ContentID)
-			}
-		}
-	}
-	progressMap := s.batchProgressForEpisodes(ctx, session, allEpisodeIDs)
 
 	if len(seasons) > 0 {
 		if s.detailSvc != nil {
@@ -1029,9 +1012,9 @@ func (s *directContentService) ListSeasons(ctx context.Context, session *Session
 		}
 		result := make([]upstreamSeason, 0, len(seasons))
 		for _, season := range seasons {
-			eps := groupedEpisodes[season.SeasonNumber]
-			us := modelSeasonToUpstream(season, len(eps))
-			applySeasonUserData(&us, eps, progressMap)
+			rollup := rollups[season.SeasonNumber]
+			us := modelSeasonToUpstream(season, rollup.episodeCount)
+			us.UserData = &rollup.userData
 			result = append(result, us)
 		}
 		s.presignSeasons(ctx, result)
@@ -1039,20 +1022,81 @@ func (s *directContentService) ListSeasons(ctx context.Context, session *Session
 	}
 
 	// Fallback: seasons table is empty for this series; derive summaries from
-	// the already-fetched grouped episodes (no extra aggregation query).
-	seasonNumbers := make([]int, 0, len(groupedEpisodes))
-	for sn := range groupedEpisodes {
+	// the season numbers that have available episodes.
+	seasonNumbers := make([]int, 0, len(rollups))
+	for sn := range rollups {
 		seasonNumbers = append(seasonNumbers, sn)
 	}
 	sort.Ints(seasonNumbers)
 	result := make([]upstreamSeason, 0, len(seasonNumbers))
 	for _, sn := range seasonNumbers {
-		eps := groupedEpisodes[sn]
-		us := syntheticSeason(seriesID, sn, len(eps))
-		applySeasonUserData(&us, eps, progressMap)
+		rollup := rollups[sn]
+		us := syntheticSeason(seriesID, sn, rollup.episodeCount)
+		us.UserData = &rollup.userData
 		result = append(result, us)
 	}
 	return result, nil
+}
+
+// seasonRollup is one season's available episode count and aggregate
+// UserData. The zero value is a season without available episodes: no
+// episodes and the empty rollup.
+type seasonRollup struct {
+	episodeCount int
+	userData     catalog.SeasonUserData
+}
+
+// seasonEpisodeRollups returns the rollup of each season number in a series
+// that has available episodes. A store with the SQL rollup answers it in one
+// aggregate. Other stores, and a failed rollup while the request is live,
+// load every available episode of the series and fold its progress.
+func (s *directContentService) seasonEpisodeRollups(ctx context.Context, session *Session, seriesID string) (map[int]seasonRollup, error) {
+	store, storeErr := s.userStore(ctx, session)
+	if rollupStore, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
+		counts, err := rollupStore.SeriesSeasonWatchCounts(ctx, session.ProfileID, seriesID)
+		if err == nil {
+			rollups := make(map[int]seasonRollup, len(counts))
+			for seasonNumber, season := range counts {
+				rollups[seasonNumber] = seasonRollup{
+					episodeCount: season.TotalEpisodes,
+					userData:     *catalog.SeasonUserDataFromCounts(season),
+				}
+			}
+			return rollups, nil
+		}
+		// Once ctx is done the fallback would fail on it too.
+		fallBack := ctx.Err() == nil
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "season watch rollup query failed",
+			"component", "jellycompat", "error", err, "fallback", fallBack)
+		if !fallBack {
+			return nil, fmt.Errorf("season watch rollup: %w", err)
+		}
+	}
+
+	groupedEpisodes, err := s.episodeRepo.ListBySeriesGroupedBySeason(ctx, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("list seasons episodes: %w", err)
+	}
+	// One progress read for the whole series. Without a store, or when the
+	// read fails, every episode counts as unplayed.
+	progressMap := map[string]userstore.WatchProgress{}
+	if storeErr == nil {
+		episodeIDs := make([]string, 0, len(groupedEpisodes))
+		for _, episodes := range groupedEpisodes {
+			episodeIDs = append(episodeIDs, modelEpisodeContentIDs(episodes)...)
+		}
+		if pm, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, episodeIDs); err == nil {
+			progressMap = pm
+		}
+	}
+	rollups := make(map[int]seasonRollup, len(groupedEpisodes))
+	for seasonNumber, episodes := range groupedEpisodes {
+		rollups[seasonNumber] = seasonRollup{
+			episodeCount: len(episodes),
+			userData:     *catalog.EpisodeRollupUserData(episodes, progressMap),
+		}
+	}
+	return rollups, nil
 }
 
 func (s *directContentService) GetSeason(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) (*upstreamSeason, error) {
@@ -1341,9 +1385,8 @@ func chunkedProgressByMediaItems(ctx context.Context, store userstore.UserStore,
 }
 
 // enrichSeasonUserData adds aggregated user data for a season. Used by
-// callers that handle a single season (GetSeason paths). For batched
-// callers like ListSeasons, prefer applySeasonUserData with a shared
-// progressMap to avoid per-season fetches.
+// callers that handle a single season (GetSeason paths). ListSeasons reads
+// every season at once through seasonEpisodeRollups instead.
 func (s *directContentService) enrichSeasonUserData(ctx context.Context, session *Session, season *upstreamSeason, episodes []*models.Episode) {
 	if s.storeProvider == nil {
 		return
@@ -1373,24 +1416,6 @@ func applySeasonUserData(season *upstreamSeason, episodes []*models.Episode, pro
 	if season.UserData == nil {
 		season.UserData = &catalog.SeasonUserData{}
 	}
-}
-
-// batchProgressForEpisodes fetches a progress map for every episode in the
-// list with a single ListProgressByMediaItems call. Returns an empty map
-// (never nil) on any error so callers can index unconditionally.
-func (s *directContentService) batchProgressForEpisodes(ctx context.Context, session *Session, episodeIDs []string) map[string]userstore.WatchProgress {
-	if s.storeProvider == nil || len(episodeIDs) == 0 {
-		return map[string]userstore.WatchProgress{}
-	}
-	store, err := s.userStore(ctx, session)
-	if err != nil {
-		return map[string]userstore.WatchProgress{}
-	}
-	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, episodeIDs)
-	if err != nil || progressMap == nil {
-		return map[string]userstore.WatchProgress{}
-	}
-	return progressMap
 }
 
 // enrichEpisodeUserData adds user data for a single episode.

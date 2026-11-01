@@ -95,16 +95,23 @@ type BrowseRepository struct {
 	// facetValues caches facet value lists for typeahead; every resolver
 	// over this repository shares it.
 	facetValues *facetValueCache
+	// technicalFacets caches the resolution and track language lists of
+	// scopes; see technicalFacetCache.
+	technicalFacets *technicalFacetCache
 }
 
 // NewBrowseRepository creates a new BrowseRepository.
 func NewBrowseRepository(pool *pgxpool.Pool) *BrowseRepository {
-	return &BrowseRepository{pool: pool, facetValues: newFacetValueCache(facetValueCacheTTL, facetValueCacheBudget)}
+	return &BrowseRepository{
+		pool:            pool,
+		facetValues:     newFacetValueCache(facetValueCacheTTL, facetValueCacheBudget),
+		technicalFacets: newTechnicalFacetCache(),
+	}
 }
 
 // facetFetcher returns the production facetFetcher over this repository.
 func (r *BrowseRepository) facetFetcher() *pgxFacetFetcher {
-	return &pgxFacetFetcher{pool: r.pool, values: r.facetValues}
+	return &pgxFacetFetcher{pool: r.pool, values: r.facetValues, technical: r.technicalFacets}
 }
 
 // Pool returns the underlying pgx pool for ad-hoc queries.
@@ -568,12 +575,11 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
+	// Without the membership join an item must still belong to some library.
+	if !needsLibJoin {
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if !needsLibJoin {
-			conditions = append(conditions,
-				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-			)
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
 			argIdx,
@@ -751,15 +757,18 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		))
 	}
 
+	// With no library named, an item must still belong to one (see
+	// InSomeLibraryWhere), so a filter value never comes only from an item the
+	// listing leaves out. The membership table follows the scope here.
+	if len(positiveLibraryConditions) == 0 && (len(filters.DisabledLibraryIDs) > 0 || !isEpisodeCatalogScope(mediaScope)) {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
+			membershipTable,
+			membershipKey,
+			libraryContentExpr,
+		))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if len(positiveLibraryConditions) == 0 {
-			conditions = append(conditions, fmt.Sprintf(
-				"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
-				membershipTable,
-				membershipKey,
-				libraryContentExpr,
-			))
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s mil_scope_out WHERE mil_scope_out.%s = %s AND mil_scope_out.media_folder_id = ANY($%d))",
 			membershipTable,
@@ -946,12 +955,52 @@ func (r *BrowseRepository) ListOriginalLanguages(ctx context.Context, filters Br
 }
 
 func (r *BrowseRepository) ListResolutions(ctx context.Context, filters BrowseFilters) ([]string, error) {
-	return listResolutionsWithSource(ctx, r.pool, filters, "media_items mi", "")
+	return listResolutionsWithSource(ctx, r.pool, r.technicalFacets, filters, "media_items mi", "")
+}
+
+const (
+	// technicalFacetCacheTTL bounds how stale a scope's resolution and track
+	// language lists can be. Building one reads every present file in the
+	// scope, seconds for a library of a million episodes, and a list changes
+	// only when a file brings a value no other file in the scope has or
+	// takes away its last one. Each node keeps its own lists.
+	technicalFacetCacheTTL = 5 * time.Minute
+	// technicalFacetCacheBudget caps the values held across all cached
+	// lists; one list holds a few dozen.
+	technicalFacetCacheBudget = 100_000
+	// technicalFacetFillLimit caps how many lists one node builds at once.
+	technicalFacetFillLimit = 4
+	// technicalFacetLoadTimeout bounds one list build. It matches the API
+	// listener's write timeout, so the cache never fails a build that the
+	// request itself would have waited for.
+	technicalFacetLoadTimeout = 2 * time.Minute
+)
+
+// technicalFacetCache holds the resolution, audio language and subtitle
+// language lists of catalog scopes; see queryCache. A list weighs its value
+// count.
+type technicalFacetCache = queryCache[[]string]
+
+func newTechnicalFacetCache() *technicalFacetCache {
+	return newQueryCache(technicalFacetCacheTTL, technicalFacetCacheBudget, technicalFacetFillLimit, technicalFacetLoadTimeout,
+		func(values []string) int { return len(values) })
+}
+
+// cachedTechnicalFacet answers a technical facet query from cache, running
+// load on a miss. Each caller gets its own copy of the cached list.
+func cachedTechnicalFacet(ctx context.Context, cache *technicalFacetCache, query string, args []any, load func(context.Context) ([]string, error)) ([]string, error) {
+	key, ok := queryCacheKey(query, args)
+	if !ok {
+		return load(ctx)
+	}
+	values, err := cache.get(ctx, key, load)
+	return slices.Clone(values), err
 }
 
 func listResolutionsWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	cache *technicalFacetCache,
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
@@ -972,7 +1021,9 @@ func listResolutionsWithSource(
 		  AND BTRIM(mf.resolution) <> ''
 		ORDER BY mf.resolution ASC
 	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause))
-	return queryDistinctStrings(ctx, pool, query, args)
+	return cachedTechnicalFacet(ctx, cache, query, args, func(ctx context.Context) ([]string, error) {
+		return queryDistinctStrings(ctx, pool, query, args)
+	})
 }
 
 func (r *BrowseRepository) ListAudioLanguages(ctx context.Context, filters BrowseFilters) ([]string, error) {
@@ -980,12 +1031,13 @@ func (r *BrowseRepository) ListAudioLanguages(ctx context.Context, filters Brows
 }
 
 func (r *BrowseRepository) ListSubtitleLanguages(ctx context.Context, filters BrowseFilters) ([]string, error) {
-	return listSubtitleLanguagesWithSource(ctx, r.pool, filters, "media_items mi", "")
+	return listSubtitleLanguagesWithSource(ctx, r.pool, r.technicalFacets, filters, "media_items mi", "")
 }
 
 func listSubtitleLanguagesWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	cache *technicalFacetCache,
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
@@ -1029,11 +1081,13 @@ func listSubtitleLanguagesWithSource(
 		ORDER BY value ASC
 		LIMIT %d
 	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
-	values, err := queryDistinctStrings(ctx, pool, query, args)
-	if err != nil {
-		return nil, err
-	}
-	return canonicalSubtitleFacetValues(values), nil
+	return cachedTechnicalFacet(ctx, cache, query, args, func(ctx context.Context) ([]string, error) {
+		values, err := queryDistinctStrings(ctx, pool, query, args)
+		if err != nil {
+			return nil, err
+		}
+		return canonicalSubtitleFacetValues(values), nil
+	})
 }
 
 // canonicalSubtitleFacetValues restores canonical BCP 47 casing to facet
@@ -1063,7 +1117,7 @@ func canonicalSubtitleFacetValues(values []string) []string {
 }
 
 func (r *BrowseRepository) listDistinctJSONBLanguageWithFilters(ctx context.Context, column string, filters BrowseFilters) ([]string, error) {
-	return listDistinctJSONBLanguageWithSource(ctx, r.pool, column, filters, "media_items mi", "")
+	return listDistinctJSONBLanguageWithSource(ctx, r.pool, r.technicalFacets, column, filters, "media_items mi", "")
 }
 
 // listDistinctPeopleByKindWithSource returns distinct people.name values for a
@@ -1227,6 +1281,7 @@ func bookSeriesTableForMediaScope(mediaScope string) string {
 func listDistinctJSONBLanguageWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	cache *technicalFacetCache,
 	column string,
 	filters BrowseFilters,
 	baseRelation string,
@@ -1257,7 +1312,9 @@ func listDistinctJSONBLanguageWithSource(
 			ORDER BY value ASC
 			LIMIT %d
 		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
-		return queryDistinctStrings(ctx, pool, query, args)
+		return cachedTechnicalFacet(ctx, cache, query, args, func(ctx context.Context) ([]string, error) {
+			return queryDistinctStrings(ctx, pool, query, args)
+		})
 	}
 
 	query := fmt.Sprintf(`
@@ -1271,7 +1328,9 @@ func listDistinctJSONBLanguageWithSource(
 		ORDER BY value ASC
 		LIMIT %d
 	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
-	return queryDistinctStrings(ctx, pool, query, args)
+	return cachedTechnicalFacet(ctx, cache, query, args, func(ctx context.Context) ([]string, error) {
+		return queryDistinctStrings(ctx, pool, query, args)
+	})
 }
 
 // generatedLanguageColumnFor returns the migration-104 STORED text[] column

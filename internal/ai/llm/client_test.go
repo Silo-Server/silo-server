@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,52 @@ func TestChatSuccessSendsAuthAndModel(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"model":"test-model"`) || !strings.Contains(gotBody, `"json_object"`) {
 		t.Errorf("request body missing model/response_format: %s", gotBody)
+	}
+}
+
+func TestChatSendsExplicitServiceTier(t *testing.T) {
+	for _, tier := range []string{"", "priority", serviceTierUltrafast} {
+		t.Run("tier="+tier, func(t *testing.T) {
+			cfg := chatConfig("https://api.openai.com")
+			cfg.ServiceTier = tier
+			if tier == serviceTierUltrafast {
+				cfg.ChatModel = "gpt-6.1-sol"
+				cfg.ReasoningEffort = "high"
+			}
+			client := NewClient(cfg)
+			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				got, present := body["service_tier"]
+				if tier == "" && present || tier != "" && got != tier {
+					t.Fatalf("service_tier = %v (present: %v); want %q", got, present, tier)
+				}
+				response := chatOK
+				wantPath := "/v1/chat/completions"
+				if tier == serviceTierUltrafast {
+					wantPath = "/v1/responses"
+					response = `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`
+					if body["reasoning"].(map[string]any)["effort"] != "high" || body["temperature"] != nil || body["text"].(map[string]any)["format"].(map[string]any)["type"] != "json_object" {
+						t.Fatal("Responses must use nested reasoning/text format and omit unsupported temperature")
+					}
+					if _, ok := body["input"]; !ok {
+						t.Fatal("Responses request must use input")
+					}
+					if body["store"] != false || body["stream"] != false {
+						t.Fatal("Responses must disable storage and streaming")
+					}
+				}
+				if r.URL.Path != wantPath || r.Header.Get("Authorization") != "Bearer test-key" {
+					t.Fatalf("unexpected endpoint or authorization: %s", r.URL.Path)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
+			})
+			if _, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, true); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

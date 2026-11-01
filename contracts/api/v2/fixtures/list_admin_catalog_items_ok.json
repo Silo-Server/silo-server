@@ -1,0 +1,52 @@
+{
+  "items": [
+    {
+      "content_id": "episode-tvdb-81189-1-2",
+      "type": "episode",
+      "title": "Cat's in the Bag",
+      "year": 2008,
+      "tvdb_id": "349232",
+      "series_id": "series-tvdb-81189",
+      "series_title": "Breaking Bad",
+      "season_number": 1,
+      "episode_number": 2,
+      "library_ids": [
+        "3"
+      ],
+      "added_at": "2026-01-02T03:04:05.678Z",
+      "versions": [
+        {
+          "file_id": "9007199254740993",
+          "library_id": "3",
+          "resolution": "2160p",
+          "codec_video": "hevc",
+          "dynamic_range": "dolby_vision",
+          "codec_audio": "truehd",
+          "audio_channels": 8,
+          "atmos": true,
+          "container": "mkv",
+          "bitrate_kbps": 60000,
+          "file_size": 5000000000,
+          "edition": "Extended"
+        }
+      ]
+    },
+    {
+      "content_id": "series-tvdb-81189",
+      "type": "series",
+      "title": "Breaking Bad",
+      "year": 2008,
+      "status": "matched",
+      "tvdb_id": "81189",
+      "library_ids": [
+        "3"
+      ],
+      "added_at": "2026-01-02T03:04:05.678Z",
+      "versions": []
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjoic2VyaWVzLXR2ZGItODExODkifQ.GeosU6d0t9KvAsXXZP3F41BuFiPN3csmpD4XpknAzHg",
+    "has_more": true
+  }
+}

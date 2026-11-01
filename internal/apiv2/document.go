@@ -119,7 +119,7 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
-	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional, op.CreateOnly) {
+	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional, op.CreateOnly, op.RateLimitBucket != "") {
 		if status < http.StatusBadRequest {
 			// 304 is a success shape, documented with its headers by
 			// documentConcurrencyResponses, not a problem.
@@ -438,12 +438,14 @@ func resolvesProfile(class Class) bool {
 // as does a profile-resolving class (viewer access answers 404 for an unknown
 // X-Profile-Id before the handler runs); a service-backed handler adds 503
 // (its service is not wired); every gated class adds 401, 429 and 503 (a
-// gate the wiring lacks fails closed); a class that resolves a profile or a
-// demo-restricted mutation adds 403; a guarded mutation adds 412 and 428; a
-// conditional read adds 304; a create-only PUT adds 412. Statuses an
-// operation produces on its own (409 for a name conflict, say) are declared
-// on that operation's Errors, not here.
-func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath, guarded, conditional, createOnly bool) []int {
+// gate the wiring lacks fails closed); an operation naming a rate-limit
+// bucket adds 429 on any class, public included (gateChain runs its
+// limiter); a class that resolves a profile or a demo-restricted mutation
+// adds 403; a guarded mutation adds 412 and 428; a conditional read adds
+// 304; a create-only PUT adds 412. Statuses an operation produces on its own
+// (409 for a name conflict, say) are declared on that operation's Errors,
+// not here.
+func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath, guarded, conditional, createOnly, rateLimited bool) []int {
 	set := map[int]bool{
 		http.StatusBadRequest: true, http.StatusNotAcceptable: true,
 		http.StatusUnprocessableEntity: true, http.StatusInternalServerError: true,
@@ -469,6 +471,9 @@ func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPat
 	}
 	if serviceBacked {
 		set[http.StatusServiceUnavailable] = true
+	}
+	if rateLimited {
+		set[http.StatusTooManyRequests] = true
 	}
 	if class != ClassPublic {
 		set[http.StatusUnauthorized] = true
@@ -622,6 +627,7 @@ func registerAll(reg *Registry) {
 	registerAdminDiagnosticReads(reg)
 	registerAdminDiagnosticDelete(reg)
 	registerAdminDashboardInsights(reg)
+	registerAdminAPIClients(reg)
 	registerAdminDashboardCapabilities(reg)
 	registerAdminDashboardLayout(reg)
 	registerAdminDashboardLayoutReset(reg)
@@ -678,6 +684,7 @@ func registerAll(reg *Registry) {
 	registerAdminCatalogSplit(reg)
 	registerAdminCatalogMatch(reg)
 	registerAdminCatalogUnmatched(reg)
+	registerAdminCatalogItems(reg)
 	registerAdminCatalogImages(reg)
 	registerProfileSections(reg)
 	registerCatalogItems(reg)
@@ -717,6 +724,7 @@ func registerAll(reg *Registry) {
 	registerRequests(reg)
 	registerAdminRequests(reg)
 	registerAdminRequestRoutes(reg)
+	registerAdminRequestDiscover(reg)
 	registerAdminRequestQueue(reg)
 	registerAdminRequestGroups(reg)
 	registerRequestLifecycle(reg, reg.deps.RequestLifecycle, reg.deps.WatchProviders)

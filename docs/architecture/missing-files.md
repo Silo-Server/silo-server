@@ -3,7 +3,10 @@
 A library membership (`media_item_libraries` for items, `episode_libraries`
 for episodes) exists while its item or episode has a present file in that
 library. Catalog reads hide anything without one, so removing a membership is
-how a title with no playable file leaves the library. The scanner marks a
+how a title with no playable file leaves the library. That includes listings
+that name no library, for an administrator too: catalog browse, search, Home
+rows, and the unmatched-items list. Only a read by ID still opens such an
+item for a viewer whose library access is unrestricted. The scanner marks a
 vanished file `missing_since`; membership reconciliation then removes the
 memberships left without a present file, in the same pass.
 
@@ -60,6 +63,18 @@ own probes still apply to that scan.
 Arr webhooks report an upgrade as a delete followed by an import, in either
 order and possibly in separate deliveries. Neither order changes the outcome;
 the title is only hidden between the two.
+
+Sonarr's `SeriesDelete` and Radarr's `MovieDelete` with `deletedFiles: true`
+become a scoped scan of the series or movie folder. Arr sends them before it
+deletes the folder, so the delivery waits in the webhook queue, rechecked
+every 10 to 25 seconds for two minutes and about once a minute after that,
+until the folder is gone (`ENOENT`) while its parent
+is still a directory, and only then scans. A scan any earlier would find the
+files and nothing would scan again. Each check is a bounded stat, so a stalled
+mount keeps the delivery waiting. A folder not confirmed gone an hour after
+the delivery arrived is scanned as it stands. Deleting the last folder under a
+library root leaves that root suspect-empty, so its titles stay protected
+like any other emptied root.
 
 ## Renamed and moved files
 

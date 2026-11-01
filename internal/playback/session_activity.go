@@ -37,20 +37,20 @@ func (m *SessionManager) SetDeliveryActivityReader(reader SessionActivityReader)
 // as the media they receive, so they keep counting toward stream limits between
 // sweeps, a session that goes idle during the lookup was still checked, and the
 // paused grace runs from the last delivery however long it is.
-func (m *SessionManager) refreshDeliveryActivity(activeIdle, pausedIdle time.Duration) {
+func (m *SessionManager) refreshDeliveryActivity(activeIdle, pausedIdle, startupIdle time.Duration) {
 	m.mu.RLock()
 	reader := m.deliveryActivityReader
 	m.mu.RUnlock()
-	m.refreshExternalActivity("node_delivery", reader, activeIdle, pausedIdle, false, func(s *Session, _ bool) bool {
+	m.refreshExternalActivity("node_delivery", reader, activeIdle, pausedIdle, startupIdle, false, func(s *Session, _ bool) bool {
 		return s.remoteTransport
 	})
 }
 
-func (m *SessionManager) refreshCompatActivity(activeIdle, pausedIdle time.Duration) map[*Session]bool {
+func (m *SessionManager) refreshCompatActivity(activeIdle, pausedIdle, startupIdle time.Duration) map[*Session]bool {
 	m.mu.RLock()
 	reader := m.compatActivityReader
 	m.mu.RUnlock()
-	return m.refreshExternalActivity("compat", reader, activeIdle, pausedIdle, true, func(s *Session, inactive bool) bool {
+	return m.refreshExternalActivity("compat", reader, activeIdle, pausedIdle, startupIdle, true, func(s *Session, inactive bool) bool {
 		return s.IsJellyfinCompat && inactive
 	})
 }
@@ -60,7 +60,7 @@ func (m *SessionManager) refreshCompatActivity(activeIdle, pausedIdle time.Durat
 // include is told whether the session is already inactive. When protectOnError
 // is set, a failed lookup keeps that batch from expiring in this sweep; the
 // returned map lists those sessions.
-func (m *SessionManager) refreshExternalActivity(source string, reader SessionActivityReader, activeIdle, pausedIdle time.Duration, protectOnError bool, include func(s *Session, inactive bool) bool) map[*Session]bool {
+func (m *SessionManager) refreshExternalActivity(source string, reader SessionActivityReader, activeIdle, pausedIdle, startupIdle time.Duration, protectOnError bool, include func(s *Session, inactive bool) bool) map[*Session]bool {
 	if reader == nil {
 		return nil
 	}
@@ -70,7 +70,7 @@ func (m *SessionManager) refreshExternalActivity(source string, reader SessionAc
 	originals := make(map[string]*Session)
 	for id, s := range m.sessions {
 		active, paused := remoteTransportGrace(s, activeIdle, pausedIdle)
-		if s.activeTransportCount == 0 && include(s, m.sessionIsInactiveLocked(s, now, active, paused)) {
+		if s.activeTransportCount == 0 && include(s, m.sessionIsInactiveLocked(s, now, active, paused, startupIdle)) {
 			candidates = append(candidates, *s)
 			originals[id] = s
 		}
@@ -130,14 +130,14 @@ func (m *SessionManager) SetCompatExpiryClaimer(claimer SessionExpiryClaimer) {
 
 // Called with m.mu held so a successful claim cannot race local activity or a
 // new transport. A single batched round trip has a strict 250ms deadline.
-func (m *SessionManager) claimCompatExpiryLocked(now time.Time, activeIdle, pausedIdle time.Duration, protected map[*Session]bool) map[string]bool {
+func (m *SessionManager) claimCompatExpiryLocked(now time.Time, activeIdle, pausedIdle, startupIdle time.Duration, protected map[*Session]bool) map[string]bool {
 	if m.compatExpiryClaimer == nil {
 		return nil
 	}
 	var candidates []SessionExpiryCandidate
 	for _, s := range m.sessions {
 		active, paused := remoteTransportGrace(s, activeIdle, pausedIdle)
-		if !s.IsJellyfinCompat || protected[s] || s.activeTransportCount > 0 || !m.sessionIsInactiveLocked(s, now, active, paused) {
+		if !s.IsJellyfinCompat || protected[s] || s.activeTransportCount > 0 || !m.sessionIsInactiveLocked(s, now, active, paused, startupIdle) {
 			continue
 		}
 		if len(candidates) == 256 {
@@ -161,4 +161,31 @@ func (m *SessionManager) claimCompatExpiryLocked(now time.Time, activeIdle, paus
 		return claimed
 	}
 	return result
+}
+
+// ClaimCompatExpiry runs the shared compatibility expiry claim for sessions
+// this replica may not hold: the cluster sweep ends a Jellyfin play no
+// replica holds through the same claim the reaper uses. ok is false when no
+// claimer is configured.
+func (m *SessionManager) ClaimCompatExpiry(ctx context.Context, candidates []SessionExpiryCandidate) (map[string]bool, bool, error) {
+	m.mu.RLock()
+	claimer := m.compatExpiryClaimer
+	m.mu.RUnlock()
+	if claimer == nil {
+		return nil, false, nil
+	}
+	claimed, err := claimer(ctx, candidates)
+	return claimed, true, err
+}
+
+// DeliveryActivity reads when a node last delivered media for each session,
+// for sessions this replica may not hold.
+func (m *SessionManager) DeliveryActivity(ctx context.Context, sessions []Session) (map[string]time.Time, error) {
+	m.mu.RLock()
+	reader := m.deliveryActivityReader
+	m.mu.RUnlock()
+	if reader == nil {
+		return nil, nil
+	}
+	return reader(ctx, sessions)
 }

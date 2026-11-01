@@ -69,26 +69,8 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 		populateMovieGroupIdentity(cleanFilePath, assignment, idAnchored, &group)
 	}
 
-	// ID persistence must mirror hasStructuredIDAnchor: any evidence strong
-	// enough to anchor identity must also reach downstream matching.
-	if ids := ParseFolderIDs(filepath.Base(idAnchorRoot)); ids != nil {
-		group.TmdbID = ids.TmdbID
-		group.ImdbID = ids.ImdbID
-		group.TvdbID = ids.TvdbID
-	}
-	if group.TmdbID == "" || group.ImdbID == "" || group.TvdbID == "" {
-		if ids := ParseFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
-			if group.TmdbID == "" {
-				group.TmdbID = ids.TmdbID
-			}
-			if group.ImdbID == "" {
-				group.ImdbID = ids.ImdbID
-			}
-			if group.TvdbID == "" {
-				group.TvdbID = ids.TvdbID
-			}
-		}
-	}
+	ids := groupProviderIDs(cleanFilePath, idAnchorRoot)
+	group.TmdbID, group.ImdbID, group.TvdbID = ids.TmdbID, ids.ImdbID, ids.TvdbID
 
 	// Structured provider IDs anchor the group KEY, not just the identity.
 	// Title+year keys merge distinct titles that normalize identically
@@ -290,6 +272,39 @@ func hasStructuredIDAnchor(filePath, observedRootPath string) bool {
 	}
 	baseNoExt := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 	return ParseFolderIDs(baseNoExt) != nil
+}
+
+// GroupProviderIDs returns the provider IDs a scan stores on the content group
+// of the file at filePath under observedRootPath, so a later reader can tell
+// whether a rescan would store different ones.
+func GroupProviderIDs(filePath, observedRootPath, libraryRootPath string) FolderIDHints {
+	anchorRoot := filepath.Clean(observedRootPath)
+	if observedRootPath == "" || anchorRoot == filepath.Clean(libraryRootPath) {
+		anchorRoot = ""
+	}
+	return groupProviderIDs(filepath.Clean(filePath), anchorRoot)
+}
+
+// groupProviderIDs mirrors hasStructuredIDAnchor: any evidence strong enough
+// to anchor identity must also reach downstream matching. The anchor folder's
+// IDs win, and the file name fills only providers the folder leaves out.
+func groupProviderIDs(filePath, anchorRoot string) FolderIDHints {
+	var ids FolderIDHints
+	if folder := ParseFolderIDs(filepath.Base(anchorRoot)); folder != nil {
+		ids = *folder
+	}
+	if file := ParseFolderIDs(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))); file != nil {
+		if ids.TmdbID == "" {
+			ids.TmdbID = file.TmdbID
+		}
+		if ids.ImdbID == "" {
+			ids.ImdbID = file.ImdbID
+		}
+		if ids.TvdbID == "" {
+			ids.TvdbID = file.TvdbID
+		}
+	}
+	return ids
 }
 
 func deriveObservedRootPath(filePath, candidateRoot string) string {

@@ -2163,6 +2163,8 @@ func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
 // ScrobbleStopConfirmed waits for each provider dispatch and reports provider
 // or persistence failures to the caller. It is used when the caller owns a
 // durable terminal event that must not be acknowledged after a mere enqueue.
+// Connections whose provider is unregistered or cannot scrobble are skipped,
+// not reported.
 func (s *Service) ScrobbleStopConfirmed(ctx context.Context, event ScrobbleEvent) error {
 	return s.scrobble(ctx, event, scrobbleActionStop, true)
 }
@@ -2191,30 +2193,26 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 	var dispatchErrors []error
 	var confirmedTargets []confirmedScrobbleTarget
 	for _, conn := range conns {
+		// A connection whose provider cannot take a scrobble is skipped, even
+		// for a confirmed stop. Failing the stop would make its caller retry
+		// the whole event, and the dispatch to every other provider, until the
+		// session expires: an unregistered provider may never come back, as
+		// when its plugin was removed or now registers under another key. On a
+		// connection that exports watched history, a completed play still
+		// reaches the provider once it is registered: the history-export sync
+		// reconciles all completed local history, not only scrobbled plays.
 		provider, ok := s.registry.Get(conn.Provider)
 		if !ok {
 			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q is not registered", conn.Provider,
-				))
+				slog.WarnContext(ctx, "skipped scrobble stop for unregistered watch provider", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "user_id", conn.UserID, "profile_id", conn.ProfileID)
 			}
 			continue
 		}
 		if !provider.Capabilities().ScrobblePlayback {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q does not support playback scrobbling", conn.Provider,
-				))
-			}
 			continue
 		}
 		scrobbler, ok := provider.(Scrobbler)
 		if !ok {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q has no scrobble dispatcher", conn.Provider,
-				))
-			}
 			continue
 		}
 		connAction := action

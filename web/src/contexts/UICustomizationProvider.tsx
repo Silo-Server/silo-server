@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import {
   UICustomizationContext,
@@ -11,6 +11,7 @@ import {
   useSettingsCapabilities,
 } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { setArtworkPosterSize } from "@/lib/artworkWidths";
 import { parseCardPresentation, parsePrimaryMenu, parseShortcuts } from "@/lib/uiCustomization";
 
 const UI_CUSTOMIZATION_KEYS = [
@@ -70,6 +71,10 @@ export function UICustomizationProvider({ children }: { children: ReactNode }) {
       supportsAtomicShortcuts,
     ],
   );
+
+  // Requests size card artwork for the poster size the cards draw at.
+  const posterSize = value.cardPresentation.poster_size;
+  useEffect(() => setArtworkPosterSize(posterSize), [posterSize]);
 
   return (
     <UICustomizationContext.Provider value={value}>{children}</UICustomizationContext.Provider>

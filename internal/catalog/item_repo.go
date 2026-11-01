@@ -715,7 +715,10 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			year = EXCLUDED.year,
 			genres = EXCLUDED.genres,
 			content_rating = EXCLUDED.content_rating,
-			runtime = EXCLUDED.runtime,
+			-- Audiobook runtime is maintained from active files. Preserve the
+			-- current value even when a metadata request read an older one.
+			runtime = CASE WHEN media_items.type = 'audiobook'
+				THEN media_items.runtime ELSE EXCLUDED.runtime END,
 			overview = EXCLUDED.overview,
 			tagline = EXCLUDED.tagline,
 			rating_imdb = EXCLUDED.rating_imdb,
@@ -2284,10 +2287,10 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 	// passing and a disabled library must not slip through. The old JOIN +
 	// NOT(mil.media_folder_id = ANY(...)) form let the passing membership row
 	// satisfy the deny check (audit 2026-05-01 §3.3), so both the FTS search and
-	// the fuzzy fallback that share this helper used it. appendLibraryAccessConditions
-	// emits independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and
-	// needs no JOIN.
-	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
+	// the fuzzy fallback that share this helper used it. The helper emits
+	// independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and needs
+	// no JOIN, and as a listing it leaves out an item in no library.
+	appendListedLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
 
 	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 
@@ -2882,6 +2885,13 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
+	}
+	if upd.Runtime != nil || upd.LockedFields != nil {
+		// Removing the runtime lock restores the file-derived value even
+		// when an unchanged audiobook will be skipped by the next scan.
+		if _, err := tx.Exec(ctx, `SELECT refresh_audiobook_runtime(ARRAY[$1]::text[])`, contentID); err != nil {
+			return fmt.Errorf("refreshing audiobook runtime: %w", err)
+		}
 	}
 	// The UPDATE above locked the item row before its rating sources, the
 	// order every rating source writer follows (see lockRatingSourceItem).

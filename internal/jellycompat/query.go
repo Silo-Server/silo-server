@@ -687,6 +687,17 @@ func mapSortBy(raw string) string {
 	return sort
 }
 
+// sortsBySortName reports whether the SortBy key parseSort selects is SortName
+// rather than Name; both map to the title sort.
+func sortsBySortName(sortBy string) bool {
+	for _, key := range strings.Split(sortBy, ",") {
+		if _, ok := sortKey(key); ok {
+			return strings.EqualFold(strings.TrimSpace(key), "SortName")
+		}
+	}
+	return false
+}
+
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
 // natural season/episode order episode browses already use — rather than to
 // created_at.

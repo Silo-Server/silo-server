@@ -250,6 +250,15 @@ type ItemDetail struct {
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
 
+	// An episode's series poster and backdrop and its season poster, sized
+	// like its own poster and backdrop. apiv2 emits them; /api/v1 is frozen.
+	SeriesPosterURL         string `json:"-"`
+	SeriesPosterThumbhash   string `json:"-"`
+	SeriesBackdropURL       string `json:"-"`
+	SeriesBackdropThumbhash string `json:"-"`
+	SeasonPosterURL         string `json:"-"`
+	SeasonPosterThumbhash   string `json:"-"`
+
 	// Banner, thumb, clear art and disc art, and every backdrop in display
 	// order with the primary first, for movies and series. Kept out of this
 	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
@@ -579,10 +588,10 @@ type FileVersion struct {
 
 // SetMarkers refreshes the marker projection without rebuilding file metadata.
 func (v *FileVersion) SetMarkers(file *models.MediaFile) {
-	v.Intro = markerFromRange(file.IntroStart, file.IntroEnd)
-	v.Credits = markerFromRange(file.CreditsStart, file.CreditsEnd)
-	v.Recap = markerFromRange(file.RecapStart, file.RecapEnd)
-	v.Preview = markerFromRange(file.PreviewStart, file.PreviewEnd)
+	v.Intro = markerFromFile(file, markerKindIntro)
+	v.Credits = markerFromFile(file, markerKindCredits)
+	v.Recap = markerFromFile(file, markerKindRecap)
+	v.Preview = markerFromFile(file, markerKindPreview)
 	v.MarkerSegments = models.EffectiveMarkerSegments(file)
 	previews := make([]VersionMarkerPreview, 0, len(v.MarkerPreviews))
 	for _, image := range v.MarkerPreviews {
@@ -659,6 +668,9 @@ type VersionSubtitleTrack struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
 	FileName        string `json:"file_name,omitempty"`
+	// IndexOnly is models.SubtitleTrack.IndexOnly, for planners that read
+	// this projection.
+	IndexOnly bool `json:"-"`
 }
 
 // SubtitleInfo represents a subtitle track available for a media item.
@@ -671,10 +683,35 @@ type SubtitleInfo struct {
 	Title           string `json:"title,omitempty"`
 }
 
-// Marker represents a time range (intro or credits).
+// Marker represents a time range (intro or credits) together with the provenance
+// of whatever produced it.
+//
+// Confidence has no single scale — local detection, a chapter, and each online
+// provider rate on their own — so a bare number means nothing without Source
+// beside it. Every provenance field is absent on a marker whose file row
+// recorded none.
 type Marker struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
+	// The provenance fields are excluded from JSON on purpose. This struct is the
+	// wire shape of the frozen GET /api/v1/watch/{id} response, which carries these
+	// markers directly, so a tag here would add fields to a contract that is closed.
+	// Clients that should see provenance read the v2 marker, which maps from these
+	// Go fields rather than from their JSON.
+	//
+	// Source is the class of source (models.MarkerSource*): "scanner" for local
+	// detection, "plugin"/"online" for a provider, "manual" for a person.
+	Source string `json:"-"`
+	// Provider is the provider that supplied the range — a plugin capability id
+	// such as "introdb", or "built_in" — and is empty for a locally detected or
+	// manually set marker.
+	Provider string `json:"-"`
+	// Confidence is the source's own rating, 0-1, absent when the marker was never
+	// rated. It is a pointer for that reason: an unrated marker is stored as 0, so
+	// a bare float would report a real "0%" for a range nobody rated.
+	Confidence *float64 `json:"-"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4" or "introdb:v4".
+	Algorithm string `json:"-"`
 }
 
 // SeasonUserData is the profile-scoped progress payload shared across item,
@@ -1874,6 +1911,12 @@ type seriesDetailContext struct {
 	crewCredits []CrewCredit
 	versionPref versionDefaults
 	backdropURL string
+	posterURL   string
+	// seasonPosters caches each season's signed poster, so a batch of one
+	// season's episodes signs it once. seasons holds the series' localized
+	// seasons when a batch prefetched them.
+	seasonPosters map[string]seasonPoster
+	seasons       map[string]*models.Season
 	// The viewer's audio and subtitle preferences depend only on the series
 	// and the library a file lives in, so a batch resolves them once per
 	// series (and library) instead of once per episode.
@@ -1904,6 +1947,8 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 		crewCredits:      crewCredits,
 		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
 		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop))),
+		posterURL:        s.PresignImageURL(ctx, series.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+		seasonPosters:    map[string]seasonPoster{},
 		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
 		subtitleDefaults: map[int]subtitleDefaults{},
 		trickplay:        s.trickplay,
@@ -1957,6 +2002,7 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 	if err != nil {
 		return nil, err
 	}
+	s.prefetchSeasons(ctx, seriesCtx, filter)
 	if fetcher, ok := s.fileFetcher.(interface {
 		ListByEpisodeIDs(context.Context, []string) (map[string][]*models.MediaFile, error)
 	}); ok {
@@ -3379,9 +3425,94 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		detail.AirDate = &airDate
 	}
 
+	// A season backdrop an admin picked replaces the series backdrop.
+	backdropPath := series.BackdropPath
+	if season.BackdropPath != "" {
+		backdropPath, detail.BackdropThumbhash = season.BackdropPath, season.BackdropThumbhash
+	}
 	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
-	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
+	detail.BackdropURL = s.PresignImageURL(ctx, backdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 	return detail, nil
+}
+
+// seasonPoster is a season's signed poster and its ThumbHash.
+type seasonPoster struct {
+	url       string
+	thumbhash string
+}
+
+// episodeSeasonPoster returns the poster of an episode's season, signing each
+// season once per series context. Seasons prefetchSeasons loaded are used as
+// they are; any other season is loaded and localized on its own. A missing
+// season has none.
+func (s *DetailService) episodeSeasonPoster(ctx context.Context, seriesCtx *seriesDetailContext, seasonID string, filter AccessFilter) seasonPoster {
+	if seasonID == "" || s.seasonRepo == nil {
+		return seasonPoster{}
+	}
+	if poster, ok := seriesCtx.seasonPosters[seasonID]; ok {
+		return poster
+	}
+	var poster seasonPoster
+	season, ok := seriesCtx.seasons[seasonID]
+	if !ok {
+		var err error
+		season, err = s.seasonRepo.GetByID(ctx, seasonID)
+		switch {
+		case err == nil:
+			season = s.localizeEpisodeSeason(ctx, seriesCtx, season, filter)
+		case !errors.Is(err, ErrSeasonNotFound):
+			// Decoration only: a failed read leaves the season poster absent
+			// rather than failing the detail.
+			slog.WarnContext(ctx, "loading episode season poster", "component", "catalog", "season_id", seasonID, "error", err)
+		}
+	}
+	if season != nil {
+		poster = seasonPoster{
+			url:       s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+			thumbhash: season.PosterThumbhash,
+		}
+	}
+	if seriesCtx.seasonPosters != nil {
+		seriesCtx.seasonPosters[seasonID] = poster
+	}
+	return poster
+}
+
+// localizeEpisodeSeason localizes a season the way buildSeasonDetail does, so
+// an episode shows the season poster season detail shows this viewer. A
+// failed localization keeps the stored row.
+func (s *DetailService) localizeEpisodeSeason(ctx context.Context, seriesCtx *seriesDetailContext, season *models.Season, filter AccessFilter) *models.Season {
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+	if localized, err := s.LocalizeSeasonModel(ctx, season, localizationFilter); err == nil && localized != nil {
+		return localized
+	}
+	return season
+}
+
+// prefetchSeasons loads and localizes every season of the context's series in
+// one batch, so a series-wide episode batch reads seasons once rather than
+// once per season. A failed read leaves the per-season reads in place.
+func (s *DetailService) prefetchSeasons(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter) {
+	if s.seasonRepo == nil {
+		return
+	}
+	seasons, err := s.seasonRepo.ListBySeries(ctx, seriesCtx.series.ContentID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading series seasons for episode posters", "component", "catalog", "series_id", seriesCtx.series.ContentID, "error", err)
+		return
+	}
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+	if localized, err := s.LocalizeSeasonModels(ctx, seasons, localizationFilter); err == nil && len(localized) == len(seasons) {
+		seasons = localized
+	}
+	seriesCtx.seasons = make(map[string]*models.Season, len(seasons))
+	for _, season := range seasons {
+		if season != nil {
+			seriesCtx.seasons[season.ContentID] = season
+		}
+	}
 }
 
 func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.Episode, seriesCtx *seriesDetailContext, filter AccessFilter) (*ItemDetail, error) {
@@ -3432,6 +3563,10 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 
 	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	detail.BackdropURL = seriesCtx.backdropURL
+	detail.SeriesPosterURL, detail.SeriesPosterThumbhash = seriesCtx.posterURL, series.PosterThumbhash
+	detail.SeriesBackdropURL, detail.SeriesBackdropThumbhash = seriesCtx.backdropURL, series.BackdropThumbhash
+	seasonArt := s.episodeSeasonPoster(ctx, seriesCtx, episode.SeasonID, filter)
+	detail.SeasonPosterURL, detail.SeasonPosterThumbhash = seasonArt.url, seasonArt.thumbhash
 
 	files := seriesCtx.filesByEpisode[episode.ContentID]
 	if seriesCtx.filesByEpisode == nil {
@@ -4135,14 +4270,66 @@ func bestPlayableFile(files []*models.MediaFile) *models.MediaFile {
 	return best
 }
 
-// markerFromRange converts a (start, end) pair into a *Marker, returning nil
-// when either bound is missing. Used to lift the four per-file segment kinds
-// (intro/credits/recap/preview) into the api response shape.
-func markerFromRange(start, end *float64) *Marker {
+// The four per-file segment kinds, as the marker columns and the API name them.
+const (
+	markerKindIntro   = "intro"
+	markerKindCredits = "credits"
+	markerKindRecap   = "recap"
+	markerKindPreview = "preview"
+)
+
+// markerFromFile lifts one segment kind out of a media file: its range when both
+// bounds are stored, plus the provenance recorded beside it.
+//
+// The provenance lives only in the per-kind column groups
+// (intro_markers_source, …_provider, …_confidence, …_algorithm), so the caller
+// passes the file rather than the bounds.
+func markerFromFile(file *models.MediaFile, kind string) *Marker {
+	if file == nil {
+		return nil
+	}
+
+	var (
+		start, end       *float64
+		source, provider *string
+		confidence       *float64
+		algorithm        *string
+	)
+	switch kind {
+	case markerKindIntro:
+		start, end = file.IntroStart, file.IntroEnd
+		source, provider, confidence, algorithm = file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm
+	case markerKindCredits:
+		start, end = file.CreditsStart, file.CreditsEnd
+		source, provider, confidence, algorithm = file.CreditsMarkersSource, file.CreditsMarkersProvider, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm
+	case markerKindRecap:
+		start, end = file.RecapStart, file.RecapEnd
+		source, provider, confidence, algorithm = file.RecapMarkersSource, file.RecapMarkersProvider, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm
+	case markerKindPreview:
+		start, end = file.PreviewStart, file.PreviewEnd
+		source, provider, confidence, algorithm = file.PreviewMarkersSource, file.PreviewMarkersProvider, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm
+	default:
+		return nil
+	}
 	if start == nil || end == nil {
 		return nil
 	}
-	return &Marker{Start: *start, End: *end}
+
+	marker := &Marker{Start: *start, End: *end}
+	if source != nil {
+		marker.Source = *source
+	}
+	if provider != nil {
+		marker.Provider = *provider
+	}
+	if algorithm != nil {
+		marker.Algorithm = *algorithm
+	}
+	if confidence != nil {
+		value := *confidence
+		marker.Confidence = &value
+	}
+	return marker
 }
 
 func sortAudiobookMediaFiles(files []*models.MediaFile) {
@@ -4198,19 +4385,19 @@ func (s *DetailService) buildPlaybackInfoWith(
 			continue
 		}
 		effectiveAudioSelection := s.effectiveAudioSelectionWith(ctx, audioResolver, f)
-		versionIntro := markerFromRange(f.IntroStart, f.IntroEnd)
+		versionIntro := markerFromFile(f, markerKindIntro)
 		if versionIntro != nil && firstIntro == nil {
 			firstIntro = versionIntro
 		}
-		versionCredits := markerFromRange(f.CreditsStart, f.CreditsEnd)
+		versionCredits := markerFromFile(f, markerKindCredits)
 		if versionCredits != nil && firstCredits == nil {
 			firstCredits = versionCredits
 		}
-		versionRecap := markerFromRange(f.RecapStart, f.RecapEnd)
+		versionRecap := markerFromFile(f, markerKindRecap)
 		if versionRecap != nil && firstRecap == nil {
 			firstRecap = versionRecap
 		}
-		versionPreview := markerFromRange(f.PreviewStart, f.PreviewEnd)
+		versionPreview := markerFromFile(f, markerKindPreview)
 		if versionPreview != nil && firstPreview == nil {
 			firstPreview = versionPreview
 		}
@@ -4628,6 +4815,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			HearingImpaired: sub.HearingImpaired,
 			External:        sub.External,
 			FileName:        sub.FileName,
+			IndexOnly:       sub.IndexOnly,
 		})
 
 		index := sub.Index

@@ -73,8 +73,8 @@ func (s *Server) handleThemeAudio(w http.ResponseWriter, r *http.Request) {
 	if s.tracker != nil && r.Method != http.MethodHead {
 		// A HEAD probe is not an active transfer and must not count against
 		// this proxy's capacity, as for downloads.
-		s.tracker.Track(r.Context(), sessionInfo(s.tracker, claims, themeAudioTrackerType))
-		defer s.tracker.Remove(context.WithoutCancel(r.Context()), claims.SessionID)
+		release := s.tracker.Hold(r.Context(), sessionInfo(s.tracker, claims, themeAudioTrackerType))
+		defer release(context.WithoutCancel(r.Context()))
 	}
 	modified := time.Unix(0, claims.ThemeModifiedUnixNano)
 	switch shape {

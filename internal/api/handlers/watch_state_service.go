@@ -99,14 +99,15 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 	}
 }
 
-// SetWatchedState marks a movie, ebook, episode, season or series watched
-// (played) or unwatched for the profile; a season or series expands to its
-// episodes and an ebook's read state lives in the reader-progress store. It
-// is the command behind v1 POST/DELETE /watched/{id} and the v2 operations.
-// recordRewatch lets marking a watched movie or episode that has a resume
-// position record another play; it never applies to a season or series.
+// SetWatchedState marks a movie, audiobook, ebook, episode, season or series
+// watched (played) or unwatched for the profile; a season or series expands
+// to its episodes and an ebook's read state lives in the reader-progress
+// store. It is the command behind v1 POST/DELETE /watched/{id} and the v2
+// operations. recordRewatch lets marking a watched movie, episode or
+// audiobook that has a resume position record another play; it never applies
+// to a season or series.
 func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalog.AccessFilter) (WatchedStateView, error) {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
+	targetType, seriesID, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
@@ -133,7 +134,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	case played:
 		err = h.markLeafTargetsWatched(ctx, userID, profileID, targets,
-			recordRewatch && (targetType == itemTypeMovie || targetType == itemTypeEpisode))
+			recordRewatch && (targetType == itemTypeMovie || targetType == itemTypeEpisode || targetType == itemTypeAudiobook))
 	default:
 		err = h.markLeafTargetsUnwatched(ctx, userID, profileID, targets)
 	}
@@ -145,7 +146,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	}
 
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, seriesID, "watched", userStateEventState{
 		Played: boolPtr(played),
 	})
 
@@ -161,8 +162,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 // episode and keeps its watched state and watch history; an item without a
 // resume position is a no-op. A season, series or ebook has no single resume
 // position (400 invalid_watch_target); an unknown or inaccessible item is 404,
-// as is a kind the watched-state resolver does not handle, such as an
-// audiobook.
+// and so is an audiobook, which this operation does not cover.
 // It is the command behind the v2 operation; the frozen v1 API has none.
 func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalog.AccessFilter) error {
 	// Only the target's type is needed: a season or series is rejected
@@ -173,6 +173,11 @@ func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, prof
 			return apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
+	}
+	if target.Type == itemTypeAudiobook {
+		// The resolver finds audiobooks for mark watched; this operation
+		// keeps answering them as it did before it did.
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
 	if target.Type != itemTypeMovie && target.Type != itemTypeEpisode {
 		return apiError(http.StatusBadRequest, "invalid_watch_target", "Only a movie or an episode has a resume position")
@@ -188,7 +193,7 @@ func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, prof
 		return nil
 	}
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "progress", userStateEventState{})
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, target.seriesID(), "progress", userStateEventState{})
 	return nil
 }
 

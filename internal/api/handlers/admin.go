@@ -188,6 +188,11 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// ProfileAvatars resolves the avatar on admin profile listings the way
+	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
+	ProfileAvatars interface {
+		ResolveAvatar(ctx context.Context, ref string) (source, url string)
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -521,21 +526,12 @@ func validateStreamLimits(maxStreams, maxTranscodes *int) error {
 	return nil
 }
 
-// actorIsScopedAPIKey reports whether the request is authenticated by an API
-// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
-// an unscoped key already acts with its owner's full authority, and a JWT
-// actor is the admin themselves.
-func actorIsScopedAPIKey(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && len(claims.APIKeyScopes) > 0
-}
-
 // rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
 // account, which it could then log into for an unscoped session. Provisioning
 // ordinary accounts — password included — stays in scope. It reports whether
 // it wrote a response.
 func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
-	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
+	if !apimw.IsScopedAPIKey(r.Context()) || role != roleAdmin {
 		return false
 	}
 	writeError(w, http.StatusForbidden, "insufficient_scope",
@@ -548,7 +544,7 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 // the administrator's password and obtain an unrestricted login session.
 // Callers check the account locked by the mutation transaction.
 func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
-	if !actorIsScopedAPIKey(ctx) {
+	if !apimw.IsScopedAPIKey(ctx) {
 		return nil
 	}
 	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
@@ -571,7 +567,7 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	id int,
 	req *updateUserRequest,
 ) (*models.User, bool) {
-	if !actorIsScopedAPIKey(r.Context()) {
+	if !apimw.IsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
 	target, blocked := h.loadTargetUser(w, r, id)
@@ -713,10 +709,9 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT user_id, MAX("timestamp") AS last_active_at
-		FROM activity_log
-		WHERE user_id = ANY($1::bigint[])
-		GROUP BY user_id`, userIDs)
+		SELECT user_id, last_active_at
+		FROM user_last_activity
+		WHERE user_id = ANY($1::bigint[])`, userIDs)
 	if err != nil {
 		return lastActive, fmt.Errorf("loading user last activity: %w", err)
 	}
@@ -1766,7 +1761,11 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
+// The server generates the signing keys itself. An administrator who could set
+// one could mint tokens for any account, the Owner included, after a restart.
 var machineManagedSettingKeys = map[string]bool{
+	"auth.jwt_secret":                           true,
+	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
 	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,

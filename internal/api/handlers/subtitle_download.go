@@ -26,6 +26,18 @@ func (h *SubtitleSearchHandler) DownloadStoredSubtitle(ctx context.Context, acce
 }
 
 func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, req subtitles.DownloadRequest) (*subtitles.DownloadedSubtitle, error) {
+	// A season-pack result is one archive for every episode; the file's own
+	// episode decides which entry is stored.
+	if h.mediaResolver != nil {
+		meta, err := h.mediaResolver.GetMediaFileWithMetadata(ctx, req.MediaFileID)
+		if err != nil {
+			slog.ErrorContext(ctx, "subtitle download metadata lookup failed", "component", "api", "media_file_id", req.MediaFileID, "error", err)
+			return nil, apiError(http.StatusInternalServerError, "download_error", "Failed to download subtitle")
+		}
+		if meta != nil {
+			req.Target = subtitles.DownloadTarget{Season: meta.Season, Episode: meta.Episode, EndEpisode: meta.EpisodeEnd}
+		}
+	}
 	sub, err := h.manager.Download(ctx, req)
 	if err != nil {
 		if errors.Is(err, subtitles.ErrUnknownProvider) {

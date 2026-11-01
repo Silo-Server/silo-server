@@ -6,10 +6,11 @@
  * The browser can only answer MIME support probes through
  * `MediaSource.isTypeSupported(...)` and `HTMLMediaElement.canPlayType(...)`, so
  * every claim here is `declared` evidence (see §3 of
- * `docs/architecture/playback-protocol-v3.md`). We deliberately never populate
- * `video_decode[]`: on `declared` the server matches the flat codec lists and
- * ignores the detail walk, and fabricating profile/level entries we cannot
- * observe would be exactly the dishonest attestation the tier exists to avoid.
+ * `docs/architecture/playback-protocol-v3.md`). `video_decode[]` carries only
+ * the bit depths a codec's probes accepted: on `declared` an entry can narrow
+ * the flat codec claim but never widen it, and fabricating profile/level
+ * entries we cannot observe would be exactly the dishonest attestation the
+ * tier exists to avoid.
  */
 
 import {
@@ -85,6 +86,11 @@ export interface WebCapabilityProbe {
   codecsVideo: string[];
   /** Video codecs supported specifically by direct media-element playback. */
   progressiveCodecsVideo: string[];
+  /**
+   * Bit depths each probed codec decodes, for codecs whose deeper profile
+   * browsers often refuse (H.264 High 10). Absent codecs are unconstrained.
+   */
+  videoBitDepths?: Record<string, number[]>;
   /** Audio codec names the browser reported support for. */
   codecsAudio: string[];
   /** Audio codecs supported specifically inside progressive MP4 delivery. */
@@ -125,6 +131,12 @@ export function buildClientCapabilitiesV3(
     probe.progressiveCodecsVideo,
     engine?.videoCodecs ?? [],
   );
+  // The server reads `hardware` only on the strict tiers.
+  const videoDecode = Object.entries(probe.videoBitDepths ?? {}).map(([codec, bitDepths]) => ({
+    codec,
+    bit_depths: bitDepths,
+    hardware: false,
+  }));
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
@@ -135,6 +147,7 @@ export function buildClientCapabilitiesV3(
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
     hdr_details: probe.hdrDetails,
+    ...(videoDecode.length > 0 ? { video_decode: videoDecode } : {}),
   };
 }
 

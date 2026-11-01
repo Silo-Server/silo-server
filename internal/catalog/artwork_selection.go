@@ -410,8 +410,11 @@ func compactArtworkObjectKeys(keys []string) []string {
 func artworkTargetColumns(targetType, imageType string) (table, pathColumn, sourceColumn, thumbhashColumn string, notFound error, err error) {
 	switch targetType {
 	case artworkTargetSeason:
-		if imageType == artworkImagePoster {
+		switch imageType {
+		case artworkImagePoster:
 			return "seasons", artworkPosterPathColumn, artworkPosterSourceColumn, artworkPosterThumbColumn, ErrSeasonNotFound, nil
+		case artworkImageBackdrop:
+			return "seasons", artworkBackdropPathColumn, artworkBackdropSourceColumn, artworkBackdropThumbColumn, ErrSeasonNotFound, nil
 		}
 	case artworkTargetEpisode:
 		if imageType == artworkImageStill {

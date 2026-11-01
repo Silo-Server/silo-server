@@ -292,7 +292,7 @@ case "$sonarr_eventtype" in
     # On rename, rescan the entire series folder
     SCAN_PATH="$sonarr_series_path"
     ;;
-  SeriesDelete|EpisodeFileDelete)
+  EpisodeFileDelete)
     # On deletion, rescan to mark files as missing
     SCAN_PATH="$sonarr_series_path"
     ;;
@@ -348,7 +348,7 @@ case "$radarr_eventtype" in
   Rename)
     SCAN_PATH="$radarr_movie_path"
     ;;
-  MovieDelete|MovieFileDelete)
+  MovieFileDelete)
     # On deletion, rescan to mark files as missing
     SCAN_PATH="$radarr_movie_path"
     ;;
@@ -370,6 +370,10 @@ curl -s -S --fail -X POST "${SILO_URL}/api/v2/scan" \
   -H "Content-Type: application/json" \
   -d "$BODY" || echo "Silo scan failed for: $SCAN_PATH" >&2
 ```
+
+Neither script handles `SeriesDelete` or `MovieDelete`. Sonarr and Radarr run the script before
+they delete the series or movie folder, so a scan started from it still finds the files. The
+built-in receiver waits for the folder to disappear before it scans.
 
 ## How scanning works
 

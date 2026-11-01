@@ -66,7 +66,7 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error
+	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time, delivery Delivery) error
 	IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
@@ -156,6 +156,8 @@ type IssueInput struct {
 	UserID   int
 	IssuedBy int
 	Delivery Delivery
+	// ScopedKey marks a request made with a scoped API key.
+	ScopedKey bool
 }
 
 // IssueResult reports a stored link. It may accompany a delivery error; then
@@ -204,12 +206,9 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	if err != nil {
 		return nil, fmt.Errorf("generate password reset token: %w", err)
 	}
-	var issuedBy *int
-	if in.IssuedBy > 0 {
-		issuedBy = &in.IssuedBy
-	}
 	expiresAt := s.now().Add(s.ttl)
-	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuedBy, expiresAt); err != nil {
+	issuer := Issuer{ID: in.IssuedBy, ScopedKey: in.ScopedKey}
+	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuer, expiresAt, in.Delivery); err != nil {
 		return nil, err
 	}
 

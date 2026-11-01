@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -19,6 +21,8 @@ const (
 	defaultSessionTTL = 2 * time.Hour
 	defaultMaxSize    = 256 << 20
 	defaultChunkSize  = 8 << 20
+
+	sessionFileName = "upload.bin"
 )
 
 var (
@@ -62,13 +66,24 @@ type CompletedUpload struct {
 	ID        string
 	Filename  string
 	SizeBytes int64
-	Path      string
-	Cleanup   func()
+	// File is the assembled upload, opened read-only and checked to be the
+	// file Create made. Read it rather than reopening Path.
+	File *os.File
+	// Path names File for readers that only take a path. It sits inside the
+	// verified private root, so only this process's user can change what it
+	// names, provided the root's parent is sticky or private as the shared
+	// temp dir is.
+	Path string
+	// Cleanup closes File and removes the session directory.
+	Cleanup func()
 }
 
 type Manager struct {
-	mu           sync.Mutex
-	rootDir      string
+	mu      sync.Mutex
+	rootDir string
+	// uid must own rootDir; a field so tests can reach the owner check
+	// without root.
+	uid          int
 	ttl          time.Duration
 	maxSize      int64
 	maxChunkSize int64
@@ -93,9 +108,12 @@ type session struct {
 	receivedChunks int
 	receivedBytes  int64
 	path           string
-	dir            string
-	expiresAt      time.Time
-	completed      bool
+	// file identifies the file Create made. Every later open of the session
+	// file must find this same file, so swapping the session directory or
+	// file for another cannot redirect a chunk write or a completed read.
+	file      fs.FileInfo
+	expiresAt time.Time
+	completed bool
 	// writing marks chunk indexes with a body copy in flight. Body I/O happens
 	// outside the manager mutex (a slow client must not stall every other
 	// session), so these flags are what stops a duplicate concurrent write to
@@ -131,6 +149,7 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 	return &Manager{
 		rootDir:      rootDir,
+		uid:          os.Geteuid(),
 		ttl:          ttl,
 		maxSize:      maxSize,
 		maxChunkSize: maxChunkSize,
@@ -169,32 +188,38 @@ func (m *Manager) Create(req CreateRequest) (SessionInfo, error) {
 		return SessionInfo{}, fmt.Errorf("%w: invalid total chunk count", ErrInvalidRequest)
 	}
 
-	if err := os.MkdirAll(m.rootDir, 0o700); err != nil {
-		return SessionInfo{}, fmt.Errorf("create upload root: %w", err)
+	root, err := m.openRoot()
+	if err != nil {
+		return SessionInfo{}, err
 	}
+	defer func() { _ = root.Close() }()
 
 	id, err := newID()
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	dir := filepath.Join(m.rootDir, id)
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	if err := root.Mkdir(id, 0o700); err != nil {
 		return SessionInfo{}, fmt.Errorf("create upload session directory: %w", err)
 	}
 
-	path := filepath.Join(dir, "upload.bin")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := root.OpenFile(sessionFile(id), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		_ = root.RemoveAll(id)
 		return SessionInfo{}, fmt.Errorf("create upload session file: %w", err)
 	}
 	if err := file.Truncate(req.SizeBytes); err != nil {
 		_ = file.Close()
-		_ = os.RemoveAll(dir)
+		_ = root.RemoveAll(id)
 		return SessionInfo{}, fmt.Errorf("size upload session file: %w", err)
 	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		_ = root.RemoveAll(id)
+		return SessionInfo{}, fmt.Errorf("stat upload session file: %w", err)
+	}
 	if err := file.Close(); err != nil {
-		_ = os.RemoveAll(dir)
+		_ = root.RemoveAll(id)
 		return SessionInfo{}, fmt.Errorf("close upload session file: %w", err)
 	}
 
@@ -206,8 +231,8 @@ func (m *Manager) Create(req CreateRequest) (SessionInfo, error) {
 		chunkSize:   chunkSize,
 		totalChunks: int(totalChunks64),
 		received:    make([]bool, int(totalChunks64)),
-		path:        path,
-		dir:         dir,
+		path:        filepath.Join(m.rootDir, sessionFile(id)),
+		file:        fileInfo,
 		expiresAt:   now.Add(m.ttl),
 	}
 
@@ -270,11 +295,10 @@ func (m *Manager) PutChunk(ctx context.Context, id string, index int, body io.Re
 	}
 	s.writing[index] = struct{}{}
 	s.expiresAt = m.now().Add(m.ttl)
-	path := s.path
 	offset := int64(index) * s.chunkSize
 	m.mu.Unlock()
 
-	written, copyErr := copyChunkBody(ctx, path, offset, body, expectedSize)
+	written, copyErr := m.copyChunkBody(ctx, s, offset, body, expectedSize)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -307,15 +331,16 @@ func (m *Manager) removeDetachedDirLocked(s *session) {
 		return
 	}
 	delete(m.detached, s)
-	_ = os.RemoveAll(s.dir)
+	_ = m.removeSessionDir(s.id)
 }
 
-// copyChunkBody writes exactly expectedSize bytes from body at offset,
-// rejecting short or oversized chunks. Runs without the manager lock held.
-func copyChunkBody(ctx context.Context, path string, offset int64, body io.Reader, expectedSize int64) (int64, error) {
-	file, err := os.OpenFile(path, os.O_WRONLY, 0o600)
+// copyChunkBody writes exactly expectedSize bytes from body at offset into the
+// file Create made for s, rejecting short or oversized chunks. Runs without
+// the manager lock held; it reads only fields of s fixed at Create.
+func (m *Manager) copyChunkBody(ctx context.Context, s *session, offset int64, body io.Reader, expectedSize int64) (int64, error) {
+	file, err := m.openSessionFile(s, os.O_WRONLY)
 	if err != nil {
-		return 0, fmt.Errorf("open upload session file: %w", err)
+		return 0, err
 	}
 	defer file.Close()
 
@@ -359,13 +384,21 @@ func (m *Manager) Complete(id string) (*CompletedUpload, error) {
 	s.completed = true
 	delete(m.sessions, id)
 
+	// Every chunk has landed, so no writer still holds the file.
+	file, err := m.openSessionFile(s, os.O_RDONLY)
+	if err != nil {
+		_ = m.removeSessionDir(s.id)
+		return nil, err
+	}
 	return &CompletedUpload{
 		ID:        s.id,
 		Filename:  s.filename,
 		SizeBytes: s.sizeBytes,
+		File:      file,
 		Path:      s.path,
 		Cleanup: func() {
-			_ = os.RemoveAll(s.dir)
+			_ = file.Close()
+			_ = m.removeSessionDir(s.id)
 		},
 	}, nil
 }
@@ -396,7 +429,7 @@ func (m *Manager) Cancel(id string) error {
 	// session as detached — still counted by DetachedWriterSessions — and the
 	// last finishing writer removes the directory.
 	if s.writingCount() == 0 {
-		return os.RemoveAll(s.dir)
+		return m.removeSessionDir(s.id)
 	}
 	m.detached[s] = struct{}{}
 	return nil
@@ -424,7 +457,7 @@ func (m *Manager) getLocked(id string) (*session, error) {
 	if !m.now().Before(s.expiresAt) {
 		delete(m.sessions, id)
 		if s.writingCount() == 0 {
-			_ = os.RemoveAll(s.dir)
+			_ = m.removeSessionDir(s.id)
 		} else {
 			m.detached[s] = struct{}{}
 		}
@@ -440,7 +473,7 @@ func (m *Manager) cleanupExpiredLocked(now time.Time) {
 		}
 		delete(m.sessions, id)
 		if s.writingCount() == 0 {
-			_ = os.RemoveAll(s.dir)
+			_ = m.removeSessionDir(s.id)
 		} else {
 			m.detached[s] = struct{}{}
 		}
@@ -452,33 +485,128 @@ func (m *Manager) cleanupExpiredLocked(now time.Time) {
 // the in-memory session map is empty, but the previous process's partially
 // uploaded spool directories survive on disk and would otherwise accumulate
 // forever (no sweep ever discovers them). Returns the number of directories
-// removed.
+// removed. A root another account could control is left alone: sweeping it
+// would delete whatever that account pointed it at.
 func (m *Manager) ReclaimOrphanedDirs() int {
 	m.mu.Lock()
 	live := make(map[string]struct{}, len(m.sessions))
 	for id := range m.sessions {
 		live[id] = struct{}{}
 	}
-	rootDir := m.rootDir
 	m.mu.Unlock()
 
-	entries, err := os.ReadDir(rootDir)
+	root, err := m.openRoot()
+	if err != nil {
+		slog.Warn("skipping upload spool cleanup", "component", "uploads", "error", err)
+		return 0
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return 0
 	}
 	removed := 0
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || !isSessionID(entry.Name()) {
 			continue
 		}
 		if _, ok := live[entry.Name()]; ok {
 			continue
 		}
-		if os.RemoveAll(filepath.Join(rootDir, entry.Name())) == nil {
+		if root.RemoveAll(entry.Name()) == nil {
 			removed++
 		}
 	}
 	return removed
+}
+
+// openRoot creates the upload root with mode 0700 when it is missing and opens
+// it, refusing one another local account could control: a symlink, a
+// non-directory, or a directory owned by another user or writable by its group
+// or other users. The default roots have fixed names in the shared temp dir,
+// so another account can create one first. Everything under the returned
+// root resolves inside the directory that passed these checks.
+func (m *Manager) openRoot() (*os.Root, error) {
+	if err := os.MkdirAll(m.rootDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create upload root: %w", err)
+	}
+	checked, err := os.Lstat(m.rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("upload root %q: %w", m.rootDir, err)
+	}
+	if err := m.checkRoot(checked); err != nil {
+		return nil, fmt.Errorf("%w; remove it, or set TMPDIR to a directory only the Silo user can write", err)
+	}
+	root, err := os.OpenRoot(m.rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("open upload root: %w", err)
+	}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(checked, opened) {
+		_ = root.Close()
+		return nil, fmt.Errorf("upload root %q changed while it was opened", m.rootDir)
+	}
+	return root, nil
+}
+
+func (m *Manager) checkRoot(info fs.FileInfo) error {
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("upload root %q is a symlink", m.rootDir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("upload root %q is not a directory", m.rootDir)
+	}
+	return checkRootOwner(m.rootDir, info, m.uid)
+}
+
+// openSessionFile opens the file Create made for s through the verified root
+// and refuses anything else found under its name.
+func (m *Manager) openSessionFile(s *session, flag int) (*os.File, error) {
+	root, err := m.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.OpenFile(sessionFile(s.id), flag, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open upload session file: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("stat upload session file: %w", err)
+	}
+	if !os.SameFile(s.file, info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("upload session %s file was replaced", s.id)
+	}
+	return file, nil
+}
+
+// removeSessionDir removes a session directory through the verified root. When
+// the root no longer verifies, the directory is left for the operator rather
+// than removed through a path someone else may have redirected.
+func (m *Manager) removeSessionDir(id string) error {
+	root, err := m.openRoot()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.RemoveAll(id)
+}
+
+func sessionFile(id string) string {
+	return filepath.Join(id, sessionFileName)
+}
+
+// isSessionID reports whether name has the shape newID gives session
+// directories, so the startup sweep never removes anything else.
+func isSessionID(name string) bool {
+	if len(name) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(name)
+	return err == nil
 }
 
 // StartExpirySweeper runs cleanup on the given interval until stop is closed.

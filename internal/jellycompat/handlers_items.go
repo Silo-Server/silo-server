@@ -102,7 +102,6 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		detailSvc:    detailSvc,
 		durationSrc:  detailSvc,
 		itemRepo:     itemRepo,
-		episodeRepo:  episodeRepo,
 		accessFilter: accessFilter,
 		subtitleRepo: subtitleRepo,
 	}
@@ -111,6 +110,9 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 	// handleSeasonEpisodeChildren and panic on GetByID).
 	if seasonRepo != nil {
 		h.seasonRepo = seasonRepo
+	}
+	if episodeRepo != nil {
+		h.episodeRepo = episodeRepo
 	}
 	if personRepo != nil {
 		h.personRepo = personRepo
@@ -1112,6 +1114,96 @@ func (h *ItemsHandler) HandleFiltersStub(w http.ResponseWriter, r *http.Request)
 	}{Genres: filters.Genres, Tags: []string{}, OfficialRatings: filters.OfficialRatings, Years: filters.Years})
 }
 
+// itemCountsDTO is Jellyfin's ItemCounts. Silo's compat surface has no music,
+// trailers, books or Live TV, so those kinds always count zero.
+type itemCountsDTO struct {
+	MovieCount      int
+	SeriesCount     int
+	EpisodeCount    int
+	ArtistCount     int
+	ProgramCount    int
+	TrailerCount    int
+	SongCount       int
+	AlbumCount      int
+	MusicVideoCount int
+	BoxSetCount     int
+	BookCount       int
+	ItemCount       int
+}
+
+// HandleItemCounts serves GET /Items/Counts: how many movies, series, episodes
+// and box sets the caller can see, optionally only their favorites. Seasons are
+// left out of ItemCount, which Jellyfin otherwise sums over every item type.
+func (h *ItemsHandler) HandleItemCounts(w http.ResponseWriter, r *http.Request) {
+	if h.content == nil {
+		writeError(w, 503, "Unavailable", "Catalog unavailable")
+		return
+	}
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, 401, "Unauthorized", "Missing authentication token")
+		return
+	}
+	q := newCaseInsensitiveQuery(r.URL.Query())
+	if userID := q.Get("userId"); userID != "" && !validatePseudoUser(w, userID, session) {
+		return
+	}
+	isFavorite := parseBool(q.Get("isFavorite"), false)
+
+	count := func(itemType string) (int, error) {
+		params := url.Values{}
+		params.Set("type", itemType)
+		params.Set("limit", "1")
+		params.Set("count_only", "true")
+		if isFavorite {
+			params.Set("compose_state", "true")
+			params.Set("is_favorite", "true")
+		}
+		result, err := h.content.BrowseItems(r.Context(), session, params)
+		if err != nil {
+			return 0, err
+		}
+		return result.Total, nil
+	}
+	var counts itemCountsDTO
+	var err error
+	if counts.MovieCount, err = count(compatMovieType); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if counts.SeriesCount, err = count(compatSeriesType); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	// Episodes live outside the media_items browse, so they are counted with
+	// the episode browse /Items uses for IncludeItemTypes=Episode.
+	if repo, ok := h.episodeRepo.(episodeBrowser); ok {
+		access, filters := h.episodeBrowseFilters(r.Context(), session, itemsQuery{isFavorite: isFavorite})
+		_, total, err := h.browseEpisodes(r.Context(), session, repo, "", "", nil, "", filters, access, true)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		counts.EpisodeCount = total
+	}
+	// Favorites cover catalog items only, so no box set is ever a favorite.
+	if h.collections != nil && !isFavorite {
+		visible, err := h.visibleLibraryIDs(r.Context(), session)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		boxSets, err := h.listViewerCollections(r.Context(), session, visible, nil, nil)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		counts.BoxSetCount = len(boxSets)
+	}
+	counts.ItemCount = counts.MovieCount + counts.SeriesCount + counts.EpisodeCount + counts.BoxSetCount
+	writeJSON(w, http.StatusOK, counts)
+}
+
 // HandleFilters2Stub serves current query-filter genres from visible items.
 func (h *ItemsHandler) HandleFilters2Stub(w http.ResponseWriter, r *http.Request) {
 	if h.content == nil || h.codec == nil {
@@ -2020,86 +2112,8 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if repo, ok := h.episodeRepo.(interface {
-		BrowseEpisodes(context.Context, string, string, *int, string, catalog.BrowseFilters, catalog.AccessFilter, bool) ([]*models.Episode, int, error)
-	}); ok && page {
-		filter := h.resolveAccessFilter(r.Context(), session)
-		filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
-		startID := ""
-		if query.startItemID != "" {
-			var decodeErr error
-			startID, decodeErr = decodeItemID(h.codec, query.startItemID)
-			if decodeErr != nil {
-				writeJSON(w, 200, emptyQueryResult(query.startIndex))
-				return
-			}
-		}
-		sortKey, order := "", ""
-		if query.sortExplicit {
-			sortKey = query.sort
-			order = query.order
-		}
-		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: filter.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
-		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
-			content, ok := h.content.(interface {
-				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
-			})
-			if !ok {
-				writeError(w, 503, "Unavailable", "Configured user store unavailable")
-				return
-			}
-			selected := map[string]*models.Episode{}
-			result, err := content.browseConfiguredUserState(r.Context(), session, filters, query.enableTotalRecordCount, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
-				// The configured store counts state matches. One extra catalog row
-				// determines whether another candidate batch exists without counting
-				// the series again for each batch.
-				lookahead := page
-				lookahead.Limit++
-				episodes, _, err := repo.BrowseEpisodes(r.Context(), seriesID, requestedSeasonID, query.seasonNumber, startID, lookahead, filter, false)
-				if err != nil {
-					return nil, false, err
-				}
-				hasMore := len(episodes) > page.Limit
-				if hasMore {
-					episodes = episodes[:page.Limit]
-				}
-				items := make([]upstreamListItem, 0, len(episodes))
-				for _, ep := range episodes {
-					items = append(items, upstreamListItem{ContentID: ep.ContentID})
-				}
-				return items, hasMore, nil
-			})
-			if err != nil {
-				writeCompatUpstreamError(w, err)
-				return
-			}
-			episodes, err := h.episodeRepo.GetByIDs(r.Context(), contentIDsFromListItems(result.Items))
-			if err != nil {
-				writeCompatUpstreamError(w, err)
-				return
-			}
-			for _, ep := range episodes {
-				selected[ep.ContentID] = ep
-			}
-			episodes = nil
-			for _, item := range result.Items {
-				if ep := selected[item.ContentID]; ep != nil {
-					episodes = append(episodes, ep)
-				}
-			}
-			query.totalOverride = new(result.Total)
-			query.startItemID = ""
-			h.writeEpisodeModelsPage(w, r, session, query, seriesID, seasons, episodes, false)
-			return
-		}
-		episodes, total, err := repo.BrowseEpisodes(r.Context(), seriesID, requestedSeasonID, query.seasonNumber, startID, filters, filter, query.enableTotalRecordCount)
-		if err != nil {
-			writeCompatUpstreamError(w, err)
-			return
-		}
-		query.totalOverride = new(total)
-		query.startItemID = ""
-		h.writeEpisodeModelsPage(w, r, session, query, seriesID, seasons, episodes, false)
+	if repo, ok := h.episodeRepo.(episodeBrowser); ok && page {
+		h.writeSeriesEpisodesPage(w, r, session, query, repo, seriesID, requestedSeasonID, seasons)
 		return
 	}
 	episodeModels, err := h.listSeriesEpisodes(r.Context(), session, seriesID, seasons, requestedSeasonID)
@@ -2108,6 +2122,157 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 		return
 	}
 	h.writeEpisodeModelsPage(w, r, session, query, seriesID, seasons, episodeModels, page)
+}
+
+// writeSeriesEpisodesPage pages a series' episodes in the catalog, which
+// filters and counts them before the page is hydrated.
+func (h *ItemsHandler) writeSeriesEpisodesPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, repo episodeBrowser, seriesID, requestedSeasonID string, seasons []upstreamSeason) {
+	startID := ""
+	if query.startItemID != "" {
+		var decodeErr error
+		startID, decodeErr = decodeItemID(h.codec, query.startItemID)
+		if decodeErr != nil {
+			writeJSON(w, 200, emptyQueryResult(query.startIndex))
+			return
+		}
+	}
+	access, filters := h.episodeBrowseFilters(r.Context(), session, query)
+	episodes, total, err := h.browseEpisodes(r.Context(), session, repo, seriesID, requestedSeasonID, query.seasonNumber, startID, filters, access, query.enableTotalRecordCount)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	query.totalOverride = new(total)
+	query.startItemID = ""
+	h.writeEpisodeModelsPage(w, r, session, query, seriesID, seasons, episodes, false)
+}
+
+// episodeBrowser is the catalog episode browse: one series' episodes, or every
+// series' when seriesID is empty.
+type episodeBrowser interface {
+	BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters catalog.BrowseFilters, access catalog.AccessFilter, includeTotal bool) ([]*models.Episode, int, error)
+}
+
+var errConfiguredUserStoreUnavailable = errors.New("configured user store unavailable")
+
+// episodeBrowseFilters builds the access filter and catalog filters an episode
+// browse applies for query.
+func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Session, query itemsQuery) (catalog.AccessFilter, catalog.BrowseFilters) {
+	access := h.resolveAccessFilter(ctx, session)
+	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
+	sortKey, order := "", ""
+	if query.sortExplicit {
+		sortKey = query.sort
+		order = query.order
+	}
+	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+}
+
+// browseEpisodes pages repo.BrowseEpisodes. The catalog applies favorite and
+// played filters itself unless the profile's state lives in the configured
+// user store; then the episodes are matched against that store in batches.
+func (h *ItemsHandler) browseEpisodes(ctx context.Context, session *Session, repo episodeBrowser, seriesID, seasonID string, seasonNumber *int, startID string, filters catalog.BrowseFilters, access catalog.AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
+	if h.catalogUserState || (!filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable) {
+		return repo.BrowseEpisodes(ctx, seriesID, seasonID, seasonNumber, startID, filters, access, includeTotal)
+	}
+	content, ok := h.content.(interface {
+		browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
+	})
+	if !ok {
+		return nil, 0, errConfiguredUserStoreUnavailable
+	}
+	result, err := content.browseConfiguredUserState(ctx, session, filters, includeTotal, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+		// The configured store counts state matches. One extra catalog row
+		// determines whether another candidate batch exists without counting
+		// the series again for each batch.
+		lookahead := page
+		lookahead.Limit++
+		episodes, _, err := repo.BrowseEpisodes(ctx, seriesID, seasonID, seasonNumber, startID, lookahead, access, false)
+		if err != nil {
+			return nil, false, err
+		}
+		hasMore := len(episodes) > page.Limit
+		if hasMore {
+			episodes = episodes[:page.Limit]
+		}
+		items := make([]upstreamListItem, 0, len(episodes))
+		for _, ep := range episodes {
+			items = append(items, upstreamListItem{ContentID: ep.ContentID})
+		}
+		return items, hasMore, nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(result.Items) == 0 {
+		return []*models.Episode{}, result.Total, nil
+	}
+	found, err := h.episodeRepo.GetByIDs(ctx, contentIDsFromListItems(result.Items))
+	if err != nil {
+		return nil, 0, err
+	}
+	selected := make(map[string]*models.Episode, len(found))
+	for _, ep := range found {
+		selected[ep.ContentID] = ep
+	}
+	episodes := make([]*models.Episode, 0, len(result.Items))
+	for _, item := range result.Items {
+		if ep := selected[item.ContentID]; ep != nil {
+			episodes = append(episodes, ep)
+		}
+	}
+	return episodes, result.Total, nil
+}
+
+// episodeOnlyBrowser returns the episode browse when query lists Episode alone
+// and no Ids, which the media_items browse and favorites cannot serve.
+func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, bool) {
+	if len(query.specificIDs) > 0 || !slices.Equal(query.itemTypes, []string{compatEpisodeType}) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+		return nil, false
+	}
+	repo, ok := h.episodeRepo.(episodeBrowser)
+	return repo, ok
+}
+
+// handleEpisodeBrowse serves an /Items browse for Episode alone, such as
+// IncludeItemTypes=Episode&Recursive=true. The media_items browse holds no
+// episodes, so this pages the episodes of every series (or of the ParentId
+// library). An episode's Jellyfin SortName is its season and episode number,
+// so a SortName sort keeps the series, season and episode order.
+func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, repo episodeBrowser) {
+	access, filters := h.episodeBrowseFilters(r.Context(), session, query)
+	// The access filter checks each episode's series, so a ParentId library is
+	// intersected with the session's libraries before episodes are matched to it.
+	if query.parentLibraryID > 0 && !narrowAccessToLibrary(&access, query.parentLibraryID) {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	filters.LibraryID = query.parentLibraryID
+	// Name still sorts by episode title, as Jellyfin's NameComparer does.
+	if filters.Sort == catalog.BrowseSortTitle && sortsBySortName(newCaseInsensitiveQuery(r.URL.Query()).Get("SortBy")) {
+		filters.Sort = ""
+	}
+	if query.countOnly {
+		filters.Limit = 0
+	}
+	episodes, total, err := h.browseEpisodes(r.Context(), session, repo, "", "", nil, "", filters, access, query.enableTotalRecordCount)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	contentIDs := contentIDsFromEpisodes(episodes)
+	targets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(r.Context(), session, contentIDs, nil)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	listItems := make([]upstreamListItem, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if target, ok := targets[contentID]; ok {
+			listItems = append(listItems, target.Item)
+		}
+	}
+	h.writeListItemsPage(w, r, session, query, "", listItems, targets, total)
 }
 
 // writeEpisodeModelsPage maps a resolved set of episode models to Jellyfin
@@ -2650,6 +2815,10 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 }
 
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	if repo, ok := h.episodeOnlyBrowser(query); ok {
+		h.handleEpisodeBrowse(w, r, session, query, repo)
+		return
+	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.
 	countOnly := query.countOnly
@@ -2729,6 +2898,10 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	if repo, ok := h.episodeOnlyBrowser(query); ok {
+		h.handleEpisodeBrowse(w, r, session, query, repo)
+		return
+	}
 	// Client requested specific types (e.g. Playlist, BoxSet, Video) that all
 	// mapped to nothing — return empty rather than returning all favorites.
 	if query.hasItemTypeFilter && len(query.itemTypes) == 0 {
@@ -4033,6 +4206,10 @@ func max(value, fallback int) int {
 }
 
 func writeCompatUpstreamError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errConfiguredUserStoreUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "Unavailable", "Configured user store unavailable")
+		return
+	}
 	if errors.Is(err, errUpstreamReplaced) {
 		writeError(w, http.StatusConflict, "Conflict", "Playback session changed concurrently; retry the request")
 		return

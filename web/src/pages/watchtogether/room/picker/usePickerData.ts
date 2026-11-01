@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, type Query } from "@tanstack/react-query";
 import { fetchCatalogPage, createCatalogSearchState } from "@/hooks/queries/catalog";
 import {
   fetchHomeSectionItems,
@@ -8,7 +8,7 @@ import {
   useHomeLayout,
 } from "@/hooks/queries/sections";
 import { sectionKeys } from "@/hooks/queries/keys";
-import type { BrowseItem, SectionItem } from "@/api/types";
+import type { BrowseItem, HomeSectionItemsResponse, SectionItem } from "@/api/types";
 import {
   getWatchTogetherRoomPicker,
   queryWatchTogetherMemberState,
@@ -179,6 +179,7 @@ export interface ShelfSection {
  * The first few discovery rows from the home screen (trending, curated
  * collections, hidden gems…) with only movies and series kept. Shares the
  * home page's section cache so a room opened from home costs nothing extra.
+ * Home caches most rows in part; the shelf shows those and reads them whole.
  */
 export function useHomeShelfSections(enabled: boolean) {
   const layout = useHomeLayout(enabled);
@@ -193,8 +194,9 @@ export function useHomeShelfSections(enabled: boolean) {
     queries: wanted.map((section) => ({
       queryKey: sectionKeys.homeItems(section.id),
       queryFn: ({ signal }: { signal?: AbortSignal }) =>
-        fetchHomeSectionItems(section.id, { signal }),
-      staleTime: HOME_SECTION_STALE_TIME,
+        fetchHomeSectionItems(section.id, { signal, featured: section.featured }),
+      staleTime: (query: Query<HomeSectionItemsResponse>) =>
+        query.state.data?.partial ? 0 : HOME_SECTION_STALE_TIME,
       gcTime: HOME_SECTION_GC_TIME,
       enabled,
     })),

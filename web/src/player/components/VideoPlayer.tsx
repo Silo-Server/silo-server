@@ -302,6 +302,10 @@ interface VideoPlayerProps {
    * server to leave alone.
    */
   introSkipMode?: IntroSkipMode | null;
+  /** Show the marked range's confidence above the skip prompt. Off by default. */
+  showMarkerConfidence?: boolean;
+  /** Show the marked range's source above the skip prompt. Off by default. */
+  showMarkerSource?: boolean;
   /** Effective profile mode, seeded by the host before its settings read resolves. */
   bufferingMode?: BufferingMode;
   /**
@@ -516,6 +520,8 @@ export function VideoPlayer({
   showForcedSubtitles,
   intro,
   introSkipMode = "ask",
+  showMarkerConfidence = false,
+  showMarkerSource = false,
   bufferingMode = "always",
   bandwidthCapKbps,
   bufferingTitleId,
@@ -842,7 +848,8 @@ export function VideoPlayer({
   const reportSubtitleFailure = useCallback((jobId: string, message?: string) => {
     if (reportedSubtitleFailureRef.current === jobId) return;
     reportedSubtitleFailureRef.current = jobId;
-    toast.error(message ? `Subtitle processing failed: ${message}` : "Subtitle processing failed");
+    // The server sends a complete, viewer-facing reason; show it under a short title.
+    toast.error("Subtitle processing failed", message ? { description: message } : undefined);
   }, []);
 
   const handleSubtitleJobAccepted = useCallback(
@@ -3455,6 +3462,7 @@ export function VideoPlayer({
   }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
 
   const introPromptVisible = activeIntroPrompt !== null;
+
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
 
@@ -5464,6 +5472,9 @@ export function VideoPlayer({
           timer={activeIntroPrompt}
           controlsVisible={controlsVisible}
           focusOnMount={focusIntroPromptOnMount}
+          provenance={activeIntro}
+          showConfidence={showMarkerConfidence}
+          showSource={showMarkerSource}
         />
       )}
       {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
@@ -5471,6 +5482,9 @@ export function VideoPlayer({
           onSkip={skipMarker}
           label={MARKER_SKIP_LABELS[activeSkipMarker.kind]}
           controlsVisible={controlsVisible}
+          provenance={activeSkipMarker}
+          showConfidence={showMarkerConfidence}
+          showSource={showMarkerSource}
         />
       )}
 
