@@ -107,16 +107,19 @@ export async function fetchItemBoxSet(
  */
 export function useItemBoxSet(contentId: string, libraryId?: number) {
   const libraries = useAvailableUserLibraries();
-  const hasBoxSetLibrary = (libraries.data ?? []).some(
-    (library) => library.box_sets_enabled === true,
+  const boxSetLibraryIds = new Set(
+    (libraries.data ?? [])
+      .filter((library) => library.box_sets_enabled === true)
+      .map((library) => String(library.id)),
   );
-  const enabled = hasBoxSetLibrary && contentId !== "";
+  const enabled = boxSetLibraryIds.size > 0 && contentId !== "";
   const query = useQuery({
     queryKey: boxSetKeys.item(contentId, libraryId),
     queryFn: ({ signal }) => fetchItemBoxSet(contentId, libraryId, { signal }),
     enabled,
     retry: false,
   });
-  // A cached box set outlives the library turning box sets off; hide it then.
-  return enabled ? query : { ...query, data: undefined };
+  // A cached box set outlives its library turning box sets off; hide it then.
+  const current = enabled && (query.data == null || boxSetLibraryIds.has(query.data.library_id));
+  return current ? query : { ...query, data: undefined };
 }
