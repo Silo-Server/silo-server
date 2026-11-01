@@ -548,11 +548,17 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 // the collection's stored revision. Every write to the collection, its items,
 // or its libraries advances that revision in the database, so an edit made on
 // any node changes the key on every node and the next read rebuilds the row
-// instead of serving it until the entry expires.
+// instead of serving it until the entry expires. A seasonal row's key carries
+// the list in season, so the row changes with the season rather than showing
+// the last season's titles until the entry expires.
 func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, error) {
 	key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
 	if dailyMixSectionTypes[resolved.SectionType] {
 		key += "|day=" + strconv.FormatInt(dailyMixDay(f.now()), 10)
+	}
+	if resolved.SectionType == SectionSeasonalThemed {
+		pick, _ := f.activeSeasonalPick(resolved.Config)
+		key += "|seasonal=" + pick.ListURL
 	}
 	if resolved.SectionType != SectionCollection || f.CollectionRepo == nil {
 		return key, nil

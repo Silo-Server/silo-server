@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/google/uuid"
 )
@@ -559,9 +561,47 @@ type IngestResult struct {
 	// Pending reports that the delivery was accepted durably but its immediate
 	// ingest failed. The retry task will process it again inside Silo.
 	Pending bool
+	// AwaitingRemoval reports that the delivery was accepted durably and waits
+	// for a folder its source deleted to disappear before it is scanned. The
+	// retry task checks it again; it is not a failure.
+	AwaitingRemoval bool
 }
 
-var errWebhookDeliveryDisabled = errors.New("autoscan: webhook delivery disabled")
+var (
+	errWebhookDeliveryDisabled = errors.New("autoscan: webhook delivery disabled")
+	errAwaitingRemoval         = errors.New("autoscan: waiting for a deleted folder to disappear")
+)
+
+const (
+	// removalWait bounds how long a delivery waits for a path its source
+	// deleted to disappear. Radarr and Sonarr send a folder-delete
+	// notification before they delete the folder, and moving it to a recycle
+	// bin on another filesystem copies every file first. A delivery that is
+	// still waiting after this long is scanned as the folder stands.
+	removalWait = time.Hour
+	// removalRecheckDelay is how soon a waiting delivery is checked again
+	// while it is younger than removalFastWindow, which covers most arr
+	// deletes. The retry task's own interval adds to it.
+	removalRecheckDelay = 10 * time.Second
+	removalFastWindow   = 2 * time.Minute
+	// removalSlowRecheckDelay spaces the checks of a delivery still waiting
+	// after removalFastWindow, such as a recycle-bin copy to another
+	// filesystem, so long waits cost the shared retry batch little.
+	removalSlowRecheckDelay = time.Minute
+	// removalStatTimeout bounds each filesystem check of a deleted path. A
+	// full retry batch of checks on a stalled mount must finish well inside
+	// webhookDeliveryLease, or another node reclaims rows still in progress.
+	removalStatTimeout = 2 * time.Second
+)
+
+// removalRecheckDelayFor is how soon a delivery received at receivedAt and
+// still waiting for a removal is checked again.
+func removalRecheckDelayFor(receivedAt time.Time) time.Duration {
+	if time.Since(receivedAt) < removalFastWindow {
+		return removalRecheckDelay
+	}
+	return removalSlowRecheckDelay
+}
 
 const (
 	webhookRetryBaseDelay = 5 * time.Second
@@ -626,6 +666,15 @@ func (s *Service) processWebhookDelivery(ctx context.Context, delivery WebhookDe
 		}
 		return result
 	}
+	if errors.Is(ingestErr, errAwaitingRemoval) {
+		// Expected for every arr folder delete: check again, without the
+		// failure backoff and without recording an error on the source.
+		result.AwaitingRemoval = true
+		if err := s.store.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, removalRecheckDelayFor(delivery.ReceivedAt), ""); err != nil {
+			slog.WarnContext(ctx, "autoscan: schedule removal recheck failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+		}
+		return result
+	}
 	if errors.Is(ingestErr, errWebhookDeliveryDisabled) {
 		// A source/global disable is a pause, not a reason to discard work that
 		// was already accepted while enabled. Keep it pending without surfacing a
@@ -675,6 +724,9 @@ func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (Ingest
 	if !src.Enabled {
 		return IngestResult{}, errWebhookDeliveryDisabled
 	}
+	if s.awaitingRemoval(ctx, src, in) {
+		return IngestResult{}, errAwaitingRemoval
+	}
 	startedAt := in.ReceivedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -704,6 +756,83 @@ func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (Ingest
 		Suppressed: result.Stats.Suppressed,
 		Unresolved: result.Status == EventStatusUnresolved,
 	}, cerr
+}
+
+// awaitingRemoval reports whether a delivery must wait because a path its
+// source deleted is not confirmed gone yet. Scanning a folder that arr is
+// about to delete would find its files and remove nothing, and arr sends
+// nothing else once the folder is gone. A path outside every enabled library
+// never waits, since nothing would scan it anyway.
+func (s *Service) awaitingRemoval(ctx context.Context, src Source, in ChangeIngest) bool {
+	for _, change := range rewriteChanges(in.Changes, src.PathRewrites) {
+		if !change.Removed || removalConfirmed(ctx, change.SourcePath) {
+			continue
+		}
+		if _, err := s.resolver.ResolveMissingSubtree(ctx, change.SourcePath, scanTrigger); isRequestError(err) {
+			continue
+		}
+		if time.Since(in.ReceivedAt) < removalWait {
+			return true
+		}
+		slog.WarnContext(ctx, "autoscan: deleted folder not confirmed gone after waiting; scanning it as it stands", "component", "autoscan",
+			"source_id", src.ID,
+			"path", change.SourcePath,
+			"waited", removalWait,
+		)
+	}
+	return false
+}
+
+// removalConfirmed reports whether path is gone (ENOENT) while its parent is
+// still a directory: the evidence the scanner needs to treat a vanished scan
+// root as deleted rather than unreachable (scopeRootVanished). Each stat is
+// bounded, so a stalled network mount reads as unconfirmed instead of
+// blocking the webhook request or the retry batch.
+func removalConfirmed(ctx context.Context, path string) bool {
+	// Arr can send the folder with a trailing separator, which filepath.Dir
+	// would treat as the folder itself rather than its parent.
+	path = filepath.Clean(path)
+	ctx, cancel := context.WithTimeout(ctx, removalStatTimeout)
+	defer cancel()
+	if _, err := removalStat(ctx, path); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	parent, err := removalStat(ctx, filepath.Dir(path))
+	return err == nil && parent.IsDir()
+}
+
+// removalStatSlots caps the removal checks whose stat is still running. A
+// stat on a stalled mount keeps its goroutine blocked after the caller gives
+// up, so without a cap a stream of distinct paths could pile them up.
+var removalStatSlots = make(chan struct{}, 16)
+
+var errRemovalChecksBusy = errors.New("autoscan: too many removal checks in flight")
+
+// removalStat stats path, returning when ctx ends even if the stat is still
+// blocked. The stat holds a slot until it actually returns; with no slot
+// free it does not start, and the path reads as unconfirmed.
+func removalStat(ctx context.Context, path string) (fs.FileInfo, error) {
+	select {
+	case removalStatSlots <- struct{}{}:
+	default:
+		return nil, errRemovalChecksBusy
+	}
+	type result struct {
+		info fs.FileInfo
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		info, err := fspath.Stat(path)
+		<-removalStatSlots
+		done <- result{info, err}
+	}()
+	select {
+	case r := <-done:
+		return r.info, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // enqueueScanTargets enqueues targets in bounded chunks. With an event it also
@@ -814,8 +943,8 @@ func (s *Service) resolveConnection(ctx context.Context, connectionID string) (C
 func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 	rewritten := make([]Change, 0, len(changes))
 	for _, change := range changes {
-		path := applyRewrites(change.SourcePath, rewrites)
-		rewritten = append(rewritten, Change{SourcePath: path, Scope: change.Scope})
+		change.SourcePath = applyRewrites(change.SourcePath, rewrites)
+		rewritten = append(rewritten, change)
 	}
 	return rewritten
 }

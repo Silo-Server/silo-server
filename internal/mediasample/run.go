@@ -168,12 +168,14 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		sheetsGraph = graph
 	}
 	attemptCtx := ctx
+	var deadline time.Time
 	if attempt.TimeoutSeconds > 0 {
+		deadline = time.Now().Add(time.Duration(attempt.TimeoutSeconds * float64(time.Second)))
 		var cancel context.CancelFunc
-		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
+		attemptCtx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap, keyframes: keyframes}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, deadline: deadline, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap, keyframes: keyframes}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -212,13 +214,16 @@ func (r Runner) reserveHardware(req Request, attempt Attempt) (hardwareDecode, f
 }
 
 // attemptRun is one attempt in progress. ctx is the caller's context and
-// attemptCtx the attempt's, which the attempt's timeout may end first; every
-// ffmpeg process of the attempt shares it. hw is the hardware the attempt
-// reserved, if it decodes on hardware.
+// attemptCtx the attempt's, which the attempt's timeout may end first at
+// deadline (zero without a timeout); every ffmpeg process of the attempt
+// shares it, except that a reference-picture read runs past it (see
+// withReferenceTime). hw is the hardware the attempt reserved, if it decodes
+// on hardware.
 type attemptRun struct {
 	runner     Runner
 	ctx        context.Context
 	attemptCtx context.Context
+	deadline   time.Time
 	attempt    Attempt
 	hw         hardwareDecode
 	decoder    string
@@ -484,6 +489,11 @@ func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart floa
 // no Samples. onDisorder, when set, is called once a list frame comes from an
 // earlier entry than the frame before it. logHandlers also read ffmpeg's log.
 func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDisorder func(), logHandlers ...func(string)) (Result, *AttemptError) {
+	if req.Window != nil && req.Window.referencePictures {
+		var cancel context.CancelFunc
+		a, cancel = a.withReferenceTime(*req.Window)
+		defer cancel()
+	}
 	var packetTimingPath string
 	if req.Window != nil {
 		dir, err := os.MkdirTemp("", "silo-sheets-*")
@@ -532,6 +542,21 @@ func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDi
 		return Result{}, failure
 	}
 	return Result{Decoder: a.decoder, Sheets: sheets, SheetFrames: frames, SheetTileHeight: req.Sheets.TileHeight}, nil
+}
+
+// withReferenceTime returns the attempt for a read of every reference
+// picture over window: one whose deadline is the attempt's plus
+// referenceReadSeconds(window), so a read that decodes the whole span is
+// not held to a timeout sized for the samples alone. An attempt without a
+// timeout stays without one, and the caller's context still bounds it.
+func (a attemptRun) withReferenceTime(window Window) (attemptRun, context.CancelFunc) {
+	if a.deadline.IsZero() {
+		return a, func() {}
+	}
+	run := a
+	var cancel context.CancelFunc
+	run.attemptCtx, cancel = context.WithDeadline(a.ctx, a.deadline.Add(time.Duration(referenceReadSeconds(window)*float64(time.Second))))
+	return run, cancel
 }
 
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin

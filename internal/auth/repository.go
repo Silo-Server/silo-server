@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -631,6 +634,11 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("begin password update: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	// The account is one of the audit row's accounts; an impersonator is
+	// locked with it in id order rather than after the account's update.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		SET password_hash = $1, password_change_required = false, updated_at = NOW()
@@ -644,9 +652,15 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 				return err
 			}
 		}
+		audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser,
+			strconv.Itoa(id), http.StatusNoContent, auditmutation.SecretChanged(auditmutation.FieldPassword))
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit password update: %w", err)
 		}
+		auditmutation.CommitMutation(ctx, audit)
 		return nil
 	}
 

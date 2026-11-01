@@ -378,6 +378,22 @@
 # Recorded last activity only moves forward and skips deleted accounts.
 ./internal/activitylog TestRecordLastActivityKeepsNewestDB
 
+# Account, credential, session, API key and profile audit rows: what each
+# records, that no secret reaches them, and the locks their writes take.
+./internal/activitylog TestSelfServiceDomainRowsDB
+./internal/api/handlers TestProfileAuditDB
+./internal/api/handlers TestProfileWritesQueueBehindAccountLockDB
+./internal/auth TestImpersonationAuditDB
+./internal/auth TestOwnershipTransferAuditDB
+./internal/auth TestPasswordChangeAuditDB
+./internal/auth TestLoginSessionRevocationAuditDB
+./internal/auth TestSessionRevocationQueuesBehindAccountLockDB
+./internal/auth TestImpersonatedWritesQueueBehindOwnershipTransferDB
+./internal/auth TestAPIKeyAuditDB
+./internal/passwordreset TestPasswordResetAuditDB
+./internal/userstore/pgstore TestPostgresDeleteProfileAuditedSeesConcurrentUpdate
+./internal/userstore/pgstore TestPostgresDeleteProfileAuditedWaitsForSettingClear
+
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
 
@@ -683,6 +699,10 @@
 
 # Household PIN proof must still match when the protected write transaction starts.
 ./internal/userstore/pgstore TestPostgresProfilePINRevisionTransactions
+
+# Personal collection list reads remember counts and collages with no source
+# until the membership revision or the viewer's access changes.
+./internal/catalog TestPersonalCollectionReadsRememberedDB
 
 # Series watch counts answer only series the viewer may see (not podcast shows),
 # with the same counts from the SQL rollup and the per-episode fold.

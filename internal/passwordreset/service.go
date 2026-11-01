@@ -66,7 +66,7 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time) error
+	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time, delivery Delivery) error
 	IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
@@ -208,7 +208,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	}
 	expiresAt := s.now().Add(s.ttl)
 	issuer := Issuer{ID: in.IssuedBy, ScopedKey: in.ScopedKey}
-	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuer, expiresAt); err != nil {
+	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuer, expiresAt, in.Delivery); err != nil {
 		return nil, err
 	}
 

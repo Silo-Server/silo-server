@@ -215,6 +215,7 @@ func (h *AutoscanHandler) DeliverAutoscanWebhook(w http.ResponseWriter, r *http.
 		"suppressed", result.Suppressed,
 		"unresolved", result.Unresolved,
 		"pending", result.Pending,
+		"awaiting_removal", result.AwaitingRemoval,
 	)
 	return nil
 }

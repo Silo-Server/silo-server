@@ -97,7 +97,8 @@ services:
       JF_PORT: "8096"
       ABS_PORT: "13378"
       # The account that runs Silo and owns its directories. It needs read
-      # access to the media.
+      # access to the media. To start without root instead, see
+      # https://siloserver.org/docs/docker#run-silo-without-root
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       # Master key for at-rest credential encryption. The server refuses to
