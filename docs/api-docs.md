@@ -23,7 +23,7 @@ beneath that prefix, provided the proxy forwards the `/api/v2/` subtree.
 The Go registries remain the contract source. Regenerate after changing them:
 
 ```sh
-make apiv2-openapi apiv2-web-types
+make apiv2-openapi apiv2-fixtures apiv2-web-types
 ```
 
 The pinned Swagger UI version, upstream license and update instructions are in

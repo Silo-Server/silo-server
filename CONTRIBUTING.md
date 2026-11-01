@@ -196,14 +196,18 @@ go test ./internal/<package>/...
 cd web && pnpm exec vitest run path/to/changed.test.tsx
 ```
 
-Before opening a pull request, run the full gate. This is the one list; the
-[CI workflow](.github/workflows/ci.yml) is authoritative if they ever disagree.
+Before opening a pull request, run the full gate. This is the one list; the CI
+jobs in [trusted-linux-ci.yml](.github/workflows/trusted-linux-ci.yml) and
+[go-checks.mk](.github/actions/ci-tools/go-checks.mk) are authoritative if they
+ever disagree. CI always takes both files from `main`, so edits to them in a
+pull request take effect only after it merges.
 
 ```sh
 # Go
 make embed-stub
 go build ./...
 gofmt -l .                      # must print nothing
+go mod tidy -diff               # must print nothing
 go vet ./...
 make lint-changed                   # BASE_REF=origin/<pr-base> when not main
 make lint-router-recovery
@@ -227,6 +231,7 @@ make verify-migration-ledger
 make verify-scenario-catalogs
 make verify-offline-routes
 make verify-apiv2-openapi
+make verify-apiv2-web-types
 make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
@@ -234,10 +239,10 @@ make verify-local-paths
 make verify-case-collisions
 make verify-actionlint              # actionlint 1.7.12
 make verify-shellcheck              # ShellCheck 0.11.0
-make verify-size-ratchet
+make verify-size-ratchet            # BASE_REF=origin/<pr-base> when not main
 make verify-bidi
-make verify-migrations
-make verify-v1-route-freeze
+make verify-migrations              # BASE_REF=origin/<pr-base> when not main
+make verify-v1-route-freeze         # BASE_REF=origin/<pr-base> when not main
 docker pull prom/prometheus:v3.5.0   # Required first: the target uses --pull=never
 make verify-prometheus-rules
 ```
@@ -248,10 +253,14 @@ include the updated `eslint-suppressions.json` in the change.
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
 bindings, workflow changes, unknown inputs, and unavailable diffs run both
-groups. Ordinary Markdown documentation runs the documentation checks. Pushes
-and manual runs keep the full gate. The `CI result` job rejects failed, canceled,
-missing, or unexpectedly skipped work; only jobs excluded by the selection may
-skip. Selection tools come from the trusted reusable workflow's main branch.
+groups. Markdown in the repository root, in `docs/` outside
+`docs/design/schemas/`, or under `.github/`, `scripts/`, or `cmd/` selects
+neither group; only the `Repository checks` job, which runs on every pull
+request, checks it. Other Markdown is selected by its path like any other file.
+Pushes and manual runs keep the full gate. The `CI result` job rejects failed,
+canceled, missing, or unexpectedly skipped work; only jobs excluded by the
+selection may skip. Selection tools come from the trusted reusable workflow's
+main branch.
 
 `Go test` runs the full Go suite, which owns the ledger, scenario,
 offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
@@ -265,9 +274,10 @@ and `Go DB external auth` each start a separate pgvector database, and the unit
 suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
 scenario executor, which truncates its database, gets none of these databases.
 
-Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
-`make apiv2-fixtures` and commit what they write; the gates above fail on a
-stale artifact or fixture tree.
+Touching `internal/apiv2` registrations? Run
+`make apiv2-openapi apiv2-fixtures apiv2-web-types` and commit what they write;
+the gates above fail when the artifact, the fixture tree, or the web types are
+stale.
 
 `make test-go` has no database, so every DB-backed test in it skips. The
 `Go DB pins` CI job covers the DB-backed pins listed in
@@ -299,9 +309,12 @@ the same disposable, migrated database.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
-changed. `make lint-changed` checks exactly those lines, and it analyzes only
-the packages your branch touched, so it takes seconds where a cold run over
-`./...` takes minutes of every core. Do not add to the inherited findings.
+changed. `make lint-changed` checks exactly those lines, and it usually
+analyses only the packages your branch touched, so it takes seconds where a
+cold run over `./...` takes minutes of every core. A branch that deletes or
+renames a file in a Go package, or touches shared Go inputs such as `go.mod`,
+`go.sum`, the `Makefile`, a workflow, or the lint config, gets a full-tree
+analysis instead. Do not add to the inherited findings.
 Never pass `--allow-parallel-runners`: concurrent runs queue behind one
 another on purpose.
 
