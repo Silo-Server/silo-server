@@ -298,6 +298,31 @@ func (s artworkSweepSurface) resetSet() string {
 	return fmt.Sprintf(`%s = %s, updated_at = NOW()`, s.pathCol, s.sourceCol)
 }
 
+// ArtworkColumn names a table column that holds a cached artwork key and the
+// column beside it that holds the image's source.
+type ArtworkColumn struct {
+	Table        string
+	PathColumn   string
+	SourceColumn string
+}
+
+// UploadedArtworkColumns lists every artwork slot whose source can be an image
+// an admin uploaded (upload://). Those bytes exist only in artwork storage, so
+// backups copy the keys these columns hold whenever the source is an upload.
+func UploadedArtworkColumns() []ArtworkColumn {
+	var columns []ArtworkColumn
+	for _, s := range artworkSweepSurfaces() {
+		if s.sourceCol != "" {
+			columns = append(columns, ArtworkColumn{Table: s.table, PathColumn: s.pathCol, SourceColumn: s.sourceCol})
+		}
+	}
+	return columns
+}
+
+// IsUploadedSourceSQL is the SQL pattern an uploaded image's source matches,
+// for LIKE on a lowercased source column.
+const IsUploadedSourceSQL = uploadedImageSourcePrefix + "%"
+
 // artworkSweepSurfaces lists every cached-artwork destination in the public
 // bucket that lives in a plain table column.
 //

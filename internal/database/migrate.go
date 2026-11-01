@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,20 +202,53 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// expressed in SQL without duplicating those rules. The invalid index rebuild and the
 		// push attempt key scope decide per index whether to drop and build it
 		// concurrently, which SQL cannot do outside a transaction.
-		goose.WithGoMigrations(
-			settingsBackfillMigration(),
-			displayPrefsMoveMigration(),
-			subtitleLanguageBackfillMigration(),
-			invalidIndexRebuildMigration(),
-			pushAttemptKeyScopeMigration(),
-			externalSubtitleNameBackfillMigration(),
-		),
+		goose.WithGoMigrations(goMigrations()...),
 	)
 	if err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("creating goose migration provider: %w", err)
 	}
 	return provider, nil
+}
+
+func goMigrations() []*goose.Migration {
+	return []*goose.Migration{
+		settingsBackfillMigration(),
+		displayPrefsMoveMigration(),
+		subtitleLanguageBackfillMigration(),
+		invalidIndexRebuildMigration(),
+		pushAttemptKeyScopeMigration(),
+		externalSubtitleNameBackfillMigration(),
+	}
+}
+
+// MigrationVersions lists every migration version this binary carries, SQL
+// and Go, in ascending order. A restore refuses a backup whose schema is
+// newer than the last of them, or that has applied a version not among them:
+// migrations run out of order, so a database can hold a version older than
+// the newest one here that this binary does not carry.
+func MigrationVersions(fsys fs.FS, dir string) ([]int64, error) {
+	migrationFS, err := migrationSubFS(fsys, dir)
+	if err != nil {
+		return nil, err
+	}
+	names, err := fs.Glob(migrationFS, "*.sql")
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]int64, 0, len(names)+len(goMigrations()))
+	for _, name := range names {
+		version, err := goose.NumericComponent(name)
+		if err != nil {
+			return nil, fmt.Errorf("migration %s: %w", name, err)
+		}
+		versions = append(versions, version)
+	}
+	for _, m := range goMigrations() {
+		versions = append(versions, m.Version)
+	}
+	slices.Sort(versions)
+	return slices.Compact(versions), nil
 }
 
 func migrationSubFS(fsys fs.FS, dir string) (fs.FS, error) {

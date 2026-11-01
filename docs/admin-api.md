@@ -15,9 +15,10 @@ authority belongs to the account: a secondary profile on an administrator accoun
 not inherit it. A few deliberately public reads outside `/api/v2/admin` (marked
 `public` in the route tables) are documented beside the admin writes they pair with.
 
-This document covers only the operations listed below. The rest of the
-admin surface predates it and is currently documented by the code and by the
-design documents under `docs/design/`.
+This document covers only the operations listed below. Backups are in
+[backups-api.md](backups-api.md). The rest of the admin surface predates it
+and is currently documented by the code and by the design documents under
+`docs/design/`.
 
 ## Wire conventions
 

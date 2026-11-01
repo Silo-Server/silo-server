@@ -65,6 +65,12 @@ POST /api/v2/admin/autoscan/sources/{id}/webhook	non-media
 POST /api/v2/admin/autoscan/sources/{id}/webhook/rotate	non-media
 GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
+GET /api/v2/admin/backups	non-media
+POST /api/v2/admin/backups	non-media
+GET /api/v2/admin/backups/capabilities	non-media
+DELETE /api/v2/admin/backups/{id}	non-media
+POST /api/v2/admin/backups/{id}/download-links	non-media
+GET /api/v2/admin/backups/{id}/objects/{name}	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
 GET /api/v2/admin/catalog/capabilities	non-media
@@ -1380,6 +1386,12 @@ POST /api/v2/admin/autoscan/sources/{id}/webhook	non-media
 POST /api/v2/admin/autoscan/sources/{id}/webhook/rotate	non-media
 GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
+GET /api/v2/admin/backups	non-media
+POST /api/v2/admin/backups	non-media
+GET /api/v2/admin/backups/capabilities	non-media
+DELETE /api/v2/admin/backups/{id}	non-media
+POST /api/v2/admin/backups/{id}/download-links	non-media
+GET /api/v2/admin/backups/{id}/objects/{name}	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
 GET /api/v2/admin/catalog/capabilities	non-media

@@ -624,6 +624,7 @@ func registerAll(reg *Registry) {
 	registerAdminDiagnosticDownload(reg)
 	registerAdminJobArtifactDownload(reg)
 	registerAdminJobArtifactCapabilities(reg)
+	registerAdminBackups(reg)
 	registerAdminDiagnosticReads(reg)
 	registerAdminDiagnosticDelete(reg)
 	registerAdminDashboardInsights(reg)

@@ -205,6 +205,10 @@ type Dependencies struct {
 	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
 	AdminJobArtifacts             AdminJobArtifactService
 	AdminJobArtifactSigner        *artworkurl.Signer
+	AdminBackups                  AdminBackupService
+	// AdminBackupSigner signs backup object links for destinations that
+	// cannot presign.
+	AdminBackupSigner             *artworkurl.Signer
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminAPIClients               AdminAPIClientsService

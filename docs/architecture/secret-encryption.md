@@ -123,6 +123,12 @@ on the version, returning an explicit error for an unknown version). Rotation is
 out of scope for this release; the versioning exists so it can be added without a
 data migration of the envelope format.
 
+A rotation must keep old backups restorable. Each backup manifest records the
+check value of the key it was taken with (`silo/backup-key-check/v1`), and the
+encrypted values inside a backup's database need that key. A rotation
+therefore has to keep the old key available for backups whose manifest names
+its check value, and record the new key's check value in new manifests.
+
 ## Scope and known gaps
 
 Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
