@@ -627,6 +627,7 @@ const (
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
 	registerCatalogLetters(reg)
+	registerCatalogWatchCounts(reg)
 	registerCatalogBoxSets(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)

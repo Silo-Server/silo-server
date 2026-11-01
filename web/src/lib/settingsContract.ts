@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 24;
+export const SETTINGS_REVISION = 25;
 
 export interface SettingSuggestedOption {
   value: string;

@@ -108,6 +108,12 @@ export const notInterestedKeys = {
   list: () => ["notInterested", "list"] as const,
 };
 
+/** A series' episode watch counts, behind the unwatched-episodes card badge. */
+export const watchCountKeys = {
+  all: ["watchCounts"] as const,
+  series: (seriesId: string) => ["watchCounts", seriesId] as const,
+};
+
 export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,

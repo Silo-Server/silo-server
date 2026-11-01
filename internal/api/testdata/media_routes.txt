@@ -487,6 +487,7 @@ GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
+GET /api/v2/capabilities/watch-counts	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
 GET /api/v2/catalog/box-sets	non-media
@@ -513,6 +514,7 @@ GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
 GET /api/v2/catalog/themes/capabilities	non-media
+POST /api/v2/catalog/watch-counts	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -1802,6 +1804,7 @@ GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
+GET /api/v2/capabilities/watch-counts	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
 GET /api/v2/catalog/box-sets	non-media
@@ -1828,6 +1831,7 @@ GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
 GET /api/v2/catalog/themes/capabilities	non-media
+POST /api/v2/catalog/watch-counts	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media

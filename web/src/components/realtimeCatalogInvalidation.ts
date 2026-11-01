@@ -8,6 +8,7 @@ import {
   libraryKeys,
   requestKeys,
   sectionKeys,
+  watchCountKeys,
 } from "@/hooks/queries/keys";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
@@ -50,6 +51,9 @@ export function invalidateCatalogState(
     queryKey: adminKeys.stats(),
     refetchType: allowDashboardRefetch ? "active" : "none",
   });
+  // A scan that adds or removes episodes changes how many are left to watch;
+  // only the badges on screen refetch, in one request.
+  void queryClient.invalidateQueries({ queryKey: watchCountKeys.all });
 }
 
 /**

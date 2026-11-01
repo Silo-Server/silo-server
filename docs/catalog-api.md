@@ -856,6 +856,56 @@ completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
 
+## Unwatched episode counts
+
+`POST /api/v2/catalog/watch-counts` (`queryCatalogWatchCounts`) answers the
+acting profile's episode watch counts for up to 250 series at once, for an
+unwatched-episode badge on series cards. The body names the series:
+
+```json
+{ "series_ids": ["series:severance", "movie:heat-1995", "series:the-office"] }
+```
+
+The answer keeps request order and counts a repeated ID once:
+
+```json
+{
+  "items": [
+    {
+      "series_id": "series:severance",
+      "user_data": { "watched_count": 1, "unplayed_count": 8, "in_progress_count": 1, "played": false }
+    },
+    {
+      "series_id": "series:the-office",
+      "user_data": { "watched_count": 201, "unplayed_count": 0, "in_progress_count": 0, "played": true }
+    }
+  ]
+}
+```
+
+`user_data` counts the series' available episodes the way item detail counts a
+series: an episode is watched once its progress or a visible history entry says
+it was finished, and an episode in progress still counts in `unplayed_count`.
+An ID that is not a series, a series the viewer may not see, and a series with
+no available episodes are left out, so a missing entry and `unplayed_count: 0`
+mean different things. An empty list or more than 250 IDs is `422`.
+
+Card responses do not carry these counts. Their `user_state.played` can stop at
+a series' first unwatched episode, while exact counts read every available
+episode of every series on the page, which costs tens to hundreds of
+milliseconds per page on a large library. Ask only for the series a card shows
+the badge on, and refresh a series after a `user_state.changed` event that
+names it in `content_id` or `series_id` with `change` `progress`, `watched` or
+`history`. Season lists already carry each season's counts in `user_data`
+(`listSeriesSeasons`).
+
+Detect support with `GET /api/v2/capabilities/watch-counts`
+(`getWatchCountsCapability`): `state` is `available` when the read answers, and
+`max_series_ids` gives the per-request bound. It depends only on the catalog,
+so a search provider outage does not hide it. The web client shows the counts
+as the `unwatched_episodes` card overlay, which settings manifest revision 25
+adds to `ui.card_overlays`.
+
 ## Season-list artwork
 
 `GET /api/v2/images/capabilities` advertises

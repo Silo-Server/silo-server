@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -27,6 +28,7 @@ type fakeCatalog struct {
 	lastViewer         handlers.ItemViewer
 	lastGroup          bool
 	lastGroups         catalogpkg.AudiobookGroupsQuery
+	lastWatchCountIDs  []string
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
@@ -249,6 +251,27 @@ func (f *fakeCatalog) SeasonEpisodes(_ context.Context, _ handlers.ItemViewer, i
 		return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Season not found"}
 	}
 	return []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}, nil
+}
+
+// SeriesWatchCounts knows two series the viewer may see: Severance part
+// watched and The Office finished. Every other ID is absent, as an unseen or
+// non-series ID is from the real seam.
+func (f *fakeCatalog) SeriesWatchCounts(_ context.Context, v handlers.ItemViewer, ids []string) (map[string]*catalogpkg.SeasonUserData, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.lastViewer, f.lastWatchCountIDs = v, ids
+	known := map[string]*catalogpkg.SeasonUserData{
+		"series:severance":  {WatchedCount: 1, UnplayedCount: 8, InProgressCount: 1},
+		"series:the-office": {WatchedCount: 201, Played: true},
+	}
+	out := map[string]*catalogpkg.SeasonUserData{}
+	for _, id := range ids {
+		if counts, ok := known[id]; ok {
+			out[id] = counts
+		}
+	}
+	return out, nil
 }
 
 func catalogDeps(t *testing.T) (Dependencies, *fakeCatalog) {
@@ -598,6 +621,58 @@ func TestSeriesSeasons(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/series/series:severance/seasons/2", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/series/series:severance/seasons/one", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/series/series:severance/seasons/-1", "", viewerHeaders()), TypeValidationFailed)
+}
+
+func TestQueryCatalogWatchCounts(t *testing.T) {
+	deps, fake := catalogDeps(t)
+	h := newTestHandler(t, deps)
+	const path = "/api/v2/catalog/watch-counts"
+
+	// Request order is kept, a repeated ID is counted once, and an ID the seam
+	// leaves out (a movie here) is absent rather than a zero count.
+	rec := do(t, h, http.MethodPost, path, `{"series_ids":["series:the-office","movie:heat-1995","series:severance","series:the-office"]}`, viewerHeaders())
+	want := `{"items":[` +
+		`{"series_id":"series:the-office","user_data":{"watched_count":201,"unplayed_count":0,"in_progress_count":0,"played":true}},` +
+		`{"series_id":"series:severance","user_data":{"watched_count":1,"unplayed_count":8,"in_progress_count":1,"played":false}}]}`
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.Join(fake.lastWatchCountIDs, ","); got != "series:the-office,movie:heat-1995,series:severance" {
+		t.Fatalf("seam got %s", got)
+	}
+	if fake.lastViewer.ProfileID != "p-owner" {
+		t.Fatalf("viewer = %+v", fake.lastViewer)
+	}
+
+	rec = do(t, h, http.MethodPost, path, `{"series_ids":["series:nope"]}`, viewerHeaders())
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"items":[]}` {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	tooMany := make([]string, 251)
+	for i := range tooMany {
+		tooMany[i] = `"series:s` + strconv.Itoa(i) + `"`
+	}
+	for _, body := range []string{
+		`{"series_ids":[]}`,
+		`{"series_ids":[` + strings.Join(tooMany, ",") + `]}`,
+		`{"series_ids":[""]}`,
+		`{"series_ids":["series:severance"],"limit":5}`,
+	} {
+		requireProblem(t, do(t, h, http.MethodPost, path, body, viewerHeaders()), TypeValidationFailed)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"series_ids":["series:severance"]}`, bearer(memberToken)), TypeValidationFailed)
+
+	// The capability follows the catalog wiring alone, not the search provider.
+	rec = do(t, h, http.MethodGet, "/api/v2/capabilities/watch-counts", "", viewerHeaders())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"available"`) || !strings.Contains(rec.Body.String(), `"max_series_ids":250`) {
+		t.Fatalf("capability: %d %s", rec.Code, rec.Body.String())
+	}
+	deps.CatalogItems = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/watch-counts", "", viewerHeaders())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) || strings.Contains(rec.Body.String(), "max_series_ids") {
+		t.Fatalf("unwired capability: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestListCatalogItemsPreservesResolvedSourceOrderCursors(t *testing.T) {

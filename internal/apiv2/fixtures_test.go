@@ -1767,7 +1767,34 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, seasonalThemeFixtureCases()...)
 	cases = append(cases, personalListMembershipFixtureCases()...)
 	cases = append(cases, sectionItemLimitFixtureCases()...)
-	return append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogItemsFixtureCases()...)
+	return append(cases, catalogWatchCountFixtureCases()...)
+}
+
+// catalogWatchCountFixtureCases cover the batched episode watch counts behind
+// the unwatched-episode badge on series cards.
+func catalogWatchCountFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "query_catalog_watch_counts_ok", operationID: opQueryCatalogWatchCounts,
+			scenario: "Episode watch counts for the series on a page of cards; the movie ID has none and is left out.",
+			method:   http.MethodPost, path: "/api/v2/catalog/watch-counts", headers: viewer,
+			body:   `{"series_ids":["series:severance","movie:heat-1995","series:the-office"]}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CatalogWatchCountCollection"},
+		{name: "query_catalog_watch_counts_profile_header_required", operationID: opQueryCatalogWatchCounts,
+			scenario: "Watch counts without X-Profile-Id.",
+			method:   http.MethodPost, path: "/api/v2/catalog/watch-counts", headers: bearer(memberToken), body: `{"series_ids":["series:severance"]}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_watch_counts_capability_ok", operationID: "getWatchCountsCapability",
+			scenario: "The watch-counts read is available and takes up to 250 series a request.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/watch-counts", headers: viewer,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/WatchCountsCapability"},
+		{name: "query_catalog_watch_counts_empty", operationID: opQueryCatalogWatchCounts,
+			scenario: "A request that names no series is refused.",
+			method:   http.MethodPost, path: "/api/v2/catalog/watch-counts", headers: viewer, body: `{"series_ids":[]}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate

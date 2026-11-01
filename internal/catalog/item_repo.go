@@ -2564,6 +2564,18 @@ func buildEnsureAccessibleSQL(contentID string, filter AccessFilter) (string, []
 // not accessible (mirrors EnsureAccessible returning ErrItemNotFound). Used by
 // GetItemDetailsByIDs to avoid a per-item EnsureAccessible fan-out.
 func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]bool, error) {
+	return r.accessibleIDs(ctx, contentIDs, filter, "")
+}
+
+// EnsureAccessibleIDsOfType is EnsureAccessibleIDs limited to items of one
+// type: an accessible ID of any other type is absent, like an inaccessible one.
+func (r *ItemRepository) EnsureAccessibleIDsOfType(ctx context.Context, contentIDs []string, filter AccessFilter, itemType string) (map[string]bool, error) {
+	return r.accessibleIDs(ctx, contentIDs, filter, itemType)
+}
+
+// accessibleIDs answers EnsureAccessibleIDs, limited to itemType unless it is
+// empty.
+func (r *ItemRepository) accessibleIDs(ctx context.Context, contentIDs []string, filter AccessFilter, itemType string) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
@@ -2574,7 +2586,7 @@ func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []s
 		return result, nil
 	}
 
-	query, args := buildEnsureAccessibleIDsSQL(contentIDs, filter)
+	query, args := buildEnsureAccessibleIDsSQL(contentIDs, filter, itemType)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("checking items access: %w", err)
@@ -2591,7 +2603,7 @@ func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []s
 	return result, rows.Err()
 }
 
-func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter) (string, []any) {
+func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter, itemType string) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
@@ -2599,6 +2611,11 @@ func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter) (stri
 	conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
 	args = append(args, contentIDs)
 	argIdx++
+	if itemType != "" {
+		conditions = append(conditions, fmt.Sprintf("mi.type = $%d", argIdx))
+		args = append(args, itemType)
+		argIdx++
+	}
 
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
 	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
