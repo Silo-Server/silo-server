@@ -2,11 +2,14 @@ package keptsub
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +31,9 @@ type memRepo struct {
 	putErr error
 	// trackHook, when set, runs at the start of every Track call.
 	trackHook func(ctx context.Context) error
+	// used is each row's recency on clock, as updated_at is.
+	used  map[trackKey]int64
+	clock int64
 }
 
 type memClaim struct {
@@ -36,7 +42,7 @@ type memClaim struct {
 }
 
 func newMemRepo() *memRepo {
-	return &memRepo{tracks: map[trackKey]Track{}, claims: map[trackKey]memClaim{}}
+	return &memRepo{tracks: map[trackKey]Track{}, claims: map[trackKey]memClaim{}, used: map[trackKey]int64{}}
 }
 
 func (r *memRepo) Track(ctx context.Context, fileID, stream int) (*Track, error) {
@@ -75,6 +81,8 @@ func (r *memRepo) PutTrack(_ context.Context, t Track) error {
 	}
 	r.puts++
 	r.tracks[trackKey{t.MediaFileID, t.StreamIndex}] = t
+	r.clock++
+	r.used[trackKey{t.MediaFileID, t.StreamIndex}] = r.clock
 	return nil
 }
 
@@ -116,6 +124,48 @@ func (r *memRepo) QueueCollection(_ context.Context, key string, _ time.Duration
 	return nil
 }
 
+func (r *memRepo) FileKeptBytes(_ context.Context, fileID, except int) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var total int64
+	for k, t := range r.tracks {
+		if k.fileID == fileID && k.stream != except {
+			total += t.Bytes
+		}
+	}
+	return total, nil
+}
+
+func (r *memRepo) Touch(_ context.Context, fileID, stream int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tracks[trackKey{fileID, stream}]; ok {
+		r.clock++
+		r.used[trackKey{fileID, stream}] = r.clock
+	}
+	return nil
+}
+
+// EvictBeyond keeps the most recently put or touched rows that fit, and
+// queues the rest as the delete trigger does.
+func (r *memRepo) EvictBeyond(_ context.Context, maxBytes int64) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := slices.Collect(maps.Keys(r.tracks))
+	slices.SortFunc(keys, func(a, b trackKey) int { return cmp.Compare(r.used[b], r.used[a]) })
+	var kept int64
+	evicted := 0
+	for _, k := range keys {
+		if kept += r.tracks[k].Bytes; kept > maxBytes {
+			r.queued = append(r.queued, r.tracks[k].BlobKey)
+			delete(r.tracks, k)
+			delete(r.used, k)
+			evicted++
+		}
+	}
+	return evicted, nil
+}
+
 func (r *memRepo) counts() (puts, claims int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -127,6 +177,7 @@ type memBlobs struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	gets    int
+	puts    int
 	// getHook, when set, runs at the start of every Get.
 	getHook func()
 }
@@ -141,6 +192,7 @@ func (b *memBlobs) PutStream(_ context.Context, key string, r io.Reader, _ strin
 	if b.objects == nil {
 		b.objects = map[string][]byte{}
 	}
+	b.puts++
 	b.objects[key] = data
 	return nil
 }

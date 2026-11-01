@@ -61,6 +61,14 @@ type Repo interface {
 	// QueueCollection queues an object key for the blob collector, which
 	// deletes it after the delay unless a row names it.
 	QueueCollection(ctx context.Context, key string, after time.Duration) error
+	// FileKeptBytes sums the kept bytes of a file's streams other than except.
+	FileKeptBytes(ctx context.Context, fileID, except int) (int64, error)
+	// Touch records that the stream's kept track was just used.
+	Touch(ctx context.Context, fileID, streamIndex int) error
+	// EvictBeyond removes the least recently used rows until every row left
+	// holds at most maxBytes together, and reports how many went. A removed
+	// row's object is queued for the collector.
+	EvictBeyond(ctx context.Context, maxBytes int64) (int, error)
 }
 
 // PgRepo is Repo on PostgreSQL.
@@ -136,6 +144,45 @@ func (r *PgRepo) PutTrack(ctx context.Context, t Track) error {
 		return fmt.Errorf("record kept subtitle track: %w", err)
 	}
 	return nil
+}
+
+func (r *PgRepo) FileKeptBytes(ctx context.Context, fileID, except int) (int64, error) {
+	var total int64
+	if err := r.pool.QueryRow(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM public.embedded_subtitle_tracks
+		WHERE media_file_id = $1 AND embedded_stream_index <> $2`, fileID, except).Scan(&total); err != nil {
+		return 0, fmt.Errorf("sum kept subtitle tracks: %w", err)
+	}
+	return total, nil
+}
+
+// Touch moves updated_at, the row's recency, at most once a minute; the
+// store throttles further.
+func (r *PgRepo) Touch(ctx context.Context, fileID, streamIndex int) error {
+	if _, err := r.pool.Exec(ctx, `UPDATE public.embedded_subtitle_tracks SET updated_at = now()
+		WHERE media_file_id = $1 AND embedded_stream_index = $2 AND updated_at < now() - interval '1 minute'`,
+		fileID, streamIndex); err != nil {
+		return fmt.Errorf("touch kept subtitle track: %w", err)
+	}
+	return nil
+}
+
+// EvictBeyond keeps the most recently used rows that fit in maxBytes; the
+// delete trigger queues every removed row's object.
+func (r *PgRepo) EvictBeyond(ctx context.Context, maxBytes int64) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM public.embedded_subtitle_tracks t
+		USING (
+			SELECT media_file_id, embedded_stream_index, SUM(byte_size) OVER (
+				ORDER BY updated_at DESC, media_file_id DESC, embedded_stream_index DESC) AS kept_through
+			FROM public.embedded_subtitle_tracks
+		) ranked
+		WHERE (SELECT SUM(byte_size) FROM public.embedded_subtitle_tracks) > $1
+			AND t.media_file_id = ranked.media_file_id AND t.embedded_stream_index = ranked.embedded_stream_index
+			AND ranked.kept_through > $1`, maxBytes)
+	if err != nil {
+		return 0, fmt.Errorf("evict kept subtitle tracks: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func (r *PgRepo) DeleteTrack(ctx context.Context, fileID, streamIndex int, blobKey string) error {
