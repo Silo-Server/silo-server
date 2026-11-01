@@ -290,7 +290,7 @@ export default function LibraryMetadataSettings() {
         {pluginRatingSources && (
           <FieldGroup
             label="Ratings"
-            description="IMDb and TMDB scores have no switch: a title shows them whenever a supported metadata plugin or its .nfo file provides them.Metadata providers can add other ratings; turn one on to show its scores on title pages in every app. A title page shows at most three ratings, in this order, so a rating turned on shows only where fewer than three come before it. Rotten Tomatoes scores also show on poster badges. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
+            description="IMDb and TMDB scores have no switch: a title shows them whenever a supported metadata plugin or the title's .nfo file provides them. Metadata providers can add other ratings; turn one on to show its scores on title pages in every app. A title page shows at most three ratings, in this order, so a rating turned on shows only where fewer than three come before it. Rotten Tomatoes scores also show on poster badges. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
             restartAll={allRestart(RATINGS_KEYS)}
           >
             {ratingSources.isError && (
