@@ -326,18 +326,19 @@ describe("EpisodeContent", () => {
     function renderWithSeries(
       item: ReturnType<typeof makeEpisodeItem>,
       series: Partial<ItemDetail>,
+      libraryId?: number,
     ) {
       const queryClient = new QueryClient({
         defaultOptions: { queries: { staleTime: Infinity, retry: false } },
       });
       queryClient.setQueryData(
-        catalogKeys.itemDetail("series-1"),
+        catalogKeys.itemDetail("series-1", libraryId),
         makeItemDetail("series", { content_id: "series-1", ...series }),
       );
       render(
         <QueryClientProvider client={queryClient}>
           <MemoryRouter initialEntries={["/item/episode-1"]}>
-            <EpisodeContent item={item} />
+            <EpisodeContent item={item} libraryId={libraryId} />
           </MemoryRouter>
         </QueryClientProvider>,
       );
@@ -379,7 +380,16 @@ describe("EpisodeContent", () => {
         hideOverviews: true,
         expected: { overview: "Series overview", overviewHidden: false },
       },
-    ])("$name", ({ episodeOverview, hideOverviews, expected }) => {
+      {
+        // A profile that inherits the library's metadata language gets the
+        // series in that language only when the request names the library.
+        name: "reads the series in the page's library",
+        episodeOverview: "",
+        hideOverviews: false,
+        libraryId: 7,
+        expected: { overview: "Series overview", onTranslateOverview: "translate series-1" },
+      },
+    ])("$name", ({ episodeOverview, hideOverviews, libraryId, expected }) => {
       spoilerPrefs.hideOverviews = hideOverviews;
       try {
         const props = renderWithSeries(
@@ -389,6 +399,7 @@ describe("EpisodeContent", () => {
             user_data: { played: false },
           }),
           { overview: "Series overview", machine_translated_fields: ["overview"] },
+          libraryId,
         );
         expect(props).toMatchObject(expected);
       } finally {

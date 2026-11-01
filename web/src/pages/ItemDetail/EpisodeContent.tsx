@@ -56,7 +56,14 @@ import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { hasMachineTranslation } from "./components/machineTranslation";
 
-export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
+export default function EpisodeContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "episode" };
+  /** The page's ?libraryId= scope; the series overview fallback resolves its language in it. */
+  libraryId?: number;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -95,11 +102,14 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // episode but not navigation to the next one.
   const [revealedOverviewId, setRevealedOverviewId] = useState<string | null>(null);
   // An episode without a description shows its series' overview, in the
-  // profile's language like the series page, and on-view translation follows
-  // it. It reveals nothing about the episode, so spoiler protection leaves it
+  // language the series page shows in this library, and on-view translation
+  // follows it. It reveals nothing about the episode, so spoiler protection leaves it
   // visible.
   const hasOwnOverview = !!item.overview?.trim();
-  const { data: series } = useCatalogItemDetail(hasOwnOverview ? undefined : item.series_id);
+  const { data: series } = useCatalogItemDetail(
+    hasOwnOverview ? undefined : item.series_id,
+    libraryId,
+  );
   const overviewSource = hasOwnOverview ? item : series;
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(overviewSource);
