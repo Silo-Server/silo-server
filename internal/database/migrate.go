@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 )
@@ -172,26 +171,21 @@ func MigrationStatuses(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir 
 }
 
 func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Provider, error) {
-	migrationFS, err := migrationSubFS(fsys, dir)
+	p, err := openMigrationProvider(pool, fsys, dir, goMigrations())
 	if err != nil {
 		return nil, err
 	}
+	return p.Provider, nil
+}
 
-	sqlDB := stdlib.OpenDBFromPool(pool)
-
-	locker, err := lock.NewPostgresSessionLocker(lock.WithLockID(schemaMigrationsLockID))
-	if err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("creating goose migration lock: %w", err)
-	}
-
+func newGooseProvider(sqlDB *sql.DB, migrationFS fs.FS, locker lock.SessionLocker, goMigs []*goose.Migration) (*goose.Provider, error) {
 	provider, err := goose.NewProvider(
 		goose.DialectPostgres,
 		sqlDB,
 		migrationFS,
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
-		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
+		goose.WithSessionLocker(locker),
 		// These are Go rather than SQL because their conversion rules live
 		// in Go packages shared with other write paths: the settings backfill
 		// validates every value against the contract and re-encodes it as
@@ -202,10 +196,9 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// expressed in SQL without duplicating those rules. The invalid index rebuild and the
 		// push attempt key scope decide per index whether to drop and build it
 		// concurrently, which SQL cannot do outside a transaction.
-		goose.WithGoMigrations(goMigrations()...),
+		goose.WithGoMigrations(goMigs...),
 	)
 	if err != nil {
-		_ = sqlDB.Close()
 		return nil, fmt.Errorf("creating goose migration provider: %w", err)
 	}
 	return provider, nil

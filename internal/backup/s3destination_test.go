@@ -113,7 +113,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 	}
 	before := srv.Keys(testBucket, "")
 	srv.RefuseDeletes(true)
-	rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil)
+	rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil, true)
 	if len(rotated) != 0 || len(warnings) != 2 || !strings.Contains(warnings[0], "lifecycle rules") {
 		t.Fatalf("rotation against a refusing bucket = rotated %v, warnings %v", rotated, warnings)
 	}
@@ -121,7 +121,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 		t.Fatalf("a refused rotation removed objects: %d of %d left", len(after), len(before))
 	}
 	srv.RefuseDeletes(false)
-	if rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil); len(rotated) != 2 || len(warnings) != 0 {
+	if rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil, true); len(rotated) != 2 || len(warnings) != 0 {
 		t.Fatalf("rotation = rotated %v, warnings %v", rotated, warnings)
 	}
 }
@@ -167,8 +167,8 @@ func TestS3BackupsPauseUntilTheKeyIsConfirmed(t *testing.T) {
 // TestDefaultDestinationOnAPrivateBucketIsEncrypted: the default
 // destination is the operational store, which is the private bucket when one
 // is configured. Backups there are encrypted like the dedicated bucket's:
-// they need the confirmed key, and uploads take the adaptive part size. A
-// local
+// they need the confirmed key (the before-upgrade backup skips without it),
+// and uploads take the adaptive part size. A local
 // filesystem default stays plaintext and needs no confirmation.
 func TestDefaultDestinationOnAPrivateBucketIsEncrypted(t *testing.T) {
 	ctx := t.Context()
@@ -184,6 +184,9 @@ func TestDefaultDestinationOnAPrivateBucketIsEncrypted(t *testing.T) {
 	}
 	if _, err := svc.preflight(ctx); !errors.Is(err, ErrKeyNotConfirmed) {
 		t.Fatalf("preflight before confirming = %v, want ErrKeyNotConfirmed", err)
+	}
+	if reason, warn, err := svc.skipBeforeUpgrade(ctx, false); err != nil || !warn || reason == "" {
+		t.Fatalf("before-upgrade skip = %q, %v, %v", reason, warn, err)
 	}
 	if err := svc.AcknowledgeKey(ctx, key.Check); err != nil {
 		t.Fatal(err)

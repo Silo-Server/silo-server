@@ -27,8 +27,8 @@ Each backup is one folder at the destination:
 ```
 backups/<server-id>/<UTC time>-<kind>/
   db.dump[.age]          pg_dump custom format, zstd level 3
-  restore-set.tar[.age]  sections for selective restore
-  blobs.tar[.age]        assets/<key> and operational/<key> entries
+  restore-set.tar[.age]  sections for selective restore; not in before-upgrade backups
+  blobs.tar[.age]        assets/<key> and operational/<key> entries; not in before-upgrade backups
   manifest.json          written last; never encrypted
 ```
 
@@ -43,7 +43,7 @@ the private bucket ([Destinations](#destinations), [Encryption](#encryption)).
 - The folder name is the backup id: `20261031T040000.123Z-nightly`. The time
   is the start of the run in UTC, to the millisecond; ids written to the
   second (`20261031T040000Z-nightly`) still parse. Kinds are `nightly`,
-  `manual`, and `before-restore`. Names that do not parse,
+  `manual`, `before-restore`, and `before-upgrade`. Names that do not parse,
   such as a full restore's `<time>-overwritten-blobs`, are never treated as
   backups.
 - **A folder is never reused.** A backup reserves its id under the subsystem
@@ -75,7 +75,9 @@ check value, how the table of contents was checked, the blob count and bytes,
 set, `restore_set`: its format version and the item count of each section.
 The objects are exactly `db.dump` and `blobs.tar`, plus `restore-set.tar`
 when `restore_set` is present, each named with `.age` when `encrypted` is
-true; a manifest whose names disagree with `encrypted` is refused.
+true; a manifest whose names disagree with `encrypted` is refused. A
+`before-upgrade` manifest lists `db.dump` alone, with no restore set and no
+blob counts (see [Before upgrades](#before-upgrades)).
 
 The inventory covers `users`, `user_profiles`, `media_folders`, `media_items`,
 `media_files`, `server_settings`, `plugin_installations`,
@@ -109,7 +111,8 @@ showing either key.
    and filling it would take PostgreSQL down.
 2. Open a `REPEATABLE READ`, read-only transaction and call
    `pg_export_snapshot()`. In the same transaction read the server and schema
-   versions, the table inventory, and the referenced blob keys.
+   versions, the table inventory, and, except for `before-upgrade`, the
+   referenced blob keys.
 3. Run `pg_dump --format=custom --compress=zstd:3 --snapshot=<id>` with
    `--exclude-table-data-and-children` for `activity_log`, `operational_logs`,
    `policy_decisions`, `catalog_search_index_events`, `backup_status` (its row
@@ -126,11 +129,11 @@ showing either key.
    and the upload continues. If the piped check fails, the check reads the
    stored object back. The manifest records which happened (`pipe` or
    `read_back`).
-5. Write `restore-set.tar` (see
+5. Every kind except `before-upgrade` writes `restore-set.tar` (see
    [Restore set](#restore-set)): its documents and plugin archives come from
    the same snapshot transaction, then the snapshot closes and the section
    blobs are copied, as blobs.tar's are.
-6. Copy the blobs into `blobs.tar`.
+6. Except for `before-upgrade`, copy the blobs into `blobs.tar`.
 7. Write the manifest, then rotate and sweep. A failure in any earlier step
    leaves an incomplete folder and deletes nothing.
 
@@ -251,7 +254,8 @@ current check value, and needs an endpoint and a bucket. The `default`
 destination on the private bucket needs no setting change: its backups wait,
 paused, until the key is confirmed. When `SECRET_KEY` changes, or was never
 confirmed, the recorded value does not match: encrypted backups pause (a run
-fails with the reason) and the Backups page warns (`key_not_confirmed`, with `encrypted`
+fails with the reason, and the backup before migrations is skipped with a
+warning) and the Backups page warns (`key_not_confirmed`, with `encrypted`
 true) until the admin confirms the key. The
 destination settings stay editable meanwhile.
 
@@ -326,7 +330,14 @@ which operation holds it.
   the row as the latest run, `interrupted`, with its id, kind, and start
   time, in the same statement.
 
-A restore holds the subsystem lock for its
+Lock order, for every caller:
+
+1. the before-upgrade wrapper lock, taken only around startup migrations;
+2. the subsystem lock;
+3. goose's own migration lock.
+
+Ordinary operations never take the wrapper, and nothing takes the wrapper
+while holding the subsystem lock. A restore holds the subsystem lock for its
 whole run and takes its before-restore backup by calling the backup function
 directly, never by acquiring the lock again.
 
@@ -371,8 +382,8 @@ unencrypted copy to this server instead of the S3 bucket, and one of
 - The newest `nightly` or `manual` copy without warnings is never deleted, even
   when that keeps one more than `backup.keep`, so repeated runs with missing
   blobs cannot rotate away the last copy that has every blob.
-- `before-restore` copies are deleted after 7 days and do not count toward
-  `backup.keep`.
+- `before-restore` copies are deleted after 7 days; `before-upgrade` copies
+  keep the 2 newest. Neither counts toward `backup.keep`.
 - Rotation manages only the current destination and the current server id's
   prefix, and never deletes a backup that is the source of a queued or
   running restore. A running restore holds the subsystem lock for its whole
@@ -388,6 +399,103 @@ unencrypted copy to this server instead of the S3 bucket, and one of
   lifecycle rules. An S3 folder is deleted manifest first, so a refused delete
   leaves the backup whole, and one that stops partway leaves an incomplete
   folder for the sweep, never a manifest listing objects that are gone.
+
+## Before upgrades
+
+Every API server runs migrations at startup, and so does `silo --migrate-only`.
+Both run `database.MigrateAtStartup`, which takes a database backup first
+whenever migrations are pending:
+
+1. Take the wrapper lock (`SILOMIGR`, a session advisory lock on a connection
+   of its own, outside the pool), waiting while another server holds it.
+2. Run the legacy `schema_versions` bootstrap under goose's lock, so the
+   pending check sees the versions a legacy install applied. goose's
+   `HasPending` takes no lock and would not run it.
+3. Ask goose whether migrations are pending, with the provider that runs them.
+   Nothing pending ends the sequence.
+4. On a database with a schema (any applied version), take the subsystem lock,
+   waiting for a running backup or restore, and take a `before-upgrade` backup.
+   A new database has nothing to back up.
+5. Run goose `Up` with the same provider, still holding the subsystem lock, so
+   a nightly run or a restore on another server never reads a schema being
+   migrated. goose's own lock is then uncontended.
+6. Release the subsystem lock, then the wrapper, then build the audit-detail
+   indexes.
+
+Other servers block on the wrapper and, once they get it, find nothing
+pending. If the session of the wrapper or of the subsystem lock ends at any
+point, the backup or migration in flight is canceled and startup fails;
+goose runs each migration in a transaction, so a canceled one rolls back.
+
+The backup runs before this release's schema exists, against whatever the
+previous release left:
+
+- It is `db.dump` and the manifest only: no restore set, no `blobs.tar`, and
+  no blob queries. Migrations do not touch blobs, so a restore from it leaves
+  the files in storage as they are.
+- It reads only `server_settings` rows, with defaults for keys the old
+  release never wrote: the first upgrade to a release with backups finds no
+  `backup.*` rows and backs up to the default destination. Blob storage comes
+  from the stored settings, as at startup, opened without recording anything.
+- The core inventory checks each table with `to_regclass`, so tables the old
+  schema lacks are recorded as absent. `pg_dump` excludes the same table data
+  as every backup; an exclusion that matches no table is ignored.
+- It publishes nothing to `backup_status` and skips the upload sweep: neither
+  table may exist yet. Rotation of backup folders runs as after any backup.
+
+It fails closed: if the backup fails, startup stops with the reason and
+nothing is migrated. It is skipped, with the reason logged and the subsystem
+lock still held through `Up`, when:
+
+- `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
+  is set on; remove it after that start. A value that is not a boolean does
+  not skip;
+- `backup.enabled` is `false`;
+- the user store is SQLite (backups refuse there, and the upgrade that imports
+  it must not be blocked; the warning tells the admin to back up the database
+  and the SQLite file themselves);
+- there is no destination: no operational store, or `backup.destination=s3`
+  without a bucket and endpoint;
+- the destination is a bucket, where backups are encrypted, and this
+  server's `SECRET_KEY` is not confirmed.
+
+Only settings that were read can skip it. Anything else, including a missing
+or too old `pg_dump`, an unreachable destination, or a setting that cannot be
+read, fails startup. The error names
+`SILO_SKIP_BACKUP_BEFORE_MIGRATE` as the way to start once without the backup.
+
+### Timing and readiness
+
+| Variable | Default | Bounds |
+|---|---|---|
+| `SILO_MIGRATION_WAIT` | `60m` | the wait for the wrapper while another server runs the sequence, and the wait for the subsystem lock while a backup or restore holds it; `0` waits indefinitely |
+| `SILO_MIGRATE_TIMEOUT` | `20m` | goose `Up` and the index step ([schema integrity](schema-integrity.md)); `0` disables it |
+
+The backup itself has no deadline; it ends when it finishes, fails, or loses
+its lock. A server waiting for the wrapper logs that it is waiting, then a
+heartbeat every 20 seconds; one waiting for the subsystem lock behind a running
+backup or restore does the same every 30 seconds; and the backup logs each step
+and a heartbeat every 30 seconds.
+
+The API listener opens only after migrations, so while a server waits, backs
+up, or migrates, its readiness and health endpoints do not answer, which every
+probe reads as not ready. On Kubernetes, give the API pods a startup probe on
+`/api/v1/ready` whose budget (`failureThreshold` times `periodSeconds`) covers
+`SILO_MIGRATION_WAIT` plus the backup and the migrations, so liveness checks
+do not restart a pod that is waiting for another pod's upgrade. Size the
+backup from the previous copy's duration in task history. The image's
+`HEALTHCHECK` allows a 20-minute start period.
+
+### Restoring one
+
+A `before-upgrade` backup is a full-restore recovery point; the Backups page
+offers no selective restore for it. `silo backup restore` and `silo backup
+verify` read it as a database-only backup: they fetch and verify `db.dump`
+alone and leave files in storage untouched. Swap mode needs no
+`--database-only`; separate mode still requires `--database-only` or
+`--blobs-into`, and writes nothing to the latter. Run the command from the new release's binary, then start the
+release the backup came from; starting the new release again migrates the
+restored database and takes another `before-upgrade` backup.
 
 ## Restore set
 
@@ -1122,7 +1230,7 @@ downloaded copy), or a bucket folder,
 A local unencrypted folder is read in place. A bucket folder or an encrypted
 one is fetched first: the manifest is read and an encrypted backup with
 another key check value is refused, then `db.dump` and `blobs.tar` (only
-`db.dump` with `--database-only`) are copied into a working folder in the
+`db.dump` with `--database-only` or from a `before-upgrade` backup) are copied into a working folder in the
 current directory as plaintext, decrypted as they stream, each checked
 against the manifest's size and SHA-256 of the stored bytes. Before anything
 downloads, the folder's filesystem must have room for the objects' stored
@@ -1152,7 +1260,7 @@ and checks the stored bytes against the manifest. The plaintext lands in
 `<output>.partial` and is renamed only after every check passed.
 
 Every mode first validates: the manifest is present and complete (exactly
-`db.dump` and `blobs.tar`, and
+`db.dump` and `blobs.tar`, `db.dump` alone for `before-upgrade`, and
 `restore-set.tar` when it lists a restore set,
 each with a size and SHA-256; exactly the core
 inventory tables, each present with a count or absent; a kind matching the

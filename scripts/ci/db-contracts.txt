@@ -795,3 +795,21 @@
 ./internal/watchstate TestProgressMergeKeepsHeartbeatDB
 ./internal/watchstate TestPluginSourcedPlaysDB
 ./internal/usercollections TestCollectionImportRemapsLibrariesDB
+
+# Startup migrations: the legacy bootstrap runs before the pending check, a
+# new database migrates with no backup, a failing backup stops startup with
+# nothing migrated, servers queue on the wrapper lock and then find nothing
+# pending, and a lost wrapper or backup lock session cancels the work. The
+# backup before migrations, through the server's wiring, reads a schema from
+# before plugins and every backup table with default settings and a minted
+# identity, holds the database alone, restores, and keeps the backup lock
+# through goose Up. It fails closed, also on a setting it cannot read, and
+# skips only for the listed reasons; waits behind a nightly backup up to its
+# limit; and writes an encrypted dump to a confirmed S3 bucket.
+./internal/database TestStartupMigrationSequenceDB
+./internal/database TestStartupMigrationsSerializeServersDB
+./internal/database TestStartupMigrationsStopWhenALockSessionEndsDB
+./cmd/silo TestBeforeMigrateBackupOnAnOldSchemaDB
+./internal/backup TestBeforeUpgradeFailsClosedOrSkipsDB
+./internal/backup TestBeforeUpgradeWaitsForANightlyBackupDB
+./internal/backup TestBeforeUpgradeDestinationsDB

@@ -69,6 +69,7 @@ describe("retentionPlan", () => {
         backup(30, { id: "manual", kind: "manual", status: "complete_with_warnings" }),
         backup(29, { id: "failed", status: "incomplete" }),
         backup(28, { id: "restore", kind: "before-restore" }),
+        backup(27, { id: "upgrade", kind: "before-upgrade" }),
         backup(26, { id: "nightly" }),
       ],
       2,

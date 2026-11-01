@@ -13,15 +13,20 @@ const (
 	KindNightly       Kind = "nightly"
 	KindManual        Kind = "manual"
 	KindBeforeRestore Kind = "before-restore"
+	KindBeforeUpgrade Kind = "before-upgrade"
 )
 
 func (k Kind) valid() bool {
 	switch k {
-	case KindNightly, KindManual, KindBeforeRestore:
+	case KindNightly, KindManual, KindBeforeRestore, KindBeforeUpgrade:
 		return true
 	}
 	return false
 }
+
+// databaseOnly reports a kind whose backups are db.dump and the manifest
+// only: before-upgrade, which runs against the previous release's schema.
+func (k Kind) databaseOnly() bool { return k == KindBeforeUpgrade }
 
 const (
 	// RootPrefix holds every server's backups at a destination.

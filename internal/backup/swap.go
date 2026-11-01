@@ -102,6 +102,8 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		now = opts.Now
 	}
 	m := src.Manifest
+	// A database-only backup leaves the live files as they are.
+	opts.DatabaseOnly = opts.DatabaseOnly || !m.HasBlobs()
 	// Step 1.
 	if err := src.Validate(ctx, opts.Validate); err != nil {
 		return err
@@ -370,9 +372,12 @@ func (s *swap) run(ctx context.Context, src *Source, databaseOnly bool) error {
 		return s.settle(ctx, fmt.Errorf("ending sessions on %s: %w", h.LiveDatabase, err))
 	}
 	// Step 6.
-	if databaseOnly {
+	switch {
+	case !src.Manifest.HasBlobs():
+		_, _ = fmt.Fprintln(s.out, noBlobsNote)
+	case databaseOnly:
 		_, _ = fmt.Fprintln(s.out, "Skipped files (--database-only): uploaded artwork, avatars, and branding will be missing.")
-	} else {
+	default:
 		n, err := writeBlobsFromTar(ctx, src.path(BlobsName), s.stores, func(e blobEntry) error { return s.preserve(ctx, e) })
 		if err != nil {
 			return s.settle(ctx, err)

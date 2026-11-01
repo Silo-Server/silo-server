@@ -27,8 +27,8 @@ import (
 // ErrRestoreSetTooNew refuses a restore set from a newer format.
 var ErrRestoreSetTooNew = errors.New("This backup is from a newer Silo. Upgrade this server first.") //nolint:staticcheck // shown to admins as written
 
-// ErrNoRestoreSet reports a backup without a restore set: one taken before
-// selective restore existed.
+// ErrNoRestoreSet reports a backup without a restore set: a before-upgrade
+// backup, or one taken before selective restore existed.
 var ErrNoRestoreSet = errors.New("this backup has no restore set")
 
 // Restore sets are untrusted input: an upload can come from anywhere, and a

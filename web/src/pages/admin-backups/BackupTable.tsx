@@ -132,6 +132,9 @@ function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
 
 /** What the downloaded files are for, in the download dialog's description. */
 function downloadHint(backup: AdminBackup): string {
+  if (backup.kind === "before-upgrade") {
+    return "It holds the database only; uploaded artwork and other files stay where they are. To restore it in full, put the files in one folder.";
+  }
   const restoreSet = backup.encrypted ? "the decrypted restore set" : "restore-set.tar";
   return `To restore it in full, put the files in one folder. To restore parts of it on another server, upload ${restoreSet} there.`;
 }

@@ -113,7 +113,7 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 - `last_success_at`: when the latest successful backup finished, at any
   destination (the current one's newest manifest when that is later).
 - `items`: this server's backups, newest first. Each has `id`, `kind`
-  (`nightly`, `manual`, `before-restore`), `status`,
+  (`nightly`, `manual`, `before-restore`, `before-upgrade`), `status`,
   `created_at`, `completed_at`, `size_bytes`, `silo_version`, `location`
   (a filesystem path on a local store, or `s3://bucket/key` in a bucket),
   `blob_count`,
@@ -229,7 +229,8 @@ with another `SECRET_KEY` answers `409 conflict` naming both check values.
 
 `GET /admin/backups/{id}/restore-set` reads the backup's `restore-set.tar`
 and compares each item with this server. It writes nothing and takes no
-lock. `409` when the backup has no restore set, when it is from a newer Silo ("This backup is from a newer Silo. Upgrade this
+lock. `409` when the backup has no restore set (a before-upgrade backup),
+when it is from a newer Silo ("This backup is from a newer Silo. Upgrade this
 server first."), or when the restore set cannot be read.
 
 The answer carries `backup_id` (or `upload_id` for an

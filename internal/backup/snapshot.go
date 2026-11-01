@@ -67,10 +67,10 @@ type snapshotFacts struct {
 	blobs           []blobRef
 }
 
-// readSnapshot reads the inventory, versions, and referenced blob keys in
-// the transaction that exported the dump's snapshot, so all three describe
-// the same database state.
-func readSnapshot(ctx context.Context, tx pgx.Tx, includeSubtitles bool) (snapshotFacts, error) {
+// readSnapshot reads the inventory, versions, and (withBlobs) referenced
+// blob keys in the transaction that exported the dump's snapshot, so all
+// three describe the same database state.
+func readSnapshot(ctx context.Context, tx pgx.Tx, withBlobs, includeSubtitles bool) (snapshotFacts, error) {
 	var facts snapshotFacts
 	var versionNum int
 	if err := tx.QueryRow(ctx, `SELECT current_setting('server_version'), current_setting('server_version_num')::int`).Scan(&facts.postgresVersion, &versionNum); err != nil {
@@ -83,6 +83,9 @@ func readSnapshot(ctx context.Context, tx pgx.Tx, includeSubtitles bool) (snapsh
 	}
 	if facts.tables, err = tableInventory(ctx, tx); err != nil {
 		return facts, err
+	}
+	if !withBlobs {
+		return facts, nil
 	}
 	if facts.blobs, err = referencedBlobs(ctx, tx, includeSubtitles); err != nil {
 		return facts, err
