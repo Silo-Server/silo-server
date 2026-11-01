@@ -29,8 +29,8 @@ import (
 // ExecuteRestore runs one backup_restore job:
 //
 //  1. take the subsystem lock and hold it for the whole run;
-//  2. read the source backup's restore set and refuse it when its digest
-//     is not the one the preview returned;
+//  2. read the source's restore set (a backup's, or an upload's) and
+//     refuse it when its digest is not the one the preview returned;
 //  3. take a before-restore backup by calling Backup under the same lock,
 //     keeping the source out of its rotation, and record its id; if it
 //     fails nothing is restored;
@@ -53,7 +53,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if err := json.Unmarshal(run.Payload, &req); err != nil {
 		return fail(fmt.Errorf("reading the restore request: %w", err))
 	}
-	report.BackupID, report.Digest = req.BackupID, req.Digest
+	report.BackupID, report.UploadID, report.Digest = req.BackupID, req.UploadID, req.Digest
 	if s.opts.Locker == nil {
 		return fail(errors.New("backups are not available on this server"))
 	}
@@ -92,7 +92,12 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 			return fail(err)
 		}
 	}
-	pinned := map[string]bool{req.BackupID: true}
+	// An uploaded source is not a backup of this server: rotation never
+	// sees it, and its delete waits for the lock this restore holds.
+	pinned := map[string]bool{}
+	if req.BackupID != "" {
+		pinned[req.BackupID] = true
+	}
 	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned)
 	if err != nil {
 		return fail(fmt.Errorf("%w: %w", errBeforeRestoreBackup, err))
@@ -108,7 +113,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if err := a.commit(work, next, "Backed up before restoring", nil); err != nil {
 		return fail(err)
 	}
-	op := s.beginOperation(work, held, ActiveOperation{Operation: OperationRestore, BackupID: req.BackupID, StartedAt: s.opts.Now()})
+	op := s.beginOperation(work, held, ActiveOperation{Operation: OperationRestore, BackupID: req.BackupID, UploadID: req.UploadID, StartedAt: s.opts.Now()})
 	defer op.end(work, nil)
 
 	for _, spec := range restoreSections {

@@ -497,6 +497,10 @@ function AppRoutes() {
                   <Route path="maintenance" element={<AdminMaintenance />} />
                   <Route path="backups" element={<AdminBackups />} />
                   <Route path="backups/:id/restore" element={<AdminBackupRestore />} />
+                  <Route
+                    path="backups/uploads/:uploadId/restore"
+                    element={<AdminBackupRestore />}
+                  />
                   <Route path="collections" element={<AdminCollections />} />
                   {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
                   <Route element={<CollectionEditorPage scope="server" />}>

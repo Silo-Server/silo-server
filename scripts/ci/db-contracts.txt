@@ -762,7 +762,8 @@
 # never widened; both import entrypoints take account locks before history
 # locks, as profile deletion does, and create and lock every watchlist title
 # before any watchlist row; provider-id matching reads in the importing
-# transaction, so it finishes on a one-connection pool.
+# transaction, so it finishes on a one-connection pool; an expired upload is
+# swept only under the backup lock and kept while a queued restore names it.
 ./internal/backup TestUserRestoreDB
 ./internal/backup TestUserRestoreSameServerDB
 ./internal/backup TestUserMatchingDB
@@ -777,6 +778,15 @@
 ./internal/backup TestProfileImportLockOrderDB
 ./internal/backup TestRestoreLockOrderDB
 ./internal/backup TestProfileImportAndDeleteLockOrderDB
+./internal/backup TestUploadSessionsDB
+./internal/backup TestUploadLimitAndSweepDB
+./internal/backup TestUploadRejectsHostileArchivesDB
+./internal/backup TestRestoreFromUploadDB
+./internal/backup TestUploadReservesSpaceDB
+./internal/backup TestUploadPartAttemptsDB
+./internal/backup TestUploadCompletionClosesPartsDB
+./internal/backup TestUploadCompletionDeadlineDB
+./internal/backup TestUploadPartWriteDeadlineDB
 ./internal/watchlist TestPrepareCreatesAndLocksTitlesDB
 ./internal/watchstate TestHistoryHideMergeDB
 ./internal/watchstate TestProgressMergeKeepsHeartbeatDB

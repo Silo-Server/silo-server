@@ -495,6 +495,9 @@ type Dependencies struct {
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
 	bodyReadTimeout time.Duration
+	// uploadPartReadTimeout overrides the backup upload part's read
+	// deadline, for the same reason.
+	uploadPartReadTimeout time.Duration
 	// testRegister registers probe operations; tests only.
 	testRegister func(*Registry)
 }

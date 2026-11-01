@@ -195,7 +195,7 @@ func otherServerIDs(objects []blobstore.ObjectInfo, serverID string) []string {
 	others := map[string]bool{}
 	for _, obj := range objects {
 		sid, _, ok := strings.Cut(strings.TrimPrefix(obj.Key, RootPrefix), "/")
-		if ok && sid != serverID && validServerID(sid) {
+		if ok && sid != serverID && validServerID(sid) && sid != "uploads" {
 			others[sid] = true
 		}
 	}

@@ -32,12 +32,13 @@ const tableLibraryCollections = "library_collections"
 const sourceLibraryPoster = "library poster"
 
 // excludedTableData lists the tables whose rows a dump leaves out: logs and
-// queues that are large and rebuildable or disposable; and backup_status,
-// whose row describes the backup being taken and would read as a stale run
-// after a restore. Their schema is always kept. Each entry also excludes its
+// queues that are large and rebuildable or disposable; backup_status, whose
+// row describes the backup being taken and would read as a stale run after a
+// restore; and the upload sessions, whose parts live outside the backup.
+// Their schema is always kept. Each entry also excludes its
 // partitions.
 func excludedTableData(includeIntroFingerprints bool) []string {
-	tables := []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", "backup_status"}
+	tables := []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", "backup_status", "backup_uploads", "backup_upload_parts", "backup_upload_attempts"}
 	if !includeIntroFingerprints {
 		tables = append(tables, "media_intro_fingerprints")
 	}

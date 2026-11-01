@@ -722,6 +722,7 @@ type LibraryMapping struct {
 // RestorePreview is a backup's restore set compared with this server.
 type RestorePreview struct {
 	BackupID      string    `json:"backup_id"`
+	UploadID      string    `json:"upload_id,omitempty"`
 	Digest        string    `json:"digest"`
 	FormatVersion int       `json:"format_version"`
 	ServerID      string    `json:"server_id"`
@@ -745,6 +746,12 @@ func (s *Service) Preview(ctx context.Context, id string) (*RestorePreview, erro
 	return s.preview(ctx, restoreSource{backupID: id})
 }
 
+// PreviewUpload is Preview for an uploaded restore set, bound to the digest
+// its completion froze.
+func (s *Service) PreviewUpload(ctx context.Context, id string) (*RestorePreview, error) {
+	return s.preview(ctx, restoreSource{uploadID: id})
+}
+
 func (s *Service) preview(ctx context.Context, src restoreSource) (*RestorePreview, error) {
 	rs, err := s.previewSet(ctx, src)
 	if err != nil {
@@ -752,7 +759,7 @@ func (s *Service) preview(ctx context.Context, src restoreSource) (*RestorePrevi
 	}
 	serverID, _ := s.serverID(ctx)
 	p := s.newPlanner(rs, s.opts.Pool)
-	out := &RestorePreview{BackupID: src.backupID, Digest: rs.Digest, FormatVersion: rs.Index.Version, ServerID: rs.Index.ServerID,
+	out := &RestorePreview{BackupID: src.backupID, UploadID: src.uploadID, Digest: rs.Digest, FormatVersion: rs.Index.Version, ServerID: rs.Index.ServerID,
 		ServerName: rs.Index.ServerName, SiloVersion: rs.Index.SiloVersion, CreatedAt: rs.Index.CreatedAt,
 		SameServer: rs.Index.ServerID == serverID, KeyMatches: p.keyMatches, MissingBlobs: append([]string{}, rs.MissingBlobs...),
 		Omitted:               append([]OmittedItem{}, rs.Index.Omitted...),

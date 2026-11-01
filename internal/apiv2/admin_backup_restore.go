@@ -146,7 +146,8 @@ type AdminBackupLibraryMapping struct {
 }
 
 type AdminBackupRestoreSet struct {
-	BackupID      string               `json:"backup_id,omitempty" doc:"The backup previewed"`
+	BackupID      string               `json:"backup_id,omitempty" doc:"The backup previewed; absent for an upload"`
+	UploadID      string               `json:"upload_id,omitempty" doc:"The upload previewed; absent for a backup"`
 	Digest        string               `json:"digest" doc:"SHA-256 of the restore set; a restore request must carry it"`
 	FormatVersion int                  `json:"format_version"`
 	ServerID      string               `json:"server_id" doc:"The server the backup was taken on"`
@@ -267,7 +268,8 @@ type AdminBackupRestoreCounts struct {
 // AdminBackupRestoreReport is a restore job's report: what committed, item
 // by item, even when the job was canceled or interrupted.
 type AdminBackupRestoreReport struct {
-	BackupID              string                         `json:"backup_id,omitempty" doc:"The backup restored from"`
+	BackupID              string                         `json:"backup_id,omitempty" doc:"The backup restored from; absent for an upload"`
+	UploadID              string                         `json:"upload_id,omitempty" doc:"The upload restored from; absent for a backup"`
 	BeforeRestoreBackupID string                         `json:"before_restore_backup_id,omitempty" doc:"The recovery point taken before anything was restored. Restoring it in full with silo backup restore goes back to how the server was."`
 	LibraryMap            []AdminBackupLibraryMapping    `json:"library_map"`
 	Items                 []AdminBackupRestoreReportItem `json:"items"`
@@ -277,10 +279,11 @@ type AdminBackupRestoreReport struct {
 	ErrorCode             string                         `json:"error_code,omitempty" enum:"restore_set_changed,busy,before_restore_backup_failed,interrupted,failed" doc:"Classifies error: restore_set_changed (the backup changed since its preview; nothing was restored), busy (another backup or restore held the lock), before_restore_backup_failed (nothing was restored), interrupted, or failed"`
 }
 
-// AdminBackupRestoreSource names the backup a restore job restores from.
-// It is present from the moment the job is queued.
+// AdminBackupRestoreSource names the backup or upload a restore job
+// restores from. It is present from the moment the job is queued.
 type AdminBackupRestoreSource struct {
-	BackupID string `json:"backup_id,omitempty" doc:"The backup restored from"`
+	BackupID string `json:"backup_id,omitempty" doc:"The backup restored from; absent for an upload"`
+	UploadID string `json:"upload_id,omitempty" doc:"The upload restored from; absent for a backup"`
 }
 
 func registerAdminBackupRestore(reg *Registry, op func(method, path, id, summary string) Operation) {
@@ -361,7 +364,7 @@ func restoreProblem(err error) error {
 
 func adminBackupRestoreSetOf(p *backup.RestorePreview) AdminBackupRestoreSet {
 	out := AdminBackupRestoreSet{
-		BackupID: p.BackupID, Digest: p.Digest, FormatVersion: p.FormatVersion, ServerID: p.ServerID, ServerName: p.ServerName,
+		BackupID: p.BackupID, UploadID: p.UploadID, Digest: p.Digest, FormatVersion: p.FormatVersion, ServerID: p.ServerID, ServerName: p.ServerName,
 		SiloVersion: p.SiloVersion, CreatedAt: NewInstant(p.CreatedAt), SameServer: p.SameServer, KeyMatches: p.KeyMatches,
 		MissingBlobs: nonNilStrings(p.MissingBlobs), Omitted: adminBackupOmittedOf(p.Omitted), NeverRestoredSettings: nonNilStrings(p.NeverRestoredSettings),
 		LibraryMap: []AdminBackupLibraryMapping{}, Sections: []AdminBackupRestoreSection{},
@@ -410,10 +413,10 @@ func adminBackupRestoreSetOf(p *backup.RestorePreview) AdminBackupRestoreSet {
 // a queued job names its backup before anything runs.
 func backupRestoreSourceOf(job *models.AdminJob) *AdminBackupRestoreSource {
 	var req backup.RestoreRequest
-	if json.Unmarshal(job.RequestPayload, &req) != nil || req.BackupID == "" {
+	if json.Unmarshal(job.RequestPayload, &req) != nil || (req.BackupID == "" && req.UploadID == "") {
 		return nil
 	}
-	return &AdminBackupRestoreSource{BackupID: req.BackupID}
+	return &AdminBackupRestoreSource{BackupID: req.BackupID, UploadID: req.UploadID}
 }
 
 // backupRestoreReportOf projects a restore job's report. A job stale
@@ -423,12 +426,12 @@ func backupRestoreReportOf(job *models.AdminJob) *AdminBackupRestoreReport {
 	if len(job.ResultPayload) == 0 || json.Unmarshal(job.ResultPayload, &report) != nil {
 		return nil
 	}
-	out := &AdminBackupRestoreReport{BackupID: report.BackupID, BeforeRestoreBackupID: report.BeforeRestoreBackupID,
+	out := &AdminBackupRestoreReport{BackupID: report.BackupID, UploadID: report.UploadID, BeforeRestoreBackupID: report.BeforeRestoreBackupID,
 		LibraryMap: []AdminBackupLibraryMapping{}, Items: []AdminBackupRestoreReportItem{}, Error: report.Error, ErrorCode: report.ErrorCode}
-	if out.BackupID == "" {
+	if out.BackupID == "" && out.UploadID == "" {
 		var req backup.RestoreRequest
 		_ = json.Unmarshal(job.RequestPayload, &req)
-		out.BackupID = req.BackupID
+		out.BackupID, out.UploadID = req.BackupID, req.UploadID
 	}
 	if job.Status == adminjob.StatusFailed && job.ErrorMessage == adminjob.BackupRestoreInterrupted {
 		out.Interrupted, out.ErrorCode = true, "interrupted"

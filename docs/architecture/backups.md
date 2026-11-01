@@ -4,7 +4,8 @@
 the blobs that cannot be fetched again, and a restore set of versioned
 sections for selective restore. It lists, rotates, and deletes them; the
 `silo backup` command restores one in full, and the admin API restores chosen
-parts of one (see [Selective restore](#selective-restore)). A profile can
+parts of one, or of a restore set uploaded from another server (see
+[Selective restore](#selective-restore) and [Uploads](#uploads)). A profile can
 also export and import its own data (see [Profile export](#profile-export)).
 The endpoints are in [backups-api.md](../backups-api.md).
 
@@ -33,7 +34,8 @@ backups/<server-id>/<UTC time>-<kind>/
 
 - `server-id` is `server.identity_id` (`internal/serveridentity`). Every server
   writes and rotates only its own prefix; other prefixes at the destination
-  are listed by id and otherwise left alone.
+  are listed by id and otherwise left alone. `backups/uploads/` holds
+  [uploaded restore sets](#uploads) and is never a server id.
 - The folder name is the backup id: `20261031T040000.123Z-nightly`. The time
   is the start of the run in UTC, to the millisecond; ids written to the
   second (`20261031T040000Z-nightly`) still parse. Kinds are `nightly`,
@@ -103,7 +105,8 @@ showing either key.
 3. Run `pg_dump --format=custom --compress=zstd:3 --snapshot=<id>` with
    `--exclude-table-data-and-children` for `activity_log`, `operational_logs`,
    `policy_decisions`, `catalog_search_index_events`, `backup_status` (its row
-   describes the backup being taken), and, unless
+   describes the backup being taken), `backup_uploads` and
+   `backup_upload_parts` (their parts are not in the backup), and, unless
    `backup.include_intro_fingerprints`, `media_intro_fingerprints`. The schema
    is always dumped. The password moves from the URL into `PGPASSWORD` so it
    never appears in a process listing.
@@ -168,7 +171,8 @@ list, delete a folder, probe, report local free space, and presign a
 download. The one destination, `default`, is the operational store from
 `blobstore.Open` on local artwork storage, the local root. On an S3 artwork
 backend there is no local operational store, so there is nowhere to write
-backups; the Backups page says so and links to Storage settings.
+backups; the Backups page says so and links to Storage settings. Uploads use
+the same store.
 
 **Every API server must share the operational store.** Backups are written by
 whichever server runs the task and listed, downloaded, and deleted by any
@@ -202,8 +206,8 @@ application pool's settings but outside the pool. Work under the lock takes
 pool connections (the snapshot transaction, settings reads), so a lock held
 on a pool connection would deadlock a pool of one. Every
 operation that writes or deletes backups, or restores from one, holds it: the
-nightly and manual backup, rotation, deletion, the sweep, and the restore
-job.
+nightly and manual backup, rotation, deletion, the sweep, upload completion,
+the deletion of a complete upload, and the restore job.
 
 - Rotation and the sweep run inside the backup that holds the lock.
 - "Back up now" takes the lock in the request and hands it to the task run it
@@ -213,7 +217,7 @@ job.
   "skipped: another backup or restore is running". Every API server fires the
   same daily trigger; one backs up and the others record the skip.
 - A held lock's session is checked every 10 seconds. If it ends, the work
-  holding the lock is canceled (`pg_dump`, a restore), and the
+  holding the lock is canceled (`pg_dump`, uploads, a restore), and the
   incomplete folder it leaves is the sweep's.
 - Whether the lock is held is read from `pg_locks`, never by taking it: a read
   that took the lock even briefly could make a nightly run skip.
@@ -222,8 +226,8 @@ job.
 
 The lock holder publishes what it is doing in the one-row `backup_status`
 table, so any API server can report a run another server started: the active
-operation (`backup`, `delete`, or `restore`, whose backup id is its source),
-its backup id, start time, progress and message, and, when a backup run ends, its id, kind, outcome, and error, and
+operation (`backup`, `delete`, `restore`, whose backup or upload id is its source, or `upload`, the check of a completed upload), its backup or upload id, start time, progress and
+message, and, when a backup run ends, its id, kind, outcome, and error, and
 for a run that succeeded its finish time as `last_success_at`, which a
 failed run after it leaves alone. Lock occupancy alone says nothing about
 which operation holds it.
@@ -380,8 +384,8 @@ What a restore set leaves out on purpose:
   gets the default chain, as a library created in the editor does.
 - Builtin plugin rows and `plugin_instance_state` are never included.
 
-**Restore sets are untrusted input**: something other than this server can
-write to the destination. The reader (`ReadRestoreSet`) checks the whole archive
+**Restore sets are untrusted input**, whether read from the destination or
+uploaded. The reader (`ReadRestoreSet`) checks the whole archive
 before anything is applied: regular files only (links, directories, and
 devices are refused); canonical relative paths with no empty, `.`, or `..`
 segment, backslash, or NUL; no duplicate paths, sections, or item ids;
@@ -566,8 +570,9 @@ one.
 the selection and the preview's digest; one restore can be queued or running
 at a time (a partial unique index). The request takes the subsystem lock
 (409 while another backup or restore holds it), checks the source and its
-digest again, creates the job, and releases the lock. Backup deletion and
-rotation check the queued restore's source under the same lock, so either they see the job or the job's check sees the
+digest again, creates the job, and releases the lock. Backup deletion,
+rotation, and upload deletion and expiry check the queued restore's source
+under the same lock, so either they see the job or the job's check sees the
 source gone; a source can never disappear between the check and the queue.
 Whichever API server claims it:
 
@@ -884,6 +889,123 @@ collection is there, and is otherwise left out. A PIN-protected profile reached 
 API key is exempt from the gate's PIN check) cannot import. The import runs
 synchronously: a profile's data is small, the size cap bounds it, and a single
 transaction keeps it all-or-nothing without job bookkeeping.
+
+## Uploads
+
+An admin restores from another server's backup by uploading its restore
+set: the bare `restore-set.tar` that a backup's download gives. Every
+downloaded object saves under its stored name, so a folder of downloads is
+a backup folder `silo backup restore --from` reads. The upload's file name
+does not matter; the reader decides what the file is. An upload is then previewed and restored as a
+backup is (`/admin/backups/uploads/{id}/restore-set` and `.../restore`),
+and every selective-restore rule applies unchanged, the before-restore
+backup included. A restore request names one source, `backup_id` or
+`upload_id`, and the job's report and the published active operation carry
+it.
+
+`internal/uploads` keeps chunks on one server's disk, and requests are not
+routed back to the server that holds them. A restore-set upload instead
+writes every part straight to the destination, and keeps the session in
+PostgreSQL, so any API server takes any part and any server completes it:
+
+```
+backups/uploads/<upload id>/<part>.<nonce>
+```
+
+Uploads go to the operational store, the backup destination. Parts are
+stored as sent, so the parts read back in order are exactly the bytes the
+client sent.
+
+- `backup_uploads` holds each session: its size, part size, optional
+  declared SHA-256, status (`uploading`, `checking`, `complete`,
+  `rejected`), and once complete the frozen digest and what the set says
+  about itself (source server id and name, Silo version, creation time,
+  format version). `backup_upload_parts` names, for each received part, the
+  object that counts.
+- Before a byte of a part is stored, the send records an attempt
+  (`backup_upload_attempts`) under the session row lock: one per part and at
+  most four per upload. A second send of a part being written answers 409
+  without writing anything, so concurrent sends cannot multiply the objects
+  an upload holds. A part's storage write (its body read included) has a
+  5-minute deadline, and cancellation stops it: the write's temporary file
+  is closed, so its next write fails, and removed. An attempt is abandoned only after 10 minutes, once its writer has
+  certainly stopped: another send may then replace it, and it can no longer
+  record its object.
+- Every part sent is a new object. Its row moves to it in a transaction that
+  locks the session row, requires it to be `uploading`, and consumes the
+  send's own recent attempt; the replaced object is deleted after commit, and
+  a write the transaction refuses deletes its own object. A part sent again
+  therefore replaces the first copy, a failed or abandoned attempt can only
+  delete what it wrote, and once completion moved the session to `checking`
+  no late write changes the parts it reads.
+- Parts are 1–16 MiB (4 MiB by default), and every part but the last is
+  exactly the part size. Parts may arrive in any order. A part's request sets
+  its own connection read deadline of 2 minutes (the listener's 30-second
+  read timeout would otherwise cut a slow part off) and answers 408 when the
+  part does not arrive in time.
+
+Limits: an upload is at most 2 GiB, and a server keeps three uploads
+`uploading` or `checking` at once. On a local destination every open upload
+reserves what it has not written yet plus four parts, and creation (under a
+transaction advisory lock, so it holds across API servers) requires the
+reservations of every open upload, the new one's included, plus the 1 GB
+margin backups keep to be free. Every part checks the margin again before
+it is written, since other writers share the disk.
+
+**Completion freezes the digest.** It takes the subsystem lock (a busy lock
+answers 409, and the parts stay for another try), moves the session to
+`checking`, publishes the `upload` operation, and, with a 10-minute deadline
+that closes the part being read when it passes (so a stalled read cannot
+keep the lock), reads the parts in order
+through `ReadRestoreSet`, the same checks a backup's restore set gets. The
+SHA-256 of the bytes read becomes the upload's digest. These are the bytes
+the client sent (the file as uploaded), so the digest is what a client
+computes and what a declared SHA-256 is compared with: a preview returns it,
+a restore request must carry it, and the restore job reads the parts again
+and refuses bytes with another digest. A set that fails the reader is
+`rejected` and its parts are deleted at once:
+
+| Reason | When |
+|---|---|
+| `newer_silo` | A newer format version |
+| `not_a_restore_set` | Anything else the reader refuses, with its error |
+| `checksum_mismatch` | Other bytes than the SHA-256 declared at creation |
+
+A failure to read the destination rejects nothing: the session returns to
+`uploading`, and completing again checks it again. A session left
+`checking` by a server that stopped is checked again by the next
+completion, which holds the lock, so no other check can be running. The
+validated set enters the preview cache under its digest, so the first
+preview does not read it again.
+
+A complete upload is kept 7 days after its last use (completion, a preview,
+or a restore request), and never while a queued or running restore names it.
+Deleting an unfinished
+or rejected upload, which no restore can name, needs no lock; deleting a
+complete one takes the subsystem lock (a running restore holds it) and
+refuses while the queued restore job names the upload. Restores are queued
+under the same lock, so none is queued between that check and the delete.
+
+The sweep deletes, with their parts, sessions `uploading` or `rejected` for
+24 hours, sessions left `checking` for 24 hours, and complete uploads unused
+for 7 days. It deletes a `checking` or complete session only under the
+subsystem lock: in a backup's rotation it already holds it; otherwise, when
+such a session is due, it takes the lock without waiting and leaves them
+all when it is busy, releasing it before deleting parts. Under the lock no
+completion is reading the session, no restore is running from it or being
+queued, and the one the queued restore names is kept. Deleting a session row is atomic against
+a completion, which moves it to `checking` first, and a part write, which
+requires the row.
+
+The full sweep also lists the upload folders and deletes objects older than
+an hour that no part row or attempt names: a replaced part a crash kept
+from being deleted, a folder whose delete the store refused, or uploads a
+full restore's database no longer knows. The objects are listed before the
+rows are read, and a send can record its object only within 10 minutes of
+its attempt, so an object found unnamed and an hour old can never be named
+later. The quick sweep runs on every upload create and list; the full sweep
+runs in every backup's rotation and, at most every 10 minutes per server, on
+create and list, so it does not depend on nightly backups running.
 
 ## Full restore
 

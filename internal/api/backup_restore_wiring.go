@@ -74,8 +74,8 @@ func wireBackupRestore(deps Dependencies, admin *handlers.AdminHandler, librarie
 }
 
 // ActiveBackupRestore reads the request of the backup_restore job queued or
-// running now, or nil when there is none. Backup deletion and rotation keep
-// its source.
+// running now, or nil when there is none. Backup deletion, rotation, and
+// upload deletion and expiry keep its source.
 func ActiveBackupRestore(jobs *adminjob.Repository) func(context.Context) (*backup.RestoreRequest, error) {
 	return func(ctx context.Context) (*backup.RestoreRequest, error) {
 		job, err := jobs.GetActiveByType(ctx, adminjob.JobTypeBackupRestore)

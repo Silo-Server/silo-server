@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -315,4 +316,13 @@ func TestStatusRecordsTheLastSuccessDB(t *testing.T) {
 	if rec.Last == nil || rec.Last.Status != RunFailed || rec.LastSuccessAt == nil || !rec.LastSuccessAt.Equal(succeeded) {
 		t.Fatalf("last run %+v, last success %v; want the failure, and the success before it", rec.Last, rec.LastSuccessAt)
 	}
+}
+
+func blobstoreRoot(t *testing.T, store blobstore.Store) string {
+	t.Helper()
+	root, ok := strings.CutPrefix(blobstore.Location(store), blobstore.BackendLocal+"|")
+	if !ok {
+		t.Fatal("not a local store")
+	}
+	return root
 }

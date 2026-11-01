@@ -35,6 +35,17 @@ type AdminBackupService interface {
 	Preview(ctx context.Context, id string) (*backup.RestorePreview, error)
 	// StartRestore queues a backup_restore job for the chosen items.
 	StartRestore(ctx context.Context, userID int, req backup.RestoreRequest) (*models.AdminJob, error)
+
+	// UploadsAvailable reports whether restore sets can be uploaded here.
+	UploadsAvailable() bool
+	Uploads(context.Context) ([]backup.UploadSession, error)
+	CreateUpload(ctx context.Context, userID int, size int64, sha256 string, partSize int64) (backup.UploadSession, error)
+	PutUploadPart(ctx context.Context, id string, part int, body io.Reader, length int64) (backup.UploadSession, error)
+	CompleteUpload(ctx context.Context, id string) (backup.UploadSession, error)
+	DeleteUpload(ctx context.Context, id string) error
+	// PreviewUpload compares a complete upload's restore set with this
+	// server.
+	PreviewUpload(ctx context.Context, id string) (*backup.RestorePreview, error)
 }
 
 // adminBackupLinkTTL matches the job artifact links.
@@ -55,6 +66,8 @@ const (
 type AdminBackupCapabilities struct {
 	Capability
 	Destinations     []string `json:"destinations" doc:"Backup destinations this server can write to: default, the server's own local storage, when it has one"`
+	Upload           bool     `json:"upload" doc:"Whether a restore set can be uploaded from another server"`
+	MaxUploadBytes   int64    `json:"max_upload_bytes" doc:"The largest restore set an upload takes"`
 	SelectiveRestore bool     `json:"selective_restore" doc:"Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, accounts and their profiles' data, collections and uploaded artwork"`
 	Download         bool     `json:"download" doc:"Whether a full backup can be downloaded"`
 	available        bool
@@ -116,8 +129,9 @@ type AdminBackup struct {
 // AdminBackupActive is the operation holding the cluster-wide backup lock,
 // on whichever server runs it.
 type AdminBackupActive struct {
-	Operation string  `json:"operation" enum:"backup,delete,restore" doc:"restore: a selective restore from backup_id is running"`
+	Operation string  `json:"operation" enum:"backup,delete,restore,upload" doc:"restore: a selective restore from backup_id or upload_id is running; upload: the upload upload_id is being checked"`
 	BackupID  string  `json:"backup_id,omitempty"`
+	UploadID  string  `json:"upload_id,omitempty" doc:"The upload a restore reads, or the upload being checked or deleted"`
 	StartedAt Instant `json:"started_at"`
 	Progress  float64 `json:"progress" minimum:"0" maximum:"100" doc:"Percent complete, for a backup"`
 	Message   string  `json:"message,omitempty"`
@@ -238,9 +252,11 @@ func registerAdminBackups(reg *Registry) {
 		if reg.deps.AdminBackups != nil {
 			destinations = append(destinations, reg.deps.AdminBackups.Destinations()...)
 		}
+		upload := configured && reg.deps.AdminBackups.UploadsAvailable()
 		return &AdminBackupCapabilitiesOutput{Body: AdminBackupCapabilities{
 			Destinations: destinations,
-			Download:     configured, SelectiveRestore: configured, available: configured,
+			Download:     configured, SelectiveRestore: configured, Upload: upload,
+			MaxUploadBytes: backup.MaxUploadBytes, available: configured,
 		}}, nil
 	})
 	Register(reg, op(http.MethodGet, "", "listAdminBackups", "List this server's backups with their manifest summaries, the other server identities at the destination, and the warnings the dashboard shows."),
@@ -313,6 +329,7 @@ func registerAdminBackups(reg *Registry) {
 	})
 	registerAdminBackupObjectDownload(reg)
 	registerAdminBackupRestore(reg, op)
+	registerAdminBackupUploads(reg, op)
 }
 
 func adminBackupListOf(l backup.Listing) AdminBackupList {
@@ -324,7 +341,7 @@ func adminBackupListOf(l backup.Listing) AdminBackupList {
 		Warnings: make([]AdminBackupWarning, 0, len(l.Warnings)),
 	}
 	if a := l.Active; a != nil {
-		out.Active = &AdminBackupActive{Operation: a.Operation, BackupID: a.BackupID, StartedAt: NewInstant(a.StartedAt), Progress: a.Progress, Message: a.Message}
+		out.Active = &AdminBackupActive{Operation: a.Operation, BackupID: a.BackupID, UploadID: a.UploadID, StartedAt: NewInstant(a.StartedAt), Progress: a.Progress, Message: a.Message}
 	}
 	if r := l.LastRun; r != nil {
 		out.LastRun = &AdminBackupLastRun{ID: r.ID, Kind: string(r.Kind), Status: r.Status, StartedAt: NewInstant(r.StartedAt), Error: r.Error}

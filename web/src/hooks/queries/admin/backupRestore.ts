@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { captureProfileRequestContext } from "@/api/client";
 import { captureAdminAuthority } from "@/api/v2/adminAuthority";
+import { getUploadRestoreSet, startUploadRestore } from "@/api/v2/adminBackupUpload";
 import {
   cancelRestoreJob,
   getRestoreJob,
@@ -16,17 +17,26 @@ import { adminKeys } from "@/hooks/queries/keys";
 /** How often a running restore is read again. */
 const RESTORE_POLL_MS = 2_000;
 
+/** What a restore reads: a backup of this server, or an uploaded restore set. */
+export interface RestoreSource {
+  kind: "backup" | "upload";
+  id: string;
+}
+
 function restoreRootKey() {
   return [...backupsRootKey(), "restore"] as const;
 }
 
-/** The preview of a backup's restore set against this server; none while `backupId` is null. */
-export function useRestoreSet(backupId: string | null) {
+/** The preview of a source's restore set against this server; none while `source` is null. */
+export function useRestoreSet(source: RestoreSource | null) {
   const context = captureProfileRequestContext();
   return useQuery({
-    queryKey: [...restoreRootKey(), "set", backupId],
-    queryFn: () => getRestoreSet(captureAdminAuthority(), backupId ?? ""),
-    enabled: context !== null && backupId !== null && backupId !== "",
+    queryKey: [...restoreRootKey(), "set", source?.kind, source?.id],
+    queryFn: () =>
+      source?.kind === "upload"
+        ? getUploadRestoreSet(captureAdminAuthority(), source.id)
+        : getRestoreSet(captureAdminAuthority(), source?.id ?? ""),
+    enabled: context !== null && source !== null && source.id !== "",
     // A preview is compared against the server as it is now; read it fresh
     // each time the page opens rather than restoring from a stale cache.
     staleTime: 0,
@@ -57,11 +67,13 @@ export function useRestoreJobs() {
   });
 }
 
-export function useStartRestore(backupId: string) {
+export function useStartRestore(source: RestoreSource) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ digest, selection }: { digest: string; selection: RestoreSelection }) =>
-      startRestore(captureAdminAuthority(), backupId, digest, selection),
+      source.kind === "upload"
+        ? startUploadRestore(captureAdminAuthority(), source.id, digest, selection)
+        : startRestore(captureAdminAuthority(), source.id, digest, selection),
     retry: false,
     onSettled: () => queryClient.invalidateQueries({ queryKey: adminKeys.backups() }),
   });

@@ -15,6 +15,9 @@ import (
 const (
 	OperationBackup = "backup"
 	OperationDelete = "delete"
+	// OperationUpload checks an uploaded restore set before it can be
+	// previewed.
+	OperationUpload = "upload"
 )
 
 // Last-run statuses besides the manifest statuses.
@@ -29,8 +32,11 @@ const interruptedRunError = "the server running this backup stopped before it fi
 // ActiveOperation is what the lock holder is doing, published so every API
 // server can show it.
 type ActiveOperation struct {
-	Operation string    `json:"operation"`
-	BackupID  string    `json:"backup_id,omitempty"`
+	Operation string `json:"operation"`
+	BackupID  string `json:"backup_id,omitempty"`
+	// UploadID names the uploaded restore set a restore reads, or the
+	// upload being checked or deleted.
+	UploadID  string    `json:"upload_id,omitempty"`
 	Kind      Kind      `json:"kind,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	Progress  float64   `json:"progress"`
@@ -116,10 +122,10 @@ func (p PostgresStatus) Begin(ctx context.Context, held Held, op ActiveOperation
 			last_run_finished_at = CASE WHEN active_operation = 'backup' THEN NULL ELSE last_run_finished_at END,
 			last_run_error       = CASE WHEN active_operation = 'backup' THEN $7 ELSE last_run_error END,
 			active_operation = $1, active_backup_id = $2, active_kind = $3, active_started_at = $4,
-			active_token = $5, active_lock_pid = $6, active_lock_backend_start = $8,
+			active_token = $5, active_lock_pid = $6, active_lock_backend_start = $8, active_upload_id = $9,
 			active_progress = 0, active_message = '', updated_at = now()
 		WHERE singleton AND `+holdsLock,
-		op.Operation, op.BackupID, string(op.Kind), op.StartedAt, token, op.Lock.PID, interruptedRunError, nullTime(op.Lock.Start))
+		op.Operation, op.BackupID, string(op.Kind), op.StartedAt, token, op.Lock.PID, interruptedRunError, nullTime(op.Lock.Start), op.UploadID)
 	if err != nil {
 		return "", err
 	}
@@ -136,7 +142,7 @@ func (p PostgresStatus) Progress(ctx context.Context, held Held, token string, p
 }
 
 func (p PostgresStatus) End(ctx context.Context, held Held, token string, last *LastRun) error {
-	const clearActive = `active_operation = '', active_backup_id = '', active_kind = '', active_token = '', active_lock_pid = 0, active_lock_backend_start = NULL,
+	const clearActive = `active_operation = '', active_backup_id = '', active_upload_id = '', active_kind = '', active_token = '', active_lock_pid = 0, active_lock_backend_start = NULL,
 		active_started_at = NULL, active_progress = 0, active_message = '', updated_at = now()`
 	if last == nil {
 		_, err := held.Exec(ctx, `UPDATE backup_status SET `+clearActive+` WHERE singleton AND active_token = $1 AND $1 <> '' AND `+holdsLock, token)
@@ -157,7 +163,7 @@ func (p PostgresStatus) End(ctx context.Context, held Held, token string, last *
 
 func (p PostgresStatus) Read(ctx context.Context) (StatusRecord, error) {
 	var (
-		op, activeID, activeKind                string
+		op, activeID, activeUpload, activeKind  string
 		activeMessage                           string
 		activeStarted                           *time.Time
 		progress                                float64
@@ -167,9 +173,9 @@ func (p PostgresStatus) Read(ctx context.Context) (StatusRecord, error) {
 		lastStarted, lastFinished, lastSuccess  *time.Time
 	)
 	err := p.Pool.QueryRow(ctx, `
-		SELECT active_operation, active_backup_id, active_kind, active_started_at, active_progress, active_message, active_lock_pid, active_lock_backend_start,
+		SELECT active_operation, active_backup_id, active_upload_id, active_kind, active_started_at, active_progress, active_message, active_lock_pid, active_lock_backend_start,
 			last_run_id, last_run_kind, last_run_status, last_run_started_at, last_run_finished_at, last_run_error, last_success_at
-		FROM backup_status WHERE singleton`).Scan(&op, &activeID, &activeKind, &activeStarted, &progress, &activeMessage, &lockPID, &lockStart,
+		FROM backup_status WHERE singleton`).Scan(&op, &activeID, &activeUpload, &activeKind, &activeStarted, &progress, &activeMessage, &lockPID, &lockStart,
 		&lastID, &lastKind, &lastStatus, &lastStarted, &lastFinished, &lastError, &lastSuccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return StatusRecord{}, nil
@@ -179,7 +185,7 @@ func (p PostgresStatus) Read(ctx context.Context) (StatusRecord, error) {
 	}
 	rec := StatusRecord{LastSuccessAt: lastSuccess}
 	if op != "" {
-		rec.Active = &ActiveOperation{Operation: op, BackupID: activeID, Kind: Kind(activeKind), Progress: progress, Message: activeMessage, Lock: LockSession{PID: lockPID}}
+		rec.Active = &ActiveOperation{Operation: op, BackupID: activeID, UploadID: activeUpload, Kind: Kind(activeKind), Progress: progress, Message: activeMessage, Lock: LockSession{PID: lockPID}}
 		if lockStart != nil {
 			rec.Active.Lock.Start = *lockStart
 		}

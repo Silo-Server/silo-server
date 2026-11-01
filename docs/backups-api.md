@@ -14,7 +14,8 @@ signed-in profile uses for its own data. The admin
 holds and how it is taken, rotated, and restored. Full restore is the offline
 `silo backup restore` command, not an API operation; selective restore of
 settings, plugins, libraries, accounts and their profiles' data, collections
-and uploaded artwork runs as an admin job, from a backup of this server.
+and uploaded artwork runs as an admin job, from a backup of this server or
+from a restore set [uploaded](#uploads) from another server.
 
 Settings are written through the [admin settings API](admin-settings-api.md):
 `backup.enabled`, `backup.time`, `backup.keep` (1–60),
@@ -32,6 +33,13 @@ Settings are written through the [admin settings API](admin-settings-api.md):
 | `GET /admin/backups/{id}/objects/{name}` | Stream one object; authorized by the signed link, not a session |
 | `GET /admin/backups/{id}/restore-set` | Preview a backup's restore set against this server |
 | `POST /admin/backups/{id}/restore` | Restore chosen items as a `backup_restore` admin job |
+| `GET /admin/backups/uploads` | Restore sets uploaded to this server, finished or not |
+| `POST /admin/backups/uploads` | Start uploading a restore set |
+| `PUT /admin/backups/uploads/{upload_id}/parts/{part}` | Store one part of an upload |
+| `POST /admin/backups/uploads/{upload_id}/complete` | Check a fully received upload and freeze its digest |
+| `DELETE /admin/backups/uploads/{upload_id}` | Delete an upload |
+| `GET /admin/backups/uploads/{upload_id}/restore-set` | Preview an upload's restore set against this server |
+| `POST /admin/backups/uploads/{upload_id}/restore` | Restore chosen items of an upload as a `backup_restore` admin job |
 | `GET /capabilities/profile-export` | Profile export and import support, for any verified profile |
 | `GET /profile/export` | Download the acting profile's own data |
 | `POST /profile/import` | Merge a profile export into the acting profile |
@@ -48,8 +56,10 @@ server share an id or a time.
 `not_configured` when it does not: backups are written to the operational
 store on local storage, and an S3 artwork backend has none.
 `destinations` lists the destinations this server can write to: `default`
-when it has a local operational store. `selective_restore` and `download`
-are `true` when available.
+when it has a local operational store. `selective_restore` and `download` are `true` when available.
+`upload` is `true` when the server has an operational store (uploads always
+go there) and the user store is PostgreSQL (a restore's own backup needs it).
+`max_upload_bytes` is the largest restore set an upload takes (2 GiB).
 
 ### List
 
@@ -66,8 +76,10 @@ are `true` when available.
 - `busy`: whether a backup or restore holds the cluster-wide backup lock now,
   on any server.
 - `active`: the operation holding the lock, on whichever server runs it:
-  `operation` (`backup`, `delete`, or `restore`), `backup_id` (for a restore,
-  its source backup), `started_at`, `progress` (0–100),
+  `operation` (`backup`, `delete`, `restore`, or `upload`, the check of a
+  completed upload), `backup_id` (for a restore, its source backup),
+  `upload_id` (for a restore from an upload, its source; for `upload` or
+  the delete of an upload, that upload), `started_at`, `progress` (0–100),
   and `message`. Absent when nothing runs. A restore first shows as the
   `backup` of its before-restore copy.
 - `last_run`: the latest backup run: `id`, `kind`, `status` (`complete`,
@@ -137,7 +149,8 @@ running restore reads the backup.
 `{"scope": "restore-set"}` it answers `restore-set.tar` alone, and `409` for
 a backup without one. Every object downloads under its stored name
 (`db.dump`, `blobs.tar`, `restore-set.tar`, `manifest.json`), so a folder of
-downloads is one `silo backup restore --from` reads. Each `url`
+downloads is one `silo backup restore --from` reads, and `restore-set.tar` is
+the file an [upload](#uploads) on another server takes. Each `url`
 is a presigned storage URL where the destination can presign, or a link to
 `GET /admin/backups/{id}/objects/{name}?exp=…&sig=…`, valid for 15 minutes and
 scoped to that one object. A browser opens it without an `Authorization`
@@ -152,7 +165,8 @@ and compares each item with this server. It writes nothing and takes no
 lock. `409` when the backup has no restore set, when it is from a newer Silo ("This backup is from a newer Silo. Upgrade this
 server first."), or when the restore set cannot be read.
 
-The answer carries `backup_id`, `digest` (the SHA-256 of `restore-set.tar`; a restore
+The answer carries `backup_id` (or `upload_id` for an
+[upload](#uploads)), `digest` (the SHA-256 of `restore-set.tar`; a restore
 request must send it back), the source (`server_id`, `server_name`,
 `silo_version`, `created_at`, `same_server`), `key_matches` (whether the
 backup was taken with this server's `SECRET_KEY`), `missing_blobs`,
@@ -293,18 +307,18 @@ since the preview (the digest differs): preview it again. `409 conflict` when
 another backup or restore is running (a running restore's job is in
 `Location`) or the backup has no restore set. `422` for an empty or malformed
 selection. The request holds the cluster-wide lock while it checks the source
-again and queues the job, so a backup deleted or rotated away
+again and queues the job, so a backup or upload deleted or rotated away
 meanwhile answers `404`, never a job without its source; once queued, the
 source is kept until the restore ends.
 
 Follow the job through the [admin jobs endpoints](admin-tasks-api.md):
 `GET /admin/jobs/{id}` (progress counts items; the before-restore backup is
 the first), and `POST /admin/jobs/{id}/cancel`, which stops the restore
-between items. A restore job carries `backup_restore_source` (`backup_id`)
-from the moment it is queued. Its `backup_restore_result` is the report,
+between items. A restore job carries `backup_restore_source` (`backup_id`, or
+`upload_id` for an upload) from the moment it is queued. Its `backup_restore_result` is the report,
 kept with the job when it completes, fails, is canceled, or is interrupted:
 
-- `backup_id`: the source.
+- `backup_id` or `upload_id`: the source.
 - `before_restore_backup_id`: the recovery point taken before anything was
   restored. Restoring it in full with `silo backup restore` goes back to how
   the server was; a selective restore of it cannot remove what a restore
@@ -335,6 +349,74 @@ kept with the job when it completes, fails, is canceled, or is interrupted:
   restored), `busy` (another backup or restore held the lock),
   `before_restore_backup_failed` (nothing was restored), `interrupted`, or
   `failed`.
+
+## Uploads
+
+A restore set from another server is uploaded in parts and then restored
+from as a backup is. The file is the bare `restore-set.tar` that
+[a backup's download](#downloads) gives; its name does not matter. Parts are written straight to this server's
+backup storage, so any API server takes any part, and the session lives in
+the database. [architecture/backups.md](architecture/backups.md#uploads)
+describes the storage and the rules.
+
+Each upload is `{id, status, size_bytes, part_size, part_count,
+received_parts, received_bytes, created_at, updated_at, location}`, plus
+`completed_at`, `digest`, and `source` (`server_id`, `server_name`,
+`silo_version`, `created_at`, `format_version`) once complete,
+`expires_at`, and `rejection` (`reason`,
+`message`) when rejected. `status` is `uploading`, `checking` (completion is
+reading it), `complete`, or `rejected`.
+
+- `POST /admin/backups/uploads` with `{size_bytes, sha256?, part_size?}`
+  answers `201` with the upload. `part_size` is 1–16 MiB and defaults to
+  4 MiB. With `sha256` set, completion rejects any other bytes. `413
+  payload_too_large` above 2 GiB; `409 upload_limit_reached` when three
+  uploads are already uploading or checking (unfinished uploads are deleted
+  24 hours after their last part); `409 conflict` when a local destination
+  lacks room for what every open upload, this one included, has yet to write
+  (four parts more each), plus 1 GB.
+- `PUT /admin/backups/uploads/{upload_id}/parts/{part}` with an
+  `application/octet-stream` body stores part `part` (counting from 0) and
+  answers the upload. Every part but the last is exactly `part_size` bytes.
+  Parts may arrive in any order, on any API server, and a part sent again
+  replaces the earlier copy, so a failed part is simply sent again. `422` for
+  a part outside the upload or shorter than its position, `413` for a longer
+  one, `409` once the upload is checking or finished, while the same part or
+  four parts of the upload are being received, or when a local destination
+  lacks the part plus 1 GB; `408` when the part does not arrive within 2
+  minutes.
+- `POST /admin/backups/uploads/{upload_id}/complete` reads every part in
+  order through the [restore set checks](architecture/backups.md#restore-set)
+  under the cluster-wide lock, for at most 10 minutes, freezes the SHA-256 of
+  the bytes it read as `digest` (the file as uploaded, the bytes the client
+  sent), and answers `complete` with `source`, or `rejected` with
+  `rejection.reason`:
+  - `not_a_restore_set`: the reader refused it; `message` says why.
+  - `newer_silo`: "This backup is from a newer Silo. Upgrade this server
+    first."
+  - `checksum_mismatch`: the bytes are not the `sha256` the upload declared.
+
+  A rejected upload's parts are deleted at once. A complete or rejected
+  upload answers as it is, so completing again is safe. `409 conflict` while
+  parts are missing, or while another backup or restore holds the lock:
+  the parts stay, and completing it again later checks it.
+- `GET /admin/backups/uploads` answers `{items}`, newest first, after
+  deleting uploads unfinished or rejected for 24 hours and complete ones
+  unused for 7 days. A complete upload's `expires_at` moves on each
+  completion, preview, and restore request; one a queued or running restore
+  names is never deleted.
+- `DELETE /admin/backups/uploads/{upload_id}` answers `204`. `409 conflict`
+  while a restore from it is queued or running, or, for a complete upload,
+  while another backup or restore holds the lock.
+- `GET /admin/backups/uploads/{upload_id}/restore-set` and `POST
+  /admin/backups/uploads/{upload_id}/restore` are the
+  [preview](#preview-a-restore-set) and [restore](#restore) of a backup, for
+  a complete upload: the same answers, bound to the digest completion
+  froze. `409` for an upload that is not complete. An upload from another
+  server matches accounts by username and email and libraries by folder
+  paths, and with another `SECRET_KEY` (`key_matches` false) offers no
+  encrypted settings or plugin configuration. The before-restore backup and
+  every restore rule apply unchanged.
 
 ## The backup task
 
