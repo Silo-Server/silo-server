@@ -58,6 +58,7 @@ func TestFailureReasonNamesTheCauseWithoutProviderDetails(t *testing.T) {
 		{"no audio track", JobKindTranscribe, fmt.Errorf("%w: file has no audio tracks", ErrSourceUnsupported), failureNoAudio},
 		{"bitmap source", JobKindTranslate, fmt.Errorf("%w: bitmap track", ErrSourceUnsupported), failureSourceText},
 		{"missing source", JobKindTranslate, fmt.Errorf("%w: source subtitle index out of range", errSourceMissing), failureSourceMissing},
+		{"source changed while queued", JobKindTranslate, errSourceChanged, failureSourceMissing},
 		{"empty source", JobKindTranslate, fmt.Errorf("%w: no subtitle cues found", errSourceEmpty), failureSourceEmpty},
 		{"unexpected", JobKindTranslate, errors.New("extract embedded subtitle: exit status 1: /media/Private Name.mkv"), failureGeneric},
 	}
