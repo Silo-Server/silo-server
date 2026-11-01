@@ -245,13 +245,17 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 }
 
 // jellyfinDateLayouts are client date forms Jellyfin accepts: the compact Emby
-// form its legacy datePlayed binder handles, then YYYY-MM-DDThh:mm:ss with an
-// optional fraction and offset, which its default binder and JSON reader take.
-// A value without an offset is read as UTC, as Jellyfin stores it.
+// form its legacy datePlayed binder handles, then the ISO 8601 date, with or
+// without a time to the minute or second, fraction and offset, that its
+// default binder and JSON reader take. A value without an offset is read as
+// UTC, as Jellyfin stores it.
 var jellyfinDateLayouts = []string{
 	"20060102150405",
 	time.RFC3339Nano,
 	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04Z07:00",
+	"2006-01-02T15:04",
+	time.DateOnly,
 }
 
 // parseJellyfinDate reads a client-supplied datePlayed or LastPlayedDate.

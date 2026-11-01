@@ -111,12 +111,14 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 	// Jellyfin's legacy binder takes the compact yyyyMMddHHmmss form as UTC
 	// and falls back to its default binder, which also takes a date-time
 	// without an offset (#3257).
-	for _, tc := range []struct{ name, query string }{
-		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z"},
-		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z"},
-		{"legacy compact", "DatePlayed=20250203040506"},
-		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00"},
-		{"no offset", "datePlayed=2025-02-03T04:05:06.000"},
+	for _, tc := range []struct{ name, query, want string }{
+		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"legacy compact", "DatePlayed=20250203040506", "2025-02-03T04:05:06Z"},
+		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00", "2025-02-03T04:05:06Z"},
+		{"no offset", "datePlayed=2025-02-03T04:05:06.000", "2025-02-03T04:05:06Z"},
+		{"minutes", "datePlayed=2025-02-03T04:05", "2025-02-03T04:05:00Z"},
+		{"date only", "datePlayed=2025-02-03", "2025-02-03T00:00:00Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
@@ -130,7 +132,7 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+tc.query, "", "itemId", id, session))
 			var dto itemUserDataDTO
 			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
+			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != tc.want {
 				t.Fatalf("mark played %d %+v %s", rec.Code, dto, rec.Body.String())
 			}
 			rec = httptest.NewRecorder()
