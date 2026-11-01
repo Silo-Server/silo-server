@@ -2,14 +2,11 @@ package keptsub
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -31,11 +28,6 @@ type memRepo struct {
 	putErr error
 	// trackHook, when set, runs at the start of every Track call.
 	trackHook func(ctx context.Context) error
-	// used is each row's recency on clock, as updated_at is.
-	used  map[trackKey]int64
-	clock int64
-	// reserved holds each stream's reserved bytes; they don't expire.
-	reserved map[trackKey]int64
 }
 
 type memClaim struct {
@@ -44,7 +36,7 @@ type memClaim struct {
 }
 
 func newMemRepo() *memRepo {
-	return &memRepo{tracks: map[trackKey]Track{}, claims: map[trackKey]memClaim{}, used: map[trackKey]int64{}, reserved: map[trackKey]int64{}}
+	return &memRepo{tracks: map[trackKey]Track{}, claims: map[trackKey]memClaim{}}
 }
 
 func (r *memRepo) Track(ctx context.Context, fileID, stream int) (*Track, error) {
@@ -82,11 +74,7 @@ func (r *memRepo) PutTrack(_ context.Context, t Track) error {
 		return r.putErr
 	}
 	r.puts++
-	k := trackKey{t.MediaFileID, t.StreamIndex}
-	r.tracks[k] = t
-	r.clock++
-	r.used[k] = r.clock
-	delete(r.reserved, k)
+	r.tracks[trackKey{t.MediaFileID, t.StreamIndex}] = t
 	return nil
 }
 
@@ -140,71 +128,14 @@ func (r *memRepo) FileKeptBytes(_ context.Context, fileID, except int) (int64, e
 	return total, nil
 }
 
-func (r *memRepo) Touch(_ context.Context, fileID, stream int) error {
+func (r *memRepo) KeptBytes(context.Context) (map[string]int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.tracks[trackKey{fileID, stream}]; ok {
-		r.clock++
-		r.used[trackKey{fileID, stream}] = r.clock
+	byCodec := map[string]int64{}
+	for _, t := range r.tracks {
+		byCodec[t.Codec] += t.Bytes
 	}
-	return nil
-}
-
-// Reserve is PgRepo.Reserve under one lock.
-func (r *memRepo) Reserve(_ context.Context, res Reservation) ([]string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	own := trackKey{res.MediaFileID, res.StreamIndex}
-	var fileBytes, used int64
-	for k, t := range r.tracks {
-		if k.fileID == res.MediaFileID && k.stream != res.StreamIndex {
-			fileBytes += t.Bytes
-		}
-		if k != own {
-			used += t.Bytes
-		}
-	}
-	for k, n := range r.reserved {
-		if k.fileID == res.MediaFileID && k.stream != res.StreamIndex {
-			fileBytes += n
-		}
-		if k != own {
-			used += n
-		}
-	}
-	if fileBytes+res.Bytes > res.FileMax || res.Bytes > res.StoreMax {
-		return nil, ErrNoRoom
-	}
-	var victims []trackKey
-	if need := used + res.Bytes - res.StoreMax; need > 0 {
-		keys := slices.Collect(maps.Keys(r.tracks))
-		slices.SortFunc(keys, func(a, b trackKey) int { return cmp.Compare(r.used[a], r.used[b]) })
-		for _, k := range keys {
-			if _, reserved := r.reserved[k]; need <= 0 || k == own || reserved {
-				continue
-			}
-			victims, need = append(victims, k), need-r.tracks[k].Bytes
-		}
-		if need > 0 {
-			return nil, ErrNoRoom
-		}
-	}
-	var evicted []string
-	for _, k := range victims {
-		evicted = append(evicted, r.tracks[k].BlobKey)
-		r.queued = append(r.queued, r.tracks[k].BlobKey)
-		delete(r.tracks, k)
-		delete(r.used, k)
-	}
-	r.reserved[own] = res.Bytes
-	return evicted, nil
-}
-
-func (r *memRepo) Unreserve(_ context.Context, fileID, stream int) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.reserved, trackKey{fileID, stream})
-	return nil
+	return byCodec, nil
 }
 
 func (r *memRepo) counts() (puts, claims int) {
@@ -236,15 +167,6 @@ func (b *memBlobs) PutStream(_ context.Context, key string, r io.Reader, _ strin
 	b.puts++
 	b.objects[key] = data
 	return nil
-}
-
-func (b *memBlobs) Delete(_ context.Context, keys []string) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, key := range keys {
-		delete(b.objects, key)
-	}
-	return len(keys), nil
 }
 
 func (b *memBlobs) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {

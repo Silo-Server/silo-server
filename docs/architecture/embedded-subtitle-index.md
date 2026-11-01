@@ -138,11 +138,11 @@ or, for an on-demand segment, with an empty segment.
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
 | Local copies of kept tracks | 1 GiB per node by default, least recently used first; a copy being written, fetched or read, holds its size from before its first byte, so eviction makes room ahead, and fetches may not hold more than the budget |
-| Kept tracks | a text track 32 MiB, a PGS track 128 MiB; one media file's tracks together at most the file's own size and 1 GiB; every kept track together 64 GiB, past which the least recently used rows go and their objects are deleted at once. Both totals count tracks still being stored, and are reserved before an object is written. A track past a bound isn't kept and is demuxed when requested |
+| Kept tracks | a text track 16 MiB, a PGS track 128 MiB; one media file's tracks together at most the file's own size and 1 GiB; every kept text track together 16 GiB and every kept PGS track 48 GiB, past which no more are kept. The file and store checks are approximate (see Budget). A track past a bound isn't kept and is demuxed when requested |
 | Whole-track flights | 16 running or queued per store and 8 per source file, including canceled workers until they exit; callers may join an admitted track at capacity; a request for another track is answered `503` with `Retry-After`, and whole-track text conversions (jellycompat, AI translation) demux instead; a flight still waiting for a read slot stops when its last caller goes |
 | Cold mirror downloads | eight workers and 256 MiB of recorded output bytes reserved across the process, including temporary files until their worker finishes cleanup; past these or the copies' budget no fetch starts: a whole track streams the object from storage, checked against the row's size and SHA-256 at its end, and a window reads the source; local copies and callers joining a fetch remain available |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
-| One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept PGS track's whole read and 32 MiB for a text track's, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
+| One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept PGS track's whole read and 16 MiB for a text track's, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
 | Blocks and samples | 16 MiB each, compressed or not |
 | On-demand segments | eight conversion slots, each holding one read, so 128 MiB of read budget at once; 256 window reads running or queued; eight start-time probes |
 
@@ -243,24 +243,19 @@ collector deletes the object, and if it lands, the collector finds the key
 live and only dequeues it. A row that already names the key has its object,
 so reading an unchanged track again writes only the row.
 
-**Budget.** A keep reserves its track's bytes before storing the object, in
-one transaction: the file's share (see Bounds) under a per-file advisory
-lock, so two of a file's tracks can't both fit what only one does, then the
-store's total under the lock of `embedded_subtitle_track_usage`, a row that
-statement triggers keep equal to the rows' total, so no keep sums the table.
-Reservations (`embedded_subtitle_track_reservations`) count toward both until
-the row lands, the keep gives up, or a lease of two minutes runs out. When
-the total is full, the reservation evicts rows from the least recently used,
-skipping rows locked by a writer or being kept again; if that can't make
-room, it evicts nothing and the track isn't kept. The keeper deletes the
-evicted objects at once, so storage shrinks with the budget; the delete
-trigger queues them for the collector as well, in case that fails, and a
-reader still on one reads its track again. A row's `updated_at` is its
-recency: keeping the track sets it, and serving it moves it at most once an
-hour per node. A file's tracks are parts of it, so together they may not
-hold more than the file does: more means packets the file points at more
-than once. Objects a row stops naming for other reasons (a changed or
-deleted file) wait out the collector's day as before.
+**Budget.** Before a read and again before storing, a keep checks that the
+track has room (see Bounds): the file's other kept tracks and this one may not
+hold more than the file's own bytes, since its tracks are parts of it and
+more means packets the file points at more than once; and the store's text or
+PGS tracks may not pass their total, kept apart so PGS tracks can't crowd out
+text ones. A track without room isn't kept and is demuxed when requested;
+nothing is evicted. The checks take no locks, so they are approximate: a
+node counts the store's totals about once a minute and adds what it keeps
+itself, so keeps running at once on several nodes, or of one file's tracks,
+can pass a limit by those keeps, each one track's size at most. Objects leave
+storage only through the collector, which rechecks that no row names them
+while holding the key's queue entry; a keep queues its key before storing
+the object, so a key kept again is never deleted under its new row.
 
 **One read at a time.** Concurrent calls for a track on a node share one
 read. A prefetch starts its read at background priority and stops it when
@@ -271,7 +266,7 @@ after every caller has gone, so a client that gave up and retries finds the
 track kept or still being read; a read still waiting for a slot, or for
 another node's claim, stops when its last caller goes or stops waiting. Up to
 four whole reads run on a node at once, each holding at most 128 MiB of
-packets, 32 MiB for a text track; a larger track is demuxed. Admission is bounded too (see Bounds): a
+packets, 16 MiB for a text track; a larger track is demuxed. Admission is bounded too (see Bounds): a
 request past it is answered `503` with `Retry-After: 5` instead of starting a
 read or a demux, and a prefetch skips the track. Across nodes, a reader holds a claim in
 `embedded_subtitle_track_claims` with a lease longer than its read and keep
