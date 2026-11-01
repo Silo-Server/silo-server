@@ -13,6 +13,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
+import MovieBoxSetRow from "@/components/boxsets/MovieBoxSetRow";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -416,12 +417,10 @@ export default function MovieContent({
         </>
       }
     >
-      {canCurateMetadata && (
-        <MediaLocations
-          title="Media locations"
-          versions={item.versions}
-          onShowMediaInfo={openMediaInfo}
-        />
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
+        </DetailSection>
       )}
 
       {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
@@ -429,11 +428,7 @@ export default function MovieContent({
 
       {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
-      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
-        <DetailSection title="Cast & Crew">
-          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
-        </DetailSection>
-      )}
+      <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
 
       {/* More Like This */}
       {similarLoading ? (
@@ -441,6 +436,14 @@ export default function MovieContent({
       ) : (
         similarData?.items &&
         similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
+      )}
+
+      {canCurateMetadata && (
+        <MediaLocations
+          title="Media locations"
+          versions={item.versions}
+          onShowMediaInfo={openMediaInfo}
+        />
       )}
     </DetailLayout>
   );

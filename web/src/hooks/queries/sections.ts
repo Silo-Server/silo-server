@@ -30,6 +30,7 @@ import { v2, type V2Query } from "@/api/v2/request";
 import { sectionKeys } from "./keys";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
 import { artworkQuery, rowDrawsBackdrops, type ArtworkWidthQuery } from "@/lib/artworkWidths";
+import { HOME_ROW_ITEM_LIMIT, homeRowItemLimit, homeRowResponse } from "./homeRowLimit";
 import { runBulkDelete, type BulkDeleteProgress } from "./bulkDelete";
 
 /**
@@ -85,9 +86,11 @@ export function profileSectionOverridesFromV2(
 export const HOME_LAYOUT_INCLUDED_ROWS = 3;
 
 /**
- * The home layout query. Rows the server included are written into their own
- * item caches before the layout resolves, so Home finds them already loaded
- * and does not request them again.
+ * The home layout query. Rows the server included, capped at
+ * HOME_ROW_ITEM_LIMIT cards, are written into their own item caches before the
+ * layout resolves, so Home finds them already loaded and does not request them
+ * again. A featured row that holds more cards than the cap is left out: the
+ * hero shows every card of its row, so Home reads it whole.
  */
 export function homeLayoutQueryOptions(queryClient: QueryClient) {
   return queryOptions({
@@ -105,13 +108,18 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
         ) {
           continue;
         }
+        const row = homeRowResponse(section);
+        if (row.partial && section.featured) continue;
         const queryKey = sectionKeys.homeItems(section.id);
+        // A row the viewer has already completed or read whole past the cap
+        // keeps that entry, left stale, so Home rereads it whole instead of
+        // shrinking it.
+        const cached = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
+        if (!section.featured && homeRowItemLimit(false, cached) === undefined) continue;
         // setQueryData alone would create the entry with the client's default
         // gcTime, and Home never fetches a fresh row to raise it.
         queryClient.getQueryCache().build(queryClient, { queryKey, gcTime: HOME_SECTION_GC_TIME });
-        queryClient.setQueryData<HomeSectionItemsResponse>(queryKey, {
-          section: sectionFromV2(section),
-        });
+        queryClient.setQueryData<HomeSectionItemsResponse>(queryKey, row);
       }
       return { sections: layout.sections };
     },
@@ -121,22 +129,40 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
 }
 
 /**
- * Reads the home layout with its first rows' items. A server that predates
- * include_items (an older node during a rolling upgrade) or allows fewer rows
- * answers 422; the layout is then read alone and Home loads every row itself.
- * The layout alone carries no artwork, so that read sends no widths either.
+ * Reads the home layout with its first rows' items, capped at
+ * HOME_ROW_ITEM_LIMIT cards. A server that predates item_limit (an older node
+ * during a rolling upgrade) answers 422 and is asked again without it, so its
+ * included rows come whole. One that also predates include_items, or allows
+ * fewer rows, answers 422 again; the layout is then read alone and Home loads
+ * every row itself. The layout alone carries no artwork, so that read sends no
+ * widths either.
  */
-async function fetchHomeLayout(artwork: ArtworkWidthQuery, signal?: AbortSignal) {
+async function fetchHomeLayout(
+  artwork: ArtworkWidthQuery,
+  signal?: AbortSignal,
+): Promise<V2HomeLayout> {
+  const included = { include_items: HOME_LAYOUT_INCLUDED_ROWS, ...artwork };
   try {
     return await v2("GET /api/v2/home/layout", {
-      query: { include_items: HOME_LAYOUT_INCLUDED_ROWS, ...artwork },
+      query: { ...included, item_limit: HOME_ROW_ITEM_LIMIT },
       signal,
     });
   } catch (error) {
-    if (!(error instanceof V2ProblemError) || error.status !== 422) throw error;
-    const layout = await v2("GET /api/v2/home/layout", { signal });
-    return { ...layout, included_sections: [] };
+    if (!isUnprocessable(error)) throw error;
   }
+  try {
+    return await v2("GET /api/v2/home/layout", { query: included, signal });
+  } catch (error) {
+    if (!isUnprocessable(error)) throw error;
+  }
+  const layout = await v2("GET /api/v2/home/layout", { signal });
+  return { ...layout, included_sections: [] };
+}
+
+type V2HomeLayout = components["schemas"]["HomeLayout"];
+
+function isUnprocessable(error: unknown): boolean {
+  return error instanceof V2ProblemError && error.status === 422;
 }
 
 export function useHomeLayout(enabled = true) {
@@ -148,22 +174,37 @@ interface SectionItemsOptions {
   signal?: AbortSignal;
   /** The section draws as the hero, so its backdrops load at hero size. */
   featured?: boolean;
+  /** Read at most this many cards (see homeRowLimit). */
+  itemLimit?: number;
 }
 
 /**
- * Fetches one home section with its items. Answers in the same `{ section }`
- * shape as the library section fetch so the section caches and refresh
- * helpers treat both alike.
+ * Fetches one home section with its items, at most `itemLimit` of them when
+ * set (see homeRowLimit). Answers in the same `{ section }` shape as the
+ * library section fetch so the section caches and refresh helpers treat both
+ * alike. A server that predates item_limit (an older node during a rolling
+ * upgrade) answers 422; the row is then read whole.
  */
-export function fetchHomeSectionItems(
+export async function fetchHomeSectionItems(
   sectionId: string,
   options?: SectionItemsOptions,
 ): Promise<HomeSectionItemsResponse> {
-  return v2("GET /api/v2/home/sections/{id}/items", {
-    path: { id: sectionId },
-    query: artworkQuery(options?.featured ? "hero" : "row"),
-    signal: options?.signal,
-  }).then((section) => ({ section: sectionFromV2(section) }));
+  const read = (itemLimit?: number) =>
+    v2("GET /api/v2/home/sections/{id}/items", {
+      path: { id: sectionId },
+      query: {
+        ...artworkQuery(options?.featured ? "hero" : "row"),
+        ...(itemLimit === undefined ? {} : { item_limit: itemLimit }),
+      },
+      signal: options?.signal,
+    }).then(homeRowResponse);
+  try {
+    return await read(options?.itemLimit);
+  } catch (error) {
+    const rejected = error instanceof V2ProblemError && error.status === 422;
+    if (options?.itemLimit === undefined || !rejected) throw error;
+    return read();
+  }
 }
 
 /**

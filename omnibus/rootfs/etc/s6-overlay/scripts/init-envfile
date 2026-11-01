@@ -6,6 +6,13 @@ set -euo pipefail
 # shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
 source /etc/silo-omnibus/lib.sh
 
+# The first init script. Every one of them needs root to map accounts and hand
+# directories to them, so say how to run without root instead of failing later.
+if ((EUID != 0)); then
+  echo "Started as uid $EUID, but this image's init needs root. To run without root, start silo directly (--entrypoint silo, or entrypoint: [\"silo\"] in Compose) with DATABASE_URL set to an external PostgreSQL." >&2
+  exit 1
+fi
+
 # The container environment holds SECRET_KEY. Only root, which runs these
 # scripts and drops privileges per service, needs to read it.
 chmod 0700 "$CONTAINER_ENV"

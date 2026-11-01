@@ -25,7 +25,11 @@ raise its owner's shared allowance.
 By default a key is **unscoped** and can reach every route its owner can. A key
 created with `scopes` is an allowlist credential instead: the auth middleware
 admits it only to the routes those scopes name and answers `403 permission_denied`
-everywhere else, including routes added after the key was issued.
+everywhere else, including routes added after the key was issued. A scoped key
+must send the route's plain path: a path that percent-encodes a `/`, a `.`, or
+another character that needs no encoding, or that has a `.` or `..` segment, a
+doubled slash, or a trailing slash, is refused with the same `403`, because the
+router would not read it as the route the allowlist checked.
 
 Scopes only narrow. They never grant, and they never bypass the owner's role
 check. `admin:users` on a key owned by a non-admin account still cannot manage

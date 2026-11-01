@@ -20,6 +20,27 @@ func TestLoadDatabaseURLNeedsNoSecretKey(t *testing.T) {
 	}
 }
 
+func TestLoadBootstrapNodeModesNeedNodeURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example.invalid/silo")
+	t.Setenv("SECRET_KEY", "0123456789abcdef0123456789abcdef")
+	for _, tc := range []struct {
+		mode, nodeURL string
+		ok            bool
+	}{
+		{"proxy", "", false},
+		{"transcode", "", false},
+		{"transcode", "http://node-1:8080", true},
+		{"integrated", "", true},
+		{"api", "", true},
+	} {
+		t.Setenv("MODE", tc.mode)
+		t.Setenv("NODE_URL", tc.nodeURL)
+		if _, err := LoadBootstrap(""); (err == nil) != tc.ok {
+			t.Errorf("MODE=%s NODE_URL=%q: LoadBootstrap error = %v", tc.mode, tc.nodeURL, err)
+		}
+	}
+}
+
 func TestAudiobookshelfCompatWithBootstrapListen(t *testing.T) {
 	cases := []struct {
 		name, listen, bootstrap, want string

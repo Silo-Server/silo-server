@@ -82,6 +82,7 @@ type Section struct {
 	IsCustom    bool          `json:"is_custom" example:"false"`
 	Customized  bool          `json:"customized" example:"false"`
 	Items       []CatalogItem `json:"items" doc:"Empty, never null"`
+	HasMore     bool          `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
 }
 
 // SectionCollection is a page's sections with their cards.
@@ -291,7 +292,7 @@ func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
 		}
 		items = append(items, card)
 	}
-	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items}
+	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items, HasMore: v.HasMore}
 }
 
 func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySectionsInput) (*SectionCollectionOutput, error) {

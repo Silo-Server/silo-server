@@ -15,6 +15,11 @@ export function libraryTypeMeta(type: string) {
 }
 
 // Keep these aligned with the video scanner and intro-marker library filters.
+/** The box set size a library starts with, as the server defaults it. */
+export const DEFAULT_BOX_SET_MIN_MOVIES = 2;
+/** The minimum box set sizes the form offers; the server accepts 2 to 10. */
+export const BOX_SET_MIN_MOVIE_OPTIONS = [2, 3, 4, 5] as const;
+
 export function librarySettingSupport(type: string) {
   const kind = type.trim().toLowerCase();
   // The scanner routes these types to dedicated pipelines; everything else
@@ -38,5 +43,7 @@ export function librarySettingSupport(type: string) {
     // which get intros too, so they keep detection on.
     creditsOnlyDetection: kind === "movies",
     movieCreditsDetection: kind === "movies" || kind === "mixed",
+    // Box sets group movies, so only libraries that hold movies offer them.
+    boxSets: ["movie", "movies", "mixed"].includes(kind),
   };
 }

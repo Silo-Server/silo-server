@@ -77,6 +77,7 @@ func main() {
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
 	write(*out, "hls-subtitle-rendition-decision_response.json", goldenHLSSubtitleRenditionDecisionResponse())
+	write(*out, "hls-subtitle-renditions-all-decision_response.json", goldenHLSSubtitleRenditionsAllDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())

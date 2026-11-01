@@ -335,10 +335,9 @@ proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
 A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. Set
-`NODE_URL` explicitly on every node. Without it a node guesses
-`http://localhost:<port>` and adopts whatever row carries that URL, which on a
-multi-node deployment can be a different machine's policy.
+against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
+or transcode node refuses to start without `NODE_URL`: a URL guessed from its
+listen port could match a different machine's row and adopt its policy.
 
 If the URL does not match, the node falls back to `NODE_NAME` against the
 registered name. This covers split-horizon topologies where `stream_nodes.url`
@@ -1049,6 +1048,7 @@ client tells "this deployment is older than my build" from "the request failed".
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
 | `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
+| `api_clients` | `GET /admin/stats/api-clients` and `GET /admin/stats/api-clients/{session_id}/endpoints` serve per-session API request counts. |
 
 ```json
 {
@@ -1061,7 +1061,8 @@ client tells "this deployment is older than my build" from "the request failed".
   "watch_providers": true,
   "downloads_stats": true,
   "egress_totals": true,
-  "egress_by_source": true
+  "egress_by_source": true,
+  "api_clients": true
 }
 ```
 
@@ -1425,6 +1426,42 @@ Both lists are `[]` on a server with no history, never `null`.
 }
 ```
 
+## `GET /api/v2/admin/stats/api-clients`
+
+The login sessions with the most API requests in a window, for the dashboard's
+**Busiest API clients** card. It leaves out what the session quota leaves out
+(see [Session quota](auth-api.md#session-quota)): playback and media transfer
+routes, admins, and requests made while impersonating. `requests` includes
+requests a rate limit refused. The hidden `summarize_api_usage` task writes UTC
+hourly summaries from the activity log every 15 minutes, so the newest requests
+can be up to 15 minutes late, and keeps them for 30 days.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `hours` | int | Window in hours. The read starts at the beginning of the hour the window begins in, so a 1-hour window at 13:10 reads the 12:00 and 13:00 summaries. Default 24, accepted range 1..720. |
+| `limit` | int | Sessions returned. Default 10, accepted range 1..25. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hours`, `from` | int, instant | The window: `from` is the first hour it reads. |
+| `total_requests` | int | Requests of every session in the window, for each client's share. |
+| `clients` | object[] | Sessions by requests, most first; `[]` when there are none. |
+
+Each `clients` entry: `session_id`, `user_id`, `username`, `device_name` and
+`device_platform` (from the login session), `user_agent` (the one the session
+sent most in its latest hour), `requests`, `refused` (429 responses from any
+rate limit), `peak_hour_requests`, `first_hour`, `last_hour`, and
+`session_active` (false once the session was revoked, expired, or deleted).
+`DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}` signs one
+session out without touching the account's other devices.
+
+## `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+
+The ten routes one session called most, each with `method`, `route` (the
+matched route pattern), `requests` and `refused`. `hours` is 1..24, default 24:
+it reads the activity log rows of that one session, so its window stays short.
+A session with no summarized requests in the window is `404 not_found`.
+
 ## `GET /api/v2/admin/stats/downloads`
 
 Offline-download aggregate for the dashboard's downloads widget. Cached
@@ -1754,7 +1791,7 @@ claim, cleanup, and failure boundaries.
 
 ## Dashboard aggregate reads
 
-The dashboard uses four acting-administrator operations under `/api/v2/admin/stats`:
+The dashboard uses these acting-administrator operations under `/api/v2/admin/stats`:
 
 | Path | Operation ID | Query bounds |
 | --- | --- | --- |
@@ -1762,8 +1799,10 @@ The dashboard uses four acting-administrator operations under `/api/v2/admin/sta
 | `/playback-activity` | `getAdminDashboardPlaybackActivity` | `hours`: 1–744, default 24 |
 | `/top-activity` | `getAdminDashboardTopActivity` | `days`: 1–30, default 7; `limit`: 1–25, default 10 |
 | `/downloads` | `getAdminDashboardDownloadsStats` | `limit`: 1–25, default 10 |
+| `/api-clients` | `getAdminDashboardAPIClients` | `hours`: 1–720, default 24; `limit`: 1–25, default 10 |
+| `/api-clients/{session_id}/endpoints` | `getAdminDashboardAPIClientEndpoints` | `hours`: 1–24, default 24 |
 
-All accept `refresh=true` to invalidate the provider cache before reading.
+The first four accept `refresh=true` to invalidate the provider cache before reading.
 Out-of-range inputs return a validation problem; the frozen v1 routes continue
 their existing clamping behavior. Missing data services return 503. The web normalizes
 its window before choosing a query cache key and retains its existing page-owned
@@ -1859,7 +1898,9 @@ late result presentation. No native or Jellyfin caller consumes this operation.
 
 `GET /api/v2/admin/rate-limits/config` returns desired rate-limit settings with a
 strong, administrator/profile-bound ETag and conditional read support. It includes
-API-key tiers and authentication endpoint budgets. Map entries remain extensible.
+API-key tiers, authentication endpoint budgets, and `session_quota` (`mode` of
+`off`, `log` or `enforce`, `requests_per_hour`, `burst`; see Session quota in
+[auth-api.md](auth-api.md#session-quota)). Map entries remain extensible.
 `GET /api/v2/admin/rate-limits/status` returns process-local `active`, optional
 `active_backend`, and `redis_available`. The latter reflects valid persisted or
 bootstrap Redis configuration, not a successful reachability probe. Both reads
@@ -1878,7 +1919,8 @@ An `If-Match` validator is required. Both conditional headers are evaluated agai
 the canonical configuration inside the same settings transaction that validates
 and saves changes, including wildcard conditions and Redis backend eligibility.
 A stale request returns 412 with the current validator. Invalid budgets or backend
-selection return 422. Success returns `status` and `restart_required`; this receipt
+selection return 422, as does a `session_quota` with an unknown mode or a burst that
+would take more than a week to refill (more than 168 times `requests_per_hour`). Success returns `status` and `restart_required`; this receipt
 is not the canonical configuration and does not carry an ETag. Read config again
 for the next edit.
 
@@ -2336,6 +2378,11 @@ the acknowledged batch validator; an intervening writer's snapshot cannot rebase
 them. Batch validation considers the
 prospective combined values. Single-key validation preserves the existing paired
 setting repair behavior. Empty values retain the established clear/default rules.
+Machine-managed keys, including the `auth.jwt_secret` and
+`audiobooks.abs.jwt_secret` signing keys the server generates itself, are
+refused with `422 validation_failed` (`400 bad_request` on `/api/v1`) and the
+detail `<key> is managed internally`, and nothing is written. The batch PUT
+checks `If-Match` before the keys, so a stale validator still answers 412.
 
 Both writes are nonretryable. Enabling diagnostics can probe storage before the
 transaction, a change to the Redis connection connects to Redis before it (see
@@ -3391,21 +3438,54 @@ against `/api/v2`.
 
 ### Account and permission audit details (v2)
 
-Successful v2 administrator account and access-group mutations record an audit
-row in the mutation transaction. Actions are `user.created`, `user.updated`,
-`user.deleted`, `access_group.created`, `access_group.updated`, and
-`access_group.deleted`. `target_type` and `target_id` identify the affected
-entity; `user_id` identifies the authenticated subject, and a present
-`impersonator_user_id` identifies the acting administrator. Actor filters use
+Successful v2 account, permission and credential mutations record an audit
+row in the mutation transaction. `target_type` and `target_id` identify the
+affected entity, and an action's prefix is its target type. `user_id`
+identifies the authenticated subject, and a present `impersonator_user_id`
+identifies the acting administrator. Actor filters use
 `COALESCE(impersonator_user_id, user_id)`.
 
-`changes` lists changed allowlisted identity/policy fields. `before` and `after`
-are optional strings containing canonical JSON values: JSON null represents an
-unset account override, while an absent side represents creation/deletion.
-A password change includes only `{ "field": "password" }`; passwords, hashes,
-tokens, arbitrary request bodies and headers are excluded. Permission arrays
-show the exact prior and resulting membership. Rollbacks record no successful
-domain action, and a repeated identical policy write has no change details.
+| Action | Operation | `changes` |
+| --- | --- | --- |
+| `user.created`, `user.updated`, `user.deleted` | v2 account administration | allowlisted identity and policy fields |
+| `access_group.created`, `access_group.updated`, `access_group.deleted` | v2 access-group administration | allowlisted group policy fields |
+| `user.impersonation_started` | `impersonateAdminUser` | `impersonation_session_id` (after) |
+| `user.impersonation_ended` | `endImpersonation` | `impersonation_session_id` (before) |
+| `user.ownership_transferred` | `transferAdminUserOwnership`; target is the new Owner | `owner_user_id` |
+| `user.password_reset_link_created` | `createAdminUserPasswordReset` | `delivery`, `expires_at` |
+| `user.password_reset_completed` | `completePasswordReset` | `password` (field name only) |
+| `user.password_changed` | `changePassword` | `password` (field name only) |
+| `user.login_session_revoked` | `deleteSession`, `deleteAdminUserLoginSession` | `login_session_id` (before) |
+| `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count; recorded when the call ended any login session or Audiobookshelf, Jellyfin-compatible or device sign-in |
+| `api_key.created`, `api_key.updated`, `api_key.deleted` | `createAdminAPIKey`, `updateAdminAPIKeyTier`, `deleteAdminAPIKey`, `createPersonalAPIKey`, `revokePersonalAPIKey` | `user_id` (owner), `label`, `rate_tier`, `scopes` (an empty list is an unscoped key with its owner's full access) |
+| `profile.created`, `profile.updated`, `profile.deleted` | `createProfile`, `updateProfile`, `deleteProfile` | `name`, `is_child`, `is_primary`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`, `library_restrictions_enabled`, `allowed_library_ids`, `max_playback_quality`, `pin` |
+
+`changes` lists changed allowlisted fields. `before` and `after` are optional
+strings containing canonical JSON values: JSON null represents an unset account
+override, while an absent side represents creation/deletion. Permission arrays
+show the exact prior and resulting membership. A password change or reset
+includes only `{ "field": "password" }`. A profile's `pin` is `true` or
+`false` for whether the profile has a PIN; `true` on both sides is a PIN
+replaced by another. A profile row's `user_id` is the account that owns the
+profile. Login session IDs identify sessions and are not credentials.
+
+Audit rows never contain a password, password or PIN hash, PIN, access or
+refresh token, API key or its prefix, reset link, its token or digest, or an
+arbitrary request body or header. The path of `completePasswordReset` is stored
+with its link token replaced by `[redacted]`, and that row has no `user_id`
+because the request is unauthenticated.
+
+Rollbacks and refused requests record no domain action, and neither does a
+write that changes no allowlisted value: a repeated identical policy write,
+a profile update that only changes playback preferences or the avatar, or
+revoking a login session that had already ended. A committed domain row
+replaces the request's own row when both carry the same status. Outside
+`/api/v2/admin/`, only the operations listed above record domain rows (the
+v2 registry's `Audited` declaration); the frozen v1 routes keep request rows
+only. `requestPasswordReset` records none: it is anonymous, answers alike
+whether an account matched, and issues the link in the background, so its
+request row is the record. Profile rows require the PostgreSQL user store;
+the SQLite user store records request rows only.
 
 Audit history and live streams accept `action`, `actor_user_id`, `target_type`,
 and `target_id` alongside existing filters. History cursors bind these filters.

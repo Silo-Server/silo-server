@@ -180,7 +180,7 @@ func TestTokenHandlers_ScopeLibrariesToAuthenticatedProfile(t *testing.T) {
 	t.Run("login", func(t *testing.T) {
 		h, _, _ := profileScopedHandler(t)
 		rec := httptest.NewRecorder()
-		h.completeLogin(rec, httptest.NewRequest(http.MethodPost, "/login", nil), Principal{UserID: "42", ProfileID: "kid", DisplayName: "Kid"})
+		h.completeLogin(rec, httptest.NewRequest(http.MethodPost, "/login", nil), Principal{UserID: "42", ProfileID: "kid", DisplayName: "Kid", LoginSessionID: "login-kid"})
 		assertResponseLibraries(t, rec, want)
 	})
 

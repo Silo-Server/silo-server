@@ -69,8 +69,9 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	return response, nil
 }
 
-// HomeSectionItems answers one section of the home page with its items, or an
-// error when its items cannot be fetched.
+// HomeSectionItems answers one section of the home page with its items,
+// capped at viewer.ItemLimitCap items when it is set (see homeSectionRow), or
+// an error when its items cannot be fetched.
 func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer) (SectionView, error) {
 	return h.homeSectionItems(ctx, sectionID, viewer, false)
 }
@@ -111,7 +112,9 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 // answers: the hide-watched filter, then user states, overlays, playable
 // targets and artwork. The cross-row diversity filter does not run, and a row
 // the filter empties is kept. s is the row's unwidened section, so the row is
-// cut back to its display limit.
+// cut back to its display limit, at most viewer.ItemLimitCap cards when that
+// is set. A capped read reports in HasMore whether the row holds more cards
+// than it answers.
 func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.ResolvedSection, withItems sections.SectionWithItems, hideWatched bool, viewer SectionViewer) SectionView {
 	withItems.ItemLimit = s.ItemLimit
 	rows := []sections.SectionWithItems{withItems}
@@ -121,20 +124,37 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 		// filter empties it; only aggregate Home drops such sections.
 		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{s})
 	}
+	row := &rows[0]
+	hasMore := false
+	if viewer.ItemLimitCap > 0 {
+		// A capped read fetches and filters the row at its own limit, as
+		// an uncapped read does, and builds only the first cards. Fetching
+		// at the cap instead would let a row that loses cards after its
+		// fetch limit (an unsorted collection limits its members before
+		// the access filter) end at the cap without reporting the rest.
+		// An admin curated list returns every configured item, so the cut
+		// applies to it too.
+		row.ItemLimit = capSectionItemLimit(s, viewer.ItemLimitCap).ItemLimit
+		if limit := effectiveHomeItemLimit(row.ItemLimit); len(row.Items) > limit {
+			row.Items, hasMore = row.Items[:limit], true
+		}
+	}
 	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
-			ID:          withItems.ID,
-			SectionType: string(withItems.SectionType),
-			Title:       withItems.Title,
-			Featured:    withItems.Featured,
-			ItemLimit:   withItems.ItemLimit,
-			TotalCount:  withItems.TotalCount,
-			IsCustom:    withItems.IsCustom,
-			Customized:  withItems.Customized,
+			ID:          row.ID,
+			SectionType: string(row.SectionType),
+			Title:       row.Title,
+			Featured:    row.Featured,
+			ItemLimit:   row.ItemLimit,
+			TotalCount:  row.TotalCount,
+			IsCustom:    row.IsCustom,
+			Customized:  row.Customized,
 			Items:       []sectionItemResponse{},
+			HasMore:     hasMore,
 		}
 	}
+	built[0].HasMore = hasMore
 	return built[0]
 }
 
@@ -165,9 +185,11 @@ type HomeLayoutView struct {
 
 // HomeLayoutWithItems answers the home layout for the profile on the
 // context and, when includeItems is positive, the cards of its first
-// includeItems rows (at most MaxHomeLayoutIncludedSections). The layout is
-// resolved once and the rows are built in parallel; rows that error or
-// take longer than the budget are omitted rather than failing the layout.
+// includeItems rows (at most MaxHomeLayoutIncludedSections), each capped at
+// viewer.ItemLimitCap items when it is set. The layout entries keep each
+// row's own item limit. The layout is resolved once and the rows are built
+// in parallel; rows that error or take longer than the budget are omitted
+// rather than failing the layout.
 func (h *SectionHandler) HomeLayoutWithItems(ctx context.Context, viewer SectionViewer, includeItems int) (HomeLayoutView, error) {
 	return h.homeLayoutWithItems(ctx, viewer, includeItems, homeLayoutIncludedRowsBudget)
 }

@@ -133,7 +133,10 @@ and runs each file at idle CPU and I/O priority:
   server found no video stream (`no_stream`). A GPU that cannot decode the codec fails
   its attempt as `unsupported`, logged at debug rather than as the
   accelerator's first failure. Attempt timeouts grow with the samples: two minutes plus half a
-  second a sample on hardware, two seconds a sample in software.
+  second a sample on hardware, two seconds a sample in software. A
+  reference-picture read gets the chunk's playing time on top (see
+  [media sampling](media-sampling.md#sheets)), and a request to a node
+  waits that long too.
 - A file selected for local extraction that this server cannot read
   (an offline mount) is given back for an hour without counting a failure;
   `invalid_data` and `no_stream` mark it unusable; any other failure counts and backs off.

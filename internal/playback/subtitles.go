@@ -89,57 +89,52 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	// We default to SRT as a safe text-based format.
 	outputFormat := "srt"
 
-	args := []string{
-		"-i", filePath,
-		"-map", fmt.Sprintf("0:s:%d", trackIndex),
-		"-f", outputFormat,
-		"pipe:1",
+	args := append([]string{"-i", filePath}, subtitleFormatOutputArgs(trackIndex, outputFormat)...)
+	data, err := runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, nil, trackIndex)
+	if err != nil {
+		return nil, "", err
 	}
-
-	ffmpeg := "ffmpeg"
-	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
-		ffmpeg = ffmpegPath[0]
-	}
-	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
-			err, truncateStderr(stderr.String()))
-	}
-
-	data := stdout.Bytes()
-	if len(data) == 0 {
-		return nil, "", fmt.Errorf("ffmpeg produced empty subtitle output for track %d", trackIndex)
-	}
-
 	return data, outputFormat, nil
 }
 
 // ExtractSubtitleWithFormat extracts a subtitle track from a media file in the
 // specified output format. Only "srt" and "ass" are allowed as output formats.
 func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex int, outputFormat string, ffmpegPath ...string) ([]byte, error) {
+	if err := checkExtractFormat(outputFormat); err != nil {
+		return nil, err
+	}
+	args := append([]string{"-i", filePath}, subtitleFormatOutputArgs(trackIndex, outputFormat)...)
+	return runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, nil, trackIndex)
+}
+
+func checkExtractFormat(outputFormat string) error {
 	switch outputFormat {
 	case "srt", "ass":
-	default:
-		return nil, fmt.Errorf("unsupported subtitle extraction format: %q (must be \"srt\" or \"ass\")", outputFormat)
+		return nil
 	}
+	return fmt.Errorf("unsupported subtitle extraction format: %q (must be \"srt\" or \"ass\")", outputFormat)
+}
 
-	args := []string{
-		"-i", filePath,
+// subtitleFormatOutputArgs are the output options of a buffered extract:
+// the track, converted by the format's default encoder.
+func subtitleFormatOutputArgs(trackIndex int, outputFormat string) []string {
+	return []string{
 		"-map", fmt.Sprintf("0:s:%d", trackIndex),
 		"-f", outputFormat,
 		"pipe:1",
 	}
+}
 
-	ffmpeg := "ffmpeg"
+func firstFFmpegPath(ffmpegPath []string) string {
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
-		ffmpeg = ffmpegPath[0]
+		return ffmpegPath[0]
 	}
+	return defaultFFmpegBinary
+}
+
+// runSubtitleExtract runs ffmpeg with args, feeding it in when set, and
+// returns its whole output.
+func runSubtitleExtract(ctx context.Context, ffmpeg string, args []string, in *SubtitlePacketInput, trackIndex int) ([]byte, error) {
 	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
@@ -147,9 +142,17 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
-			err, truncateStderr(stderr.String()))
+	wait, err := startSubtitleCommand(ctx, cmd, in)
+	if err != nil {
+		return nil, fmt.Errorf("start ffmpeg: %w", err)
+	}
+	if waitErr, feedErr := wait(); waitErr != nil {
+		// A write that failed first, such as one refusing its packets, is
+		// why FFmpeg failed; callers look for it.
+		return nil, errors.Join(fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
+			waitErr, truncateStderr(stderr.String())), feedErr)
+	} else if feedErr != nil {
+		return nil, fmt.Errorf("write subtitle packets to ffmpeg: %w", feedErr)
 	}
 
 	data := stdout.Bytes()

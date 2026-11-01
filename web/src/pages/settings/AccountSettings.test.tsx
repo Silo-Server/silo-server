@@ -23,8 +23,16 @@ vi.mock("sonner", () => ({
 
 import AccountSettings from "./AccountSettings";
 
+class MockResizeObserver implements ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 describe("AccountSettings", () => {
   beforeEach(() => {
+    // The Radix checkbox measures itself.
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     mocks.mutateAsync.mockReset().mockResolvedValue(undefined);
     mocks.toastSuccess.mockReset();
     mocks.useCapability.mockReset().mockReturnValue({
@@ -35,6 +43,7 @@ describe("AccountSettings", () => {
         requires_current_password: true,
         minimum_password_length: 8,
         maximum_password_bytes: 72,
+        sign_out_other_sessions: true,
       },
       isLoading: false,
       isError: false,
@@ -62,6 +71,25 @@ describe("AccountSettings", () => {
     expect(screen.getByLabelText("Current password")).toHaveValue("");
   });
 
+  it("signs out of other devices only when asked", async () => {
+    const user = userEvent.setup();
+    render(<AccountSettings />);
+
+    const signOut = screen.getByRole("checkbox", { name: "Sign out of other devices" });
+    expect(signOut).not.toBeChecked();
+    await user.type(screen.getByLabelText("Current password"), "old password");
+    await user.type(screen.getByLabelText("New password"), "new password");
+    await user.type(screen.getByLabelText("Confirm new password"), "new password");
+    await user.click(signOut);
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(mocks.mutateAsync).toHaveBeenCalledWith({
+      current_password: "old password",
+      new_password: "new password",
+      sign_out_other_sessions: true,
+    });
+  });
+
   it("stops mismatched passwords before calling the API", async () => {
     const user = userEvent.setup();
     render(<AccountSettings />);
@@ -84,6 +112,7 @@ describe("AccountSettings", () => {
         requires_current_password: true,
         minimum_password_length: 8,
         maximum_password_bytes: 72,
+        sign_out_other_sessions: true,
       },
       isLoading: false,
       isError: false,

@@ -14,7 +14,9 @@ import (
 // Attempt timeouts grow with the samples a request decodes: a base for
 // opening the input, plus a per-sample allowance generous enough for a 4K
 // HDR keyframe decoded and tone mapped in software at idle priority on a
-// busy host. A run that outlives it is stuck, not slow.
+// busy host. A run that outlives it is stuck, not slow. A read that decodes
+// every reference picture of the sampled span gets that span's playing time
+// on top (see mediasample.Request.AttemptSeconds).
 const (
 	attemptBaseSeconds       = 120
 	hardwareSecondsPerSample = 0.5

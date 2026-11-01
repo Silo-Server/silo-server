@@ -1627,6 +1627,21 @@ work from the capped size; `total_count` keeps its meaning. Without the paramete
 its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
 only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
 `include_items_max` is.
+`getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
+one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
+`getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
+row's own `item_limit`. Neither read runs the cross-row duplicate filter. A row either read
+answers with `item_limit` carries `has_more: true` when it holds more cards than it answered, so
+that reading it again without `item_limit` answers more; the field is absent when false and on
+every other read that answers a `Section`. This includes an admin curated list, which an uncapped
+read can answer past its own `item_limit`. The server fetches and filters a capped row at the
+row's own `item_limit`, exactly as the uncapped read does, and builds only its first cards, so
+`has_more` is true exactly when the uncapped read answers more cards. Fetching at the cap would
+miss cards that a fetcher drops after applying its limit, such as an unsorted collection's
+members the access filter removes. A client sends `item_limit` to these two reads only when
+`getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
+parameter on them does not send. A row that draws a random subset on each read may answer
+different cards when read again.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond

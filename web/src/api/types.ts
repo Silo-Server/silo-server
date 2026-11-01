@@ -812,10 +812,29 @@ export interface BrowseItemSortMetrics {
   series_name?: string;
 }
 
+/**
+ * A movie box set: the movies TMDB lists in one collection that a viewer can
+ * see in one library. `id` is the TMDB collection ID.
+ */
+export interface BoxSetSummary {
+  id: string;
+  library_id: string;
+  title: string;
+  overview?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
+  movie_count: number;
+  played_count: number;
+  first_year?: number;
+  last_year?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "box_set";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -856,6 +875,8 @@ export interface BrowseItem {
   // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
+  /** Set on a box set card (type box_set) of a group=box_set browse. */
+  box_set?: BoxSetSummary;
 }
 
 export interface BrowseResponse {
@@ -2888,7 +2909,7 @@ export type DiagnosticReportType =
   | "hang"
   | "abnormal_exit"
   | "manual";
-export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos";
+export type DiagnosticPlatform = "android" | "android-tv" | "ios" | "tvos" | "roku";
 
 export interface ClientDiagnosticManifest {
   schema_version: number;
@@ -3448,6 +3469,12 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
+  /** Browse movies of one TMDB collection as a box set. Absent from servers without box sets. */
+  box_sets_enabled?: boolean;
+  /** The fewest of a collection's movies that form a box set. */
+  box_set_min_movies?: number;
+  /** List matching box sets in search. */
+  box_sets_in_search?: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
   /**
@@ -3599,6 +3626,10 @@ export interface CreateLibraryRequest {
   intro_detection_enabled?: boolean;
   /** Sent only when it changes, so a server without seek previews never sees it. */
   trickplay_enabled?: boolean;
+  /** The box set settings are sent only when they change, like trickplay_enabled. */
+  box_sets_enabled?: boolean;
+  box_set_min_movies?: number;
+  box_sets_in_search?: boolean;
   trailer_kinds?: string[];
   /** Omitted on create means on. */
   realtime_monitoring?: boolean;
@@ -4459,6 +4490,8 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
+  /** The library browses a TMDB collection's movies as one box set; browse it with group=box_set. */
+  box_sets_enabled?: boolean;
 }
 
 // Sections
@@ -4558,6 +4591,22 @@ export interface LibraryLayoutResponse {
 
 export interface HomeSectionItemsResponse {
   section: ResolvedSection;
+  /**
+   * The row was read with an item_limit and the server reported it holds
+   * more cards than `section.items` (has_more; see homeRowLimit).
+   */
+  partial?: boolean;
+  /**
+   * The row was completed after showing this many of its first cards (see
+   * homeRowLimit's completeHomeRow).
+   */
+  shown?: number;
+  /**
+   * When the row was completed, in epoch milliseconds. Home restores its
+   * cached rows' duplicate-filter order by it, since a cache edit rewrites
+   * every row's updated time.
+   */
+  shownAt?: number;
 }
 
 export interface CollectionSectionConfig {
@@ -4874,6 +4923,8 @@ export interface RateLimitConfig {
   ip_requests_per_minute: number;
   ip_burst: number;
   auth_endpoints: Record<string, RateLimitAuthEndpointConfig>;
+  /** Hourly token bucket per sign-in session; absent from servers that predate it. */
+  session_quota?: RateLimitSessionQuota;
   /** Whether a limiter is running in this process (GET responses only). */
   active?: boolean;
   /** Backend the running limiter uses; may differ from `backend` until restart. */
@@ -4885,6 +4936,8 @@ export interface RateLimitConfig {
    */
   redis_available?: boolean;
 }
+
+export type RateLimitSessionQuota = V2Components["schemas"]["AdminRateLimitSessionQuota"];
 
 export interface RateLimitUpdateResponse {
   status: string;

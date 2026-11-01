@@ -207,6 +207,7 @@ type Dependencies struct {
 	AdminJobArtifactSigner        *artworkurl.Signer
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminAPIClients               AdminAPIClientsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService
 	AdminNodeDrain                AdminNodeDrainService
@@ -482,6 +483,8 @@ type Dependencies struct {
 	People PeopleService
 	// LiteraryWorks answers literary works (*handlers.LiteraryWorkHandler).
 	LiteraryWorks LiteraryWorkService
+	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
+	BoxSets BoxSetService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -840,7 +843,7 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 type AccountService interface {
 	AccountPasswordCapability(context.Context, *auth.Claims, string) (handlers.AccountPasswordCapabilityView, error)
 	AuthorizePasswordChange(context.Context, *auth.Claims, string) error
-	ChangePassword(context.Context, *auth.Claims, string, string) error
+	ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string, signOutOtherSessions bool) error
 	NeedsSetup(ctx context.Context) (bool, error)
 	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)

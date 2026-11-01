@@ -4218,6 +4218,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Forced:           st.Forced,
 			Default:          st.Default,
 			HearingImpaired:  st.HearingImpaired,
+			IndexOnly:        st.IndexOnly,
 		}
 	}
 	mf.SubtitleTracks = subtitleTracks

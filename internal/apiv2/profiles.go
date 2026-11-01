@@ -214,6 +214,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(create.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.createProfile)
 
 	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
@@ -240,6 +241,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(update.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.updateProfile)
 
 	del := humaOp(http.MethodDelete, Prefix+"/profiles/{id}", "deleteProfile", "profiles",
@@ -260,6 +262,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(del.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.deleteProfile)
 
 	Register(reg, Operation{

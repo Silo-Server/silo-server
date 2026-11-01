@@ -158,7 +158,38 @@ func TestCompareVersions(t *testing.T) {
 		{"1.0.0", "1.1.0", -1},
 		{"1.10.0", "1.9.0", 1},
 		{"0.0.30", "0.0.29", 1},
-		{"1.2.3", "1.2.3.1", -1},
+		{"v1.2.3", "1.2.3", 0},
+		// A pre-release sorts below its release and above the previous one.
+		{"1.2.0-rc.1", "1.2.0", -1},
+		{"1.2.0", "1.2.0-rc.1", 1},
+		{"1.2.0-rc.1", "1.1.9", 1},
+		// Pre-release identifiers: numeric ones compare numerically and sort
+		// below alphanumeric ones, and a longer list wins a shared prefix.
+		{"1.2.0-rc.2", "1.2.0-rc.10", -1},
+		{"1.2.0-alpha", "1.2.0-beta", -1},
+		{"1.2.0-1", "1.2.0-alpha", -1},
+		{"1.2.0-alpha", "1.2.0-alpha.1", -1},
+		{"1.2.0-alpha.beta", "1.2.0-alpha.1", 1},
+		// Build metadata does not affect precedence.
+		{"1.2.0+build.5", "1.2.0+build.9", 0},
+		{"1.2.0-rc.1+abc", "1.2.0", -1},
+		// Missing minor and patch segments read as zero.
+		{"1.2", "1.2.0", 0},
+		{"2", "1.9.9", 1},
+		// An invalid version sorts below any valid one; two invalid versions
+		// compare by dot segment.
+		{"dev", "0.0.1", -1},
+		{"", "1.0.0", -1},
+		{"1.2.3", "1.2.3.1", 1},
+		{"1.2.3.1", "1.2.3.2", -1},
+		{"1.2.3.10", "1.2.3.9", 1},
+		{"1.2.3.4", "1.2.3.4.5", -1},
+		// Integer segments sort before text, so invalid versions stay
+		// transitive: 2.dev < 10.dev < 1a.dev.
+		{"2.dev", "10.dev", -1},
+		{"10.dev", "1a.dev", -1},
+		{"2.dev", "1a.dev", -1},
+		{"", "", 0},
 	}
 	for _, tt := range tests {
 		got := compareVersions(tt.a, tt.b)

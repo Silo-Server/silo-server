@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
+	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -507,7 +508,7 @@ func (s *Service) validateRoute(ctx context.Context, route *Route) error {
 	}
 	route.MediaType = mediaType
 	route.Conditions = normalizeConditions(route.Conditions)
-	validateConditions(route.Conditions, fields)
+	validateConditions(route.Conditions, mediaType, fields)
 
 	integrations, err := s.store.ListIntegrations(ctx)
 	if err != nil {
@@ -646,11 +647,16 @@ func normalizeConditions(c RouteConditions) RouteConditions {
 	c.ExcludeNetworkIDs, c.ExcludeCompanyIDs = ids(c.ExcludeNetworkIDs), ids(c.ExcludeCompanyIDs)
 	c.ExcludeRequesterUserIDs = ids(c.ExcludeRequesterUserIDs)
 	c.ExcludeOriginalLanguages, c.ExcludeOriginCountries = lower(c.ExcludeOriginalLanguages), upper(c.ExcludeOriginCountries)
+	c.SeriesStatuses, c.ExcludeSeriesStatuses = lower(c.SeriesStatuses), lower(c.ExcludeSeriesStatuses)
 	c.MaxContentRating = strings.TrimSpace(c.MaxContentRating)
 	return c
 }
 
-func validateConditions(c RouteConditions, fields map[string]string) {
+// msgIncludedAndExcluded refuses a value both wanted and excluded, which
+// makes a rule match nothing.
+const msgIncludedAndExcluded = "Remove the values that are in both \u201cis any of\u201d and \u201cis none of\u201d."
+
+func validateConditions(c RouteConditions, mediaType MediaType, fields map[string]string) {
 	for field, values := range map[string][]int{
 		condGenreIDs: c.GenreIDs, condKeywordIDs: c.KeywordIDs, condNetworkIDs: c.NetworkIDs,
 		condCompanyIDs: c.CompanyIDs, condRequesterUserIDs: c.RequesterUserIDs,
@@ -681,6 +687,7 @@ func validateConditions(c RouteConditions, fields map[string]string) {
 			}
 		}
 	}
+	validateSeriesStatuses(c, mediaType, fields)
 	// A value both wanted and excluded makes the rule match nothing.
 	overlaps := slices.ContainsFunc(c.GenreIDs, func(v int) bool { return slices.Contains(c.ExcludeGenreIDs, v) }) ||
 		slices.ContainsFunc(c.KeywordIDs, func(v int) bool { return slices.Contains(c.ExcludeKeywordIDs, v) }) ||
@@ -690,7 +697,7 @@ func validateConditions(c RouteConditions, fields map[string]string) {
 		slices.ContainsFunc(c.OriginalLanguages, func(v string) bool { return slices.Contains(c.ExcludeOriginalLanguages, v) }) ||
 		slices.ContainsFunc(c.OriginCountries, func(v string) bool { return slices.Contains(c.ExcludeOriginCountries, v) })
 	if overlaps {
-		fields["conditions"] = "Remove the values that are in both \u201cis any of\u201d and \u201cis none of\u201d."
+		fields["conditions"] = msgIncludedAndExcluded
 	}
 	if c.MaxContentRating != "" {
 		if _, ok := ratingAge(c.MaxContentRating); !ok {
@@ -707,12 +714,28 @@ func validateConditions(c RouteConditions, fields map[string]string) {
 	}
 }
 
+// validateSeriesStatuses checks the status conditions: series rules only,
+// statuses as the catalog spells them, none both wanted and excluded.
+func validateSeriesStatuses(c RouteConditions, mediaType MediaType, fields map[string]string) {
+	for field, values := range map[string][]string{condSeriesStatuses: c.SeriesStatuses, condExcludeSeriesStatuses: c.ExcludeSeriesStatuses} {
+		switch {
+		case len(values) > 0 && mediaType == MediaTypeMovie:
+			fields["conditions."+field] = "Only series rules can match on status."
+		case slices.ContainsFunc(values, func(v string) bool { return !slices.Contains(showstatus.Known, v) }):
+			fields["conditions."+field] = "Use the statuses " + strings.Join(showstatus.Known, ", ") + "."
+		}
+	}
+	if slices.ContainsFunc(c.SeriesStatuses, func(v string) bool { return slices.Contains(c.ExcludeSeriesStatuses, v) }) {
+		fields["conditions"] = msgIncludedAndExcluded
+	}
+}
+
 func conditionsEmpty(c RouteConditions) bool {
 	lists := len(c.GenreIDs) + len(c.KeywordIDs) + len(c.OriginalLanguages) + len(c.OriginCountries) +
 		len(c.NetworkIDs) + len(c.CompanyIDs) + len(c.RequesterUserIDs) +
 		len(c.ExcludeGenreIDs) + len(c.ExcludeKeywordIDs) + len(c.ExcludeOriginalLanguages) +
 		len(c.ExcludeOriginCountries) + len(c.ExcludeNetworkIDs) + len(c.ExcludeCompanyIDs) +
-		len(c.ExcludeRequesterUserIDs)
+		len(c.ExcludeRequesterUserIDs) + len(c.SeriesStatuses) + len(c.ExcludeSeriesStatuses)
 	return c.Anime == nil && lists == 0 && c.YearFrom == 0 && c.YearTo == 0 && c.MaxContentRating == ""
 }
 

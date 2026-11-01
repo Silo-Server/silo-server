@@ -112,7 +112,7 @@ lines you need.
 ### Updating an install from before the omnibus image
 
 An install that runs Silo, PostgreSQL, and Redis in separate containers keeps
-that layout when its `.env` sets `COMPOSE_FILE=docker-compose.split.yml`; set
+that layout when its `.env` sets `COMPOSE_FILE=docker-compose.advanced.yml`; set
 it before updating. `docker-compose.yml` is an example of a new install and
 does not look for an earlier one: started on that data folder, it replaces
 the old `silo` container and comes up on a new, empty database with setup
@@ -181,8 +181,9 @@ open source program.
 ## License and trademarks
 
 Silo's source code is licensed under the
-**GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`). See
-[LICENSE](LICENSE).
+**GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`), with
+an additional permission to combine it with platform SDKs such as the Windows
+App SDK. See [LICENSE](LICENSE) and [PLATFORM-EXCEPTION.md](PLATFORM-EXCEPTION.md).
 
 The **Silo name, logo, and wordmark are trademarks of Silo Media L.L.C.** and
 are not covered by the AGPL. Forks and redistributions may use the code but must

@@ -11,7 +11,8 @@ no-store responses:
   whose changes need a server restart.
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names and
   `managed_by_env` names. Values are never returned. Both fields are arrays,
-  including when empty.
+  including when empty. `configured` leaves out machine-managed keys, such as
+  the JWT signing keys the server generates itself.
 
 `managed_by_env` lists the keys the server's environment sets on every start:
 `redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
