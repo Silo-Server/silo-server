@@ -494,31 +494,41 @@ func TestOnDemandSegmentsAheadOfTheGenerationStartOnTheGrid(t *testing.T) {
 		SegmentDuration: 2, TotalDuration: 30, SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
 		SubtitleRenditionTracks: []SubtitleRenditionTrack{{TrackNumber: numbers[0], Name: "A", Default: true}},
 	}
-	// The running generation from segment 0 has written segments 0 and 1, and
-	// its first frame came 1.5 s into the grid.
-	playlist := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.000000,\nseg_00000.ts\n#EXTINF:2.000000,\nseg_00001.ts\n"
-	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(playlist), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	session := &TranscodeSession{outputDir: dir, opts: opts, running: true, subtitleSpans: []subtitleCueSpan{
-		{file: subtitleCueFileName(0), start: 0, end: -1, origin: 1.5, originKnown: true},
-	}}
 	for _, tc := range []struct {
-		segment int
-		cue     string
-		want    bool
+		name   string
+		origin float64
 	}{
-		// [24, 26) on the grid, [25.5, 27.5) from the running generation's
-		// first frame: "Across A" (21-25 s) is on screen at 24 s.
-		{segment: 12, cue: "Across A", want: true},
-		// Segment 3 is within the running generation's reach, which places it
-		// at [7.5, 9.5): "Boundary A" (5-7.2 s) ends before it.
-		{segment: 3, cue: "Boundary A", want: false},
+		{"delay below one segment", 1.5},
+		{"delay above one segment", 3},
 	} {
-		segment, err := session.subtitleTrackSegmentVTT(ctx, numbers[0], tc.segment)
-		if err != nil || strings.Contains(string(segment), tc.cue) != tc.want {
-			t.Fatalf("segment %d has %q: %v, want %v (%v):\n%s", tc.segment, tc.cue, !tc.want, tc.want, err, segment)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			// The running generation from segment 0 has written segments 0 and 1, and
+			// its first frame trails the grid by the observed origin.
+			playlist := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.000000,\nseg_00000.ts\n#EXTINF:2.000000,\nseg_00001.ts\n"
+			if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(playlist), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session := &TranscodeSession{outputDir: dir, opts: opts, running: true, subtitleSpans: []subtitleCueSpan{
+				{file: subtitleCueFileName(0), start: 0, end: -1, origin: tc.origin, originKnown: true},
+			}}
+			for _, tc := range []struct {
+				segment int
+				cue     string
+				want    bool
+			}{
+				// "Across A" (21-25 s) is on screen at the grid start, 24 s,
+				// before the running generation places this segment.
+				{segment: 12, cue: "Across A", want: true},
+				// Segment 3 is within the running generation's reach, which places it
+				// after 7.2 s: "Boundary A" ends before it.
+				{segment: 3, cue: "Boundary A", want: false},
+			} {
+				segment, err := session.subtitleTrackSegmentVTT(ctx, numbers[0], tc.segment)
+				if err != nil || strings.Contains(string(segment), tc.cue) != tc.want {
+					t.Fatalf("segment %d has %q: %v, want %v (%v):\n%s", tc.segment, tc.cue, !tc.want, tc.want, err, segment)
+				}
+			}
+		})
 	}
 }
 
