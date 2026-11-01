@@ -1331,13 +1331,16 @@ const cueIndexedSubtitleTrackTimeoutV3 = 3 * time.Second
 
 // cueIndexReadsV3 shares one deadline for reading sources' indexes, and
 // each file's answer, among the planning passes of one start or replan:
-// alternate versions and fallbacks plan the same files again.
+// alternate versions and fallbacks plan the same files again. The deadline
+// is timeout after the first read begins, so the planning work before it
+// (node and tone-map inventories can take seconds) doesn't use it up.
 type cueIndexReadsV3 struct {
-	deadline time.Time
+	timeout time.Duration
 	// lookup reads a source's index (playback.CueIndexedSubtitleTracks).
-	lookup func(ctx context.Context, path string) (playback.CueIndexedSubtitles, error)
-	mu     sync.Mutex
-	byPath map[string]func() *playback.CueIndexedSubtitles
+	lookup   func(ctx context.Context, path string) (playback.CueIndexedSubtitles, error)
+	mu       sync.Mutex
+	deadline time.Time
+	byPath   map[string]func() *playback.CueIndexedSubtitles
 }
 
 type cueIndexReadsKeyV3 struct{}
@@ -1349,10 +1352,20 @@ func withCueIndexReadsV3(ctx context.Context) context.Context {
 
 func newCueIndexReadsV3() *cueIndexReadsV3 {
 	return &cueIndexReadsV3{
-		deadline: time.Now().Add(cueIndexedSubtitleTrackTimeoutV3),
-		lookup:   playback.CueIndexedSubtitleTracks,
-		byPath:   map[string]func() *playback.CueIndexedSubtitles{},
+		timeout: cueIndexedSubtitleTrackTimeoutV3,
+		lookup:  playback.CueIndexedSubtitleTracks,
+		byPath:  map[string]func() *playback.CueIndexedSubtitles{},
 	}
+}
+
+// readDeadline returns the reads' deadline, starting it at the first read.
+func (reads *cueIndexReadsV3) readDeadline() time.Time {
+	reads.mu.Lock()
+	defer reads.mu.Unlock()
+	if reads.deadline.IsZero() {
+		reads.deadline = time.Now().Add(reads.timeout)
+	}
+	return reads.deadline
 }
 
 // cueIndexedSubtitleTracksV3 answers PlannerInputV3.CueIndexedSubtitleTracks
@@ -1372,7 +1385,7 @@ func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) fun
 		return read
 	}
 	read := sync.OnceValue(func() *playback.CueIndexedSubtitles {
-		readCtx, cancel := context.WithDeadline(ctx, reads.deadline)
+		readCtx, cancel := context.WithDeadline(ctx, reads.readDeadline())
 		defer cancel()
 		indexed, err := reads.lookupWithin(readCtx, file.FilePath)
 		if err != nil {
