@@ -2662,7 +2662,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	progressiveRemuxOK := enableDirectStream && allowVideoCopy && videoSupported && allowAudioCopy && audioSupported &&
 		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
 	remuxAudioCopyFMP4 := profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	remuxAudioCopyTS := !remuxAudioCopyFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, audio.Codec) &&
+	remuxAudioCopyTS := !remuxAudioCopyFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
 		profile.supportsHLSRemuxIn(version, selectedAudioIndex, compatContainerTS)
 	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
@@ -2671,7 +2671,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		!supportsDirectPlay &&
 		(remuxAudioCopyFMP4 || remuxAudioCopyTS)
 	remuxAudioEncodeFMP4 := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
-	remuxAudioEncodeTS := !remuxAudioEncodeFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, "") &&
+	remuxAudioEncodeTS := !remuxAudioEncodeFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, "") &&
 		profile.supportsHLSRemuxWithAudioTranscodeIn(version, selectedAudioIndex, targetAudioChannels, compatContainerTS)
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&

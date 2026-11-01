@@ -739,7 +739,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
-					(source.VideoCodec == transcodeCodecH264 || source.VideoCodec == transcodeCodecHEVC) {
+					HLSCopyFitsMPEGTS(source.VideoCodec, "") {
 					// HLS carries only H.264 and HEVC in MPEG-TS; other copied
 					// codecs keep fMP4. MPEG-TS has no sample entry; the
 					// executor still keeps a preserved Dolby Vision

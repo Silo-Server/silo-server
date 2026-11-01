@@ -213,6 +213,7 @@ func TestHLSCopyPackagesForTheContainerTheClientLists(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		video, audio string
+		fileAudio    string
 		containers   string
 		wantCopy     bool
 		wantTS       bool
@@ -222,11 +223,16 @@ func TestHLSCopyPackagesForTheContainerTheClientLists(t *testing.T) {
 		{name: "fMP4 offered", video: "h264", audio: "aac", containers: mp4Too, wantCopy: true},
 		{name: "HEVC in TS", video: "hevc", audio: "aac", containers: tsOnly, wantCopy: true, wantTS: true},
 		{name: "TS cannot carry the audio", video: "h264", audio: "flac", containers: tsOnly, wantCopy: true, wantTS: true, wantAudioAAC: true},
+		{name: "untagged track is judged by the file codec", video: "h264", fileAudio: "flac", containers: tsOnly, wantCopy: true, wantTS: true, wantAudioAAC: true},
 		{name: "unlisted video encodes", video: "vc1", audio: "aac", containers: tsOnly},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			fileAudio := tc.audio
+			if tc.fileAudio != "" {
+				fileAudio = tc.fileAudio
+			}
 			version := catalog.FileVersion{
-				FileID: 42, Container: "mkv", CodecVideo: tc.video, CodecAudio: tc.audio, Bitrate: 8000, Resolution: "1080p",
+				FileID: 42, Container: "mkv", CodecVideo: tc.video, CodecAudio: fileAudio, Bitrate: 8000, Resolution: "1080p",
 				VideoTracks: []models.VideoTrack{{Codec: tc.video, BitDepth: 8, Width: 1920, Height: 1080, FrameRate: "24"}},
 				AudioTracks: []models.AudioTrack{{Codec: tc.audio, Channels: 2, Default: true}},
 			}
