@@ -7149,11 +7149,15 @@ func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, s
 	switch {
 	case err == nil && debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete):
 		airedSinceAttempt := debt.LastAttemptAt != nil && newestAirDate >= debt.LastAttemptAt.UTC().Format(time.DateOnly)
-		if !isParkedEpisodeDebt(debt.ReasonMask, debt.AttemptCount) || !airedSinceAttempt {
+		// A live lease means a refresh claimed the row and will settle it;
+		// this sweep may be running inside that refresh.
+		leased := debt.LeaseExpiresAt != nil && debt.LeaseExpiresAt.After(now)
+		if !isParkedEpisodeDebt(debt.ReasonMask, debt.AttemptCount) || !airedSinceAttempt || leased {
 			return
 		}
-		// Parked debt carries no other reason, so dropping the row loses only
-		// its attempt count.
+		// Parked debt carries no other reason and, without a lease, no claim,
+		// so dropping the row loses its attempt count and last error. It is
+		// not due either, so ClaimDue cannot take it before RequestDue runs.
 		if err := s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetItem, seriesID); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to restart parked series refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)

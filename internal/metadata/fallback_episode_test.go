@@ -1336,6 +1336,11 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		LastAttemptAt: &lastAttempt,
 		NextRefreshAt: time.Now().Add(refreshDebtTerminalDelay).Truncate(time.Second),
 	}
+	// A refresh that claimed the row for its third attempt holds a lease and
+	// settles the row itself.
+	leaseExpires := time.Now().Add(time.Hour)
+	claimed := *parked
+	claimed.LeaseExpiresAt = &leaseExpires
 	for _, tc := range []struct {
 		name           string
 		fileDate       string
@@ -1347,6 +1352,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		{name: "unknown date inside stored range", fileDate: "2024-05-02"},
 		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-05", existing: parked, wantIncomplete: true},
 		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
+		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFallbackTestHarness()
