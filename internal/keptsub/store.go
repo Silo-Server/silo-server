@@ -121,8 +121,12 @@ type Store struct {
 
 	mu      sync.Mutex
 	flights map[flightKey]*flight
-	// activeFlights includes canceled workers removed from flights until they exit.
-	activeFlights    int
+	// activeFlights includes canceled workers removed from flights until they
+	// exit; fileFlights counts them per source file.
+	activeFlights int
+	fileFlights   map[int]int
+	// fileFlightLimit is maxFileFlights; tests change it.
+	fileFlightLimit  int
 	starts           map[sourceVersion]time.Duration
 	mirrors          map[string]*mirrorFetch
 	mirrorUsed       map[string]time.Time
@@ -145,6 +149,8 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		opts:         opts,
 		pollInterval: defaultPollInterval,
 		flights:      map[flightKey]*flight{},
+		// Per source file; see maxWholeFlights.
+		fileFlightLimit: maxFileFlights,
 		// A request's wait on a whole read; see foregroundWait.
 		foregroundWait:   foregroundWait,
 		starts:           map[sourceVersion]time.Duration{},
@@ -439,6 +445,9 @@ func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref pla
 		defer func() { <-s.reads }()
 	case <-ctx.Done():
 		return nil, embeddedsub.ReadStats{}, nil, ctx.Err()
+	}
+	if err := s.start(ctx, f); err != nil {
+		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	idx, track, err := s.sourceTrack(ctx, path, ref, number)
 	if err != nil {

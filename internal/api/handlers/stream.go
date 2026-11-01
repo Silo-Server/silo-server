@@ -949,6 +949,10 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		if r.Context().Err() != nil {
 			return
 		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			writeSubtitleReadsBusy(w)
+			return
+		}
 		if response.Status() == 0 {
 			writeError(w, http.StatusInternalServerError, "subtitle_extract_failed", "Failed to extract subtitles")
 			return
@@ -956,6 +960,13 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		// A successful HTTP EOF would make clients accept the partial track.
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// writeSubtitleReadsBusy answers a subtitle the node had no room to read
+// (playback.ErrSubtitleReadsBusy) as a retryable 503.
+func writeSubtitleReadsBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+	writeError(w, http.StatusServiceUnavailable, "service_unavailable", "The server is busy; try again in a moment")
 }
 
 // subtitleSeekPosition uses only the caller's explicit position. Session

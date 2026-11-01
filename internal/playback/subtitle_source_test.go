@@ -175,6 +175,21 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 	}
 }
 
+// A node with no room for another whole read answers the request busy
+// before writing anything, instead of demuxing the source.
+func TestServeExtractAnswersBusyWithoutADemux(t *testing.T) {
+	c, source := newTestCache(t)
+	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"})
+	var mu sync.Mutex
+	var calls []StreamExtractOpts
+	rec := httptest.NewRecorder()
+	err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil),
+		StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
+	if !errors.Is(err, ErrSubtitleReadsBusy) || len(calls) != 0 || rec.Body.Len() != 0 {
+		t.Fatalf("err %v, %d extracts, body %q", err, len(calls), rec.Body.String())
+	}
+}
+
 // A demux whose kept copy fails runs again without it and doesn't send the
 // viewer what it already has.
 func TestServeExtractRetriesADemuxWhoseCopyFailed(t *testing.T) {

@@ -1138,6 +1138,11 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+			http.Error(w, "server busy", http.StatusServiceUnavailable)
+			return
+		}
 		if response.Status() == 0 {
 			http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 			return

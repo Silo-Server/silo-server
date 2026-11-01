@@ -36,7 +36,8 @@ func stallSecondLookup(repo *memRepo, release <-chan struct{}) *atomic.Int32 {
 func TestSharedBoundsDetachedFlights(t *testing.T) {
 	for _, background := range []bool{false, true} {
 		t.Run(fmt.Sprintf("background=%t", background), func(t *testing.T) {
-			s := &Store{flights: make(map[flightKey]*flight)}
+			// Only the node's limit applies here.
+			s := &Store{flights: make(map[flightKey]*flight), fileFlightLimit: maxWholeFlights}
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
 			var admitted []*flight
@@ -58,7 +59,9 @@ func TestSharedBoundsDetachedFlights(t *testing.T) {
 					key = flightKey{fileID: 1}
 				}
 				go func() {
-					_, err := s.shared(ctx, key, background, 0, func(_ context.Context, f *flight) (*Track, error) {
+					_, err := s.shared(ctx, key, background, 0, func(readCtx context.Context, f *flight) (*Track, error) {
+						// The read has its slot: a request's goes on without it.
+						_ = s.start(readCtx, f)
 						entered <- f
 						<-release
 						return nil, nil
@@ -115,6 +118,23 @@ func TestSharedBoundsDetachedFlights(t *testing.T) {
 	}
 }
 
+// stallStartedRead makes a read wait, once it holds a read slot, until
+// release closes or its context ends.
+func stallStartedRead(s *Store, release <-chan struct{}) *atomic.Int32 {
+	var calls atomic.Int32
+	probe := s.probeStart
+	s.probeStart = func(ctx context.Context, path string) (time.Duration, error) {
+		calls.Add(1)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+		return probe(ctx, path)
+	}
+	return &calls
+}
+
 // A request for a track a prefetch on the same node is reading joins that
 // read and raises its priority, instead of waiting on the claim.
 func TestRequestJoinsAPrefetchRead(t *testing.T) {
@@ -161,14 +181,14 @@ func TestRequestJoinsAPrefetchRead(t *testing.T) {
 	}
 }
 
-// A request's read finishes and keeps the track after the request is gone;
-// a prefetch's stops, and a later caller starts afresh.
+// A request's read that has started finishes and keeps the track after the
+// request is gone; a prefetch's stops, and a later caller starts afresh.
 func TestReadsOutliveRequestsButNotPrefetches(t *testing.T) {
 	ffmpeg := requireFFmpeg(t)
 	path, file := fixtureFile(t, ffmpeg, true)
 	s, repo, _ := newTestStore(t, ffmpeg)
 	release := make(chan struct{})
-	calls := stallSecondLookup(repo, release)
+	calls := stallStartedRead(s, release)
 	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
 
 	ctx, leave := context.WithCancel(t.Context())
@@ -177,7 +197,7 @@ func TestReadsOutliveRequestsButNotPrefetches(t *testing.T) {
 		_, err := s.WholeTrack(ctx, path, ref)
 		done <- err
 	}()
-	waitFor(t, "the read", func() bool { return calls.Load() == 2 })
+	waitFor(t, "the read", func() bool { return calls.Load() == 1 })
 	leave()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("request: %v", err)
@@ -308,5 +328,97 @@ func TestPinReleaseScansOnlyOverBudget(t *testing.T) {
 	release()
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("the release that left the directory over budget didn't scan: %v", err)
+	}
+}
+
+// One source file's tracks take at most fileFlightLimit of a node's whole
+// reads: a request for another track of that file is answered busy at once,
+// while other files' tracks are still admitted.
+func TestWholeReadsPerFileAreBounded(t *testing.T) {
+	s, _, _ := newTestStore(t, "ffmpeg")
+	s.fileFlightLimit = 2
+	release := make(chan struct{})
+	read := func(ctx context.Context, _ *flight) (*Track, error) {
+		select {
+		case <-release:
+			return &Track{}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	results := make(chan error, 3)
+	for _, key := range []flightKey{{fileID: 1, stream: 1}, {fileID: 1, stream: 2}, {fileID: 2, stream: 1}} {
+		go func() {
+			_, err := s.shared(t.Context(), key, false, 0, read)
+			results <- err
+		}()
+	}
+	waitFor(t, "the reads to be admitted", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.activeFlights == 3
+	})
+	// A busy answer comes before any wait; an admitted read would stop
+	// waiting after a millisecond instead.
+	if _, err := s.shared(t.Context(), flightKey{fileID: 1, stream: 3}, false, time.Millisecond, read); !errors.Is(err, playback.ErrSubtitleReadsBusy) {
+		t.Fatalf("a third read of one file: %v", err)
+	}
+	close(release)
+	for range 3 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A read still waiting for a slot stops when its last caller goes, whether
+// the request ended or stopped waiting, and keeps nothing.
+func TestQueuedReadStopsWhenItsCallersGo(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	for _, tc := range []struct {
+		name string
+		wait time.Duration
+		want error
+	}{
+		{"request ended", time.Hour, context.Canceled},
+		{"request stopped waiting", 20 * time.Millisecond, errStillReading},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, repo, _ := newTestStore(t, ffmpeg)
+			s.foregroundWait = tc.wait
+			// Every read slot is taken.
+			for range wholeReads {
+				s.reads <- struct{}{}
+			}
+			ctx, leave := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() {
+				_, err := s.WholeTrack(ctx, path, *playback.EmbeddedSubtitleRefFor(file, 0))
+				done <- err
+			}()
+			waitFor(t, "the read to queue", func() bool {
+				_, claims := repo.counts()
+				return claims == 1
+			})
+			if errors.Is(tc.want, context.Canceled) {
+				leave()
+			}
+			if err := <-done; !errors.Is(err, tc.want) {
+				t.Fatalf("request: %v, want %v", err, tc.want)
+			}
+			waitFor(t, "the queued read to stop", func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				return s.activeFlights == 0 && len(s.flights) == 0
+			})
+			leave()
+			for range wholeReads {
+				<-s.reads
+			}
+			if puts, _ := repo.counts(); puts != 0 {
+				t.Fatal("a stopped read kept the track")
+			}
+		})
 	}
 }

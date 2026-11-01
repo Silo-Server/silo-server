@@ -442,15 +442,9 @@ func TestSlowReadsHandOverToTheDemux(t *testing.T) {
 	path, file := fixtureFile(t, ffmpeg, true)
 	s, repo, _ := newTestStore(t, ffmpeg)
 	s.foregroundWait = 20 * time.Millisecond
-	// The read's own lookup stalls until released.
+	// The read stalls, once started, until released.
 	release := make(chan struct{})
-	var calls atomic.Int32
-	repo.trackHook = func(context.Context) error {
-		if calls.Add(1) == 2 {
-			<-release
-		}
-		return nil
-	}
+	stallStartedRead(s, release)
 	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
 	if _, err := s.WholeTrack(t.Context(), path, ref); !errors.Is(err, errStillReading) {
 		t.Fatalf("slow read: %v", err)
