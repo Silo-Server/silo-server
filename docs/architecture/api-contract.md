@@ -1589,7 +1589,8 @@ the refresh `mode` and `image_size` are strict enums answered `422`; the queued-
 (`deleteLibrary`, `refreshLibraryMetadata`) answer `409` without v1's `active_job` echo, pending
 the long-running-work foundation rule; `uploadLibraryPoster` is the first multipart operation
 (`multipart/form-data` only, else `415`; a wrong part media type is `422` at `body.poster`; over
-10 MiB is `413`); `getLibrarySectionItems` answers the section itself rather than a `{section}`
+10 MiB is `413`); `listLibrarySections` leaves out rows with no items for the viewer, which v1
+answers empty (see catalog-home); `getLibrarySectionItems` answers the section itself rather than a `{section}`
 wrapper, and
 `getLibraryCollections` has one shape whether or not collection groups are configured.
 
@@ -1654,7 +1655,8 @@ Deliberate differences from v1, all recorded on the ledger rows: the calendar `s
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
 instant; the dismissal `surface` is a path enum, `progress_updated_at` an instant, and both
-dismissal operations answer `204`; `getHomeSectionItems` answers the section itself rather than
+dismissal operations answer `204`; `listHomeSections` leaves out rows with no items for the
+viewer, which v1 answers empty; `getHomeSectionItems` answers the section itself rather than
 a `{section}` wrapper; `listSectionRecipes` groups recipes in an ordered `categories` array of
 `{category, recipes}` instead of a map, never emits `hidden`, and declares each preset's
 `default_params` as the `section-config` extension bag; `listSectionRecipeCandidates` always

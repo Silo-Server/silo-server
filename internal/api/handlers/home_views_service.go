@@ -108,8 +108,8 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 			// Unlike the aggregate reads, which keep the page up by leaving
 			// the row out (v2) or answering it empty (v1), a failed single
 			// section answers an error, so a client can tell it from a
-			// section with nothing to show. A
-			// deleted collection is not a failure and keeps its empty row.
+			// section with nothing to show. A deleted collection is not a
+			// failure and keeps its empty row.
 			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
 				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}

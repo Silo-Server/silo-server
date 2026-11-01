@@ -540,7 +540,8 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// The frozen v1 endpoint keeps answering empty rows other than an
-	// off-season seasonal row; v2 leaves every empty row out.
+	// off-season seasonal row and one that hiding watched titles emptied;
+	// v2 leaves every empty row out.
 	resp, err := h.homeSections(r.Context(), sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
