@@ -135,7 +135,7 @@ or, for an on-demand segment, with an empty segment.
 | Index cache | 64 MiB by estimate, counting cues, samples, kept boxes and compression settings |
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
-| Whole-track flights | 16 running or queued per store, including canceled workers until they exit; callers may join an admitted track at capacity; additional tracks fall back to demux |
+| Whole-track flights | 16 running or queued per store and 8 per source file, including canceled workers until they exit; callers may join an admitted track at capacity; a request for another track is answered `503` with `Retry-After`, and whole-track text conversions (jellycompat, AI translation) demux instead; a flight still waiting for a read slot stops when its last caller goes |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
 | One read's memory (`MaxBytes`) | 256 MiB by default, 128 MiB for a kept track's whole read, 16 MiB (`WindowMaxBytes`) for a window; it counts packet data, blocks being read, decompression buffers before they grow, 1 KiB per selected cue or sample, 512 bytes per packet, and a window's visited flags and cue times, so a 16 MiB window selects at most about 16,000 cues |
 | Blocks and samples | 16 MiB each, compressed or not |
@@ -234,11 +234,15 @@ live and only dequeues it.
 **One read at a time.** Concurrent calls for a track on a node share one
 read. A prefetch starts its read at background priority and stops it when
 its callers go; a request that joins it raises its I/O priority and
-concurrency (`embeddedsub.Priority`). A request's read finishes and keeps the
-track even after every caller has gone, so a client that gave up and
-retries finds the track kept or still being read. Up to four whole reads run
-on a node at once, each holding at most 128 MiB of packets; a larger track is
-demuxed. Across nodes, a reader holds a claim in
+concurrency (`embeddedsub.Priority`). A request's read that has started,
+holding one of the node's read slots, finishes and keeps the track even
+after every caller has gone, so a client that gave up and retries finds the
+track kept or still being read; a read still waiting for a slot, or for
+another node's claim, stops when its last caller goes or stops waiting. Up to
+four whole reads run on a node at once, each holding at most 128 MiB of
+packets; a larger track is demuxed. Admission is bounded too (see Bounds): a
+request past it is answered `503` with `Retry-After: 5` instead of starting a
+read or a demux, and a prefetch skips the track. Across nodes, a reader holds a claim in
 `embedded_subtitle_track_claims` with a lease longer than its read and keep
 can last, and releases it after. A request that finds another node's claim
 polls for that node's row, or the claim coming free, for up to three

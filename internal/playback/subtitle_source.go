@@ -70,6 +70,15 @@ type EmbeddedSubtitleSource interface {
 	KeepDemuxed(ctx context.Context, path string, ref EmbeddedSubtitleRef, demuxCopy DemuxCopy, srcSize int64, srcModTime time.Time) error
 }
 
+// ErrSubtitleReadsBusy means the node already admits as many whole-track
+// subtitle reads as it allows. A request can retry after
+// SubtitleReadsRetryAfter seconds.
+var ErrSubtitleReadsBusy = errors.New("too many subtitle track reads")
+
+// SubtitleReadsRetryAfter is the Retry-After, in seconds, of a request
+// answered busy with ErrSubtitleReadsBusy.
+const SubtitleReadsRetryAfter = 5
+
 // DemuxCopy is a copy of a track that a demux of the whole source writes.
 type DemuxCopy struct {
 	// Path is the file the copy is written to.
@@ -131,6 +140,11 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 			opts.Writer = keepalive
 		}
 		in, err := c.source.WholeTrack(ctx, opts.InputPath, *opts.Embedded)
+		if errors.Is(err, ErrSubtitleReadsBusy) {
+			// The node admits no more reads; a demux would add the load
+			// the limit keeps off it.
+			return err
+		}
 		if err == nil {
 			wrote, convErr := convertPackets(ctx, opts.Writer, opts, in, extract)
 			if convErr == nil || wrote || ctx.Err() != nil {
