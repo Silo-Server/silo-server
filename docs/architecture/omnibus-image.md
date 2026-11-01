@@ -31,8 +31,8 @@ The omnibus image is not a drop-in replacement for the base image, which an
 install that pulled `latest` before this layout ran. It runs Silo as `PUID` (911 unless set) instead of root, so media that only root could
 read becomes unreadable; re-owns the bind-mounted Silo, transcode, and download
 directories to that account on first start; and starts `/init` rather than
-`silo`. `/init` needs root, so a container `user:` or a Kubernetes
-`runAsUser` also sets the entrypoint to `silo` (see
+`silo`. `/init` needs root, so a deployment that sets a container `user:` or a
+Kubernetes `runAsUser` must also set the entrypoint to `silo` (see
 [Starting without root](#starting-without-root)).
 
 Because the omnibus image starts from the base one, both run the same Silo
@@ -232,8 +232,9 @@ and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
 `POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
 changes the shared database's schema or settings. `/config` holds the node's
 own state. Silo itself refuses to start either mode without `NODE_URL`, the
-node's identity. An administrator adds the node on the main server, which then
-checks its health over `NODE_URL`.
+node's identity. An administrator registers the node's URL on the main server,
+which checks the node's health at that registered URL; it can differ from
+`NODE_URL` (see [Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
 
 A main server shares its bundled services with nodes when `.env` sets
 `ENABLE_NODE_ACCESS=true` and the two commented port lines in

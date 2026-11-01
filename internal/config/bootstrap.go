@@ -87,7 +87,7 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	// A URL guessed from the listen port would give two nodes on the same port
 	// one identity.
 	if (mode == modeProxy || mode == modeTranscode) && os.Getenv("NODE_URL") == "" {
-		return nil, fmt.Errorf("MODE=%s needs NODE_URL, the URL the main server reaches this node on", mode)
+		return nil, fmt.Errorf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
