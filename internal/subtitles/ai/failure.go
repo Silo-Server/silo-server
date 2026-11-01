@@ -46,7 +46,7 @@ const (
 	failureBilling           = "The AI provider has no available credit or has reached its spending limit. Ask a server administrator to check AI Services."
 	failureKeyRejected       = "The AI provider rejected the server's credentials. Ask a server administrator to check AI Services."
 	failurePlanIneligible    = "The ChatGPT account connected to this server can't share its plan usage. Ask a server administrator to check AI Services."
-	failureModelNotFound     = "The AI provider doesn't recognize the configured model. Ask a server administrator to check AI Services."
+	failureEndpointNotFound  = "The AI provider doesn't offer the configured endpoint or model. Ask a server administrator to check AI Services."
 	failureAudioTooLarge     = "The AI provider rejected the audio as too large. Ask a server administrator to lower Audio per request in AI Services."
 	failureLiveAudioTooLarge = "The AI provider rejected live audio as too large. Ask a server administrator to check AI Services."
 	failureTextTooLarge      = "The AI provider rejected the subtitle text as too large. Ask a server administrator to lower Subtitle lines per request in AI Services."
@@ -68,7 +68,7 @@ const (
 )
 
 var publicFailureReasons = map[string]bool{
-	failureGeneric: true, failureBilling: true, failureKeyRejected: true, failurePlanIneligible: true, failureModelNotFound: true,
+	failureGeneric: true, failureBilling: true, failureKeyRejected: true, failurePlanIneligible: true, failureEndpointNotFound: true,
 	failureAudioTooLarge: true, failureLiveAudioTooLarge: true, failureTextTooLarge: true, failureRateLimited: true, failureUnavailable: true, failureRejected: true,
 	failureTimeout: true, failureUnreachable: true, failureUnusableOutput: true, failureNoSpeech: true,
 	failureNoAudio: true, failureSourceText: true, failureSourceMissing: true, failureSourceEmpty: true,
@@ -121,7 +121,7 @@ func providerFailureReason(provider *providerError) string {
 	case llm.FailureUnauthorized, llm.FailureForbidden:
 		return failureKeyRejected
 	case llm.FailureNotFound:
-		return failureModelNotFound
+		return failureEndpointNotFound
 	case llm.FailureTooLarge:
 		// A transcribe_translate job also sends text, so the request that
 		// failed, not the job kind, names the setting to lower.

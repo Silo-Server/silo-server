@@ -39,7 +39,7 @@ func TestFailureReasonNamesTheCauseWithoutProviderDetails(t *testing.T) {
 		{"key rejected", JobKindTranslate, providerErr(401), failureKeyRejected},
 		{"key lacks access", JobKindTranscribe, providerErr(403), failureKeyRejected},
 		{"payment required", JobKindTranslate, providerErr(402), failureBilling},
-		{"model not found", JobKindTranslate, providerErr(404), failureModelNotFound},
+		{"endpoint or model not found", JobKindTranslate, providerErr(404), failureEndpointNotFound},
 		{"audio too large", JobKindTranscribe, fmt.Errorf("transcribe chunk 1/2: %w", &providerError{err: &llm.HTTPError{StatusCode: 413}, audio: true}), failureAudioTooLarge},
 		{"live audio too large", JobKindTranscribe, fmt.Errorf("transcribe chunk 1/2: %w", &providerError{err: &llm.HTTPError{StatusCode: 413}, audio: true, jobChunks: true}), failureLiveAudioTooLarge},
 		{"text too large", JobKindTranslate, providerErr(413), failureTextTooLarge},
