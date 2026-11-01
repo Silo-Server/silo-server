@@ -2,15 +2,16 @@ package playback
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,11 @@ import (
 // one whole-file demux and no viewer's connection can hold up another's.
 // Fills are per process and the cache is on local disk, so requests on other
 // nodes extract for themselves.
+//
+// The cache dir sits at a predictable path, by default under the shared temp
+// dir, so every operation first checks that no other local account can
+// control it or the transcode dir above it, and reads, writes and removes
+// entries only through that checked directory (see openDir).
 type SubtitleCache struct {
 	// transcodeDir returns the current transcode directory; the cache lives
 	// in a subtitle-cache subdirectory beneath it, created lazily. An empty
@@ -49,6 +55,9 @@ type SubtitleCache struct {
 	// inflight maps a cache key to the fill running for it, so another
 	// request can watch it or wait for it.
 	inflight map[string]*SubtitleCacheFill
+	// refusal is why the cache dir was last refused, or "" when it was
+	// last usable, so a refused dir is logged once rather than per request.
+	refusal string
 
 	// warmSem bounds concurrent background warms server-wide (each warm
 	// demuxes an entire source file — heavy sequential IO). Acquisition is
@@ -326,12 +335,18 @@ func (s *skipWriter) Flush() {
 // started so later windows — the client re-fetches on every seek — hit the
 // fast path.
 func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
+	if cached, _, ok := c.Lookup(opts.InputPath, opts.TrackIndex); ok {
+		// ffmpeg opens the entry again by name. Lookup verified it as a
+		// regular file, and openDir checked that no other account can
+		// change the cache dir or the transcode dir above it.
+		cachedPath := cached.Name()
+		firstCue, cueErr := readSupFirstCue(cached)
+		_ = cached.Close()
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
 		opts.InputIsExtractedSup = true
-		if firstCue, err := readSupFirstCue(cachedPath); err == nil {
+		if cueErr == nil {
 			opts = windowFromCachedSup(opts, firstCue)
 		}
 	} else {
@@ -444,15 +459,23 @@ func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, mo
 }
 
 func (c *SubtitleCache) lookup(inputPath string, trackIndex int, format string) (f *os.File, modTime time.Time, ok bool) {
-	path, modTime, ok := c.cachedFormatEntryPath(inputPath, trackIndex, format)
-	if !ok {
+	if c.dir() == "" {
 		return nil, time.Time{}, false
 	}
-	f, err := os.Open(path)
+	src, err := fspath.Stat(inputPath)
 	if err != nil {
 		return nil, time.Time{}, false
 	}
-	return f, modTime, true
+	root := c.openDir()
+	if root == nil {
+		return nil, time.Time{}, false
+	}
+	defer func() { _ = root.Close() }()
+	f, ok = openEntry(root, subtitleCacheFormatKey(inputPath, trackIndex, src.ModTime(), src.Size(), format))
+	if !ok {
+		return nil, time.Time{}, false
+	}
+	return f, src.ModTime(), true
 }
 
 // LookupText returns a complete cached text subtitle artifact. The cache key
@@ -567,38 +590,6 @@ func normalizeCachedTextSubtitleFormat(format string) string {
 	}
 }
 
-// cachedEntryPath reports whether a committed entry exists for the given
-// source+track and returns its path plus the source file's mtime. Like
-// Lookup it stats the source on every call (a changed source reads as a
-// miss) and bumps the entry's mtime to record recency for LRU eviction.
-// Callers that hand the path to an external reader (ffmpeg) rather than
-// opening it themselves use this instead of Lookup.
-func (c *SubtitleCache) cachedEntryPath(inputPath string, trackIndex int) (path string, srcModTime time.Time, ok bool) {
-	return c.cachedFormatEntryPath(inputPath, trackIndex, subtitleFormatSUP)
-}
-
-func (c *SubtitleCache) cachedFormatEntryPath(inputPath string, trackIndex int, format string) (path string, srcModTime time.Time, ok bool) {
-	dir := c.dir()
-	if dir == "" {
-		return "", time.Time{}, false
-	}
-	src, err := fspath.Stat(inputPath)
-	if err != nil {
-		return "", time.Time{}, false
-	}
-	path = filepath.Join(dir, subtitleCacheFormatKey(inputPath, trackIndex, src.ModTime(), src.Size(), format))
-	if _, err := os.Stat(path); err != nil {
-		return "", time.Time{}, false
-	}
-	// Recency bump for LRU. Best-effort: a failure (e.g. read-only remount)
-	// only degrades eviction ordering, not correctness.
-	now := time.Now()
-	if err := os.Chtimes(path, now, now); err != nil {
-		slog.Debug("subtitle cache recency bump failed", "path", path, "error", err)
-	}
-	return path, src.ModTime(), true
-}
-
 // SubtitleCacheFill is an in-progress cache population for one track. Bytes
 // are written to a temp file via the writer returned by Tee; Commit renames
 // it into place atomically, Discard throws it away. Exactly one of Commit or
@@ -610,7 +601,11 @@ type SubtitleCacheFill struct {
 	trackIndex int
 	srcMtime   time.Time
 	srcSize    int64
-	tmp        *os.File
+	// root is the checked cache dir. The temp file, the published entry
+	// and the cleanup after a commit are all reached through it; release
+	// closes it.
+	root *os.Root
+	tmp  *os.File
 	// progressive marks a fill whose extract streams through Tee, so its
 	// temp file grows as the extract runs and requests can watch it. A text
 	// batch writes its files directly and only at the end.
@@ -647,8 +642,8 @@ var errSubtitleSourceChanged = errors.New("source file changed during extract; c
 // BeginFill reserves the in-flight slot for the given track and creates the
 // temp file the tee will write into. Returns nil — meaning "stream without
 // caching" — when caching is disabled, the source can't be stat'ed, the
-// cache directory can't be created, or another fill for the same track is
-// already in flight.
+// cache directory can't be created or is refused, or another fill for the
+// same track is already in flight.
 func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCacheFill {
 	return c.beginFill(inputPath, trackIndex, subtitleFormatSUP)
 }
@@ -662,16 +657,15 @@ func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format strin
 // temp file. When another fill already holds the slot it returns that fill
 // as inflight instead. Both are nil when caching is unavailable.
 func (c *SubtitleCache) reserveFill(inputPath string, trackIndex int, format string, progressive bool) (fill, inflight *SubtitleCacheFill) {
-	dir := c.dir()
-	if dir == "" {
+	if c.dir() == "" {
 		return nil, nil
 	}
 	src, err := fspath.Stat(inputPath)
 	if err != nil {
 		return nil, nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Warn("subtitle cache dir create failed", "dir", dir, "error", err)
+	root := c.openDir()
+	if root == nil {
 		return nil, nil
 	}
 	fill = &SubtitleCacheFill{
@@ -681,6 +675,7 @@ func (c *SubtitleCache) reserveFill(inputPath string, trackIndex int, format str
 		trackIndex:  trackIndex,
 		srcMtime:    src.ModTime(),
 		srcSize:     src.Size(),
+		root:        root,
 		progressive: progressive,
 		done:        make(chan struct{}),
 		grew:        make(chan struct{}),
@@ -692,16 +687,17 @@ func (c *SubtitleCache) reserveFill(inputPath string, trackIndex int, format str
 	c.mu.Lock()
 	if busy := c.inflight[fill.key]; busy != nil {
 		c.mu.Unlock()
+		_ = root.Close()
 		return nil, busy
 	}
 	c.inflight[fill.key] = fill
 	c.mu.Unlock()
 
-	tmp, err := os.CreateTemp(dir, fill.key+".part-*")
+	tmp, err := root.OpenFile(fill.key+".part-"+rand.Text(), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		fill.endLocked()
 		c.release(fill)
-		slog.Warn("subtitle cache temp create failed", "dir", dir, "error", err)
+		slog.Warn("subtitle cache temp create failed", "dir", root.Name(), "error", err)
 		return nil, nil
 	}
 	fill.tmp = tmp
@@ -713,6 +709,7 @@ func (c *SubtitleCache) release(fill *SubtitleCacheFill) {
 	if c.inflight[fill.key] == fill {
 		close(fill.done)
 		delete(c.inflight, fill.key)
+		_ = fill.root.Close()
 	}
 	c.mu.Unlock()
 }
@@ -875,25 +872,24 @@ func (f *SubtitleCacheFill) Commit() error {
 		return err
 	}
 
-	dir := filepath.Dir(f.tmp.Name())
-	f.c.removeStaleSiblings(dir, f.inputPath, f.trackIndex, f.key)
-	f.c.evict(dir)
+	f.c.removeStaleSiblings(f.root, f.inputPath, f.trackIndex, f.key)
+	f.c.evict(f.root)
 	return nil
 }
 
 // publishLocked syncs, closes, and renames the temp file into place.
 func (f *SubtitleCacheFill) publishLocked() error {
-	tmpPath := f.tmp.Name()
+	tmpName := filepath.Base(f.tmp.Name())
 	if err := f.tmp.Sync(); err != nil {
 		f.closeAndRemoveTmp()
 		return fmt.Errorf("sync subtitle cache temp: %w", err)
 	}
 	if err := f.tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = f.root.Remove(tmpName)
 		return fmt.Errorf("close subtitle cache temp: %w", err)
 	}
-	if err := os.Rename(tmpPath, filepath.Join(filepath.Dir(tmpPath), f.key)); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := f.root.Rename(tmpName, f.key); err != nil {
+		_ = f.root.Remove(tmpName)
 		return fmt.Errorf("publish subtitle cache entry: %w", err)
 	}
 	return nil
@@ -912,84 +908,9 @@ func (f *SubtitleCacheFill) Discard() {
 
 func (f *SubtitleCacheFill) closeAndRemoveTmp() {
 	_ = f.tmp.Close()
-	if err := os.Remove(f.tmp.Name()); err != nil && !os.IsNotExist(err) {
+	// A fill that was already released has closed its root (ErrClosed).
+	err := f.root.Remove(filepath.Base(f.tmp.Name()))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, os.ErrClosed) {
 		slog.Warn("subtitle cache temp remove failed", "path", f.tmp.Name(), "error", err)
-	}
-}
-
-// removeStaleSiblings deletes committed entries for the same source+track
-// with a different mtime/size suffix — the source was replaced, so those can
-// never be served again.
-func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, keepKey string) {
-	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if name == keepKey || !strings.HasPrefix(name, prefix) || filepath.Ext(name) != filepath.Ext(keepKey) {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			slog.Warn("subtitle cache stale entry remove failed", "name", name, "error", err)
-		}
-	}
-}
-
-// evict is the scan-on-write LRU pass: when committed entries exceed the
-// byte budget, the oldest-mtime entries are removed until the total fits.
-// It also sweeps orphaned .part temp files older than stalePartMaxAge
-// (crash leftovers). No background daemon — commits are rare enough that a
-// directory scan per commit is cheap.
-func (c *SubtitleCache) evict(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	type cacheEnt struct {
-		path  string
-		size  int64
-		mtime time.Time
-	}
-	var (
-		ents  []cacheEnt
-		total int64
-	)
-	now := time.Now()
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		if strings.Contains(e.Name(), ".part-") {
-			if now.Sub(info.ModTime()) > stalePartMaxAge {
-				_ = os.Remove(path)
-			}
-			continue
-		}
-		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, ".srt"}, filepath.Ext(e.Name())) {
-			continue
-		}
-		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})
-		total += info.Size()
-	}
-	if total <= c.maxBytes {
-		return
-	}
-	slices.SortFunc(ents, func(a, b cacheEnt) int { return a.mtime.Compare(b.mtime) })
-	for _, e := range ents {
-		if total <= c.maxBytes {
-			break
-		}
-		if err := os.Remove(e.path); err != nil {
-			if !os.IsNotExist(err) {
-				slog.Warn("subtitle cache eviction remove failed", "path", e.path, "error", err)
-			}
-			continue
-		}
-		slog.Info("evicted cached subtitle track (LRU)", "path", e.path, "bytes", e.size)
-		total -= e.size
 	}
 }
