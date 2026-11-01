@@ -1859,11 +1859,13 @@ master.m3u8?silo_rendition=video&...
 
 `NAME` is the inventory row's `label` (its language, or `Subtitles`, when it
 has none), with `"` replaced by `'`, control characters dropped and ` (2)`,
-` (3)`... added to repeats; `LANGUAGE` is the row's language as a canonical
-BCP 47 tag (`eng` becomes `en`), left out when it is empty, `und` or not a
-language tag. With subtitles off every rendition is `DEFAULT=NO` but still
-`AUTOSELECT=YES`, so a player that follows the system's caption or language
-preferences may turn one on by itself: a client playing with subtitles off
+` (3)`... added to repeats. New names use at most 232 UTF-8 bytes from the
+sanitized label, leaving room for the uniqueness suffix within 256 bytes.
+Names carried by existing recipes keep their full value. `LANGUAGE` is the
+row's language as a canonical BCP 47 tag (`eng` becomes `en`), left out when
+it is empty, `und` or not a language tag. With subtitles off every rendition
+is `DEFAULT=NO` but still `AUTOSELECT=YES`, so a player that follows the
+system's caption or language preferences may turn one on by itself: a client playing with subtitles off
 must disable subtitle selection in its player explicitly (AVPlayer: select
 no option in the legible group; Media3: disable the text track type; Roku:
 turn captions off). Each listed inventory row carries `hls_rendition: {"group_id":
