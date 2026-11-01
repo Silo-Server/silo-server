@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type DownloadRegistryService interface {
@@ -198,6 +199,8 @@ func downloadProblem(err error) *Problem {
 		return NewProblem(TypePermissionDenied, "Downloads are not allowed.")
 	case errors.Is(err, downloads.ErrManifestUnavailable), errors.Is(err, downloads.ErrSubscriptionsUnavailable):
 		return NewProblem(TypeDependencyUnavailable, "Offline assets are not configured.")
+	case errors.Is(err, playback.ErrSubtitleReadsBusy):
+		return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").WithRetryAfter(playback.SubtitleReadsRetryAfter)
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		return NewProblem(TypeMalformedRequest, "Invalid subtitle reference.")
 	case errors.Is(err, downloads.ErrStatusConflict):

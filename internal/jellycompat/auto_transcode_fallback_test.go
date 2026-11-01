@@ -171,6 +171,7 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 			t.Errorf("decode remote request: %v", err)
 		}
 		response.SessionID = remoteReq.SessionID
+		response.RequireAudioTrack = remoteReq.RequireAudioTrack
 		writeJSON(w, http.StatusAccepted, response)
 	}))
 	defer node.Close()

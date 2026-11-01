@@ -896,6 +896,8 @@ func (h *DownloadHandler) writeAssetError(w http.ResponseWriter, asset, id strin
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 	case errors.Is(err, downloads.ErrManifestUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Offline assets are not configured")
+	case errors.Is(err, playback.ErrSubtitleReadsBusy):
+		writeSubtitleReadsBusy(w)
 	case errors.Is(err, downloads.ErrFeatureDisabled), errors.Is(err, downloads.ErrDownloadNotAllowed):
 		writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
 	default:

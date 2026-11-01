@@ -654,9 +654,11 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	// Discovery and one-frame smoke commands finish immediately. Only a
 	// transport stays alive; exec keeps it one process so cancellation closes
 	// its pipes without waiting for an orphaned shell child.
+	// The playlist is the HLS output's, which a subtitle rendition's outputs
+	// may follow.
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
-		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) last=\"$arg\" ;; esac; done\n" +
 		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
