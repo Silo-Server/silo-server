@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -571,6 +572,22 @@ func TestRehomeRestoresOnDemandRenditionNamesFromTheRecord(t *testing.T) {
 	}
 }
 
+// The bound on index reads starts with the first read: planning that took
+// longer than it beforehand still reads the index.
+func TestCueIndexReadsBoundStartsAtTheFirstRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		reads := newCueIndexReadsV3()
+		reads.lookup = func(context.Context, string) (playback.CueIndexedSubtitles, error) {
+			return playback.CueIndexedSubtitles{Tracks: map[uint64]bool{3: true}}, nil
+		}
+		ctx := context.WithValue(t.Context(), cueIndexReadsKeyV3{}, reads)
+		time.Sleep(2 * cueIndexedSubtitleTrackTimeoutV3) //nolint:forbidigo // synctest: virtual planning time before the first read
+		if got := cueIndexedSubtitleTracksV3(ctx, &models.MediaFile{ID: 7, FilePath: "/media/movie.mkv"})(); got == nil || !got.Tracks[3] {
+			t.Fatalf("index read after slow planning answered %+v", got)
+		}
+	})
+}
+
 // A lookup held up before it can see the deadline, as a stat on a stalled
 // mount is, still answers none by the deadline, so planning keeps the
 // pipeline rendition instead of waiting on it.
@@ -578,7 +595,7 @@ func TestCueIndexReadsAnswerByTheDeadline(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	reads := newCueIndexReadsV3()
-	reads.deadline = time.Now().Add(20 * time.Millisecond)
+	reads.timeout = 20 * time.Millisecond
 	reads.lookup = func(context.Context, string) (playback.CueIndexedSubtitles, error) {
 		<-release
 		return playback.CueIndexedSubtitles{}, nil

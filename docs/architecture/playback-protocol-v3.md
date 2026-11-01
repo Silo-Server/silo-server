@@ -1832,8 +1832,9 @@ source's own index finds: every Matroska track with Cues that the muxer's
 `NUMBER_OF_FRAMES` tag confirms or that has no such tag, and every MP4 text
 track (see [the index reader](embedded-subtitle-index.md)). The server reads
 the index when the attempt starts; every planning pass of one start or
-replan, alternate versions included, shares one 3 s bound and reads each
-file once. A replan that stays on the playing HLS stream's file lists the
+replan, alternate versions included, shares one 3 s bound, which starts
+with its first index read so slower planning work before it doesn't use it
+up, and reads each file once. A replan that stays on the playing HLS stream's file lists the
 tracks the stream already serves, none for a stream serving none, without
 reading the index again, except that one selecting an embedded text track on
 a stream without on-demand renditions, which restarts anyway, reads it. A
