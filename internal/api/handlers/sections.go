@@ -1817,10 +1817,11 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 }
 
 // sectionItemFromMediaItem maps an item's own catalog fields onto a card.
-// Every card surface (Home and library sections, recommendations, Watch
-// Tonight) starts from it, so a card shows the same metadata, and the same
-// poster badges, wherever the item appears. Callers add the per-request
-// parts: artwork URLs, overlay summary, user state and row metadata.
+// Home and library sections, recommendations and Watch Tonight all start from
+// it, so their cards carry the same catalog fields and poster badges. It copies
+// the item as given: only Home and library rows localize their items first.
+// Callers add the per-request parts: artwork URLs, overlay summary, user state
+// and row metadata.
 func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	resp := sectionItemResponse{
 		ContentID:              item.ContentID,
