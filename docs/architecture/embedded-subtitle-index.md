@@ -138,7 +138,7 @@ or, for an on-demand segment, with an empty segment.
 | Index reads | callers wait 30 s; a read that timed out stays registered until its I/O finishes, so retries of that file version share its timeout; eight reads at most across the process, timed-out ones included, and a load past them fails at once |
 | Packet reads | eight operations across the process, including canceled ones until every worker exits; one operation per file version, track and window; a busy key or full limit fails a new read promptly |
 | Local copies of kept tracks | 1 GiB per node by default, least recently used first; a copy being written, fetched or read, holds its size from before its first byte, so eviction makes room ahead, and fetches may not hold more than the budget |
-| Kept tracks | a text track 32 MiB, a PGS track 128 MiB; one media file's tracks together at most the file's own size and 1 GiB, checked before a read starts and again before a track is kept; every kept track together 64 GiB, past which the least recently used rows go and the collector deletes their objects. A track past a bound isn't kept and is demuxed when requested |
+| Kept tracks | a text track 32 MiB, a PGS track 128 MiB; one media file's tracks together at most the file's own size and 1 GiB; every kept track together 64 GiB, past which the least recently used rows go and their objects are deleted at once. Both totals count tracks still being stored, and are reserved before an object is written. A track past a bound isn't kept and is demuxed when requested |
 | Whole-track flights | 16 running or queued per store and 8 per source file, including canceled workers until they exit; callers may join an admitted track at capacity; a request for another track is answered `503` with `Retry-After`, and whole-track text conversions (jellycompat, AI translation) demux instead; a flight still waiting for a read slot stops when its last caller goes |
 | Cold mirror downloads | eight workers and 256 MiB of recorded output bytes reserved across the process, including temporary files until their worker finishes cleanup; past these or the copies' budget no fetch starts: a whole track streams the object from storage, checked against the row's size and SHA-256 at its end, and a window reads the source; local copies and callers joining a fetch remain available |
 | Opens and stats | observe the caller's context; one kernel call per path and 32 per process until it returns |
@@ -243,12 +243,24 @@ collector deletes the object, and if it lands, the collector finds the key
 live and only dequeues it. A row that already names the key has its object,
 so reading an unchanged track again writes only the row.
 
-**Budget.** A row's `updated_at` is its recency: keeping the track sets it,
-and serving it moves it at most once an hour per node. After each keep, the
-least recently used rows past the store's budget (see Bounds) are deleted;
-their trigger queues the objects, which the collector deletes a day later. A
-file's tracks are parts of it, so together they may not hold more than the
-file does: more means packets the file points at more than once.
+**Budget.** A keep reserves its track's bytes before storing the object, in
+one transaction: the file's share (see Bounds) under a per-file advisory
+lock, so two of a file's tracks can't both fit what only one does, then the
+store's total under the lock of `embedded_subtitle_track_usage`, a row that
+statement triggers keep equal to the rows' total, so no keep sums the table.
+Reservations (`embedded_subtitle_track_reservations`) count toward both until
+the row lands, the keep gives up, or a lease of two minutes runs out. When
+the total is full, the reservation evicts rows from the least recently used,
+skipping rows locked by a writer or being kept again; if that can't make
+room, it evicts nothing and the track isn't kept. The keeper deletes the
+evicted objects at once, so storage shrinks with the budget; the delete
+trigger queues them for the collector as well, in case that fails, and a
+reader still on one reads its track again. A row's `updated_at` is its
+recency: keeping the track sets it, and serving it moves it at most once an
+hour per node. A file's tracks are parts of it, so together they may not
+hold more than the file does: more means packets the file points at more
+than once. Objects a row stops naming for other reasons (a changed or
+deleted file) wait out the collector's day as before.
 
 **One read at a time.** Concurrent calls for a track on a node share one
 read. A prefetch starts its read at background priority and stops it when

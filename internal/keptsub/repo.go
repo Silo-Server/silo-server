@@ -49,7 +49,8 @@ type Repo interface {
 	Track(ctx context.Context, fileID, streamIndex int) (*Track, error)
 	// FileTracks returns every kept track of a file.
 	FileTracks(ctx context.Context, fileID int) ([]Track, error)
-	// PutTrack records t, replacing the file's row for the same stream.
+	// PutTrack records t, replacing the file's row for the same stream, and
+	// ends the stream's reservation.
 	PutTrack(ctx context.Context, t Track) error
 	// DeleteTrack removes the stream's row while it still names blobKey.
 	DeleteTrack(ctx context.Context, fileID, streamIndex int, blobKey string) error
@@ -65,10 +66,29 @@ type Repo interface {
 	FileKeptBytes(ctx context.Context, fileID, except int) (int64, error)
 	// Touch records that the stream's kept track was just used.
 	Touch(ctx context.Context, fileID, streamIndex int) error
-	// EvictBeyond removes the least recently used rows until every row left
-	// holds at most maxBytes together, and reports how many went. A removed
-	// row's object is queued for the collector.
-	EvictBeyond(ctx context.Context, maxBytes int64) (int, error)
+	// Reserve claims room for a track before its object is stored, evicting
+	// the least recently used rows when the store's total is full, and
+	// returns the evicted rows' keys. It fails with ErrNoRoom, evicting
+	// nothing, when the file's share or the store can't take the track.
+	Reserve(ctx context.Context, res Reservation) ([]string, error)
+	// Unreserve ends the stream's reservation without a row.
+	Unreserve(ctx context.Context, fileID, streamIndex int) error
+}
+
+// ErrNoRoom means a track's file share or the store's total can't take it.
+var ErrNoRoom = errors.New("keptsub: no room to keep the track")
+
+// Reservation is room asked for one track's bytes.
+type Reservation struct {
+	MediaFileID int
+	StreamIndex int
+	Bytes       int64
+	// FileMax bounds the file's tracks together, reservations included;
+	// StoreMax every track and reservation together.
+	FileMax  int64
+	StoreMax int64
+	// Lease is how long the reservation counts without its row landing.
+	Lease time.Duration
 }
 
 // PgRepo is Repo on PostgreSQL.
@@ -126,7 +146,15 @@ func (r *PgRepo) FileTracks(ctx context.Context, fileID int) ([]Track, error) {
 }
 
 func (r *PgRepo) PutTrack(ctx context.Context, t Track) error {
-	_, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("record kept subtitle track: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The row goes first: its byte count locks the usage row, which a
+	// reservation takes before its own row, so the two never wait on each
+	// other in turn.
+	_, err = tx.Exec(ctx, `
 		INSERT INTO public.embedded_subtitle_tracks (`+trackColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (media_file_id, embedded_stream_index) DO UPDATE SET
@@ -141,6 +169,13 @@ func (r *PgRepo) PutTrack(ctx context.Context, t Track) error {
 		t.BlobKey, t.StreamFormat, t.StartTime.Microseconds(), t.SHA256, t.Bytes, t.Packets,
 		t.Completeness, t.Method, t.HasOverrideTags)
 	if err != nil {
+		return fmt.Errorf("record kept subtitle track: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.embedded_subtitle_track_reservations
+		WHERE media_file_id = $1 AND embedded_stream_index = $2`, t.MediaFileID, t.StreamIndex); err != nil {
+		return fmt.Errorf("record kept subtitle track: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("record kept subtitle track: %w", err)
 	}
 	return nil
@@ -166,23 +201,129 @@ func (r *PgRepo) Touch(ctx context.Context, fileID, streamIndex int) error {
 	return nil
 }
 
-// EvictBeyond keeps the most recently used rows that fit in maxBytes; the
-// delete trigger queues every removed row's object.
-func (r *PgRepo) EvictBeyond(ctx context.Context, maxBytes int64) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM public.embedded_subtitle_tracks t
-		USING (
-			SELECT media_file_id, embedded_stream_index, SUM(byte_size) OVER (
-				ORDER BY updated_at DESC, media_file_id DESC, embedded_stream_index DESC) AS kept_through
-			FROM public.embedded_subtitle_tracks
-		) ranked
-		WHERE (SELECT SUM(byte_size) FROM public.embedded_subtitle_tracks) > $1
-			AND t.media_file_id = ranked.media_file_id AND t.embedded_stream_index = ranked.embedded_stream_index
-			AND ranked.kept_through > $1`, maxBytes)
-	if err != nil {
-		return 0, fmt.Errorf("evict kept subtitle tracks: %w", err)
+// evictionBatch is how many least recently used rows Reserve looks at at a
+// time.
+const evictionBatch = 32
+
+// Reserve checks the file's share under a per-file advisory lock, so two of
+// a file's tracks can't both fit what only one does, then the store's total
+// under the usage row's lock, which every keep takes in turn. Eviction skips
+// locked rows and reserved streams, so it never waits on a writer or takes
+// a track being kept.
+func (r *PgRepo) Reserve(ctx context.Context, res Reservation) ([]string, error) {
+	if res.Bytes > res.StoreMax {
+		return nil, fmt.Errorf("%w: %d bytes over the store's %d", ErrNoRoom, res.Bytes, res.StoreMax)
 	}
-	return int(tag.RowsAffected()), nil
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('embedded_subtitle_track_reservations'), $1)`, res.MediaFileID); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	var fileBytes int64
+	if err := tx.QueryRow(ctx, `SELECT
+		COALESCE((SELECT SUM(byte_size) FROM public.embedded_subtitle_tracks
+			WHERE media_file_id = $1 AND embedded_stream_index <> $2), 0)
+		+ COALESCE((SELECT SUM(byte_size) FROM public.embedded_subtitle_track_reservations
+			WHERE media_file_id = $1 AND embedded_stream_index <> $2 AND expires_at > now()), 0)`,
+		res.MediaFileID, res.StreamIndex).Scan(&fileBytes); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	if fileBytes+res.Bytes > res.FileMax {
+		return nil, fmt.Errorf("%w: file %d keeps %d bytes, %d more would pass its %d", ErrNoRoom, res.MediaFileID, fileBytes, res.Bytes, res.FileMax)
+	}
+	// The stream's own row is replaced when its new one lands.
+	var used int64
+	if err := tx.QueryRow(ctx, `SELECT u.kept_bytes
+		- COALESCE((SELECT byte_size FROM public.embedded_subtitle_tracks
+			WHERE media_file_id = $1 AND embedded_stream_index = $2), 0)
+		+ COALESCE((SELECT SUM(byte_size) FROM public.embedded_subtitle_track_reservations
+			WHERE (media_file_id, embedded_stream_index) <> ($1, $2) AND expires_at > now()), 0)
+		FROM public.embedded_subtitle_track_usage u FOR UPDATE OF u`, res.MediaFileID, res.StreamIndex).Scan(&used); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	var evicted []string
+	if need := used + res.Bytes - res.StoreMax; need > 0 {
+		if evicted, err = evictLeastRecentlyUsed(ctx, tx, need, res.MediaFileID, res.StreamIndex); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.embedded_subtitle_track_reservations WHERE expires_at <= now()`); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO public.embedded_subtitle_track_reservations (media_file_id, embedded_stream_index, byte_size, expires_at)
+		VALUES ($1, $2, $3, now() + $4 * interval '1 millisecond')
+		ON CONFLICT (media_file_id, embedded_stream_index) DO UPDATE
+		SET byte_size = EXCLUDED.byte_size, expires_at = EXCLUDED.expires_at`,
+		res.MediaFileID, res.StreamIndex, res.Bytes, res.Lease.Milliseconds()); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("reserve kept subtitle track: %w", err)
+	}
+	return evicted, nil
+}
+
+// evictLeastRecentlyUsed deletes rows other than the reserving stream's,
+// from the least recently used, until they free need bytes, and returns
+// their keys; the delete trigger queues them too. It fails with ErrNoRoom
+// when every evictable row frees less, and the caller's rollback keeps them.
+func evictLeastRecentlyUsed(ctx context.Context, tx pgx.Tx, need int64, fileID, streamIndex int) ([]string, error) {
+	var keys []string
+	for freed := int64(0); freed < need; {
+		rows, err := tx.Query(ctx, `SELECT t.media_file_id, t.embedded_stream_index, t.byte_size
+			FROM public.embedded_subtitle_tracks t
+			WHERE (t.media_file_id, t.embedded_stream_index) <> ($2, $3)
+				AND NOT EXISTS (SELECT 1 FROM public.embedded_subtitle_track_reservations v
+				WHERE v.media_file_id = t.media_file_id AND v.embedded_stream_index = t.embedded_stream_index
+					AND v.expires_at > now())
+			ORDER BY t.updated_at, t.media_file_id, t.embedded_stream_index
+			LIMIT $1 FOR UPDATE OF t SKIP LOCKED`, evictionBatch, fileID, streamIndex)
+		if err != nil {
+			return nil, fmt.Errorf("evict kept subtitle tracks: %w", err)
+		}
+		var files, streams []int32
+		for rows.Next() && freed < need {
+			var file, stream int32
+			var size int64
+			if err := rows.Scan(&file, &stream, &size); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("evict kept subtitle tracks: %w", err)
+			}
+			files, streams, freed = append(files, file), append(streams, stream), freed+size
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("evict kept subtitle tracks: %w", err)
+		}
+		if len(files) == 0 {
+			return nil, fmt.Errorf("%w: the store is full of tracks in use", ErrNoRoom)
+		}
+		deleted, err := tx.Query(ctx, `DELETE FROM public.embedded_subtitle_tracks t
+			USING unnest($1::int[], $2::int[]) AS v(media_file_id, embedded_stream_index)
+			WHERE t.media_file_id = v.media_file_id AND t.embedded_stream_index = v.embedded_stream_index
+			RETURNING t.blob_key`, files, streams)
+		if err != nil {
+			return nil, fmt.Errorf("evict kept subtitle tracks: %w", err)
+		}
+		batch, err := pgx.CollectRows(deleted, pgx.RowTo[string])
+		if err != nil {
+			return nil, fmt.Errorf("evict kept subtitle tracks: %w", err)
+		}
+		keys = append(keys, batch...)
+	}
+	return keys, nil
+}
+
+func (r *PgRepo) Unreserve(ctx context.Context, fileID, streamIndex int) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM public.embedded_subtitle_track_reservations
+		WHERE media_file_id = $1 AND embedded_stream_index = $2`, fileID, streamIndex); err != nil {
+		return fmt.Errorf("end kept subtitle track reservation: %w", err)
+	}
+	return nil
 }
 
 func (r *PgRepo) DeleteTrack(ctx context.Context, fileID, streamIndex int, blobKey string) error {
