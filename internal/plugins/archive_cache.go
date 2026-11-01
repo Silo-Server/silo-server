@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -168,24 +169,24 @@ func (c *ArchiveCache) ensure(
 	if err != nil {
 		reader, manifestBytes, manifest, err = c.recoverLegacyBinaryArchive(ctx, installation.ID, archive, err)
 		if err != nil {
-			return nil, fmt.Errorf("open stored plugin archive for installation %d: %w", installation.ID, err)
+			return nil, unreadableArchivef("open stored plugin archive for installation %d: %w", installation.ID, err)
 		}
 	}
 	if archive.Checksum != manifest.GetChecksum() {
-		return nil, fmt.Errorf("stored plugin archive checksum mismatch for installation %d", installation.ID)
+		return nil, unreadableArchivef("stored plugin archive checksum mismatch for installation %d", installation.ID)
 	}
 	if len(archive.ManifestJSON) > 0 && !bytes.Equal(archive.ManifestJSON, manifestBytes) {
-		return nil, fmt.Errorf("stored plugin manifest mismatch for installation %d", installation.ID)
+		return nil, unreadableArchivef("stored plugin manifest mismatch for installation %d", installation.ID)
 	}
 	if manifest.GetPluginId() != installation.PluginID {
-		return nil, fmt.Errorf(
+		return nil, unreadableArchivef(
 			"stored plugin archive plugin_id %q does not match installation %q",
 			manifest.GetPluginId(),
 			installation.PluginID,
 		)
 	}
 	if manifest.GetVersion() != installation.Version {
-		return nil, fmt.Errorf(
+		return nil, unreadableArchivef(
 			"stored plugin archive version %q does not match installation %q",
 			manifest.GetVersion(),
 			installation.Version,
@@ -201,12 +202,24 @@ func (c *ArchiveCache) ensure(
 	}
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		// Creating or writing the files fails with a *fs.PathError, a fault
+		// of this host's disk. Anything else came from the archive: an entry
+		// that doesn't decompress or match its CRC, or an unsafe entry name.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		}
+		return nil, unreadableArchivef("extract stored plugin archive for installation %d: %w", installation.ID, err)
 	}
 	info, err := c.validateInstalledFiles(binaryPath, manifest)
 	if err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		// The files were just written from the archive, so a failure other
+		// than this host's disk is the archive's too: the binary or a packaged
+		// asset stored as a directory entry.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		}
+		return nil, unreadableArchivef("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
 	if c.root != "" {
 		// Proxy caches may contain a binary installed by an API host on a
@@ -336,6 +349,18 @@ func (c *ArchiveCache) recoverLegacyBinaryArchive(
 	}
 
 	return reader, manifestBytes, manifest, nil
+}
+
+// unreadableArchiveError is a failure of a stored archive's own contents. It
+// matches ErrArchiveUnreadable and keeps its cause's message and chain.
+type unreadableArchiveError struct{ err error }
+
+func (e *unreadableArchiveError) Error() string { return e.err.Error() }
+
+func (e *unreadableArchiveError) Unwrap() []error { return []error{ErrArchiveUnreadable, e.err} }
+
+func unreadableArchivef(format string, args ...any) error {
+	return &unreadableArchiveError{err: fmt.Errorf(format, args...)}
 }
 
 func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
