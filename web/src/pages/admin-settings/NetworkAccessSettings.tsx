@@ -1,5 +1,6 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 
+import { DirectConnectionsSection } from "@/components/admin/DirectConnectionsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -244,6 +245,7 @@ export default function NetworkAccessSettings() {
       <p className="text-muted-foreground max-w-prose text-sm">
         {t("web.admin.settings.network.page.intro")}
       </p>
+      <DirectConnectionsSection />
       {capabilities.isLoading ? (
         <div className="space-y-3" aria-busy="true">
           <Skeleton className="h-6 w-1/3" />
