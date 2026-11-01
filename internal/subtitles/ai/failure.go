@@ -93,7 +93,7 @@ func failureReason(kind JobKind, err error) string {
 		return failureUnusableOutput
 	case errors.Is(err, ErrNoSpeech):
 		return failureNoSpeech
-	case errors.Is(err, errSourceMissing):
+	case errors.Is(err, errSourceMissing), errors.Is(err, errSourceChanged):
 		return failureSourceMissing
 	case errors.Is(err, errSourceEmpty):
 		return failureSourceEmpty
