@@ -126,6 +126,7 @@ or, for an on-demand segment, with an empty segment.
 | --- | --- |
 | Matroska metadata reads | EBML header 4 KiB, SeekHead and Info 1 MiB, Tracks and Cues 16 MiB, Tags 8 MiB; Info, Tracks, Cues and Tags together 32 MiB per index read |
 | Matroska tracks | 1,000 TrackEntries; 8 ContentEncodings kept per entry |
+| Matroska frame-count tags | counts only for indexed subtitle TrackUIDs, at most 1,000; targets are visited without retaining a list, including repeated UIDs |
 | Codec-private data | 16 MiB of decompression shared by an index's tracks, old and new buffers counted while one grows; a track past it is unsupported |
 | MP4 metadata | `moov` 64 MiB; 1,000 tracks; `ftyp` 4 KiB and `mvhd` 64 KiB kept; each box a track keeps 64 KiB and all its index's tracks' kept boxes 16 MiB, a track past either keeping nothing and unsupported; the codec's private data is read from the kept `stsd`, not copied again |
 | Index entries | 2^20 cues (Matroska) or samples (MP4) across an index's tracks, checked before any is kept; past it the Cues aren't trusted, or the MP4 index is malformed |

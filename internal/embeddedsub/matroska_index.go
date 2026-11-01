@@ -122,7 +122,12 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	if idx.Tracks, err = subtitleTracks(el.tracks); err != nil {
 		return nil, err
 	}
-	frames := map[uint64]int64{}
+	frames := make(map[uint64]int64, len(idx.Tracks))
+	for _, t := range idx.Tracks {
+		if t.UID != 0 {
+			frames[t.UID] = -1
+		}
+	}
 	for _, tags := range el.tags {
 		parseFrameCounts(tags, frames)
 	}
@@ -499,49 +504,53 @@ func newTrack(e matroska.TrackEntry, privateBudget *budget) Track {
 	return t
 }
 
-// parseFrameCounts records the NUMBER_OF_FRAMES statistics tag of each
-// track a Tags element targets by TrackUID.
+// parseFrameCounts updates NUMBER_OF_FRAMES for the TrackUIDs already in
+// counts. Its caller seeds only indexed subtitle tracks, bounding the map.
 func parseFrameCounts(tags []byte, counts map[uint64]int64) {
 	matroska.Children(tags, func(id uint64, tag []byte) {
 		if id != matroska.IDTag {
 			return
 		}
-		var uids []uint64
 		frames := int64(-1)
 		matroska.Children(tag, func(id uint64, v []byte) {
-			switch id {
-			case matroska.IDTargets:
-				matroska.Children(v, func(id uint64, v []byte) {
-					if id == matroska.IDTagTrackUID {
-						uids = append(uids, matroska.Uint(v))
-					}
-				})
-			case matroska.IDSimpleTag:
-				var name, value string
-				matroska.Children(v, func(id uint64, v []byte) {
-					switch id {
-					case matroska.IDTagName:
-						name = matroska.String(v)
-					case matroska.IDTagString:
-						value = matroska.String(v)
-					}
-				})
-				if name == "NUMBER_OF_FRAMES" {
-					if n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && n >= 0 {
-						frames = n
-					}
+			if id != matroska.IDSimpleTag {
+				return
+			}
+			var name, value string
+			matroska.Children(v, func(id uint64, v []byte) {
+				switch id {
+				case matroska.IDTagName:
+					name = matroska.String(v)
+				case matroska.IDTagString:
+					value = matroska.String(v)
+				}
+			})
+			if name == "NUMBER_OF_FRAMES" {
+				if n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && n >= 0 {
+					frames = n
 				}
 			}
 		})
 		if frames < 0 {
 			return
 		}
-		for _, uid := range uids {
-			// A zero TagTrackUID targets every track, not one.
-			if uid != 0 {
-				counts[uid] = frames
+		// Targets may precede the statistic. Visit them after finding its
+		// value without retaining a list that a crafted tag could expand.
+		matroska.Children(tag, func(id uint64, v []byte) {
+			if id != matroska.IDTargets {
+				return
 			}
-		}
+			matroska.Children(v, func(id uint64, v []byte) {
+				if id != matroska.IDTagTrackUID {
+					return
+				}
+				uid := matroska.Uint(v)
+				// A zero TagTrackUID targets every track, not one.
+				if _, ok := counts[uid]; ok && uid != 0 {
+					counts[uid] = frames
+				}
+			})
+		})
 	})
 }
 
