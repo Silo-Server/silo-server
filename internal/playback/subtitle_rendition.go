@@ -346,6 +346,12 @@ type subtitleCueWindow struct {
 	// muxShift is the span's observed muxShift, which the timestamp map adds.
 	muxShift       float64
 	observed, open bool
+	// restartGrid marks an encode's segment beyond the running generation's
+	// reach, whose video a seek restart on the grid will cut. Its window then
+	// starts no later than grid90k, the segment's start on that grid on the
+	// cue clock, so a cue on screen there is in it.
+	restartGrid bool
+	grid90k     int64
 }
 
 // subtitleSegmentWindow returns the window of segment segNum of the

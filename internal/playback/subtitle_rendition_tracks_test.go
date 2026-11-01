@@ -471,6 +471,57 @@ func TestOnDemandSubtitleSegmentsDoNotWaitForTheStream(t *testing.T) {
 	}
 }
 
+// A segment far ahead of the running generation is cut where the seek
+// restart its video request starts would cut it, on the grid, not from the
+// running generation's first frame: a cue still on screen at the grid
+// boundary is in it. A segment the running generation will reach keeps that
+// generation's window, as the pipeline rendition cuts it.
+func TestOnDemandSegmentsAheadOfTheGenerationStartOnTheGrid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	base, _ := onDemandRealSources(ctx, t, ffmpeg)
+	numbers := subtitleTrackNumbers(t, base)
+	dir := t.TempDir()
+	opts := TranscodeOpts{
+		InputPath: base, OutputDir: dir, FFmpegPath: ffmpeg, SourceVideoCodec: "h264", TargetCodecVideo: transcodeCodecH264, TargetCodecAudio: "aac",
+		SegmentDuration: 2, TotalDuration: 30, SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
+		SubtitleRenditionTracks: []SubtitleRenditionTrack{{TrackNumber: numbers[0], Name: "A", Default: true}},
+	}
+	// The running generation from segment 0 has written segments 0 and 1, and
+	// its first frame came 1.5 s into the grid.
+	playlist := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.000000,\nseg_00000.ts\n#EXTINF:2.000000,\nseg_00001.ts\n"
+	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(playlist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := &TranscodeSession{outputDir: dir, opts: opts, running: true, subtitleSpans: []subtitleCueSpan{
+		{file: subtitleCueFileName(0), start: 0, end: -1, origin: 1.5, originKnown: true},
+	}}
+	for _, tc := range []struct {
+		segment int
+		cue     string
+		want    bool
+	}{
+		// [24, 26) on the grid, [25.5, 27.5) from the running generation's
+		// first frame: "Across A" (21-25 s) is on screen at 24 s.
+		{segment: 12, cue: "Across A", want: true},
+		// Segment 3 is within the running generation's reach, which places it
+		// at [7.5, 9.5): "Boundary A" (5-7.2 s) ends before it.
+		{segment: 3, cue: "Boundary A", want: false},
+	} {
+		segment, err := session.subtitleTrackSegmentVTT(ctx, numbers[0], tc.segment)
+		if err != nil || strings.Contains(string(segment), tc.cue) != tc.want {
+			t.Fatalf("segment %d has %q: %v, want %v (%v):\n%s", tc.segment, tc.cue, !tc.want, tc.want, err, segment)
+		}
+	}
+}
+
 // TestCueIndexedSubtitleTracksFallsBackWithoutCues reads a Matroska file
 // written to a pipe, which has no Cues, and the same streams written to a
 // file, which does.
@@ -1077,13 +1128,13 @@ func TestOnDemandEmptyMP4WindowIsCached(t *testing.T) {
 			// A hit must not start another conversion.
 			opts.FFmpegPath = filepath.Join(dir, "missing-ffmpeg")
 		}
-		data, err := readOnDemandCues(t.Context(), opts, number, 0, subtitleCueSpan{}, subtitleCueWindow{duration: 2})
+		data, err := readOnDemandCues(t.Context(), opts, number, 0, subtitleCueSpan{}, &subtitleCueWindow{duration: 2})
 		if err != nil || string(bytes.TrimSpace(data)) != "WEBVTT" {
 			t.Fatalf("legitimate empty window: %q, %v", data, err)
 		}
 	}
 	opts.FFmpegPath = ffmpeg
-	data, err := readOnDemandCues(t.Context(), opts, number, 5, subtitleCueSpan{}, subtitleCueWindow{offset: 10, duration: 2})
+	data, err := readOnDemandCues(t.Context(), opts, number, 5, subtitleCueSpan{}, &subtitleCueWindow{offset: 10, duration: 2})
 	if err != nil || !bytes.Contains(data, []byte("later")) {
 		t.Fatalf("later text window: %q, %v", data, err)
 	}
