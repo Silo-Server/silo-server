@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sync"
 	"time"
@@ -380,16 +381,18 @@ func (m *matroskaRead) readElement(at int64, first []byte) (_ blockElement, held
 		if err := m.budget.take(total); err != nil {
 			return blockElement{}, 0, err
 		}
-		rest, err := readUpTo(m.r, at+int64(len(first)), total-len(first))
-		if err != nil {
+		buf := make([]byte, total)
+		copy(buf, first)
+		n, err := m.r.ReadAt(buf[len(first):], at+int64(len(first)))
+		if err != nil && !errors.Is(err, io.EOF) {
 			m.budget.give(total)
 			return blockElement{}, 0, err
 		}
-		if len(first)+len(rest) < total {
+		if len(first)+n < total {
 			m.budget.give(total)
 			return blockElement{}, 0, corrupt("block at %d is cut off", at)
 		}
-		first, held = append(first[:len(first):len(first)], rest...), total
+		first, held = buf, total
 	}
 	return blockElement{id: id, data: first[hl:total]}, held, nil
 }

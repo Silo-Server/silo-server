@@ -887,6 +887,42 @@ func TestCompressionSettingsCountAgainstCacheBudget(t *testing.T) {
 	}
 }
 
+func TestLargeBlockReadStaysWithinBudget(t *testing.T) {
+	const payloadBytes = 8 << 20
+	for _, simple := range []bool{true, false} {
+		t.Run(map[bool]string{true: "SimpleBlock", false: "BlockGroup"}[simple], func(t *testing.T) {
+			block := (fixtureBlock{track: textTrack, simple: simple, duration: 1000,
+				frames: [][]byte{bytes.Repeat([]byte("a"), payloadBytes)}}).element()
+			const offset = 17
+			file := append(bytes.Repeat([]byte{0xCC}, offset), block...)
+			first := bytes.Clone(block[:blockWindow])
+			m := matroskaRead{r: newFileReader(t.Context(), bytes.NewReader(file), 1), budget: newBudget(int64(len(block)))}
+			id, _, hl, ok := matroska.ParseElementHeader(block)
+			if !ok {
+				t.Fatal("invalid fixture block")
+			}
+			runtime.GC()
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			element, held, err := m.readElement(offset, first)
+			runtime.ReadMemStats(&after)
+			if err != nil || element.id != id || !bytes.Equal(element.data, block[hl:]) {
+				t.Fatalf("large block read: id = %#x, bytes = %d, err = %v", element.id, len(element.data), err)
+			}
+			if held != len(block) || m.budget.left.Load() != 0 {
+				t.Fatalf("large block held %d bytes, budget left %d; want %d held and zero left", held, m.budget.left.Load(), len(block))
+			}
+			allocated := after.TotalAlloc - before.TotalAlloc
+			t.Logf("assembled %d bytes under a %d-byte charge with %d allocated bytes", len(block), held, allocated)
+			// Allow allocator rounding and reader setup, but not a second copy
+			// of the block alongside the buffer covered by the budget.
+			if allocated > uint64(len(block))+64<<10 {
+				t.Fatalf("large block allocated %d bytes under a %d-byte charge", allocated, held)
+			}
+		})
+	}
+}
+
 func TestPacketBudgetBoundsDecompression(t *testing.T) {
 	const expandedBytes = 4 << 20
 	const packetBudget = 64 << 10
