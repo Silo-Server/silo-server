@@ -1889,7 +1889,11 @@ transcode, less the source's start time for a copy remux), then cuts the
 segment exactly as above: the same window, generation origins, spans and
 `X-TIMESTAMP-MAP`. For the same generation the bytes match the single
 rendition's. A segment ahead of the stream's FFmpeg is answered at once with
-its cues; a segment waits only for its generation's origin, which the
+its cues. One of a transcode far enough ahead that its video request restarts
+the transcode there (more than two segments past what the running generation
+has written) starts its window no later than its place on the segment grid,
+where that restart cuts it, so a cue on screen at the boundary is in it even
+when the running generation's first frame came later. A segment waits only for its generation's origin, which the
 generation's first video segment shows, or, when no generation covers it, for
 the seek restart its video request starts, then answers empty as above, or,
 for a keyframe-planned copy, `404`, as its video segment does. A copy remux on

@@ -325,6 +325,7 @@ func (s *TranscodeSession) subtitleTrackSegmentVTT(ctx context.Context, number u
 		switch {
 		case found:
 			window := s.subtitleSegmentWindow(ctx, span.file, segNum)
+			window.restartGrid = s.segmentNeedsRestart(opts, span, segNum)
 			if window.observed || !originPending || !time.Now().Before(originDeadline) {
 				return onDemandSegmentDocument(ctx, opts, number, segNum, span, window)
 			}
@@ -373,6 +374,17 @@ func (s *TranscodeSession) onDemandSegmentSpan(segNum int) (span subtitleCueSpan
 	return subtitleCueSpan{}, false, false, waitable, restarting
 }
 
+// segmentNeedsRestart reports whether segNum of an encode lies beyond what
+// the running generation of span will produce before a request for its video
+// restarts the transcode there (SegmentRecoveryDecision), on the grid.
+func (s *TranscodeSession) segmentNeedsRestart(opts TranscodeOpts, span subtitleCueSpan, segNum int) bool {
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") || span.end >= 0 {
+		return false
+	}
+	head, ok := s.liveProducedHead()
+	return ok && segNum > head+maxSequentialMissingSegments
+}
+
 // onDemandSegmentDocument reads track number's cues for segment segNum's
 // window and cuts the segment from them as the pipeline rendition cuts its
 // cue file. A track the file can't give answers an empty segment, as the
@@ -380,7 +392,7 @@ func (s *TranscodeSession) onDemandSegmentSpan(segNum int) (span subtitleCueSpan
 // that failed or ran out of time answers ErrSegmentNotFound, for the player
 // to retry.
 func onDemandSegmentDocument(ctx context.Context, opts TranscodeOpts, number uint64, segNum int, span subtitleCueSpan, window subtitleCueWindow) ([]byte, error) {
-	cues, err := readOnDemandCues(ctx, opts, number, segNum, span, window)
+	cues, err := readOnDemandCues(ctx, opts, number, segNum, span, &window)
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:
@@ -429,6 +441,9 @@ func subtitleWindowBounds(opts TranscodeOpts, segNum int, window subtitleCueWind
 	}
 	start90k = origin90k + int64(math.Round(window.offset*90_000))
 	end90k = start90k + int64(math.Round(window.duration*90_000))
+	if window.restartGrid && window.grid90k < start90k && start90k-window.grid90k < end90k-start90k {
+		start90k = window.grid90k
+	}
 	if window.open {
 		end90k = math.MaxInt64
 	}
@@ -440,8 +455,9 @@ func subtitleWindowBounds(opts TranscodeOpts, segNum int, window subtitleCueWind
 // track's kept copy (SetRenditionKeptTracks), or else the ones the source's
 // index points at; both give the same bytes. Only the file version the plan
 // read is read (SubtitleRenditionSource). Windows are kept per file version,
-// track and clock, so every session on the file shares them.
-func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, segNum int, span subtitleCueSpan, window subtitleCueWindow) ([]byte, error) {
+// track and clock, so every session on the file shares them. A restartGrid
+// window gets its grid start, which cutting the segment needs as well.
+func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, segNum int, span subtitleCueSpan, window *subtitleCueWindow) ([]byte, error) {
 	idx, err := subtitleIndexes.Index(ctx, opts.InputPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: source is gone: %w", embeddedsub.ErrFileChanged, err)
@@ -478,7 +494,10 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 	} else {
 		expected += startTime.Seconds()
 	}
-	from90k, to90k := subtitleWindowBounds(opts, segNum, window, int64(math.Round(expected*90_000)))
+	if window.restartGrid {
+		window.grid90k = int64(math.Round(expected * 90_000))
+	}
+	from90k, to90k := subtitleWindowBounds(opts, segNum, *window, int64(math.Round(expected*90_000)))
 	from := ticks90kDuration(from90k) + clockStart
 	to := embeddedsub.WholeTo
 	if to90k != math.MaxInt64 {
