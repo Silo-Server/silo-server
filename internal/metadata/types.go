@@ -177,7 +177,8 @@ const (
 	// The top candidates scored within the tie window and no tie-breaker
 	// chose between them.
 	MatchRejectionAmbiguous MatchRejection = "ambiguous"
-	// No candidate carried the item's trusted provider ID, from its name or NFO.
+	// No candidate carried the item's trusted provider ID, whether it came from
+	// the name, an NFO, or a group override.
 	MatchRejectionTrustedIDMissing MatchRejection = "trusted_id_missing"
 )
 

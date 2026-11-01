@@ -34,11 +34,11 @@ function describeRejection(decision: MatchDecision): string | undefined {
     case "lone_candidate":
       return "A single result needs a higher score when nothing else, such as a matching year, confirms it.";
     case "year_mismatch":
-      return "The best result's year is more than 2 years from the year in the name.";
+      return "The best result's year is more than 2 years from the item's year.";
     case "ambiguous":
       return "The top results scored too close together to choose one automatically.";
     case "trusted_id_missing":
-      return "No result has the provider ID set for this item in its name or NFO.";
+      return "No result has the provider ID set for this item.";
     default:
       return undefined;
   }
