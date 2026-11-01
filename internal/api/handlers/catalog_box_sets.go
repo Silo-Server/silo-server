@@ -285,6 +285,11 @@ func (h *CatalogHandler) ItemBoxSet(ctx context.Context, v ItemViewer, contentID
 	if !ok {
 		return nil, nil
 	}
+	// The movies read as in the box set's library, as getCatalogBoxSet
+	// shows them there, even when the page named none.
+	if v.Access.PresentationLibraryID == nil {
+		v.Access.PresentationLibraryID = &found.LibraryID
+	}
 	detail, err := h.boxSetDetail(ctx, v, found.LibraryID, found.BoxSetGroup)
 	if err != nil {
 		var apiErr *APIError
