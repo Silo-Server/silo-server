@@ -876,10 +876,12 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 	)
 }
 
-// streamEmbeddedSubtitle runs a dedicated ffmpeg for a single embedded
-// track, optionally windowed by explicit client parameters, and pipes its
-// stdout directly to w. Because this ffmpeg is independent of the video
-// pipeline, it works the same for direct play, remux, and transcode.
+// streamEmbeddedSubtitle serves a single embedded track, optionally windowed
+// by explicit client parameters: from the subtitle cache, a kept copy, or
+// the container's index when it can, else from a dedicated ffmpeg demux of
+// the source that pipes its stdout to w (SubtitleCache.ServeExtract).
+// Because none of these depends on the video pipeline, it works the same for
+// direct play, remux, and transcode.
 func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
@@ -920,6 +922,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
 		AllowWindow:     allowWindow,
+		Embedded:        playback.EmbeddedSubtitleRefFor(file, embeddedIndex),
 		FFmpegPath:      h.ffmpegPath(),
 	}
 	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {
@@ -946,6 +949,10 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		if r.Context().Err() != nil {
 			return
 		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			writeSubtitleReadsBusy(w)
+			return
+		}
 		if response.Status() == 0 {
 			writeError(w, http.StatusInternalServerError, "subtitle_extract_failed", "Failed to extract subtitles")
 			return
@@ -953,6 +960,13 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		// A successful HTTP EOF would make clients accept the partial track.
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// writeSubtitleReadsBusy answers a subtitle the node had no room to read
+// (playback.ErrSubtitleReadsBusy) as a retryable 503.
+func writeSubtitleReadsBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+	writeError(w, http.StatusServiceUnavailable, "service_unavailable", "The server is busy; try again in a moment")
 }
 
 // subtitleSeekPosition uses only the caller's explicit position. Session

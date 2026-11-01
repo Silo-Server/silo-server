@@ -728,7 +728,8 @@ func proxyRemuxPlayMethodV3(method string) bool {
 func proxyTranscodePlayMethodV3(method string) bool {
 	switch method {
 	case "", string(playback.PlayTranscode), streamtoken.PlayMethodToneMapTranscode,
-		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode:
+		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode,
+		streamtoken.PlayMethodSubtitleRenditionsTranscode, streamtoken.PlayMethodSubtitleRenditionsCopyFMP4:
 		return true
 	default:
 		return false
@@ -1135,6 +1136,11 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	if err := s.subCache.ServeExtract(response, r, opts, playback.StreamExtractSubtitle); err != nil {
 		playback.LogSubtitleStreamError(r.Context(), err, claims.MediaFileID, trackIndex)
 		if r.Context().Err() != nil {
+			return
+		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+			http.Error(w, "server busy", http.StatusServiceUnavailable)
 			return
 		}
 		if response.Status() == 0 {

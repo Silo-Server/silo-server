@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -58,6 +59,9 @@ const (
 	transcodeStartFailedReasonV3  = "transcode_start_failed"
 	trackUnavailableReasonV3      = "track_unavailable"
 	capabilityUnavailableReasonV3 = "transcode_node_capability_unavailable"
+	// failureSubtitleTrackChangedV3 is the failure_recovery classification
+	// of a subtitle the client switched to on its own.
+	failureSubtitleTrackChangedV3 = "subtitle_track_changed"
 	// transportStartupReadyV3 is the "outcome" of a transport startup whose
 	// first manifest became ready.
 	transportStartupReadyV3 = "ready"
@@ -1217,31 +1221,53 @@ type hlsPlanningSnapshotV3 struct {
 	renditionExecutable bool
 	remuxRenditionOnce  sync.Once
 	remuxRendition      bool
+	onDemandOnce        sync.Once
+	onDemand            bool
+	remuxOnDemandOnce   sync.Once
+	remuxOnDemand       bool
 }
 
 func (snapshot *hlsPlanningSnapshotV3) subtitleRenditionExecutable() bool {
 	snapshot.renditionOnce.Do(func() {
-		snapshot.renditionExecutable = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayTranscode)
+		snapshot.renditionExecutable = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayTranscode, false)
 	})
 	return snapshot.renditionExecutable
 }
 
 func (snapshot *hlsPlanningSnapshotV3) remuxSubtitleRenditionExecutable() bool {
 	snapshot.remuxRenditionOnce.Do(func() {
-		snapshot.remuxRendition = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayRemux)
+		snapshot.remuxRendition = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayRemux, false)
 	})
 	return snapshot.remuxRendition
 }
 
+func (snapshot *hlsPlanningSnapshotV3) onDemandSubtitleRenditionsExecutable() bool {
+	snapshot.onDemandOnce.Do(func() {
+		snapshot.onDemand = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayTranscode, true)
+	})
+	return snapshot.onDemand
+}
+
+func (snapshot *hlsPlanningSnapshotV3) remuxOnDemandSubtitleRenditionsExecutable() bool {
+	snapshot.remuxOnDemandOnce.Do(func() {
+		snapshot.remuxOnDemand = snapshot.handler.hlsSubtitleRenditionExecutableV3(snapshot.ctx, snapshot.proxyAllowed, playback.PlayRemux, true)
+	})
+	return snapshot.remuxOnDemand
+}
+
 // hlsSubtitleRenditionExecutableV3 reports whether a policy-eligible executor
 // of an HLS transcode (playMethod PlayTranscode) or HLS copy remux (PlayRemux)
-// can emit a subtitle rendition: this server, or a pooled transcode node
-// advertising the transport feature for it. Node selection then admits only
-// capable nodes for a plan that carries one (transcodeEligibilityV3).
-func (h *PlaybackHandler) hlsSubtitleRenditionExecutableV3(ctx context.Context, proxyAllowed bool, playMethod playback.PlayMethod) bool {
-	workload, feature := noderouting.WorkloadVideoTranscode, playback.TransportFeatureHLSSubtitleRenditionV1
+// can emit a subtitle rendition, or on-demand renditions of every text track
+// (onDemand): this server, or a pooled transcode node advertising the
+// transport features for it. Node selection then admits only capable nodes
+// for a plan that carries one (transcodeEligibilityV3).
+func (h *PlaybackHandler) hlsSubtitleRenditionExecutableV3(ctx context.Context, proxyAllowed bool, playMethod playback.PlayMethod, onDemand bool) bool {
+	workload, features := noderouting.WorkloadVideoTranscode, []string{playback.TransportFeatureHLSSubtitleRenditionV1}
 	if playMethod == playback.PlayRemux {
-		workload, feature = noderouting.WorkloadRemux, playback.TransportFeatureHLSRemuxSubtitleRenditionV1
+		workload, features = noderouting.WorkloadRemux, []string{playback.TransportFeatureHLSRemuxSubtitleRenditionV1}
+	}
+	if onDemand {
+		features = append(features, playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1)
 	}
 	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(
 		workload, h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
@@ -1254,11 +1280,21 @@ func (h *PlaybackHandler) hlsSubtitleRenditionExecutableV3(ctx context.Context, 
 		return false
 	}
 	for _, entry := range h.pooledNodeCapabilitiesV3(ctx, transcodeNodeURLsForNewPlanV3(enumerator)) {
-		if slices.Contains(entry.transportFeatures, feature) {
+		if hasAllStringsV3(entry.transportFeatures, features) {
 			return true
 		}
 	}
 	return false
+}
+
+// hasAllStringsV3 reports whether have lists every one of want.
+func hasAllStringsV3(have, want []string) bool {
+	for _, value := range want {
+		if !slices.Contains(have, value) {
+			return false
+		}
+	}
+	return true
 }
 
 // subtitleRenditionRoutableV3 reports whether one policy-eligible executor can
@@ -1285,6 +1321,103 @@ func (h *PlaybackHandler) subtitleRenditionRoutableV3(ctx context.Context, resul
 		}
 	}
 	return false
+}
+
+// cueIndexedSubtitleTrackTimeoutV3 bounds the read of a source's index that
+// decides whether its text tracks become on-demand renditions. A cold index
+// takes a fraction of a second; one held up longer plans the pipeline
+// rendition rather than delay the start.
+const cueIndexedSubtitleTrackTimeoutV3 = 3 * time.Second
+
+// cueIndexReadsV3 shares one deadline for reading sources' indexes, and
+// each file's answer, among the planning passes of one start or replan:
+// alternate versions and fallbacks plan the same files again. The deadline
+// is timeout after the first read begins, so the planning work before it
+// (node and tone-map inventories can take seconds) doesn't use it up.
+type cueIndexReadsV3 struct {
+	timeout time.Duration
+	// lookup reads a source's index (playback.CueIndexedSubtitleTracks).
+	lookup   func(ctx context.Context, path string) (playback.CueIndexedSubtitles, error)
+	mu       sync.Mutex
+	deadline time.Time
+	byPath   map[string]func() *playback.CueIndexedSubtitles
+}
+
+type cueIndexReadsKeyV3 struct{}
+
+// withCueIndexReadsV3 starts the index reads of one start or replan.
+func withCueIndexReadsV3(ctx context.Context) context.Context {
+	return context.WithValue(ctx, cueIndexReadsKeyV3{}, newCueIndexReadsV3())
+}
+
+func newCueIndexReadsV3() *cueIndexReadsV3 {
+	return &cueIndexReadsV3{
+		timeout: cueIndexedSubtitleTrackTimeoutV3,
+		lookup:  playback.CueIndexedSubtitleTracks,
+		byPath:  map[string]func() *playback.CueIndexedSubtitles{},
+	}
+}
+
+// readDeadline returns the reads' deadline, starting it at the first read.
+func (reads *cueIndexReadsV3) readDeadline() time.Time {
+	reads.mu.Lock()
+	defer reads.mu.Unlock()
+	if reads.deadline.IsZero() {
+		reads.deadline = time.Now().Add(reads.timeout)
+	}
+	return reads.deadline
+}
+
+// cueIndexedSubtitleTracksV3 answers PlannerInputV3.CueIndexedSubtitleTracks
+// for file, reading its index at most once per start or replan and within
+// that request's deadline. A failed read answers none.
+func cueIndexedSubtitleTracksV3(ctx context.Context, file *models.MediaFile) func() *playback.CueIndexedSubtitles {
+	if file == nil || strings.TrimSpace(file.FilePath) == "" {
+		return nil
+	}
+	reads, ok := ctx.Value(cueIndexReadsKeyV3{}).(*cueIndexReadsV3)
+	if !ok {
+		reads = newCueIndexReadsV3()
+	}
+	reads.mu.Lock()
+	defer reads.mu.Unlock()
+	if read, ok := reads.byPath[file.FilePath]; ok {
+		return read
+	}
+	read := sync.OnceValue(func() *playback.CueIndexedSubtitles {
+		readCtx, cancel := context.WithDeadline(ctx, reads.readDeadline())
+		defer cancel()
+		indexed, err := reads.lookupWithin(readCtx, file.FilePath)
+		if err != nil {
+			slog.InfoContext(ctx, "protocol v3 source index unreadable for on-demand subtitle renditions",
+				logComponentKey, playbackLogValueV3, "media_file_id", file.ID, "error", err)
+			return nil
+		}
+		return &indexed
+	})
+	reads.byPath[file.FilePath] = read
+	return read
+}
+
+// lookupWithin answers lookup for path by ctx's deadline. The lookup stats
+// the file before it can wait on ctx, and a stat on a stalled mount ignores
+// ctx, so it runs on its own; one that outlives ctx finishes unobserved.
+func (reads *cueIndexReadsV3) lookupWithin(ctx context.Context, path string) (playback.CueIndexedSubtitles, error) {
+	type answer struct {
+		indexed playback.CueIndexedSubtitles
+		err     error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		indexed, err := reads.lookup(ctx, path)
+		done <- answer{indexed, err}
+	}()
+	select {
+	case a := <-done:
+		return a.indexed, a.err
+	case <-ctx.Done():
+		return playback.CueIndexedSubtitles{}, ctx.Err()
+	}
 }
 
 func (snapshot *hlsPlanningSnapshotV3) progressiveRemuxRegistry() *playback.TransformationRegistryV3 {
@@ -1390,12 +1523,25 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 	input.HLSToneMapCapabilities = snapshot.toneMapCapabilities
 	input.SubtitleRenditionExecutable = snapshot.subtitleRenditionExecutable
 	input.RemuxSubtitleRenditionExecutable = snapshot.remuxSubtitleRenditionExecutable
+	input.OnDemandSubtitleRenditionsExecutable = snapshot.onDemandSubtitleRenditionsExecutable
+	input.RemuxOnDemandSubtitleRenditionsExecutable = snapshot.remuxOnDemandSubtitleRenditionsExecutable
+	if input.CueIndexedSubtitleTracks == nil {
+		input.CueIndexedSubtitleTracks = cueIndexedSubtitleTracksV3(ctx, input.EffectiveFile)
+	}
 	input.LocalNetwork = streamlocation.FromContext(ctx) == streamlocation.Local
+	if h.SubtitleTrackFacts != nil {
+		input.SubtitleTrackFacts = h.SubtitleTrackFacts.SubtitleTrackFacts(ctx, input.EffectiveFile)
+	}
 	result := playback.PlanPlaybackV3(input)
-	if result.SubtitleRendition && result.Plan != nil && !h.subtitleRenditionRoutableV3(ctx, result, proxyAllowed) {
+	// On-demand renditions fall back to the single pipeline rendition, which
+	// falls back to the sidecar.
+	for range 2 {
+		if !result.SubtitleRendition || result.Plan == nil || h.subtitleRenditionRoutableV3(ctx, result, proxyAllowed) {
+			break
+		}
 		// The planning gate counts any executor that emits renditions, but
 		// this recipe may need transformations only nodes without one
-		// advertise. Marking the rendition attempted plans the sidecar.
+		// advertise. Marking the rendition attempted plans the next shape.
 		input.AttemptedKeys = append(slices.Clone(input.AttemptedKeys),
 			playback.PlanAttemptKeyV3(*result.Plan, input.Request.ClientPlaybackContext.Output.OutputContextID, nil))
 		result = playback.PlanPlaybackV3(input)
@@ -1588,7 +1734,7 @@ func (h *PlaybackHandler) transcodeEligibilityV3(ctx context.Context, result pla
 			if requiresProgressiveRemux && !slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 				continue
 			}
-			if result.SubtitleRendition && !slices.Contains(entry.transportFeatures, playback.HLSSubtitleRenditionTransportFeatureV3(result.TargetVideoCodec)) {
+			if !hasAllStringsV3(entry.transportFeatures, playback.HLSSubtitleRenditionTransportFeaturesV3(result)) {
 				continue
 			}
 			// A rehomed rendition whose plan record is gone has no plan to
@@ -1900,6 +2046,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSRemuxSubtitleRenditionsV3)
+		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsAllV3)
 		withoutNativeDeliveryFeaturesV3(&req.ClientPlaybackContext)
 	}
 	timings.mark("decode_validate")
@@ -2052,6 +2199,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, effectiveFile, remapAudioIndexV3(requestedFile, effectiveFile, preferredAudio), settings)
 	}
 	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
+	// Every planning pass of this start shares one bound on reading indexes.
+	r = r.WithContext(withCueIndexReadsV3(r.Context()))
 	planned, fallbackWarnings := h.planStartV3(r, req, requestedFile, alternateBase, effectiveFile, audioIndex, settings, lowerVersion)
 	req, effectiveFile, audioIndex = planned.request, planned.file, planned.audioIndex
 	warnings = append(warnings, fallbackWarnings...)
@@ -2374,6 +2523,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		legacyAudioTrackIndex = &index
 	}
 	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, legacyAudioTrackIndex)
+	h.prefetchSubtitlesV3(session.ID, effectiveFile, req, result)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
 }
@@ -2448,6 +2598,53 @@ func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context,
 		// cost instead of silently dropping a provider event.
 		h.runPlaybackStartSideEffectsV3(task)
 	}
+}
+
+// prefetchSubtitlesV3 asks for the embedded subtitle tracks a playback will
+// likely want soon: the next episode's in the language of the subtitle it
+// plays, and, for a client whose native embedded entry declares
+// literal_override_tags, the playing file's plain-text tracks, whose facts
+// the next plan or replan needs. The reads run detached and end with the
+// session.
+func (h *PlaybackHandler) prefetchSubtitlesV3(sessionID string, file *models.MediaFile, req playback.StartRequestV3, result playback.PlannerResultV3) {
+	if h.SubtitlePrefetch == nil || file == nil {
+		return
+	}
+	h.SubtitlePrefetch.SessionStarted(keptsub.PrefetchRequest{
+		SessionID:         sessionID,
+		File:              file,
+		Language:          plannedSubtitleLanguageV3(file, result.SubtitleTrackIndex),
+		LearnOverrideTags: declaresLiteralOverrideTagsV3(req),
+	})
+}
+
+// plannedSubtitleLanguageV3 is the language of the sidecar or embedded
+// subtitle at a plan's combined subtitle ordinal, or "".
+func plannedSubtitleLanguageV3(file *models.MediaFile, ordinal int) string {
+	switch {
+	case ordinal < 0:
+		return ""
+	case ordinal < len(file.ExternalSubtitles):
+		return file.ExternalSubtitles[ordinal].Language
+	case ordinal-len(file.ExternalSubtitles) < len(file.SubtitleTracks):
+		return file.SubtitleTracks[ordinal-len(file.ExternalSubtitles)].Language
+	}
+	return ""
+}
+
+// declaresLiteralOverrideTagsV3 reports a native embedded entry, on any
+// delivery, that lists literal_override_tags.
+func declaresLiteralOverrideTagsV3(req playback.StartRequestV3) bool {
+	for _, delivery := range req.ClientPlaybackContext.Deliveries {
+		for _, entry := range delivery.Subtitles.NativeEmbedded {
+			for _, limitation := range entry.Limitations {
+				if strings.EqualFold(strings.TrimSpace(limitation), playback.NativeEmbeddedLimitationLiteralOverrideTagsV3) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (h *PlaybackHandler) runPlaybackStartSideEffectsV3(task playbackStartSideEffectsV3) {
@@ -2531,6 +2728,9 @@ func (h *PlaybackHandler) waitForPlaybackStartSideEffectsV3(ctx context.Context,
 func (h *PlaybackHandler) cancelPlaybackStartSideEffectsV3(ctx context.Context, sessionID string) {
 	if h == nil || sessionID == "" {
 		return
+	}
+	if h.SubtitlePrefetch != nil {
+		h.SubtitlePrefetch.SessionEnded(sessionID)
 	}
 	h.v3StartEffectsMu.Lock()
 	state := h.v3StartEffectsPending[sessionID]
@@ -4130,7 +4330,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: cfg.KeyframePlaylist && videoCodec == "copy", SegmentRetentionSeconds: cfg.SegmentRetentionSeconds, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
+	opts := playback.TranscodeOpts{InputPath: file.FilePath, MediaFileID: file.ID, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: cfg.KeyframePlaylist && videoCodec == "copy", SegmentRetentionSeconds: cfg.SegmentRetentionSeconds, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, SubtitleRenditionTracks: result.SubtitleRenditionTracks, SubtitleRenditionSource: result.SubtitleRenditionSource, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
 	opts.CopyVideoMPEGTS = playback.PlanCopiesVideoAsMPEGTSV3(*result.Plan)
 	if opts.ToneMapMode != "" {
 		opts.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
@@ -4391,7 +4591,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 			hwAccel = playback.HWAccelNone
 		}
 	}
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: h.playbackConfig().KeyframePlaylist && videoCodec == "copy", HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: h.playbackConfig().KeyframePlaylist && videoCodec == "copy", HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, SubtitleRenditionTracks: result.SubtitleRenditionTracks, SubtitleRenditionSource: result.SubtitleRenditionSource, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
 	req.ThrottleSeconds = playback.ConfiguredTranscodeThrottleSeconds(r.Context(), h.SettingsRepo)
 	if strings.EqualFold(videoCodec, "copy") {
 		req.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
@@ -4627,7 +4827,7 @@ func (h *PlaybackHandler) liveTranscodeRouteV3(session *playback.Session) (nodeU
 // not part of the node's request/response contract, so the caller supplies it.
 func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFile, nodeURL, transportID string, req transcodenode.TranscodeStartRequest, nodeResp transcodenode.TranscodeStartResponse, toneMapFilter string) playback.RecipeCard {
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, VideoRange: req.VideoRange, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, RequireAudioTrack: req.RequireAudioTrack, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, SubtitleRendition: req.SubtitleRendition, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, VideoRange: req.VideoRange, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, RequireAudioTrack: req.RequireAudioTrack, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, SubtitleRendition: req.SubtitleRendition, SubtitleRenditionTracks: req.SubtitleRenditionTracks, SubtitleRenditionSource: req.SubtitleRenditionSource, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
 	card.ToneMapDVConfigPresent = req.ToneMapDVConfigPresent
 	card.CopyVideoMPEGTS = req.CopyVideoMPEGTS
 	if encoderHWAccel := strings.TrimSpace(nodeResp.EncoderHWAccel); encoderHWAccel != "" {
@@ -4814,6 +5014,19 @@ func withoutNativeDeliveryFieldsV3(ctx *playback.ClientPlaybackContextV3) {
 			delivery.MaxChannelsByCodec = nil
 			ctx.Deliveries[name] = delivery
 		}
+		// Native embedded limitations came after the freeze: /api/v1 plans
+		// an entry as it did before them, and never advertises
+		// native_embedded_limitations_v1, without which a client must not
+		// send an entry that needs them.
+		if slices.ContainsFunc(delivery.Subtitles.NativeEmbedded, func(entry playback.NativeEmbeddedSubtitleCapabilityV3) bool {
+			return entry.Limitations != nil
+		}) {
+			delivery.Subtitles.NativeEmbedded = slices.Clone(delivery.Subtitles.NativeEmbedded)
+			for i := range delivery.Subtitles.NativeEmbedded {
+				delivery.Subtitles.NativeEmbedded[i].Limitations = nil
+			}
+			ctx.Deliveries[name] = delivery
+		}
 	}
 }
 
@@ -4877,7 +5090,18 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
-		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded)), clientFeatures)
+		rebuilt := playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded))
+		// The rebuild knows no request to evaluate native selection against,
+		// nor the stream's renditions; keep what planning decided for each
+		// embedded track that is still the same stream.
+		for i := range rebuilt {
+			planned, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, rebuilt[i].CombinedIndex)
+			if ok && planned.Source == playback.SubtitleSourceEmbeddedV3 && rebuilt[i].StreamIndex != nil && planned.StreamIndex != nil && *planned.StreamIndex == *rebuilt[i].StreamIndex {
+				rebuilt[i].NativeSelectable = planned.NativeSelectable
+				rebuilt[i].HLSRendition = planned.HLSRendition
+			}
+		}
+		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, rebuilt, clientFeatures)
 	}
 	plan.Subtitle.Inventory = inventory
 	// Only render and convert publish a client-fetchable artifact; off and
@@ -5323,6 +5547,76 @@ type replanPlanningV3 struct {
 	// desired is the attempt's track intent; nil remaps from the effective
 	// file's selection instead.
 	desired *playback.DesiredTracksV3
+	// renditionTracks answers which tracks of the file playing the source's
+	// index reads, from the on-demand renditions its stream already serves,
+	// so a track change plans the same renditions without reading the index
+	// again and can keep the stream. Nil reads the index.
+	renditionTracks *pinnedRenditionTracksV3
+}
+
+// pinnedRenditionTracksV3 is the set of on-demand rendition tracks the
+// running HLS stream of file fileID serves, which may be none.
+type pinnedRenditionTracksV3 struct {
+	fileID   int
+	indexed  *playback.CueIndexedSubtitles
+	onDemand bool
+}
+
+// pinnedRenditionTracksForRecordV3 pins the on-demand renditions the attempt's
+// current HLS stream serves, or returns nil when its plan isn't one.
+func pinnedRenditionTracksForRecordV3(record *playback.AttemptRecordV3) *pinnedRenditionTracksV3 {
+	if record == nil || !isHLSDeliveryV3(record.CurrentPlan.Delivery) || !record.FrozenRecipe.ValidFor(record.CurrentPlan) {
+		return nil
+	}
+	frozen := record.FrozenRecipe
+	tracks := make(map[uint64]bool, len(frozen.SubtitleRenditionTracks))
+	for _, track := range frozen.SubtitleRenditionTracks {
+		tracks[track.TrackNumber] = true
+	}
+	return &pinnedRenditionTracksV3{
+		fileID:   record.EffectiveMediaFileID,
+		indexed:  &playback.CueIndexedSubtitles{Tracks: tracks, Source: frozen.SubtitleRenditionSource},
+		onDemand: len(tracks) > 0,
+	}
+}
+
+// cueIndexedSubtitleTracks is the planner seam for a replan of start on file.
+// While the replan stays on the file playing, it answers the renditions the
+// stream serves without reading the index: a stream serving none then keeps
+// serving none, so turning subtitles off or choosing a sidecar keeps it. A
+// stream without on-demand renditions whose replan selects an embedded text
+// track restarts anyway, for its single rendition, so that replan reads the
+// index and may move to on-demand renditions. Nil reads the index.
+func (pinned *pinnedRenditionTracksV3) cueIndexedSubtitleTracks(file *models.MediaFile, start playback.StartRequestV3) func() *playback.CueIndexedSubtitles {
+	if pinned == nil || file == nil || file.ID != pinned.fileID ||
+		!pinned.onDemand && selectsEmbeddedTextSubtitleV3(file, start) {
+		return nil
+	}
+	return func() *playback.CueIndexedSubtitles { return pinned.indexed }
+}
+
+// selectsEmbeddedTextSubtitleV3 reports whether start selects an embedded
+// track of file that an HLS rendition can carry.
+func selectsEmbeddedTextSubtitleV3(file *models.MediaFile, start playback.StartRequestV3) bool {
+	index := -1
+	switch {
+	case start.SubtitleTrackIndex != nil:
+		index = *start.SubtitleTrackIndex
+	case start.SubtitleTrackID != "":
+		if fileID, kind, ordinal, ok := playback.ParseTrackIDV3(start.SubtitleTrackID); ok && kind == subtitleTrackKindV3 && fileID == file.ID {
+			index = ordinal
+		}
+	}
+	ordinal := index - len(file.ExternalSubtitles)
+	return index >= 0 && ordinal >= 0 && ordinal < len(file.SubtitleTracks) &&
+		playback.SubtitleRenditionCodecSupported(file.SubtitleTracks[ordinal].Codec)
+}
+
+// onDemandSubtitleSwitchV3 reports a failure_recovery classified
+// subtitle_track_changed on a stream serving on-demand renditions.
+func onDemandSubtitleSwitchV3(record *playback.AttemptRecordV3, req playback.ReplanRequestV3) bool {
+	return record != nil && req.EffectiveOperation() == playback.ReplanOperationFailureRecoveryV3 &&
+		req.Failure.Classification == failureSubtitleTrackChangedV3 && len(record.FrozenRecipe.SubtitleRenditionTracks) > 0
 }
 
 // replanPassV3 is a replan's plan and how it degraded the viewer's audio and
@@ -5351,7 +5645,7 @@ func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, star
 		// and the viewer can repeat the change.
 		return replanPassV3{}, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", inventoryErr)
 	}
-	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: additional})
+	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: additional, CueIndexedSubtitleTracks: p.renditionTracks.cueIndexedSubtitleTracks(effectiveFile, start)})
 	if p.operation == playback.ReplanOperationOutputChangeV3 && result.Terminal != nil && effectiveFile.ID != p.currentEffectiveFile.ID {
 		// Returning to the requested edition is speculative during an output
 		// refresh. Any terminal from that probe must fall back to the edition
@@ -5365,7 +5659,7 @@ func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, star
 		if err != nil {
 			return replanPassV3{}, &transportErrorV3{reason: trackUnavailableReasonV3, message: err.Error()}
 		}
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile), CueIndexedSubtitleTracks: p.renditionTracks.cueIndexedSubtitleTracks(effectiveFile, start)})
 	}
 	planned := replanPassV3{alternateCandidateV3: alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, audioDegraded: audioDegraded}
 	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(p.operation) {
@@ -5519,6 +5813,7 @@ func (h *PlaybackHandler) replanInputV3(r *http.Request, p replanPlanningV3, sta
 func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
 	r = r.WithContext(withServerBitrateCapV3(r.Context(), record.ServerBitrateCapKbps))
+	r = r.WithContext(withCueIndexReadsV3(r.Context()))
 	audioDegraded := false
 	subtitleDegraded := false
 	// subtitleNotShown marks a subtitle the effective file has but cannot
@@ -5541,6 +5836,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}()
 	start := record.NormalizedRequest
 	operation := req.EffectiveOperation()
+	if onDemandSubtitleSwitchV3(record, req) {
+		// A client that switched among on-demand renditions in its player may
+		// report it as a subtitle_track_changed recovery. That is a track
+		// change: it stays on the file playing, selects the track it names,
+		// and turns subtitles off when it names none.
+		operation = playback.ReplanOperationTrackChangeV3
+	}
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
@@ -5555,6 +5857,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	trackChange := operation == playback.ReplanOperationTrackChangeV3
+	// A subtitle switch the client already made on the playing stream, and
+	// reports as a failure recovery, is expressed in the mounted file's
+	// inventory like a track_change, and its answer must be the same media:
+	// it stays on the effective file as a track_change does.
+	pinnedTrackChange := trackChange ||
+		(operation == playback.ReplanOperationFailureRecoveryV3 && req.Failure.Classification == failureSubtitleTrackChangedV3)
 	qualityChange := operation == playback.ReplanOperationQualityChangeV3
 	outputChange := operation == playback.ReplanOperationOutputChangeV3
 	// User-intent operations replace the legacy audio PATCH and client-recipe
@@ -5621,7 +5929,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// is expressed in the mounted alternate's inventory and must stay pinned to
 		// that file or its combined ordinals can select unrelated tracks.
 		start.FileID = record.EffectiveMediaFileID
-		if intentChange && !trackChange {
+		if intentChange && !pinnedTrackChange {
 			start.FileID = record.RequestedMediaFileID
 		}
 		if strings.TrimSpace(req.QualityPreference) != "" {
@@ -5710,8 +6018,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if intentChange && !trackChange {
 		// Prefer returning to the requested edition, but a quality/output/track
 		// change must not abandon a healthy active alternate merely because the
-		// inactive original has gone missing since playback started.
-		if requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
+		// inactive original has gone missing since playback started. A reported
+		// subtitle switch stays on the version playing.
+		if !pinnedTrackChange && requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
 			effectiveFile = requestedFile
 		}
 		// Track identities only need remapping when the effective edition
@@ -5839,7 +6148,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
-	choosesVersion := qualityChange || (intentChange && !trackChange)
+	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -5859,6 +6168,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		currentEffectiveFile: currentEffectiveFile, currentEffectiveStart: currentEffectiveStart,
 		lowerVersion: lowerVersion, settings: plannerSettings, attemptedKeys: attemptedKeys,
 		keptActiveEditionForSubtitle: keptActiveEditionForSubtitle, desired: desired,
+		renditionTracks: pinnedRenditionTracksForRecordV3(record),
 	}
 	if seekReanchor {
 		if err := h.validateFrozenSubtitleIdentityV3(r.Context(), effectiveFile, record.FrozenRecipe); err != nil {
@@ -5912,7 +6222,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// when the limit lowered that plan, it still lowers this one. Any other
 	// label stands only if the same replan without the limit plays more, as
 	// bitrates alone cannot tell whether the requested file could play.
-	staysLimited := (!intentChange || trackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
+	staysLimited := (!intentChange || pinnedTrackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
 		var readingErr error
 		if !seekScopedRecovery {
@@ -6464,11 +6774,7 @@ func sidecarOnlyHLSReplanV3(record *playback.AttemptRecordV3, candidate *playbac
 		record.CurrentPlan.EffectiveMediaFileID != candidate.EffectiveMediaFileID ||
 		!isHLSDeliveryV3(record.CurrentPlan.Delivery) || record.CurrentPlan.Delivery != candidate.Delivery ||
 		record.CurrentPlan.Subtitle.Mode == playback.SubtitleBurnInV3 || candidate.Subtitle.Mode == playback.SubtitleBurnInV3 ||
-		// A subtitle rendition is part of what FFmpeg emits, so only an
-		// unchanged one keeps the transport. Dropping a rendition is fine:
-		// the client stops selecting it.
-		candidate.Subtitle.HLSRendition != nil && (record.CurrentPlan.Subtitle.HLSRendition == nil ||
-			!record.FrozenRecipe.SubtitleRendition || record.FrozenRecipe.SubtitleTransportTrackIndex != candidateRecipe.SubtitleTransportTrackIndex) ||
+		!subtitleRenditionsServedV3(record, candidate, candidateRecipe) ||
 		!sameTrackIdentityV3(record.CurrentPlan.SelectedTracks.Audio, candidate.SelectedTracks.Audio) {
 		return candidateRecipe, false
 	}
@@ -6499,6 +6805,36 @@ func sidecarOnlyHLSReplanV3(record *playback.AttemptRecordV3, candidate *playbac
 
 func isHLSDeliveryV3(delivery playback.DeliveryV3) bool {
 	return delivery == playback.DeliveryRemuxHLSV3 || delivery == playback.DeliveryTranscodeHLSV3
+}
+
+// subtitleRenditionsServedV3 reports whether the running stream already
+// serves every subtitle rendition a track-change plan needs. A pipeline
+// rendition is part of what FFmpeg emits, so only an unchanged one keeps the
+// stream. On-demand renditions are the stream's playlists: a plan that lists
+// the same tracks of the same source version keeps it whichever one it
+// selects, or none, since choosing among them is the player's media
+// selection. Dropping renditions is fine: the client stops selecting them.
+func subtitleRenditionsServedV3(record *playback.AttemptRecordV3, candidate *playback.PlanV3, candidateRecipe playback.ExecutableRecipeV3) bool {
+	frozen := record.FrozenRecipe
+	if len(candidateRecipe.SubtitleRenditionTracks) > 0 {
+		return frozen.SubtitleRendition && frozen.SubtitleRenditionSource == candidateRecipe.SubtitleRenditionSource &&
+			sameSubtitleRenditionTracksV3(frozen.SubtitleRenditionTracks, candidateRecipe.SubtitleRenditionTracks)
+	}
+	if candidate.Subtitle.HLSRendition == nil {
+		return true
+	}
+	return record.CurrentPlan.Subtitle.HLSRendition != nil && frozen.SubtitleRendition && len(frozen.SubtitleRenditionTracks) == 0 &&
+		frozen.SubtitleTransportTrackIndex == candidateRecipe.SubtitleTransportTrackIndex
+}
+
+// sameSubtitleRenditionTracksV3 compares two on-demand rendition lists as
+// playlists: the same tracks in the same order under the same names. Which
+// one is the default does not matter.
+func sameSubtitleRenditionTracksV3(left, right []playback.SubtitleRenditionTrack) bool {
+	return slices.EqualFunc(left, right, func(a, b playback.SubtitleRenditionTrack) bool {
+		a.Default, b.Default = false, false
+		return a == b
+	})
 }
 
 // sameExecutableAVRecipeV3 reports whether two frozen A/V recipes are equivalent.
@@ -7401,8 +7737,10 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 }
 
 // frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface: active_quality, and the menu rungs
-// below 1.5 Mbps that Auto lowering added after the freeze.
+// written on the frozen /api/v1 surface: active_quality, the menu rungs
+// below 1.5 Mbps that Auto lowering added after the freeze, and the
+// embedded inventory rows' stream_index, container_track_id and
+// native_selectable.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if response.PlaybackPlan == nil {
 		return response
@@ -7412,6 +7750,16 @@ func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionR
 	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
 		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
 	})
+	plan.Subtitle.Inventory = slices.Clone(plan.Subtitle.Inventory)
+	for i := range plan.Subtitle.Inventory {
+		item := &plan.Subtitle.Inventory[i]
+		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable, item.HLSRendition = nil, "", false, nil
+	}
+	if rendition := plan.Subtitle.HLSRendition; rendition != nil && rendition.Index != 0 {
+		frozen := *rendition
+		frozen.Index = 0
+		plan.Subtitle.HLSRendition = &frozen
+	}
 	response.PlaybackPlan = &plan
 	return response
 }
