@@ -11,14 +11,20 @@ The scanner's file removal grace (`scanner.file_removal_grace`, 24 hours by
 default) is how long a removal stays reversible. A replacement file, or the
 same file returning, within the grace restores the title as it was:
 
-- **Item hold.** Reconciliation does not delete an orphaned movie or series
-  while any of its files was marked missing within the grace
+- **Item hold.** Reconciliation does not delete an orphaned movie, series, or
+  audiobook while any of its files was marked missing within the grace
   (`LibraryItemRepository.WithRemovalGrace`). The item is hidden, but its
-  collections, manual metadata, artwork, and root claim survive, so a
+  collections, manual metadata, artwork, progress, and root claim survive, so a
   replacement file relinks to it without a new match. A reconciliation after
-  the grace deletes it. A zero grace deletes at once. Book items are deleted
-  at once regardless: chapter and series listings read child tables (such as
-  `manga_chapters`) that only an item delete clears.
+  the grace deletes it. A zero grace deletes at once. Ebook and manga items are
+  deleted at once regardless: chapter and series listings read child tables
+  (such as `manga_chapters`) that only an item delete clears. Audiobook
+  listings (Audiobookshelf, related rows, work pages) and Audiobookshelf by-ID
+  reads require a library membership, so a held audiobook stays out of its
+  author and series lists. A monitored rename of a book folder can scan the old
+  path first; the hold keeps the book until the new path's scan matches it by
+  its author, narrator, year, duration, and title tags. An untagged book gets a
+  new item.
 - **Added date.** Deleting a membership holds its `first_seen_at` (and an
   episode's `first_seen_scan_run_id`) on the title's missing file rows in that
   library (`media_files.held_*`). Inserting the membership again, or moving

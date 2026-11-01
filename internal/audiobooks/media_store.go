@@ -86,7 +86,11 @@ var _ abs.MediaStore = (*ABSMediaStore)(nil)
 // it is of type 'audiobook'. Returns nil and a wrapped error for any other
 // outcome; the caller interprets a nil result as not-found.
 func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, access catalog.AccessFilter) (*models.MediaItem, error) {
-	items, err := s.Items.GetByIDsWithAccess(ctx, []string{contentID}, access)
+	ids, err := s.idsInALibrary(ctx, []string{contentID})
+	if err != nil {
+		return nil, fmt.Errorf("abs_media_store: get audiobook %q: %w", contentID, err)
+	}
+	items, err := s.Items.GetByIDsWithAccess(ctx, ids, access)
 	if err != nil {
 		return nil, fmt.Errorf("abs_media_store: get audiobook %q: %w", contentID, err)
 	}
@@ -116,6 +120,10 @@ func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, 
 // handful of queries per item — up to ~500 single fetches on app open. Returns
 // a map keyed by content_id; missing or non-audiobook ids are omitted.
 func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error) {
+	contentIDs, err := s.idsInALibrary(ctx, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("abs_media_store: get audiobooks: %w", err)
+	}
 	if len(contentIDs) == 0 {
 		return map[string]*models.MediaItem{}, nil
 	}
@@ -145,6 +153,23 @@ func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []str
 		out[b.ContentID] = b
 	}
 	return out, nil
+}
+
+// idsInALibrary returns the contentIDs that belong to at least one library.
+// Progress, collections, and playlists keep the IDs of books that have left
+// every library (held through the file removal grace, or under an offline
+// root), and an unrestricted viewer's by-ID read would otherwise return them.
+func (s *ABSMediaStore) idsInALibrary(ctx context.Context, contentIDs []string) ([]string, error) {
+	if len(contentIDs) == 0 || s.Pool == nil {
+		return contentIDs, nil
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT DISTINCT content_id FROM media_item_libraries WHERE content_id = ANY($1)
+	`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load library memberships: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // ListAudiobooks returns a page of media_items with type='audiobook'.
@@ -377,14 +402,15 @@ func appendAudiobookAccessConditions(alias string, filter catalog.AccessFilter, 
 			*args = append(*args, filter.AllowedLibraryIDs)
 			*argIdx = *argIdx + 1
 		}
+	} else {
+		// A book in no library (held through the file removal grace, or
+		// under an offline root) has left the catalog; never list it.
+		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM media_item_libraries mil_present
+			WHERE mil_present.content_id = %s.content_id
+		)`, alias))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (
-				SELECT 1 FROM media_item_libraries mil_present
-				WHERE mil_present.content_id = %s.content_id
-			)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil_disabled
 			WHERE mil_disabled.content_id = %s.content_id

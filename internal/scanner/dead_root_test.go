@@ -348,3 +348,75 @@ func TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB(t *testing.T) {
 		})
 	}
 }
+
+// TestScanSubtreeAudiobookRenameKeepsBookDB covers a monitored rename of a
+// tagged book folder to a name that sorts later, so the old path is scanned
+// first and reconciled as deleted. The removal grace must hold the book until
+// the new path's scan matches it, keeping its content ID and added date.
+func TestScanSubtreeAudiobookRenameKeepsBookDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	root := t.TempDir()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Kept Book","artist":"Kept Author","narrator":"Kept Narrator","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
+JSON
+`)
+	folderID := seedDeadRootTestFolder(t, pool, "audiobooks", fmt.Sprintf("renamed-book-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "audiobooks", Paths: []string{root}}
+	oldDir := filepath.Join(root, "Kept Author", "Kept Book")
+	newDir := filepath.Join(root, "Kept Author", "Kept Book (Unabridged)")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "part.m4b"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
+	if err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
+		t.Fatalf("initial scan: %v", err)
+	}
+	const bookQuery = `
+		SELECT mf.content_id, mil.first_seen_at FROM media_files mf
+		JOIN media_item_libraries mil ON mil.content_id = mf.content_id AND mil.media_folder_id = mf.media_folder_id
+		WHERE mf.media_folder_id = $1 AND mf.file_path = $2`
+	var contentID string
+	var firstSeen time.Time
+	if err := pool.QueryRow(ctx, bookQuery, folderID, filepath.Join(oldDir, "part.m4b")).Scan(&contentID, &firstSeen); err != nil {
+		t.Fatalf("read indexed book: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1) OR content_id = $2`, folderID, contentID)
+	})
+
+	if err := os.Rename(oldDir, newDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ScanSubtree(ctx, folder, oldDir); err != nil {
+		t.Fatalf("old path scan: %v", err)
+	}
+	var memberships int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if memberships != 0 {
+		t.Fatalf("memberships after the old path's scan = %d, want 0 (hidden while held)", memberships)
+	}
+	if _, err := s.ScanSubtree(ctx, folder, newDir); err != nil {
+		t.Fatalf("new path scan: %v", err)
+	}
+
+	var renamedID string
+	var renamedFirstSeen time.Time
+	if err := pool.QueryRow(ctx, bookQuery, folderID, filepath.Join(newDir, "part.m4b")).Scan(&renamedID, &renamedFirstSeen); err != nil {
+		t.Fatalf("read renamed book: %v", err)
+	}
+	if renamedID != contentID {
+		t.Fatalf("renamed book content id = %s, want %s", renamedID, contentID)
+	}
+	if !renamedFirstSeen.Equal(firstSeen) {
+		t.Fatalf("renamed book first_seen_at = %v, want %v", renamedFirstSeen, firstSeen)
+	}
+}

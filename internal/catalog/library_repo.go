@@ -31,12 +31,13 @@ func NewLibraryItemRepository(pool *pgxpool.Pool) *LibraryItemRepository {
 }
 
 // WithRemovalGrace returns a copy of the repository whose membership
-// reconciliation keeps an orphaned movie or series while any of its files was
-// marked missing within grace (the scanner's file removal grace). Its membership is
-// still removed, so the item is hidden at once, but a replacement file that
-// arrives in time (an arr upgrade deletes the old release before importing
-// the new one) relinks to the same item: collections, manual edits, artwork,
-// and the added date survive. A reconciliation after the grace has passed
+// reconciliation keeps an orphaned movie, series, or audiobook while any of its
+// files was marked missing within grace (the scanner's file removal grace). Its
+// membership is still removed, so the item is hidden at once, but a replacement
+// file that arrives in time (an arr upgrade deletes the old release before
+// importing the new one, a monitored book folder rename scans the old path
+// first) relinks to the same item: collections, manual edits, artwork,
+// progress, and the added date survive. A reconciliation after the grace has passed
 // deletes the item; until then the trash sweep keeps its file rows (see
 // scanner FileRepository.DeleteMissingByFolder). Zero keeps the immediate
 // delete.
@@ -709,11 +710,12 @@ func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, co
 }
 
 // excludeOrphansWithRecentlyMissingFiles returns the orphanIDs to delete now:
-// all but movies and series with a file marked missing at or after cutoff. A
-// held item keeps its file rows, so collectFolderFileOrphanIDs finds it again
-// on a later pass. Book items (ebooks, manga chapters, audiobooks) are never
-// held: their parent and chapter listings read child tables that only an
-// item delete clears, so a held item would stay listed.
+// all but movies, series, and audiobooks with a file marked missing at or after
+// cutoff. A held item keeps its file rows, so collectFolderFileOrphanIDs finds
+// it again on a later pass. Ebooks and manga chapters are never held: their
+// parent and chapter listings read child tables that only an item delete
+// clears, so a held item would stay listed. Audiobook listings require a
+// library membership instead.
 func excludeOrphansWithRecentlyMissingFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string, cutoff time.Time) ([]string, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT cid FROM unnest($1::text[]) AS cid
@@ -722,7 +724,7 @@ func excludeOrphansWithRecentlyMissingFiles(ctx context.Context, tx pgx.Tx, orph
 			FROM media_items mi
 			JOIN media_files mf ON mf.content_id = mi.content_id
 			WHERE mi.content_id = cid
-			  AND mi.type IN ('movie', 'series')
+			  AND mi.type IN ('movie', 'series', 'audiobook')
 			  AND mf.missing_since >= $2
 		)
 	`, orphanIDs, cutoff)

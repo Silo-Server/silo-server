@@ -15,6 +15,7 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/audiobooks TestABSStoreHidesBooksWithoutLibraryDB
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
@@ -74,6 +75,10 @@
 # A subtree scan of a deleted book folder reconciles its files, except under a
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
+
+# A monitored rename of a book folder keeps the book: the old path is
+# reconciled first, and the removal grace holds the book for the new path.
+./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.

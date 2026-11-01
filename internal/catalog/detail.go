@@ -2965,15 +2965,16 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
+	} else {
+		// A book in no library (held through the file removal grace, or
+		// under an offline root) has left the catalog; never list it.
+		*conditions = append(*conditions, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1 FROM media_item_libraries mil_visible
+				WHERE mil_visible.content_id = %s.content_id
+			)`, alias))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = %s.content_id
-				)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`
 			NOT EXISTS (
 				SELECT 1 FROM media_item_libraries mil_disabled
