@@ -74,9 +74,7 @@ Images generated from a media file (chapter thumbnails, under
 on `embedded_subtitle_tracks` queues a stream's exact key whenever its row
 goes, by replacement, by a rescan that finds the file changed, or by the
 cascade from the file's deletion, and the sweep lists them by file
-(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A row evicted
-for the kept-track budget is queued too, but its keeper deletes the object at
-once. A trigger on `media_files` deletes, whichever path
+(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due groups whose namespace reports them

@@ -457,7 +457,7 @@ func TestSlowReadsHandOverToTheDemux(t *testing.T) {
 }
 
 // What is kept stays within a text track's cap, its file's share, and the
-// store's budget, past which the least recently used tracks go.
+// store's total for its kind, past which nothing more is kept.
 func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
 	ffmpeg := requireFFmpeg(t)
 	path, file := fixtureFile(t, ffmpeg, true)
@@ -508,50 +508,38 @@ func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
 		}
 	})
 
-	t.Run("least recently used go first", func(t *testing.T) {
+	t.Run("store total", func(t *testing.T) {
 		s, repo, blobs := newTestStore(t, ffmpeg)
 		refs := make([]playback.EmbeddedSubtitleRef, 3)
 		for i := range refs {
 			refs[i] = en
 			refs[i].MediaFileID = 50 + i
 		}
-		for _, ref := range refs[:2] {
-			if _, err := s.WholeTrack(t.Context(), path, ref); err != nil {
-				t.Fatal(err)
-			}
-		}
-		// An hour on, the first is used again.
-		s.mu.Lock()
-		clear(s.touched)
-		s.mu.Unlock()
 		if _, err := s.WholeTrack(t.Context(), path, refs[0]); err != nil {
 			t.Fatal(err)
 		}
-		// Room for two: the third evicts the second, used less recently
-		// than the first, and its object goes with it.
 		first, _ := repo.Track(t.Context(), refs[0].MediaFileID, en.StreamIndex)
-		second, _ := repo.Track(t.Context(), refs[1].MediaFileID, en.StreamIndex)
-		s.limits.store = 2 * first.Bytes
-		if _, err := s.WholeTrack(t.Context(), path, refs[2]); err != nil {
+		// Room for two: the node counts what it keeps itself before its
+		// next count of the store, so the third isn't kept, or stored.
+		s.limits.store.text = 2 * first.Bytes
+		if _, err := s.WholeTrack(t.Context(), path, refs[1]); err != nil {
 			t.Fatal(err)
 		}
-		for i, want := range []bool{true, false, true} {
-			if got, _ := repo.Track(t.Context(), refs[i].MediaFileID, en.StreamIndex); (got != nil) != want {
-				t.Fatalf("track %d kept = %v, want %v", i, got != nil, want)
-			}
+		puts, _ := repo.counts()
+		if _, err := s.WholeTrack(t.Context(), path, refs[2]); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("a track past the store's total: %v, want ErrTooLarge", err)
 		}
-		if blobs.objects[second.BlobKey] != nil || blobs.objects[first.BlobKey] == nil {
-			t.Fatal("eviction left the evicted object, or took another")
+		if after, _ := repo.counts(); after != puts || blobs.puts != 2 {
+			t.Fatalf("a track past the store's total was kept: %d rows, %d objects", after-puts, blobs.puts)
 		}
-		// No room even after evicting: refused before storing anything.
-		s.limits.store = first.Bytes - 1
-		puts := blobs.puts
-		refs[1].MediaFileID = 60
-		if _, err := s.WholeTrack(t.Context(), path, refs[1]); !errors.Is(err, embeddedsub.ErrTooLarge) || blobs.puts != puts {
-			t.Fatalf("a track with no room: %v, %d objects stored", err, blobs.puts-puts)
+		// A node that hasn't kept them counts them too, and PGS tracks have
+		// their own total.
+		s.totals, s.totalsAt = keptBytes{}, time.Time{}
+		if err := s.room(t.Context(), refs[2].MediaFileID, 1, "subrip", 1<<30, 1, false); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("after a fresh count: %v, want ErrTooLarge", err)
 		}
-		if len(repo.reserved) != 0 {
-			t.Fatalf("reservations left behind: %v", repo.reserved)
+		if err := s.room(t.Context(), refs[2].MediaFileID, 1, "hdmv_pgs_subtitle", 1<<30, first.Bytes, false); err != nil {
+			t.Fatalf("a PGS track with the text total full: %v", err)
 		}
 	})
 }

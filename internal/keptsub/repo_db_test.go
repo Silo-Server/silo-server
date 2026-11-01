@@ -2,7 +2,6 @@ package keptsub
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -42,7 +41,6 @@ func newDBFixture(t *testing.T) *dbFixture {
 		_, _ = pool.Exec(ctx, `DELETE FROM public.media_folders WHERE id = $1`, f.folder)
 		for _, id := range f.files {
 			_, _ = pool.Exec(ctx, `DELETE FROM public.blob_gc_queue WHERE prefix LIKE $1`, fmt.Sprintf("subtitles/embedded/%d/%%", id))
-			_, _ = pool.Exec(ctx, `DELETE FROM public.embedded_subtitle_track_reservations WHERE media_file_id = $1`, id)
 		}
 		pool.Close()
 	})
@@ -101,9 +99,23 @@ func TestKeptTrackRowsAndGarbageDB(t *testing.T) {
 	ctx := t.Context()
 	file := f.file(t)
 
+	before, err := f.repo.KeptBytes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	first := keptRow(file, 2, "a")
 	if err := f.repo.PutTrack(ctx, first); err != nil {
 		t.Fatal(err)
+	}
+	// The store's and the file's counts include it.
+	if after, err := f.repo.KeptBytes(ctx); err != nil || after["subrip"]-before["subrip"] != first.Bytes {
+		t.Fatalf("kept bytes %v -> %v, %v; want %d more subrip", before, after, err, first.Bytes)
+	}
+	if n, err := f.repo.FileKeptBytes(ctx, file, 3); err != nil || n != first.Bytes {
+		t.Fatalf("file keeps %d bytes, %v; want %d", n, err, first.Bytes)
+	}
+	if n, err := f.repo.FileKeptBytes(ctx, file, 2); err != nil || n != 0 {
+		t.Fatalf("file keeps %d bytes besides stream 2, %v", n, err)
 	}
 	got, err := f.repo.Track(ctx, file, 2)
 	if err != nil || got == nil {
@@ -227,163 +239,6 @@ func TestQueueCollectionDB(t *testing.T) {
 	}
 	if due < orphanGrace-time.Minute || due > orphanGrace {
 		t.Fatalf("due in %v, want about %v", due, orphanGrace)
-	}
-}
-
-func (f *dbFixture) int64(t *testing.T, query string, args ...any) int64 {
-	t.Helper()
-	var n int64
-	if err := f.pool.QueryRow(t.Context(), query, args...).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-// The usage row follows the rows through every path that changes them. Past
-// the store's budget a reservation evicts the least recently used rows, and
-// one that can't make room evicts nothing. The rows here are huge and long
-// unused, so they rank before every other row, and only a reservation that
-// evicts nothing could reach other rows.
-func TestKeptTrackBudgetDB(t *testing.T) {
-	f := newDBFixture(t)
-	ctx := t.Context()
-	file, other := f.file(t), f.file(t)
-	usage := func() int64 {
-		t.Helper()
-		got := f.int64(t, `SELECT kept_bytes FROM public.embedded_subtitle_track_usage`)
-		if want := f.int64(t, `SELECT COALESCE(SUM(byte_size), 0) FROM public.embedded_subtitle_tracks`); got != want {
-			t.Fatalf("usage row holds %d bytes, rows %d", got, want)
-		}
-		return got
-	}
-	const huge = int64(1) << 50
-	rows := []Track{keptRow(file, 1, "a"), keptRow(file, 2, "b"), keptRow(file, 3, "c")}
-	for i := range rows {
-		rows[i].Bytes = huge
-		if err := f.repo.PutTrack(ctx, rows[i]); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.pool.Exec(ctx, `UPDATE public.embedded_subtitle_tracks SET updated_at = '1971-01-01'::timestamptz + $3 * interval '1 day'
-			WHERE media_file_id = $1 AND embedded_stream_index = $2`, file, rows[i].StreamIndex, i); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// A replaced row, a file whose change retires its row, a touch.
-	gone := keptRow(other, 1, "d")
-	if err := f.repo.PutTrack(ctx, gone); err != nil {
-		t.Fatal(err)
-	}
-	gone.Bytes = 3
-	if err := f.repo.PutTrack(ctx, gone); err != nil {
-		t.Fatal(err)
-	}
-	usage()
-	if _, err := f.pool.Exec(ctx, `UPDATE public.media_files SET file_size = file_size + 1 WHERE id = $1`, other); err != nil {
-		t.Fatal(err)
-	}
-	if kept, err := f.repo.FileKeptBytes(ctx, file, 2); err != nil || kept != 2*huge {
-		t.Fatalf("file's other tracks hold %d bytes, %v; want %d", kept, err, 2*huge)
-	}
-	// The first is used: now the second is the least recently used.
-	if err := f.repo.Touch(ctx, file, 1); err != nil {
-		t.Fatal(err)
-	}
-	total := usage()
-
-	ask := Reservation{MediaFileID: other, StreamIndex: 1, Bytes: huge, FileMax: huge, StoreMax: total + huge, Lease: time.Minute}
-	if evicted, err := f.repo.Reserve(ctx, ask); err != nil || len(evicted) != 0 {
-		t.Fatalf("within the budget: evicted %v, %v", evicted, err)
-	}
-	// The reservation counts: a second one past the budget by one row
-	// evicts the least recently used row no one is keeping again. The
-	// second row is being kept again (a 1-byte reservation), so the third
-	// goes.
-	if _, err := f.pool.Exec(ctx, `INSERT INTO public.embedded_subtitle_track_reservations VALUES ($1, 2, 1, now() + interval '1 minute')`, file); err != nil {
-		t.Fatal(err)
-	}
-	second := ask
-	second.StreamIndex, second.FileMax, second.StoreMax = 2, 2*huge, total+huge+1
-	if evicted, err := f.repo.Reserve(ctx, second); err != nil || !slices.Equal(evicted, []string{rows[2].BlobKey}) {
-		t.Fatalf("over the budget: evicted %v, %v; want the third row", evicted, err)
-	}
-	for i, want := range []bool{true, true, false} {
-		if got, err := f.repo.Track(ctx, file, rows[i].StreamIndex); err != nil || (got != nil) != want {
-			t.Fatalf("track %d kept = %v (%v), want %v", i, got != nil, err, want)
-		}
-	}
-	if q := f.queued(t, file); !slices.Equal(q, []string{rows[2].BlobKey}) {
-		t.Fatalf("queued after eviction: %v", q)
-	}
-	usage()
-	// The file's share counts its live reservations, and not expired ones.
-	third := second
-	third.StreamIndex, third.StoreMax = 3, 1<<62
-	if _, err := f.repo.Reserve(ctx, third); !errors.Is(err, ErrNoRoom) {
-		t.Fatalf("past the file's share: %v, want ErrNoRoom", err)
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE public.embedded_subtitle_track_reservations SET expires_at = now() WHERE media_file_id = $1`, other); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.repo.Reserve(ctx, third); err != nil {
-		t.Fatalf("expired reservations still counted: %v", err)
-	}
-	// Room that evicting every unreserved row wouldn't make: nothing goes.
-	full := Reservation{MediaFileID: file, StreamIndex: 9, Bytes: huge, FileMax: 1 << 62, StoreMax: 2*huge - 1, Lease: time.Minute}
-	before := usage()
-	if _, err := f.repo.Reserve(ctx, full); !errors.Is(err, ErrNoRoom) || usage() != before {
-		t.Fatalf("no room: %v, usage %d -> %d", err, before, usage())
-	}
-	// A kept row ends its reservation.
-	if err := f.repo.PutTrack(ctx, keptRow(other, 3, "e")); err != nil {
-		t.Fatal(err)
-	}
-	if n := f.int64(t, `SELECT count(*) FROM public.embedded_subtitle_track_reservations WHERE media_file_id = $1 AND embedded_stream_index = 3`, other); n != 0 {
-		t.Fatal("a kept row left its reservation")
-	}
-}
-
-// Two tracks of one file reserve in turn, so two can't both fit a share
-// only one fits: one waiting on the file's lock sees what the holder
-// reserved.
-func TestKeptTrackReservationsTakeTurnsDB(t *testing.T) {
-	f := newDBFixture(t)
-	ctx := t.Context()
-	file := f.file(t)
-	holder, err := f.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = holder.Rollback(context.Background()) }()
-	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('embedded_subtitle_track_reservations'), $1)`, file); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := holder.Exec(ctx, `INSERT INTO public.embedded_subtitle_track_reservations VALUES ($1, 1, 40, now() + interval '1 minute')`, file); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := f.repo.Reserve(ctx, Reservation{MediaFileID: file, StreamIndex: 2, Bytes: 40, FileMax: 60, StoreMax: 1 << 62, Lease: time.Minute})
-		done <- err
-	}()
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		select {
-		case err := <-done:
-			t.Fatalf("a reservation didn't wait for its file's lock: %v", err)
-		default:
-		}
-		if f.int64(t, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND objsubid = 2 AND objid::bigint = $1`, file) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the reservation never waited for its file's lock")
-		}
-		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // polls pg_locks, which has no notification
-	}
-	if err := holder.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, ErrNoRoom) {
-		t.Fatalf("after the holder reserved: %v, want ErrNoRoom", err)
 	}
 }
 

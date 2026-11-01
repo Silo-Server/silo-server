@@ -48,8 +48,8 @@ Embedded tracks the server has read whole are kept under `subtitles/embedded/`
 in a private store, the operational one when there is one (see
 [blob storage](blob-storage.md)), with rows in `embedded_subtitle_tracks`. They are a cache
 of the media file, not subtitles in their own right: their keys hold a content
-hash, a changed or deleted file retires them, the least recently used go past
-a store-wide budget, and the blob collector deletes their objects. See
+hash, a changed or deleted file retires them, a store-wide budget stops more
+being kept, and the blob collector deletes their objects. See
 [embedded-subtitle-index.md](embedded-subtitle-index.md#kept-tracks).
 
 Deletion removes the row before attempting object cleanup. A delayed cleanup
