@@ -560,7 +560,7 @@ populating them:
 | Field | Match |
 | --- | --- |
 | `profiles` | Case-insensitive profile identity against the source profile. H.264 ignores presentation separators, and a decoder reporting Baseline also accepts the narrower Constrained Baseline source profile; the reverse is not inferred |
-| `levels` | **At-least**: any listed level ≥ the source level passes. An `exact` hardware HEVC entry also passes a source tagged above its highest level when both levels share a picture-size family (4–4.1, 5–5.2, 6–6.2) and the source's luma sample rate and bitrate fit the entry's level, with bitrate held to the Main-tier limit |
+| `levels` | **At-least**: any listed level ≥ the source level passes. An `exact` hardware HEVC entry also passes a source tagged above its highest level when both levels share a picture-size family (4–4.1, 5–5.2, 6–6.2) and the source's luma sample rate and bitrate fit the entry's level, with bitrate held to the Main-tier limit and the sample rate taken at no less than 60 fps, since the stored frame rate is an average |
 | `bit_depths` | Exact integer equality |
 
 So a decoder that tops out at H.264 level 4.1 may report `[41]` and still
