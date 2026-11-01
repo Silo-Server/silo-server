@@ -378,11 +378,14 @@ func TestSubscriptionPermanentStreamFailuresDoNotRetry(t *testing.T) {
 // Incomplete or refused translations must never replace the source text, even
 // when the provider includes partial output alongside its terminal status.
 func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
-	for name, body := range map[string]string{
-		"incomplete":     `{"status":"incomplete","output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`,
-		"failed":         `{"status":"failed","error":{"code":"invalid_prompt"}}`,
-		"refused":        `{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"no"}]}]}`,
-		"reasoning only": `{"status":"completed","output":[{"type":"reasoning","content":[{"type":"output_text","text":"private reasoning"}]}]}`,
+	for name, tc := range map[string]struct {
+		body string
+		kind FailureKind
+	}{
+		"incomplete":     {`{"status":"incomplete","output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`, FailureUnusableResponse},
+		"failed":         {`{"status":"failed","error":{"code":"invalid_prompt"}}`, FailureRejected},
+		"refused":        {`{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"no"}]}]}`, FailureUnusableResponse},
+		"reasoning only": {`{"status":"completed","output":[{"type":"reasoning","content":[{"type":"output_text","text":"private reasoning"}]}]}`, FailureUnusableResponse},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := chatConfig("https://api.openai.com")
@@ -391,11 +394,14 @@ func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
 			calls := 0
 			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				calls++
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 			})
 			content, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, true)
 			if err == nil || content != "" || calls != 1 {
 				t.Fatalf("content=%q err=%v calls=%d; want no output and one failed attempt", content, err, calls)
+			}
+			if got := Classify(err); got != tc.kind {
+				t.Fatalf("Classify(%v) = %v, want %v", err, got, tc.kind)
 			}
 		})
 	}
