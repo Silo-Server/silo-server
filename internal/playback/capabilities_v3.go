@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -142,7 +143,7 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 				continue
 			}
 			named = true
-			if videoDecodeTakesSourceV3(capability, source, false, false) {
+			if videoDecodeTakesSourceV3(capability, source, false, false, false) {
 				return true, false
 			}
 		}
@@ -164,7 +165,8 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 			// stops at maxTradedFrameRateV3.
 			rateAtMaxSize := request.Capabilities.VideoEvidence == EvidenceExactV3 &&
 				source.FrameRate <= maxTradedFrameRateV3+0.01
-			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel, rateAtMaxSize) {
+			hevcLevelInFamily := request.Capabilities.VideoEvidence == EvidenceExactV3 && capability.Hardware
+			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel, rateAtMaxSize, hevcLevelInFamily) {
 				return true, false
 			}
 		}
@@ -180,14 +182,19 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 // videoDecodeTakesSourceV3 reports whether one decode entry's bounds admit
 // the source. An omitted bound is unconstrained. rateAtMaxSize lets the
 // source trade frame rate against size as decoderTakesFrameV3 describes;
-// otherwise the entry's rate is absolute.
-func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel, rateAtMaxSize bool) bool {
+// otherwise the entry's rate is absolute. hevcLevelInFamily lets an HEVC
+// level tag exceed the entry's levels as hevcLevelFitsDecoderV3 describes.
+func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel, rateAtMaxSize, hevcLevelInFamily bool) bool {
 	if !skipProfileLevel {
 		if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
 			return false
 		}
-		if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
-			return false
+		if len(capability.Levels) > 0 {
+			levelFits := (source.VideoLevel > 0 && containsAtLeastV3(capability.Levels, source.VideoLevel)) ||
+				(hevcLevelInFamily && hevcLevelFitsDecoderV3(source, slices.Max(capability.Levels)))
+			if !levelFits {
+				return false
+			}
 		}
 	}
 	if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
@@ -195,6 +202,57 @@ func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceD
 	}
 	return decoderTakesFrameV3(capability, source.Width, source.Height, source.FrameRate, rateAtMaxSize) &&
 		(capability.MaxBitrateKbps <= 0 || source.BitrateKbps <= capability.MaxBitrateKbps)
+}
+
+// hevcLevelLimitV3 holds H.265 level limits for one level_idc: maxLumaPs
+// (Table A.8; levels sharing it also share the decoded picture buffer,
+// slice-segment and tile limits), and maxLumaSr and maxBRKbps (Table A.9,
+// Main tier, since Android reports levels without a tier).
+type hevcLevelLimitV3 struct {
+	maxLumaPs int
+	maxLumaSr int
+	maxBRKbps int
+}
+
+var hevcLevelLimitsV3 = map[int]hevcLevelLimitV3{
+	30:  {36_864, 552_960, 128},
+	60:  {122_880, 3_686_400, 1_500},
+	63:  {245_760, 7_372_800, 3_000},
+	90:  {552_960, 16_588_800, 6_000},
+	93:  {983_040, 33_177_600, 10_000},
+	120: {2_228_224, 66_846_720, 12_000},
+	123: {2_228_224, 133_693_440, 20_000},
+	150: {8_912_896, 267_386_880, 25_000},
+	153: {8_912_896, 534_773_760, 40_000},
+	156: {8_912_896, 1_069_547_520, 60_000},
+	180: {35_651_584, 1_069_547_520, 60_000},
+	183: {35_651_584, 2_139_095_040, 120_000},
+	186: {35_651_584, 4_278_190_080, 240_000},
+}
+
+// hevcLevelFitsDecoderV3 reports whether an HEVC source tagged above a
+// decoder's highest level stays within that level's decoding work. Encoders
+// pick the level from the declared buffer and peak bitrate as well as picture
+// size and rate, so a 4K24 encode with a high VBV ceiling is tagged 5.2
+// though a 5.1 decoder handles its pictures. The tag must share the decoder
+// level's picture-size family, and the source's sample rate and average
+// bitrate must fit the decoder's level. Peaks and per-picture slice counts
+// are not in the metadata, which is why the bitrate bound is Main tier's.
+// The stored frame rate is an average too, so a variable-rate stream could
+// hide faster stretches: the sample rate is checked at no less than
+// maxTradedFrameRateV3.
+func hevcLevelFitsDecoderV3(source SourceDescriptorV3, decoderLevel int) bool {
+	sourceLimit, sourceKnown := hevcLevelLimitsV3[source.VideoLevel]
+	decoderLimit, decoderKnown := hevcLevelLimitsV3[decoderLevel]
+	if !strings.EqualFold(source.VideoCodec, transcodeCodecHEVC) || !sourceKnown || !decoderKnown ||
+		sourceLimit.maxLumaPs != decoderLimit.maxLumaPs {
+		return false
+	}
+	lumaPs := source.Width * source.Height
+	frameRate := max(source.FrameRate, maxTradedFrameRateV3)
+	return lumaPs > 0 && lumaPs <= decoderLimit.maxLumaPs &&
+		float64(lumaPs)*frameRate <= float64(decoderLimit.maxLumaSr) &&
+		source.BitrateKbps > 0 && source.BitrateKbps <= decoderLimit.maxBRKbps
 }
 
 // maxTradedFrameRateV3 is the highest source frame rate a copy route admits
