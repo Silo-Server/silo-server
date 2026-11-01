@@ -113,10 +113,16 @@ type ProcessResult struct {
 // MatchDecision is a bounded, persistence-safe explanation of an automatic
 // matcher outcome. It intentionally excludes artwork and provider payloads.
 type MatchDecision struct {
-	Outcome        MatchOutcome             `json:"outcome"`
-	CandidateCount int                      `json:"candidate_count"`
-	Threshold      float64                  `json:"threshold"`
-	TopCandidates  []MatchDecisionCandidate `json:"top_candidates,omitempty"`
+	Outcome        MatchOutcome `json:"outcome"`
+	CandidateCount int          `json:"candidate_count"`
+	Threshold      float64      `json:"threshold"`
+	// Rejection names the rule that turned down a candidate_rejected outcome's
+	// candidates, and RequiredScore the score it required when that rule is a
+	// score bar. Threshold stays the general acceptance floor, which a rule
+	// other than the floor can reject a candidate above.
+	Rejection     MatchRejection           `json:"rejection,omitempty"`
+	RequiredScore float64                  `json:"required_score,omitempty"`
+	TopCandidates []MatchDecisionCandidate `json:"top_candidates,omitempty"`
 	// localSidecarUnreadable marks a transient outcome caused by a local
 	// sidecar (NFO) the server could not read rather than by a provider, so
 	// the queue's message points at the share instead of a provider outage.
@@ -153,6 +159,27 @@ const (
 	MatchOutcomeMetadataEmpty         MatchOutcome = "metadata_empty"
 	MatchOutcomeProviderTransient     MatchOutcome = "provider_transient"
 	MatchOutcomeProviderPermanent     MatchOutcome = "provider_permanent"
+)
+
+// MatchRejection is the automatic-selection rule behind a candidate_rejected
+// outcome. It is exposed in the match queue's failure detail, so keep
+// additions backward-compatible.
+type MatchRejection string
+
+const (
+	// The best candidate scored below the acceptance floor.
+	MatchRejectionBelowFloor MatchRejection = "below_floor"
+	// The best candidate's year is more than two years from the parsed year.
+	MatchRejectionYearMismatch MatchRejection = "year_mismatch"
+	// A single candidate that nothing corroborates scored below the
+	// lone-candidate bar.
+	MatchRejectionLoneCandidate MatchRejection = "lone_candidate"
+	// The top candidates scored within the tie window and no tie-breaker
+	// chose between them.
+	MatchRejectionAmbiguous MatchRejection = "ambiguous"
+	// No candidate carried the item's trusted provider ID, whether it came from
+	// the name, an NFO, or a group override.
+	MatchRejectionTrustedIDMissing MatchRejection = "trusted_id_missing"
 )
 
 // MatchHints carries scanner-extracted data into the pipeline.

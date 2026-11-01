@@ -2447,6 +2447,14 @@ func buildMatchDecision(hints *MatchHints, candidates []MatchCandidate, winner *
 		decision.Outcome = MatchOutcomeTrustedIDConflict
 	default:
 		decision.Outcome = MatchOutcomeCandidateRejected
+		// The caller passes the hints and candidates of the attempt it kept,
+		// and the fallbacks after selection (episode or title-alias validation)
+		// only accept, so selecting again names the rule that rejected them.
+		// Outcomes a caller reclassifies afterwards drop the rule when bounded.
+		if _, ok, rejection := selectInitialMatch(hints, candidates, nil); !ok {
+			decision.Rejection = rejection.rule
+			decision.RequiredScore = rejection.requiredScore
+		}
 	}
 
 	scored := make([]MatchCandidate, len(candidates))
