@@ -3354,8 +3354,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Silo session; the URL's bearer token authenticates the delivery and
 		// maps it to its Autoscan source. Rate limited per-IP (plus the
 		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
+		// The per-endpoint limit only refuses unknown tokens: arr does not
+		// retry a refused delivery, so a real one over it is still admitted.
+		// The v2 operation spends the same budget and shares this admission.
 		if autoscanHandler != nil {
 			if deps.RateLimitMW != nil {
+				deps.RateLimitMW.AdmitOverEndpointBudget("autoscan_webhook", autoscanHandler.KnowsWebhookToken)
 				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).
 					Post("/autoscan/webhooks/{token}", autoscanHandler.HandleWebhookDelivery)
 			} else {

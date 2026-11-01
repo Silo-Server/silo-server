@@ -35,6 +35,9 @@ type Middleware struct {
 	// overQuotaLogged holds, per session, when the session quota last logged
 	// it, so a session over the quota logs once per overQuotaLogEvery.
 	overQuotaLogged sync.Map
+	// overBudget holds, per endpoint budget, the check that admits a request
+	// the budget would refuse. See AdmitOverEndpointBudget.
+	overBudget map[string]func(*http.Request) bool
 }
 
 // NewMiddleware creates the rate limit middleware. Session quotas share the
@@ -225,6 +228,26 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 	})
 }
 
+// AdmitOverEndpointBudget lets requests that admit accepts through once the
+// endpoint's own budget, or a forwarding peer's share of it, is spent. The
+// per-address request budget and the global budget still apply. admit runs
+// only for a request those budgets would refuse, so it may do a lookup the
+// handler repeats.
+//
+// It is for public endpoints whose callers prove themselves with a
+// high-entropy secret the middleware cannot see, such as an autoscan source
+// token: the endpoint budget keeps slowing guesses with unknown secrets while
+// a sender holding a valid one is never refused for sharing an address with
+// them. Call it while building the router, before serving requests.
+func (mw *Middleware) AdmitOverEndpointBudget(endpoint string, admit func(*http.Request) bool) {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	if mw.overBudget == nil {
+		mw.overBudget = map[string]func(*http.Request) bool{}
+	}
+	mw.overBudget[endpoint] = admit
+}
+
 type rateLimitError struct {
 	Error      string `json:"error"`
 	Message    string `json:"message"`
@@ -245,6 +268,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			mw.mu.RLock()
 			cfg := mw.cfg
+			admit := mw.overBudget[endpoint]
 			mw.mu.RUnlock()
 
 			if !cfg.Enabled {
@@ -277,10 +301,6 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					}
 					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
-					if !epResult.Allowed {
-						writeRateLimitResponse(w, epResult, reject)
-						return
-					}
 
 					// A client IP taken from forwarding headers is a new
 					// budget whenever the sender names a new client, and every
@@ -288,13 +308,15 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					// connection's own address also spends a looser budget
 					// that all clients behind it share. Network access ingress
 					// writes the header itself and needs no such cap.
-					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
-						peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
-						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
-						if !peerResult.Allowed {
-							writeRateLimitResponse(w, peerResult, reject)
-							return
+					if epResult.Allowed {
+						if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+							peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
+							epResult = mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
 						}
+					}
+					if !epResult.Allowed && (admit == nil || !admit(r)) {
+						writeRateLimitResponse(w, epResult, reject)
+						return
 					}
 				}
 			}

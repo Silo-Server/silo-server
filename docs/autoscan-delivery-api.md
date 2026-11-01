@@ -15,6 +15,15 @@ including the per-connection cap for forwarded clients described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits); rate-limit problems retain
 `Retry-After`.
 
+That budget only refuses unknown tokens. Every delivery spends it, but once it is
+spent a delivery whose token resolves to a source is still accepted, and only the
+rest get `429`. Sonarr and Radarr do not retry a refused delivery, so refusing a
+real one would lose the change until the next library scan; the budget exists to
+slow guesses at tokens, and a sender with a real token often shares its address
+with whatever spent it, or imports more files at once than the budget holds. The
+token is looked up only for a request over the budget. The per-address request
+budget and the server-wide budget still apply to every delivery.
+
 Accepted requests return `202` with `{"status":"accepted"}`. Test events,
 unsupported event types and disabled sources/global autoscan settings return the
 same acceptance without enqueuing work. Actionable deliveries are durably
