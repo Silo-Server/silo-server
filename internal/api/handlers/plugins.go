@@ -1419,13 +1419,16 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		// archive is damaged, never loads. List it without its manifest so
 		// one broken plugin doesn't fail the whole list and the admin can
 		// still turn it off or uninstall it.
+		// An archive whose own manifest has an invalid identity matches both
+		// sentinels, so check the archive first; a row with an invalid identity
+		// fails before its archive is read and matches only the second.
 		switch {
-		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
 		case errors.Is(err, plugins.ErrArchiveUnreadable):
 			// The message can quote the archive's own contents; mask any
 			// credential assignment before it is logged or returned.
 			unreadableArchive = logredact.SanitizeText(err.Error())
 			slog.WarnContext(ctx, "listing plugin without its manifest", "component", "api", "installation_id", installation.ID, "plugin_id", installation.PluginID, "error", unreadableArchive)
+		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
 		default:
 			return PluginInstallationView{}, err
 		}
