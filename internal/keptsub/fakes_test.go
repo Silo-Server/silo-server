@@ -127,6 +127,8 @@ type memBlobs struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	gets    int
+	// getHook, when set, runs at the start of every Get.
+	getHook func()
 }
 
 func (b *memBlobs) PutStream(_ context.Context, key string, r io.Reader, _ string) error {
@@ -144,6 +146,9 @@ func (b *memBlobs) PutStream(_ context.Context, key string, r io.Reader, _ strin
 }
 
 func (b *memBlobs) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	if b.getHook != nil {
+		b.getHook()
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.gets++

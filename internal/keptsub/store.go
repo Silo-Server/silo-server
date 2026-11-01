@@ -121,6 +121,9 @@ type Store struct {
 
 	mu      sync.Mutex
 	flights map[flightKey]*flight
+	// mirrorReserved is the room copies being written hold in the copies'
+	// budget.
+	mirrorReserved int64
 	// activeFlights includes canceled workers removed from flights until they
 	// exit; fileFlights counts them per source file.
 	activeFlights int
@@ -204,6 +207,10 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 			return nil, err
 		}
 		_, release, err := s.mirror(ctx, t)
+		if errors.Is(err, errMirrorFetchLimit) {
+			// The stream is read from storage instead.
+			err, release = nil, func() {}
+		}
 		if errors.Is(err, blobstore.ErrNotFound) && attempt == 0 {
 			// The row outlived its object (a storage move that left the
 			// objects behind): read the track again.
@@ -232,6 +239,9 @@ func (s *Store) streamInput(ctx context.Context, t *Track) *playback.SubtitlePac
 		ExpectCues:      t.Packets > 0,
 		Stream: func() (io.ReadCloser, error) {
 			again, release, err := s.mirror(ctx, t)
+			if errors.Is(err, errMirrorFetchLimit) {
+				return s.openObject(ctx, t)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -263,7 +273,12 @@ func (s *Store) Window(ctx context.Context, path string, ref playback.EmbeddedSu
 		if err == nil || ctx.Err() != nil {
 			return in, err
 		}
-		slog.WarnContext(ctx, "subtitle window from the kept track failed; reading the source", "component", "keptsub",
+		level := slog.LevelWarn
+		if errors.Is(err, errMirrorFetchLimit) {
+			// A window needs the local copy; the source serves it as well.
+			level = slog.LevelDebug
+		}
+		slog.Log(ctx, level, "subtitle window from the kept track failed; reading the source", "component", "keptsub",
 			"file_id", t.MediaFileID, "stream_index", t.StreamIndex, "error", err)
 	case to == embeddedsub.WholeTo:
 		// A window open to the end reads most of the track: read it whole,
@@ -436,6 +451,16 @@ func (s *Store) readWhole(ctx context.Context, f *flight, path string, ref playb
 	return t, nil
 }
 
+// keptBound is about the most WriteKept writes for packets: their data, a
+// block's or sample's headers and cue each, and the track's header.
+func keptBound(t *embeddedsub.Track, packets []embeddedsub.Packet) int64 {
+	n := int64(len(t.CodecPrivate)) + 1<<20
+	for _, p := range packets {
+		n += int64(len(p.Data)) + 128
+	}
+	return n
+}
+
 // readAndCopy reads the track's packets, in one of the node's whole-read
 // slots, and writes them as a kept stream to the local copies, returning
 // the track to record.
@@ -465,7 +490,8 @@ func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref pla
 	if len(res.Packets) == 0 {
 		return nil, res.Stats, nil, errNoPackets
 	}
-	_, sum, size, release, err := s.writeMirror(s.mirrorDir(), streamExt(idx.StreamFormat()), func(w io.Writer) error {
+	dir := s.mirrorDir()
+	_, sum, size, release, err := s.writeMirror(dir, streamExt(idx.StreamFormat()), s.reserveMirror(dir, keptBound(track, res.Packets)), func(w io.Writer) error {
 		return embeddedsub.WriteKept(w, idx, track, res.Packets)
 	})
 	if err != nil {
