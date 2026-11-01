@@ -757,4 +757,57 @@ func TestCompatMoveThatLosesToAnotherServerLeavesItsRecord(t *testing.T) {
 	if err != nil || nodeURL != winnerURL {
 		t.Fatalf("lost move = %q, %v; want the first server's node %q", nodeURL, err, winnerURL)
 	}
+	// This server's upstream session follows the first server's move, so its
+	// own relays and reconstruction use the new executor.
+	if got := f.sessions.sessions["upstream-1"].TranscodeNodeURL; got != winnerURL {
+		t.Fatalf("upstream session names %q after a lost move, want %q", got, winnerURL)
+	}
+}
+
+// The release of the node a transport left can land after a later move put
+// the transport back on that node. The release ends the rebuilt job there and
+// the node deletes the record, which now names it. The record is written
+// again, so the next request rebuilds the transcode on that node.
+func TestCompatMoveRewritesRecordWhenReleaseLandsAfterMoveBack(t *testing.T) {
+	var f *compatMoveFixture
+	oldNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.NotFound(w, r)
+			return
+		}
+		// A later move put the transport back here before the release arrived.
+		var movedBack playback.RecipeCard
+		if err := f.store.Update("play-1", func(current *PlaybackSession) error {
+			recipe := *current.Recipe
+			recipe.TranscodeNodeURL = f.deadURL
+			current.Recipe = &recipe
+			movedBack = recipe
+			return nil
+		}); err != nil {
+			t.Errorf("move back: %v", err)
+		}
+		_ = f.recipes.Put(r.Context(), "upstream-1", movedBack)
+		// The release ends that job, and this node deletes the record that
+		// names it (noderecipe.Store.DeleteUnlessMoved).
+		_ = f.recipes.Delete(r.Context(), "upstream-1")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer oldNode.Close()
+	f = newCompatMoveFixtureOn(t, oldNode.URL, true, noderouting.EgressAPI)
+
+	if _, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", oldNode.URL); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		card, ok := f.recipes.Get("upstream-1")
+		if ok && card.TranscodeNodeURL == oldNode.URL {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("record after a release that landed after a move back = %+v, %v (operations %v)", card, ok, f.recipes.Operations())
+		}
+		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
+	}
 }

@@ -748,8 +748,8 @@ working (`internal/jellycompat/transcode_failover.go`):
 - **Two API servers.** The lock and the single-flight are per process, so two
   API servers that both hold the play can each run a move. The durable compat
   store's update is a compare-and-swap on the shared row, and it settles the
-  race: the server whose swap loses writes nothing, neither the record nor its
-  upstream session, and relays to the node the winner picked.
+  race: the server whose swap loses leaves the record alone, points its own
+  upstream session at the winner's executor, and relays there.
 - **Rebuild.** Nothing is started eagerly. The new node rebuilds the transcode
   from the rewritten record on the next request, seeked to the requested
   segment, exactly as after its own restart; a local move goes through the
@@ -778,7 +778,11 @@ working (`internal/jellycompat/transcode_failover.go`):
   names the new node (`noderecipe.Store.DeleteUnlessMoved`). A node that cannot
   tell (an older binary, or a card without node row ids) deletes it anyway; for
   that case central writes the session's current recipe again after the stop,
-  and the proxy keeps polling through a missing record until its deadline.
+  and the proxy keeps polling through a missing record until its deadline. The
+  same rewrite covers a release that lands after a later move put the
+  transport back on the released node: the release ends the rebuilt job and
+  the node deletes the record, and the rewrite lets the next request rebuild
+  it there.
 
 Limits: the moved route lives in the owning API process, like any compat
 session; a proxy-egress transcode whose proxy has no other usable transcode node

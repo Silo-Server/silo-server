@@ -318,12 +318,15 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 	}); err != nil {
 		if errors.Is(err, errCompatMoveNoSession) {
 			// Another API server moved or stopped the play first. The store
-			// now holds its row; relay to where it moved the transport.
-			if winner, ok := h.playbackStore.Get(playSessionID); ok && !winner.Terminal && winner.Recipe != nil &&
-				!sameCompatNode(winner.Recipe.TranscodeNodeURL, deadNodeURL) {
-				return winner.Recipe.TranscodeNodeURL, nil
+			// now holds its row; relay to where it moved the transport, with
+			// this server's upstream session following it there.
+			winner, ok := h.playbackStore.Get(playSessionID)
+			if !ok || winner.Terminal || winner.Recipe == nil || winner.RoutingAssignment == nil ||
+				sameCompatNode(winner.Recipe.TranscodeNodeURL, deadNodeURL) {
+				return "", errCompatMoveNoSession
 			}
-			return "", errCompatMoveNoSession
+			h.recordCompatMoveOnUpstream(ctx, upstreamSessionID, winner.Recipe.TranscodeNodeURL, *winner.RoutingAssignment)
+			return winner.Recipe.TranscodeNodeURL, nil
 		}
 		return "", fmt.Errorf("record moved transcode: %w",
 			errors.Join(err, h.undoCompatTranscodeMove(playSessionID, previous, next, previousAssignment)))
@@ -331,6 +334,16 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 	if err := h.writeMovedNodeRecipe(ctx, upstreamSessionID, nodeURL, next); err != nil {
 		return "", errors.Join(err, h.undoCompatTranscodeMove(playSessionID, previous, next, previousAssignment))
 	}
+	h.recordCompatMoveOnUpstream(ctx, upstreamSessionID, nodeURL, assignment)
+	h.retireCompatTranscodeOnDeadNode(ctx, playSessionID, upstreamSessionID, deadNodeURL, nodeURL)
+	return nodeURL, nil
+}
+
+// recordCompatMoveOnUpstream points this server's upstream session at the
+// executor the transport moved to.
+func (h *PlaybackHandler) recordCompatMoveOnUpstream(
+	ctx context.Context, upstreamSessionID, nodeURL string, assignment playback.NodeRoutingAssignment,
+) {
 	if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, nodeURL); err != nil {
 		slog.WarnContext(ctx, "record moved transcode on the upstream session", "component", "jellycompat",
 			"error", logredact.SanitizeText(err.Error()), "playback_session_id", upstreamSessionID)
@@ -341,8 +354,6 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 				"error", logredact.SanitizeText(err.Error()), "playback_session_id", upstreamSessionID)
 		}
 	}
-	h.retireCompatTranscodeOnDeadNode(ctx, playSessionID, upstreamSessionID, deadNodeURL, nodeURL)
-	return nodeURL, nil
 }
 
 // writeMovedNodeRecipe points the transport's node recipe record at nodeURL,
@@ -435,10 +446,13 @@ func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(
 		defer unlock()
 		// Under the lock a stop's recipe delete takes: a stop that already
 		// ran has ended the play or its upstream session, and a later one
-		// deletes what this writes.
+		// deletes what this writes. A later move may have put the transport
+		// back on the node this released; a release that landed after that
+		// move ended the rebuilt job and deleted its record, so the record is
+		// written for that node too, and the next request rebuilds there.
 		current, ok := h.playbackStore.Get(playSessionID)
 		if !ok || current.Terminal || current.UpstreamSessionID != upstreamSessionID || current.Recipe == nil ||
-			!sameCompatNode(current.Recipe.TranscodeNodeURL, nodeURL) {
+			(!sameCompatNode(current.Recipe.TranscodeNodeURL, nodeURL) && !sameCompatNode(current.Recipe.TranscodeNodeURL, deadNodeURL)) {
 			return
 		}
 		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err != nil || upstream == nil {
