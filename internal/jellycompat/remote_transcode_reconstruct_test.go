@@ -1419,3 +1419,44 @@ func TestStartRemoteTranscodeRequiresAudioConfirmation(t *testing.T) {
 		})
 	}
 }
+
+// A card persisted before negotiated audio became mandatory, by this pod before
+// an upgrade or by an older pod during a rolling one, keeps serving segments
+// from its remote node. Only a card that demands audio the source lacks is stale.
+func TestPrepareCompatSegmentRecipeAcceptsLegacyOptionalAudioRemoteCard(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		requireAudio bool
+		sourceAudio  bool
+		wantMismatch bool
+	}{
+		{name: "legacy optional card, source with audio", sourceAudio: true},
+		{name: "required card, source with audio", requireAudio: true, sourceAudio: true},
+		{name: "required card, source without audio", requireAudio: true, wantMismatch: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const nodeURL = "http://transcode-node"
+			handler, _, playbackStore := newRemoteTranscodeHandler(t, nodeURL, &stubRecipeNodeStore{})
+			source := testRemoteTranscodeSource()
+			if !tt.sourceAudio {
+				source.Version.AudioTracks = nil
+				source.SelectedAudioStreamIndex, source.DefaultAudioStreamIndex = nil, nil
+			}
+			card := playback.NewRecipeCard(7, "profile-1", source.FileID, nodeURL, playback.TranscodeOpts{
+				SessionID: "upstream-1", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: compatTargetVideoCodec, TargetCodecAudio: compatTargetAudioCodec,
+				SegmentDuration:     compatSegmentDuration,
+				AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+				RequireAudioTrack:   tt.requireAudio,
+				SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
+			})
+			playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", Recipe: &card})
+			playSession, _ := playbackStore.Get("play-1")
+
+			_, err := handler.prepareCompatSegmentRecipe(t.Context(), playSession, source)
+			if got := errors.Is(err, errCompatRecipeSourceMismatch); got != tt.wantMismatch {
+				t.Fatalf("mismatch = %v (err %v), want %v", got, err, tt.wantMismatch)
+			}
+		})
+	}
+}
