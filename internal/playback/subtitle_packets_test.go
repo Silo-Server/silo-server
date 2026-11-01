@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os/exec"
@@ -44,7 +45,7 @@ func TestConversionReportsARefusedWrite(t *testing.T) {
 	if err != nil {
 		t.Skip("ffmpeg is not installed")
 	}
-	in := &SubtitlePacketInput{StreamFormat: "matroska", Stream: func() (io.ReadCloser, error) {
+	in := &SubtitlePacketInput{StreamFormat: "matroska", Stream: func(context.Context) (io.ReadCloser, error) {
 		return nil, embeddedsub.ErrTooLarge
 	}}
 	if _, err := ExtractSubtitlePacketsWebVTT(t.Context(), in, ffmpeg); !errors.Is(err, embeddedsub.ErrTooLarge) {

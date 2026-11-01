@@ -2,13 +2,19 @@ package keptsub
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -86,5 +92,123 @@ func TestSubtitleCacheServesThroughTheStore(t *testing.T) {
 				t.Fatalf("sourced SRT %q, want %q (%v)", srt, wantSRT, err)
 			}
 		})
+	}
+}
+
+// A failed response writer cancels conversion, including a kept stream
+// whose storage open or read is stalled while mirror admission is full.
+func TestStorageFallbackStopsOnWriterFailure(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf 'WEBVTT\\n\\n'\nexec cat >/dev/null\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{"open", "read", "close"} {
+		t.Run(phase, func(t *testing.T) {
+			s, _, blobs := newTestStore(t, ffmpeg)
+			if _, err := s.WholeTrack(t.Context(), path, ref); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(s.mirrorDir()); err != nil {
+				t.Fatal(err)
+			}
+			fillMirrorFetches(t, s)
+			entered := make(chan struct{})
+			closed := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(closed) })
+			s.blobs = stalledObjectBlobs{Blobs: blobs, phase: phase, entered: entered, closed: closed, close: unblock}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			in, err := s.WholeTrack(ctx, path, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeErr := errors.New("response writer disconnected")
+			done := make(chan error, 1)
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				done <- playback.StreamExtractSubtitle(ctx, playback.StreamExtractOpts{
+					Packets: in, SourceCodec: "subrip", FFmpegPath: bin,
+					Writer: storageFailureWriter{canceled: ctx.Done(), entered: entered, err: writeErr},
+				})
+			}()
+			// Release and join the feeder even when an assertion fails.
+			t.Cleanup(func() {
+				cancel()
+				unblock()
+				select {
+				case <-finished:
+				case <-time.After(5 * time.Second):
+					t.Error("storage fallback worker did not stop during cleanup")
+				}
+			})
+			select {
+			case err := <-done:
+				if !errors.Is(err, writeErr) || ctx.Err() != nil {
+					t.Fatalf("conversion error %v, parent error %v", err, ctx.Err())
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("writer failure left storage fallback blocked")
+			}
+		})
+	}
+}
+
+type stalledObjectBlobs struct {
+	Blobs
+	phase   string
+	entered chan struct{}
+	closed  <-chan struct{}
+	close   func()
+}
+
+func (b stalledObjectBlobs) Get(ctx context.Context, _ string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	if b.phase == "open" {
+		close(b.entered)
+		<-ctx.Done()
+		return nil, blobstore.ObjectInfo{}, ctx.Err()
+	}
+	return &stalledObjectReader{canceled: ctx.Done(), entered: b.entered, closed: b.closed,
+		close: b.close, onlyClose: b.phase == "close"}, blobstore.ObjectInfo{}, nil
+}
+
+type stalledObjectReader struct {
+	canceled  <-chan struct{}
+	entered   chan struct{}
+	closed    <-chan struct{}
+	close     func()
+	onlyClose bool
+}
+
+func (r *stalledObjectReader) Read([]byte) (int, error) {
+	close(r.entered)
+	if r.onlyClose {
+		<-r.closed
+	} else {
+		select {
+		case <-r.canceled:
+		case <-r.closed:
+		}
+	}
+	return 0, io.ErrClosedPipe
+}
+
+func (r *stalledObjectReader) Close() error { r.close(); return nil }
+
+type storageFailureWriter struct {
+	canceled <-chan struct{}
+	entered  <-chan struct{}
+	err      error
+}
+
+func (w storageFailureWriter) Write([]byte) (int, error) {
+	select {
+	case <-w.entered:
+		return 0, w.err
+	case <-w.canceled:
+		return 0, context.Canceled
 	}
 }

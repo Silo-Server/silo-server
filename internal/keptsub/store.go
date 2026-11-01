@@ -224,7 +224,7 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 		if err != nil {
 			return nil, err
 		}
-		in := s.streamInput(ctx, t)
+		in := s.streamInput(t)
 		release()
 		return in, nil
 	}
@@ -232,12 +232,12 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 
 // streamInput feeds FFmpeg the local copy of t, fetching it again
 // should it have been evicted since.
-func (s *Store) streamInput(ctx context.Context, t *Track) *playback.SubtitlePacketInput {
+func (s *Store) streamInput(t *Track) *playback.SubtitlePacketInput {
 	return &playback.SubtitlePacketInput{
 		StreamFormat:    t.StreamFormat,
 		SourceStartTime: t.StartTime,
 		ExpectCues:      t.Packets > 0,
-		Stream: func() (io.ReadCloser, error) {
+		Stream: func(ctx context.Context) (io.ReadCloser, error) {
 			again, release, err := s.mirror(ctx, t)
 			if errors.Is(err, errMirrorFetchLimit) {
 				return s.openObject(ctx, t)

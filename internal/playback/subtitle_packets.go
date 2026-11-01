@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
@@ -28,8 +29,9 @@ type SubtitlePacketInput struct {
 	// Stream, when set, opens a subtitle-only stream that is already written,
 	// such as a kept track (embeddedsub.WriteKept, or FFmpeg's copy of the
 	// track), in the FFmpeg input format StreamFormat. FFmpeg reads it
-	// instead of Index, Track and Packets.
-	Stream       func() (io.ReadCloser, error)
+	// instead of Index, Track and Packets. The context ends with conversion,
+	// including when its output writer fails or FFmpeg exits early.
+	Stream       func(context.Context) (io.ReadCloser, error)
 	StreamFormat string
 	// ExpectCues marks a whole track known to hold packets, so a conversion
 	// that yields no cue failed to read it, however FFmpeg exited; the
@@ -75,10 +77,10 @@ func (in *SubtitlePacketInput) validate() error {
 }
 
 // write writes the subtitle-only stream to w and closes it.
-func (in *SubtitlePacketInput) write(w io.WriteCloser) error {
+func (in *SubtitlePacketInput) write(ctx context.Context, w io.WriteCloser) error {
 	var err error
 	if in.Stream != nil {
-		err = copyStream(w, in.Stream)
+		err = copyStream(ctx, w, in.Stream)
 	} else {
 		err = embeddedsub.WriteStream(w, in.Index, in.Track, in.Packets)
 	}
@@ -88,13 +90,16 @@ func (in *SubtitlePacketInput) write(w io.WriteCloser) error {
 	return err
 }
 
-func copyStream(w io.Writer, open func() (io.ReadCloser, error)) error {
-	r, err := open()
+func copyStream(ctx context.Context, w io.Writer, open func(context.Context) (io.ReadCloser, error)) error {
+	r, err := open(ctx)
 	if err != nil {
 		return err
 	}
+	closeReader := sync.OnceValue(r.Close)
+	stop := context.AfterFunc(ctx, func() { _ = closeReader() })
+	defer stop()
 	_, err = io.Copy(w, r)
-	if closeErr := r.Close(); err == nil {
+	if closeErr := closeReader(); err == nil {
 		err = closeErr
 	}
 	return err
@@ -183,9 +188,9 @@ func ExtractSubtitlePacketsWebVTT(ctx context.Context, in *SubtitlePacketInput, 
 }
 
 // startSubtitleCommand starts cmd, writing in's stream to its stdin when in
-// is set. wait waits for the command and then for the writer, which ends
-// once the command has exited because Wait closes its stdin.
-func startSubtitleCommand(cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (waitErr, feedErr error), err error) {
+// is set. wait ends the input context after the command exits, then joins
+// the writer, including a storage open or read that no longer has a consumer.
+func startSubtitleCommand(ctx context.Context, cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (waitErr, feedErr error), err error) {
 	if in == nil {
 		if err := cmd.Start(); err != nil {
 			return nil, err
@@ -199,6 +204,7 @@ func startSubtitleCommand(cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	feedCtx, cancel := context.WithCancel(ctx)
 	feed := make(chan error, 1)
 	go func() {
 		defer func() {
@@ -207,10 +213,11 @@ func startSubtitleCommand(cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (
 				feed <- fmt.Errorf("write subtitle packets panicked: %v", r)
 			}
 		}()
-		feed <- in.write(stdin)
+		feed <- in.write(feedCtx, stdin)
 	}()
 	return func() (error, error) {
 		waitErr := cmd.Wait()
+		cancel()
 		return waitErr, <-feed
 	}, nil
 }
