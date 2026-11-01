@@ -2,6 +2,8 @@ package keptsub
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -10,10 +12,161 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+type blockedMirrorBlobs struct {
+	Blobs
+	entered chan struct{}
+	release <-chan struct{}
+}
+
+func (b *blockedMirrorBlobs) Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	return io.NopCloser(&blockedMirrorReader{blobs: b}), blobstore.ObjectInfo{}, nil
+}
+
+type blockedMirrorReader struct {
+	blobs   *blockedMirrorBlobs
+	started bool
+}
+
+func (r *blockedMirrorReader) Read(p []byte) (int, error) {
+	if !r.started {
+		r.started = true
+		p[0] = 'x'
+		return 1, nil
+	}
+	r.blobs.entered <- struct{}{}
+	<-r.blobs.release
+	return 0, io.ErrUnexpectedEOF
+}
+
+func TestMirrorBoundsDetachedFetches(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		bytes int64
+		limit int
+	}{{"bytes", 128 << 20, 2}, {"workers", 1024, 8}} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				release := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				blobs := &blockedMirrorBlobs{entered: make(chan struct{}, 1), release: release}
+				var stores []*Store
+				for range 2 {
+					dir := t.TempDir()
+					stores = append(stores, NewStore(newMemRepo(), blobs, Options{MirrorDir: func() string { return dir }}))
+				}
+				var admitted []*mirrorFetch
+				defer func() {
+					unblock()
+					for _, f := range admitted {
+						<-f.done
+					}
+				}()
+				first := &Track{SHA256: fmt.Sprintf("%064x", 1), Bytes: tc.bytes, StreamFormat: "matroska"}
+				for i := range 20 {
+					s := stores[i%len(stores)]
+					track := *first
+					track.SHA256 = fmt.Sprintf("%064x", i+1)
+					ctx, cancel := context.WithCancel(t.Context())
+					done := make(chan error, 1)
+					go func() {
+						_, unpin, err := s.mirror(ctx, &track)
+						if unpin != nil {
+							unpin()
+						}
+						done <- err
+					}()
+					select {
+					case <-blobs.entered:
+						s.mu.Lock()
+						admitted = append(admitted, s.mirrors[filepath.Join(s.mirrorDir(), mirrorName(&track))])
+						s.mu.Unlock()
+						cancel()
+						if err := <-done; !errors.Is(err, context.Canceled) {
+							t.Fatalf("canceled fetch waiter: %v", err)
+						}
+					case err := <-done:
+						cancel()
+						if !errors.Is(err, playback.ErrSubtitleReadsBusy) {
+							t.Fatalf("fetch admission refusal: %v", err)
+						}
+					}
+				}
+				if len(admitted) != tc.limit {
+					t.Errorf("admitted %d detached downloads reserving %d bytes, want %d", len(admitted), int64(len(admitted))*tc.bytes, tc.limit)
+				}
+				var temps int
+				for _, s := range stores {
+					files, _ := filepath.Glob(filepath.Join(s.mirrorDir(), mirrorTempPrefix+"*"))
+					temps += len(files)
+				}
+				if temps != len(admitted) {
+					t.Errorf("%d temporary files for %d admitted workers", temps, len(admitted))
+				}
+				// A warm track and another caller of an admitted key still work
+				// when no new fetch can be admitted.
+				s := stores[0]
+				warm := &Track{SHA256: "warm", StreamFormat: "matroska"}
+				if err := os.WriteFile(filepath.Join(s.mirrorDir(), mirrorName(warm)), []byte("warm"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, unpin, err := s.mirror(t.Context(), warm)
+				if err != nil {
+					t.Fatal(err)
+				}
+				unpin()
+				joined := make(chan error, 1)
+				go func() {
+					_, unpin, err := s.mirror(t.Context(), first)
+					if unpin != nil {
+						unpin()
+					}
+					joined <- err
+				}()
+				synctest.Wait()
+				unblock()
+				if err := <-joined; !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Errorf("joining an admitted key: %v", err)
+				}
+				for _, f := range admitted {
+					<-f.done
+				}
+				for _, s := range stores {
+					files, _ := filepath.Glob(filepath.Join(s.mirrorDir(), mirrorTempPrefix+"*"))
+					if len(files) != 0 {
+						t.Errorf("failed fetches left %d temporary files", len(files))
+					}
+				}
+				checkMirrorFetchRecovery(t, s)
+			})
+		})
+	}
+}
+
+// Failure returns both worker and byte capacity; successful downloads return it too.
+func checkMirrorFetchRecovery(t *testing.T, s *Store) {
+	t.Helper()
+	for i := range 10 {
+		data := []byte(fmt.Sprintf("recovered %d", i))
+		sum := sha256.Sum256(data)
+		s.blobs = &memBlobs{objects: map[string][]byte{"recovered": data}}
+		track := &Track{BlobKey: "recovered", SHA256: hex.EncodeToString(sum[:]), Bytes: int64(len(data)), StreamFormat: "matroska"}
+		path, unpin, err := s.mirror(t.Context(), track)
+		if err != nil {
+			t.Fatalf("fetch after worker exit: %v", err)
+		}
+		unpin()
+		if got, err := os.ReadFile(path); err != nil || string(got) != string(data) {
+			t.Fatalf("recovered fetch: %q, %v", got, err)
+		}
+	}
+}
 
 // stallSecondLookup makes the read's own lookup, the second Track call,
 // wait until release closes or its context ends.

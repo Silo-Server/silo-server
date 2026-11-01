@@ -197,7 +197,6 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
 	return c.streamFullTrack(r.Context(), w, opts, subtitleFormatSUP, c.sourced(extract))
 }
 

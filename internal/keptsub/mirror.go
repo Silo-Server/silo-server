@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // Kept streams are copied to the node's local disk, named by their SHA-256,
@@ -28,9 +31,40 @@ const (
 	mirrorTempPrefix      = ".kept-"
 	// staleMirrorTempAge is when a temp file a crash left is removed.
 	staleMirrorTempAge = time.Hour
+	// Cold fetches reserve their recorded output size before starting. These
+	// process-wide limits include workers whose callers have disconnected.
+	maxMirrorFetches    = 8
+	maxMirrorFetchBytes = 256 << 20
 )
 
 var errNoMirrorDir = errors.New("keptsub: no local directory for kept tracks")
+
+var errMirrorFetchLimit = fmt.Errorf("keptsub: too many mirror downloads: %w", playback.ErrSubtitleReadsBusy)
+
+var mirrorFetchBudget struct {
+	mu     sync.Mutex
+	active int
+	bytes  int64
+}
+
+func reserveMirrorFetch(size int64) (func(), error) {
+	if size <= 0 || size > maxMirrorFetchBytes {
+		return nil, fmt.Errorf("keptsub: invalid mirror size %d", size)
+	}
+	mirrorFetchBudget.mu.Lock()
+	defer mirrorFetchBudget.mu.Unlock()
+	if mirrorFetchBudget.active >= maxMirrorFetches || size > maxMirrorFetchBytes-mirrorFetchBudget.bytes {
+		return nil, errMirrorFetchLimit
+	}
+	mirrorFetchBudget.active++
+	mirrorFetchBudget.bytes += size
+	return func() {
+		mirrorFetchBudget.mu.Lock()
+		defer mirrorFetchBudget.mu.Unlock()
+		mirrorFetchBudget.active--
+		mirrorFetchBudget.bytes -= size
+	}, nil
+}
 
 // mirrorFetch is one copy being fetched, shared by its concurrent callers.
 type mirrorFetch struct {
@@ -61,6 +95,9 @@ func (s *Store) used(path string) {
 // mirror returns the local copy of t's stream, fetching it from storage
 // when the node has none. The fetched bytes must hash to t's SHA-256.
 func (s *Store) mirror(ctx context.Context, t *Track) (local string, release func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	dir := s.mirrorDir()
 	if dir == "" {
 		return "", nil, errNoMirrorDir
@@ -79,6 +116,11 @@ func (s *Store) mirror(ctx context.Context, t *Track) (local string, release fun
 	s.mu.Lock()
 	f := s.mirrors[path]
 	if f == nil {
+		finish, err := reserveMirrorFetch(t.Bytes)
+		if err != nil {
+			s.mu.Unlock()
+			return "", nil, err
+		}
 		f = &mirrorFetch{done: make(chan struct{})}
 		s.mirrors[path] = f
 		go func() {
@@ -86,6 +128,7 @@ func (s *Store) mirror(ctx context.Context, t *Track) (local string, release fun
 				s.mu.Lock()
 				delete(s.mirrors, path)
 				s.mu.Unlock()
+				finish()
 				close(f.done)
 			}()
 			fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)

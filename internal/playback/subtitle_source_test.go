@@ -19,6 +19,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 )
 
@@ -178,15 +180,20 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 // A node with no room for another whole read answers the request busy
 // before writing anything, instead of demuxing the source.
 func TestServeExtractAnswersBusyWithoutADemux(t *testing.T) {
-	c, source := newTestCache(t)
-	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"})
-	var mu sync.Mutex
-	var calls []StreamExtractOpts
-	rec := httptest.NewRecorder()
-	err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil),
-		StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
-	if !errors.Is(err, ErrSubtitleReadsBusy) || len(calls) != 0 || rec.Body.Len() != 0 {
-		t.Fatalf("err %v, %d extracts, body %q", err, len(calls), rec.Body.String())
+	for _, codec := range []string{"subrip", "hdmv_pgs_subtitle"} {
+		t.Run(codec, func(t *testing.T) {
+			c, source := newTestCache(t)
+			c.SetEmbeddedSource(&fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"})
+			var mu sync.Mutex
+			var calls []StreamExtractOpts
+			rec := httptest.NewRecorder()
+			response := middleware.NewWrapResponseWriter(rec, 1)
+			err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle", nil),
+				StreamExtractOpts{InputPath: source, SourceCodec: codec, Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
+			if !errors.Is(err, ErrSubtitleReadsBusy) || len(calls) != 0 || rec.Body.Len() != 0 || response.Status() != 0 {
+				t.Fatalf("err %v, %d extracts, status %d, body %q", err, len(calls), response.Status(), rec.Body.String())
+			}
+		})
 	}
 }
 
