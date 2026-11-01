@@ -15,25 +15,41 @@ type AdminDashboardInsightsService interface {
 }
 type AdminDashboardWindowInput struct {
 	Hours   int  `query:"hours" minimum:"1" maximum:"744" default:"24"`
-	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading."`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
 type AdminDashboardTopInput struct {
 	Days    int  `query:"days" minimum:"1" maximum:"30" default:"7"`
 	Limit   int  `query:"limit" minimum:"1" maximum:"25" default:"10"`
-	Refresh bool `query:"refresh" default:"false"`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
 type AdminDashboardDownloadsInput struct {
 	Limit   int  `query:"limit" minimum:"1" maximum:"25" default:"10"`
-	Refresh bool `query:"refresh" default:"false"`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
+
+// cacheRefresh honors a refresh request from administrators only. A scoped API
+// key reads the shared cached aggregate, so a monitoring tool polling these
+// reads cannot force the aggregate queries on every call.
+func cacheRefresh(ctx context.Context, requested bool) bool {
+	return requested && !scopedAPIKey(ctx)
+}
+
 type AdminDashboardTimeseriesPoint struct {
-	T                  Instant `json:"t"`
-	Streams            int64   `json:"streams"`
-	Direct             int64   `json:"direct"`
-	Remux              int64   `json:"remux"`
-	Transcode          int64   `json:"transcode"`
-	EgressKbps         int64   `json:"egress_kbps"`
-	DownloadEgressKbps int64   `json:"download_egress_kbps"`
+	T                  Instant          `json:"t"`
+	Streams            int64            `json:"streams"`
+	Direct             int64            `json:"direct"`
+	Remux              int64            `json:"remux"`
+	Transcode          int64            `json:"transcode"`
+	EgressKbps         int64            `json:"egress_kbps"`
+	DownloadEgressKbps int64            `json:"download_egress_kbps"`
+	EgressBySource     map[string]int64 `json:"egress_by_source" doc:"egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values."`
+}
+type AdminDashboardEgressSource struct {
+	Key         string `json:"key" doc:"The key used in a point's egress_by_source: \"api\" or \"node:<node_id>\"."`
+	Kind        string `json:"kind" enum:"api,node" doc:"api is every API server process together; node is one stream node."`
+	NodeID      *ID    `json:"node_id,omitempty" doc:"The stream node, for kind node."`
+	Name        string `json:"name" doc:"Display name. A node deleted since it was sampled is named \"Removed node <id>\"."`
+	EgressBytes int64  `json:"egress_bytes" doc:"Data this source served over the whole window, integrated from every sampled minute like the window's egress_bytes. Rank sources by this rather than by the per-point split, which shows only each bucket's peak minute."`
 }
 type AdminDashboardTimeseries struct {
 	ResolutionSeconds   int                             `json:"resolution_seconds"`
@@ -42,6 +58,7 @@ type AdminDashboardTimeseries struct {
 	OldestSampleAt      NullableInstant                 `json:"oldest_sample_at"`
 	EgressBytes         int64                           `json:"egress_bytes"`
 	DownloadEgressBytes int64                           `json:"download_egress_bytes"`
+	EgressSources       []AdminDashboardEgressSource    `json:"egress_sources" doc:"Every source with samples in the window, which covers every key a point's egress_by_source uses; the API source first, then nodes by name."`
 	Points              []AdminDashboardTimeseriesPoint `json:"points"`
 }
 type AdminDashboardTimeseriesOutput struct{ Body AdminDashboardTimeseries }
@@ -109,16 +126,23 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminTimeseries(ctx, in.Hours, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminTimeseries(ctx, in.Hours, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
-		body := AdminDashboardTimeseries{ResolutionSeconds: s.ResolutionSeconds, From: NewInstant(s.From), To: NewInstant(s.To), EgressBytes: s.EgressBytes, DownloadEgressBytes: s.DownloadEgressBytes, Points: make([]AdminDashboardTimeseriesPoint, 0, len(s.Points))}
+		body := AdminDashboardTimeseries{ResolutionSeconds: s.ResolutionSeconds, From: NewInstant(s.From), To: NewInstant(s.To), EgressBytes: s.EgressBytes, DownloadEgressBytes: s.DownloadEgressBytes, EgressSources: make([]AdminDashboardEgressSource, 0, len(s.EgressSources)), Points: make([]AdminDashboardTimeseriesPoint, 0, len(s.Points))}
+		for _, source := range s.EgressSources {
+			wire := AdminDashboardEgressSource{Key: source.Key, Kind: source.Kind, Name: source.Name, EgressBytes: source.EgressBytes}
+			if source.Kind == handlers.EgressSourceKindNode {
+				wire.NodeID = new(IDFromInt(int64(source.NodeID)))
+			}
+			body.EgressSources = append(body.EgressSources, wire)
+		}
 		if s.OldestSampleAt != nil {
 			body.OldestSampleAt = NullableInstant{Valid: true, Time: NewInstant(*s.OldestSampleAt)}
 		}
 		for _, p := range s.Points {
-			body.Points = append(body.Points, AdminDashboardTimeseriesPoint{T: NewInstant(p.T), Streams: p.Streams, Direct: p.Direct, Remux: p.Remux, Transcode: p.Transcode, EgressKbps: p.EgressKbps, DownloadEgressKbps: p.DownloadEgressKbps})
+			body.Points = append(body.Points, AdminDashboardTimeseriesPoint{T: NewInstant(p.T), Streams: p.Streams, Direct: p.Direct, Remux: p.Remux, Transcode: p.Transcode, EgressKbps: p.EgressKbps, DownloadEgressKbps: p.DownloadEgressKbps, EgressBySource: egressBySourceOf(p.EgressBySource)})
 		}
 		return &AdminDashboardTimeseriesOutput{Body: body}, nil
 	})
@@ -126,7 +150,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminPlaybackActivity(ctx, in.Hours, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminPlaybackActivity(ctx, in.Hours, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -140,7 +164,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminTopActivity(ctx, in.Days, in.Limit, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminTopActivity(ctx, in.Days, in.Limit, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -157,7 +181,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminDownloadsStats(ctx, in.Limit, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminDownloadsStats(ctx, in.Limit, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -189,4 +213,13 @@ type AdminTopTitle struct {
 	// the runtime of the titles played. A title with no finalized session in
 	// the window reports 0.
 	TotalSeconds int64 `json:"total_seconds"`
+}
+
+// egressBySourceOf keeps egress_by_source an object on the wire even for a
+// point the provider left without a breakdown.
+func egressBySourceOf(bySource map[string]int64) map[string]int64 {
+	if bySource == nil {
+		return map[string]int64{}
+	}
+	return bySource
 }

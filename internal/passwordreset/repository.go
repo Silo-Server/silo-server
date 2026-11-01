@@ -11,11 +11,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -30,6 +34,9 @@ var (
 	// password (disabled, or managed by an external provider), or whose
 	// recovery email changed since the caller read it.
 	ErrNotEligible = errors.New("account cannot use a password reset")
+	// ErrScopedKeyAdmin refuses a scoped API key issuing a link for an admin
+	// account: the link would carry the admin's full authority.
+	ErrScopedKeyAdmin = errors.New("a scoped API key may not reset an admin account's password")
 )
 
 // The account state a link needs, both to be issued and to be used, over the
@@ -66,19 +73,86 @@ type Link struct {
 	ExpiresAt time.Time
 }
 
+// Issuer is the account asking for an administrator's link, as the Owner
+// rules judge it when the link is stored.
+type Issuer struct {
+	// ID is the issuing account; 0 is no account, which may issue only for
+	// an ordinary account.
+	ID int
+	// ScopedKey marks a request made with a scoped API key, which may not
+	// issue for an admin account.
+	ScopedKey bool
+}
+
 // Issue stores the digest of a new link for the account, replacing any
-// earlier one: an account has at most one live link. It refuses an account
-// that cannot sign in with a local password or whose email no longer matches
-// expectedEmail. Locking the account before the link serializes issuance with
-// email changes, which delete existing links in the same transaction.
-func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error {
-	tag, err := r.pool.Exec(ctx, `
-		WITH account AS (
-			SELECT u.id, u.password_hash FROM users u
-			WHERE u.id = $1 AND u.email = $5::citext AND `+eligibleAccount+` FOR NO KEY UPDATE
-		)
+// earlier one: an account has at most one live link. It refuses, with the
+// auth Owner-rule errors or ErrScopedKeyAdmin, an issuer that may not reset
+// the account's password, and with ErrNotEligible an account that cannot
+// sign in with a local password or whose email no longer matches
+// expectedEmail. The issuer and the account are locked in id order, as
+// ownership transfers lock them, before the link. A promotion, an ownership
+// move or an email change that commits first is judged here. A promotion of
+// the account, an ownership move to it, or an email change that commits later
+// deletes the link in its own transaction. The audit row names the delivery
+// and expiry only, never the link or its digest.
+func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time, delivery Delivery) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin password reset link: %w", err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+
+	// The issuer, and the audit row's accounts (an impersonator included),
+	// are held FOR KEY SHARE: ownership moves lock both accounts FOR UPDATE
+	// before changing is_owner, so this waits for them, but not for other
+	// writers of the issuer's row, such as access-group updates that lock
+	// many rows in no fixed order and would otherwise deadlock with this set.
+	ids := append([]int{userID}, auditmutation.ActorIDs(ctx)...)
+	if issuer.ID > 0 {
+		ids = append(ids, issuer.ID)
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	actor := auth.OwnerActor{ID: issuer.ID}
+	var target *models.User
+	for _, id := range ids {
+		lock := "FOR NO KEY UPDATE"
+		if id != userID {
+			lock = "FOR KEY SHARE"
+		}
+		var user models.User
+		err := tx.QueryRow(ctx, `SELECT id, role, is_owner FROM users WHERE id = $1 `+lock, id).Scan(&user.ID, &user.Role, &user.IsOwner)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("locking password reset accounts: %w", err)
+		}
+		if id == issuer.ID {
+			actor.IsOwner = user.IsOwner
+		}
+		if id == userID {
+			target = &user
+		}
+	}
+	if target == nil {
+		return ErrNotEligible
+	}
+	if err := auth.CheckOwnerTarget(actor, target); err != nil {
+		return err
+	}
+	if issuer.ScopedKey && target.Role == models.RoleAdmin {
+		return ErrScopedKeyAdmin
+	}
+
+	var issuedBy *int
+	if issuer.ID > 0 {
+		issuedBy = new(issuer.ID)
+	}
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
-		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM account u
+		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM users u
+		WHERE u.id = $1 AND u.email = $5::citext AND `+eligibleAccount+`
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
@@ -92,6 +166,17 @@ func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, token
 	if tag.RowsAffected() == 0 {
 		return ErrNotEligible
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordResetLinkCreated, auditmutation.TargetUser,
+		strconv.Itoa(userID), http.StatusCreated, auditmutation.Changes(nil, map[string]any{
+			"delivery": string(delivery), "expires_at": expiresAt.UTC().Format(time.RFC3339),
+		}))
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit password reset link: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
 	return nil
 }
 
@@ -196,8 +281,14 @@ func (r *Repository) Complete(ctx context.Context, tokenHash, newPassword string
 	if err != nil {
 		return nil, err
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordResetCompleted, auditmutation.TargetUser,
+		strconv.Itoa(userID), http.StatusOK, auditmutation.SecretChanged(auditmutation.FieldPassword))
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit password reset: %w", err)
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return user, nil
 }

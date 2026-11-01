@@ -98,8 +98,18 @@ type Store interface {
 	// decideRoutes orders them.
 	ListRoutes(ctx context.Context) ([]Route, error)
 	// SetRoutingFacts stores facts fetched after the request was created (and
-	// the anime flag they imply).
+	// the anime flag they imply), unless another API server stored captured
+	// facts first; it returns the request as stored either way.
 	SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error)
+	// UpdateRoutingFacts writes the facts set in facts over the stored ones,
+	// key by key, and keeps the rest: a fact read again (the rating) replaces
+	// only itself.
+	UpdateRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error)
+	// FillRoutingFacts stores the facts set in facts that the stored ones
+	// lack and keeps every one already stored, so a fact read once (series
+	// status) keeps the first value any API server wrote. It returns the
+	// request as stored.
+	FillRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error)
 	// SetExternalIDs records a TVDB ID resolved after the request was created,
 	// and fills the IMDb ID when the row has none. An existing positive TVDB ID
 	// is kept; the TVDB ID the row holds afterwards is returned.

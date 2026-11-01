@@ -19,12 +19,16 @@ import { prefetchCatalog } from "@/pages/catalogRoute";
 import { useSidebarItemNavigation } from "@/components/sidebarItemNavigationContext";
 import {
   createEmptyQueryDefinition,
+  type BoxSetSummary,
   type BrowseItem,
   type Person,
   type RequestMediaResult,
 } from "@/api/types";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
 import { usePersonSearch } from "@/hooks/queries/personSearch";
+import { useBoxSetSearch } from "@/hooks/queries/boxSets";
+import { buildBoxSetHref } from "@/lib/mediaNavigation";
+import { GlobalSearchBoxSetRow } from "@/components/boxsets/GlobalSearchBoxSetRow";
 import { useSearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRequestSearch } from "@/hooks/queries/useRequests";
 import { useCanRequest } from "@/hooks/useCanRequest";
@@ -373,6 +377,11 @@ export function GlobalSearch({
     open && debouncedQuery.length > 0,
     searchScope === "all" ? undefined : searchScope,
   );
+  // Box sets are movies, so an audiobook-scoped search leaves them out.
+  const boxSetsInScope = searchScope !== "audiobook";
+  const boxSetQuery = useBoxSetSearch(debouncedQuery, {
+    enabled: open && boxSetsInScope,
+  });
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -405,6 +414,15 @@ export function GlobalSearch({
       setQuery("");
     },
     [beginSidebarItemNavigation, navigate],
+  );
+
+  const handlePickBoxSet = useCallback(
+    (boxSet: BoxSetSummary) => {
+      navigate(buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id }));
+      setOpen(false);
+      setQuery("");
+    },
+    [navigate],
   );
 
   const handlePickPerson = useCallback(
@@ -441,13 +459,20 @@ export function GlobalSearch({
   );
   const peopleFirst = exactPeople.length > 0;
   const people = peopleFirst ? exactPeople : matchedPeople;
-  const itemOffset = peopleFirst ? people.length : 0;
-  const peopleOffset = peopleFirst ? 0 : items.length;
-  const resultKeys = [
+  // A matching box set leads, ahead of its movies and of people.
+  // A disabled query still holds its last answer, so another scope hides it.
+  const boxSets = boxSetsInScope ? (boxSetQuery.data ?? []) : [];
+  const itemOffset = boxSets.length + (peopleFirst ? people.length : 0);
+  const peopleOffset = boxSets.length + (peopleFirst ? 0 : items.length);
+  const contentKeys = [
     ...items.map((item) => `item:${item.content_id}`),
     ...people.map((person) => `person:${person.id}`),
   ];
-  if (peopleFirst) resultKeys.unshift(...resultKeys.splice(items.length));
+  if (peopleFirst) contentKeys.unshift(...contentKeys.splice(items.length));
+  const resultKeys = [
+    ...boxSets.map((boxSet) => `box-set:${boxSet.library_id}:${boxSet.id}`),
+    ...contentKeys,
+  ];
   const resultCount = resultKeys.length;
   // Request suggestions follow the library results in the option sequence.
   const optionKeys = [
@@ -470,10 +495,13 @@ export function GlobalSearch({
     setSelectedKey(key);
   };
 
-  const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
+  const boxSetsFetching = boxSetsInScope && boxSetQuery.isFetching;
+  const showLoading =
+    (previewQuery.isFetching || peopleQuery.isFetching || boxSetsFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
     !peopleQuery.isFetching &&
+    !boxSetsFetching &&
     debouncedQuery.length > 0 &&
     resultCount === 0 &&
     !previewQuery.isError &&
@@ -498,6 +526,11 @@ export function GlobalSearch({
     if (index === selectedIndex) scrollSearchResultIntoView(index);
   }
   function pickSelected() {
+    const boxSet = selectedIndex >= 0 ? boxSets[selectedIndex] : undefined;
+    if (boxSet) {
+      handlePickBoxSet(boxSet);
+      return true;
+    }
     const item = items[selectedIndex - itemOffset];
     if (item) {
       handlePickItem(item.content_id);
@@ -526,15 +559,38 @@ export function GlobalSearch({
       onPlay={() => setOpen(false)}
     />
   ));
-  // With both kinds of result, each gets a heading and the lower one a
-  // divider, so neither reads as part of the other.
-  const grouped = people.length > 0 && items.length > 0;
+  // With more than one kind of result, each gets a heading and every group
+  // after the first a divider, so none reads as part of another.
+  const grouped =
+    [boxSets.length, people.length, items.length].filter((count) => count > 0).length > 1;
+  const boxSetGroup =
+    boxSets.length > 0 ? (
+      <div role="group" aria-labelledby="global-search-box-sets-heading">
+        {grouped ? (
+          <ResultGroupHeading id="global-search-box-sets-heading">Box sets</ResultGroupHeading>
+        ) : null}
+        {boxSets.map((boxSet, i) => (
+          <GlobalSearchBoxSetRow
+            key={`${boxSet.library_id}:${boxSet.id}`}
+            boxSet={boxSet}
+            optionId={searchResultOptionId(i)}
+            rowClassName={ROW_LAYOUT_CLASSES}
+            posterClassName={ROW_POSTER_CLASSES}
+            isSelected={i === selectedIndex}
+            onSelect={() => selectByPointer(`box-set:${boxSet.library_id}:${boxSet.id}`)}
+            onPick={handlePickBoxSet}
+          />
+        ))}
+      </div>
+    ) : null;
   const peopleGroup =
     people.length > 0 ? (
       <div
         role="group"
         aria-labelledby="global-search-people-heading"
-        className={cn(grouped && !peopleFirst && "mt-1 border-t border-white/5 pt-1")}
+        className={cn(
+          grouped && (!peopleFirst || boxSets.length > 0) && "mt-1 border-t border-white/5 pt-1",
+        )}
       >
         <ResultGroupHeading id="global-search-people-heading">People</ResultGroupHeading>
         {people.map((person, i) => (
@@ -553,7 +609,7 @@ export function GlobalSearch({
     <div
       role="group"
       aria-labelledby="global-search-titles-heading"
-      className={cn(peopleFirst && "mt-1 border-t border-white/5 pt-1")}
+      className={cn((peopleFirst || boxSets.length > 0) && "mt-1 border-t border-white/5 pt-1")}
     >
       <ResultGroupHeading id="global-search-titles-heading">Titles</ResultGroupHeading>
       {titleRows}
@@ -652,6 +708,7 @@ export function GlobalSearch({
                     No matches
                   </div>
                 )}
+                {boxSetGroup}
                 {peopleFirst && peopleGroup}
                 {titlesGroup}
                 {!peopleFirst && peopleGroup}

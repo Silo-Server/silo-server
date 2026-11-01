@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -646,8 +647,12 @@ func (h *PluginHandler) HandleCancelChunkedUpload(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) (*plugins.InstallResult, error) {
-	zipUpload, err := isZipUploadFile(path)
+// installUploadedPlugin installs the upload in file. A zip archive is
+// installed from path, which names the same file, because the archive
+// installer reads by path; a bare binary is read from file itself, so the
+// binary that gets executed is the one that was uploaded.
+func (h *PluginHandler) installUploadedPlugin(ctx context.Context, file *os.File, path string) (*plugins.InstallResult, error) {
+	zipUpload, err := isZipUploadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +662,7 @@ func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) 
 		})
 	}
 
-	uploadData, err := os.ReadFile(path)
+	uploadData, err := io.ReadAll(io.NewSectionReader(file, 0, math.MaxInt64))
 	if err != nil {
 		return nil, fmt.Errorf("read uploaded plugin binary: %w", err)
 	}
@@ -703,16 +708,10 @@ func isZipUpload(data []byte) bool {
 		bytes.Equal(data[:4], []byte("PK\x07\x08"))
 }
 
-func isZipUploadFile(path string) (bool, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return false, fmt.Errorf("open uploaded plugin file: %w", err)
-	}
-	defer file.Close()
-
+func isZipUploadFile(file io.ReaderAt) (bool, error) {
 	var header [4]byte
-	n, err := io.ReadFull(file, header[:])
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	n, err := file.ReadAt(header[:], 0)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read uploaded plugin header: %w", err)
 	}
 	return isZipUpload(header[:n]), nil
@@ -1170,6 +1169,12 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			continue
 		}
 		manifest, err := plugins.LoadManifestFile(plugins.InstalledManifestPath(installation.InstallPath))
+		if errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+			// A row admitted before the identity check never loads; it has
+			// no settings to offer and must not hide the other plugins.
+			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1400,7 +1405,9 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) {
+		// A row admitted before the identity check never loads; list it
+		// without its manifest so the admin can still uninstall it.
+		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
 			return PluginInstallationView{}, err
 		}
 	}

@@ -181,7 +181,7 @@ func TestPublicRunReplacesDiagnostics(t *testing.T) {
 			t.Fatalf("warning leaked a diagnostic: %q", warning)
 		}
 	}
-	if public.Warnings[0] != GenericRunWarning || public.Warnings[1] != jellyfinFavoritesUnavailableSummary {
+	if public.Warnings[0] != `Plex section "Movies" couldn't be read, so its watched movies weren't imported.` || public.Warnings[1] != jellyfinFavoritesUnavailableSummary {
 		t.Fatalf("warnings = %q", public.Warnings)
 	}
 	if public.UnmatchedSamples[0].Reason != GenericUnmatchedReason || public.UnmatchedSamples[0].Title != "Heat" {

@@ -916,8 +916,9 @@ fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
-expired on the applicable launch/logout transition where practical and otherwise dies within its
-existing five-minute maximum. It is never broadened to `/`.
+expired on the applicable launch/logout transition where practical and otherwise dies five minutes
+after it was last issued or renewed; a page request through a cookie past half its lifetime renews
+it while the login session could still refresh ([plugin content](plugin-content.md)). It is never broadened to `/`.
 
 ### Discovery and capability detection
 
@@ -1281,7 +1282,7 @@ tombstone. The retained contract is:
   finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
-container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
+container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
 root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
@@ -1618,6 +1619,29 @@ Because v2 rejects unknown query parameters, a client sends `include_items` only
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
 home sections service is not wired.
+`listHomeSections` and `listLibrarySections` take an optional `item_limit` (1 to 100) that caps
+every row: each row's limit becomes the smaller of its own effective limit and `item_limit`, and
+the response's per-row `item_limit` reports the capped value. The cap applies to the resolved rows
+before their items are fetched, so the hide-watched widening and the cross-row duplicate filter
+work from the capped size; `total_count` keeps its meaning. Without the parameter every row keeps
+its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
+only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
+`include_items_max` is.
+`getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
+one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
+`getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
+row's own `item_limit`. Neither read runs the cross-row duplicate filter. A row either read
+answers with `item_limit` carries `has_more: true` when it holds more cards than it answered, so
+that reading it again without `item_limit` answers more; the field is absent when false and on
+every other read that answers a `Section`. This includes an admin curated list, which an uncapped
+read can answer past its own `item_limit`. The server fetches and filters a capped row at the
+row's own `item_limit`, exactly as the uncapped read does, and builds only its first cards, so
+`has_more` is true exactly when the uncapped read answers more cards. Fetching at the cap would
+miss cards that a fetcher drops after applying its limit, such as an unsorted collection's
+members the access filter removes. A client sends `item_limit` to these two reads only when
+`getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
+parameter on them does not send. A row that draws a random subset on each read may answer
+different cards when read again.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
@@ -1662,12 +1686,12 @@ overwrite newer progress; every item needs a stable event time before automatic 
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
 resume position while keeping its watched state and history, answers `204` (also when there is
-nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
-kind `markWatched` does not handle, and is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for an
+audiobook or a kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
 `clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
-v2 `markWatched` on a watched movie or episode with a resume position records another play and
+v2 `markWatched` on a watched movie, episode or audiobook with a resume position records another play and
 clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
 no-op. Semantics are in
 [the progress API](../progress-api.md#clearing-a-resume-position).
@@ -2045,8 +2069,25 @@ title detail's recommendations) and the title detail carry `in_watchlist`,
 true when the acting profile has the title on its watchlist, in or out of the
 library.
 
+The Discover page follows the admin's layout ([Request Discover rows](request-discover-rows.md)).
+`GET /api/v2/requests/discover` (`listDiscoverSections`) returns, in `items`, the
+enabled title rows that have titles, in layout order, and in the required
+`row_order` every enabled row, brand rows (`studios`, `networks`, `genres`)
+included; a brand row draws the cards of the matching brand list operation, and a
+client skips a row type it does not know. The six built-in rows keep their keys;
+an admin's rows have opaque keys. `GET /api/v2/requests/discover/rows/{row_id}`
+(`getDiscoverRow`) pages any title row. `getDiscoverSection` keeps its six-key enum
+but reads through the layout, so a built-in row the admin turned off or removed
+answers 404. A row page's `next_page` covers rows that leave out titles the
+library has as well as rating backfill, and after a read of several pages reached
+the end it points past `total_pages`. `GET /api/v2/requests/status` advertises
+`discover_rows_supported`. The frozen v1 discovery keeps the six built-in rows
+whatever the layout.
+
 Native Apple and Android request migrations accompany this contract change;
-integrate those client changes before retiring their v1 routes. Jellyfin compatibility does not expose this request
+integrate those client changes before retiring their v1 routes. Shipped apps
+merge only the built-in trending and popular rows, so an admin's rows reach them
+once they read `row_order`. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
 
 ### Watchlist titles
@@ -2366,6 +2407,16 @@ where Standard sends each media type, or why it cannot be used, and switching
 to Standard is refused with a validation problem while it cannot. The `routing`
 field of `getAdminRequestCapabilities` reports whether the server offers both
 the routing rule operations and the routing mode operations.
+
+The Discover layout (`/admin/request-discover`) is v2-only:
+`GET`/`PUT`/`DELETE /admin/request-discover/layout` read, replace and reset the
+whole layout with `If-Match` on its revision (the default layout, with none
+stored, reads as revision zero; a guarded reset answers 204); list rows carry
+the status of their stored copy. `POST /admin/request-discover/preview` shows a
+row's first page before it is saved, fetching a list row's list live, and
+`GET /admin/request-discover/watch-providers` lists the streaming services a
+discover row can filter on in a region. They work while requests are turned off.
+The `discover_layout` field of `getAdminRequestCapabilities` reports them.
 
 Settings, account limits and integrations require `If-Match` for replacement and
 integration deletion. A shared PostgreSQL sequence assigns a new revision on every

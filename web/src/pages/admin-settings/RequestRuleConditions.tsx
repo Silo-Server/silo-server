@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import {
   ROUTING_COUNTRIES,
   ROUTING_DECADES,
@@ -36,6 +37,10 @@ import {
   rowField,
   rowsToConditions,
   ruleSentence,
+  SERIES_STATUS_PRESETS,
+  SERIES_STATUSES,
+  seriesStatusLabel,
+  seriesStatusPreset,
   type ConditionKind,
   type ConditionRow,
   type ListConditionRow,
@@ -64,6 +69,8 @@ function kindLabel(kind: ConditionKind, mediaType: RequestRouteMediaType): strin
       return mediaType === "series" ? "First aired" : "Release year";
     case "rating":
       return "Content rating";
+    case "status":
+      return "Status";
     case "network":
       return "Network";
     case "studio":
@@ -96,7 +103,7 @@ function parseYear(value: string): number | undefined {
 }
 
 /** An input for a numeric TMDB ID, added with Enter or the button. */
-function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
+export function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
   const [text, setText] = useState("");
   const id = Number(text.trim());
   const valid = Number.isInteger(id) && id > 0;
@@ -183,6 +190,11 @@ function ListValues({
         lookups.users.find((user) => String(user.id) === value)?.username ?? `Account ${value}`;
       addLabel = "Add an account";
       break;
+    case "status":
+      options = [...SERIES_STATUSES];
+      labelOf = seriesStatusLabel;
+      addLabel = "Add a status";
+      break;
     case "keyword":
       labelOf = (value) => `Keyword ${value}`;
       break;
@@ -204,6 +216,25 @@ function ListValues({
           row.kind === "network" || row.kind === "studio" ? lookups.brandsHint : undefined
         }
       />
+      {row.kind === "status" ? (
+        <div role="group" aria-label="Status presets" className="flex flex-wrap gap-1.5">
+          {SERIES_STATUS_PRESETS.map((preset) => {
+            const on = seriesStatusPreset(row.values) === preset;
+            return (
+              <Button
+                key={preset.label}
+                type="button"
+                size="xs"
+                variant={on ? "default" : "outline"}
+                aria-pressed={on}
+                onClick={() => onChange(on ? [] : [...preset.values])}
+              >
+                {preset.label}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
       {byId ? (
         <div className="flex flex-wrap items-center gap-2">
           {row.kind !== "keyword" ? (
@@ -341,6 +372,9 @@ function ConditionLine({
   } else if (row.kind === "year") {
     body = <YearValues row={row} onChange={onChange} invalid={Boolean(error)} />;
   } else {
+    if (row.kind === "status") {
+      hint = `Read when the request is made, so a show that ends later stays where it was sent. A series with no TMDB status ${row.mode === "any" ? "doesn't match" : "matches"}.`;
+    }
     control = (
       <Select
         value={row.mode}
@@ -438,7 +472,16 @@ export function RuleConditionsEditor({
 }) {
   const headingId = useId();
   const brandKind: ConditionKind = mediaType === "series" ? "network" : "studio";
-  const menu: ConditionKind[] = [...MENU_KINDS, brandKind, "requester"];
+  // A server without the status condition refuses it in a save and ignores
+  // it in a rule another server saved, so it is offered only where the server
+  // says it takes it. A saved status row still shows.
+  const statusSupported = useAdminRequestCapabilities().data?.routing_series_status ?? false;
+  const menu: ConditionKind[] = [
+    ...MENU_KINDS,
+    ...(mediaType === "series" && statusSupported ? (["status"] as const) : []),
+    brandKind,
+    "requester",
+  ];
   // The rule in words, as the list shows it: "When a movie is Action or
   // Documentary and came out in 1970–1979".
   const conditions = rowsToConditions(rows);

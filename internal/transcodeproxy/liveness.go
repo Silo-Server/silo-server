@@ -27,21 +27,21 @@ import (
 // ready, for over a minute (see nodeClient).
 //
 // DoNode tells the two apart by asking the node. Once a call has waited
-// livenessGrace for response headers, the node's health endpoint is probed,
-// and probed again every livenessInterval while the call keeps waiting. A live
-// node answers health at once however slow the call it is serving, and the call
-// keeps waiting. A probe that gets no answer within livenessProbeTimeout is
-// retried at once on a fresh connection, so one lost packet cannot condemn a
-// live node; a node that misses two probes without answering one in between is
-// hung: the call is canceled and fails with nodepool.ErrNodeNotAnswering. A
-// probe this host could not send (a name that does not resolve or a lookup that
-// stalls, no local sockets left) says nothing about the node and counts as
-// neither: it neither adds a miss nor clears one.
+// livenessGrace for response headers or a body Read, the node's health endpoint
+// is probed, and probed again every livenessInterval while the call keeps
+// waiting. A live node answers health at once however slow the call it is
+// serving, and the call keeps waiting. A probe that gets no answer within
+// livenessProbeTimeout is retried at once on a fresh connection, so one lost
+// packet cannot condemn a live node; a node that misses two probes without
+// answering one in between is hung: the call is canceled and fails with
+// nodepool.ErrNodeNotAnswering. A probe this host could not send (a name that
+// does not resolve or a lookup that stalls, no local sockets left) says nothing
+// about the node and counts as neither: it neither adds a miss nor clears one.
 //
-// A node found hung is remembered until it answers a probe or a call again.
-// Calls to it probe at once instead of waiting out the grace, and one missed
-// probe is enough, so every other session on the node finds out within one
-// probe timeout.
+// A node found hung is remembered until it answers a probe or sends response
+// headers or body data. Calls to it probe at once instead of waiting out the
+// grace, and one missed probe is enough, so every other session on the node
+// finds out within one probe timeout.
 const (
 	livenessGrace        = 2 * time.Second
 	livenessProbeTimeout = 2 * time.Second
@@ -63,30 +63,17 @@ func currentLiveness() livenessTiming {
 
 // DoNode sends req to the transcode node at nodeURL through
 // telemetry.DoTrustedNode and watches the node while the call waits for
-// response headers. It returns an error wrapping nodepool.ErrNodeNotAnswering
-// when the node stopped answering, which nodepool.IsConnectFailure counts as a
-// failure to reach the node. The watch ends with the headers: a body that stops
-// streaming is not detected here.
+// response headers or a body Read. The call or Read returns an error wrapping
+// nodepool.ErrNodeNotAnswering when the node stopped answering, which
+// nodepool.IsConnectFailure counts as a failure to reach the node.
+// No watch runs between body reads, so a slow viewer does not trigger probes.
+// The caller must close the returned body.
 func DoNode(client *http.Client, req *http.Request, nodeURL, operation string) (*http.Response, error) {
 	ctx, cancel := context.WithCancelCause(req.Context())
-	const (
-		waiting int32 = iota
-		answered
-		hung
-	)
-	var state atomic.Int32
-	done := make(chan struct{})
-	go watchNode(ctx, nodeURL, currentLiveness(), done, func() {
-		// Only a call still waiting is condemned and remembers the node: once
-		// the node answered, the answer stands and the miss is stale.
-		if state.CompareAndSwap(waiting, hung) {
-			notAnswering.Store(nodepool.NormalizeNodeURL(nodeURL), struct{}{})
-			cancel(nodepool.ErrNodeNotAnswering)
-		}
-	})
+	timing := currentLiveness()
+	finish := beginNodeWatch(ctx, nodeURL, timing, cancel)
 	resp, err := telemetry.DoTrustedNode(client, req.WithContext(ctx), operation)
-	close(done)
-	if !state.CompareAndSwap(waiting, answered) {
+	if finish() {
 		// The watch found the node hung before an answer arrived.
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -99,20 +86,68 @@ func DoNode(client *http.Client, req *http.Request, nodeURL, operation string) (
 	}
 	// An answer is as good as a probe's.
 	notAnswering.Delete(nodepool.NormalizeNodeURL(nodeURL))
-	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: func() { cancel(nil) }}
+	resp.Body = &watchedBody{ReadCloser: resp.Body, ctx: ctx, cancel: cancel, nodeURL: nodeURL, operation: operation, timing: timing}
 	return resp, nil
 }
 
-// cancelOnClose releases the call's context once its body is closed.
-type cancelOnClose struct {
-	io.ReadCloser
-	cancel func()
+// beginNodeWatch returns a function that ends one pending operation and reports
+// whether the watch found it hung. Fast operations stop the grace timer without
+// starting a watcher goroutine; only a wait beyond the grace enters watchNode.
+func beginNodeWatch(ctx context.Context, nodeURL string, timing livenessTiming, cancel context.CancelCauseFunc) func() bool {
+	const (
+		waiting int32 = iota
+		answered
+		hung
+	)
+	var state atomic.Int32
+	done := make(chan struct{})
+	wait := timing.grace
+	if _, known := notAnswering.Load(nodepool.NormalizeNodeURL(nodeURL)); known {
+		wait = 0
+	}
+	timing.grace = 0 // the timer below already waits out the grace
+	timer := time.AfterFunc(wait, func() {
+		watchNode(ctx, nodeURL, timing, done, func() {
+			// Only a call still waiting is condemned and remembers the node: once
+			// the node answered, the answer stands and the miss is stale.
+			if state.CompareAndSwap(waiting, hung) {
+				notAnswering.Store(nodepool.NormalizeNodeURL(nodeURL), struct{}{})
+				cancel(nodepool.ErrNodeNotAnswering)
+			}
+		})
+	})
+	return func() bool {
+		wasHung := !state.CompareAndSwap(waiting, answered)
+		close(done)
+		timer.Stop()
+		return wasHung
+	}
 }
 
-func (b *cancelOnClose) Close() error {
-	err := b.ReadCloser.Close()
-	b.cancel()
-	return err
+type watchedBody struct {
+	io.ReadCloser
+	ctx       context.Context //nolint:containedctx // io.ReadCloser has no context argument; the body owns the request lifetime until Close.
+	cancel    context.CancelCauseFunc
+	nodeURL   string
+	operation string
+	timing    livenessTiming
+}
+
+func (b *watchedBody) Read(p []byte) (int, error) {
+	finish := beginNodeWatch(b.ctx, b.nodeURL, b.timing, b.cancel)
+	n, err := b.ReadCloser.Read(p)
+	if finish() || errors.Is(context.Cause(b.ctx), nodepool.ErrNodeNotAnswering) {
+		return n, fmt.Errorf("%w: no body data for %s or answer to a health probe", nodepool.ErrNodeNotAnswering, b.operation)
+	}
+	if n > 0 {
+		notAnswering.Delete(nodepool.NormalizeNodeURL(b.nodeURL))
+	}
+	return n, err
+}
+
+func (b *watchedBody) Close() error {
+	b.cancel(nil)
+	return b.ReadCloser.Close()
 }
 
 // watchNode probes nodeURL while a call to it waits, and calls hung once the

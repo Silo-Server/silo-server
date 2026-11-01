@@ -43,14 +43,22 @@ func TestQueryExecutorTerminalPageTotals(t *testing.T) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("preview-total-%d-%02d", time.Now().UnixNano(), i)
 	}
+	var library int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, ids[0]).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
 	_, err = pool.Exec(t.Context(), `INSERT INTO media_items (content_id, type, title, status, genres)
 		SELECT id, 'movie', id, 'matched', '{}'::text[] FROM unnest($1::text[]) id`, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
-	})
+	if _, err := pool.Exec(t.Context(), `INSERT INTO media_item_libraries (content_id, media_folder_id) SELECT id, $2 FROM unnest($1::text[]) id`, ids, library); err != nil {
+		t.Fatal(err)
+	}
 	executor := &QueryExecutor{Pool: pool}
 	for _, tc := range []struct {
 		name                            string

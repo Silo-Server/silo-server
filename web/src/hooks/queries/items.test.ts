@@ -75,7 +75,8 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { useRefreshItemMetadata, useWatchedStateMutation } from "./items";
+import { V2ProblemError } from "@/api/v2/request";
+import { useRefreshItemMetadata, useUploadItemImage, useWatchedStateMutation } from "./items";
 
 type WatchedMutationOptions = {
   mutationFn: (nextPlayed: boolean) => Promise<unknown>;
@@ -137,6 +138,31 @@ describe("item query helpers", () => {
     }));
     mocks.useQueryClient.mockReset();
     mocks.useQueryClient.mockReturnValue({});
+  });
+
+  it("shows why the server refused an uploaded image, not the generic summary", () => {
+    useUploadItemImage();
+    const options = mocks.useMutation.mock.calls[mocks.useMutation.mock.calls.length - 1]?.[0] as {
+      onError: (err: unknown) => void;
+    };
+
+    options.onError(
+      new V2ProblemError("uploadAdminItemImage", {
+        type: "https://silo.example/problems/validation_failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "The request did not pass validation; see errors.",
+        errors: [
+          {
+            location: "body",
+            code: "invalid",
+            detail: "The file is not a JPEG, PNG or WebP image",
+          },
+        ],
+      } as ConstructorParameters<typeof V2ProblemError>[1]),
+    );
+
+    expect(mocks.toastError).toHaveBeenCalledWith("The file is not a JPEG, PNG or WebP image");
   });
 
   it("warns when the refresh succeeded but artwork caching did not finish", async () => {

@@ -929,9 +929,8 @@ func (e *Enricher) persist(ctx context.Context, item enrichmentItemRow, provider
 	if result.ContentRating != "" {
 		upd.ContentRating = &result.ContentRating
 	}
-	if result.Runtime > 0 {
-		upd.Runtime = &result.Runtime
-	}
+	// result.Runtime is left out on purpose: it describes whichever edition
+	// the provider matched. Active audio files determine the book's runtime.
 	if result.Year > 0 {
 		upd.Year = &result.Year
 	}

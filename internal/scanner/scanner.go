@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -482,7 +484,7 @@ func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[
 }
 
 func canonicalWalkPath(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
 	}
@@ -562,7 +564,7 @@ func walkLogicalTree(
 		}
 	}
 
-	info, err := os.Lstat(physicalPath)
+	info, err := fspath.Lstat(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures, logicalPath)
@@ -570,13 +572,13 @@ func walkLogicalTree(
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(physicalPath)
+		resolved, err := fspath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
-		targetInfo, err := os.Stat(resolved)
+		targetInfo, err := fspath.Stat(resolved)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
@@ -649,13 +651,13 @@ func walkLogicalTree(
 		}
 
 		if entry.Type()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(physicalChild)
+			resolved, err := fspath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
 				continue
 			}
-			targetInfo, err := os.Stat(resolved)
+			targetInfo, err := fspath.Stat(resolved)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
@@ -737,6 +739,10 @@ func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string,
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
+		if scopeRootVanished(cleanRoot, libraryRoots) {
+			slog.InfoContext(ctx, "scanner: scope no longer exists under its library root; reconciling it as empty", "component", "scanner", "path", cleanRoot)
+			continue
+		}
 		rules, ignored, err := scanRootIgnoreRules(cleanRoot, libraryRoots)
 		if err != nil {
 			recordWalkFailure(&walkFailures, cleanRoot)
@@ -746,12 +752,33 @@ func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string,
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, os.ReadDir); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, fspath.ReadDir); err != nil {
 			return nil, nil, nil, err
 		}
 	}
 
 	return filePaths, walkFailures, sidecars, nil
+}
+
+// scopeRootVanished reports whether a walk root below a configured library
+// root is confirmed gone while its parent directory is still there: a deleted
+// movie or series folder that a monitor or webhook scan is scoped to. Such a
+// scope is empty, not unreadable, so its cataloged files are reconciled the way
+// a full library scan would. Only ENOENT counts, and the parent must resolve to
+// a directory. A missing parent (a missing library root, or storage that
+// dropped further up), a dangling symlink at or above the scope, and permission
+// or I/O errors stay walk failures. An unreachable or suspect-empty library
+// root keeps its own protection.
+func scopeRootVanished(scope string, libraryRoots []string) bool {
+	root := scopeLibraryRoot(scope, libraryRoots)
+	if root == "" || root == scope {
+		return false
+	}
+	if _, err := os.Lstat(scope); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	parent, err := os.Stat(filepath.Dir(scope))
+	return err == nil && parent.IsDir()
 }
 
 func (s *Scanner) scanPaths(
@@ -1337,10 +1364,10 @@ func (s *Scanner) scanFolderByRoots(
 
 	// When EVERY configured root is unreachable this is an outage, not an
 	// intentionally emptied library: skip the empty-root confirm flow (and do
-	// not consume the operator's one-time cleanup allowance), fall through so
-	// pending scopes mark files missing (hiding them), and let the dead_root
-	// warning below explain the state. All deletion paths are protected by
-	// the unreachable-roots exclusions, so nothing is purged.
+	// not consume the operator's one-time cleanup allowance) and let the
+	// dead_root warning below explain the state. The pending scopes still run,
+	// but every root is in the protected set, so their files are neither
+	// marked missing nor deleted.
 	allRootsUnreachable := len(unreachableRoots) > 0 && len(unreachableRoots) == len(configuredRoots)
 	if !seenAnyFiles && totalExisting > 0 && !allRootsUnreachable {
 		var err error
@@ -2463,6 +2490,11 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 	if err := tx.QueryRow(ctx, restoreEpisodeMembershipsSQL, args...).Scan(&linkedSeriesIDs); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}
+	spannedSeriesIDs, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1"+filePredicate, args...)
+	if err != nil {
+		return err
+	}
+	linkedSeriesIDs = append(linkedSeriesIDs, spannedSeriesIDs...)
 	// New links move the series' membership denorms ("Latest Episodes",
 	// issue #202; "Latest Episode Air Date", issue #2741). Recompute them in
 	// a later statement: one that waited on a concurrent air-date
@@ -2672,7 +2704,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			if err != nil {
 				return err
 			}
-			if info, statErr := os.Stat(scanRoot); statErr == nil && info.IsDir() {
+			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
 				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, false); err != nil {
 					return err
 				}
@@ -2834,7 +2866,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := fspath.Stat(filePath); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
@@ -2996,7 +3028,7 @@ func (s *Scanner) processFile(
 ) (resultAction fileAction, resultWarnings []string, resultErr error) {
 	defer func() { observeFile(resultAction, resultErr) }()
 	// Stat the file.
-	info, err := os.Stat(filePath)
+	info, err := fspath.Stat(filePath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("stat %s: %w", filePath, err)
 	}
@@ -3343,6 +3375,17 @@ func identityOnlyFastPathEligible(existing *scanStateFile, reasons []string) boo
 		existing.FileHash != ""
 }
 
+// scanStateUpdateReasons lists why a scan must write an existing file's row.
+// The file's content counts as changed only when its size or modification
+// time differs from the row's. A replacement with the same size and mtime
+// (a copy tool that preserves mtime, or a filesystem whose coarse timestamps
+// hide the rewrite) keeps the old probe data, markers and trickplay until one
+// of them changes; touching the file is the remedy. That limit is accepted:
+// inode numbers are not stable on SMB, FUSE and mergerfs mounts, so comparing
+// them would re-probe whole libraries after a remount; ctime also changes with
+// permissions and ownership; and hashing even part of each file would read
+// every unchanged file on every scan, which the stable-file skip exists to
+// avoid.
 func scanStateUpdateReasons(
 	existing *scanStateFile,
 	fileSize int64,
@@ -3431,7 +3474,7 @@ func hasMissingExternalSubtitlePath(paths []string) bool {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err := fspath.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return true
 		}
 	}
@@ -4175,6 +4218,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Forced:           st.Forced,
 			Default:          st.Default,
 			HearingImpaired:  st.HearingImpaired,
+			IndexOnly:        st.IndexOnly,
 		}
 	}
 	mf.SubtitleTracks = subtitleTracks

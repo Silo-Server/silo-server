@@ -33,6 +33,7 @@ import { DownloadsWidget } from "./widgets/DownloadsWidget";
 import { ScanActivityWidget } from "./widgets/ScanActivityWidget";
 import { RecentErrorsWidget } from "./widgets/RecentErrorsWidget";
 import { RecentActivityWidget } from "./widgets/RecentActivityWidget";
+import { ApiClientsWidget } from "./widgets/ApiClientsWidget";
 
 /**
  * Sampled charts read `dashboard_metric_samples`, which the sampler keeps for a
@@ -388,6 +389,21 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     maxRows: 8,
     defaultRows: 4,
     Component: RecentActivityWidget,
+  },
+  {
+    id: "api-clients",
+    title: "Busiest API clients",
+    description: "Sign-in sessions with the most API requests, and a way to sign one out",
+    minSpan: 6,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 6,
+    defaultRows: 3,
+    // API usage is summarized per hour and kept for 30 days: the same spread
+    // as the sampled charts.
+    ranges: SAMPLED_RANGES,
+    Component: ApiClientsWidget,
   },
 ];
 

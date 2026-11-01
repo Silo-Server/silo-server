@@ -32,9 +32,19 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
+| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}`, in the operational store (see below) |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+
+Kept embedded subtitle tracks come from users' media and are never delivered to
+browsers, so they are kept in the operational store, never in a bucket whose
+objects can be read outside the server's own authorization. With no operational
+store (an S3 backend with no private bucket), they use the assets bucket only
+while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
+`cloudflare_token` delivery nothing is kept, and tracks are read through their
+index or demuxed instead. The blob collector and sweep reach them in whichever
+store holds them (`blobgc.Namespace.Store`).
 
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
@@ -60,7 +70,11 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 
 Images generated from a media file (chapter thumbnails, under
 `chapter-images/<media_files.id>/`) are deleted with their file
-(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+(`internal/blobgc`). Kept embedded subtitle tracks go the same way: a trigger
+on `embedded_subtitle_tracks` queues a stream's exact key whenever its row
+goes, by replacement, by a rescan that finds the file changed, or by the
+cascade from the file's deletion, and the sweep lists them by file
+(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due groups whose namespace reports them
@@ -213,6 +227,18 @@ and the key prefix keep their case. Releases before the identity row
 lowercased the whole endpoint, so startup accepts a recorded S3 identity whose
 endpoint equals the configured one lowercased, with the bucket and key prefix
 matching exactly, and rewrites the row in the exact form.
+A local root is resolved through symlinks in its parent directories, so the
+same directory can resolve to another path after a link is added, such as the
+omnibus image's `/var/lib/silo` link to `/config/silo`. When the recorded root
+and the configured one resolve to the same path (`SameLocalRoot`), the
+store keeps reporting the recorded identity and the row is left as it is:
+trickplay manifests, delivery scopes, and sweep checkpoints are keyed by it,
+and an image that reaches the directory by the recorded path must still open
+it. The reconcile task and storage transitions compare a local identity they
+derive from settings the same way, so naming the active directory by its other
+path is not a move. The root's own name is never followed: a store refuses a
+root that is itself a link, so a recorded root replaced by a link to another
+directory is a different location and still needs the managed transition.
 The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
 any write that would resolve to a different identity with

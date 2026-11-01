@@ -9,8 +9,11 @@ in the process.
 
 ## Channels and database numbers
 
-The bus has five channels: `silo:catalog`, `silo:admin`, `silo:playback`,
-`silo:logs` and `silo:events`. Code, logs and other documents use these names.
+The bus has six channels: `silo:catalog`, `silo:admin`, `silo:playback`,
+`silo:logs`, `silo:events` and `silo:transcode-move`. Code, logs and other
+documents use these names. `silo:transcode-move` carries only transcode move
+requests from proxy nodes, so subscribers that react to every `silo:playback`
+message never see them.
 
 Redis scopes keys by database number but not pub/sub. A published message
 reaches every subscriber of the channel on that server, whichever database

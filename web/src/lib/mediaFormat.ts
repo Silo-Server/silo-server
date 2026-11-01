@@ -174,10 +174,13 @@ export function prettyResolution(value: string | undefined): string | null {
 }
 
 // Compact HDR suffix used for combined Resolution+HDR badges. Any Dolby
-// Vision variant collapses to "DV"; any other HDR variant to "HDR".
+// Vision variant collapses to "DV", HDR10+ hybrids included, so the badge
+// stays short next to one in the opposite corner. HDR10+ keeps its name;
+// any other HDR variant collapses to "HDR".
 export function compactHdrSuffix(value: string | undefined): string | null {
   if (!value) return null;
   if (value.includes("DV")) return "DV";
+  if (value.includes("HDR10+")) return "HDR10+";
   return "HDR";
 }
 

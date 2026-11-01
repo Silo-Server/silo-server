@@ -10,7 +10,7 @@ import (
 
 // TestChristmasDateRangeMatches verifies the christmas predicate matches Dec 24
 // and rejects Nov 30. Also pins the boundaries: the window is Dec 1 inclusive
-// through Dec 31 inclusive.
+// through Dec 31 inclusive, plus seasonEndGrace into Jan 1.
 func TestChristmasDateRangeMatches(t *testing.T) {
 	pred, ok := SeasonalPredicates["christmas"]
 	if !ok {
@@ -39,10 +39,14 @@ func TestChristmasDateRangeMatches(t *testing.T) {
 		t.Error("christmas predicate should match Dec 31 23:59:59 (end boundary)")
 	}
 
-	// Boundary: just past end of window (Jan 1 of next year) must reject.
-	jan1Next := time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC)
+	// Boundary: the grace keeps the window open until Jan 1 12:00.
+	jan1Grace := time.Date(2027, time.January, 1, 11, 59, 59, 0, time.UTC)
+	if !pred(jan1Grace) {
+		t.Error("christmas predicate should match Jan 1 11:59:59 (within the end grace)")
+	}
+	jan1Next := time.Date(2027, time.January, 1, 12, 0, 0, 0, time.UTC)
 	if pred(jan1Next) {
-		t.Error("christmas predicate should reject Jan 1 (just past window)")
+		t.Error("christmas predicate should reject Jan 1 12:00 (just past the end grace)")
 	}
 }
 
@@ -311,6 +315,7 @@ func TestMovableHolidayWindows(t *testing.T) {
 		{"easter", day(2027, time.March, 20), false},
 		{"easter", day(2027, time.March, 21), true},
 		{"easter", day(2027, time.March, 29), true},
+		{"easter", day(2027, time.March, 30).Add(-time.Second), true},
 		{"easter", day(2027, time.March, 30), false},
 		{"easter", day(2026, time.April, 5), true},
 		{"new_year", day(2026, time.December, 25), false},

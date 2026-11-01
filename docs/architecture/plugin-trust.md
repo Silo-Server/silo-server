@@ -34,6 +34,26 @@ Installation runs code too. `loadManifestFromBinary`
 the admin configures or enables it. Installing a package is the point of
 trust, not enabling it.
 
+Whoever can write the plugin cache can replace a plugin binary together with
+the manifest checksum it is checked against. The default root,
+`<tmp>/silo-plugins`, sits in the shared temp directory, so on Unix
+`plugins.EnsurePrivateCacheRoot` creates it with mode 0700 and the server
+refuses to start when it already exists as a symlink, belongs to another user,
+or is writable by its group or other users. A root set with
+`SILO_PLUGIN_CACHE_DIR` is not checked; the operator keeps it writable only by
+Silo's user.
+
+Chunked plugin uploads spool under `<tmp>/silo-uploads`, and chunked
+diagnostics uploads under `<tmp>/silo-diagnostics-uploads`, both through
+`internal/uploads`. The upload manager applies the same root checks before it
+creates a session or sweeps orphaned sessions at startup, and refuses the
+operation when they fail. Each chunk write and each completed upload reopens
+the session file through the verified root and must find the file `Create`
+made, so a swapped session directory or file cannot redirect uploaded bytes.
+A bare plugin binary is installed from that checked handle; a zip archive is
+still read by path, which only Silo's user can change while the root's parent
+directory is sticky or private, as the shared temp directory is.
+
 ## What RuntimeHost scoping is for
 
 `RuntimeHost.v1` scopes what the host hands a plugin: catalog reads return

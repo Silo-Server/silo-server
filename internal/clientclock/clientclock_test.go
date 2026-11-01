@@ -16,6 +16,7 @@ func TestClamp(t *testing.T) {
 		{"zero defaults to now", time.Time{}, now},
 		{"far future clamps to now", now.Add(48 * time.Hour), now},
 		{"just past skew clamps to now", now.Add(MaxSkew + time.Minute), now},
+		{"at skew is kept", now.Add(MaxSkew), now.Add(MaxSkew)},
 		{"within skew is kept", now.Add(time.Minute), now.Add(time.Minute)},
 		{"past is kept", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour)},
 	}

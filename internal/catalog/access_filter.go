@@ -255,6 +255,28 @@ func appendLibraryAccessConditions(keyColumn string, filter AccessFilter, condit
 	*conditions = append(*conditions, libraryAccessConditions(keyColumn, allowedIdx, disabledIdx)...)
 }
 
+// InSomeLibraryWhere requires the media item whose content ID is
+// contentIDExpr to belong to at least one library. Listings that name no
+// library apply it for every viewer, an unrestricted administrator included:
+// an item in no library is either gone or held only by the scanner's file
+// removal grace until a replacement file relinks it (see
+// docs/architecture/missing-files.md), and its library pages already leave it
+// out. Reads by ID do not apply it.
+func InSomeLibraryWhere(contentIDExpr string) string {
+	return "EXISTS (SELECT 1 FROM media_item_libraries in_library WHERE in_library.content_id = " + contentIDExpr + ")"
+}
+
+// appendListedLibraryAccessConditions is appendLibraryAccessConditions for
+// listings such as search: with no library restriction it still applies
+// InSomeLibraryWhere. Reads by ID keep using appendLibraryAccessConditions.
+func appendListedLibraryAccessConditions(keyColumn string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0 {
+		*conditions = append(*conditions, InSomeLibraryWhere(keyColumn))
+		return
+	}
+	appendLibraryAccessConditions(keyColumn, filter, conditions, args, argIdx)
+}
+
 // ApplyLibraryAccessFilter appends the canonical item-level library allow/deny
 // predicates for keyColumn. It is exported for query builders outside the
 // catalog package that must enforce the same dual-membership invariant.

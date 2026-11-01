@@ -3,6 +3,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,17 +95,30 @@ func (m *memTokenStore) RevokeTokenByJTI(_ context.Context, jti string) error {
 	m.tokens[jti] = t
 	return nil
 }
-func (m *memTokenStore) RevokeTokenIfActive(_ context.Context, jti string) (ABSToken, error) {
+
+// IssueTokens checks a presented JTI, revoking it under Rotate, and stores
+// the tokens in one step. A login session is only required, not checked.
+func (m *memTokenStore) IssueTokens(_ context.Context, from TokenSource, tokens ...ABSToken) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t, ok := m.tokens[jti]
-	if !ok || t.RevokedAt != nil {
-		return ABSToken{}, ErrNotFound
+	if from.JTI == "" && from.LoginSessionID == "" {
+		return errors.New("tokens issued with no source credential")
 	}
-	now := time.Now()
-	t.RevokedAt = &now
-	m.tokens[jti] = t
-	return t, nil
+	if from.JTI != "" {
+		t, ok := m.tokens[from.JTI]
+		if !ok || t.RevokedAt != nil {
+			return ErrNotFound
+		}
+		if from.Rotate {
+			now := time.Now()
+			t.RevokedAt = &now
+			m.tokens[from.JTI] = t
+		}
+	}
+	for _, tok := range tokens {
+		m.tokens[tok.JTI] = tok
+	}
+	return nil
 }
 func (m *memTokenStore) RevokeTokensForPrincipal(_ context.Context, userID, profileID string) error {
 	m.mu.Lock()

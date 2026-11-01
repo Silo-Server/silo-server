@@ -6,6 +6,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type MouseEvent,
 } from "react";
 import { Link } from "react-router";
@@ -13,6 +14,7 @@ import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-r
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { usePageActivity } from "@/hooks/usePageActivity";
 import { HeroOverviewText } from "./HeroOverviewText";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
@@ -186,6 +188,14 @@ export default function HeroBanner({
     outgoingIndex: null as number | null,
   });
   const [paused, setPaused] = useState(false);
+  const { isVisible: pageVisible } = usePageActivity();
+  const sectionRef = useRef<HTMLElement>(null);
+  // Unknown until the observer first reports, so a hero mounted below the
+  // fold preloads nothing; without IntersectionObserver it counts as shown.
+  const [onScreen, setOnScreen] = useState(() => typeof IntersectionObserver === "undefined");
+  // A hero scrolled out of view or in a background tab neither advances nor
+  // downloads the next slide's backdrop.
+  const shown = pageVisible && onScreen;
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
   // changes, or after the user unpauses. Used as part of the progress-rail key
@@ -240,12 +250,22 @@ export default function HeroBanner({
   // t=5s the auto-advance would still fire at t=8 instead of t=13, desyncing
   // with the progress rail that restarts on slide change.
   useEffect(() => {
-    if (slides.length <= 1 || paused) return;
+    if (slides.length <= 1 || paused || !shown) return;
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) return;
     const timer = setInterval(next, 8000);
     return () => clearInterval(timer);
-  }, [next, slides.length, paused, activeIndex]);
+  }, [next, slides.length, paused, shown, activeIndex]);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setOnScreen(entry.isIntersecting);
+    });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [slides.length]);
 
   const current = slides[activeIndex] ?? slides[0];
   useAmbientColor(current?.backdrop_thumbhash);
@@ -294,6 +314,7 @@ export default function HeroBanner({
 
   return (
     <section
+      ref={sectionRef}
       className={cn(
         "home-hero group relative w-full overflow-hidden",
         heightClassName,
@@ -308,7 +329,9 @@ export default function HeroBanner({
         if (!e.currentTarget.contains(e.relatedTarget)) resume();
       }}
     >
-      {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
+      {/* Preload the slide that comes next while the hero is shown; retain
+          loaded backdrops for crossfades. Going back fades in from the
+          thumbhash. */}
       {slides.map((slide, i) => (
         <HeroBackdropSlide
           key={slide.content_id ?? i}
@@ -328,8 +351,7 @@ export default function HeroBanner({
           shouldLoad={
             i === activeIndex ||
             i === outgoingIndex ||
-            i === (activeIndex + 1) % slideCount ||
-            i === (activeIndex - 1 + slideCount) % slideCount
+            (shown && i === (activeIndex + 1) % slideCount)
           }
         />
       ))}

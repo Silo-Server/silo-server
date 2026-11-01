@@ -268,6 +268,7 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		resp.Items = append(resp.Items, watchTonightItemResponse{
@@ -470,6 +471,7 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse, urls sectionItemImageURLs) sectionItemResponse {
 	item := sectionItemFromMediaItem(mi)
 	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+	item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

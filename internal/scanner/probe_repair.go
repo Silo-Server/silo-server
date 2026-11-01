@@ -84,6 +84,26 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	return false
 }
 
+// chapterSourceEmbedded marks a chapter read from the file's container.
+const chapterSourceEmbedded = "embedded"
+
+// carryUnprobedChapters keeps chapters a reprobe cannot reproduce. The
+// audiobook scanner synthesizes one chapter per part of a multipart book from
+// the file name; those are not in the container, so playback's repair probe
+// finds none and would otherwise erase the book's chapter list on first play.
+// Chapters read from the container ("embedded") follow the reprobe.
+func carryUnprobedChapters(previous []models.MediaChapter, next *models.MediaFile) {
+	if len(next.Chapters) > 0 || len(previous) == 0 {
+		return
+	}
+	for _, chapter := range previous {
+		if chapter.Source == chapterSourceEmbedded {
+			return
+		}
+	}
+	next.Chapters = previous
+}
+
 // carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status
 // across playback's probe repair, which skips the frame read, when the
 // reprobed stream is the one that was checked. The fields a repair fills in
@@ -475,6 +495,7 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		updated := *current
 		applyProbeData(&updated, probe, "local")
 		carryCheckedHDR10Plus(current.VideoTracks, updated.VideoTracks)
+		carryUnprobedChapters(current.Chapters, &updated)
 		return e.fileRepo.Upsert(probeCtx, updated)
 	})
 	select {

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -21,6 +21,11 @@ interface SectionRowProps {
    * cards load their artwork eagerly at high fetch priority.
    */
   priority?: boolean;
+  /**
+   * Called with the section id when the carousel nears its last card, so a
+   * row loaded in part can load the rest of itself.
+   */
+  onNearEnd?: (sectionId: string) => void;
 }
 
 function SectionPinButton({
@@ -52,7 +57,12 @@ function SectionPinButton({
   );
 }
 
-export default memo(function SectionRow({ section, libraryId, priority = false }: SectionRowProps) {
+export default memo(function SectionRow({
+  section,
+  libraryId,
+  priority = false,
+  onNearEnd,
+}: SectionRowProps) {
   const browseHref = useMemo(
     () =>
       libraryId
@@ -97,6 +107,8 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
     [slideSize],
   );
   const priorityCount = priority ? visibleCarouselSlideCount(slideSize) : 0;
+  const sectionId = section.id;
+  const handleNearEnd = useCallback(() => onNearEnd?.(sectionId), [onNearEnd, sectionId]);
 
   if (section.items.length === 0) return null;
 
@@ -111,6 +123,7 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
       viewAllHref={browseHref}
       headerActions={headerActions}
       windowing={windowing}
+      onNearEnd={onNearEnd ? handleNearEnd : undefined}
     >
       {isProgressRow
         ? section.items.map((item, index) => (

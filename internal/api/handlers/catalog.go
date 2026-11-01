@@ -22,6 +22,7 @@ type CatalogHandler struct {
 	resolver    *catalog.CatalogResolver
 	itemsH      *ItemsHandler
 	workSummary catalog.WorkSummaryProvider
+	boxSets     *catalog.BoxSetRepository
 }
 
 func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) *CatalogHandler {
@@ -183,7 +184,7 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 	responseWG.Add(2)
 	go func() {
 		defer responseWG.Done()
-		imageURLs = h.itemsH.itemListCardImageURLs(ctx, localizedItems, accessFilter.Artwork())
+		imageURLs = h.itemsH.itemListCardImageURLs(ctx, localizedItems, episodeMetadata, accessFilter.Artwork())
 	}()
 	go func() {
 		defer responseWG.Done()
@@ -211,6 +212,9 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		resp.PlayContentID = playTargets[playableTargetKeyForItem(item)]
 		if meta, ok := episodeMetadata[item.ContentID]; ok {
 			applyEpisodeBrowseMetadata(&resp, meta)
+			if item.Type == itemTypeEpisode {
+				resp.ParentArtwork = episodeParentArtworkView(meta.ParentArtwork, imageURLs[item.ContentID].parents)
+			}
 		}
 		resp.PosterURL = imageURLs[item.ContentID].posterURL
 		resp.BackdropURL = imageURLs[item.ContentID].backdropURL

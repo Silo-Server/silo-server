@@ -183,7 +183,7 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
 		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
 		       last_sequence, last_sample, stopped_at, COALESCE(stop_receipt->>'stop_id', ''), updated_at,
-		       desired_tracks
+		       desired_tracks, created_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
@@ -191,7 +191,7 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
 		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
 		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.StopID, &record.LastSampleAt,
-		&desiredJSON,
+		&desiredJSON, &record.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -429,7 +429,16 @@ func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample p
 	if err != nil {
 		return playback.ProgressReceiptV3{}, err
 	}
-	result, err := s.db.Exec(ctx, `
+	// The sample and the session's announced pause state commit together:
+	// the attempt's row lock, held to the commit, orders concurrent samples,
+	// and the lifecycle statement reads after it, so the announced state is
+	// always the latest accepted sample's.
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts
 		SET last_sequence = $2, last_sample = $3, updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence < $2`,
@@ -438,7 +447,30 @@ func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample p
 		return playback.ProgressReceiptV3{}, err
 	}
 	if result.RowsAffected() == 1 {
-		return playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}, nil
+		receipt := playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}
+		change := playback.LifecycleChangeV3{Paused: sample.IsPaused}
+		state := "playing"
+		if sample.IsPaused {
+			state = "paused"
+		}
+		err := tx.QueryRow(ctx, `
+			UPDATE playback_session_lifecycle
+			SET state = $2, seq = nextval('playback_session_lifecycle_seq'), updated_at = NOW()
+			WHERE session_id = $1 AND state NOT IN ('stopped', $2)
+			RETURNING seq, updated_at`, sessionID, state).Scan(&change.Seq, &change.At)
+		switch {
+		case err == nil:
+			receipt.Lifecycle = &change
+		case !errors.Is(err, pgx.ErrNoRows):
+			return playback.ProgressReceiptV3{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return playback.ProgressReceiptV3{}, err
+		}
+		return receipt, nil
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return playback.ProgressReceiptV3{}, err
 	}
 	var lastSequence int64
 	var lastJSON []byte
@@ -515,6 +547,27 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 		return playback.StopReceiptV3{}, false, err
 	}
 	return receipt, false, nil
+}
+
+// ExpireIdleAttempt stops a live attempt under stopID only while it has
+// accepted no progress since idleBefore. The predicate runs under the row
+// lock ApplyProgress takes, so a sample that lands first keeps it live.
+func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID string, idleBefore time.Time) (bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return false, playback.ErrInvalidStopIDV3
+	}
+	tag, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET stopped_at = NOW(),
+		    stop_id = $2::uuid,
+		    stop_receipt = jsonb_strip_nulls(jsonb_build_object('stop_id', $2::uuid::text, 'accepted', last_sample)),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND updated_at < $3`,
+		sessionID, stopID, idleBefore)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, receipt playback.StopReceiptV3) error {

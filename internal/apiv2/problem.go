@@ -423,12 +423,21 @@ func validationDetail(msg string) string {
 // location, so a missing body.name is reported at body.name like every other
 // field-level failure rather than at its parent.
 func validationLocation(d *huma.ErrorDetail) string {
+	location := d.Location
+	// Huma validates a multipart text field at form.<name>; the contract's
+	// grammar puts it under the body, like a file part.
+	if location == "form" || strings.HasPrefix(location, "form.") {
+		location = locationBody + strings.TrimPrefix(location, "form")
+	}
 	const prefix = "expected required property "
 	if strings.HasPrefix(d.Message, prefix) {
 		name := strings.TrimSuffix(strings.TrimPrefix(d.Message, prefix), " to be present")
 		if name != "" && !strings.ContainsAny(name, " .[") {
-			return d.Location + "." + name
+			return location + "." + name
 		}
+	}
+	if location != d.Location {
+		return location
 	}
 	// A multipart part the form decoder refused is reported at the bare part
 	// name; the contract's grammar puts it under the body.

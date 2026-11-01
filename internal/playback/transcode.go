@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -144,6 +145,17 @@ type TranscodeOpts struct {
 	// the WebVTT subtitle rendition of its HLS playlist, for a transcode or
 	// an HLS copy remux. See subtitle_rendition.go.
 	SubtitleRendition bool
+	// SubtitleRenditionTracks, with SubtitleRendition, lists every embedded
+	// text track as a rendition of its own, read on demand through the
+	// source's index instead of by this ffmpeg process; SubtitleTrackIndex then
+	// only names the selected one. See subtitle_rendition_tracks.go.
+	SubtitleRenditionTracks []SubtitleRenditionTrack
+	// SubtitleRenditionSource is the source version the on-demand renditions
+	// were planned from; segments are read from that version only.
+	SubtitleRenditionSource SubtitleRenditionSource
+	// MediaFileID is the catalog file InputPath is, or 0 when unknown. On-demand
+	// subtitle renditions find the file's kept tracks by it.
+	MediaFileID int
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
 	subtitleCueFile string
@@ -152,6 +164,8 @@ type TranscodeOpts struct {
 	// subtitle-free layout that older artifacts were encoded with.
 	PreparedTracks  *PreparedTracks
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
+	// RequireAudioTrack rejects sources missing the negotiated audio ordinal.
+	RequireAudioTrack bool
 	// SourceAudioChannels is the selected source stream's channel count. Zero
 	// means unknown and deliberately disables stereo downmix gain: boosting an
 	// already-stereo stream would change its authored level.
@@ -502,7 +516,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -1044,7 +1058,11 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-map", "0:v:0")
 	}
 	if audioTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
+		audioMap := fmt.Sprintf("0:a:%d", audioTrackIndex)
+		if !opts.RequireAudioTrack {
+			audioMap += "?"
+		}
+		args = append(args, "-map", audioMap)
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}
@@ -2072,14 +2090,15 @@ func prepareSubtitleFilterInput(opts *TranscodeOpts) error {
 	}
 
 	aliasPath := filepath.Join(opts.OutputDir, subtitleFilterAliasName)
-	target, err := os.Readlink(aliasPath)
+	// InputPath is fspath-encoded; the link must point at the real file name.
+	target, err := fspath.Readlink(aliasPath)
 	switch {
 	case err == nil:
 		if target != opts.InputPath {
 			return fmt.Errorf("prepare subtitle filter input: alias targets unexpected source")
 		}
 	case errors.Is(err, os.ErrNotExist):
-		if err := os.Symlink(opts.InputPath, aliasPath); err != nil {
+		if err := os.Symlink(fspath.Decode(opts.InputPath), aliasPath); err != nil {
 			return fmt.Errorf("prepare subtitle filter input: %w", err)
 		}
 	default:
@@ -2140,10 +2159,11 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
-	data, info, err := readManifestFile(manifestPath)
-	if err == nil && currentGeneration && s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest) {
-		data, err = nil, os.ErrNotExist
+	var inherited os.FileInfo
+	if currentGeneration {
+		inherited = s.inheritedManifest
 	}
+	data, err := readManifestFile(manifestPath, inherited)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if !s.running {
@@ -2196,25 +2216,26 @@ func statManifest(outputDir string) os.FileInfo {
 	return info
 }
 
-// readManifestFile reads a playlist and describes the same open file. FFmpeg
-// replaces the playlist by rename, so a separate Stat by path could describe a
-// newer file than the bytes returned and let an inherited playlist pass as
-// current.
-func readManifestFile(path string) ([]byte, os.FileInfo, error) {
+// readManifestFile reads a playlist. When the open file is still inherited,
+// it reports os.ErrNotExist without reading the old playlist, which a startup
+// wait would otherwise read in full on every check. The comparison uses the
+// open file: FFmpeg replaces the playlist by rename, so a separate Stat by path
+// could describe a newer file than the bytes returned and let an inherited
+// playlist pass as current.
+func readManifestFile(path string, inherited os.FileInfo) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, nil, err
+	if inherited != nil && sameManifestFile(info, inherited) {
+		return nil, os.ErrNotExist
 	}
-	return data, info, nil
+	return io.ReadAll(f)
 }
 
 // sameManifestFile reports whether current is still the inherited playlist.
@@ -2225,6 +2246,14 @@ func sameManifestFile(current, inherited os.FileInfo) bool {
 		current.Size() == inherited.Size() &&
 		current.ModTime().Equal(inherited.ModTime())
 }
+
+// outputPollInterval is the pause between checks while a request waits for
+// FFmpeg output. FFmpeg tells the server nothing when it renames a finished
+// segment into place or rewrites the playlist, so a finished file can go
+// unnoticed for up to one interval. Every transcoded startup and seek waits on
+// output at least once. A check opens or stats one file, or reads the playlist
+// and stats its startup segments, so a short interval costs little.
+const outputPollInterval = 10 * time.Millisecond
 
 // WaitForManifest polls until the manifest is ready for playback or the timeout
 // expires. It keeps the initial request open long enough for FFmpeg to write
@@ -2270,7 +2299,7 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 			return nil, ctx.Err()
 		case <-deadline:
 			return nil, s.manifestTimeoutError(timeout)
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -2286,7 +2315,19 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 //
 // A session with a subtitle rendition answers its multivariant playlist, or
 // the media playlist rawQuery selects (see buildSubtitleRenditionPlaylist).
+//
+// A rawQuery longer than maxManifestQueryBytes is ErrManifestQueryTooLong.
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildPlaybackManifest(segPrefix, rawQuery)
+}
+
+// buildPlaybackManifest is BuildPlaybackManifest for a query manifestQuery
+// has already accepted.
+func (s *TranscodeSession) buildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
 	if s.HasSubtitleRendition() {
 		return s.buildSubtitleRenditionPlaylist(segPrefix, rawQuery)
 	}
@@ -2382,10 +2423,14 @@ const SourceTimelineQueryParam = "source_timeline"
 // first produced segment retains its source-time position. Synthetic manifests
 // already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
 	if s.copyPlan != nil {
 		// A planned playlist starts at the source's beginning and doesn't
 		// depend on FFmpeg's progress or restarts.
-		return s.BuildPlaybackManifest(segPrefix, rawQuery)
+		return s.buildPlaybackManifest(segPrefix, rawQuery)
 	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
@@ -2393,7 +2438,7 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 	if restarting {
 		return nil, ErrManifestNotReady
 	}
-	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
+	manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -3188,6 +3233,14 @@ func (s *TranscodeSession) SetAudioTrackIndex(index int) {
 	s.opts.AudioTrackIndex = index
 }
 
+// SetRequireAudioTrack updates whether ffmpeg must fail rather than drop the
+// selected audio track. Must be called before Restart() to take effect.
+func (s *TranscodeSession) SetRequireAudioTrack(required bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.RequireAudioTrack = required
+}
+
 // SetSourceAudioChannels updates the selected source track's channel count in
 // the session's opts. Must be called before Restart() so the rebuilt ffmpeg
 // command applies (or removes) the stereo-downmix loudness filter.
@@ -3300,6 +3353,13 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	// A request can wait on the lifecycle lock behind another restart, and a
+	// player that seeks again abandons it. Restarting for it would move FFmpeg
+	// to a position nobody wants and delay the restart the player now waits
+	// on. Once started, a restart runs to completion (see restart).
+	if err := ctx.Err(); err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
@@ -3455,7 +3515,7 @@ func (s *TranscodeSession) restart(
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -3554,7 +3614,7 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 			select {
 			case <-deadline:
 				return "", ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
@@ -3571,7 +3631,7 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 		select {
 		case <-deadline:
 			return "", ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -3580,6 +3640,13 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 // closes the stat-to-open race for HTTP serving while preserving the same
 // restart and ffmpeg-exit error contract.
 func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration) (*SegmentLease, error) {
+	return s.WaitForOpenSegmentContext(context.Background(), name, timeout)
+}
+
+// WaitForOpenSegmentContext is WaitForOpenSegment that also returns ctx.Err()
+// as soon as ctx ends, so a request the client abandoned stops polling. It
+// does not stop FFmpeg.
+func (s *TranscodeSession) WaitForOpenSegmentContext(ctx context.Context, name string, timeout time.Duration) (*SegmentLease, error) {
 	deadline := time.After(timeout)
 	for {
 		segment, err := s.OpenSegment(name)
@@ -3598,9 +3665,11 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 
 		if restarting {
 			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			case <-deadline:
 				return nil, ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
@@ -3612,9 +3681,11 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 		}
 
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-deadline:
 			return nil, ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
