@@ -145,7 +145,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `hls_variable_substitution_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. Playlists the server rewrites may then carry a repeated media credential once through HLS variable substitution (`EXT-X-DEFINE`); without it they keep literal URIs (§4.2) |
 | `codec_channel_ceilings_v1` | `/api/v2` only. The server honors a delivery's `max_channels_by_codec` (§3). A client that needs a ceiling for one codec only (stereo AAC beside E-AC-3 5.1) sends it there instead of narrowing `max_channels` for every codec |
 | `native_embedded_limitations_v1` | `/api/v2` only. The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
-| `hls_subtitle_renditions_all_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
+| `hls_subtitle_renditions_all_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1830,7 +1830,9 @@ its workload. The tracks are the embedded text tracks the single rendition
 could carry whose `container_track_id` is known and whose packets the
 source's own index finds: every Matroska track with Cues that the muxer's
 `NUMBER_OF_FRAMES` tag confirms or that has no such tag, and every MP4 text
-track (see [the index reader](embedded-subtitle-index.md)). The server reads
+track (see [the index reader](embedded-subtitle-index.md)). A plan lists at
+most 64: the first in inventory order, the selected track taking the last
+place when it comes later. The server reads
 the index when the attempt starts; every planning pass of one start or
 replan, alternate versions included, shares one 3 s bound, which starts
 with its first index read so slower planning work before it doesn't use it
