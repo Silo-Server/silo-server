@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
@@ -319,6 +320,92 @@ describe("EpisodeContent", () => {
     } finally {
       spoilerPrefs.hideOverviews = false;
     }
+  });
+
+  describe("overview", () => {
+    function renderWithSeries(
+      item: ReturnType<typeof makeEpisodeItem>,
+      series: Partial<ItemDetail>,
+      libraryId?: number,
+    ) {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+      });
+      queryClient.setQueryData(
+        catalogKeys.itemDetail("series-1", libraryId),
+        makeItemDetail("series", { content_id: "series-1", ...series }),
+      );
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={item} libraryId={libraryId} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      return mocks.capturedDetailHeroProps.value;
+    }
+
+    // The translate control follows whichever overview is on screen.
+    beforeEach(() => {
+      mocks.useOnViewTranslation.mockImplementation((target?: { content_id: string }) => ({
+        translating: false,
+        onTranslate: target ? `translate ${target.content_id}` : undefined,
+      }));
+    });
+
+    it.each([
+      {
+        name: "falls back to the series overview when the episode has none",
+        episodeOverview: "",
+        hideOverviews: false,
+        expected: {
+          overview: "Series overview",
+          overviewMachineTranslated: true,
+          onTranslateOverview: "translate series-1",
+        },
+      },
+      {
+        name: "keeps the episode's own overview",
+        episodeOverview: "Episode overview",
+        hideOverviews: false,
+        expected: {
+          overview: "Episode overview",
+          overviewMachineTranslated: false,
+          onTranslateOverview: "translate episode-1",
+        },
+      },
+      {
+        name: "does not hide the series overview behind episode spoiler protection",
+        episodeOverview: "",
+        hideOverviews: true,
+        expected: { overview: "Series overview", overviewHidden: false },
+      },
+      {
+        // A profile that inherits the library's metadata language gets the
+        // series in that language only when the request names the library.
+        name: "reads the series in the page's library",
+        episodeOverview: "",
+        hideOverviews: false,
+        libraryId: 7,
+        expected: { overview: "Series overview", onTranslateOverview: "translate series-1" },
+      },
+    ])("$name", ({ episodeOverview, hideOverviews, libraryId, expected }) => {
+      spoilerPrefs.hideOverviews = hideOverviews;
+      try {
+        const props = renderWithSeries(
+          makeEpisodeItem({
+            content_id: "episode-1",
+            overview: episodeOverview,
+            user_data: { played: false },
+          }),
+          { overview: "Series overview", machine_translated_fields: ["overview"] },
+          libraryId,
+        );
+        expect(props).toMatchObject(expected);
+      } finally {
+        spoilerPrefs.hideOverviews = false;
+      }
+    });
   });
 
   it("passes marker re-detection only for admins", () => {
