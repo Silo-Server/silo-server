@@ -329,34 +329,74 @@ func TestAuthEndpointHandlerAdmissionDoesNotLiftAddressBudget(t *testing.T) {
 	}
 }
 
-// Checking a request over the endpoint budget costs a lookup, so those checks
-// spend their own budget keyed by the connection's address, which forwarding
-// headers cannot rotate: ten times the endpoint's (one a minute, so ten
-// checks). Past it, requests are refused without one.
-func TestAuthEndpointHandlerBoundsAdmissionChecksPerConnection(t *testing.T) {
-	mw := newAuthLimitMiddleware(t)
-	mw.cfg.AuthEndpoints = map[string]AuthEndpointConfig{"autoscan_webhook": {RequestsPerMinute: 1, Burst: 2}}
-	checks := 0
-	mw.AdmitOverEndpointBudget("autoscan_webhook", func(*http.Request) bool {
-		checks++
-		return false
-	})
-	trusted, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
-	if err != nil {
-		t.Fatal(err)
+// Checking a request over the endpoint budget costs a lookup. Each client's
+// checks spend a budget ten times the endpoint's, so one prober cannot use up
+// the checks of the real senders it shares a reverse proxy with. A forwarded
+// request's check also spends a cap on the connection's own address, a
+// hundred times the endpoint's, so a sender rotating forwarding headers
+// still gets a bounded number of lookups. With one request a minute that is
+// ten checks per client and a hundred per connection.
+func TestAuthEndpointHandlerBoundsAdmissionChecks(t *testing.T) {
+	newHandler := func(t *testing.T) (http.Handler, *int) {
+		t.Helper()
+		mw := newAuthLimitMiddleware(t)
+		mw.cfg.AuthEndpoints = map[string]AuthEndpointConfig{"autoscan_webhook": {RequestsPerMinute: 1, Burst: 2}}
+		checks := 0
+		mw.AdmitOverEndpointBudget("autoscan_webhook", func(r *http.Request) bool {
+			checks++
+			return r.Header.Get("X-Known") == "yes"
+		})
+		trusted, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return clientip.Middleware(clientip.NewResolver(trusted))(
+			mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Known") == "yes" {
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))), &checks
 	}
-	handler := clientip.Middleware(clientip.NewResolver(trusted))(
-		mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		})))
-	peer, clients := randomPrivatePeer(), randomClientNet()
-	for i := range 100 {
+	send := func(h http.Handler, peer, client string, known bool) int {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/autoscan/webhooks/t", nil)
 		req.RemoteAddr = peer + ":40000"
-		req.Header.Set("X-Forwarded-For", fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250))
-		handler.ServeHTTP(httptest.NewRecorder(), req)
+		req.Header.Set("X-Forwarded-For", client)
+		if known {
+			req.Header.Set("X-Known", "yes")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
 	}
-	if checks != 10 {
-		t.Fatalf("admission checks = %d, want 10 from one connection", checks)
-	}
+
+	t.Run("one prober behind a proxy leaves the other clients' checks", func(t *testing.T) {
+		h, checks := newHandler(t)
+		peer, clients := randomPrivatePeer(), randomClientNet()
+		prober, sender := clients+".1.1", clients+".2.2"
+		for range 50 {
+			send(h, peer, prober, false)
+		}
+		if *checks != 10 {
+			t.Fatalf("prober's admission checks = %d, want 10", *checks)
+		}
+		for range 3 {
+			send(h, peer, sender, true) // spend the sender's own endpoint budget
+		}
+		if code := send(h, peer, sender, true); code != http.StatusAccepted {
+			t.Fatalf("real delivery behind the same proxy = %d, want 202", code)
+		}
+	})
+
+	t.Run("rotating forwarded clients are capped per connection", func(t *testing.T) {
+		h, checks := newHandler(t)
+		peer, clients := randomPrivatePeer(), randomClientNet()
+		for i := range 300 {
+			send(h, peer, fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250), false)
+		}
+		if *checks != 100 {
+			t.Fatalf("admission checks = %d, want 100 from one connection", *checks)
+		}
+	})
 }

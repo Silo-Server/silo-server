@@ -232,8 +232,8 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 // endpoint's own budget, or a forwarding peer's share of it, is spent. The
 // per-address request budget and the global budget still apply. admit runs
 // only for a request those budgets would refuse, so it may do a lookup the
-// handler repeats; those checks are themselves capped per connection
-// address (see admitOverBudget).
+// handler repeats; those checks spend budgets of their own (see
+// admitOverBudget).
 //
 // It is for public endpoints whose callers prove themselves with a
 // high-entropy secret the middleware cannot see, such as an autoscan source
@@ -251,21 +251,25 @@ func (mw *Middleware) AdmitOverEndpointBudget(endpoint string, admit func(*http.
 
 // admitOverBudget runs the endpoint's admission check for a request its
 // endpoint budget refused. Each check costs the caller a lookup, so checks
-// spend their own budget, keyed by the connection's own address rather than
-// a forwarded client address the sender can rotate, and sized like the
-// forwarding peer's share of the endpoint budget. Past it the request is
-// refused without a check.
+// spend budgets of their own before it runs. The client's budget is ten times
+// the endpoint's, so one prober cannot use up the checks of the senders it
+// shares a reverse proxy with. A client address taken from forwarding
+// headers can be rotated, so such a check also spends a cap on the
+// connection's own address, ten times that again; network access ingress
+// writes the header itself and skips it, as with the peer budget.
 func (mw *Middleware) admitOverBudget(r *http.Request, admit func(*http.Request) bool, clientIP, endpoint string, epRate Rate) bool {
 	if admit == nil {
 		return false
 	}
-	conn := clientip.PeerIP(r.Context())
-	if conn == "" {
-		conn = clientIP
-	}
-	key := fmt.Sprintf("authadmit:%s:%s", SourceKey(conn), endpoint)
-	if !mw.perKey.Allow(r.Context(), key, authPeerRate(epRate)).Allowed {
+	checkRate := authPeerRate(epRate)
+	if !mw.perKey.Allow(r.Context(), fmt.Sprintf("authadmit:%s:%s", SourceKey(clientIP), endpoint), checkRate).Allowed {
 		return false
+	}
+	if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+		peerKey := fmt.Sprintf("authadmitpeer:%s:%s", SourceKey(peer), endpoint)
+		if !mw.perKey.Allow(r.Context(), peerKey, authPeerRate(checkRate)).Allowed {
+			return false
+		}
 	}
 	return admit(r)
 }
