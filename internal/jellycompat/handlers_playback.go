@@ -29,10 +29,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -3666,10 +3669,40 @@ func compatLanguageName(code string) string {
 	if name, ok := compatLanguageNames[normalized]; ok {
 		return name
 	}
+	if name := compatRegionalLanguageName(trimmed); name != "" {
+		return name
+	}
 	if len(normalized) > 3 {
 		return titleCaseWords(trimmed)
 	}
 	return strings.ToUpper(normalized)
+}
+
+// compatRegionalLanguageName names a tag with a script or region the way the
+// web app does, using CLDR: "Brazilian Portuguese", "Traditional Chinese",
+// "Portuguese (Angola)". Bare, undefined, private-use and malformed tags
+// return "".
+func compatRegionalLanguageName(code string) string {
+	canonical := lang.CanonicalTag(code)
+	if !strings.Contains(canonical, "-") || lang.PrimaryLanguage(canonical) == "" {
+		return ""
+	}
+	tag, err := language.Parse(canonical)
+	if err != nil {
+		return ""
+	}
+	base, _ := tag.Base()
+	script, scriptConfidence := tag.Script()
+	if base.String() == "sr" && script.String() == "Latn" && scriptConfidence == language.Exact {
+		// CLDR names sr-Latn through its "sh" alias, "Serbo-Croatian",
+		// which hides both the language and the script.
+		qualifiers := []string{display.English.Scripts().Name(script)}
+		if region, confidence := tag.Region(); confidence == language.Exact {
+			qualifiers = append(qualifiers, display.English.Regions().Name(region))
+		}
+		return display.English.Languages().Name(base) + " (" + strings.Join(qualifiers, ", ") + ")"
+	}
+	return display.English.Tags().Name(tag)
 }
 
 func subtitleFormatLabel(codec string) string {
