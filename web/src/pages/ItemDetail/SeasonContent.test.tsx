@@ -80,7 +80,7 @@ vi.mock("@/components/MediaItemMenu", () => ({
 }));
 
 vi.mock("@/components/CardPlayOverlay", () => ({
-  default: () => null,
+  default: ({ contentId }: { contentId: string }) => <span data-play-overlay={contentId} />,
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
@@ -199,6 +199,115 @@ describe("SeasonContent", () => {
       expect.objectContaining({
         target: hasPlayable ? expect.objectContaining({ content_id: "playable" }) : null,
       }),
+    );
+  });
+
+  it("keeps the page's library on the episode read and links but not on Play", () => {
+    mocks.useItemEpisodes.mockReturnValue({
+      data: {
+        episodes: [
+          {
+            content_id: "episode-1",
+            title: "Pilot",
+            episode_number: 1,
+            still_url: "",
+            files: [{ file_id: 1 }],
+            user_data: null,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    const item = makeSeasonItem();
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={item} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(item.content_id, 4);
+    // Every episode has a file in the library, so no unscoped read starts.
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(undefined);
+    expect(markup).toContain('href="/item/episode-1?libraryId=4"');
+    expect(markup).not.toContain('href="/item/episode-1"');
+    // Playback always sees every version, so Play carries no library.
+    expect(mocks.capturedActionBarProps.value?.playHref).toBe("/watch/episode-1");
+  });
+
+  it("keeps Shuffle but holds the watch party target while the unscoped list loads", () => {
+    const episode = (n: number, files: object[]) => ({
+      content_id: `episode-${n}`,
+      title: `Episode ${n}`,
+      episode_number: n,
+      season_number: 1,
+      still_url: "",
+      files,
+      user_data: { played: false },
+    });
+    // Scoped to library 4 only episode 1 has a file; the unscoped read has not answered.
+    mocks.useItemEpisodes.mockImplementation((_id?: string, libraryId?: number) =>
+      libraryId === 4
+        ? {
+            data: { episodes: [episode(1, [{ file_id: 1 }]), episode(2, [])] },
+            isLoading: false,
+            error: null,
+          }
+        : { data: undefined, isLoading: true, error: null },
+    );
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={makeSeasonItem()} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value?.onShuffle).toBeTypeOf("function");
+    expect(mocks.useDetailWatchTogether).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: null }),
+    );
+  });
+
+  it("picks Play and the watch party target from every library when the opened one lacks an episode", () => {
+    const episode = (n: number, files: object[], played: boolean) => ({
+      content_id: `episode-${n}`,
+      title: `Episode ${n}`,
+      episode_number: n,
+      season_number: 1,
+      still_url: "",
+      files,
+      user_data: { played },
+    });
+    // Scoped to library 4, episode 2 has no file there; unscoped it does.
+    mocks.useItemEpisodes.mockImplementation((_id?: string, libraryId?: number) => ({
+      data: {
+        episodes:
+          libraryId === 4
+            ? [
+                episode(1, [{ file_id: 1 }], true),
+                episode(2, [], false),
+                episode(3, [{ file_id: 3 }], false),
+              ]
+            : [
+                episode(1, [{ file_id: 1 }], true),
+                episode(2, [{ file_id: 2 }], false),
+                episode(3, [{ file_id: 3 }], false),
+              ],
+      },
+      isLoading: false,
+      error: null,
+    }));
+    const item = makeSeasonItem();
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={item} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(item.content_id);
+    // Episode 2's card still plays, from the file only the other library has.
+    expect(html).toContain('data-play-overlay="episode-2"');
+    expect(mocks.useDetailWatchTogether).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: expect.objectContaining({ content_id: "episode-2" }) }),
     );
   });
 

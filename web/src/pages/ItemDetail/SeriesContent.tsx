@@ -25,6 +25,7 @@ import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogethe
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import SeasonCarousel from "./SeasonCarousel";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
+import { useEpisodePlaybackList } from "./useEpisodePlaybackList";
 import MetadataBadges from "./components/MetadataBadges";
 import TrailersSection from "./components/TrailersSection";
 import ExtrasSection from "./components/ExtrasSection";
@@ -34,6 +35,7 @@ import MediaUserActionBar from "./components/MediaUserActionBar";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { cn } from "@/lib/utils";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
@@ -47,7 +49,10 @@ export default function SeriesContent({
   showAdvisoryAge,
 }: {
   item: ItemDetail & { type: "series" };
-  /** The page's ?libraryId= scope; the match and split dialogs search in it. */
+  /**
+   * The page's ?libraryId= scope. Season and episode links keep it, and the
+   * match and split dialogs search in it.
+   */
   libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
@@ -82,7 +87,7 @@ export default function SeriesContent({
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
-  const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
+  const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id, libraryId);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
   const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Creator"), [item.crew]);
@@ -101,7 +106,13 @@ export default function SeriesContent({
   const singleSeason = seasons.length === 1 ? seasons[0] : undefined;
 
   const primaryAction = resolveSeriesPrimaryAction(item);
-  const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id);
+  const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id, libraryId);
+  const singleSeasonEpisodes = singleSeasonEpisodesQuery.data?.episodes ?? [];
+  const { episodes: singleSeasonPlaybackEpisodes } = useEpisodePlaybackList(
+    singleSeason?.content_id,
+    libraryId,
+    singleSeasonEpisodes,
+  );
   // A single-season show lists its episodes here rather than on a season
   // page, so this page starts the season's on-view translation (the season
   // job covers its episodes) when an episode reports a missing description.
@@ -119,7 +130,7 @@ export default function SeriesContent({
     );
   const singleSeasonEpisodeLinkState = singleSeason
     ? {
-        parentSeasonHref: `/item/${singleSeason.content_id}`,
+        parentSeasonHref: buildItemHref({ contentId: singleSeason.content_id, libraryId }),
         parentSeasonLabel: getSeasonDisplayTitle(singleSeason),
       }
     : undefined;
@@ -131,7 +142,7 @@ export default function SeriesContent({
   const nextUpSeason = item.play_content_id
     ? seasons.find((season) => season.play_content_id === item.play_content_id)
     : undefined;
-  const nextUpEpisode = useItemEpisodes(nextUpSeason?.content_id).data?.episodes.find(
+  const nextUpEpisode = useItemEpisodes(nextUpSeason?.content_id, libraryId).data?.episodes.find(
     (episode) => episode.content_id === item.play_content_id,
   );
   const watchTogether = useDetailWatchTogether({
@@ -261,13 +272,15 @@ export default function SeriesContent({
                     </div>
                   </div>
                   <SeasonEpisodeGrid
-                    episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}
+                    episodes={singleSeasonEpisodes}
+                    playbackEpisodes={singleSeasonPlaybackEpisodes}
                     isLoading={singleSeasonEpisodesQuery.isLoading}
                     episodeLinkState={singleSeasonEpisodeLinkState}
+                    libraryId={libraryId}
                   />
                 </section>
               ) : (
-                <SeasonCarousel seasons={seasons} />
+                <SeasonCarousel seasons={seasons} libraryId={libraryId} />
               )}
             </div>
           )}
