@@ -192,16 +192,20 @@ func decompressBudget(c *Compression, data []byte, b *budget) ([]byte, error) {
 type packetBuffer struct {
 	data   []byte
 	budget *budget
+	// refused is why a write failed: the size bound or the budget.
+	refused error
 }
 
 func (w *packetBuffer) Write(p []byte) (int, error) {
 	if len(p) > maxPacketSize-len(w.data) {
-		return 0, corrupt("decompressed packet over %d bytes", maxPacketSize)
+		w.refused = corrupt("decompressed packet over %d bytes", maxPacketSize)
+		return 0, w.refused
 	}
 	need := len(w.data) + len(p)
 	if need > cap(w.data) {
 		capacity := min(maxPacketSize, max(need, 2*cap(w.data)))
 		if err := w.budget.take(capacity); err != nil {
+			w.refused = err
 			return 0, err
 		}
 		data := make([]byte, len(w.data), capacity)
@@ -218,8 +222,10 @@ func readDecompressedBudget(r io.Reader, name string, b *budget) ([]byte, error)
 	_, err := io.Copy(w, r)
 	if err != nil {
 		b.give(cap(w.data))
-		if errors.Is(err, ErrTooLarge) {
-			return nil, err
+		// The buffer's own refusal keeps its meaning: ErrTooLarge, or a
+		// shared budget's busy error, which a caller retries.
+		if w.refused != nil {
+			return nil, w.refused
 		}
 		return nil, corrupt("%s: %v", name, err)
 	}

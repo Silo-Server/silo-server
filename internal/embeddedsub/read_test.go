@@ -137,6 +137,36 @@ func TestMatroskaIndexDrawsOnTheConstructionBudget(t *testing.T) {
 	}
 }
 
+// A shared budget too busy for a track's codec private data fails the load
+// instead of marking the track unsupported: the busy load isn't cached, and
+// a later one with room reads the track.
+func TestBusyCodecPrivateExpansionIsRetried(t *testing.T) {
+	for _, algo := range []uint64{matroska.CompressionZlib, matroska.CompressionHeaderStripping} {
+		private := bytes.Repeat([]byte("a"), 64<<10)
+		stored, settings := zlibBytes(t, private), []byte(nil)
+		if algo == matroska.CompressionHeaderStripping {
+			stored, settings = private[:1], private[1:]
+		}
+		path := writeFixture(t, mkvFixture{tracks: []fixtureTrack{{
+			number: 1, codec: "S_TEXT/ASS", private: stored,
+			extra: [][]byte{encodingEl(matroska.ScopeCodecPrivate, algo, settings)},
+		}}}.build())
+		previous := indexConstructionBytes
+		cache := NewCache(1 << 20)
+		indexConstructionBytes = newConstructionBudget(1 << 10)
+		_, busyErr := cache.Index(t.Context(), path)
+		indexConstructionBytes = newConstructionBudget(64 << 20)
+		idx, err := cache.Index(t.Context(), path)
+		indexConstructionBytes = previous
+		if !errors.Is(busyErr, errIndexReadBusy) {
+			t.Fatalf("algorithm %d without room: %v, want busy", algo, busyErr)
+		}
+		if err != nil || len(idx.Tracks) != 1 || idx.Tracks[0].Unsupported != "" || !bytes.Equal(idx.Tracks[0].CodecPrivate, private) {
+			t.Fatalf("algorithm %d with room: %v, tracks %+v", algo, err, idx)
+		}
+	}
+}
+
 func TestReadIndex(t *testing.T) {
 	path, idx := readFixture(t, libraryFixture(t))
 	info, err := os.Stat(path)
