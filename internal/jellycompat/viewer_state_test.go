@@ -80,7 +80,8 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if err != nil || len(afterDateEdit) != len(beforeDateEdit) || dto.PlaybackPositionTicks != 15000000000 || dto.LastPlayedDate != "2023-01-01T00:00:00Z" {
 		t.Fatalf("date-only edit changed history/progress: %+v %v", dto, err)
 	}
-	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00Z"}`)
+	// Jellyfin reads a LastPlayedDate without an offset as UTC (#3257).
+	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00.0000000"}`)
 	if dto.Played || dto.PlaybackPositionTicks != 50000000 || dto.LastPlayedDate != "2024-01-01T00:00:00Z" {
 		t.Fatalf("historical edit suppressed: %+v", dto)
 	}
@@ -107,9 +108,9 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	// Jellyfin binds datePlayed with its legacy binder: the compact
-	// yyyyMMddHHmmss form (read as UTC) that Emby-era clients send, then
-	// ordinary ISO 8601 with or without an offset (#3257).
+	// Jellyfin's legacy binder takes the compact yyyyMMddHHmmss form as UTC
+	// and falls back to its default binder, which also takes a date-time
+	// without an offset (#3257).
 	for _, tc := range []struct{ name, query string }{
 		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z"},
 		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z"},

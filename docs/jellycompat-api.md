@@ -37,7 +37,7 @@ owns registration; the native `/api/v1` contract is separate.
 |---|---|
 | `GET`, `POST /UserItems/{itemId}/UserData` | Read or partially update the current profile's state; POST returns the resulting user-data DTO. |
 | `GET`, `POST /Users/{userId}/Items/{itemId}/UserData` | Legacy aliases with the same profile and item access checks. |
-| `POST`, `DELETE /UserPlayedItems/{itemId}` and `/Users/{userId}/PlayedItems/{itemId}` | Mark played or unplayed; return HTTP 200 and the resulting DTO. POST accepts `datePlayed` in the forms Jellyfin binds: compact `yyyyMMddHHmmss` (UTC), or ISO 8601 with or without an offset (UTC when absent). |
+| `POST`, `DELETE /UserPlayedItems/{itemId}` and `/Users/{userId}/PlayedItems/{itemId}` | Mark played or unplayed; return HTTP 200 and the resulting DTO. POST accepts `datePlayed`. |
 | `POST /Users/Configuration`, `/Users/{userId}/Configuration` | Persist profile settings and client presentation preferences; return 204. Current-user responses return effective settings. |
 | `GET`, `POST /DisplayPreferences/{displayPreferencesId}` | Store preferences separately by account, profile, client, and preference ID. Writes return 204. Reads always include `skipBackLength` and `skipForwardLength`, defaulting to 10000 and 30000 ms as Jellyfin does. As in Jellyfin 12, a write without either stores 15000 ms for it, and empty `landing-*` values are dropped. |
 | `GET /Localization/Cultures` | Language choices with two- and three-letter ISO codes. Accepts case-insensitive paths, including `/Localization/cultures`. |
@@ -48,6 +48,10 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
+`datePlayed` and `LastPlayedDate` accept the compact Emby form `yyyyMMddHHmmss`
+or `YYYY-MM-DDThh:mm:ss` with an optional fraction and an optional `Z` or
+`±hh:mm` offset, all forms Jellyfin accepts. A value without an offset is read
+as UTC. Other values return 400.
 A `LastPlayedDate` or `datePlayed` more than two minutes ahead of the server
 clock is stored and reported as the server's current time, the same bound
 native progress sync applies, so a client with a wrong clock cannot block
