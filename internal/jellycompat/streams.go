@@ -3558,6 +3558,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		}
 		previousOpts := transcodeSession.Opts()
 		transcodeSession.SetAudioTrackIndex(audioTrackIndex)
+		// A new selection is always mandatory, even on a runtime rebuilt from a
+		// recipe written before negotiated audio was.
+		transcodeSession.SetRequireAudioTrack(compatRequiresAudioTrack(source))
 		transcodeSession.SetSourceAudioChannels(sourceAudioChannels)
 		startSegment := 0
 		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
@@ -3565,6 +3568,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		}
 		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			transcodeSession.SetAudioTrackIndex(previousOpts.AudioTrackIndex)
+			transcodeSession.SetRequireAudioTrack(previousOpts.RequireAudioTrack)
 			transcodeSession.SetSourceAudioChannels(previousOpts.SourceAudioChannels)
 			if errors.Is(err, playback.ErrSessionSuperseded) {
 				return false, err

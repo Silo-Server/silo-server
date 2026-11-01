@@ -3222,6 +3222,14 @@ func (s *TranscodeSession) SetAudioTrackIndex(index int) {
 	s.opts.AudioTrackIndex = index
 }
 
+// SetRequireAudioTrack updates whether ffmpeg must fail rather than drop the
+// selected audio track. Must be called before Restart() to take effect.
+func (s *TranscodeSession) SetRequireAudioTrack(required bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.RequireAudioTrack = required
+}
+
 // SetSourceAudioChannels updates the selected source track's channel count in
 // the session's opts. Must be called before Restart() so the rebuilt ffmpeg
 // command applies (or removes) the stereo-downmix loudness filter.
