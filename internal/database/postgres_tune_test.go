@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -200,7 +201,9 @@ WHERE name = $1 AND sourcefile LIKE '%postgresql.auto.conf' ORDER BY seqno DESC 
 		if saved != nil {
 			statement = "ALTER SYSTEM SET " + name + " = " + quotePostgresLiteral(*saved)
 		}
-		if _, err := pool.Exec(context.Background(), statement); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(ctx, statement); err != nil {
 			t.Error(err)
 		}
 	})
