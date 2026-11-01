@@ -485,6 +485,12 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	}
 	// Until the owner registers again, the cleared installation stays reserved
 	// for its account against the ordered and the legacy writer alike.
+	if _, err = reset(foreign.UserID, foreign.InstallationKey); !errors.Is(err, ErrPushInstallationProof) {
+		t.Fatalf("another account resetting a reserved installation=%v", err)
+	}
+	if done, e := reset(owner.UserID, reinstalled.InstallationKey); e != nil || done {
+		t.Fatalf("owner retrying a cleared installation reset=%v err=%v", done, e)
+	}
 	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
 		t.Fatalf("another account binding a reset installation=%v", err)
 	}

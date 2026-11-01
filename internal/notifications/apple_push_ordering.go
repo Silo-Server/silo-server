@@ -342,7 +342,7 @@ func (r *PushDeviceRepository) ResetApplePushInstallation(ctx context.Context, c
 	// unknown installation.
 	defer func() { _ = tx.Rollback(ctx) }()
 	generation, err := lockApplePushInstallation(ctx, tx, cmd.DeviceID)
-	if err != nil || generation == 0 {
+	if err != nil {
 		return false, err
 	}
 	var storedKey string
@@ -350,10 +350,13 @@ func (r *PushDeviceRepository) ResetApplePushInstallation(ctx context.Context, c
 	if err = tx.QueryRow(ctx, `SELECT installation_key_hash,user_id FROM apple_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&storedKey, &storedUser); err != nil {
 		return false, err
 	}
+	if generation == 0 && storedUser == 0 {
+		return false, nil
+	}
 	if storedUser != cmd.UserID {
 		return false, ErrPushInstallationProof
 	}
-	if hmac.Equal([]byte(storedKey), []byte(pushDigest([]byte(cmd.InstallationKey)))) {
+	if generation == 0 || hmac.Equal([]byte(storedKey), []byte(pushDigest([]byte(cmd.InstallationKey)))) {
 		return false, nil
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE device_id=$1 AND platform=$2`, cmd.DeviceID, PushPlatformApple); err != nil {
