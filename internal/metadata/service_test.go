@@ -525,6 +525,20 @@ func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
+func (r *fakeRefreshDebtRepo) DeleteParkedTargetDebt(_ context.Context, targetType, contentID string, reasonMask int64, attemptCount int, nextRefreshAt time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fakeRefreshDebtKey(targetType, contentID)
+	debt, ok := r.debts[key]
+	now := time.Now()
+	if !ok || debt.ReasonMask != reasonMask || debt.AttemptCount != attemptCount || !debt.NextRefreshAt.Equal(nextRefreshAt) ||
+		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
+		return false, nil
+	}
+	delete(r.debts, key)
+	return true, nil
+}
+
 // fakeFileRepo implements FileContentUpdater with an in-memory store.
 type fakeFileRepo struct {
 	mu                  sync.Mutex

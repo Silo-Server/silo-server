@@ -363,6 +363,43 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
+// DeleteParkedTargetDebt deletes a target's debt row only while it still has
+// the reasons, attempt count and schedule the caller read, is not due, and
+// holds no live lease, and reports whether it did. A row that a nudge made due,
+// a refresh claimed, or another writer added a reason to since that read
+// belongs to that writer and is kept.
+func (r *RefreshDebtRepository) DeleteParkedTargetDebt(
+	ctx context.Context,
+	targetType string,
+	contentID string,
+	reasonMask int64,
+	attemptCount int,
+	nextRefreshAt time.Time,
+) (bool, error) {
+	if err := r.requireConfigured(); err != nil {
+		return false, err
+	}
+	targetType = NormalizeRefreshTargetType(targetType)
+	contentID = strings.TrimSpace(contentID)
+	if targetType == "" || contentID == "" {
+		return false, nil
+	}
+
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM metadata_refresh_debt
+		WHERE target_type = $1 AND content_id = $2
+		  AND reason_mask = $3
+		  AND attempt_count = $4
+		  AND next_refresh_at = $5
+		  AND next_refresh_at > NOW()
+		  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+	`, targetType, contentID, reasonMask, attemptCount, nextRefreshAt.UTC())
+	if err != nil {
+		return false, fmt.Errorf("deleting parked metadata refresh debt: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // SnapshotEpisodeDebts captures short-lived PostgreSQL row-version tokens before
 // the caller reads episode completeness. xmin changes across transactions; ctid
 // also changes when a row is rewritten within the same transaction. These tokens
