@@ -441,7 +441,7 @@ func subtitleWindowBounds(opts TranscodeOpts, segNum int, window subtitleCueWind
 	}
 	start90k = origin90k + int64(math.Round(window.offset*90_000))
 	end90k = start90k + int64(math.Round(window.duration*90_000))
-	if window.restartGrid && window.grid90k < start90k && start90k-window.grid90k < end90k-start90k {
+	if window.restartGrid && window.grid90k < start90k {
 		start90k = window.grid90k
 	}
 	if window.open {
