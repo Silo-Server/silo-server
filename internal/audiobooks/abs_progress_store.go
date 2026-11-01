@@ -74,8 +74,9 @@ func (s *ABSProgressStore) GetProgress(ctx context.Context, userID, profileID, c
 }
 
 // ListProgressForAudiobooks returns all progress rows for (userID, profileID)
-// that join to media_items with type = 'audiobook'. Ordered by updated_at DESC,
-// capped at limit rows.
+// that join to media_items with type = 'audiobook' in at least one library, so
+// books held through the file removal grace don't use up the limit. Ordered by
+// updated_at DESC, capped at limit rows.
 func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID, profileID string, limit int) ([]abs.ProgressRow, error) {
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
@@ -98,6 +99,7 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 		WHERE wp.user_id = $1
 		  AND wp.profile_id = $2
 		  AND mi.type = 'audiobook'
+		  AND EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)
 		ORDER BY wp.updated_at DESC
 		LIMIT $3`,
 		uid, profileID, limit,

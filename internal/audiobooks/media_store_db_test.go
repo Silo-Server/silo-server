@@ -17,8 +17,80 @@ import (
 // library but still exists: one held through the file removal grace, or under
 // an offline root. ABS author, series, and search reads, and the by-ID reads
 // that resume, collection, and playlist listings hydrate through, must not
-// return it, even for a viewer without library restrictions.
+// return it, even for a viewer without library restrictions. Its progress must
+// not use up the progress list's limit either.
 func TestABSStoreHidesBooksWithoutLibraryDB(t *testing.T) {
+	f := seedHiddenBookFixture(t)
+	pool, series, listed, held, authorID, userID := f.pool, f.series, f.listed, f.held, f.authorID, f.userID
+	ctx := t.Context()
+	store := &ABSMediaStore{Items: catalog.NewItemRepository(pool), Pool: pool}
+	unrestricted := catalog.AccessFilter{}
+	author, err := store.GetAuthorByID(ctx, strconv.FormatInt(authorID, 10), unrestricted)
+	if err != nil {
+		t.Fatalf("GetAuthorByID: %v", err)
+	}
+	seriesBooks, err := store.GetSeriesByName(ctx, series, unrestricted)
+	if err != nil {
+		t.Fatalf("GetSeriesByName: %v", err)
+	}
+	found, err := store.SearchAudiobooks(ctx, 0, "Book", 50, unrestricted)
+	if err != nil {
+		t.Fatalf("SearchAudiobooks: %v", err)
+	}
+	byID, err := store.GetAudiobooksByIDs(ctx, []string{listed, held}, unrestricted)
+	if err != nil {
+		t.Fatalf("GetAudiobooksByIDs: %v", err)
+	}
+	single, err := store.GetAudiobookByID(ctx, held, unrestricted)
+	if err != nil {
+		t.Fatalf("GetAudiobookByID: %v", err)
+	}
+	if single != nil {
+		t.Errorf("GetAudiobookByID returned held book %s", held)
+	}
+	progress, err := (&ABSProgressStore{Pool: pool}).ListProgressForAudiobooks(ctx, strconv.Itoa(userID), "", 1)
+	if err != nil {
+		t.Fatalf("ListProgressForAudiobooks: %v", err)
+	}
+	if len(progress) != 1 || progress[0].ContentID != listed {
+		t.Errorf("newest progress with limit 1 = %+v, want the book in a library", progress)
+	}
+	searched := found[:0]
+	for _, item := range found {
+		if item.ContentID == listed || item.ContentID == held {
+			searched = append(searched, item)
+		}
+	}
+	for name, got := range map[string]int{
+		"author books": len(author.Books), "series books": len(seriesBooks.Books), "search results": len(searched), "by-ID books": len(byID),
+	} {
+		if got != 1 {
+			t.Errorf("%s = %d, want only the book in a library", name, got)
+		}
+	}
+	listedBooks := append(append(author.Books, seriesBooks.Books...), searched...)
+	for _, book := range byID {
+		listedBooks = append(listedBooks, book)
+	}
+	for _, book := range listedBooks {
+		if book.ContentID == held {
+			t.Errorf("held book %s listed", held)
+		}
+	}
+}
+
+// hiddenBookFixture is one audiobook in a library and one in none, sharing an
+// author and a series, with the out-of-library book's progress the newest.
+type hiddenBookFixture struct {
+	pool         *pgxpool.Pool
+	authorID     int64
+	series       string
+	listed, held string
+	userID       int
+}
+
+func seedHiddenBookFixture(t *testing.T) hiddenBookFixture {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -47,6 +119,7 @@ func TestABSStoreHidesBooksWithoutLibraryDB(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{listed, held})
 		_, _ = pool.Exec(ctx, `DELETE FROM people WHERE id = $1`, authorID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE username = $1`, fmt.Sprintf("abs-hidden-%d", suffix))
 	})
 	stmts := []struct {
 		sql  string
@@ -63,52 +136,14 @@ func TestABSStoreHidesBooksWithoutLibraryDB(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-
-	store := &ABSMediaStore{Items: catalog.NewItemRepository(pool), Pool: pool}
-	unrestricted := catalog.AccessFilter{}
-	author, err := store.GetAuthorByID(ctx, strconv.FormatInt(authorID, 10), unrestricted)
-	if err != nil {
-		t.Fatalf("GetAuthorByID: %v", err)
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("abs-hidden-%d", suffix)).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
 	}
-	seriesBooks, err := store.GetSeriesByName(ctx, series, unrestricted)
-	if err != nil {
-		t.Fatalf("GetSeriesByName: %v", err)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
+		VALUES ($1, '', $2, 60, 3600, now() - interval '1 hour'), ($1, '', $3, 60, 3600, now())`, userID, listed, held); err != nil {
+		t.Fatalf("seed progress: %v", err)
 	}
-	found, err := store.SearchAudiobooks(ctx, 0, "Book", 50, unrestricted)
-	if err != nil {
-		t.Fatalf("SearchAudiobooks: %v", err)
-	}
-	byID, err := store.GetAudiobooksByIDs(ctx, []string{listed, held}, unrestricted)
-	if err != nil {
-		t.Fatalf("GetAudiobooksByIDs: %v", err)
-	}
-	single, err := store.GetAudiobookByID(ctx, held, unrestricted)
-	if err != nil {
-		t.Fatalf("GetAudiobookByID: %v", err)
-	}
-	if single != nil {
-		t.Errorf("GetAudiobookByID returned held book %s", held)
-	}
-	searched := found[:0]
-	for _, item := range found {
-		if item.ContentID == listed || item.ContentID == held {
-			searched = append(searched, item)
-		}
-	}
-	for name, got := range map[string]int{
-		"author books": len(author.Books), "series books": len(seriesBooks.Books), "search results": len(searched), "by-ID books": len(byID),
-	} {
-		if got != 1 {
-			t.Errorf("%s = %d, want only the book in a library", name, got)
-		}
-	}
-	listedBooks := append(append(author.Books, seriesBooks.Books...), searched...)
-	for _, book := range byID {
-		listedBooks = append(listedBooks, book)
-	}
-	for _, book := range listedBooks {
-		if book.ContentID == held {
-			t.Errorf("held book %s listed", held)
-		}
-	}
+	return hiddenBookFixture{pool: pool, authorID: authorID, series: series, listed: listed, held: held, userID: userID}
 }
