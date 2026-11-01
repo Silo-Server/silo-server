@@ -1,0 +1,44 @@
+{
+  "templates": {
+    "subject": "{{server_name}}: {{summary}}",
+    "html": "<h1>{{header_title}}</h1>{{#shows}}<h2>{{show_name}}</h2>{{/shows}}",
+    "text": "{{summary}}"
+  },
+  "theme": {
+    "accent_color": "#7c5cff",
+    "background_color": "#0f1115",
+    "card_color": "#181b22",
+    "text_color": "#f2f3f5",
+    "muted_color": "#9aa0ab",
+    "logo_url": "https://siloserver.org/brand/silo-project-icon.png",
+    "header_title": "New on {{server_name}}",
+    "intro": "Here's what just landed on the server.",
+    "footer_text": "You're receiving this because you signed up for new media alerts.",
+    "button_text": "Watch now",
+    "backdrop_behind_show": true,
+    "backdrop_dim": 72,
+    "open_in_app": true
+  },
+  "custom_vars": [],
+  "schedule": {
+    "timezone": "Europe/London",
+    "daily_hour": 7,
+    "weekly_day": 5,
+    "weekly_hour": 18
+  },
+  "delivery": {
+    "paused": false,
+    "settle_minutes": 1,
+    "max_items": 60,
+    "embed_images": true,
+    "max_images": 40,
+    "synopsis_length": 320,
+    "instant_gap_minutes": 10,
+    "instant_daily_cap": 0,
+    "max_age_hours": 168
+  },
+  "self_service": {
+    "enabled": true,
+    "require_verification": true
+  }
+}

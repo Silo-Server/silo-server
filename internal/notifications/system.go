@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -73,9 +74,10 @@ type System struct {
 	mailSender                mail.Sender
 	emailBrand                *mail.BrandLoader
 	emailVerificationDispatch *emailVerificationDispatcher
-	emailWorker               *accountChannelWorker[profileKey]
-	discordWorker             *accountChannelWorker[int]
-	discordClient             *discord.Client
+	// EmailAlerts sends the new-media emails; nil without a mail sender.
+	EmailAlerts   *EmailAlerts
+	discordWorker *accountChannelWorker[int]
+	discordClient *discord.Client
 	// publicURL is the server's externally reachable base URL, used as the
 	// fallback for tokenized email links (see SetPublicURL).
 	publicURL string
@@ -103,8 +105,11 @@ type System struct {
 	scopes ScopeResolver
 	users  UserLister
 	images ImageURLResolver
-	logger *slog.Logger
-	wg     sync.WaitGroup
+	// EmailArtwork serves the signed poster and backdrop links in
+	// notification emails; nil until SetEmailArtwork.
+	EmailArtwork *EmailArtwork
+	logger       *slog.Logger
+	wg           sync.WaitGroup
 }
 
 // NewSystem wires the notification system. hub may be nil (no realtime
@@ -189,20 +194,15 @@ func NewSystem(
 
 	// Email rides the shared SMTP core. Unlike the per-target channels it
 	// keeps no outbox: its dispatcher only nudges the watermark sweep.
+	// Email alerts replace the per-profile email sweep: recipients are
+	// profiles (followed shows or everything new) and addresses an admin
+	// added, each with instant, daily and weekly legs.
 	var emailPrefs *EmailPrefsRepository
-	var emailChannelInst *emailChannel
-	var emailWorker *accountChannelWorker[profileKey]
+	var emailAlerts *EmailAlerts
 	if mailSender != nil {
 		emailPrefs = NewEmailPrefsRepository(pool)
-		emailChannelInst = &emailChannel{
-			prefs:      emailPrefs,
-			deliveries: deliveries,
-			settings:   settings,
-			sender:     mailSender,
-			brand:      emailBrand,
-		}
-		emailWorker = newAccountChannelWorker(pool, emailChannelInst)
-		dispatchers = append(dispatchers, newNudgeDispatcher(emailWorker))
+		emailAlerts = newEmailAlerts(pool, settings, mailSender, emailBrand, scopes)
+		dispatchers = append(dispatchers, newNudgeDispatcher(emailAlerts))
 	}
 
 	// Discord DMs ride the same account-watermark engine as email. The
@@ -249,7 +249,7 @@ func NewSystem(
 		DiscordPrefs:        discordPrefs,
 		mailSender:          mailSender,
 		emailBrand:          emailBrand,
-		emailWorker:         emailWorker,
+		EmailAlerts:         emailAlerts,
 		discordWorker:       discordWorker,
 		discordClient:       discordClient,
 		webhookRepo:         webhookRepo,
@@ -275,8 +275,8 @@ func NewSystem(
 		system.EmailVerification = &EmailVerificationService{store: emailPrefs, cipher: cipher, profile: system.lookupProfile, linkBase: system.emailLinkBase, brand: emailBrand, dispatch: system.emailVerificationDispatch}
 	}
 	wsDispatcher.payload = system.PayloadForRow
-	if emailChannelInst != nil {
-		emailChannelInst.profileName = system.lookupProfileName
+	if emailAlerts != nil {
+		emailAlerts.profileName = system.lookupProfileName
 	}
 	if sender != nil {
 		sender.operational = system.DispatchOperational
@@ -291,6 +291,27 @@ func NewSystem(
 		webPushSenderInst.payload = system.PayloadForRow
 	}
 	return system
+}
+
+// SetEmailArtwork enables posters and dimmed backdrops in notification
+// emails, read from store (nil serves provider-hosted artwork only) and
+// signed with a key derived from jwtSecret.
+func (s *System) SetEmailArtwork(store blobstore.Store, jwtSecret string) {
+	if s == nil {
+		return
+	}
+	s.EmailArtwork = NewEmailArtwork(s.pool, store, jwtSecret)
+	if s.EmailAlerts != nil {
+		s.EmailAlerts.setArtwork(s.EmailArtwork)
+	}
+}
+
+// ServeEmailArtwork returns the JPEG behind a signed email artwork link.
+func (s *System) ServeEmailArtwork(ctx context.Context, token string) ([]byte, error) {
+	if s == nil || s.EmailArtwork == nil {
+		return nil, ErrEmailArtworkNotFound
+	}
+	return s.EmailArtwork.Serve(ctx, token)
 }
 
 // SetImageResolver wires presigned poster URLs into notification payloads.
@@ -391,11 +412,11 @@ func (s *System) Start(ctx context.Context) {
 			s.serverChannelWorker.Run(ctx)
 		}()
 	}
-	if s.emailWorker != nil {
+	if s.EmailAlerts != nil {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.emailWorker.Run(ctx)
+			s.EmailAlerts.Run(ctx)
 		}()
 	}
 	if s.emailVerificationDispatch != nil {

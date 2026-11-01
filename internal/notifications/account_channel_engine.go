@@ -23,7 +23,55 @@ const (
 	// digest hour, a digest recapping everything since the previous digest —
 	// including items already sent individually.
 	ChannelModePerEpisodeAndDigest = "per_episode_and_digest"
+	// ChannelModeWeeklyDigest and EmailModePerEpisodeAndWeeklyDigest are email
+	// only: the email alerts send a weekly digest, alone or with per-episode
+	// sends. The shared digest engine does not run them.
+	ChannelModeWeeklyDigest            = "weekly_digest"
+	EmailModePerEpisodeAndWeeklyDigest = "per_episode_and_weekly_digest"
 )
+
+// emailSendsOfMode splits a single email mode into its sends.
+func emailSendsOfMode(mode string) (instant, daily, weekly bool) {
+	switch mode {
+	case ChannelModePerEpisode:
+		return true, false, false
+	case ChannelModePerEpisodeAndDigest:
+		return true, true, false
+	case EmailModePerEpisodeAndWeeklyDigest:
+		return true, false, true
+	case ChannelModeDailyDigest:
+		return false, true, false
+	case ChannelModeWeeklyDigest:
+		return false, false, true
+	}
+	return false, false, false
+}
+
+// emailModeOfSends is the single mode closest to a combination of sends,
+// for clients that read one mode. Every send combination maps to a mode
+// that is off exactly when no send is on.
+func emailModeOfSends(instant, daily, weekly bool) string {
+	switch {
+	case instant && daily:
+		return ChannelModePerEpisodeAndDigest
+	case instant && weekly:
+		return EmailModePerEpisodeAndWeeklyDigest
+	case instant:
+		return ChannelModePerEpisode
+	case daily:
+		return ChannelModeDailyDigest
+	case weekly:
+		return ChannelModeWeeklyDigest
+	}
+	return ChannelModeOff
+}
+
+// ValidEmailMode reports whether mode is a profile email mode: the shared
+// channel modes plus the weekly ones.
+func ValidEmailMode(mode string) bool {
+	return ValidChannelMode(mode) || mode == ChannelModeWeeklyDigest ||
+		mode == EmailModePerEpisodeAndWeeklyDigest
+}
 
 // transactionalDeliveryTypes are the delivery types that bypass digest
 // batching: digest-mode recipients receive them in a prompt early send (the
@@ -48,7 +96,8 @@ func ValidChannelMode(mode string) bool {
 // ModeIncludesPerEpisode reports whether the mode performs per-episode sends
 // and is therefore subject to the admin per-episode allowance.
 func ModeIncludesPerEpisode(mode string) bool {
-	return mode == ChannelModePerEpisode || mode == ChannelModePerEpisodeAndDigest
+	return mode == ChannelModePerEpisode || mode == ChannelModePerEpisodeAndDigest ||
+		mode == EmailModePerEpisodeAndWeeklyDigest
 }
 
 const (

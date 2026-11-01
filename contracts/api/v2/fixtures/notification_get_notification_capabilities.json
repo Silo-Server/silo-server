@@ -1,5 +1,5 @@
 {
-  "revision": "302a85c2ba6b66ff6c3326888ce8a646db429680e8060081bd639c7c70101ced",
+  "revision": "9e0a01b931046320a147325824ecee0874ac89ccdeed1cd190b8c3350bb19894",
   "state": "available",
   "allowed": true,
   "in_app": {
@@ -30,12 +30,14 @@
   "email": {
     "available": false,
     "modes": [],
-    "digest_hour": 0
+    "digest_hour": 0,
+    "digest_weekday": 0
   },
   "discord": {
     "available": false,
     "modes": [],
-    "digest_hour": 0
+    "digest_hour": 0,
+    "digest_weekday": 0
   },
   "series": {
     "available": true,

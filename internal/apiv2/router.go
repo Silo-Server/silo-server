@@ -190,6 +190,7 @@ type Dependencies struct {
 	SubtitleAIReads               SubtitleAIReadService
 	NotificationDiscordLinks      NotificationDiscordLinkService
 	NotificationEmailLinks        NotificationEmailLinkService
+	NotificationEmailAlertLinks   NotificationEmailAlertLinkService
 	NotificationDestinationTests  NotificationDestinationTestService
 	AdminDevices                  AdminDeviceService
 	UserLibraries                 UserLibraryService
@@ -234,6 +235,8 @@ type Dependencies struct {
 	AdminRecommendations          AdminRecommendationsService
 	AdminLiteraryWorks            AdminLiteraryWorkService
 	NotificationChannels          NotificationChannelService
+	NotificationEmailArtwork      NotificationEmailArtworkService
+	AdminEmailAlerts              AdminEmailAlertsService
 	NotificationDiscordManagement NotificationDiscordManagementService
 	NotificationRelay             NotificationRelayService
 	AdminNotificationPush         AdminNotificationPushService

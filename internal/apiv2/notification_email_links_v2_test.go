@@ -42,15 +42,16 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 		ok                 bool
 		err                error
 		status             int
+		calls              int
 	}{
-		{"verify", "verify", http.MethodGet, notifications.EmailVerifyOK, false, nil, 200},
-		{"used", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, nil, 400},
-		{"conflict", "verify", http.MethodGet, notifications.EmailVerifyConflict, false, nil, 409},
-		{"verify-error", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, errors.New("private database detail"), 500},
-		{"unsubscribe", "unsubscribe", http.MethodGet, 0, true, nil, 200},
-		{"one-click", "unsubscribe", http.MethodPost, 0, true, nil, 200},
-		{"invalid", "unsubscribe", http.MethodPost, 0, false, nil, 400},
-		{"unsubscribe-error", "unsubscribe", http.MethodPost, 0, false, errors.New("private database detail"), 500},
+		{"verify", "verify", http.MethodGet, notifications.EmailVerifyOK, false, nil, 200, 1},
+		{"used", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, nil, 400, 1},
+		{"conflict", "verify", http.MethodGet, notifications.EmailVerifyConflict, false, nil, 409, 1},
+		{"verify-error", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, errors.New("private database detail"), 500, 1},
+		{"unsubscribe-confirm", "unsubscribe", http.MethodGet, 0, false, nil, 200, 0},
+		{"one-click", "unsubscribe", http.MethodPost, 0, true, nil, 200, 1},
+		{"invalid", "unsubscribe", http.MethodPost, 0, false, nil, 400, 1},
+		{"unsubscribe-error", "unsubscribe", http.MethodPost, 0, false, errors.New("private database detail"), 500, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			*fake = fakeNotificationEmailLinks{outcome: tc.outcome, unsubscribed: tc.ok, err: tc.err}
@@ -61,7 +62,7 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer unrelated-expired-session")
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
-			if rec.Code != tc.status || fake.calls != 1 || fake.token != "synthetic-proof" {
+			if rec.Code != tc.status || fake.calls != tc.calls || (tc.calls > 0 && fake.token != "synthetic-proof") {
 				t.Fatalf("%d %s calls=%d token=%s", rec.Code, rec.Body.String(), fake.calls, fake.token)
 			}
 			bridge := httptest.NewRecorder()

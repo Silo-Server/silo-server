@@ -329,6 +329,22 @@ type capabilityAccountChannel struct {
 	// allowance); DigestHour tells the UI when daily digests go out.
 	Modes      []string `json:"modes"`
 	DigestHour int      `json:"digest_hour"`
+	// DigestWeekday is the day weekly digests go out (0 = Sunday). Only the
+	// v2 projection carries it; v1 is frozen.
+	DigestWeekday int `json:"-"`
+}
+
+// withoutWeeklyDigest drops the weekly mode, which the frozen v1 contract
+// does not list.
+func (c capabilityAccountChannel) withoutWeeklyDigest() capabilityAccountChannel {
+	modes := make([]string, 0, len(c.Modes))
+	for _, mode := range c.Modes {
+		if mode != notifications.ChannelModeWeeklyDigest {
+			modes = append(modes, mode)
+		}
+	}
+	c.Modes = modes
+	return c
 }
 
 type capabilityWebPush struct {
@@ -359,7 +375,9 @@ type capabilityWebhooks struct {
 // HandleCapability handles GET /notifications/capability. Clients render
 // setup UI from this response instead of introspecting admin settings.
 func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.NotificationCapabilities(r.Context()))
+	view := h.NotificationCapabilities(r.Context())
+	view.Email = view.Email.withoutWeeklyDigest()
+	writeJSON(w, http.StatusOK, view)
 }
 
 // NotificationCapabilitiesView is shared by both API projections.
@@ -380,20 +398,7 @@ func (h *NotificationsHandler) NotificationCapabilities(ctx context.Context) Not
 			webPush = capabilityWebPush{Available: true, PublicKey: publicKey}
 		}
 	}
-	email := capabilityAccountChannel{Modes: []string{}}
-	if h.system.EmailAvailable(ctx) {
-		modes := []string{notifications.ChannelModeDailyDigest}
-		if h.system.Settings.EmailAllowPerEpisode(ctx) {
-			modes = append(modes,
-				notifications.ChannelModePerEpisode,
-				notifications.ChannelModePerEpisodeAndDigest)
-		}
-		email = capabilityAccountChannel{
-			Available:  true,
-			Modes:      modes,
-			DigestHour: h.system.Settings.EmailDigestHour(ctx),
-		}
-	}
+	email := h.emailCapability(ctx)
 	discordCap := capabilityAccountChannel{Modes: []string{}}
 	if h.system.DiscordAvailable(ctx) {
 		modes := []string{notifications.ChannelModeDailyDigest}
@@ -460,4 +465,31 @@ func (h *NotificationsHandler) HandleMintWSTicket(w http.ResponseWriter, r *http
 		Ticket:    ticket,
 		ExpiresIn: int(ttl.Seconds()),
 	})
+}
+
+// emailCapability reports the profile email channel. The digest schedule and
+// the self-service switch live in the email alert settings.
+func (h *NotificationsHandler) emailCapability(ctx context.Context) capabilityAccountChannel {
+	email := capabilityAccountChannel{Modes: []string{}}
+	if !h.system.EmailAvailable(ctx) {
+		return email
+	}
+	settings, err := h.system.EmailAlerts.Settings(ctx)
+	if err != nil || !settings.SelfService.Enabled {
+		return email
+	}
+	modes := []string{notifications.ChannelModeDailyDigest}
+	if h.system.Settings.EmailAllowPerEpisode(ctx) {
+		modes = append(modes,
+			notifications.ChannelModePerEpisode,
+			notifications.ChannelModePerEpisodeAndDigest,
+			notifications.EmailModePerEpisodeAndWeeklyDigest)
+	}
+	modes = append(modes, notifications.ChannelModeWeeklyDigest)
+	return capabilityAccountChannel{
+		Available:     true,
+		Modes:         modes,
+		DigestHour:    settings.Schedule.DailyHour,
+		DigestWeekday: settings.Schedule.WeeklyDay,
+	}
 }

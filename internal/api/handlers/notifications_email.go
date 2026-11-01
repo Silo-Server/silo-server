@@ -188,8 +188,15 @@ func (h *EmailLinkHandler) HandleVerify(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleUnsubscribe handles GET and POST /notifications/email/unsubscribe?token=...
-// POST is the RFC 8058 one-click target mail clients call directly.
+// GET only asks for confirmation, so link scanners that open every link in
+// a message cannot unsubscribe anyone. POST unsubscribes: it is the confirm
+// button's target and the RFC 8058 one-click target mail clients call
+// directly.
 func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeUnsubscribeConfirmPage(w)
+		return
+	}
 	ok, err := h.system.UnsubscribeEmail(r.Context(), r.URL.Query().Get("token"))
 	switch {
 	case err != nil:
@@ -202,6 +209,21 @@ func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Requ
 		writeEmailLinkPage(w, http.StatusOK, "Unsubscribed",
 			"This profile will no longer receive notification emails. Re-enable them any time in Silo's settings.")
 	}
+}
+
+// writeUnsubscribeConfirmPage asks before unsubscribing. The form has no
+// action, so it posts back to the page's own URL, token included, without
+// echoing the token into the page.
+func writeUnsubscribeConfirmPage(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe — Silo</title></head>
+<body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#101014;color:#e8e8ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+<div style="max-width:420px;padding:32px;text-align:center;">
+<h1 style="font-size:20px;margin:0 0 12px;">Unsubscribe from Silo emails?</h1>
+<p style="font-size:14px;color:#9a9aa4;margin:0 0 20px;">You will stop receiving notification emails. You can turn them back on any time in Silo's settings.</p>
+<form method="post"><button type="submit" style="font:inherit;font-size:15px;font-weight:600;background:#6b4dff;color:#fff;border:0;border-radius:8px;padding:10px 22px;cursor:pointer;">Unsubscribe</button></form>
+</div></body></html>`)
 }
 
 // writeEmailLinkPage renders the minimal standalone page behind tokenized

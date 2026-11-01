@@ -461,9 +461,10 @@ type NotificationWebhookCapability struct {
 	SupportedTypes []string `json:"supported_types"`
 }
 type NotificationAccountChannelCapability struct {
-	Available  bool     `json:"available"`
-	Modes      []string `json:"modes"`
-	DigestHour int      `json:"digest_hour"`
+	Available     bool     `json:"available"`
+	Modes         []string `json:"modes"`
+	DigestHour    int      `json:"digest_hour"`
+	DigestWeekday int      `json:"digest_weekday" minimum:"0" maximum:"6" doc:"Day weekly email digests go out, 0 = Sunday. Always 0 for channels without weekly digests."`
 }
 
 func notificationCapabilitiesOf(v handlers.NotificationCapabilitiesView) NotificationCapabilities {
@@ -473,7 +474,7 @@ func notificationCapabilitiesOf(v handlers.NotificationCapabilitiesView) Notific
 		AndroidPush: NotificationPushCapability{Available: v.AndroidPush.Available, Provider: v.AndroidPush.Provider, SupportedModes: NonNil(v.AndroidPush.SupportedModes), DisplayToken: v.AndroidPush.DisplayToken},
 		WebPush:     NotificationWebPushCapability{Available: v.WebPush.Available, PublicKey: v.WebPush.PublicKey},
 		Webhooks:    NotificationWebhookCapability{Available: v.Webhooks.Available, MaxPerProfile: v.Webhooks.MaxPerProfile, SupportedTypes: NonNil(v.Webhooks.SupportedTypes)},
-		Email:       NotificationAccountChannelCapability{Available: v.Email.Available, Modes: NonNil(v.Email.Modes), DigestHour: v.Email.DigestHour},
+		Email:       NotificationAccountChannelCapability{Available: v.Email.Available, Modes: NonNil(v.Email.Modes), DigestHour: v.Email.DigestHour, DigestWeekday: v.Email.DigestWeekday},
 		Discord:     NotificationAccountChannelCapability{Available: v.Discord.Available, Modes: NonNil(v.Discord.Modes), DigestHour: v.Discord.DigestHour},
 	}
 }

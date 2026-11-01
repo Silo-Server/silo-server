@@ -2847,6 +2847,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
+		v2deps.NotificationEmailArtwork = deps.Notifications
+		if deps.Notifications.EmailAlerts != nil {
+			v2deps.AdminEmailAlerts = deps.Notifications.EmailAlerts
+			v2deps.NotificationEmailAlertLinks = handlers.NewEmailAlertLinksHandler(deps.Notifications.EmailAlerts)
+		}
 		v2deps.NotificationDiscordManagement = newDiscordNotificationsHandler(deps, profileTokenService)
 		v2deps.NotificationEmailVerification = deps.Notifications.EmailVerification
 		v2deps.NotificationEmailLinks = handlers.NewEmailLinkHandler(deps.Notifications)
@@ -3387,6 +3392,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			r.Get("/notifications/email/verify", emailLinkHandler.HandleVerify)
 			r.Get("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
 			r.Post("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
+			if deps.Notifications.EmailAlerts != nil {
+				alertLinks := handlers.NewEmailAlertLinksHandler(deps.Notifications.EmailAlerts)
+				r.Get("/notifications/email/open", alertLinks.HandleOpen)
+				r.Get("/notifications/email/manage", alertLinks.HandleManage)
+				r.Post("/notifications/email/manage", alertLinks.HandleManage)
+			}
 		}
 
 		// API key management routes (auth only, no viewer access needed).

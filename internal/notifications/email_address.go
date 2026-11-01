@@ -136,10 +136,10 @@ func (s *System) VerifyEmailToken(ctx context.Context, token string) (EmailVerif
 // UnsubscribeEmail handles a tokenized unsubscribe link: the matching
 // profile's email mode switches off.
 func (s *System) UnsubscribeEmail(ctx context.Context, token string) (ok bool, err error) {
-	if s == nil || s.EmailPrefs == nil || token == "" {
+	if s == nil || s.EmailAlerts == nil || token == "" {
 		return false, nil
 	}
-	return s.EmailPrefs.UnsubscribeByToken(ctx, token)
+	return s.EmailAlerts.Unsubscribe(ctx, token)
 }
 
 // composeVerificationEmail renders the address-confirmation message.

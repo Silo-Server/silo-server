@@ -3183,6 +3183,8 @@ export interface NotificationAccountChannelCapability {
   available: boolean;
   modes: string[];
   digest_hour: number;
+  /** Day weekly digests go out, 0 = Sunday. Absent on older servers. */
+  digest_weekday?: number;
 }
 
 export interface NotificationCapability {
@@ -3200,7 +3202,11 @@ export type NotificationChannelMode =
   | "per_episode"
   | "daily_digest"
   | "per_episode_and_digest";
-export type NotificationEmailMode = NotificationChannelMode;
+/** Email adds weekly digests, alone or with per-episode sends. */
+export type NotificationEmailMode =
+  | NotificationChannelMode
+  | "weekly_digest"
+  | "per_episode_and_weekly_digest";
 export type NotificationDiscordMode = NotificationChannelMode;
 
 /**
@@ -3216,11 +3222,33 @@ export interface NotificationEmailPreferences {
   pending_email: string;
   /** False for child profiles, which cannot set addresses. */
   can_edit_address: boolean;
+  /** An email shortly after something new arrives. */
+  instant: boolean;
+  /** A daily digest. */
+  daily: boolean;
+  /** A weekly digest. */
+  weekly: boolean;
+  /** What to email: shows the profile follows, or everything new it can open. */
+  content: "followed" | "all";
+  /** Item types to include (movie, episode); empty includes both. */
+  types: string[];
+  /** Libraries to include; empty includes every library the profile can open. */
+  library_ids: number[];
+  /** Hours an item counts as new; 0 uses the server default. */
+  max_age_hours: number;
 }
 
-/** PUT /notifications/email-preferences body: only the mode is writable. */
+/** PUT /notifications/email-preferences body: the mode, plus optional choices. */
 export interface NotificationEmailPreferencesUpdate {
-  mode: NotificationEmailMode;
+  /** One mode for older clients; instant, daily and weekly take precedence when any is sent. */
+  mode?: NotificationEmailMode;
+  instant?: boolean;
+  daily?: boolean;
+  weekly?: boolean;
+  content?: "followed" | "all";
+  types?: string[];
+  library_ids?: number[];
+  max_age_hours?: number;
 }
 
 /** Account-level Discord DM channel: link state, mode, and delivery health. */

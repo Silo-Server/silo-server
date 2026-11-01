@@ -25,6 +25,7 @@ require (
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34
+	github.com/cbroglie/mustache v1.4.2
 	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-chi/cors v1.2.2

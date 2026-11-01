@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
+	"github.com/Silo-Server/silo-server/internal/emailalerts"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
@@ -151,7 +152,7 @@ var (
 // EmailAvailable reports whether the email channel can deliver right now:
 // a sender is wired, the kill switch is on, and SMTP is configured.
 func (s *System) EmailAvailable(ctx context.Context) bool {
-	return s != nil && s.emailWorker != nil &&
+	return s != nil && s.EmailAlerts != nil &&
 		s.Settings.EmailEnabled(ctx) && s.mailSender.Enabled(ctx)
 }
 
@@ -162,6 +163,15 @@ type EmailPreferencesState struct {
 	CustomEmail  string
 	PendingEmail string
 	IsChild      bool
+	// Instant, Daily and Weekly are the sends, in any combination.
+	Instant, Daily, Weekly bool
+	// The recipient choices: what to send (followed or all), which types
+	// and libraries (empty = every), and how recent counts as new (0 = the
+	// server default).
+	Content     string
+	Types       []string
+	LibraryIDs  []int
+	MaxAgeHours int
 }
 
 // EmailPreferences returns the profile's email notification state.
@@ -178,7 +188,62 @@ func (s *System) EmailPreferences(ctx context.Context, userID int, profileID str
 	state.CustomEmail = prefs.CustomEmail
 	state.PendingEmail = prefs.PendingEmail
 	state.IsChild = s.profileIsChild(ctx, userID, profileID)
+	state.Instant, state.Daily, state.Weekly = prefs.SendInstant, prefs.SendDaily, prefs.SendWeekly
+	state.Content = prefs.Content
+	state.Types = prefs.Types
+	state.LibraryIDs = prefs.LibraryIDs
+	state.MaxAgeHours = prefs.MaxAgeHours
 	return state, nil
+}
+
+// SetEmailSends stores which emails the profile gets, in any combination of
+// instant, daily and weekly. Turning any on needs the profile's verified
+// address, and instant the admin allowance.
+func (s *System) SetEmailSends(ctx context.Context, userID int, profileID string, instant, daily, weekly bool) error {
+	if s == nil || s.EmailPrefs == nil {
+		return ErrEmailModeInvalid
+	}
+	if instant && !s.Settings.EmailAllowPerEpisode(ctx) {
+		return ErrEmailModeNotAllowed
+	}
+	if instant || daily || weekly {
+		prefs, err := s.EmailPrefs.Get(ctx, profileID)
+		if err != nil {
+			return err
+		}
+		if prefs.CustomEmail == "" {
+			return ErrEmailNoAddress
+		}
+	}
+	return s.EmailPrefs.SetSends(ctx, userID, profileID, instant, daily, weekly)
+}
+
+// EmailChoices are a profile's optional email recipient choices; nil
+// fields are left as they are.
+type EmailChoices struct {
+	Content     *string
+	Types       *[]string
+	LibraryIDs  *[]int
+	MaxAgeHours *int
+}
+
+// SetEmailChoices stores the profile's recipient choices.
+func (s *System) SetEmailChoices(ctx context.Context, userID int, profileID string, c EmailChoices) error {
+	if s == nil || s.EmailPrefs == nil {
+		return ErrEmailModeInvalid
+	}
+	if c.Content != nil && *c.Content != EmailContentAll && *c.Content != EmailContentFollowed {
+		return ErrEmailModeInvalid
+	}
+	if c.Types != nil {
+		types := emailalerts.CleanTypes(*c.Types)
+		c.Types = &types
+	}
+	if c.MaxAgeHours != nil {
+		h := emailalerts.CleanMaxAge(*c.MaxAgeHours)
+		c.MaxAgeHours = &h
+	}
+	return s.EmailPrefs.SetChoices(ctx, userID, profileID, c)
 }
 
 // SetEmailMode validates and stores the profile's email mode. Enabling
@@ -188,7 +253,7 @@ func (s *System) SetEmailMode(ctx context.Context, userID int, profileID, mode s
 	if s == nil || s.EmailPrefs == nil {
 		return ErrEmailModeInvalid
 	}
-	if !ValidChannelMode(mode) {
+	if !ValidEmailMode(mode) {
 		return ErrEmailModeInvalid
 	}
 	if ModeIncludesPerEpisode(mode) && !s.Settings.EmailAllowPerEpisode(ctx) {

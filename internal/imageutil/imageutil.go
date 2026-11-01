@@ -209,6 +209,53 @@ func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, h
 	return out, outSize.Width, outSize.Height, nil
 }
 
+// EncodeEmailJPEG re-encodes the source image as a JPEG no wider than width,
+// with metadata stripped, and blends it toward tint by dim (0 keeps the
+// picture, 1 is solid tint). Email uses it: JPEG renders in every mail client,
+// and a dimmed backdrop keeps text drawn over it readable where clients
+// ignore CSS overlays.
+func EncodeEmailJPEG(data []byte, width int, tint color.RGBA, dim float64) ([]byte, error) {
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
+	}
+	opts := bimg.Options{Type: bimg.JPEG, Quality: 82, StripMetadata: true}
+	if size.Width > width {
+		opts.Width = width
+	}
+	out, err := bimg.NewImage(data).Process(opts)
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: encode jpeg: %w", err)
+	}
+	if dim <= 0 {
+		return out, nil
+	}
+	dim = min(dim, 1)
+	src, err := jpeg.Decode(bytes.NewReader(out))
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: decode jpeg: %w", err)
+	}
+	bounds := src.Bounds()
+	dst := image.NewRGBA(bounds)
+	keep := 1 - dim
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := src.At(x, y).RGBA()
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8(float64(r>>8)*keep + float64(tint.R)*dim),
+				G: uint8(float64(g>>8)*keep + float64(tint.G)*dim),
+				B: uint8(float64(b>>8)*keep + float64(tint.B)*dim),
+				A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, fmt.Errorf("imageutil: encode dimmed jpeg: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 // GenerateSquareVariants center-crops the source image to a square and returns
 // a square original plus resized square variants, all encoded as WebP. The
 // original is capped at MaxCachedOriginalDimension, because libwebp holds the

@@ -3271,6 +3271,143 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/notifications/email-alerts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the email alert settings, recipients, last run and send log. */
+    get: operations["getAdminEmailAlerts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Render unsaved settings with the newest items or sample content. Sends nothing. */
+    post: operations["previewAdminEmailAlert"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/recipients": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add an address that receives everything new in the chosen libraries. */
+    post: operations["createAdminEmailAlertRecipient"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/recipients/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Change a recipient. For a profile only the delivery choices change; its address stays the profile's own. */
+    put: operations["updateAdminEmailAlertRecipient"];
+    post?: never;
+    /** Remove an added address, or switch a profile's email off. */
+    delete: operations["deleteAdminEmailAlertRecipient"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/recipients/{key}/rewind": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Resend the last hours to one recipient on its next send. */
+    post: operations["rewindAdminEmailAlertRecipient"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/run": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Send every email that is due now. */
+    post: operations["runAdminEmailAlerts"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Save the email templates, design, schedule and delivery settings. Templates that fail to render are rejected. */
+    put: operations["updateAdminEmailAlertSettings"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/notifications/email-alerts/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Email the newest items to one address. Send once; each call sends an email. */
+    post: operations["sendAdminEmailAlertTest"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/notifications/push/apple/test": {
     parameters: {
       query?: never;
@@ -9434,7 +9571,7 @@ export interface paths {
     };
     /** Read the acting profile's email notification preferences. */
     get: operations["getNotificationEmailPreferences"];
-    /** Set the acting profile's email delivery mode. */
+    /** Set the acting profile's email delivery mode and what its emails include. */
     put: operations["updateNotificationEmailPreferences"];
     post?: never;
     delete?: never;
@@ -9470,6 +9607,58 @@ export interface paths {
     };
     /** Describe durable verification admission separately from dispatch availability. */
     get: operations["getNotificationEmailVerificationCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/notifications/email/artwork/{token}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a poster or dimmed backdrop linked from a notification email. */
+    get: operations["getNotificationEmailArtwork"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/notifications/email/manage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Render the email alert choices a manage link belongs to. */
+    get: operations["getNotificationEmailManagePage"];
+    put?: never;
+    /** Save the email alert choices submitted from a manage page. */
+    post: operations["saveNotificationEmailManagePage"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/notifications/email/open": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Open an item linked from an alert email in the Silo app or the browser. */
+    get: operations["openNotificationEmailItem"];
     put?: never;
     post?: never;
     delete?: never;
@@ -16109,6 +16298,67 @@ export interface components {
        */
       last_seen_at?: string;
       username: string;
+    };
+    AdminEmailAlertRecipientBody: {
+      /**
+       * @description Profile recipients only: shows the profile follows, or everything new.
+       * @enum {string}
+       */
+      content?: "followed" | "all";
+      email?: string;
+      enabled: boolean;
+      library_ids?: number[];
+      /** Format: int64 */
+      max_age_hours?: number;
+      /** @enum {string} */
+      mode: "instant" | "instant_daily" | "instant_weekly" | "daily" | "weekly";
+      name?: string;
+      types?: string[];
+    };
+    AdminEmailAlertRecipientRewindInputBody: {
+      /**
+       * Format: int64
+       * @description How far back to resend; defaults to 24.
+       */
+      hours?: number;
+    };
+    AdminEmailAlertsPreview: {
+      /** @description Template error; the other fields are empty. */
+      error?: string;
+      html: string;
+      note?: string;
+      subject: string;
+      text: string;
+    };
+    AdminEmailAlertsPreviewInputBody: {
+      /** @enum {string} */
+      mode?: "instant" | "daily" | "weekly";
+      settings: components["schemas"]["EmailAlertSettings"];
+      /**
+       * @description latest renders the newest items; sample renders placeholder content.
+       * @enum {string}
+       */
+      source?: "latest" | "sample";
+    };
+    AdminEmailAlertsSettingsInputBody: {
+      settings: components["schemas"]["EmailAlertSettings"];
+    };
+    AdminEmailAlertsTestInputBody: {
+      email: string;
+      /** @enum {string} */
+      mode?: "instant" | "daily" | "weekly";
+      /**
+       * @description Send only the newest episode or movie.
+       * @enum {string}
+       */
+      pick?: "episode" | "movie";
+      /** @description Unsaved settings to test; omitted uses the saved ones. */
+      settings?: components["schemas"]["EmailAlertSettings"];
+    };
+    AdminEmailAlertsTestResult: {
+      /** Format: int64 */
+      items: number;
+      subject: string;
     };
     AdminEmailTestInputBody: {
       to: string;
@@ -24964,6 +25214,202 @@ export interface components {
        */
       updated_at?: string;
     };
+    EmailAlertCustomVar: {
+      key: string;
+      value: string;
+    };
+    EmailAlertDelivery: {
+      embed_images: boolean;
+      /**
+       * Format: int64
+       * @description Most instant emails per recipient per day; 0 is no limit.
+       */
+      instant_daily_cap: number;
+      /**
+       * Format: int64
+       * @description Least time between two instant emails to one recipient.
+       */
+      instant_gap_minutes: number;
+      /**
+       * Format: int64
+       * @description Default for how recently an item must have been added to count as new.
+       */
+      max_age_hours: number;
+      /** Format: int64 */
+      max_images: number;
+      /** Format: int64 */
+      max_items: number;
+      paused: boolean;
+      /**
+       * Format: int64
+       * @description How long after an item arrives before it is emailed.
+       */
+      settle_minutes: number;
+      /** Format: int64 */
+      synopsis_length: number;
+    };
+    EmailAlertLibrary: {
+      /** Format: int64 */
+      id: number;
+      media_type: string;
+      name: string;
+    };
+    EmailAlertLogEntry: {
+      email: string;
+      error?: string;
+      /** Format: int64 */
+      items: number;
+      leg: string;
+      recipient_key: string;
+      /** Format: date-time */
+      sent_at: string;
+      subject: string;
+    };
+    EmailAlertMaxAgeOption: {
+      /** Format: int64 */
+      hours: number;
+      label: string;
+    };
+    EmailAlertRecipient: {
+      /** @enum {string} */
+      content: "followed" | "all";
+      /** Format: date-time */
+      created_at: string;
+      email: string;
+      enabled: boolean;
+      id?: string;
+      /** @enum {string} */
+      kind: "admin" | "profile";
+      library_ids: number[];
+      /** Format: int64 */
+      max_age_hours: number;
+      /** @enum {string} */
+      mode: "instant" | "instant_daily" | "instant_weekly" | "daily" | "weekly";
+      name: string;
+      profile_id?: string;
+      types: string[];
+      /** Format: int64 */
+      user_id?: number;
+    };
+    EmailAlertRecipientStatus: {
+      active: boolean;
+      /** @enum {string} */
+      content: "followed" | "all";
+      /** Format: date-time */
+      created_at: string;
+      email: string;
+      enabled: boolean;
+      /** Format: int64 */
+      failures?: number;
+      /** Format: date-time */
+      held_until?: string;
+      id?: string;
+      /** @description r:<id> for an added address, p:<user id>:<profile id> for a profile. */
+      key: string;
+      /** @enum {string} */
+      kind: "admin" | "profile";
+      /** Format: date-time */
+      last_sent?: string;
+      library_ids: number[];
+      /** Format: int64 */
+      max_age_hours: number;
+      /** @enum {string} */
+      mode: "instant" | "instant_daily" | "instant_weekly" | "daily" | "weekly";
+      name: string;
+      /** Format: date-time */
+      next_attempt?: string;
+      /** Format: date-time */
+      next_due?: string;
+      profile_id?: string;
+      types: string[];
+      /** Format: int64 */
+      user_id?: number;
+    };
+    EmailAlertRunReport: {
+      errors?: string[];
+      /**
+       * Format: int64
+       * @description Items the sent emails covered.
+       */
+      items: number;
+      reason: string;
+      /** Format: int64 */
+      recipients: number;
+      /** Format: int64 */
+      sent: number;
+      skipped?: string;
+      /** Format: date-time */
+      time: string;
+    };
+    EmailAlertSchedule: {
+      /** Format: int64 */
+      daily_hour: number;
+      /** @description IANA time zone for digests; empty uses the server's. */
+      timezone: string;
+      /**
+       * Format: int64
+       * @description 0 is Sunday.
+       */
+      weekly_day: number;
+      /** Format: int64 */
+      weekly_hour: number;
+    };
+    EmailAlertSelfService: {
+      /** @description Profiles may email themselves. */
+      enabled: boolean;
+      require_verification: boolean;
+    };
+    EmailAlertSettings: {
+      custom_vars: components["schemas"]["EmailAlertCustomVar"][];
+      delivery: components["schemas"]["EmailAlertDelivery"];
+      schedule: components["schemas"]["EmailAlertSchedule"];
+      self_service: components["schemas"]["EmailAlertSelfService"];
+      templates: components["schemas"]["EmailAlertTemplates"];
+      theme: components["schemas"]["EmailAlertTheme"];
+    };
+    EmailAlertsOverview: {
+      defaults: components["schemas"]["EmailAlertSettings"];
+      from_address: string;
+      libraries: components["schemas"]["EmailAlertLibrary"][];
+      log: components["schemas"]["EmailAlertLogEntry"][];
+      max_age_options: components["schemas"]["EmailAlertMaxAgeOption"][];
+      /** Format: date-time */
+      now: string;
+      problems: string[];
+      /** @description Server public URL emails link to; empty when unset, so not validated as a URI */
+      public_url: string;
+      recipients: components["schemas"]["EmailAlertRecipientStatus"][];
+      report: components["schemas"]["EmailAlertRunReport"];
+      server_name: string;
+      settings: components["schemas"]["EmailAlertSettings"];
+      smtp_host: string;
+    };
+    EmailAlertTemplates: {
+      /** @description Mustache template for the HTML body. */
+      html: string;
+      /** @description Mustache template for the subject line. */
+      subject: string;
+      /** @description Mustache template for the plain-text body. */
+      text: string;
+    };
+    EmailAlertTheme: {
+      accent_color: string;
+      backdrop_behind_show: boolean;
+      /** Format: int64 */
+      backdrop_dim: number;
+      background_color: string;
+      button_text: string;
+      card_color: string;
+      footer_text: string;
+      header_title: string;
+      intro: string;
+      /** @description Logo image URL as entered; may be empty, so not validated as a URI */
+      logo_url: string;
+      muted_color: string;
+      /** @description Item links open the Silo app when it is installed. */
+      open_in_app: boolean;
+      text_color: string;
+    };
     EmbeddedSubtitleV3: {
       container_track_id?: string;
       /** Format: int64 */
@@ -27670,6 +28116,11 @@ export interface components {
       available: boolean;
       /** Format: int64 */
       digest_hour: number;
+      /**
+       * Format: int64
+       * @description Day weekly email digests go out, 0 = Sunday. Always 0 for channels without weekly digests.
+       */
+      digest_weekday: number;
       modes: string[];
     };
     NotificationCapabilities: {
@@ -27732,10 +28183,69 @@ export interface components {
     };
     NotificationEmailPreferences: {
       can_edit_address: boolean;
+      /**
+       * @description What to email: shows the profile follows, or everything new it can open.
+       * @enum {string}
+       */
+      content: "followed" | "all";
       custom_email: string;
+      /** @description A daily digest. */
+      daily: boolean;
+      /** @description An email shortly after something new arrives. */
+      instant: boolean;
+      /** @description Libraries to include; empty includes every library the profile can open. */
+      library_ids: number[];
+      /**
+       * Format: int64
+       * @description How recently an item must have been added to count as new, in hours; 0 uses the server default.
+       */
+      max_age_hours: number;
       /** @enum {string} */
-      mode: "off" | "per_episode" | "daily_digest" | "per_episode_and_digest";
+      mode:
+        | "off"
+        | "per_episode"
+        | "daily_digest"
+        | "per_episode_and_digest"
+        | "weekly_digest"
+        | "per_episode_and_weekly_digest";
       pending_email: string;
+      /** @description Item types to include; empty includes both. */
+      types: string[];
+      /** @description A weekly digest. */
+      weekly: boolean;
+    };
+    NotificationEmailPreferencesInputBody: {
+      /**
+       * @description What to email: shows the profile follows, or everything new it can open.
+       * @enum {string}
+       */
+      content?: "followed" | "all";
+      /** @description A daily digest. */
+      daily?: boolean;
+      /** @description An email shortly after something new arrives. */
+      instant?: boolean;
+      /** @description Libraries to include; empty includes every library the profile can open. */
+      library_ids?: number[];
+      /**
+       * Format: int64
+       * @description How recently an item must have been added to count as new, in hours; 0 uses the server default.
+       */
+      max_age_hours?: number;
+      /**
+       * @description One mode for older clients; instant, daily and weekly take precedence when any is sent.
+       * @enum {string}
+       */
+      mode?:
+        | "off"
+        | "per_episode"
+        | "daily_digest"
+        | "per_episode_and_digest"
+        | "weekly_digest"
+        | "per_episode_and_weekly_digest";
+      /** @description Item types to include (movie, episode); empty includes both. */
+      types?: string[];
+      /** @description A weekly digest. */
+      weekly?: boolean;
     };
     NotificationEmailVerificationCapability: {
       /** @description Whether the current principal may use the capability */
@@ -63950,6 +64460,1149 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminEmailAlerts: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailAlertsOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  previewAdminEmailAlert: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertsPreviewInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailAlertsPreview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAdminEmailAlertRecipient: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertRecipientBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailAlertRecipient"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  updateAdminEmailAlertRecipient: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Recipient key: r:<id> for an added address, p:<user id>:<profile id> for a profile. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertRecipientBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailAlertRecipient"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminEmailAlertRecipient: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  rewindAdminEmailAlertRecipient: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertRecipientRewindInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  runAdminEmailAlerts: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailAlertRunReport"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  updateAdminEmailAlertSettings: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertsSettingsInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmailAlertsOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  sendAdminEmailAlertTest: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailAlertsTestInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailAlertsTestResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -118759,7 +120412,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["NotificationChannelModeInputBody"];
+        "application/json": components["schemas"]["NotificationEmailPreferencesInputBody"];
       };
     };
     responses: {
@@ -119253,6 +120906,202 @@ export interface operations {
         };
         content: {
           "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getNotificationEmailArtwork: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Signed artwork reference minted into the email. */
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description JPEG artwork */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/jpeg": string;
+        };
+      };
+      /** @description Unknown or invalid artwork link */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Email artwork unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getNotificationEmailManagePage: {
+    parameters: {
+      query?: {
+        /** @description Email capability token. An unknown token returns an HTML error page. */
+        token?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Standalone email-link page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  saveNotificationEmailManagePage: {
+    parameters: {
+      query?: {
+        /** @description Email capability token. An unknown token returns an HTML error page. */
+        token?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Standalone email-link page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  openNotificationEmailItem: {
+    parameters: {
+      query?: {
+        /** @description Item id to open. */
+        id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Standalone email-link page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Standalone email-link page */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
         };
       };
       /** @description Service Unavailable */

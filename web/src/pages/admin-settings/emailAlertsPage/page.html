@@ -1,0 +1,244 @@
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Email alerts</h1>
+      <div class="sub" id="server-line">Loading…</div>
+    </div>
+    <div class="spacer"></div>
+    <span id="dirty" class="muted" hidden>Unsaved changes<span class="dirty-dot"></span></span>
+    <button class="primary" id="save" disabled>Save changes</button>
+  </header>
+
+  <div id="problems"></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" data-tab="templates" aria-selected="false">Templates</button>
+    <button role="tab" data-tab="design" aria-selected="false">Design</button>
+    <button role="tab" data-tab="recipients" aria-selected="false">Recipients</button>
+    <button role="tab" data-tab="schedule" aria-selected="false">Schedule &amp; sign-up</button>
+    <button role="tab" data-tab="log" aria-selected="false">Send log</button>
+  </nav>
+
+  <section data-panel="overview">
+    <div class="grid cols-3">
+      <div class="panel"><div class="muted">Recipients receiving alerts</div><div class="stat" id="stat-active">–</div></div>
+      <div class="panel"><div class="muted">Emails in the log</div><div class="stat" id="stat-sent">–</div></div>
+      <div class="panel"><div class="muted">Last check</div><div class="stat" id="stat-last" style="font-size:18px">–</div><div class="hint" id="stat-last-detail"></div></div>
+    </div>
+    <div class="panel">
+      <h2>Send now</h2>
+      <p class="muted">Checks the catalog and sends anything due: instant alerts for new items, and any digest whose time has passed. Alerts also go out automatically a few minutes after each scan.</p>
+      <div class="row">
+        <button class="primary" id="run-now">Check and send now</button>
+        <span id="run-result" class="muted"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Send a test email</h2>
+      <p class="muted">Sends the current templates, including unsaved edits, with the newest items on the server.</p>
+      <div class="row">
+        <input type="email" id="test-email-ov" placeholder="you@example.com" style="max-width:320px">
+        <select id="test-mode-ov" style="max-width:220px">
+          <option value="instant">As an instant alert</option>
+          <option value="daily">As a daily digest</option>
+          <option value="weekly">As a weekly digest</option>
+        </select>
+        <select id="test-pick-ov" style="max-width:220px" aria-label="Items to include">
+          <option value="">With the newest items</option>
+          <option value="episode">With one episode</option>
+          <option value="movie">With one movie</option>
+        </select>
+        <button id="test-send-ov">Send test</button>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="templates" hidden>
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <div class="seg" role="group" aria-label="Template">
+          <button data-tpl="html" aria-pressed="true">HTML</button>
+          <button data-tpl="text" aria-pressed="false">Plain text</button>
+        </div>
+        <div class="spacer"></div>
+        <button id="reset-tpl">Reset to default</button>
+      </div>
+      <label class="f"><span>Subject</span>
+        <input type="text" id="tpl-subject" spellcheck="false">
+        <small>Uses the same variables. Line breaks and extra spaces are collapsed.</small>
+      </label>
+      <div class="editor">
+        <div>
+          <textarea id="tpl-body" class="code" spellcheck="false" aria-label="Template body"></textarea>
+          <div class="hint">Mustache syntax: <span class="mono">{{name}}</span> inserts a value, <span class="mono">{{#shows}}…{{/shows}}</span> repeats a block for each show (or shows it when a value is set), <span class="mono">{{^x}}…{{/x}}</span> shows a block when a value is empty. Click a variable in the Variables pane to insert it.</div>
+        </div>
+        <div>
+          <div class="row" style="margin-bottom:8px">
+            <select id="pv-mode" style="width:auto">
+              <option value="instant">Instant alert</option>
+              <option value="daily">Daily digest</option>
+              <option value="weekly">Weekly digest</option>
+            </select>
+            <select id="pv-source" style="width:auto">
+              <option value="latest">Newest items on the server</option>
+              <option value="sample">Sample data</option>
+            </select>
+            <button id="pv-refresh">Refresh</button>
+            <div class="spacer"></div>
+            <div class="seg" role="group" aria-label="Side pane">
+              <button data-pane="preview" aria-pressed="true">Preview</button>
+              <button data-pane="vars" aria-pressed="false">Variables</button>
+            </div>
+          </div>
+          <div id="pane-preview">
+            <div class="preview-subject" id="pv-subject">–</div>
+            <iframe class="preview-frame" id="pv-frame" sandbox="allow-same-origin" title="Email preview"></iframe>
+            <pre class="textprev" id="pv-text" hidden></pre>
+            <div class="hint" id="pv-note"></div>
+          </div>
+          <div id="pane-vars" class="vars panel" hidden></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <input type="email" id="test-email" placeholder="you@example.com" style="max-width:320px">
+        <button id="test-send">Send test of these templates</button>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="design" hidden>
+    <div class="grid cols-2">
+      <div class="panel">
+        <h2>Colours</h2>
+        <p class="muted">Available in templates as <span class="mono">{{accent_color}}</span>, <span class="mono">{{background_color}}</span> and so on.</p>
+        <div id="colors"></div>
+      </div>
+      <div class="panel">
+        <h2>Wording and branding</h2>
+        <label class="f"><span>Logo URL</span><input type="url" data-theme-key="logo_url" placeholder="https://…/logo.png"><small>A public PNG or JPG. Leave empty to show the server name instead.</small></label>
+        <label class="f"><span>Heading</span><input type="text" data-theme-key="header_title"><small>Can use variables, for example <span class="mono">New on {{server_name}}</span>.</small></label>
+        <label class="f"><span>Intro line</span><input type="text" data-theme-key="intro"></label>
+        <label class="f"><span>Button text</span><input type="text" data-theme-key="button_text"></label>
+        <label class="f"><span>Footer</span><input type="text" data-theme-key="footer_text"></label>
+        <label class="check"><input type="checkbox" data-theme-bool="backdrop_behind_show"> Show the backdrop behind each show and movie</label>
+        <label class="check"><input type="checkbox" data-theme-bool="open_in_app"> Open links in the Silo app on phones that have it</label>
+        <small class="hint" style="margin:-4px 0 12px 26px">Links go through a short page on your server that opens the iOS or Android app, or the web page when the app isn't installed. <span class="mono">{{web_url}}</span> and <span class="mono">{{show_web_url}}</span> always go straight to the web.</small>
+        <label class="f"><span>Backdrop darkness (%)</span><input type="number" min="0" max="95" data-theme-num="backdrop_dim"><small>How strongly the card colour is laid over the backdrop so text stays readable. Template variables: <span class="mono">{{show_backdrop_bg}}</span> for shows, <span class="mono">{{backdrop_bg}}</span> for movies.</small></label>
+      </div>
+      <div class="panel">
+        <h2>Custom variables</h2>
+        <p class="muted">Your own values for templates. A variable named <span class="mono">signoff</span> is available as <span class="mono">{{signoff}}</span> and <span class="mono">{{custom.signoff}}</span>.</p>
+        <div id="custom-vars"></div>
+        <button id="add-var">Add variable</button>
+      </div>
+      <div class="panel">
+        <h2>Content</h2>
+        <label class="f"><span>Synopsis length</span><input type="number" min="0" max="5000" data-delivery-key="synopsis_length"><small>Characters before synopses are shortened. 0 keeps them whole. The <span class="mono">_full</span> variables are never shortened.</small></label>
+        <label class="check"><input type="checkbox" data-delivery-key="embed_images"> Embed posters and episode stills in the email</label>
+        <label class="f"><span>Most images per email</span><input type="number" min="0" max="150" data-delivery-key="max_images"></label>
+        <label class="f"><span>Most items per email</span><input type="number" min="1" max="500" data-delivery-key="max_items"><small>Anything beyond this is counted in <span class="mono">{{more_count}}</span>.</small></label>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="recipients" hidden>
+    <div class="panel">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">Recipients</h2>
+        <div class="spacer"></div>
+        <button class="primary" id="add-recipient">Add recipient</button>
+      </div>
+      <div class="table-wrap">
+        <table class="list">
+          <thead><tr><th>Recipient</th><th>Delivery</th><th>Includes</th><th>Status</th><th>Last sent</th><th></th></tr></thead>
+          <tbody id="recipients"></tbody>
+        </table>
+      </div>
+      <p class="hint">Profiles can also turn email on themselves in <b>Settings → Notifications</b>. Recipient changes save immediately.</p>
+    </div>
+  </section>
+
+  <section data-panel="schedule" hidden>
+    <div class="grid cols-2">
+      <div class="panel">
+        <h2>Digest schedule</h2>
+        <label class="f"><span>Time zone</span><input type="text" data-schedule-key="timezone" placeholder="Europe/London" list="tz-list"><small id="tz-now"></small></label>
+        <datalist id="tz-list"></datalist>
+        <label class="f"><span>Daily digest at</span><select data-schedule-key="daily_hour" data-hours></select></label>
+        <div class="grid cols-2" style="gap:12px">
+          <label class="f"><span>Weekly digest on</span><select data-schedule-key="weekly_day">
+            <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+          </select></label>
+          <label class="f"><span>at</span><select data-schedule-key="weekly_hour" data-hours></select></label>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Instant alerts</h2>
+        <label class="f"><span>Wait after a scan (minutes)</span><input type="number" min="0" max="240" data-delivery-key="settle_minutes"><small>Gives metadata and artwork time to arrive, and batches a run of new episodes into one email.</small></label>
+        <label class="f"><span>Minimum gap between instant emails (minutes)</span><input type="number" min="0" max="1440" data-delivery-key="instant_gap_minutes"><small>Per recipient. The first item goes out straight away; anything arriving within this gap is held and sent together when it ends, so a whole season downloading doesn't send an email per episode. 0 turns this off.</small></label>
+        <label class="f"><span>Count as new if added within</span><select data-delivery-key="max_age_hours">
+          <option value="24">24 hours</option><option value="48">48 hours</option><option value="72">3 days</option>
+          <option value="168">1 week</option><option value="336">2 weeks</option><option value="720">30 days</option>
+        </select><small>Default for every recipient; each can choose their own. Anything added longer ago is never emailed, even after an outage or a stale watermark. Weekly digests need at least 1 week.</small></label>
+        <label class="f"><span>Most instant emails per day</span><input type="number" min="0" max="500" data-delivery-key="instant_daily_cap"><small>Per recipient. Once reached, new items are held for the first email after midnight. 0 means no limit.</small></label>
+        <label class="check"><input type="checkbox" data-delivery-key="paused"> Pause all sending</label>
+      </div>
+      <div class="panel">
+        <h2>Self-service sign-up</h2>
+        <label class="check"><input type="checkbox" data-self-key="enabled"> Let signed-in users sign themselves up</label>
+        <label class="check"><input type="checkbox" data-self-key="require_verification"> Require users to confirm their address by email</label>
+        <p class="hint">Every email includes a manage link and one-click unsubscribe, which work without signing in.</p>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="log" hidden>
+    <div class="panel">
+      <div class="table-wrap">
+        <table class="list">
+          <thead><tr><th>When</th><th>To</th><th>Type</th><th>Items</th><th>Subject or error</th></tr></thead>
+          <tbody id="log"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<dialog id="rdlg">
+  <form method="dialog" id="rform">
+    <h2 id="rdlg-title">Add recipient</h2>
+    <input type="hidden" name="rid">
+    <label class="f"><span>Name</span><input type="text" name="rname" placeholder="Optional"></label>
+    <label class="f"><span>Email</span><input type="email" name="remail" required></label>
+    <label class="f"><span>Delivery</span><select name="rmode">
+      <option value="instant">Instant: shortly after new media arrives</option>
+      <option value="instant_daily">Instant, plus a daily digest</option>
+          <option value="instant_weekly">Instant, plus a weekly digest</option>
+      <option value="daily">Daily digest</option>
+      <option value="weekly">Weekly digest</option>
+    </select></label>
+    <div class="f"><span style="font-weight:600">Include</span>
+      <label class="check"><input type="checkbox" name="type-episode" checked> TV episodes</label>
+      <label class="check"><input type="checkbox" name="type-movie" checked> Movies</label>
+    </div>
+    <label class="f"><span>Count as new if added within</span><select name="rmaxage"></select></label>
+    <div class="f"><span style="font-weight:600">Libraries</span><small class="hint">Leave all unticked for every library.</small>
+      <div class="libs" id="rdlg-libs"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="renabled" checked> Enabled</label>
+    <div class="row" style="margin-top:16px">
+      <div class="spacer"></div>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" value="save">Save recipient</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cdlg">
+  <form method="dialog">
+    <h2 id="cdlg-title">Are you sure?</h2>
+    <p id="cdlg-body" class="muted"></p>
+    <div class="row"><div class="spacer"></div><button value="no">Cancel</button><button class="primary" value="yes" id="cdlg-yes">Confirm</button></div>
+  </form>
+</dialog>
