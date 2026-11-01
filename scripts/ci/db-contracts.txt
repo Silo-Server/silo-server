@@ -181,6 +181,11 @@
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
 
+# The owning account resets an Apple installation whose key was lost; another
+# account is refused, and a registration queued behind the reset still binds.
+./internal/notifications TestApplePushInstallationResetDB
+./internal/notifications TestApplePushResetOrdersAgainstInFlightRegistrationDB
+
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 

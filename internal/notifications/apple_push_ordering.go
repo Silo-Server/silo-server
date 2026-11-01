@@ -6,11 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrPushInstallationKeyMismatch refuses a registration by the account that
+// owns the installation when the key differs from the stored one, as after an
+// app reinstall. It is still an installation-proof failure; the owner can
+// recover with ResetApplePushInstallation. Another account's mismatch stays the
+// plain ErrPushInstallationProof so the refusal reveals no foreign ownership.
+var ErrPushInstallationKeyMismatch = fmt.Errorf("%w: the installation is bound to another key", ErrPushInstallationProof)
 
 type ApplePushCommand struct {
 	UserID          int
@@ -108,12 +116,16 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 		return result, err
 	}
 	var storedKey, storedIntent string
-	err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash,generation,registration_id,server_device_id,push_mode FROM apple_push_installations WHERE device_id=$1`, registration.DeviceID).Scan(&storedKey, &storedIntent, &result.Generation, &result.RegistrationID, &result.ServerDeviceID, &result.PushMode)
+	var storedUser int
+	err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash,generation,registration_id,server_device_id,push_mode,user_id FROM apple_push_installations WHERE device_id=$1`, registration.DeviceID).Scan(&storedKey, &storedIntent, &result.Generation, &result.RegistrationID, &result.ServerDeviceID, &result.PushMode, &storedUser)
 	if err != nil {
 		return result, err
 	}
 	if generation > 0 {
 		if !hmac.Equal([]byte(storedKey), []byte(keyHash)) {
+			if storedUser == cmd.UserID {
+				return ApplePushReceipt{}, ErrPushInstallationKeyMismatch
+			}
 			return ApplePushReceipt{}, ErrPushInstallationProof
 		}
 		if cmd.Generation < generation || (cmd.Generation == generation && intent != storedIntent) {
@@ -286,4 +298,89 @@ func (s *PushDeviceService) RetireApplePush(ctx context.Context, cmd ApplePushRe
 		return ApplePushReceipt{}, ErrPushDeviceUnavailable
 	}
 	return store.RetireApplePush(ctx, cmd)
+}
+
+// ApplePushReset asks to drop an Apple installation's binding so the account
+// that owns it can register again from scratch. InstallationKey is the
+// caller's current key: an installation already bound to it is left alone, so
+// a reset retried after its response was lost cannot undo the registration
+// that followed it.
+type ApplePushReset struct {
+	UserID          int
+	DeviceID        string
+	InstallationKey string
+}
+
+// ResetApplePushInstallation clears an installation the caller's account owns
+// so its next registration binds a new key at any generation. It deletes the
+// installation's Apple rows, whose pending attempts cascade, under the
+// installation lock. The row itself is blanked rather than deleted, so a
+// registration waiting on the lock reads an unclaimed installation instead of
+// a vanished one. It reports false, writing nothing, for an installation with
+// no ordered record or one already bound to the caller's key. An installation
+// another account owns returns ErrPushInstallationProof.
+func (r *PushDeviceRepository) ResetApplePushInstallation(ctx context.Context, cmd ApplePushReset) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, ErrPushDeviceUnavailable
+	}
+	if cmd.UserID <= 0 || cmd.DeviceID == "" || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) || len(cmd.DeviceID) > 128 {
+		return false, ErrPushDeviceInvalid
+	}
+	if !validInstallationKey(cmd.InstallationKey) {
+		return false, ErrPushInstallationProof
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	// Rolling back also drops the placeholder row the lock inserts for an
+	// unknown installation.
+	defer func() { _ = tx.Rollback(ctx) }()
+	generation, err := lockApplePushInstallation(ctx, tx, cmd.DeviceID)
+	if err != nil || generation == 0 {
+		return false, err
+	}
+	var storedKey string
+	var storedUser int
+	if err = tx.QueryRow(ctx, `SELECT installation_key_hash,user_id FROM apple_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&storedKey, &storedUser); err != nil {
+		return false, err
+	}
+	if storedUser != cmd.UserID {
+		return false, ErrPushInstallationProof
+	}
+	if hmac.Equal([]byte(storedKey), []byte(pushDigest([]byte(cmd.InstallationKey)))) {
+		return false, nil
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE device_id=$1 AND platform=$2`, cmd.DeviceID, PushPlatformApple); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE apple_push_installations SET installation_key_hash='',generation=0,user_id=0,profile_id='',intent_hash='',registration_id='',server_device_id='',push_mode='' WHERE device_id=$1`, cmd.DeviceID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+type applePushResettingStore interface {
+	ResetApplePushInstallation(context.Context, ApplePushReset) (bool, error)
+}
+
+// ApplePushResetAvailable reports whether ordered Apple storage can reset an
+// installation for its owning account.
+func (s *PushDeviceService) ApplePushResetAvailable() bool {
+	if !s.Available() {
+		return false
+	}
+	_, ok := s.store.(applePushResettingStore)
+	return ok
+}
+
+func (s *PushDeviceService) ResetApplePushInstallation(ctx context.Context, cmd ApplePushReset) (bool, error) {
+	if !s.Available() {
+		return false, ErrPushDeviceUnavailable
+	}
+	store, ok := s.store.(applePushResettingStore)
+	if !ok {
+		return false, ErrPushDeviceUnavailable
+	}
+	return store.ResetApplePushInstallation(ctx, cmd)
 }

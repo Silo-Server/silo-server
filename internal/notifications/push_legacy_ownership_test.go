@@ -279,3 +279,102 @@ func TestLegacyMobilePushWaitsForOwnershipDB(t *testing.T) {
 		}
 	}
 }
+
+// A registration queued behind a reset binds the reinstalled app's key: the
+// reset blanks the installation row instead of deleting it, so the waiting
+// writer still finds a row to lock.
+func TestApplePushResetOrdersAgainstInFlightRegistrationDB(t *testing.T) {
+	_, fixture := newPushDeviceTestRepo(t)
+	schema := "push_reset_" + strings.ToLower(ulid.Make().String())
+	quoted := pgx.Identifier{schema}.Sanitize()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := fixture.Exec(ctx, "CREATE SCHEMA "+quoted); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = fixture.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
+	for _, table := range []string{"push_devices", "apple_push_installations", "android_push_installations"} {
+		if _, err := fixture.Exec(ctx, "CREATE TABLE "+quoted+"."+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := fixture.Config()
+	cfg.MaxConns = 4
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	cfg.ConnConfig.RuntimeParams["application_name"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	repo, cipher := NewPushDeviceRepository(pool), testPushCipher(t)
+	key := func(c string) string { return base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat(c, 32))) }
+	old := ApplePushCommand{UserID: 7, ProfileID: "profile", InstallationKey: key("1"), Generation: 1, ApplePushRegistrationInput: validApplePushInput()}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, old, cipher, nil); err != nil {
+		t.Fatal(err)
+	}
+	// waitFor polls until n writers of this test are blocked on a lock.
+	waitFor := func(n int) {
+		t.Helper()
+		for {
+			var blocked int
+			if err := fixture.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND cardinality(pg_blocking_pids(pid))>0`, schema).Scan(&blocked); err != nil {
+				t.Fatal(err)
+			}
+			if blocked >= n {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("waiting for %d blocked writers: %v", n, ctx.Err())
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+
+	// Another writer holds the installation lock without changing the row, so
+	// the reset and the registration queue behind it in that order.
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	if _, err = lockApplePushInstallation(ctx, holder, old.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		done bool
+		err  error
+	}
+	resetDone := make(chan outcome, 1)
+	go func() {
+		done, e := repo.ResetApplePushInstallation(ctx, ApplePushReset{UserID: 7, DeviceID: old.DeviceID, InstallationKey: key("2")})
+		resetDone <- outcome{done, e}
+	}()
+	waitFor(1)
+	fresh := old
+	fresh.InstallationKey, fresh.Generation, fresh.APNsToken = key("2"), 1, strings.Repeat("b", 64)
+	registered := make(chan error, 1)
+	go func() {
+		_, e := repo.ApplyApplePushAndFinalize(ctx, fresh, cipher, nil)
+		registered <- e
+	}()
+	waitFor(2)
+	if err = holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resetDone; got.err != nil || !got.done {
+		t.Fatalf("queued reset=%+v", got)
+	}
+	if err = <-registered; err != nil {
+		t.Fatalf("registration queued behind the reset=%v", err)
+	}
+	var generation int64
+	var keyHash string
+	if err = pool.QueryRow(ctx, `SELECT generation,installation_key_hash FROM apple_push_installations WHERE device_id=$1`, old.DeviceID).Scan(&generation, &keyHash); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 1 || keyHash != pushDigest([]byte(fresh.InstallationKey)) {
+		t.Fatalf("installation generation=%d, bound to the reinstalled key=%v", generation, keyHash == pushDigest([]byte(fresh.InstallationKey)))
+	}
+}

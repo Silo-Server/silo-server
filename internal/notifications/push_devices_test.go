@@ -437,6 +437,75 @@ func TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T
 	}
 }
 
+// A reinstalled iPhone keeps its device ID but loses its installation key. The
+// owning account may reset the installation and register from scratch; any
+// other account is refused and learns nothing beyond the generic refusal.
+func TestApplePushInstallationResetDB(t *testing.T) {
+	repo, pool := newPushDeviceTestRepo(t)
+	ctx, cipher := t.Context(), testPushCipher(t)
+	key := func(c string) string { return base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat(c, 32))) }
+	owner := ApplePushCommand{UserID: 7, ProfileID: "profile", InstallationKey: key("1"), Generation: 5, ApplePushRegistrationInput: validApplePushInput()}
+	first, err := repo.ApplyApplePushAndFinalize(ctx, owner, cipher, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reinstalled := owner
+	reinstalled.InstallationKey, reinstalled.Generation, reinstalled.APNsToken = key("2"), 1, strings.Repeat("b", 64)
+	foreign := reinstalled
+	foreign.UserID, foreign.ProfileID, foreign.InstallationKey = 8, "other", key("3")
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, reinstalled, cipher, nil); !errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("owner with a new key=%v", err)
+	}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account with a new key=%v", err)
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	reset := func(user int, k string) (bool, error) {
+		return repo.ResetApplePushInstallation(ctx, ApplePushReset{UserID: user, DeviceID: owner.DeviceID, InstallationKey: k})
+	}
+
+	if _, err = reset(foreign.UserID, foreign.InstallationKey); !errors.Is(err, ErrPushInstallationProof) {
+		t.Fatalf("another account's reset=%v", err)
+	}
+	if current, e := repo.getPushDeviceByID(ctx, first.RegistrationID); e != nil || !current.Enabled {
+		t.Fatalf("refused reset touched the registration: %+v err=%v", current, e)
+	}
+	if done, e := reset(owner.UserID, reinstalled.InstallationKey); e != nil || !done {
+		t.Fatalf("owner reset=%v err=%v", done, e)
+	}
+	if n := count(`SELECT count(*) FROM push_devices`); n != 0 {
+		t.Fatalf("reset installation keeps %d rows", n)
+	}
+	again, err := repo.ApplyApplePushAndFinalize(ctx, reinstalled, cipher, nil)
+	if err != nil || !again.Enabled || again.Generation != 1 {
+		t.Fatalf("register after reset=%+v err=%v", again, err)
+	}
+	// A reset retried after its response was lost finds the caller's own key and
+	// leaves the new registration alone.
+	if done, e := reset(owner.UserID, reinstalled.InstallationKey); e != nil || done {
+		t.Fatalf("replayed reset=%v err=%v", done, e)
+	}
+	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+		t.Fatalf("replayed reset touched the new registration: %+v err=%v", current, e)
+	}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account after reset=%v", err)
+	}
+	if done, e := repo.ResetApplePushInstallation(ctx, ApplePushReset{UserID: owner.UserID, DeviceID: "never-registered", InstallationKey: key("2")}); e != nil || done {
+		t.Fatalf("unknown installation reset=%v err=%v", done, e)
+	}
+	if n := count(`SELECT count(*) FROM apple_push_installations WHERE device_id='never-registered'`); n != 0 {
+		t.Fatalf("unknown installation reset wrote %d rows", n)
+	}
+}
+
 func TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T) {
 	repo, pool := newPushDeviceTestRepo(t)
 	ctx, cipher := t.Context(), testPushCipher(t)
