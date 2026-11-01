@@ -38,7 +38,7 @@ func seerrInst(id string, supports4K bool) Integration {
 	return in
 }
 
-// Issue #2633: a requester with no quality cap must not get a failed 4K
+// Issue #2633: a regular request must not get a failed 4K
 // target from a Seerr that does not take 4K requests.
 func TestSubmitSkips4KOnSeerrWithout4K(t *testing.T) {
 	store := newFakeStore()
@@ -46,7 +46,6 @@ func TestSubmitSkips4KOnSeerrWithout4K(t *testing.T) {
 	router := seerrRouter{&fakeRouterProvider{}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: ""})
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
@@ -87,7 +86,7 @@ func TestSubmitSends4KToSeerrThatTakes4K(t *testing.T) {
 		router := seerrRouter{&fakeRouterProvider{}}
 		svc := newTestService(store)
 		svc.SetRouterProvider(router)
-		svc.SetEntitlementResolver(fixedCeiling{q: ""})
+		store.settings.ForceDualQuality = true
 
 		req := Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 		store.requests["r1"] = &req
@@ -115,7 +114,6 @@ func TestForceDualStillAsksSeerrWithout4KFor4K(t *testing.T) {
 	router := seerrRouter{&fakeRouterProvider{}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req

@@ -1,4 +1,9 @@
-import type { RequestApprovalMode, RequestLimitMode, RequestSettings } from "@/api/types";
+import type {
+  Request4KMode,
+  RequestApprovalMode,
+  RequestLimitMode,
+  RequestSettings,
+} from "@/api/types";
 
 // Who may request, and on what terms, resolves in layers, as the server does
 // it (internal/requests, EffectivePolicy): the account's own approval and
@@ -20,11 +25,17 @@ export interface RequestLimitLayer {
   max_requests?: number | null;
   window_days?: number | null;
   approval_mode: RequestApprovalMode;
+  /** Absent from servers without 4K requests, which reads as inherit. */
+  requests_4k?: Request4KMode;
 }
 
 export type RequestServerDefaults = Pick<
   RequestSettings,
-  "requests_enabled" | "global_max_requests" | "global_window_days" | "global_auto_approval_enabled"
+  | "requests_enabled"
+  | "global_max_requests"
+  | "global_window_days"
+  | "global_auto_approval_enabled"
+  | "requests_4k_default"
 >;
 
 /** Where a resolved value comes from. An empty group name means the name is not known. */
@@ -41,6 +52,9 @@ export interface ResolvedRequestTerms {
   quotaSource: RequestPolicySource;
   autoApprove: boolean;
   approvalSource: RequestPolicySource;
+  /** Whether the account may make 4K requests. */
+  allow4K: boolean;
+  allow4KSource: RequestPolicySource;
 }
 
 export type EffectiveRequestPolicy =
@@ -129,7 +143,16 @@ export function resolveRequestTerms(
     [approvalSource] = approvalLayer;
     autoApprove = approvalLayer[1].approval_mode === "auto";
   }
-  return { quota, quotaSource, autoApprove, approvalSource };
+  let allow4K = server.requests_4k_default === true;
+  let allow4KSource = SERVER;
+  const uhdLayer = layers.find(
+    ([, layer]) => layer.requests_4k === "allowed" || layer.requests_4k === "denied",
+  );
+  if (uhdLayer) {
+    [allow4KSource] = uhdLayer;
+    allow4K = uhdLayer[1].requests_4k === "allowed";
+  }
+  return { quota, quotaSource, autoApprove, approvalSource, allow4K, allow4KSource };
 }
 
 /**
@@ -189,6 +212,10 @@ function formatQuotaFrom(quota: RequestQuota, source?: string): string {
 
 export function formatRequestApproval(autoApprove: boolean): string {
   return autoApprove ? "approved automatically" : "an admin approves";
+}
+
+export function formatRequest4K(allow4K: boolean): string {
+  return allow4K ? "can request 4K" : "no 4K requests";
 }
 
 export function formatRequestSource(source: RequestPolicySource): string {
@@ -252,6 +279,8 @@ export function requestGroupLimitSummary(layer: RequestLimitLayer): string {
   const parts: string[] = [];
   if (layer.approval_mode === "manual") parts.push("Admin approves");
   if (layer.approval_mode === "auto") parts.push("Auto-approves");
+  if (layer.requests_4k === "allowed") parts.push("4K requests");
+  if (layer.requests_4k === "denied") parts.push("No 4K requests");
   if (layer.limit_mode === "unlimited") parts.push("No request limit");
   if (layer.limit_mode === "custom" && layer.max_requests != null) {
     const days = layer.window_days;
@@ -270,6 +299,7 @@ export interface RequestLimitDraft {
   limit: RequestLimitChoice;
   maxRequests: string;
   windowDays: string;
+  requests4K: Request4KMode;
 }
 
 export function requestLimitDraft(layer: RequestLimitLayer): RequestLimitDraft {
@@ -278,6 +308,7 @@ export function requestLimitDraft(layer: RequestLimitLayer): RequestLimitDraft {
     limit: layer.limit_mode === "blocked" ? "inherit" : layer.limit_mode,
     maxRequests: layer.max_requests == null ? "" : String(layer.max_requests),
     windowDays: layer.window_days == null ? "" : String(layer.window_days),
+    requests4K: layer.requests_4k ?? "inherit",
   };
 }
 
@@ -286,6 +317,7 @@ export function requestLimitChanges(draft: RequestLimitDraft, base: RequestLimit
   let changes = 0;
   if (draft.approval !== base.approval) changes++;
   if (draft.limit !== base.limit) changes++;
+  if (draft.requests4K !== base.requests4K) changes++;
   if (draft.limit === "custom") {
     if (draft.maxRequests !== base.maxRequests) changes++;
     if (draft.windowDays !== base.windowDays) changes++;
@@ -337,6 +369,8 @@ export interface RequestLimitBody {
   approval_mode: RequestApprovalChoice;
   max_requests: number | null;
   window_days: number | null;
+  /** Left out, the server keeps the stored value. */
+  requests_4k?: Request4KMode;
 }
 
 /** The body a save sends; call it only for a draft without errors. */
@@ -347,6 +381,7 @@ export function requestLimitBody(draft: RequestLimitDraft): RequestLimitBody {
     approval_mode: draft.approval,
     max_requests: custom ? Number(draft.maxRequests.trim()) : null,
     window_days: custom ? Number(draft.windowDays.trim()) : null,
+    requests_4k: draft.requests4K,
   };
 }
 

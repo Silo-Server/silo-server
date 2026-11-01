@@ -58,6 +58,8 @@ type AdminRequestSettings struct {
 	// WatchlistRequests is optional on update so a client that predates it
 	// keeps the stored value; responses always carry it.
 	WatchlistRequests *bool `json:"watchlist_requests,omitempty" doc:"Adding a title that is not in the library to a watchlist also requests it; absent on update keeps the stored value" example:"true"`
+	// Requests4KDefault is optional on update for the same reason.
+	Requests4KDefault *bool `json:"requests_4k_default,omitempty" doc:"Whether accounts may make 4K requests where neither the account nor its access group says; absent on update keeps the stored value" example:"false"`
 }
 type AdminRequestSettingsOutput struct {
 	ETag string `header:"ETag"`
@@ -75,12 +77,14 @@ type AdminRequestUserLimit struct {
 	MaxRequests  *int   `json:"max_requests" nullable:"true" minimum:"0"`
 	WindowDays   *int   `json:"window_days" nullable:"true" minimum:"1"`
 	ApprovalMode string `json:"approval_mode" enum:"inherit,manual,auto,blocked"`
+	Requests4K   string `json:"requests_4k" enum:"inherit,allowed,denied" doc:"Whether the account may make 4K requests; inherit uses its access group's setting, then the server's requests_4k_default" example:"inherit"`
 }
 type AdminRequestLimitBody struct {
 	LimitMode    string `json:"limit_mode" enum:"inherit,custom,unlimited,blocked"`
 	MaxRequests  *int   `json:"max_requests" nullable:"true" minimum:"0"`
 	WindowDays   *int   `json:"window_days" nullable:"true" minimum:"1"`
 	ApprovalMode string `json:"approval_mode" enum:"inherit,manual,auto,blocked"`
+	Requests4K   string `json:"requests_4k,omitempty" enum:"inherit,allowed,denied" doc:"Absent keeps the stored value" example:"allowed"`
 }
 type AdminRequestUserInput struct {
 	UserID ID `path:"user_id" pattern:"^[1-9][0-9]*$"`
@@ -320,7 +324,7 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
 func adminSettingsOf(s mediarequests.Settings) AdminRequestSettings {
-	watchlist := s.WatchlistRequests
+	watchlist, uhd := s.WatchlistRequests, s.UHDRequestsAllowed
 	return AdminRequestSettings{
 		RequestsEnabled:           s.RequestsEnabled,
 		GlobalMaxRequests:         s.GlobalMaxRequests,
@@ -328,16 +332,20 @@ func adminSettingsOf(s mediarequests.Settings) AdminRequestSettings {
 		GlobalAutoApprovalEnabled: s.GlobalAutoApprovalEnabled,
 		ForceDualQuality:          s.ForceDualQuality,
 		WatchlistRequests:         &watchlist,
+		Requests4KDefault:         &uhd,
 	}
 }
 
 // domain converts an update body; current supplies a field the body omits.
 func (b AdminRequestSettings) domain(current mediarequests.Settings) mediarequests.Settings {
-	watchlist := current.WatchlistRequests
+	watchlist, uhd := current.WatchlistRequests, current.UHDRequestsAllowed
 	if b.WatchlistRequests != nil {
 		watchlist = *b.WatchlistRequests
 	}
-	return mediarequests.Settings{RequestsEnabled: b.RequestsEnabled, GlobalMaxRequests: b.GlobalMaxRequests, GlobalWindowDays: b.GlobalWindowDays, GlobalAutoApprovalEnabled: b.GlobalAutoApprovalEnabled, ForceDualQuality: b.ForceDualQuality, WatchlistRequests: watchlist}
+	if b.Requests4KDefault != nil {
+		uhd = *b.Requests4KDefault
+	}
+	return mediarequests.Settings{RequestsEnabled: b.RequestsEnabled, GlobalMaxRequests: b.GlobalMaxRequests, GlobalWindowDays: b.GlobalWindowDays, GlobalAutoApprovalEnabled: b.GlobalAutoApprovalEnabled, ForceDualQuality: b.ForceDualQuality, WatchlistRequests: watchlist, UHDRequestsAllowed: uhd}
 }
 func (reg *Registry) getAdminRequestSettings(ctx context.Context, _ *struct{}) (*AdminRequestSettingsOutput, error) {
 	s, p := reg.adminRequestService()
@@ -382,7 +390,7 @@ func (reg *Registry) updateAdminRequestSettings(ctx context.Context, in *AdminRe
 	return &AdminRequestSettingsOutput{ETag: adminRequestTag(ctx, "settings", "global", r.Revision).String(), Body: adminSettingsOf(r)}, nil
 }
 func adminLimitOf(r *mediarequests.UserLimit) AdminRequestUserLimit {
-	return AdminRequestUserLimit{ID(strconv.Itoa(r.UserID)), string(r.LimitMode), r.MaxRequests, r.WindowDays, string(r.ApprovalMode)}
+	return AdminRequestUserLimit{ID(strconv.Itoa(r.UserID)), string(r.LimitMode), r.MaxRequests, r.WindowDays, string(r.ApprovalMode), string(uhdModeOrInherit(r.UHDMode))}
 }
 func (reg *Registry) getAdminRequestUserLimit(ctx context.Context, in *AdminRequestUserInput) (*AdminRequestLimitOutput, error) {
 	s, p := reg.adminRequestService()
@@ -422,7 +430,7 @@ func (reg *Registry) updateAdminRequestUserLimit(ctx context.Context, in *AdminR
 		return nil, p
 	}
 	b := in.Body
-	r, err = g.UpsertUserLimitConditional(ctx, v, mediarequests.UserLimit{UserID: id, LimitMode: mediarequests.LimitMode(b.LimitMode), MaxRequests: b.MaxRequests, WindowDays: b.WindowDays, ApprovalMode: mediarequests.ApprovalMode(b.ApprovalMode)}, rev)
+	r, err = g.UpsertUserLimitConditional(ctx, v, mediarequests.UserLimit{UserID: id, LimitMode: mediarequests.LimitMode(b.LimitMode), MaxRequests: b.MaxRequests, WindowDays: b.WindowDays, ApprovalMode: mediarequests.ApprovalMode(b.ApprovalMode), UHDMode: mediarequests.UHDMode(b.Requests4K)}, rev)
 	if errors.Is(err, mediarequests.ErrStaleRevision) {
 		current, e := reg.getAdminRequestUserLimit(ctx, &in.AdminRequestUserInput)
 		if e != nil {

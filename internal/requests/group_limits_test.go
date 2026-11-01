@@ -53,6 +53,40 @@ func TestEffectivePolicyLayersAccountGroupServer(t *testing.T) {
 	}
 }
 
+// Whether an account may make 4K requests resolves like its limits: the
+// account's setting, then its group's, then the server-wide default.
+func TestEffectivePolicyLayersUHD(t *testing.T) {
+	cases := []struct {
+		name           string
+		server         bool
+		group, account UHDMode
+		want           bool
+	}{
+		{name: "server default off", want: false},
+		{name: "server default on", server: true, want: true},
+		{name: "group denies over the server", server: true, group: UHDModeDenied, want: false},
+		{name: "group allows over the server", group: UHDModeAllowed, want: true},
+		{name: "account denies over the group", group: UHDModeAllowed, account: UHDModeDenied, want: false},
+		{name: "account allows over the group", server: true, group: UHDModeDenied, account: UHDModeAllowed, want: true},
+		{name: "inherit everywhere", server: true, group: UHDModeInherit, account: UHDModeInherit, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.settings.UHDRequestsAllowed = tc.server
+			store.groupLimits = map[int64]*GroupLimit{1: {GroupID: 1, LimitMode: LimitModeInherit, ApprovalMode: ApprovalModeInherit, UHDMode: tc.group}}
+			store.limit = &UserLimit{UserID: 1, LimitMode: LimitModeInherit, ApprovalMode: ApprovalModeInherit, UHDMode: tc.account}
+			policy, err := groupedService(store, nil).EffectivePolicy(context.Background(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.AllowUHD != tc.want {
+				t.Fatalf("AllowUHD = %v, want %v", policy.AllowUHD, tc.want)
+			}
+		})
+	}
+}
+
 func TestAdminsIgnoreTheirGroupLimits(t *testing.T) {
 	store := newFakeStore()
 	store.groupLimits = map[int64]*GroupLimit{1: {GroupID: 1, LimitMode: LimitModeCustom, MaxRequests: intPtr(1), WindowDays: intPtr(1), ApprovalMode: ApprovalModeManual}}

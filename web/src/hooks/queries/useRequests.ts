@@ -214,8 +214,12 @@ export function useRequestMediaDetail(
     queryFn: () => getRequestMediaDetailV2(mediaType, tmdbID),
     enabled: tmdbID > 0 && (options.enabled ?? true),
     staleTime: REQUESTS_STALE_TIME,
-    refetchInterval: (query) =>
-      query.state.data?.request.download ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false,
+    // The regular and 4K requests download separately; a title in the
+    // library in HD often has only its 4K request downloading.
+    refetchInterval: ({ state: { data } }) =>
+      data?.request.download || data?.request_4k?.download
+        ? REQUEST_DOWNLOAD_REFETCH_INTERVAL
+        : false,
   });
 }
 

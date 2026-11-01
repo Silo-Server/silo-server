@@ -6,8 +6,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 )
 
-// accessEntitlements resolves a requester's effective playback-quality ceiling
-// (account + profile caps combined) via the shared access resolver.
+// accessEntitlements resolves a viewer's parental rating ceiling via the
+// shared access resolver.
 type accessEntitlements struct {
 	resolver *access.Resolver
 }
@@ -17,16 +17,8 @@ func NewAccessEntitlements(resolver *access.Resolver) EntitlementResolver {
 	return accessEntitlements{resolver: resolver}
 }
 
-func (e accessEntitlements) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := e.resolveScope(ctx, userID, profileID)
-	if err != nil {
-		return "", err
-	}
-	return scope.MaxPlaybackQuality, nil
-}
-
-// MaxContentRating implements ContentRatingResolver so request discovery
-// honors the profile's parental rating ceiling.
+// MaxContentRating lets request discovery honor the profile's parental rating
+// ceiling.
 func (e accessEntitlements) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
 	scope, err := e.resolveScope(ctx, userID, profileID)
 	if err != nil {

@@ -31,6 +31,7 @@ import ExtrasSection from "./components/ExtrasSection";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
 import MediaUserActionBar from "./components/MediaUserActionBar";
+import { useDetail4KRequest } from "./components/useDetail4KRequest";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
@@ -82,6 +83,7 @@ export default function SeriesContent({
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
+  const request4K = useDetail4KRequest("series", tmdbID, item.title ?? "");
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
@@ -193,39 +195,47 @@ export default function SeriesContent({
               />
             }
             actions={
-              <MediaUserActionBar
-                compactMobile
-                item={item}
-                contentId={item.content_id}
-                watchTogether={watchTogether.menu}
-                playHref={primaryAction.href}
-                playLabel={primaryAction.label}
-                onRefresh={
-                  canCurateMetadata
-                    ? (mode) =>
-                        refreshMetadataMutation.mutate({
-                          item,
-                          mode,
-                          onReplaced: followReplacedItem,
-                        })
-                    : undefined
-                }
-                isRefreshing={refreshMetadataMutation.isPending}
-                isAdmin={isAdmin}
-                canManageTrickplay={canManageTrickplay}
-                canCurateMetadata={canCurateMetadata}
-                onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-                onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
-                onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
-                onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
-                onShuffle={
-                  episodeCount > 1
-                    ? () => startShuffle({ kind: "series", id: item.content_id })
-                    : undefined
-                }
-              />
+              <>
+                <MediaUserActionBar
+                  compactMobile
+                  item={item}
+                  contentId={item.content_id}
+                  watchTogether={watchTogether.menu}
+                  playHref={primaryAction.href}
+                  playLabel={primaryAction.label}
+                  onRefresh={
+                    canCurateMetadata
+                      ? (mode) =>
+                          refreshMetadataMutation.mutate({
+                            item,
+                            mode,
+                            onReplaced: followReplacedItem,
+                          })
+                      : undefined
+                  }
+                  isRefreshing={refreshMetadataMutation.isPending}
+                  isAdmin={isAdmin}
+                  canManageTrickplay={canManageTrickplay}
+                  canCurateMetadata={canCurateMetadata}
+                  onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+                  onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+                  onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
+                  onRequestSeasons={
+                    canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined
+                  }
+                  onRequest4K={request4K.onRequest4K}
+                  onCancel4KRequest={request4K.onCancel4KRequest}
+                  onShuffle={
+                    episodeCount > 1
+                      ? () => startShuffle({ kind: "series", id: item.content_id })
+                      : undefined
+                  }
+                />
+                {request4K.status}
+              </>
             }
           />
+          {request4K.dialogs}
           {canRequestSeasons ? (
             <RequestSeasonsDialog
               open={requestSeasonsOpen}

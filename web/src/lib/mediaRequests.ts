@@ -235,6 +235,10 @@ export function formatRequestReason(reason?: string): string {
       return "Blocked";
     case "quota_exceeded":
       return "Request limit reached";
+    case "4k_not_allowed":
+      return "4K requests not allowed";
+    case "4k_unavailable":
+      return "No 4K server";
     default:
       return "Unavailable";
   }

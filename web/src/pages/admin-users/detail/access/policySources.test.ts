@@ -160,7 +160,7 @@ describe("inheritedValueText", () => {
 });
 
 describe("countCustomRequestTerms", () => {
-  it("counts the request limit and approval the account sets itself", () => {
+  it("counts the request limit, approval and 4K permission the account sets itself", () => {
     const quota = { unlimited: false as const, max: 5, days: 7 };
     expect(countCustomRequestTerms(undefined)).toBe(0);
     expect(
@@ -169,6 +169,8 @@ describe("countCustomRequestTerms", () => {
         quotaSource: { kind: "account" },
         autoApprove: true,
         approvalSource: { kind: "group", name: "Family" },
+        allow4K: false,
+        allow4KSource: { kind: "server" },
       }),
     ).toBe(1);
     expect(
@@ -177,8 +179,20 @@ describe("countCustomRequestTerms", () => {
         quotaSource: { kind: "account" },
         autoApprove: false,
         approvalSource: { kind: "account" },
+        allow4K: false,
+        allow4KSource: { kind: "server" },
       }),
     ).toBe(2);
+    expect(
+      countCustomRequestTerms({
+        quota,
+        quotaSource: { kind: "account" },
+        autoApprove: false,
+        approvalSource: { kind: "account" },
+        allow4K: true,
+        allow4KSource: { kind: "account" },
+      }),
+    ).toBe(3);
   });
 });
 

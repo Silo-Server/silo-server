@@ -11,7 +11,9 @@ type Store interface {
 	GetUserLimit(ctx context.Context, userID int) (*UserLimit, error)
 	UpsertUserLimit(ctx context.Context, limit UserLimit) (*UserLimit, error)
 	CountUserRequestsSince(ctx context.Context, userID int, since time.Time) (int, error)
-	ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int) (map[int]*Request, error)
+	// ListActiveByTMDB returns the titles' open regular requests, or their open
+	// 4K requests when is4K is set.
+	ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int, is4K bool) (map[int]*Request, error)
 	// ListProfileWatchlistRequests returns the active requests a profile's
 	// watchlist made.
 	ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error)

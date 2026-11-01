@@ -342,8 +342,9 @@ same `user_id`, `profile_id` and `ended_after` set to `since`.
 The request usage read reports the account's effective request policy as the
 request service resolves it: `requests_enabled` (the server switch), `allowed`
 (false when the account's switch, group or approval mode blocks it), `unlimited`,
-`used`, `max_requests`, `window_days`, `window_start`, `remaining` and
-`auto_approve`. An unlimited account is not counted, so `used` is 0.
+`used`, `max_requests`, `window_days`, `window_start`, `remaining`,
+`auto_approve` and `requests_4k` (whether it may make 4K requests). An unlimited
+account is not counted, so `used` is 0.
 
 ### Profile page layouts
 

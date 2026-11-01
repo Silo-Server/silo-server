@@ -62,7 +62,7 @@ func (s *Service) Follow(ctx context.Context, viewer Viewer, mediaType MediaType
 	}
 	// An open request is what makes a title followable: a series partly in
 	// the library can have one for its missing seasons.
-	active, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{tmdbID})
+	active, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{tmdbID}, false)
 	if err != nil {
 		return RequestState{}, err
 	}
@@ -146,7 +146,7 @@ func (r *Repository) FollowTitle(ctx context.Context, mediaType MediaType, tmdbI
 		WITH open_request AS (
 			SELECT id FROM media_requests
 			WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
-			  AND outcome = 'active' AND status <> 'completed'
+			  AND NOT is_4k AND outcome = 'active' AND status <> 'completed'
 			LIMIT 1
 			FOR SHARE
 		), inserted AS (
@@ -182,8 +182,12 @@ func forgetTitleFollows(ctx context.Context, exec requestExecutor, closed *Reque
 // re-checks the moved row, still on the title and the profile, and deletes it,
 // where a delete and re-insert would leave it a row it cannot see.
 func adoptTitleFollows(ctx context.Context, exec requestExecutor, req *Request) error {
+	if req.Is4K {
+		// Follows ride on a title's regular request.
+		return nil
+	}
 	const failed = `SELECT id FROM media_requests
-		WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2 AND outcome = 'failed'`
+		WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2 AND NOT is_4k AND outcome = 'failed'`
 	// A profile that followed two failed requests keeps its earliest follow.
 	if _, err := exec.Exec(ctx, `
 		DELETE FROM media_request_follows f

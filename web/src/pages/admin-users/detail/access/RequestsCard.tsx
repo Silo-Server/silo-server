@@ -19,6 +19,7 @@ import { useAdminUserRequestUsage } from "@/hooks/queries/admin/userActivity";
 import {
   clearLegacyRequestBlock,
   describeInheritedValue,
+  formatRequest4K,
   formatRequestApproval,
   formatRequestQuota,
   hasRequestLimitErrors,
@@ -66,6 +67,10 @@ function formatRequestLimit(quota: RequestQuota): string {
 
 function formatApprovalValue(autoApprove: boolean): string {
   return autoApprove ? "Automatic" : "Needs approval";
+}
+
+function format4KValue(allow4K: boolean): string {
+  return allow4K ? "Allowed" : "Not allowed";
 }
 
 /**
@@ -170,7 +175,12 @@ export function RequestsCard({
       // The limit compares with the record the edit holds, not the live query.
       if (d.limit && limitRecordDraft) {
         if (d.limit.approval !== limitRecordDraft.approval) rows.push("Approval");
-        const limitOnly = { ...d.limit, approval: limitRecordDraft.approval };
+        if (d.limit.requests4K !== limitRecordDraft.requests4K) rows.push("4K requests");
+        const limitOnly = {
+          ...d.limit,
+          approval: limitRecordDraft.approval,
+          requests4K: limitRecordDraft.requests4K,
+        };
         if (requestLimitChanges(limitOnly, limitRecordDraft) > 0) rows.push("Limit");
       }
       return rows;
@@ -180,7 +190,7 @@ export function RequestsCard({
         ? "Fix the request limit before saving."
         : null,
     extra: {
-      savedLabel: "Request approval and limit",
+      savedLabel: "Request approval, limit and 4K",
       changed: (d) =>
         Boolean(d.limit && limitRecordDraft && requestLimitChanges(d.limit, limitRecordDraft) > 0),
       write: async (d) => {
@@ -211,6 +221,8 @@ export function RequestsCard({
             ...d,
             limit: {
               approval: mine.approval === oldLimit.approval ? freshLimit.approval : mine.approval,
+              requests4K:
+                mine.requests4K === oldLimit.requests4K ? freshLimit.requests4K : mine.requests4K,
               limit: limitKept ? freshLimit.limit : mine.limit,
               maxRequests: limitKept ? freshLimit.maxRequests : mine.maxRequests,
               windowDays: limitKept ? freshLimit.windowDays : mine.windowDays,
@@ -372,7 +384,11 @@ export function RequestsCard({
           {legacyNote ??
             (d.limit ? (
               <div
-                data-changed={changed.has("Approval") || changed.has("Limit") ? "true" : undefined}
+                data-changed={
+                  changed.has("Approval") || changed.has("Limit") || changed.has("4K requests")
+                    ? "true"
+                    : undefined
+                }
                 className="border-border/50 border-t px-4 py-3.5 sm:px-5"
               >
                 <RequestLimitFields
@@ -390,6 +406,11 @@ export function RequestsCard({
                           limit: describeInheritedValue(
                             formatRequestQuota(inherited.quota),
                             inherited.quotaSource,
+                            group,
+                          ),
+                          requests4K: describeInheritedValue(
+                            formatRequest4K(inherited.allow4K),
+                            inherited.allow4KSource,
                             group,
                           ),
                         }
@@ -447,6 +468,16 @@ export function RequestsCard({
                   base={
                     inherited
                       ? `${inheritedPrefix(inherited.quotaSource)}: ${formatRequestLimit(inherited.quota).toLowerCase()}`
+                      : undefined
+                  }
+                />
+                <PolicyValueRow
+                  label="4K requests"
+                  value={format4KValue(terms.allow4K)}
+                  source={requestSourceTag(terms.allow4KSource)}
+                  base={
+                    inherited
+                      ? `${inheritedPrefix(inherited.allow4KSource)}: ${format4KValue(inherited.allow4K).toLowerCase()}`
                       : undefined
                   }
                 />

@@ -16558,6 +16558,18 @@
               "null"
             ]
           },
+          "requests_4k": {
+            "description": "Whether the group's accounts may make 4K requests; inherit uses the server's requests_4k_default",
+            "enum": [
+              "inherit",
+              "allowed",
+              "denied"
+            ],
+            "examples": [
+              "inherit"
+            ],
+            "type": "string"
+          },
           "window_days": {
             "examples": [
               7
@@ -16575,7 +16587,8 @@
           "limit_mode",
           "max_requests",
           "window_days",
-          "approval_mode"
+          "approval_mode",
+          "requests_4k"
         ],
         "type": "object"
       },
@@ -16605,6 +16618,18 @@
               "integer",
               "null"
             ]
+          },
+          "requests_4k": {
+            "description": "Absent keeps the stored value",
+            "enum": [
+              "inherit",
+              "allowed",
+              "denied"
+            ],
+            "examples": [
+              "allowed"
+            ],
+            "type": "string"
           },
           "window_days": {
             "format": "int64",
@@ -16794,6 +16819,18 @@
               "integer",
               "null"
             ]
+          },
+          "requests_4k": {
+            "description": "Absent keeps the stored value",
+            "enum": [
+              "inherit",
+              "allowed",
+              "denied"
+            ],
+            "examples": [
+              "allowed"
+            ],
+            "type": "string"
           },
           "window_days": {
             "format": "int64",
@@ -17551,6 +17588,13 @@
             "minimum": 1,
             "type": "integer"
           },
+          "requests_4k_default": {
+            "description": "Whether accounts may make 4K requests where neither the account nor its access group says; absent on update keeps the stored value",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "requests_enabled": {
             "type": "boolean"
           },
@@ -17624,6 +17668,18 @@
               "null"
             ]
           },
+          "requests_4k": {
+            "description": "Whether the account may make 4K requests; inherit uses its access group's setting, then the server's requests_4k_default",
+            "enum": [
+              "inherit",
+              "allowed",
+              "denied"
+            ],
+            "examples": [
+              "inherit"
+            ],
+            "type": "string"
+          },
           "user_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -17646,7 +17702,8 @@
           "limit_mode",
           "max_requests",
           "window_days",
-          "approval_mode"
+          "approval_mode",
+          "requests_4k"
         ],
         "type": "object"
       },
@@ -17670,6 +17727,10 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "requests_4k": {
+            "description": "Whether this account may make 4K requests, resolved over the account, its access group and the server default",
+            "type": "boolean"
           },
           "requests_enabled": {
             "description": "Server-wide requests switch",
@@ -17706,7 +17767,8 @@
           "window_days",
           "window_start",
           "remaining",
-          "auto_approve"
+          "auto_approve",
+          "requests_4k"
         ],
         "type": "object"
       },
@@ -32460,6 +32522,14 @@
           "rating_restrictions_enforced": {
             "type": "boolean"
           },
+          "requests_4k_allowed": {
+            "description": "Whether the viewer may make 4K requests now: their account may, and a download server takes 4K for movies or for series. request_4k on the title detail says which",
+            "type": "boolean"
+          },
+          "requests_4k_supported": {
+            "description": "Whether the server takes 4K requests: is_4k on createRequest and on requests, and request_4k on the title detail",
+            "type": "boolean"
+          },
           "requests_enabled": {
             "type": "boolean"
           },
@@ -32498,6 +32568,8 @@
           "download_progress_supported",
           "watchlist_titles_supported",
           "watchlist_requests",
+          "requests_4k_supported",
+          "requests_4k_allowed",
           "discover_rows_supported",
           "revision",
           "state",
@@ -36905,6 +36977,13 @@
             ],
             "type": "string"
           },
+          "is_4k": {
+            "description": "A 4K request, fulfilled by a 4K copy alone. A regular request gets an HD copy, and a 4K one too while the server asks every request for 4K",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "is_anime": {
             "type": "boolean"
           },
@@ -37056,6 +37135,7 @@
           "season_progress",
           "source",
           "is_anime",
+          "is_4k",
           "targets",
           "created_at",
           "updated_at"
@@ -37094,6 +37174,13 @@
               "tt0113277"
             ],
             "type": "string"
+          },
+          "is_4k": {
+            "description": "Request a 4K copy alone. Needs the account's 4K permission (403 otherwise) and a download server that takes 4K (409 otherwise); see request_4k on the title detail. Omitted seasons then mean every aired season",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "media_type": {
             "enum": [
@@ -45859,6 +45946,10 @@
           "request": {
             "$ref": "#/components/schemas/RequestMediaState"
           },
+          "request_4k": {
+            "$ref": "#/components/schemas/RequestMediaState",
+            "description": "The title's 4K request: its open 4K request, or whether the viewer may make one. Reasons beyond request's: 4k_not_allowed (the account may not make 4K requests) and 4k_unavailable (no download server takes 4K for this media type). A 4K request is independent of the regular one and is not refused because the library has the title"
+          },
           "runtime": {
             "description": "Minutes",
             "examples": [
@@ -45931,6 +46022,7 @@
           "recommendations",
           "availability",
           "request",
+          "request_4k",
           "in_watchlist",
           "seasons"
         ],

@@ -252,28 +252,6 @@ func TestCreateRequestReplacesOwnFailedRequestAtQuota(t *testing.T) {
 	}
 }
 
-func TestSubmitKeepsFailedTargetWhenEntitlementLookupFails(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("router-1")}
-	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed}
-	store.targets = map[string][]Target{"r1": {
-		{ID: 1, RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusCompleted},
-		{ID: 2, RequestID: "r1", Quality: Quality2160p, Status: StatusFailed, LastError: "radarr 4k unreachable"},
-	}}
-	store.targetSeq = 2
-	svc := newTestService(store)
-	svc.SetRouterProvider(&fakeRouterProvider{})
-	svc.SetEntitlementResolver(failingCeiling{})
-
-	if _, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
-		t.Fatalf("Retry returned error: %v", err)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 2 {
-		t.Fatalf("targets = %+v, want the failed 4K target kept after a failed entitlement lookup", targets)
-	}
-}
-
 func TestSubmitBackoff(t *testing.T) {
 	for attempts, want := range map[int]time.Duration{
 		1:  5 * time.Minute,
@@ -301,7 +279,6 @@ func TestRetryDropsFailedTargetForUnwantedQuality(t *testing.T) {
 	}}
 	store.targetSeq = 2
 	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	req, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1")
 	if err != nil {
@@ -361,6 +338,11 @@ func TestRequestState(t *testing.T) {
 		{"withdrawn", Request{Status: StatusPending, Outcome: OutcomeCancelled}, StateCancelled},
 		// A failed request keeps whatever status it failed at.
 		{"failed after queueing", Request{Status: StatusQueued, Outcome: OutcomeFailed}, StateFailed},
+		// The library's copy says nothing about a 4K request's progress.
+		{"4K, downloading, its seasons in the library in HD", Request{Is4K: true, Status: StatusDownloading, Outcome: OutcomeActive,
+			Seasons: []int{1}, SeasonProgress: []SeasonProgress{{Season: 1, SeasonCounts: SeasonCounts{Aired: 9, Have: 9}}}, LibraryContentID: "series-1"}, StateProcessing},
+		{"4K, its 4K copy done, title not scanned in yet", Request{Is4K: true, Status: StatusCompleted, Outcome: OutcomeActive, Seasons: []int{1}}, StateProcessing},
+		{"4K, its 4K copy done, title in the library", Request{Is4K: true, Status: StatusCompleted, Outcome: OutcomeActive, Seasons: []int{1}, LibraryContentID: "series-1"}, StateAvailable},
 	} {
 		if got := tc.req.State(); got != tc.want {
 			t.Errorf("%s: State() = %q, want %q", tc.name, got, tc.want)

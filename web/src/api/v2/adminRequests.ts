@@ -69,6 +69,7 @@ export async function putAdminRequestSettingsV2(
     global_auto_approval_enabled,
     force_dual_quality,
     watchlist_requests,
+    requests_4k_default,
   } = settings;
   let etag = "";
   const body = await v2("PUT /api/v2/admin/request-settings", {
@@ -81,6 +82,7 @@ export async function putAdminRequestSettingsV2(
       force_dual_quality,
       // Sent only when read: a server without the setting keeps its own.
       ...(watchlist_requests !== undefined && { watchlist_requests }),
+      ...(requests_4k_default !== undefined && { requests_4k_default }),
     },
     onResponse: (r) => {
       etag = r.headers.get("ETag") ?? "";
@@ -190,6 +192,8 @@ export async function putAdminRequestUserLimitV2(
       approval_mode: limit.approval_mode,
       max_requests: limit.max_requests ?? null,
       window_days: limit.window_days ?? null,
+      // Sent only when read: a server without the setting keeps its own.
+      ...(limit.requests_4k !== undefined && { requests_4k: limit.requests_4k }),
     },
     onResponse: (r) => {
       etag = r.headers.get("ETag") ?? "";
