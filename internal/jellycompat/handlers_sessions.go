@@ -79,9 +79,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	lister, ok := h.playbackStore.(interface {
-		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
-	})
+	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
 		writeCompatUpstreamError(w, fmt.Errorf("session listing unavailable"))
 		return
