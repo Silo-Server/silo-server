@@ -1325,11 +1325,15 @@ func TestEnsureSeriesEpisodeLinks_CoalescesConcurrentFallbackWork(t *testing.T) 
 // stored episode list is behind, so the series must be refreshed even though
 // no placeholder episode can be built for it.
 func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *testing.T) {
+	// The parked row's last attempt ran after 2024-05-06 aired and before
+	// 2024-05-07 did, so only the later date is news to it.
+	lastAttempt := time.Date(2024, 5, 6, 12, 0, 0, 0, time.UTC)
 	parked := &models.MetadataRefreshDebt{
 		TargetType:    RefreshTargetItem,
 		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
 		Priority:      refreshDebtTerminalPriority,
 		AttemptCount:  refreshDebtEpisodeTerminalAttempts,
+		LastAttemptAt: &lastAttempt,
 		NextRefreshAt: time.Now().Add(refreshDebtTerminalDelay).Truncate(time.Second),
 	}
 	for _, tc := range []struct {
@@ -1341,7 +1345,8 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 	}{
 		{name: "file newer than stored episodes", fileDate: "2024-05-06", wantIncomplete: true, wantDue: true},
 		{name: "unknown date inside stored range", fileDate: "2024-05-02"},
-		{name: "parked episode debt stays parked", fileDate: "2024-05-06", existing: parked, wantIncomplete: true},
+		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-06", existing: parked, wantIncomplete: true},
+		{name: "parked debt wakes for a date that aired after its last attempt", fileDate: "2024-05-07", existing: parked, wantIncomplete: true, wantDue: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFallbackTestHarness()
@@ -1373,7 +1378,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 			}
 			debt := debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)]
 			switch {
-			case tc.existing != nil:
+			case tc.existing != nil && !tc.wantDue:
 				if debt == nil || debt.Priority != tc.existing.Priority || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
 					t.Errorf("parked debt changed: %+v", debt)
 				}
