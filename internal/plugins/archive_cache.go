@@ -13,9 +13,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 type archiveStore interface {
@@ -344,18 +347,41 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 		return nil, nil, nil, fmt.Errorf("open plugin archive: %w", err)
 	}
 
+	// The checks below read entries by name, but extraction writes each one to
+	// its cleaned path. Refuse any layout extraction would not reproduce
+	// exactly: two entries for the same file, on a case- or
+	// normalization-insensitive filesystem too, or an entry inside a file.
 	files := make(map[string]*zip.File, len(reader.File))
+	extracted := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
+		if err := validateRelativePath(file.Name, "plugin archive"); err != nil {
+			return nil, nil, nil, err
+		}
+		key, err := archivePathKey(file.Name)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if other, ok := extracted[key]; ok && (!other.FileInfo().IsDir() || !file.FileInfo().IsDir()) {
+			return nil, nil, nil, fmt.Errorf("plugin archive entries %q and %q extract to the same path", other.Name, file.Name)
+		}
+		extracted[key] = file
 		files[file.Name] = file
 	}
-
-	manifestFile, ok := files["manifest.json"]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("plugin archive is missing manifest.json")
+	for key, file := range extracted {
+		for child, parent := key, filepath.Dir(key); parent != child; child, parent = parent, filepath.Dir(parent) {
+			if entry, ok := extracted[parent]; ok && !entry.FileInfo().IsDir() {
+				return nil, nil, nil, fmt.Errorf("plugin archive entry %q is inside file %q", file.Name, entry.Name)
+			}
+		}
 	}
-	binaryFile, ok := files["plugin"]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("plugin archive is missing plugin binary")
+
+	manifestFile, err := regularArchiveEntry(files, "manifest.json")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	binaryFile, err := regularArchiveEntry(files, "plugin")
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	manifestBytes, err := readZipFile(manifestFile)
@@ -377,12 +403,37 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 	}
 
 	for _, asset := range manifest.GetAssets() {
-		if _, ok := files[asset.GetPath()]; !ok {
-			return nil, nil, nil, fmt.Errorf("plugin archive is missing packaged asset %q", asset.GetPath())
+		if _, err := regularArchiveEntry(files, asset.GetPath()); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
 	return reader, manifestBytes, manifest, nil
+}
+
+// archivePathKey is the path extraction writes an entry to, in a form where
+// names a case- and normalization-insensitive filesystem (such as APFS) treats
+// as one file compare equal: the Unicode canonical caseless match. It refuses
+// a name no file can have (NUL), and one whose key holds a combining grapheme
+// joiner: NFD inserts one after 30 combining marks in a row, so canonically
+// equivalent names could then get different keys.
+func archivePathKey(name string) (string, error) {
+	key := norm.NFD.String(cases.Fold().String(norm.NFD.String(filepath.Clean(name))))
+	if strings.ContainsAny(key, "\x00\u034f") {
+		return "", fmt.Errorf("plugin archive entry %q has an unsupported file name", name)
+	}
+	return key, nil
+}
+
+func regularArchiveEntry(files map[string]*zip.File, name string) (*zip.File, error) {
+	file, ok := files[name]
+	if !ok {
+		return nil, fmt.Errorf("plugin archive is missing %q", name)
+	}
+	if !file.Mode().IsRegular() {
+		return nil, fmt.Errorf("plugin archive entry %q is not a regular file", name)
+	}
+	return file, nil
 }
 
 func buildBinaryPluginArchive(manifestBytes []byte, binaryData []byte) ([]byte, error) {
