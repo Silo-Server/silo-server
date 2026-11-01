@@ -509,7 +509,7 @@ func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
 	})
 
 	t.Run("least recently used go first", func(t *testing.T) {
-		s, repo, _ := newTestStore(t, ffmpeg)
+		s, repo, blobs := newTestStore(t, ffmpeg)
 		refs := make([]playback.EmbeddedSubtitleRef, 3)
 		for i := range refs {
 			refs[i] = en
@@ -528,8 +528,9 @@ func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Room for two: the third evicts the second, used less recently
-		// than the first.
+		// than the first, and its object goes with it.
 		first, _ := repo.Track(t.Context(), refs[0].MediaFileID, en.StreamIndex)
+		second, _ := repo.Track(t.Context(), refs[1].MediaFileID, en.StreamIndex)
 		s.limits.store = 2 * first.Bytes
 		if _, err := s.WholeTrack(t.Context(), path, refs[2]); err != nil {
 			t.Fatal(err)
@@ -538,6 +539,19 @@ func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
 			if got, _ := repo.Track(t.Context(), refs[i].MediaFileID, en.StreamIndex); (got != nil) != want {
 				t.Fatalf("track %d kept = %v, want %v", i, got != nil, want)
 			}
+		}
+		if blobs.objects[second.BlobKey] != nil || blobs.objects[first.BlobKey] == nil {
+			t.Fatal("eviction left the evicted object, or took another")
+		}
+		// No room even after evicting: refused before storing anything.
+		s.limits.store = first.Bytes - 1
+		puts := blobs.puts
+		refs[1].MediaFileID = 60
+		if _, err := s.WholeTrack(t.Context(), path, refs[1]); !errors.Is(err, embeddedsub.ErrTooLarge) || blobs.puts != puts {
+			t.Fatalf("a track with no room: %v, %d objects stored", err, blobs.puts-puts)
+		}
+		if len(repo.reserved) != 0 {
+			t.Fatalf("reservations left behind: %v", repo.reserved)
 		}
 	})
 }

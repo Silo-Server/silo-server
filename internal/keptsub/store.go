@@ -33,6 +33,7 @@ import (
 type Blobs interface {
 	PutStream(ctx context.Context, key string, r io.Reader, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error)
+	Delete(ctx context.Context, keys []string) (int, error)
 }
 
 const (
@@ -63,6 +64,9 @@ const (
 	// keptStoreMaxBytes bounds every kept track together; past it the least
 	// recently used go, and the collector deletes their objects.
 	keptStoreMaxBytes = 64 << 30
+	// reservationLease is how long a keep's reservation counts without its
+	// row landing; a keep gives up after keepTimeout.
+	reservationLease = 2 * keepTimeout
 	// keptTouchInterval is how often a kept track's use is recorded.
 	keptTouchInterval = time.Hour
 	// orphanGrace is when the collector checks a stored object no row may
@@ -700,17 +704,41 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 }
 
 // keep stores the local copy at local as t's kept stream and records t.
-// The key is queued for the collector before the object is stored, so an
-// object whose row never lands is deleted after orphanGrace, while one a row
-// names is live and stays. The object goes before the row, so a row never
-// names a missing object.
+// Room is reserved before the object is stored, so storage holds no more
+// than the budgets allow, and objects of rows evicted to make it are
+// deleted at once. The key is queued for the collector before the object is
+// stored, so an object whose row never lands is deleted after orphanGrace,
+// while one a row names is live and stays. The object goes before the row,
+// so a row never names a missing object.
 func (s *Store) keep(ctx context.Context, t *Track, local string) error {
 	if t.Bytes > s.trackMaxBytes(t.Codec) {
 		return fmt.Errorf("%w: a kept %s track of %d bytes", embeddedsub.ErrTooLarge, t.Codec, t.Bytes)
 	}
-	if err := s.fileHasRoom(ctx, t.MediaFileID, t.StreamIndex, t.SourceSize, t.Bytes); err != nil {
+	// The reservation outlasts this.
+	ctx, cancel := context.WithTimeout(ctx, keepTimeout)
+	defer cancel()
+	evicted, err := s.repo.Reserve(ctx, Reservation{
+		MediaFileID: t.MediaFileID, StreamIndex: t.StreamIndex, Bytes: t.Bytes,
+		FileMax: min(t.SourceSize, s.limits.file), StoreMax: s.limits.store, Lease: reservationLease,
+	})
+	if errors.Is(err, ErrNoRoom) {
+		return fmt.Errorf("%w: %w", embeddedsub.ErrTooLarge, err)
+	}
+	if err != nil {
 		return err
 	}
+	s.dropEvicted(ctx, evicted)
+	kept := false
+	defer func() {
+		if kept {
+			return
+		}
+		endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := s.repo.Unreserve(endCtx, t.MediaFileID, t.StreamIndex); err != nil {
+			slog.DebugContext(ctx, "ending a kept subtitle track reservation failed", "component", "keptsub", "error", err)
+		}
+	}()
 	t.BlobKey = blobKey(t)
 	// The key names the bytes: a row that already names it has them stored.
 	if old, err := s.repo.Track(ctx, t.MediaFileID, t.StreamIndex); err != nil || old == nil || old.BlobKey != t.BlobKey {
@@ -721,13 +749,23 @@ func (s *Store) keep(ctx context.Context, t *Track, local string) error {
 	if err := s.repo.PutTrack(ctx, *t); err != nil {
 		return err
 	}
+	kept = true
 	s.noteUse(t) // writing the row recorded its use
-	if n, err := s.repo.EvictBeyond(ctx, s.limits.store); err != nil {
-		slog.WarnContext(ctx, "evicting kept subtitle tracks failed", "component", "keptsub", "error", err)
-	} else if n > 0 {
-		slog.InfoContext(ctx, "evicted least recently used kept subtitle tracks", "component", "keptsub", "tracks", n)
-	}
 	return nil
+}
+
+// dropEvicted deletes the objects of rows evicted to make room now, rather
+// than after the collector's grace, so eviction frees storage as well as
+// budget. A reader still on one reads its track again. The collector has
+// them queued too, in case this fails.
+func (s *Store) dropEvicted(ctx context.Context, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	if _, err := s.blobs.Delete(ctx, keys); err != nil {
+		slog.WarnContext(ctx, "deleting evicted kept subtitle tracks failed; the collector will", "component", "keptsub", "error", err)
+	}
+	slog.InfoContext(ctx, "evicted least recently used kept subtitle tracks", "component", "keptsub", "tracks", len(keys))
 }
 
 // store puts the local copy at local under key, queued for the collector
@@ -761,7 +799,8 @@ func (s *Store) trackMaxBytes(codec string) int64 {
 
 // fileHasRoom reports, with ErrTooLarge, a stream of the file whose n more
 // kept bytes the file's share has no room for: other streams' kept bytes and
-// n together may not pass the file's size or limits.file.
+// n together may not pass the file's size or limits.file. It saves a read
+// that couldn't be kept; Reserve is what holds the share.
 func (s *Store) fileHasRoom(ctx context.Context, fileID, streamIndex int, sourceSize, n int64) error {
 	kept, err := s.repo.FileKeptBytes(ctx, fileID, streamIndex)
 	if err != nil {

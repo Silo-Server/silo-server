@@ -393,6 +393,10 @@ func TestKeepQueuesTheObjectBeforeItsRow(t *testing.T) {
 	if len(repo.queued) != 1 || blobs.objects[repo.queued[0]] == nil {
 		t.Fatalf("queued %v for %d objects", repo.queued, len(blobs.objects))
 	}
+	// The keep that failed gives its room back.
+	if len(repo.reserved) != 0 {
+		t.Fatalf("a failed keep left its reservation: %v", repo.reserved)
+	}
 }
 
 // Using a local copy leaves its file as written, so the index cache, keyed
