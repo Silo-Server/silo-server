@@ -1299,10 +1299,13 @@ func TestVideoEligibleV3HEVCLevelAboveDecoderWithinItsFamily(t *testing.T) {
 		// x265 tags a 4K24 encode 5.2 when its VBV ceiling (180 Mb/s)
 		// exceeds 5.1 High tier's 160 Mb/s.
 		{name: "5.2 4K24 at 37 Mb/s on a 5.1 decoder", level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900, want: true},
-		{name: "5.1 4K24 at 20 Mb/s on a 5.0 decoder", level: 153, decoderLevel: 150, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 20_000, want: true},
+		{name: "5.1 1440p24 at 20 Mb/s on a 5.0 decoder", level: 153, decoderLevel: 150, width: 2560, height: 1440, frameRate: 24, bitrateKbps: 20_000, want: true},
 		{name: "6.2 needs a larger picture and buffer family", level: 186, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 30_000},
 		{name: "bitrate above 5.1 Main tier", level: 156, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 45_000},
 		{name: "sample rate above 5.1", level: 156, width: 3840, height: 2160, frameRate: 120, bitrateKbps: 30_000},
+		// The stored rate is an average: a variable-rate 1080p stream with
+		// 60 fps stretches can average 17 fps and still need level 4.1.
+		{name: "low average rate on a 4.0 decoder", level: 123, decoderLevel: 120, width: 1920, height: 1080, frameRate: 17.455, bitrateKbps: 1_000},
 		{name: "declared entries keep the strict level", evidence: EvidenceDeclaredV3, level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900},
 		{name: "software entries keep the strict level", software: true, level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900},
 	} {

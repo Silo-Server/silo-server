@@ -238,6 +238,9 @@ var hevcLevelLimitsV3 = map[int]hevcLevelLimitV3{
 // level's picture-size family, and the source's sample rate and average
 // bitrate must fit the decoder's level. Peaks and per-picture slice counts
 // are not in the metadata, which is why the bitrate bound is Main tier's.
+// The stored frame rate is an average too, so a variable-rate stream could
+// hide faster stretches: the sample rate is checked at no less than
+// maxTradedFrameRateV3.
 func hevcLevelFitsDecoderV3(source SourceDescriptorV3, decoderLevel int) bool {
 	sourceLimit, sourceKnown := hevcLevelLimitsV3[source.VideoLevel]
 	decoderLimit, decoderKnown := hevcLevelLimitsV3[decoderLevel]
@@ -246,8 +249,9 @@ func hevcLevelFitsDecoderV3(source SourceDescriptorV3, decoderLevel int) bool {
 		return false
 	}
 	lumaPs := source.Width * source.Height
+	frameRate := max(source.FrameRate, maxTradedFrameRateV3)
 	return lumaPs > 0 && lumaPs <= decoderLimit.maxLumaPs &&
-		float64(lumaPs)*source.FrameRate <= float64(decoderLimit.maxLumaSr) &&
+		float64(lumaPs)*frameRate <= float64(decoderLimit.maxLumaSr) &&
 		source.BitrateKbps > 0 && source.BitrateKbps <= decoderLimit.maxBRKbps
 }
 
