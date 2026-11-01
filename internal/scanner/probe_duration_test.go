@@ -15,6 +15,16 @@ func TestDurationFromProbeMetadata(t *testing.T) {
 	video := func(start, duration string) ffprobeStream {
 		return ffprobeStream{CodecType: "video", StartTime: start, Duration: duration}
 	}
+	// tagged is a Matroska track: ffprobe reports no duration, only the
+	// muxer's DURATION statistics tag.
+	tagged := func(codecType, length string) ffprobeStream {
+		return ffprobeStream{CodecType: codecType, Duration: "N/A", Tags: map[string]string{"DURATION": length}}
+	}
+	untagged := func(codecType string) ffprobeStream {
+		return ffprobeStream{CodecType: codecType, Duration: "N/A"}
+	}
+	// A 600-second film whose container runs to 1198 seconds.
+	stretched := ffprobeFormat{Duration: "1198.000000"}
 	tests := []struct {
 		name    string
 		format  ffprobeFormat
@@ -59,6 +69,36 @@ func TestDurationFromProbeMetadata(t *testing.T) {
 		// direct duration paths.
 		{"rejects collapsed timestamp span for large video", ffprobeFormat{Size: "2022705152"},
 			[]ffprobeStream{video("1514891.405000", "1514894.405000")}, 0},
+		// A subtitle track that runs past the film stretches the container
+		// duration; the film's own tracks set the duration instead.
+		{"drops subtitle that outlasts video and audio", stretched,
+			[]ffprobeStream{tagged("video", "00:10:00.022000000"), tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000")}, 600},
+		{"uses stream durations when present", ffprobeFormat{Duration: "1198.000000"},
+			[]ffprobeStream{video("", "599.999000"), {CodecType: "audio", Duration: "600.026417"}, {CodecType: "subtitle", Duration: "1198.000000"}}, 600},
+		{"keeps audio that outlasts video", ffprobeFormat{Duration: "640.023000"},
+			[]ffprobeStream{tagged("video", "00:10:00.000000000"), tagged("audio", "00:10:40.023000000"), tagged("subtitle", "00:09:48.000000000")}, 640},
+		{"keeps container duration when an audio track has no length", stretched,
+			[]ffprobeStream{tagged("video", "00:10:00.022000000"), untagged("audio"), tagged("subtitle", "00:19:58.000000000")}, 1198},
+		{"keeps container duration when a tag is malformed", stretched,
+			[]ffprobeStream{tagged("video", "10:00.022"), tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000")}, 1198},
+		// Stale statistics tags understate every track; nothing explains the
+		// container duration, so it stands.
+		{"keeps container duration no track accounts for", stretched,
+			[]ffprobeStream{tagged("video", "00:05:00.000000000"), tagged("audio", "00:05:00.024000000"), tagged("subtitle", "00:04:58.000000000")}, 1198},
+		{"reads language-suffixed duration tags", stretched,
+			[]ffprobeStream{
+				{CodecType: "video", Duration: "N/A", Tags: map[string]string{"DURATION-eng": "00:10:00.022000000"}},
+				tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000"),
+			}, 600},
+		// Video and audio that start late end at their offset plus length.
+		{"counts late-starting video and audio to their end", stretched,
+			[]ffprobeStream{
+				{CodecType: "video", StartTime: "120.000000", Duration: "600.000000"},
+				{CodecType: "audio", StartTime: "120.000000", Duration: "600.000000"},
+				{CodecType: "subtitle", StartTime: "0.000000", Duration: "1198.000000"},
+			}, 720},
+		{"keeps audio-only duration past a longer lyrics track", ffprobeFormat{Duration: "1198.000000"},
+			[]ffprobeStream{tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000")}, 1198},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
