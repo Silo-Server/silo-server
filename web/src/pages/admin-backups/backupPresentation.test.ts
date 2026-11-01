@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AdminBackup } from "@/api/v2/adminBackups";
 
-import { restoreCommand, retentionPlan } from "./backupPresentation";
+import { canRestoreParts, restoreCommand, retentionPlan } from "./backupPresentation";
 
 function backup(day: number, overrides: Partial<AdminBackup> = {}): AdminBackup {
   return {
@@ -63,6 +63,7 @@ describe("retentionPlan", () => {
         backup(31, { id: "running", status: "in_progress" }),
         backup(30, { id: "manual", kind: "manual", status: "complete_with_warnings" }),
         backup(29, { id: "failed", status: "incomplete" }),
+        backup(28, { id: "restore", kind: "before-restore" }),
         backup(26, { id: "nightly" }),
       ],
       2,
@@ -82,5 +83,15 @@ describe("restoreCommand", () => {
     ],
   ])("%s", (_case, location, expected) => {
     expect(restoreCommand(location)).toBe(expected);
+  });
+});
+
+describe("canRestoreParts", () => {
+  it.each([
+    ["a plain restore set", ["db.dump", "restore-set.tar", "manifest.json"], true],
+    ["no restore set", ["db.dump", "blobs.tar", "manifest.json"], false],
+  ])("%s", (_case, names, expected) => {
+    const objects = names.map((name) => ({ name, sha256: "", size_bytes: 1 }));
+    expect(canRestoreParts(backup(31, { objects }))).toBe(expected);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DatabaseBackup, LoaderCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import type { AdminBackupActive } from "@/api/v2/adminBackups";
@@ -32,7 +32,9 @@ import { BackupTable } from "@/pages/admin-backups/BackupTable";
 import {
   BACKUP_ENABLED_KEY,
   BACKUP_KEEP_KEY,
+  BACKUP_ROWS_SHOWN,
   BACKUP_SETTING_KEYS,
+  backupRowId,
   backUpNowBlocker,
   backupErrorMessage,
   backupSchedulePhrases,
@@ -40,6 +42,7 @@ import {
   lastRunProblem,
   lockBlocker,
   nextBackupRun,
+  activeRestorePath,
   restoreCommand,
   retentionNote,
   retentionPlan,
@@ -65,6 +68,19 @@ function ActiveOperation({ active }: { active: AdminBackupActive }) {
   switch (active.operation) {
     case "backup":
       return `Backing up, started at ${formatTime(active.started_at)}.`;
+    case "restore": {
+      const path = activeRestorePath(active);
+      return (
+        <>
+          A restore is running.{" "}
+          {path ? (
+            <Link to={path} className="underline underline-offset-2">
+              See its progress
+            </Link>
+          ) : null}
+        </>
+      );
+    }
     default:
       return "Deleting a backup.";
   }
@@ -78,6 +94,11 @@ export default function AdminBackups() {
   const backupTask = useTask("backup");
   const form = useSettingsForm({ keys: BACKUP_SETTING_KEYS });
   const startBackup = useStartAdminBackup();
+  // `?backup=<id>` (the recovery point a restore report links to) opens with
+  // that backup selected.
+  const [searchParams] = useSearchParams();
+  const linkedId = searchParams.get("backup");
+  const [selectedId, setSelectedId] = useState<string | null>(linkedId);
   const [showAll, setShowAll] = useState(false);
   // The backup this page started, and when, so its outcome is read only from
   // a list fetched after the start.
@@ -86,6 +107,13 @@ export default function AdminBackups() {
 
   const list = backups.data;
   const items = useMemo(() => list?.items ?? [], [list]);
+  const linkedIndex = linkedId ? items.findIndex((item) => item.id === linkedId) : -1;
+  const rowsExpanded = showAll || (selectedId === linkedId && linkedIndex >= BACKUP_ROWS_SHOWN);
+  const linkedFound = linkedIndex >= 0;
+  useEffect(() => {
+    if (linkedId && linkedFound)
+      document.getElementById(backupRowId(linkedId))?.scrollIntoView?.({ block: "center" });
+  }, [linkedId, linkedFound]);
   const warnings = list?.warnings ?? [];
   const running = backupRunning(list);
   const shownWarnings = visibleWarnings(warnings, {
@@ -96,6 +124,7 @@ export default function AdminBackups() {
   const busy = Boolean(list?.busy || active || running);
   const sqliteUserStore = warnings.some((warning) => warning.code === "sqlite_user_store");
   const configured = capabilities.data ? capabilities.data.state === "available" : true;
+  const selectiveRestore = capabilities.data?.selective_restore === true;
   const destinations = capabilities.data?.destinations;
 
   // The status line and the strip describe what is saved, not a draft.
@@ -122,7 +151,8 @@ export default function AdminBackups() {
   // Before capabilities load, assume the server has its own storage.
   const location: BackupLocation =
     destinations && !destinations.includes("default") ? "none" : "local";
-  const commandBackup = items.find(isFinished);
+  const commandBackup =
+    items.find((item) => item.id === selectedId && isFinished(item)) ?? items.find(isFinished);
   const command = restoreCommand(commandBackup?.location);
   const commandSource: FullRestoreSource = commandBackup ? "folder" : "download";
 
@@ -300,11 +330,16 @@ export default function AdminBackups() {
             </div>
             <BackupTable
               items={items}
-              showAll={showAll}
-              onShowAllChange={setShowAll}
+              selectedId={selectedId}
+              showAll={rowsExpanded}
+              onShowAllChange={(value) => {
+                setShowAll(value);
+                if (!value && selectedId === linkedId) setSelectedId(null);
+              }}
               sqliteUserStore={sqliteUserStore}
               active={active}
               deleteBlocker={lock}
+              selectiveRestore={selectiveRestore}
             />
           </div>
         </section>

@@ -203,6 +203,19 @@ Listings use lexical keys and a cursor equal to the last returned key. Local
 pagination skips completed subtrees and stops after a page plus one object;
 each visited directory's entries are read and sorted in memory.
 
+`CreateExclusive` writes an object only when none exists at its key and
+otherwise returns `ErrExists` without writing; a concurrent writer of the
+same key is never replaced. Local storage hard-links the synced temporary
+file into place (`link(2)` fails on an existing name, where a rename would
+replace it). S3 sends one `PutObject` with `If-None-Match: *`, answered 412
+(or 409 for a conflicting concurrent conditional write) when the key exists.
+A backend that rejects the header (501, or a 400 naming it) returns
+`ErrExclusiveUnsupported` without writing, with a warning in the log, and so
+does a store without an atomic create: a check followed by a write could
+replace an object published between the two, so there is no such fallback.
+Selective restore writes every blob this way and fails the item on
+`ErrExclusiveUnsupported`; ordinary writes are unaffected.
+
 `Matches` lets the image cache skip rewriting an immutable object whose bytes
 are already stored. It is only an optimization, so on S3 a `HeadObject` 403
 reports no match instead of an error and the object is rewritten. A HEAD

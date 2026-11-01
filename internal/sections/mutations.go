@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -397,4 +398,68 @@ func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 }
 func (r *Repository) DeleteGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int) error {
 	return r.mutate(ctx, scopeMutation("home", nil), func(ctx context.Context) error { return r.deleteGeneratedHomeLibraryRecentSections(ctx, libraryID) })
+}
+
+// insertSectionInTx inserts s under its id when that is set and free, else
+// under a new one.
+func insertSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection) error {
+	if s.ID != "" {
+		var taken bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM page_sections WHERE id = $1)`, s.ID).Scan(&taken); err != nil {
+			return err
+		}
+		if taken {
+			s.ID = ""
+		}
+	}
+	if s.ID == "" {
+		id, err := idgen.NextID()
+		if err != nil {
+			return fmt.Errorf("generate section id: %w", err)
+		}
+		s.ID = id
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())`,
+		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled); err != nil {
+		return fmt.Errorf("creating section: %w", err)
+	}
+	return nil
+}
+
+// WriteSectionInTx creates s (create) or replaces the stored section with
+// s's position, type, title, featured flag, item limit, configuration, and
+// enabled flag, in the caller's transaction. A created section keeps s.ID
+// when it is set and free, so a restore on the server that wrote it keeps
+// the id profile overrides name. The collection references are locked as
+// every section writer locks them, and a featured section is the only one
+// on its surface. Revisions advance through the table's triggers.
+func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create bool) error {
+	if s.Config == nil {
+		s.Config = json.RawMessage(`{}`)
+	}
+	var previous []string
+	if !create {
+		stored, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1 FOR UPDATE", s.ID))
+		if err != nil {
+			return err
+		}
+		previous = referencesOf([]*PageSection{stored})
+	}
+	if err := catalog.LockLibraryCollectionReferences(ctx, tx, previous, referencesOf([]*PageSection{s})); err != nil {
+		return err
+	}
+	r := &Repository{}
+	txCtx := context.WithValue(ctx, sectionTransactionKey{}, tx)
+	if create {
+		if err := insertSectionInTx(ctx, tx, s); err != nil {
+			return err
+		}
+	} else if err := r.update(txCtx, s); err != nil {
+		return err
+	}
+	if s.Featured {
+		return r.clearFeaturedForSurface(txCtx, s.Scope, s.LibraryID, s.ID)
+	}
+	return nil
 }

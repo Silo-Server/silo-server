@@ -208,6 +208,31 @@ func (r *ServerSettingsRepo) UpdateAtomicInTransaction(
 	})
 }
 
+// UpdateAtomicWithTx runs the same mutation in the caller's transaction:
+// it takes the settings mutation lock there and writes without committing,
+// so the settings land or roll back with the caller's other writes.
+func (r *ServerSettingsRepo) UpdateAtomicWithTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		serverSettingsMutationLock,
+	); err != nil {
+		return fmt.Errorf("server_settings acquire mutation lock: %w", err)
+	}
+	current, err := getAllServerSettings(ctx, tx)
+	if err != nil {
+		return err
+	}
+	writes, err := update(current, tx)
+	if err != nil {
+		return err
+	}
+	return upsertServerSettings(ctx, tx, writes)
+}
+
 func (r *ServerSettingsRepo) withMutationTransaction(
 	ctx context.Context,
 	mutate func(tx pgx.Tx) error,

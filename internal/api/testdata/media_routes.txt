@@ -71,6 +71,8 @@ GET /api/v2/admin/backups/capabilities	non-media
 DELETE /api/v2/admin/backups/{id}	non-media
 POST /api/v2/admin/backups/{id}/download-links	non-media
 GET /api/v2/admin/backups/{id}/objects/{name}	non-media
+POST /api/v2/admin/backups/{id}/restore	non-media
+GET /api/v2/admin/backups/{id}/restore-set	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
 GET /api/v2/admin/catalog/capabilities	non-media
@@ -1392,6 +1394,8 @@ GET /api/v2/admin/backups/capabilities	non-media
 DELETE /api/v2/admin/backups/{id}	non-media
 POST /api/v2/admin/backups/{id}/download-links	non-media
 GET /api/v2/admin/backups/{id}/objects/{name}	non-media
+POST /api/v2/admin/backups/{id}/restore	non-media
+GET /api/v2/admin/backups/{id}/restore-set	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
 GET /api/v2/admin/catalog/capabilities	non-media

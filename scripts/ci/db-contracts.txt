@@ -727,7 +727,11 @@
 
 # Backups: the full restore round trip (needs the PostgreSQL 18 client), the
 # manifest written last and the sweep, the cluster-wide subsystem lock, and
-# the published status of the operation holding it.
+# the published status of the operation holding it. Selective restore: the
+# restore round trip with re-run after interruption, idempotency and digest
+# refusal; plugins restored disabled until configured; restore job fencing;
+# a restored library whose setup partly failed, or whose provider placement
+# could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
@@ -736,3 +740,11 @@
 ./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
 ./internal/backup TestStatusRecordsTheLastSuccessDB
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
+./internal/backup TestSelectiveRestoreDB
+./internal/backup TestTemplateCollectionsAndHomeSectionsDB
+./internal/backup TestIdentityTwinsRestoreOneToOneDB
+./internal/plugins TestRestoreInstallationDB
+./internal/adminjob TestBackupRestoreFencingDB
+./internal/api/handlers TestLibraryRestoredReportsFailedSetupDB
+./internal/api/handlers TestRestoredLibraryChainNeedsItsProviderLookupDB
+./internal/api/handlers TestRestoredPluginJoinsChainsOnlyFromItsManifestDB

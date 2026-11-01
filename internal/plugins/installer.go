@@ -32,6 +32,9 @@ type InstallArchiveRequest struct {
 	// InstallBinaryRequest.
 	PluginID string
 	Version  string
+	// KeepDisabled persists the new installation disabled and never enables
+	// it, so a restore can apply configuration before anything runs it.
+	KeepDisabled bool
 }
 
 type InstallBinaryRequest struct {
@@ -69,6 +72,14 @@ type Installer struct {
 	installations installationStore
 	baseDir       string
 	httpClient    *http.Client
+}
+
+// withStore returns a copy of the installer that persists through store,
+// such as an InstallationStore bound to a caller's transaction.
+func (i *Installer) withStore(store installationStore) *Installer {
+	out := *i
+	out.installations = store
+	return &out
 }
 
 func NewInstaller(installations installationStore, opts InstallerOptions) *Installer {
@@ -587,16 +598,18 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 		return nil, err
 	}
 
-	enabled := true
-	if err := i.installations.Update(ctx, installation.ID, UpdateInstallationInput{
-		Enabled: &enabled,
-	}); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
+	if !req.KeepDisabled {
+		enabled := true
+		if err := i.installations.Update(ctx, installation.ID, UpdateInstallationInput{
+			Enabled: &enabled,
+		}); err != nil {
+			if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
+				return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
+			}
+			return nil, fmt.Errorf("enable plugin installation: %w", err)
 		}
-		return nil, fmt.Errorf("enable plugin installation: %w", err)
+		installation.Enabled = true
 	}
-	installation.Enabled = true
 
 	keepInstallDir = true
 

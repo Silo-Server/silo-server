@@ -156,7 +156,7 @@ function commandHint(source: FullRestoreSource): string {
     case "download":
       return "Download the backup's files into one folder on the server and pass that folder. ";
     case "folder":
-      return "The command uses the newest backup. ";
+      return "The command uses the backup selected above, or the newest one. ";
   }
 }
 

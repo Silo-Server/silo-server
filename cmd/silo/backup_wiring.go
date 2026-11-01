@@ -5,8 +5,10 @@ import (
 	"log"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -38,6 +40,23 @@ func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *
 		KeyCheck:         keyCheck,
 		Cipher:           deps.SecretCipher,
 		UserStoreBackend: func() string { return deps.CurrentConfig().UserDB.Backend },
+	})
+}
+
+// backupRestoreExecutor runs backup_restore admin jobs on the backup
+// service, translating the runner's fenced transaction into the service's.
+type backupRestoreExecutor struct{ svc *backup.Service }
+
+func (e backupRestoreExecutor) ExecuteBackupRestore(ctx context.Context, run adminjob.BackupRestoreRun) (any, error) {
+	return e.svc.ExecuteRestore(ctx, backup.RestoreRun{
+		Payload: run.Payload,
+		Fenced: func(ctx context.Context, fn func(pgx.Tx) (backup.FencedUpdate, error)) error {
+			return run.Fenced(ctx, func(tx pgx.Tx) (adminjob.FencedUpdate, error) {
+				update, err := fn(tx)
+				return adminjob.FencedUpdate(update), err
+			})
+		},
+		Published: run.Published,
 	})
 }
 

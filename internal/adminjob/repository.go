@@ -38,7 +38,7 @@ var (
 
 // cancellableJobTypes are the job types RequestCancellation accepts. Every v2
 // job resource that reports such a job as cancelable accepts its cancellation.
-var cancellableJobTypes = []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}
+var cancellableJobTypes = []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup, JobTypeBackupRestore}
 
 // IsCancellableJobType reports whether jobs of this type accept cancellation
 // while queued or running.
@@ -778,7 +778,28 @@ func (r *Repository) Yield(ctx context.Context, id string, current, total int, m
 	return nil
 }
 
+// RequeueStaleRunning requeues running jobs whose worker stopped
+// heartbeating, except backup restores: a restore is never run twice by
+// recovery. It is marked failed as interrupted instead, keeping the report of
+// what committed; running the same restore again is safe. A restore item's
+// fenced transaction holds the job row locked, so this update waits for it
+// and then sees a fresh heartbeat.
 func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) (int, error) {
+	interrupted, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			message = 'Restore interrupted: the server running it stopped',
+			error_message = $4,
+			completed_at = NOW(),
+			expires_at = NOW() + INTERVAL '7 days',
+			updated_at = NOW()
+		WHERE status = $1 AND job_type = $5
+		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3`,
+		StatusRunning, StatusFailed, before, BackupRestoreInterrupted, JobTypeBackupRestore,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failing interrupted restores: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = $2,
@@ -791,14 +812,14 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 			completed_at = NULL,
 			heartbeat_at = NULL,
 			updated_at = NOW()
-		WHERE status = $1
+		WHERE status = $1 AND job_type <> $4
 		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3`,
-		StatusRunning, StatusQueued, before,
+		StatusRunning, StatusQueued, before, JobTypeBackupRestore,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("requeueing stale admin jobs: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return int(tag.RowsAffected() + interrupted.RowsAffected()), nil
 }
 
 func (r *Repository) ListExpired(ctx context.Context, now time.Time, limit int) ([]*models.AdminJob, error) {

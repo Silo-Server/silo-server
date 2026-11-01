@@ -5,9 +5,14 @@ import (
 	"time"
 )
 
-// incompleteSweepAge is how old an incomplete folder must be before the
-// sweep deletes it.
-const incompleteSweepAge = 24 * time.Hour
+const (
+	// beforeRestoreRetention keeps a before-restore copy, the recovery point
+	// for a full restore, for a week outside the nightly count.
+	beforeRestoreRetention = 7 * 24 * time.Hour
+	// incompleteSweepAge is how old an incomplete folder must be before the
+	// sweep deletes it.
+	incompleteSweepAge = 24 * time.Hour
+)
 
 // folder is one backup folder at the destination for this server.
 type folder struct {
@@ -22,21 +27,40 @@ type folder struct {
 }
 
 // planRotation returns the ids rotation deletes. Only folders with a manifest
-// are candidates. Nightly and manual copies beyond keep are deleted oldest
-// first, except that the newest copy without warnings is always kept, even
-// when that keeps one more than keep, so repeated runs with missing blobs
-// cannot rotate away the last copy that has every blob.
-func planRotation(folders []folder, keep int) []string {
+// are candidates. pinned ids (the source of an active restore) are never
+// deleted. Rules:
+//
+//   - nightly and manual copies beyond keep are deleted oldest first, except
+//     that the newest copy without warnings is always kept, even when that
+//     keeps one more than keep, so repeated runs with missing blobs cannot
+//     rotate away the last copy that has every blob;
+//   - before-restore copies are deleted once older than seven days, and do
+//     not count toward keep.
+func planRotation(folders []folder, keep int, now time.Time, pinned map[string]bool) []string {
 	if keep < 1 {
 		keep = 1
 	}
-	var regular []folder
+	byKind := map[Kind][]folder{}
 	for _, f := range folders {
-		if f.manifest != nil {
-			regular = append(regular, f)
+		if f.manifest == nil {
+			continue
+		}
+		group := f.kind
+		if group == KindManual {
+			group = KindNightly
+		}
+		byKind[group] = append(byKind[group], f)
+	}
+	for _, list := range byKind {
+		sort.Slice(list, func(i, j int) bool { return list[i].at.After(list[j].at) })
+	}
+	var deletes []string
+	drop := func(f folder) {
+		if !pinned[f.id] {
+			deletes = append(deletes, f.id)
 		}
 	}
-	sort.Slice(regular, func(i, j int) bool { return regular[i].at.After(regular[j].at) })
+	regular := byKind[KindNightly]
 	newestClean := ""
 	for _, f := range regular {
 		if f.manifest.Status() == StatusComplete {
@@ -44,10 +68,14 @@ func planRotation(folders []folder, keep int) []string {
 			break
 		}
 	}
-	var deletes []string
 	for i, f := range regular {
 		if i >= keep && f.id != newestClean {
-			deletes = append(deletes, f.id)
+			drop(f)
+		}
+	}
+	for _, f := range byKind[KindBeforeRestore] {
+		if now.Sub(f.at) > beforeRestoreRetention {
+			drop(f)
 		}
 	}
 	sort.Strings(deletes)

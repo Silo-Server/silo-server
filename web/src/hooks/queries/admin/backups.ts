@@ -8,6 +8,7 @@ import {
   getAdminBackupCapabilities,
   listAdminBackups,
   startAdminBackup,
+  type AdminBackupDownloadScope,
   type AdminBackupList,
 } from "@/api/v2/adminBackups";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -79,8 +80,8 @@ export function useDeleteAdminBackup() {
 
 export function useAdminBackupDownloadLinks() {
   return useMutation({
-    mutationFn: ({ id }: { id: string }) =>
-      createAdminBackupDownloadLinks(captureAdminAuthority(), id),
+    mutationFn: ({ id, scope = "full" }: { id: string; scope?: AdminBackupDownloadScope }) =>
+      createAdminBackupDownloadLinks(captureAdminAuthority(), id, scope),
     retry: false,
   });
 }

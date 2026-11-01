@@ -150,6 +150,23 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return fmt.Errorf("catalog: artwork persistence is not configured")
 	}
+	tx, err := s.itemRepo.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("catalog: begin artwork publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := PublishArtworkSelectionInTx(ctx, tx, selection); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("catalog: commit artwork publication: %w", err)
+	}
+	return nil
+}
+
+// PublishArtworkSelectionInTx is PublishArtworkSelection in the caller's
+// transaction.
+func PublishArtworkSelectionInTx(ctx context.Context, tx pgx.Tx, selection ArtworkSelection) error {
 	selection.TargetType = strings.ToLower(strings.TrimSpace(selection.TargetType))
 	selection.ImageType = strings.ToLower(strings.TrimSpace(selection.ImageType))
 	selection.TargetContentID = strings.TrimSpace(selection.TargetContentID)
@@ -163,12 +180,6 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 	if err != nil {
 		return err
 	}
-
-	tx, err := s.itemRepo.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("catalog: begin artwork publication: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 
 	var previousPath string
 	selectSQL := fmt.Sprintf("SELECT COALESCE(%s, '') FROM %s WHERE content_id = $1 FOR UPDATE", pathColumn, table)
@@ -225,10 +236,6 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 		if err := queueArtworkRevisionGC(ctx, tx, previousPath, selection.ImageType, time.Now().Add(defaultArtworkGCGracePeriod)); err != nil {
 			return err
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("catalog: commit artwork publication: %w", err)
 	}
 	return nil
 }

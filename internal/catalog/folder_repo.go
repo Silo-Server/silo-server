@@ -112,6 +112,17 @@ type CreateFolderInput struct {
 	// RealtimeMonitoring is the library's real-time monitoring switch; nil
 	// means on.
 	RealtimeMonitoring *bool
+
+	// The fields below restore a library from a backup; the library editor
+	// leaves them zero.
+
+	// ID is an id reserved with ReserveFolderID; zero assigns one.
+	ID int
+	// Disabled creates the library disabled.
+	Disabled                     bool
+	AutoTranslateMetadata        bool
+	PosterPath                   string
+	CollectionUngroupedSortOrder *int
 }
 
 // FolderReorderEntry carries a folder ID and its new sort position.
@@ -329,6 +340,31 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	folder, err := CreateFolderInTx(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing create transaction: %w", err)
+	}
+	return folder, nil
+}
+
+// ReserveFolderID takes the next library id without creating the library,
+// so objects keyed by it (the library poster) can be written before the
+// transaction that creates it.
+func (r *FolderRepository) ReserveFolderID(ctx context.Context) (int, error) {
+	var id int
+	if err := r.pool.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('public.media_folders', 'id'))`).Scan(&id); err != nil {
+		return 0, fmt.Errorf("reserving a library id: %w", err)
+	}
+	return id, nil
+}
+
+// CreateFolderInTx inserts a media folder with its paths in the caller's
+// transaction: the library editor's create, for a caller that commits it
+// with other writes.
+func CreateFolderInTx(ctx context.Context, tx pgx.Tx, input CreateFolderInput) (*models.MediaFolder, error) {
 	metaLang := input.MetadataLanguage
 	if metaLang == "" {
 		metaLang = "en"
@@ -352,11 +388,23 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 	if input.BoxSetsInSearch != nil {
 		boxSetsInSearch = *input.BoxSetsInSearch
 	}
-
-	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, trickplay_enabled, box_sets_enabled, box_set_min_movies, box_sets_in_search, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
+	ungroupedOrder := 9999
+	if input.CollectionUngroupedSortOrder != nil {
+		ungroupedOrder = *input.CollectionUngroupedSortOrder
+	}
+	query := `INSERT INTO media_folders (id, type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, trickplay_enabled,
+			box_sets_enabled, box_set_min_movies, box_sets_in_search,
+			enabled, auto_translate_metadata, poster_path, collection_ungrouped_sort_order, sort_order)
+		OVERRIDING SYSTEM VALUE
+		VALUES (COALESCE($9::bigint, nextval(pg_get_serial_sequence('public.media_folders', 'id'))), $1, $2, $3, $4, $5, $6, $7, $8,
+			$14, $15, $16,
+			$10, $11, $12, $13, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
 		RETURNING ` + folderColumns
 
+	var id *int
+	if input.ID > 0 {
+		id = &input.ID
+	}
 	row := tx.QueryRow(ctx, query,
 		input.Type,
 		input.Name,
@@ -366,6 +414,11 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		realtimeMonitoring,
 		trailerKinds,
 		input.TrickplayEnabled,
+		id,
+		!input.Disabled,
+		input.AutoTranslateMetadata,
+		input.PosterPath,
+		ungroupedOrder,
 		input.BoxSetsEnabled,
 		boxSetMinMovies,
 		boxSetsInSearch,
@@ -392,10 +445,6 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 
 	if err := seedCanonicalUserCollectionsGroup(ctx, tx, folder.ID); err != nil {
 		return nil, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing create transaction: %w", err)
 	}
 
 	folder.Paths = input.Paths

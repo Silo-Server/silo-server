@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -603,6 +604,17 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
 	{"ai.chat_model", "subtitle_ai.chat_model"},
+}
+
+// AdminSettingDefaultKeys lists every key with an admin default, sorted. The
+// backup restore table must classify each one.
+func AdminSettingDefaultKeys() []string {
+	keys := make([]string, 0, len(adminSettingDefaults))
+	for key := range adminSettingDefaults {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // EffectiveAdminSettings overlays persisted values onto the runtime defaults

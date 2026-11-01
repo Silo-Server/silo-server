@@ -47,6 +47,9 @@ type PluginHandler struct {
 	// authProvidersChanged rebuilds the sign-in provider registry on every
 	// node after an auth binding write; nil when sign-in is not wired.
 	authProvidersChanged func(context.Context)
+	// seedPlacement resolves a provider's chain placement; nil uses
+	// metadata.LookupSeedPlacementChecked. Tests replace it.
+	seedPlacement seedPlacementLookup
 }
 
 // SetAuthProvidersChanged registers the callback an auth binding write runs
@@ -696,6 +699,38 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 				"error", err)
 		}
 	}
+}
+
+// addMetadataProvidersToChains is the restore's provider-chain sync: unlike
+// an admin upload's best-effort syncMetadataProviders, a placement lookup
+// that fails appends nothing and is returned, so the restore keeps its
+// follow-up and retries instead of saving a fallback placement.
+func (h *PluginHandler) addMetadataProvidersToChains(ctx context.Context, installation *plugins.Installation) error {
+	if h.chainRepo == nil {
+		return nil
+	}
+
+	caps, err := h.installations.ListCapabilities(ctx, installation.ID)
+	if err != nil {
+		return fmt.Errorf("listing capabilities for metadata provider sync: %w", err)
+	}
+
+	lookup := h.seedPlacement
+	if lookup == nil {
+		lookup = metadata.LookupSeedPlacementChecked
+	}
+	var errs []error
+	for _, cap := range caps {
+		if cap.Type != "metadata_provider.v1" {
+			continue
+		}
+		if err := h.chainRepo.AppendProviderToAllChainsChecked(ctx, installation.ID, cap.ID, func(level string) (metadata.SeedPlacement, error) {
+			return lookup(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("appending provider %s to library chains: %w", cap.ID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func isZipUpload(data []byte) bool {

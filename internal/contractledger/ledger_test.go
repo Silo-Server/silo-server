@@ -1042,6 +1042,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"startAdminBackup":                         "V2-only backup. The cluster-wide backup lock answers a concurrent or replayed start with 409 instead of a second backup.",
 	"deleteAdminBackup":                        "V2-only backup deletion. Deleting a backup that is already gone answers 404, so a replay changes nothing.",
 	"createAdminBackupDownloadLinks":           "V2-only backup download links. Minting links writes nothing; a replay mints fresh short-lived links.",
+	"startAdminBackupRestore":                  "V2-only selective restore. The one-active-restore constraint answers a concurrent or replayed start with 409 and the running job, and every restored item is idempotent.",
 	"createThemeSongPlayback":                  "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":              "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",
 	"createAdminLogsSocketTicket":              "V2-only administrator log stream handshake delegation: v1 accepted the bearer token in the socket URL directly. Repeated minting grants the same bounded authority through expiring single-use tickets; the legacy log stream GET retains its own mapping.",

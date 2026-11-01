@@ -1,5 +1,6 @@
 import { Fragment, useId, useState } from "react";
 import { Download, LoaderCircle, Trash2 } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 
 import type {
@@ -38,8 +39,10 @@ import {
   backupDateTime,
   backupErrorMessage,
   backupRowId,
+  canRestoreParts,
   isFinished,
   knownSiloVersion,
+  restorePath,
 } from "./backupPresentation";
 
 function takenLabel(backup: AdminBackup) {
@@ -125,7 +128,7 @@ function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
 
 /** What the downloaded files are for, in the download dialog's description. */
 function downloadHint(): string {
-  return "To restore it, put the files in one folder.";
+  return "To restore it in full, put the files in one folder. To restore parts of it on another server, upload restore-set.tar there.";
 }
 
 function DownloadDialogBody({
@@ -179,6 +182,7 @@ const PHONE_CELL = "max-sm:block max-sm:p-0 max-sm:whitespace-normal";
 export interface BackupTableProps {
   /** Newest first, as the list returns them. */
   items: AdminBackup[];
+  selectedId: string | null;
   showAll: boolean;
   onShowAllChange: (showAll: boolean) => void;
   /** The SQLite user store is in use; its conflicts are not "busy" conflicts. */
@@ -187,15 +191,19 @@ export interface BackupTableProps {
   active: AdminBackupActive | undefined;
   /** Why deleting is unavailable now, from the lock; null when it is free. */
   deleteBlocker: string | null;
+  /** This server can restore parts of a backup. */
+  selectiveRestore: boolean;
 }
 
 export function BackupTable({
   items,
+  selectedId,
   showAll,
   onShowAllChange,
   sqliteUserStore,
   active,
   deleteBlocker,
+  selectiveRestore,
 }: BackupTableProps) {
   const deleteBlockerId = useId();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -276,10 +284,18 @@ export function BackupTable({
               const open = expanded.has(backup.id);
               const pendingDownload =
                 downloadLinks.isPending && downloadLinks.variables?.id === backup.id;
+              const restorable = selectiveRestore && canRestoreParts(backup);
+              const restoreLabel = (
+                <>
+                  Restore…
+                  <span className="sr-only"> from {takenLabel(backup)}</span>
+                </>
+              );
               return (
                 <Fragment key={backup.id}>
                   <TableRow
                     id={backupRowId(backup.id)}
+                    data-state={selectedId === backup.id ? "selected" : undefined}
                     className={cn(
                       "scroll-mt-24",
                       "max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:items-start max-sm:gap-x-3 max-sm:gap-y-1 max-sm:px-3 max-sm:py-3",
@@ -319,6 +335,11 @@ export function BackupTable({
                     </TableCell>
                     <TableCell className={cn(PHONE_CELL, "max-sm:col-span-2 max-sm:row-start-3")}>
                       <div className="flex flex-wrap justify-end gap-1 max-sm:-ml-2.5 max-sm:justify-start">
+                        {restorable ? (
+                          <Button asChild variant="ghost" size="sm">
+                            <Link to={restorePath(backup.id)}>{restoreLabel}</Link>
+                          </Button>
+                        ) : null}
                         {isFinished(backup) ? (
                           <Button
                             variant="ghost"

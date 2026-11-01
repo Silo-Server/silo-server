@@ -140,9 +140,17 @@ the jobs realtime channel use the same safe storage-transition receipt,
 including the websocket snapshot; they omit the raw request and result
 documents for this job type.
 
+Backup restore jobs (`backup_restore`) include `backup_restore_result`, the
+restore report described in [backups-api.md](backups-api.md#restore): each
+chosen item restored, unchanged, left out with a reason, or failed with its
+error, kept when the job is canceled or interrupted. A restore is never
+requeued: a worker that stops heartbeating leaves the job failed with
+`interrupted: true` in its report.
+
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for library refresh, storage-transition, and image cache cleanup jobs. A job's
+for library refresh, storage-transition, image cache cleanup, and backup
+restore jobs. A restore stops between items and keeps what committed. A job's
 `cancelable` field is true exactly when it is one of these types and not
 terminal, and every job resource that reports `cancelable: true` accepts the
 cancellation through its own cancel operation. A library refresh can therefore

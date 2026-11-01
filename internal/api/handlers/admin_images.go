@@ -759,3 +759,13 @@ func findBestContentID(item *models.MediaItem, providerID string) string {
 
 type AdminImageEntryView = itemImageEntry
 type AdminCurrentImagesView = currentImages
+
+// ArtworkRestored announces artwork a backup restore published for
+// contentID (a season's parentContentID is its series), as an upload does.
+func (h *AdminImageHandler) ArtworkRestored(ctx context.Context, contentID, parentContentID string) {
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, parentContentID)
+	publishEventMetadataUpdate(ctx, h.EventsHub, 0, contentID)
+	if parentContentID != "" && parentContentID != contentID {
+		publishEventMetadataUpdate(ctx, h.EventsHub, 0, parentContentID)
+	}
+}
