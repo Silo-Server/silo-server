@@ -390,22 +390,26 @@ func compatSignatureFallbackSubtitleIndex(candidates []compatSubtitleCandidate, 
 	return best
 }
 
-// compatLanguageMatchRank orders a candidate the preferred language matches
-// as the web player does: the same tag, then the bare language, then another
-// variant of it. It is -1 when the preference does not match the candidate.
+// compatLanguageMatchRank orders a remembered-track fallback as the web
+// player does: the same tag, then the bare language, then another variant.
+// Unlike ordinary Jellyfin selection, a regional preference can fall back
+// within its primary language. Unrelated languages return -1.
 func compatLanguageMatchRank(language, preferred string) int {
-	if !compatContainsLanguage([]string{preferred}, language) {
+	candidate := lang.CompatibleTag(language)
+	preferredTag := lang.CompatibleTag(preferred)
+	if candidate == "" || preferredTag == "" {
 		return -1
 	}
-	candidate := lang.CompatibleTag(language)
-	switch {
-	case candidate == lang.CompatibleTag(preferred):
+	if candidate == preferredTag {
 		return 0
-	case !strings.Contains(candidate, "-"):
-		return 1
-	default:
-		return 2
 	}
+	if primary := lang.PrimaryLanguage(candidate); primary == "" || primary != lang.PrimaryLanguage(preferredTag) {
+		return -1
+	}
+	if !strings.Contains(candidate, "-") {
+		return 1
+	}
+	return 2
 }
 
 // compatBitmapSubtitle mirrors the web player's isBitmapCodec.
