@@ -136,7 +136,11 @@ Then register again with the same key the reset carried. The cleared
 installation accepts any positive generation, so the app can restart its counter
 at 1. A provider request already sent cannot be recalled, and a registration
 that reaches the server after the reset binds the installation, as a first
-registration would.
+registration would. The app should send the reset and the registration after
+it on the same serialized path as its other registrations for that device. A
+registration with an older key that is still in flight can otherwise bind first,
+and the next registration with the new key gets `push_installation_key_mismatch`
+again; the app recovers by resetting on that later attempt.
 
 ## Retirement without a session
 
