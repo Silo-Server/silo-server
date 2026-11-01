@@ -3,13 +3,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminAuthorityScope, captureAdminAuthority } from "@/api/v2/adminAuthority";
 import {
+  acknowledgeAdminBackupKey,
   createAdminBackupDownloadLinks,
   deleteAdminBackup,
   getAdminBackupCapabilities,
   listAdminBackups,
   startAdminBackup,
+  testAdminBackupS3,
   type AdminBackupDownloadScope,
   type AdminBackupList,
+  type AdminBackupS3TestBody,
 } from "@/api/v2/adminBackups";
 import { adminKeys } from "@/hooks/queries/keys";
 
@@ -83,5 +86,22 @@ export function useAdminBackupDownloadLinks() {
     mutationFn: ({ id, scope = "full" }: { id: string; scope?: AdminBackupDownloadScope }) =>
       createAdminBackupDownloadLinks(captureAdminAuthority(), id, scope),
     retry: false,
+  });
+}
+
+export function useTestAdminBackupS3() {
+  return useMutation({
+    mutationFn: (body: AdminBackupS3TestBody) => testAdminBackupS3(captureAdminAuthority(), body),
+    retry: false,
+  });
+}
+
+/** Confirms the SECRET_KEY copy; the list's key_confirmed and warnings change with it. */
+export function useAcknowledgeAdminBackupKey() {
+  const invalidate = useInvalidateBackups();
+  return useMutation({
+    mutationFn: (keyCheck: string) => acknowledgeAdminBackupKey(captureAdminAuthority(), keyCheck),
+    retry: false,
+    onSettled: invalidate,
   });
 }

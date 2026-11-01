@@ -2,9 +2,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AdminBackup } from "@/api/v2/adminBackups";
+import type { AdminBackup, AdminBackupList } from "@/api/v2/adminBackups";
 
-import { canRestoreParts, restoreCommand, retentionPlan } from "./backupPresentation";
+import {
+  canRestoreParts,
+  keyConfirmationNeeded,
+  restoreCommand,
+  retentionPlan,
+} from "./backupPresentation";
 
 function backup(day: number, overrides: Partial<AdminBackup> = {}): AdminBackup {
   return {
@@ -81,6 +86,11 @@ describe("restoreCommand", () => {
       "/srv/silo data/it's/backups/srv-1/x",
       "silo backup restore --from '/srv/silo data/it'\\''s/backups/srv-1/x'",
     ],
+    [
+      "reads a backup in a bucket from its address, without the trailing slash",
+      "s3://backups/silo/backups/srv-1/20261031T040000Z-nightly/",
+      "silo backup restore --from s3://backups/silo/backups/srv-1/20261031T040000Z-nightly",
+    ],
   ])("%s", (_case, location, expected) => {
     expect(restoreCommand(location)).toBe(expected);
   });
@@ -89,9 +99,31 @@ describe("restoreCommand", () => {
 describe("canRestoreParts", () => {
   it.each([
     ["a plain restore set", ["db.dump", "restore-set.tar", "manifest.json"], true],
+    ["an encrypted restore set", ["db.dump.age", "restore-set.tar.age", "manifest.json"], true],
     ["no restore set", ["db.dump", "blobs.tar", "manifest.json"], false],
   ])("%s", (_case, names, expected) => {
     const objects = names.map((name) => ({ name, sha256: "", size_bytes: 1 }));
     expect(canRestoreParts(backup(31, { objects }))).toBe(expected);
+  });
+});
+
+describe("keyConfirmationNeeded", () => {
+  const list = (overrides: Partial<AdminBackupList>) =>
+    ({ destination: "s3", encrypted: true, key_confirmed: false, ...overrides }) as AdminBackupList;
+
+  it.each([
+    [
+      "asks on the default destination when it is an encrypted private bucket",
+      list({ destination: "default" }),
+      true,
+    ],
+    [
+      "not on the default destination on this server's disk",
+      list({ destination: "default", encrypted: false }),
+      false,
+    ],
+    ["not for a confirmed key", list({ key_confirmed: true }), false],
+  ])("%s", (_case, value, expected) => {
+    expect(keyConfirmationNeeded(value)).toBe(expected);
   });
 });

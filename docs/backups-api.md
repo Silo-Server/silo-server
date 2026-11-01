@@ -19,7 +19,16 @@ from a restore set [uploaded](#uploads) from another server.
 
 Settings are written through the [admin settings API](admin-settings-api.md):
 `backup.enabled`, `backup.time`, `backup.keep` (1–60),
-`backup.include_intro_fingerprints`, and `backup.include_subtitles`.
+`backup.include_intro_fingerprints`, `backup.include_subtitles`,
+`backup.destination` (`default` or `s3`), and the backup bucket's
+`backup.s3.endpoint`, `.region`, `.bucket`, `.key_prefix`, `.access_key`,
+`.path_style`, and `.secret_key`. The secret key is sensitive: it is encrypted
+at rest, never returned, and `GET /admin/settings/sensitive-status` reports
+whether it is set. A save that switches `backup.destination` to `s3` answers
+`409 backup_key_not_confirmed` unless
+[the key was confirmed](#s3-bucket-and-key-confirmation) first, and `400`
+without an endpoint and a bucket. `backup.s3.key_acknowledged` is written
+only by the acknowledge-key operation; the settings API refuses it.
 
 ## Operations
 
@@ -33,6 +42,8 @@ Settings are written through the [admin settings API](admin-settings-api.md):
 | `GET /admin/backups/{id}/objects/{name}` | Stream one object; authorized by the signed link, not a session |
 | `GET /admin/backups/{id}/restore-set` | Preview a backup's restore set against this server |
 | `POST /admin/backups/{id}/restore` | Restore chosen items as a `backup_restore` admin job |
+| `POST /admin/backups/s3/test` | Test a bucket for backups: reach it, write and delete a test file |
+| `POST /admin/backups/s3/acknowledge-key` | Confirm a copy of this server's `SECRET_KEY` is kept off the server |
 | `GET /admin/backups/uploads` | Restore sets uploaded to this server, finished or not |
 | `POST /admin/backups/uploads` | Start uploading a restore set |
 | `PUT /admin/backups/uploads/{upload_id}/parts/{part}` | Store one part of an upload |
@@ -53,10 +64,14 @@ server share an id or a time.
 
 `GET /admin/backups/capabilities` is a capability document: `state` is
 `available` when the server has somewhere to write backups and
-`not_configured` when it does not: backups are written to the operational
-store on local storage, and an S3 artwork backend has none.
+`not_configured` when the current destination does not exist (the default
+destination on an S3 artwork backend without a private bucket).
 `destinations` lists the destinations this server can write to: `default`
-when it has a local operational store. `selective_restore` and `download` are `true` when available.
+when it has an operational store, and `s3`, a bucket used only for backups.
+`encryption` is `true` when `s3` is listed. Backups in any S3 bucket are
+always encrypted: the `s3` destination, and `default` when this server's
+operational store is its private bucket. On the local filesystem they are
+not. `selective_restore` and `download` are `true` when available.
 `upload` is `true` when the server has an operational store (uploads always
 go there) and the user store is PostgreSQL (a restore's own backup needs it).
 `max_upload_bytes` is the largest restore set an upload takes (2 GiB).
@@ -67,11 +82,19 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 
 - `server_id`: this server's identity; its backups live under
   `backups/<server_id>/`.
-- `destination` (`default`) and `destination_available`, false when the
-  destination is missing or cannot be reached.
+- `destination` (`default` or `s3`) and `destination_available`, false when
+  the destination is missing, not set up, or cannot be reached. `items` lists
+  only the current destination's backups; copies at a previous destination
+  stay there.
+- `encrypted`: whether new backups are encrypted: `true` for `s3`, and for
+  `default` when it is the private bucket. Clients should offer the key
+  confirmation whenever `encrypted` is `true` and `key_confirmed` is not,
+  whatever the destination.
 - `key_check`: this server's `SECRET_KEY` check value, 16 hex digits in
   groups of 4 (`1a2b-3c4d-5e6f-7a8b`). It names the key without revealing it;
   `silo secret check` prints the same value for a key.
+- `key_confirmed`: whether an admin confirmed keeping a copy of the key with
+  this check value. Encrypted backups run only while it is `true`.
 - `enabled`: whether nightly backups run.
 - `busy`: whether a backup or restore holds the cluster-wide backup lock now,
   on any server.
@@ -87,12 +110,12 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
   it stopped), `started_at`, `finished_at`, and `error` for a failed or
   interrupted run.
 - `keep`: `backup.keep`, how many nightly and manual backups rotation keeps.
-- `last_success_at`: when the latest successful backup finished (the newest
-  manifest when that is later).
+- `last_success_at`: when the latest successful backup finished, at any
+  destination (the current one's newest manifest when that is later).
 - `items`: this server's backups, newest first. Each has `id`, `kind`
   (`nightly`, `manual`, `before-restore`), `status`,
   `created_at`, `completed_at`, `size_bytes`, `silo_version`, `location`
-  (a filesystem path on this server's storage),
+  (a filesystem path on a local store, or `s3://bucket/key` in a bucket),
   `blob_count`,
   `missing_blobs` (`store`, `key`, `source`), `restore_set_omitted` (items
   the restore set could not carry: `section`, `id`, `label`, `reason` of
@@ -102,14 +125,21 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
   `notifications: reading notification preferences`), stable across backups
   so a client can group items without parsing `message`, and `error`, the
   underlying error without ids; the dump still holds them),
-  `objects` (`name`, `size_bytes`, and `sha256` of the stored bytes),
+  `objects` (`name` as stored, `size_bytes`, and `sha256` of the stored
+  bytes), `encrypted` (the objects are named `db.dump.age` and so on),
   `key_check` (the check value of the key the backup was taken with), and
-  `key_matches` (whether that is this server's; settings and credentials the
-  backup holds encrypted cannot be read with another key).
+  `key_matches` (whether that is this server's). An encrypted backup that does
+  not match cannot be previewed, restored, or downloaded decrypted here.
 - `other_server_ids`: other server identities with backups at the destination.
 - `warnings`: `{code, message}` for the dashboard. Codes are `disabled`,
-  `no_recent_backup` (none completed in 48 hours), `destination_unavailable`,
-  `sqlite_user_store`, `pg_dump_missing`, and `pg_dump_too_old`.
+  `no_recent_backup` (none completed in 48 hours, at any destination),
+  `no_backups_at_destination` (backups completed before, but none is at the
+  current destination: it was switched, and earlier copies stay where they
+  were written), `destination_unavailable`,
+  `sqlite_user_store`, `pg_dump_missing`, `pg_dump_too_old`, and
+  `key_not_confirmed` (backups are `encrypted` and the current `SECRET_KEY`
+  was never confirmed, or changed since: encrypted backups, and uploads to a
+  bucket, are paused).
 
 `status` is one of:
 
@@ -129,9 +159,10 @@ the responding server, answering `202` with `{id, kind: "manual", status:
 "in_progress"}`. The id is the folder the backup writes. Poll the list, or the
 `backup` task through the [admin tasks API](admin-tasks-api.md), for the
 result. It answers `409 conflict` when another backup or restore is running
-on any server, `409` with the SQLite user store message on that backend, and
-`409 capability_not_configured` with no destination. It is not retried
-automatically.
+on any server, `409` with the SQLite user store message on that backend,
+`409 capability_not_configured` with no destination or no bucket set up, and
+`409 conflict` while encrypted backups are paused for an unconfirmed key. It is not
+retried automatically.
 
 ### Delete
 
@@ -148,15 +179,51 @@ running restore reads the backup.
 `manifest.json` of a backup with a manifest (`404` otherwise). With
 `{"scope": "restore-set"}` it answers `restore-set.tar` alone, and `409` for
 a backup without one. Every object downloads under its stored name
-(`db.dump`, `blobs.tar`, `restore-set.tar`, `manifest.json`), so a folder of
-downloads is one `silo backup restore --from` reads, and `restore-set.tar` is
-the file an [upload](#uploads) on another server takes. Each `url`
+(`db.dump`, `blobs.tar`, `restore-set.tar`, `manifest.json`, with `.age` for
+an encrypted backup), so a folder of downloads is one
+`silo backup restore --from` reads, and `restore-set.tar` is the file an
+[upload](#uploads) on another server takes.
+
+For an encrypted backup the full scope gives the objects as stored, encrypted
+(decrypt one with `silo backup decrypt <file>.age` and `SECRET_KEY` set, or
+restore the folder directly). The restore-set scope gives one link named
+`restore-set.tar` that this server serves decrypted, only after the stored
+object matched the manifest's size and SHA-256; `size_bytes` is the stored
+size, slightly larger than the file. The link answers `409` for a backup
+taken with another key, naming both check values, and for a stored object
+that no longer matches its checksum. Each `url`
 is a presigned storage URL where the destination can presign, or a link to
 `GET /admin/backups/{id}/objects/{name}?exp=…&sig=…`, valid for 15 minutes and
 scoped to that one object. A browser opens it without an `Authorization`
 header. The streaming route answers `404` for any invalid, expired, or
 mismatched signature without revealing whether the backup exists, and `503`
 when storage is unavailable.
+
+### S3 bucket and key confirmation
+
+`POST /admin/backups/s3/test` with `{endpoint, region, bucket, key_prefix,
+access_key, secret_key, path_style}` tests a bucket the way backups use it:
+`HeadBucket`, then it writes and deletes a test object under
+`<key_prefix>/backups/`. It saves nothing and answers `200` with `{ok,
+step, message}`: `ok: true` and "Connected. Silo wrote and deleted a test
+file.", or `ok: false` with the `step` that failed (`endpoint`: the address
+cannot be reached; `credentials`: the keys were refused; `bucket`: no such
+bucket, or the wrong region; `permission`: the keys cannot write or delete
+under the folder) and what to check. The backend's own message is never
+returned. An omitted `secret_key` uses the stored `backup.s3.secret_key`, but
+only when `endpoint` and `access_key` are the stored ones, so a test cannot
+send the stored secret elsewhere.
+
+`POST /admin/backups/s3/acknowledge-key` with `{key_check}` records that a
+copy of this server's `SECRET_KEY` is kept somewhere other than this server.
+`key_check` is the value from the list, and must be this server's current one
+(`409 conflict` otherwise: the key changed since it was read). It answers
+`{key_check}`. A new `SECRET_KEY` needs confirming again; until then the list
+warns `key_not_confirmed` and encrypted backups (the `s3` destination, or
+`default` on the private bucket) are paused.
+
+A preview, a restore, or a restore-set download of an encrypted backup taken
+with another `SECRET_KEY` answers `409 conflict` naming both check values.
 
 ### Preview a restore set
 
@@ -356,7 +423,11 @@ A restore set from another server is uploaded in parts and then restored
 from as a backup is. The file is the bare `restore-set.tar` that
 [a backup's download](#downloads) gives; its name does not matter. Parts are written straight to this server's
 backup storage, so any API server takes any part, and the session lives in
-the database. [architecture/backups.md](architecture/backups.md#uploads)
+the database. Where that storage is this server's private S3 bucket, the
+parts are stored encrypted with a key derived from `SECRET_KEY`, as backups
+there are, and creating an upload or sending a part answers `409 conflict`
+until [the key is confirmed](#s3-bucket-and-key-confirmation) (the list
+warns `key_not_confirmed`). [architecture/backups.md](architecture/backups.md#uploads)
 describes the storage and the rules.
 
 Each upload is `{id, status, size_bytes, part_size, part_count,
@@ -389,11 +460,17 @@ reading it), `complete`, or `rejected`.
   order through the [restore set checks](architecture/backups.md#restore-set)
   under the cluster-wide lock, for at most 10 minutes, freezes the SHA-256 of
   the bytes it read as `digest` (the file as uploaded, the bytes the client
-  sent), and answers `complete` with `source`, or `rejected` with
+  sent, whether or not its parts are stored encrypted), and answers `complete` with `source`, or `rejected` with
   `rejection.reason`:
   - `not_a_restore_set`: the reader refused it; `message` says why.
   - `newer_silo`: "This backup is from a newer Silo. Upgrade this server
     first."
+  - `encrypted`: an age file this server's key cannot open: "This file is
+    encrypted with another server's SECRET_KEY. On a computer with that
+    server's SECRET_KEY in the environment, run `silo backup decrypt
+    restore-set.tar.age -o restore-set.tar`, then upload restore-set.tar."
+    One encrypted with this server's key is decrypted and read; `digest` is
+    of the uploaded bytes.
   - `checksum_mismatch`: the bytes are not the `sha256` the upload declared.
 
   A rejected upload's parts are deleted at once. A complete or rejected

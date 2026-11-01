@@ -73,6 +73,28 @@ func KeyCheckValue(masterKey []byte) (string, error) {
 	return digits[0:4] + "-" + digits[4:8] + "-" + digits[8:12] + "-" + digits[12:16], nil
 }
 
+// backupKeyInfo domain-separates the backup archive key from the data key and
+// the check value. Backups encrypted under it stay readable only with the
+// same SECRET_KEY and label, so a future key rotation must keep deriving it
+// from the old key for old backups; the manifest's check value names that key.
+const backupKeyInfo = "silo/backup-encryption/v1"
+
+// backupKeyLen is the archive key's length in bytes before encoding.
+const backupKeyLen = 32
+
+// BackupPassphrase derives the passphrase backup archives are encrypted with:
+// HKDF-SHA256 over masterKey with backupKeyInfo, 32 bytes, in standard
+// base64. It is the age scrypt passphrase of every encrypted backup object,
+// so `age -d` decrypts one given it. It applies the same minimum length as
+// New.
+func BackupPassphrase(masterKey []byte) (string, error) {
+	key, err := deriveFromMasterKey(masterKey, backupKeyInfo, backupKeyLen, "backup key")
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
 // deriveFromMasterKey is HKDF-SHA256 over masterKey with info, refusing a key
 // shorter than New accepts. what names the derived value in errors.
 func deriveFromMasterKey(masterKey []byte, info string, length int, what string) ([]byte, error) {

@@ -16,29 +16,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
-	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 )
 
 // newBackupService builds the backup subsystem over the operational store,
-// which is the default destination when it is on local storage. A
-// deployment without one (an S3 artwork backend) still gets a service, so
-// the Backups page can say why there is nowhere to write.
+// which is the default destination, with the archive key an S3 destination
+// encrypts with. A deployment without an operational store (an S3 artwork
+// backend with no private bucket) still gets a service, so the Backups page
+// can say why there is nowhere to write, or keep backups in an S3 bucket.
 func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *catalog.EncryptedSettingsRepo, deps *api.Dependencies) *backup.Service {
-	keyCheck, err := secret.KeyCheckValue(bc.SecretKey)
+	archiveKey, err := backup.NewArchiveKey(bc.SecretKey)
 	if err != nil {
-		log.Fatalf("backup key check value: %v", err)
+		log.Fatalf("backup archive key: %v", err)
 	}
 	return backup.New(backup.Options{
 		Pool:                pool,
 		DatabaseURL:         bc.DatabaseURL,
 		Settings:            settings,
+		SettingsWriter:      settings,
 		Stores:              deps.Blobs,
 		Destination:         backup.NewStoreDestination(deps.Blobs.Operational),
 		Locker:              backup.PostgresLocker{Pool: pool},
 		Status:              backup.PostgresStatus{Pool: pool},
 		ServerID:            serveridentity.New(settings).ServerID,
-		KeyCheck:            keyCheck,
+		KeyCheck:            archiveKey.Check,
+		ArchiveKey:          archiveKey,
 		Cipher:              deps.SecretCipher,
 		UserStoreBackend:    func() string { return deps.CurrentConfig().UserDB.Backend },
 		AllowUnratedContent: config.NewUnratedContentPolicy(settings).AllowUnratedContent,

@@ -3,6 +3,7 @@ import type {
   AdminBackupActive,
   AdminBackupKind,
   AdminBackupLastRun,
+  AdminBackupList,
   AdminBackupStatus,
   AdminBackupWarning,
 } from "@/api/v2/adminBackups";
@@ -16,10 +17,66 @@ export const BACKUP_INTRO_KEY = "backup.include_intro_fingerprints";
 export const BACKUP_SUBTITLES_KEY = "backup.include_subtitles";
 export const BACKUP_SCHEDULE_KEYS = [BACKUP_ENABLED_KEY, BACKUP_TIME_KEY, BACKUP_KEEP_KEY];
 export const BACKUP_CONTENT_KEYS = [BACKUP_INTRO_KEY, BACKUP_SUBTITLES_KEY];
-export const BACKUP_SETTING_KEYS = [...BACKUP_SCHEDULE_KEYS, ...BACKUP_CONTENT_KEYS];
+/** "default" (the server's own storage) or "s3" (a bucket used only for backups). */
+export const BACKUP_DESTINATION_KEY = "backup.destination";
+export const BACKUP_SETTING_KEYS = [
+  ...BACKUP_SCHEDULE_KEYS,
+  ...BACKUP_CONTENT_KEYS,
+  BACKUP_DESTINATION_KEY,
+];
 
-/** Where backups are kept on this server: its own disk, or nowhere yet. */
-export type BackupLocation = "local" | "none";
+/** Where the default destination lives on this server. */
+export type BackupLocation = "local" | "bucket" | "none";
+
+/**
+ * Where the default destination (the server's own storage) lives. The list
+ * shows only the current destination's backups, so their locations say so
+ * only while default is current; otherwise the private bucket setting does.
+ */
+export function defaultBackupLocation({
+  hasDefault,
+  destination,
+  items,
+  privateBucket,
+}: {
+  /** The server has its own storage: capabilities list "default". */
+  hasDefault: boolean;
+  destination: AdminBackupList["destination"] | undefined;
+  items: readonly AdminBackup[];
+  /** The persisted s3.private_bucket setting. */
+  privateBucket: string;
+}): BackupLocation {
+  if (!hasDefault) return "none";
+  if (destination !== "s3" && items.length > 0)
+    return items.some((item) => isBucketLocation(item.location)) ? "bucket" : "local";
+  return privateBucket.trim() ? "bucket" : "local";
+}
+
+/**
+ * Whether the page asks the admin to confirm this server's SECRET_KEY.
+ * Encrypted backups (any bucket: the S3 destination, or the server's own
+ * storage when that is a private bucket) pause until a copy of the current
+ * key is confirmed.
+ */
+export function keyConfirmationNeeded(list: AdminBackupList | undefined): boolean {
+  return Boolean(list?.encrypted && !list.key_confirmed);
+}
+
+/** An encrypted backup taken with another SECRET_KEY: this server can't decrypt it. */
+export function encryptedWithOtherKey(backup: AdminBackup): boolean {
+  return backup.encrypted && !backup.key_matches;
+}
+
+/** How the table marks a backup this server can't decrypt. */
+export function otherKeyNote(backup: AdminBackup): string {
+  return backup.key_check
+    ? `Encrypted with another SECRET_KEY (key check ${backup.key_check})`
+    : "Encrypted with another SECRET_KEY";
+}
+
+/** Why restoring or a decrypted download is unavailable for such a backup. */
+export const OTHER_KEY_REASON =
+  "Only a server with the SECRET_KEY it was taken with can restore it or decrypt its files.";
 
 /** Table rows shown before "Show all". */
 export const BACKUP_ROWS_SHOWN = 4;
@@ -60,9 +117,18 @@ export function sourceServerName(source: { server_name: string }): string | null
   return source.server_name.trim() || null;
 }
 
-/** Whether parts of a backup can be restored: it is finished and holds a restore set. */
+/**
+ * Whether parts of a backup can be restored: it is finished and holds a
+ * restore set, stored plain or encrypted. An encrypted one also needs this
+ * server's key; see {@link encryptedWithOtherKey}.
+ */
 export function canRestoreParts(backup: AdminBackup): boolean {
-  return isFinished(backup) && backup.objects.some((object) => object.name === "restore-set.tar");
+  return (
+    isFinished(backup) &&
+    backup.objects.some(
+      (object) => object.name === "restore-set.tar" || object.name === "restore-set.tar.age",
+    )
+  );
 }
 
 export function restorePath(backupId: string): string {
@@ -289,6 +355,26 @@ export function visibleWarnings(
   );
 }
 
+/** Warning codes that are information, not a problem: shown muted, not amber. */
+const INFO_WARNINGS: ReadonlySet<AdminBackupWarning["code"]> = new Set([
+  "no_backups_at_destination",
+]);
+
+export function warningTone(warning: AdminBackupWarning): "warn" | "muted" {
+  return INFO_WARNINGS.has(warning.code) ? "muted" : "warn";
+}
+
+/**
+ * A warning's text. The key pause gets the page's own wording: the API can't
+ * say whether the key was never confirmed or changed since, so it names the
+ * fix rather than guessing the cause.
+ */
+export function warningText(warning: AdminBackupWarning): string {
+  return warning.code === "key_not_confirmed"
+    ? "Backups to this bucket are paused until you confirm this server's SECRET_KEY."
+    : warning.message;
+}
+
 /** Why a backup or a delete can't start because the lock is held, or null when it is free. */
 export function lockBlocker(busy: boolean, active: AdminBackupActive | undefined): string | null {
   if (!busy && !active) return null;
@@ -318,6 +404,10 @@ export function backUpNowBlocker({
   if (!configured) return "This server has no storage for backups.";
   const sqlite = warnings.find((warning) => warning.code === "sqlite_user_store");
   if (sqlite) return sqlite.message;
+  // The status area explains the pause and offers the confirmation.
+  if (warnings.some((warning) => warning.code === "key_not_confirmed")) {
+    return "Paused until the key is confirmed.";
+  }
   if (lock) return lock;
   if (!destinationAvailable) return "The backup destination can't be reached.";
   return null;
@@ -340,16 +430,24 @@ export function backupErrorMessage(error: unknown, { sqliteUserStore = false } =
   return error.message;
 }
 
+/** Whether a backup's location is in a bucket rather than on this server's disk. */
+export function isBucketLocation(location: string): boolean {
+  return /^s3:\/\//i.test(location);
+}
+
 /** Quotes a path for a POSIX shell when it holds anything beyond plain path characters. */
 function shellPath(path: string): string {
   return /^[\w./:@+-]+$/.test(path) ? path : `'${path.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
- * The full-restore command for a backup at `location`, its folder on this
- * server. Without a backup it names the folder the downloaded files go into.
+ * The full-restore command for a backup at `location`: its folder on this
+ * server, or its s3:// address, which the command reads with the
+ * SILO_BACKUP_S3_* variables. Without a backup it names the folder the
+ * downloaded files go into.
  */
 export function restoreCommand(location: string | null | undefined): string {
   if (!location) return "silo backup restore --from <folder with the downloaded files>";
-  return `silo backup restore --from ${shellPath(location)}`;
+  const from = isBucketLocation(location) ? location.replace(/\/+$/, "") : location;
+  return `silo backup restore --from ${shellPath(from)}`;
 }

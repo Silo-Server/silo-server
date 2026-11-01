@@ -20,8 +20,9 @@ const (
 )
 
 // dump streams pg_dump's output into the destination with no local spool,
-// hashing the stored bytes, while `pg_restore --list` reads a tee of the
-// stream to check the table of contents. pg_restore reads a custom-format
+// encrypting it when t encrypts and hashing the stored bytes, while
+// `pg_restore --list` reads a tee of the plaintext stream to check the table
+// of contents. pg_restore reads a custom-format
 // archive's table of contents from a pipe and exits without reading the data
 // that follows; the tee then drops its copy and the upload continues. When
 // the piped check fails, the check reads the stored object back instead.
@@ -87,8 +88,12 @@ func readBackTOC(ctx context.Context, t target, tools Tools, key string) error {
 	if err != nil {
 		return fmt.Errorf("reading db.dump back: %w", err)
 	}
-	defer func() { _ = body.Close() }()
-	return listTOC(ctx, tools, body)
+	plain, err := openStored(body, t.key)
+	if err != nil {
+		return fmt.Errorf("reading db.dump back: %w", err)
+	}
+	defer func() { _ = plain.Close() }()
+	return listTOC(ctx, tools, plain)
 }
 
 // listTOC runs `pg_restore --list` over an archive and fails unless it prints

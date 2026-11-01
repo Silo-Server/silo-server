@@ -14,13 +14,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
-// DestinationDefault is the operational blob store blobstore.Open returns on
-// local storage.
+// DestinationDefault is the operational blob store blobstore.Open returns:
+// the local root, or the private bucket when one is configured. Backups there
+// are encrypted when it is a bucket, as at DestinationS3.
 const DestinationDefault = "default"
 
 // Destination is where backup objects are written, listed, and deleted. Keys
-// are full keys under RootPrefix. Nothing above this interface knows which
-// implementation it has.
+// are full keys under RootPrefix. A dedicated S3 bucket and an encrypting
+// wrapper are further implementations; nothing above this interface knows
+// which one it has.
 type Destination interface {
 	Name() string
 	// Put streams r to key. Nothing is spooled locally first.
@@ -37,24 +39,44 @@ type Destination interface {
 	// DownloadURL presigns a read of key that needs no session. ok is false
 	// when the destination cannot presign; the caller then streams the bytes.
 	DownloadURL(ctx context.Context, key string, ttl time.Duration) (url string, expires time.Time, ok bool, err error)
-	// Location names where key is, for an operator: a filesystem path.
+	// Location names where key is, for an operator: a filesystem path on a
+	// local store, or s3://bucket/key in a bucket.
 	Location(key string) string
+	// Encrypted reports whether backups written here are encrypted: every
+	// destination but this server's local filesystem, which already holds
+	// the database's data with the same protection.
+	Encrypted() bool
+}
+
+// partSizedPutter is a blob store that streams an object in parts of a
+// chosen size (blobstore.S3). A store wrapper that does not forward it
+// leaves Put on PutStream and the store's default part size.
+type partSizedPutter interface {
+	PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error
+}
+
+// partSizer is a destination whose uploads take a multipart part size. A
+// backup sizes the parts from the previous backup (partSizeFor).
+type partSizer interface {
+	withPartSize(size int64) Destination
 }
 
 // StoreDestination writes backups into a blob store.
 type StoreDestination struct {
 	Store blobstore.Store
+	// PartSize is the multipart part size of the objects Put writes to a
+	// bucket; zero is the store's default.
+	PartSize int64
 }
 
 // NewStoreDestination is the default destination over the operational store.
-// It returns nil when there is no operational store on local storage: an S3
-// artwork backend keeps it in a bucket, or has none, and backups written
-// there would not be encrypted.
+// It returns nil when there is no operational store: an S3 artwork backend
+// with no private bucket.
 //
 // It returns the interface so a missing store is a nil Destination, never a
 // non-nil one wrapping nothing.
 func NewStoreDestination(store blobstore.Store) Destination { //nolint:iface // see above
-	if store == nil || !strings.HasPrefix(blobstore.Location(store), blobstore.BackendLocal+"|") {
+	if store == nil {
 		return nil
 	}
 	return StoreDestination{Store: store}
@@ -63,7 +85,21 @@ func NewStoreDestination(store blobstore.Store) Destination { //nolint:iface // 
 func (d StoreDestination) Name() string { return DestinationDefault }
 
 func (d StoreDestination) Put(ctx context.Context, key string, r io.Reader) error {
+	if sized, ok := d.Store.(partSizedPutter); ok && d.PartSize > 0 {
+		return sized.PutStreamParts(ctx, key, r, "application/octet-stream", d.PartSize)
+	}
 	return d.Store.PutStream(ctx, key, r, "application/octet-stream")
+}
+
+func (d StoreDestination) withPartSize(size int64) Destination {
+	d.PartSize = size
+	return d
+}
+
+// Encrypted is true unless the store is this server's local filesystem: the
+// operational store is a bucket when a private one is configured.
+func (d StoreDestination) Encrypted() bool {
+	return !strings.HasPrefix(blobstore.Location(d.Store), blobstore.BackendLocal+"|")
 }
 
 func (d StoreDestination) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
@@ -135,6 +171,13 @@ func (d StoreDestination) Location(key string) string {
 			path += string(filepath.Separator)
 		}
 		return path
+	}
+	if parts := strings.Split(where, "|"); len(parts) == 4 && parts[0] == blobstore.BackendS3 {
+		prefix := strings.Trim(parts[3], "/")
+		if prefix != "" {
+			key = prefix + "/" + key
+		}
+		return "s3://" + parts[2] + "/" + key
 	}
 	return key
 }

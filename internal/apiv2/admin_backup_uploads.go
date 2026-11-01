@@ -41,7 +41,7 @@ type AdminBackupUploadSource struct {
 }
 
 type AdminBackupUploadRejection struct {
-	Reason  string `json:"reason" enum:"not_a_restore_set,newer_silo,checksum_mismatch" doc:"not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started"`
+	Reason  string `json:"reason" enum:"not_a_restore_set,newer_silo,encrypted,checksum_mismatch" doc:"not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; encrypted: encrypted with another server's SECRET_KEY, decrypt it with silo backup decrypt first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started"`
 	Message string `json:"message"`
 }
 
@@ -58,7 +58,7 @@ type AdminBackupUpload struct {
 	UpdatedAt     Instant                     `json:"updated_at" doc:"The last part or status change"`
 	CompletedAt   *Instant                    `json:"completed_at,omitempty"`
 	ExpiresAt     *Instant                    `json:"expires_at,omitempty" doc:"When the upload is deleted: an unfinished or rejected one 24 hours after its last activity, a complete one 7 days after it was last completed, previewed, or restored from. One a queued or running restore reads is kept."`
-	Digest        string                      `json:"digest,omitempty" doc:"SHA-256 of the file as uploaded, frozen when the upload completed; a restore request must carry it"`
+	Digest        string                      `json:"digest,omitempty" doc:"SHA-256 of the file as uploaded (the bytes sent, not the parts as stored, which are encrypted on a bucket), frozen when the upload completed; a restore request must carry it"`
 	Source        *AdminBackupUploadSource    `json:"source,omitempty" doc:"What a complete restore set says about itself"`
 	Rejection     *AdminBackupUploadRejection `json:"rejection,omitempty"`
 	Location      string                      `json:"location" doc:"Where the upload's parts are: a folder in this server's storage, or s3://bucket/key in a bucket"`
@@ -172,7 +172,7 @@ func registerAdminBackupUploads(reg *Registry, op func(method, path, id, summary
 	})
 
 	create := op(http.MethodPost, "/uploads", "createAdminBackupUpload",
-		"Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress.")
+		"Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress. Where this server's private storage is an S3 bucket the parts are stored encrypted with a key derived from SECRET_KEY, and uploads, like backups, need that key confirmed first (409 otherwise).")
 	create.DefaultStatus = http.StatusCreated
 	create.RetrySafety = RetrySafetyNonRetryable
 	create.Errors = []int{http.StatusConflict, http.StatusRequestEntityTooLarge}
@@ -218,7 +218,7 @@ func registerAdminBackupUploads(reg *Registry, op func(method, path, id, summary
 	}}
 
 	complete := op(http.MethodPost, "/uploads/{upload_id}/complete", "completeAdminBackupUpload",
-		"Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, or from a newer Silo). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then.")
+		"Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, from a newer Silo, encrypted with another server's key). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then.")
 	complete.RetrySafety = RetrySafetyNaturalIdempotent
 	complete.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, complete, func(ctx context.Context, in *AdminBackupUploadCompleteInput) (*AdminBackupUploadOutput, error) {

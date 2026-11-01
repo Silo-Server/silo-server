@@ -21,6 +21,7 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.2
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/andybalholm/brotli v1.2.1
@@ -58,6 +59,7 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/TwiN/go-color v1.4.1 // indirect
 	github.com/agnivade/levenshtein v1.2.1 // indirect

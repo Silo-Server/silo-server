@@ -270,6 +270,7 @@
 ./internal/markers TestProviderConfigEnsureDefaultSharingDB
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
+./cmd/silo TestBackupCommandsReadS3DB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
 ./internal/markers TestContributionStoreAmendSendsAnUnsentManualCorrection
 ./internal/markers TestContributionStoreAmendSendsManualClears
@@ -734,6 +735,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB
@@ -779,6 +781,7 @@
 ./internal/backup TestRestoreLockOrderDB
 ./internal/backup TestProfileImportAndDeleteLockOrderDB
 ./internal/backup TestUploadSessionsDB
+./internal/backup TestUploadEncryptedOnABucketDB
 ./internal/backup TestUploadLimitAndSweepDB
 ./internal/backup TestUploadRejectsHostileArchivesDB
 ./internal/backup TestRestoreFromUploadDB

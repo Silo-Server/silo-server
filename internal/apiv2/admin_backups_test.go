@@ -74,7 +74,18 @@ func (f *fakeBackups) PreviewUpload(_ context.Context, id string) (*backup.Resto
 
 func (f *fakeBackups) Configured() bool { return true }
 func (f *fakeBackups) Destinations() []string {
-	return []string{backup.DestinationDefault}
+	return []string{backup.DestinationDefault, backup.DestinationS3}
+}
+func (f *fakeBackups) TestS3(_ context.Context, cfg backup.S3Config) (backup.S3TestResult, error) {
+	f.calls = append(f.calls, "test s3 "+cfg.Bucket)
+	return backup.S3TestResult{OK: true, Message: "Connected. Silo wrote and deleted a test file."}, nil
+}
+func (f *fakeBackups) AcknowledgeKey(_ context.Context, check string) error {
+	f.calls = append(f.calls, "acknowledge "+check)
+	if check != testKeyCheck {
+		return backup.ErrKeyCheckChanged
+	}
+	return nil
 }
 func (f *fakeBackups) List(context.Context) (backup.Listing, error) {
 	f.calls = append(f.calls, "list")
@@ -113,6 +124,7 @@ func (f *fakeBackups) OpenObject(_ context.Context, id, name string) (io.ReadClo
 }
 
 const (
+	testKeyCheck = "1a2b-3c4d-5e6f-7a8b"
 	testBackupID = "20261031T040000Z-manual"
 	testUploadID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 )
@@ -155,6 +167,8 @@ func TestAdminBackupEndpointsRequireAdminRole(t *testing.T) {
 		{http.MethodGet, upload + "/restore-set", "", ""},
 		{http.MethodPost, upload + "/restore", restore, ""},
 		{http.MethodDelete, upload, "", ""},
+		{http.MethodPost, base + "/s3/test", `{"endpoint":"https://s3.example.com","bucket":"b","secret_key":"s"}`, ""},
+		{http.MethodPost, base + "/s3/acknowledge-key", `{"key_check":"` + testKeyCheck + `"}`, ""},
 	}
 	headers := func(base map[string]string, contentType string) map[string]string {
 		if contentType == "" {

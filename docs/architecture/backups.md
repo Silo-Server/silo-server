@@ -26,11 +26,15 @@ Each backup is one folder at the destination:
 
 ```
 backups/<server-id>/<UTC time>-<kind>/
-  db.dump          pg_dump custom format, zstd level 3
-  restore-set.tar  sections for selective restore
-  blobs.tar        assets/<key> and operational/<key> entries
-  manifest.json    written last
+  db.dump[.age]          pg_dump custom format, zstd level 3
+  restore-set.tar[.age]  sections for selective restore
+  blobs.tar[.age]        assets/<key> and operational/<key> entries
+  manifest.json          written last; never encrypted
 ```
+
+Objects end in `.age` when they are encrypted, which every backup in an
+S3 bucket is: the `s3` destination, and the `default` destination when it is
+the private bucket ([Destinations](#destinations), [Encryption](#encryption)).
 
 - `server-id` is `server.identity_id` (`internal/serveridentity`). Every server
   writes and rotates only its own prefix; other prefixes at the destination
@@ -65,11 +69,13 @@ highest applied `goose_db_version`), `applied_migrations` (every applied
 goose version, ascending, without goose's version 0; it must end at the goose
 version), PostgreSQL server version, `pg_dump`
 version, the tables whose data was excluded, each object's size and the
-SHA-256 of its stored bytes, the `SECRET_KEY` check value, how the table of contents was checked, the blob count and bytes,
+SHA-256 of its stored bytes, whether objects are encrypted, the `SECRET_KEY`
+check value, how the table of contents was checked, the blob count and bytes,
 `missing_blobs`, the core table inventory, and, when the backup has a restore
 set, `restore_set`: its format version and the item count of each section.
 The objects are exactly `db.dump` and `blobs.tar`, plus `restore-set.tar`
-when `restore_set` is present.
+when `restore_set` is present, each named with `.age` when `encrypted` is
+true; a manifest whose names disagree with `encrypted` is refused.
 
 The inventory covers `users`, `user_profiles`, `media_folders`, `media_items`,
 `media_files`, `server_settings`, `plugin_installations`,
@@ -94,9 +100,11 @@ showing either key.
 
 ## Taking a backup
 
-1. Preflight: the user store is PostgreSQL, the destination exists, its id
-   is reserved, `pg_dump` and `pg_restore` are installed, and the destination
-   has free space of at least 1.5 times the previous
+1. Preflight: the user store is PostgreSQL, the destination `backup.destination`
+   names exists (and, for a bucket, where backups are encrypted, the confirmed
+   key check value is this server's; see [Encryption](#encryption)), its id
+   is reserved, `pg_dump` and `pg_restore` are installed,
+   and a local destination has free space of at least 1.5 times the previous
    backup plus 1 GB. The default destination shares a disk with the database,
    and filling it would take PostgreSQL down.
 2. Open a `REPEATABLE READ`, read-only transaction and call
@@ -111,8 +119,9 @@ showing either key.
    is always dumped. The password moves from the URL into `PGPASSWORD` so it
    never appears in a process listing.
 4. Stream `pg_dump`'s stdout straight into the destination with no local
-   spool, hashing the stored bytes. `pg_restore --list` reads a tee of the
-   stream. `pg_restore` reads a custom-format archive's table of contents
+   spool, encrypting it for a bucket and hashing the stored
+   (encrypted) bytes. `pg_restore --list` reads a tee of the plaintext
+   stream, before encryption. `pg_restore` reads a custom-format archive's table of contents
    from a pipe and exits without reading the data; the tee then drops its copy
    and the upload continues. If the piped check fails, the check reads the
    stored object back. The manifest records which happened (`pipe` or
@@ -168,11 +177,30 @@ valid recovery point. Any other read error fails the backup.
 
 `backup.Destination` is the seam for every destination: put a stream, open,
 list, delete a folder, probe, report local free space, and presign a
-download. The one destination, `default`, is the operational store from
-`blobstore.Open` on local artwork storage, the local root. On an S3 artwork
-backend there is no local operational store, so there is nowhere to write
-backups; the Backups page says so and links to Storage settings. Uploads use
-the same store.
+download. `backup.destination` picks one, read when each operation starts, so
+every API server follows a change without a restart:
+
+- `default`: the operational store from `blobstore.Open` (the local root, or
+  the private bucket when one is configured). Backups there are encrypted when
+  it is the private bucket, exactly as at `s3`, and plaintext on the local
+  filesystem (`Destination.Encrypted`). On an S3 artwork backend with no
+  private bucket there is no operational store; the Backups page says to set
+  up an S3 bucket for backups.
+- `s3`: a bucket used only for backups (`backup.s3.*`), reached with its own
+  credentials through `s3client`, even when artwork storage is local. Every
+  object written there is encrypted ([Encryption](#encryption)).
+
+One destination is current at a time. Switching leaves the copies at the
+previous destination where they are: listing, rotation, deletion, previews,
+and downloads see only the current one, and the Backups page says so. Uploads
+always use the operational store, whatever the destination.
+
+An upload to either bucket is a multipart upload holding one part in memory. Parts are
+8 MiB, and a backup raises the part size when the previous backup's largest
+object could need more than 9,000 of them at twice its size (S3 allows
+10,000), so objects well beyond 80 GB work. Locations read
+`s3://<bucket>/<key prefix>/backups/<server-id>/<id>/`, the address
+`silo backup restore --from` takes.
 
 **Every API server must share the operational store.** Backups are written by
 whichever server runs the task and listed, downloaded, and deleted by any
@@ -181,11 +209,59 @@ artwork already has in a multi-server deployment
 ([blob-storage.md](blob-storage.md)).
 
 Local backups hold the same data as the database, password hashes included,
-and sit in the data folder with the database's protection. Downloads are
-short-lived and scoped to one object: a presigned URL where the store can
-presign, or a link to `GET /api/v2/admin/backups/{id}/objects/{name}` signed
-under its own capability domain (`artworkurl.NewBackupObjectSigner`) where it
-cannot. A full backup downloads its objects as stored.
+and sit in the data folder with the database's protection. Backups in any
+bucket are encrypted. Downloads are short-lived and scoped to one object: a presigned URL
+where the store can presign, or a link to
+`GET /api/v2/admin/backups/{id}/objects/{name}` signed under its own
+capability domain (`artworkurl.NewBackupObjectSigner`) where it cannot. A full
+backup downloads its objects as stored, encrypted for an S3 backup. The
+restore set of an encrypted backup is never presigned: it is served through
+that signed route, decrypted by the server, so it can be uploaded to another
+server. The server first decrypts it into an unlinked temporary file while
+hashing the stored bytes, and releases it only when they match the
+manifest's size and SHA-256, so an object replaced under the same key is
+refused, not downloaded.
+
+### Encryption
+
+Every object of a backup in an S3 bucket (the `s3` destination, or the
+`default` one on the private bucket) but `manifest.json` is an
+[age](https://age-encryption.org) file with a single scrypt recipient. The
+passphrase is the standard base64 of HKDF-SHA256 over `SECRET_KEY` with info
+`silo/backup-encryption/v1`, 32 bytes (`secret.BackupPassphrase`, beside the
+data key and check value derivations in `internal/secret/cipher.go`). There
+is no separate backup key, and the UI never shows or offers `SECRET_KEY`.
+
+- The passphrase already has full entropy, so scrypt's stretching adds
+  nothing: backups use work factor 2^10 (about 1 MiB and 1 ms per object;
+  age's default 2^18 needs 256 MiB). Decrypting accepts at most 2^15 (about
+  32 MiB), because an uploaded file names its own work factor.
+- The manifest records `encrypted: true` and the key check value. Object
+  sizes and SHA-256 are of the stored, encrypted bytes; every reader hashes
+  the ciphertext while it decrypts and compares once it has read through.
+- `silo backup decrypt` writes the plaintext of one object; `age -d` with
+  the passphrase does the same.
+
+**Confirmation.** Encrypted backups start only after an admin confirms keeping a
+copy of `SECRET_KEY` off the server: `POST /admin/backups/s3/acknowledge-key`
+records this server's check value in `backup.s3.key_acknowledged`, a row only
+that endpoint writes. A settings save that switches `backup.destination` to
+`s3` is refused (409, `backup_key_not_confirmed`) unless that row holds the
+current check value, and needs an endpoint and a bucket. The `default`
+destination on the private bucket needs no setting change: its backups wait,
+paused, until the key is confirmed. When `SECRET_KEY` changes, or was never
+confirmed, the recorded value does not match: encrypted backups pause (a run
+fails with the reason) and the Backups page warns (`key_not_confirmed`, with `encrypted`
+true) until the admin confirms the key. The
+destination settings stay editable meanwhile.
+
+**Reading.** A preview, a restore, and a restore-set download decrypt on the
+fly with this server's key. An encrypted backup whose check value differs is
+refused before anything is read, with both check values in the message:
+selective restore cannot read it at all, unlike an unencrypted backup taken
+with another key, where only encrypted values are lost. An uploaded restore
+set encrypted with this server's key is decrypted and read; its digest is of
+the uploaded bytes.
 
 ## Tools
 
@@ -270,13 +346,20 @@ status, size, duration, missing blobs, and what rotation removed.
 | `backup.keep` | `7` | 1–60 |
 | `backup.include_intro_fingerprints` | `false` | boolean |
 | `backup.include_subtitles` | `true` | boolean |
+| `backup.destination` | `default` | `default` or `s3`; `s3` needs the confirmed key ([Encryption](#encryption)) |
+| `backup.s3.endpoint` | empty | `http` or `https` URL |
+| `backup.s3.region`, `.bucket`, `.key_prefix`, `.access_key` | empty | the key prefix is the bucket folder; backups go under `<key_prefix>/backups/` |
+| `backup.s3.path_style` | `false` | boolean |
+| `backup.s3.secret_key` | empty | sensitive: encrypted at rest, never returned |
+| `backup.s3.key_acknowledged` | empty | the confirmed check value; written only by the acknowledge-key endpoint |
 
 Every `backup.*` key is server-specific: selective restore never offers one.
 
 An absent or invalid value takes its default, but a setting that cannot be
 read fails the backup or the listing, and skips rotation with a warning. It
-never falls back to the default: a failed read of `backup.keep` could rotate
-away copies the admin meant to keep.
+never falls back to the default: a failed read of `backup.destination` would write an
+unencrypted copy to this server instead of the S3 bucket, and one of
+`backup.s3.key_acknowledged` would read as unconfirmed.
 
 ## Rotation
 
@@ -290,7 +373,8 @@ away copies the admin meant to keep.
   blobs cannot rotate away the last copy that has every blob.
 - `before-restore` copies are deleted after 7 days and do not count toward
   `backup.keep`.
-- Rotation manages only the current server id's prefix, and never deletes a backup that is the source of a queued or
+- Rotation manages only the current destination and the current server id's
+  prefix, and never deletes a backup that is the source of a queued or
   running restore. A running restore holds the subsystem lock for its whole
   run, so no other rotation, sweep, or delete runs, and the rotation of its
   own before-restore backup is told to keep the source. A queued restore is
@@ -299,7 +383,11 @@ away copies the admin meant to keep.
   cannot be read, rotation deletes nothing and warns.
 - Deleting a backup takes the same lock and refuses (409) while a queued or
   running restore reads it.
-- A delete that fails leaves a warning in the task result.
+- A destination that refuses a delete (object lock, or a policy that denies
+  deletes) leaves a warning in the task result, and retention to the bucket's
+  lifecycle rules. An S3 folder is deleted manifest first, so a refused delete
+  leaves the backup whole, and one that stops partway leaves an incomplete
+  folder for the sweep, never a manifest listing objects that are gone.
 
 ## Restore set
 
@@ -909,12 +997,20 @@ writes every part straight to the destination, and keeps the session in
 PostgreSQL, so any API server takes any part and any server completes it:
 
 ```
-backups/uploads/<upload id>/<part>.<nonce>
+backups/uploads/<upload id>/<part>.<nonce>[.age]
 ```
 
-Uploads go to the operational store, the backup destination. Parts are
-stored as sent, so the parts read back in order are exactly the bytes the
-client sent.
+**Parts are encrypted on a bucket.** Uploads go to the operational store,
+which is the private bucket when one is configured. There every part is
+stored encrypted with the archive key ([Encryption](#encryption)) and named
+`.age`, since an uploaded restore set holds password hashes, and creating an
+upload or sending a part needs the confirmed `SECRET_KEY`, as a backup there
+does (409, the same `key_not_confirmed` problem otherwise). On the local
+filesystem parts are stored as sent. Each part is its own age file, so the
+parts read back in order, decrypted, are exactly the bytes the client sent.
+A part encrypted with a `SECRET_KEY` the server no longer has cannot be read:
+completing or restoring from that upload fails, and the upload is deleted
+and sent again.
 
 - `backup_uploads` holds each session: its size, part size, optional
   declared SHA-256, status (`uploading`, `checking`, `complete`,
@@ -927,8 +1023,9 @@ client sent.
   most four per upload. A second send of a part being written answers 409
   without writing anything, so concurrent sends cannot multiply the objects
   an upload holds. A part's storage write (its body read included) has a
-  5-minute deadline, and cancellation stops it: the write's temporary file
-  is closed, so its next write fails, and removed. An attempt is abandoned only after 10 minutes, once its writer has
+  5-minute deadline, and cancellation stops it: an S3 request is canceled,
+  and a local write's temporary file is closed, so its next write fails, and
+  removed. An attempt is abandoned only after 10 minutes, once its writer has
   certainly stopped: another send may then replace it, and it can no longer
   record its object.
 - Every part sent is a new object. Its row moves to it in a transaction that
@@ -959,14 +1056,17 @@ that closes the part being read when it passes (so a stalled read cannot
 keep the lock), reads the parts in order
 through `ReadRestoreSet`, the same checks a backup's restore set gets. The
 SHA-256 of the bytes read becomes the upload's digest. These are the bytes
-the client sent (the file as uploaded), so the digest is what a client
-computes and what a declared SHA-256 is compared with: a preview returns it,
+the client sent (the file as uploaded, still encrypted if the admin
+uploaded a `.age` file), never the parts as stored, so the digest is what a
+client computes, what a declared SHA-256 is compared with, and the same
+whether the parts are encrypted at rest: a preview returns it,
 a restore request must carry it, and the restore job reads the parts again
 and refuses bytes with another digest. A set that fails the reader is
 `rejected` and its parts are deleted at once:
 
 | Reason | When |
 |---|---|
+| `encrypted` | The file is an age file (binary or armored header) this server's key cannot open: "This file is encrypted with another server's SECRET_KEY. On a computer with that server's SECRET_KEY in the environment, run `silo backup decrypt restore-set.tar.age -o restore-set.tar`, then upload restore-set.tar." One encrypted with this server's key is decrypted and read. |
 | `newer_silo` | A newer format version |
 | `not_a_restore_set` | Anything else the reader refuses, with its error |
 | `checksum_mismatch` | Other bytes than the SHA-256 declared at creation |
@@ -1010,14 +1110,30 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY` and `DATABASE_URL` come from the environment (or
-`-env`); nothing comes from the database being replaced. `--from` is a backup
-folder on this computer (the folder at the destination, or a downloaded copy
-of its objects), read in place. `pg_restore` reads it, and nothing changes
-until every check passed.
+operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
+environment (or `-env`); nothing comes from the database being replaced.
+`--from` is a local backup folder (the folder at a local destination, or a
+downloaded copy), or a bucket folder,
+`s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
+`SILO_BACKUP_S3_ENDPOINT`, `SILO_BACKUP_S3_REGION`,
+`SILO_BACKUP_S3_ACCESS_KEY`, `SILO_BACKUP_S3_SECRET_KEY`, and
+`SILO_BACKUP_S3_PATH_STYLE`.
+
+A local unencrypted folder is read in place. A bucket folder or an encrypted
+one is fetched first: the manifest is read and an encrypted backup with
+another key check value is refused, then `db.dump` and `blobs.tar` (only
+`db.dump` with `--database-only`) are copied into a working folder in the
+current directory as plaintext, decrypted as they stream, each checked
+against the manifest's size and SHA-256 of the stored bytes. Before anything
+downloads, the folder's filesystem must have room for the objects' stored
+sizes (a plaintext is never larger) plus 256 MiB, and an object that writes
+more than its stored size is stopped. The folder is mode 0700, its files
+0600, and it is removed when the command ends. `pg_restore` then reads the
+local copy, and nothing changes until every check passed.
 
 The first SIGINT or SIGTERM cancels a `silo backup` command, which stops
-and cleans up before exiting, a swap's rollback included. A second signal exits at once. Once a swap's
+and cleans up before exiting: the working folder, a decrypt's `.partial`
+file, and a swap's rollback. A second signal exits at once. Once a swap's
 journal exists, the first interrupt says that a second may leave the
 databases closed and prints `silo backup restore --recover <time>` with the
 swap's time.
@@ -1027,6 +1143,13 @@ database) ignores the interrupt but has one 5-minute deadline for the whole
 cleanup, so a statement that never returns cannot keep the databases closed
 forever. When it passes, the command stops with the databases closed and
 prints the journal and the `--recover` command.
+
+`silo backup decrypt <file | s3://bucket/key> [-o <file | ->]` writes the
+plaintext of one encrypted object (to `<name>` without `.age` beside a local
+file, or in the current directory for an object). With `manifest.json` in
+the same folder it refuses a key with another check value before reading,
+and checks the stored bytes against the manifest. The plaintext lands in
+`<output>.partial` and is renamed only after every check passed.
 
 Every mode first validates: the manifest is present and complete (exactly
 `db.dump` and `blobs.tar`, and
@@ -1045,15 +1168,17 @@ a version below the binary's newest that the binary does not have, such as
 one from another branch's build; the newest-version check alone would let it
 through. A manifest written before `applied_migrations` existed is checked
 by its goose version alone, and the restored database's applied versions are
-checked against the binary in the verification step instead. A backup taken
-with another key needs `--accept-lost-credentials`: its encrypted settings and credentials cannot be
+checked against the binary in the verification step instead. An encrypted backup needs the key it was
+taken with. An unencrypted backup taken with another key needs
+`--accept-lost-credentials`: its encrypted settings and credentials cannot be
 read with this key.
 
 ### Separate mode
 
-`silo backup restore --from <backup> --into <database URL> --blobs-into <dir>`
+`silo backup restore --from <backup> --into <database URL> --blobs-into <dir | s3://bucket/prefix>`
 restores into a pre-created empty database and a separate directory laid out
-as a local store root, changing nothing in the live deployment. It needs no
+as a local store root, or a bucket under a key prefix (with the
+`SILO_BACKUP_S3_*` credentials), changing nothing in the live deployment. It needs no
 `CREATEDB` or rename privilege. After `pg_restore --exit-on-error
 --no-owner --no-privileges`, it verifies the schema version, the applied
 migrations, and the table inventory against the manifest. The target stays
@@ -1153,22 +1278,29 @@ went ahead.
 `silo backup verify --from <backup> --scratch <database URL>` runs the
 validation, restores into an empty scratch database, runs the step 4
 verification (not its connection closing). The validation reads
-`blobs.tar` through. It does not need the right `SECRET_KEY`; with another
-one it warns that encrypted values would be lost.
+`blobs.tar` through. For an unencrypted backup it does not need the right
+`SECRET_KEY`; with another one it warns that encrypted values would be lost.
+An encrypted backup needs its key.
 CI runs the same round trip against PostgreSQL
 (`TestBackupRestoreRoundTripDB`): a seeded database with blobs and an
 encrypted setting is backed up, restored in separate mode, and compared
 table by table, blob by blob, and by the decrypted value.
+`TestEncryptedS3RoundTripDB` does it through an encrypted S3 destination (a
+fake bucket), and `TestBackupCommandsReadS3DB` runs `verify`, `restore`, and
+`decrypt` from `s3://` addresses, with the right key and another.
 
 ## Health
 
 There is no server-side dashboard warning registry; the dashboard derives its
 notices on the client. `GET /api/v2/admin/backups` therefore returns the
 conditions the dashboard shows as `warnings`: backups turned off, no
-successful backup in the last 48 hours (`no_recent_backup`): the later of
-the status row's `last_success_at` and the newest complete backup at the
-destination, which also covers a status row a full restore left empty; the
-destination missing or unreachable, the SQLite user store, and `pg_dump`
-missing or older than the server. It also carries this server's key check
-value. It also returns the active operation and the latest run from
+successful backup in the last 48 hours (`no_recent_backup`), at any
+destination: the later of the status row's `last_success_at` and the newest
+complete backup at the current destination, which also covers a status row a
+full restore left empty; no backup at the current destination although one
+completed before (`no_backups_at_destination`, after switching
+destinations), the destination missing or unreachable, the SQLite user store, `pg_dump` missing or older than the
+server, and encrypted backups (any bucket) paused for an unconfirmed
+`SECRET_KEY` (`key_not_confirmed`). It also carries this server's key check value, whether
+it is confirmed, and whether new backups are encrypted. It also returns the active operation and the latest run from
 [the status row](#status).

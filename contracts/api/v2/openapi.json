@@ -3388,6 +3388,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "encrypted": {
+            "description": "Whether the objects are stored encrypted with a key derived from SECRET_KEY. The manifest is never encrypted",
+            "type": "boolean"
+          },
           "id": {
             "description": "The backup folder name: UTC start time and kind",
             "type": "string"
@@ -3397,7 +3401,7 @@
             "type": "string"
           },
           "key_matches": {
-            "description": "Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key",
+            "description": "Whether key_check is this server's. An encrypted backup that does not match cannot be previewed, restored, or downloaded decrypted here",
             "type": "boolean"
           },
           "kind": {
@@ -3409,7 +3413,7 @@
             "type": "string"
           },
           "location": {
-            "description": "Where the backup folder is: a filesystem path on this server's storage",
+            "description": "Where the backup folder is: a filesystem path on this server's storage, or s3://bucket/key in a bucket",
             "type": "string"
           },
           "missing_blobs": {
@@ -3460,7 +3464,35 @@
           "missing_blobs",
           "restore_set_omitted",
           "objects",
+          "encrypted",
           "key_matches"
+        ],
+        "type": "object"
+      },
+      "AdminBackupAcknowledgeKeyBody": {
+        "additionalProperties": false,
+        "properties": {
+          "key_check": {
+            "description": "The check value the admin was shown (key_check from the backup list). It must be this server's current one",
+            "pattern": "^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_check"
+        ],
+        "type": "object"
+      },
+      "AdminBackupAcknowledgeKeyOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "key_check": {
+            "description": "The check value now confirmed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_check"
         ],
         "type": "object"
       },
@@ -3517,7 +3549,7 @@
             "type": "boolean"
           },
           "destinations": {
-            "description": "Backup destinations this server can write to: default, the server's own local storage, when it has one",
+            "description": "Backup destinations this server can write to: default, the server's own storage, when it has one, and s3, a bucket used only for backups",
             "items": {
               "type": "string"
             },
@@ -3525,6 +3557,10 @@
           },
           "download": {
             "description": "Whether a full backup can be downloaded",
+            "type": "boolean"
+          },
+          "encryption": {
+            "description": "Whether backups can be encrypted. Backups in any S3 bucket always are, with a key derived from SECRET_KEY: the s3 destination, and the default one when this server's private storage is a bucket",
             "type": "boolean"
           },
           "max_upload_bytes": {
@@ -3557,6 +3593,7 @@
         },
         "required": [
           "destinations",
+          "encryption",
           "upload",
           "max_upload_bytes",
           "selective_restore",
@@ -3602,7 +3639,7 @@
         "additionalProperties": false,
         "properties": {
           "scope": {
-            "description": "What to download: full is every stored object as it is; restore-set is restore-set.tar alone",
+            "description": "What to download: full is every stored object as it is, encrypted for an encrypted backup (decrypt with silo backup decrypt); restore-set is restore-set.tar alone, decrypted by this server for an encrypted backup",
             "enum": [
               "full",
               "restore-set"
@@ -3735,9 +3772,10 @@
             "type": "boolean"
           },
           "destination": {
-            "description": "Where new backups go",
+            "description": "Where new backups go (backup.destination). Items lists only this destination's backups; copies at a previous destination stay there",
             "enum": [
-              "default"
+              "default",
+              "s3"
             ],
             "type": "string"
           },
@@ -3746,6 +3784,10 @@
           },
           "enabled": {
             "description": "Whether nightly backups run (backup.enabled)",
+            "type": "boolean"
+          },
+          "encrypted": {
+            "description": "Whether new backups are encrypted: true for the s3 destination, and for default when this server's private storage is an S3 bucket. Encrypted backups run only while key_confirmed is true",
             "type": "boolean"
           },
           "items": {
@@ -3764,12 +3806,16 @@
             "description": "This server's SECRET_KEY check value, 16 hex digits in groups of 4. It names the key without revealing it; silo secret check prints it for a key",
             "type": "string"
           },
+          "key_confirmed": {
+            "description": "Whether an admin confirmed keeping a copy of the SECRET_KEY with this check value. Encrypted backups (any S3 bucket) run only while it is true",
+            "type": "boolean"
+          },
           "last_run": {
             "$ref": "#/components/schemas/AdminBackupLastRun",
             "description": "The latest backup run, including one that failed or was interrupted"
           },
           "last_success_at": {
-            "description": "When the latest successful backup finished",
+            "description": "When the latest successful backup finished, at any destination",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -3798,7 +3844,9 @@
           "server_id",
           "destination",
           "destination_available",
+          "encrypted",
           "key_check",
+          "key_confirmed",
           "enabled",
           "busy",
           "keep",
@@ -3837,7 +3885,7 @@
         "additionalProperties": false,
         "properties": {
           "name": {
-            "description": "Object name in the backup folder, such as db.dump",
+            "description": "Object name in the backup folder as stored, such as db.dump, or db.dump.age when the backup is encrypted",
             "type": "string"
           },
           "sha256": {
@@ -5140,6 +5188,75 @@
         ],
         "type": "object"
       },
+      "AdminBackupS3TestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "access_key": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "bucket": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "The S3 API endpoint, such as https://s3.us-east-1.amazonaws.com. It is not validated as a URI here: an endpoint the test cannot reach fails with step endpoint",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "key_prefix": {
+            "description": "The folder in the bucket; backups go under \u003ckey_prefix\u003e/backups/",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "path_style": {
+            "description": "Path-style addressing (endpoint/bucket/key) instead of virtual-hosted (bucket.endpoint/key)",
+            "type": "boolean"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "secret_key": {
+            "description": "Omitted uses the stored backup.s3.secret_key, but only when endpoint and access_key are the stored ones",
+            "maxLength": 4096,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "endpoint",
+          "bucket"
+        ],
+        "type": "object"
+      },
+      "AdminBackupS3TestResult": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "What happened, for display: Connected. Silo wrote and deleted a test file. or what failed",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "step": {
+            "description": "The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write and delete under the folder",
+            "enum": [
+              "endpoint",
+              "credentials",
+              "bucket",
+              "permission"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "type": "object"
+      },
       "AdminBackupStarted": {
         "additionalProperties": false,
         "properties": {
@@ -5184,7 +5301,7 @@
             "type": "string"
           },
           "digest": {
-            "description": "SHA-256 of the file as uploaded, frozen when the upload completed; a restore request must carry it",
+            "description": "SHA-256 of the file as uploaded (the bytes sent, not the parts as stored, which are encrypted on a bucket), frozen when the upload completed; a restore request must carry it",
             "type": "string"
           },
           "expires_at": {
@@ -5310,10 +5427,11 @@
             "type": "string"
           },
           "reason": {
-            "description": "not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started",
+            "description": "not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; encrypted: encrypted with another server's SECRET_KEY, decrypt it with silo backup decrypt first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started",
             "enum": [
               "not_a_restore_set",
               "newer_silo",
+              "encrypted",
               "checksum_mismatch"
             ],
             "type": "string"
@@ -5363,14 +5481,16 @@
         "additionalProperties": false,
         "properties": {
           "code": {
-            "description": "no_recent_backup: no backup completed in 48 hours",
+            "description": "no_recent_backup: no backup completed in 48 hours, at any destination. no_backups_at_destination: backups completed before, but none is at the current destination (it was switched); earlier copies stay where they were written. key_not_confirmed: backups are encrypted (an S3 bucket) and this server's SECRET_KEY was not confirmed, or changed since; encrypted backups and uploads are paused until POST /admin/backups/s3/acknowledge-key",
             "enum": [
               "disabled",
               "no_recent_backup",
               "destination_unavailable",
               "sqlite_user_store",
               "pg_dump_missing",
-              "pg_dump_too_old"
+              "pg_dump_too_old",
+              "key_not_confirmed",
+              "no_backups_at_destination"
             ],
             "type": "string"
           },
@@ -68043,6 +68163,384 @@
         "x-silo-conditional": true
       }
     },
+    "/api/v2/admin/backups/s3/acknowledge-key": {
+      "post": {
+        "operationId": "acknowledgeAdminBackupKey",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminBackupAcknowledgeKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBackupAcknowledgeKeyOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Confirm that a copy of this server's SECRET_KEY is kept somewhere other than this server. backup.destination can be set to s3 only after this, and S3 backups pause when SECRET_KEY changes until it is confirmed again. 409 when key_check is not this server's current check value.",
+        "tags": [
+          "admin-backups"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/backups/s3/test": {
+      "post": {
+        "operationId": "testAdminBackupS3",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminBackupS3TestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBackupS3TestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Test a bucket for backups: reach it (HeadBucket), then write and delete a test object under the key prefix. A failed test answers ok false with the step that failed. Nothing is saved.",
+        "tags": [
+          "admin-backups"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/backups/uploads": {
       "get": {
         "operationId": "listAdminBackupUploads",
@@ -68367,7 +68865,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress.",
+        "summary": "Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress. Where this server's private storage is an S3 bucket the parts are stored encrypted with a key derived from SECRET_KEY, and uploads, like backups, need that key confirmed first (409 otherwise).",
         "tags": [
           "admin-backups"
         ],
@@ -68686,7 +69184,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, or from a newer Silo). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then.",
+        "summary": "Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, from a newer Silo, encrypted with another server's key). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then.",
         "tags": [
           "admin-backups"
         ],
@@ -69676,7 +70174,10 @@
                 "manifest.json",
                 "db.dump",
                 "blobs.tar",
-                "restore-set.tar"
+                "restore-set.tar",
+                "db.dump.age",
+                "blobs.tar.age",
+                "restore-set.tar.age"
               ],
               "type": "string"
             }
@@ -69726,6 +70227,9 @@
           },
           "404": {
             "description": "Object not found, or the capability is invalid or expired"
+          },
+          "409": {
+            "description": "The backup is encrypted with another server's SECRET_KEY, so this server cannot decrypt its restore set, or the stored restore set no longer matches its checksum in the manifest"
           },
           "503": {
             "description": "Backup storage unavailable"
