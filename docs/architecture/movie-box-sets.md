@@ -21,8 +21,11 @@ contract is in [catalog-api.md](../catalog-api.md#movie-box-sets).
   parts in no reliable order, so the sync sorts them by release date, with
   undated (announced) parts last.
 - The stored name is TMDB's. Reads show it through `catalog.BoxSetTitle`
-  ("… Collection" becomes "… Box Set"), and search matches the same rule in
-  SQL (`boxSetTitleSQL`); change the two together.
+  ("… Collection" becomes "… Box Set"). Search matches the name without that
+  suffix (`boxSetStemSQL`, the same rule in SQL; change the two together),
+  and query words "box", "set" and "collection" count as matched by the
+  suffix only beside a word the rest of the name matches, so "box" alone does
+  not find every box set.
 
 ## Sync
 

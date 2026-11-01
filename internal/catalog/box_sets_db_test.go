@@ -228,12 +228,17 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	if byName := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(byName, []int64{f.franchise}) {
 		t.Fatalf("name search = %v, want [%d]", byName, f.franchise)
 	}
-	// The name is searched as it is shown: "Saga Box Set", not "Saga Collection".
-	if shown := search(f.prefix+" saga box set", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(shown, []int64{f.franchise}) {
-		t.Fatalf("search by shown name = %v, want [%d]", shown, f.franchise)
+	// The name is found as it is shown ("Saga Box Set") and as TMDB names it
+	// ("Saga Collection"), but the suffix words alone match no name.
+	for _, query := range []string{f.prefix + " saga box set", f.prefix + " saga collection"} {
+		if got := search(query, []int{f.lib}, f.viewer, 10, 0); !slices.Equal(got, []int64{f.franchise}) {
+			t.Fatalf("search %q = %v, want [%d]", query, got, f.franchise)
+		}
 	}
-	if stored := search(f.prefix+" saga collection", []int{f.lib}, f.viewer, 10, 0); len(stored) != 0 {
-		t.Fatalf("search by stored TMDB name = %v, want empty", stored)
+	for _, query := range []string{"box", "set", "box set", "collection"} {
+		if got := search(query, []int{f.lib}, f.viewer, 10, 0); slices.Contains(got, f.franchise) {
+			t.Fatalf("search %q = %v, want no franchise", query, got)
+		}
 	}
 	if next := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 1); len(next) != 0 {
 		t.Fatalf("second page = %v, want empty", next)

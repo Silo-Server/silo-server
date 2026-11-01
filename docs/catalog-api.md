@@ -842,7 +842,9 @@ movies on the movie page, marking the movie being viewed.
 A box set's `title` is its TMDB collection name with a trailing "Collection"
 shown as "Box Set" ("Harry Potter Collection" is "Harry Potter Box Set"), so it
 does not read as one of Silo's own collections; other names are unchanged.
-Search matches that title, not the stored TMDB name.
+Search finds it by either form ("harry potter box set" or "harry potter
+collection"), but "box", "set" or "collection" alone matches only names that
+contain the word themselves.
 
 ## History ordering
 

@@ -40,18 +40,32 @@ func LibraryTypeSupportsBoxSets(libraryType string) bool {
 // BoxSetTitle names a box set after its TMDB collection, whose names end in
 // "Collection" ("Harry Potter Collection"): that word becomes "Box Set", so a
 // box set does not read as one of Silo's own collections. Other names are
-// kept as they are. boxSetTitleSQL is the same rule for search.
+// kept as they are. boxSetStemSQL and boxSetSuffixedSQL are the same rule for
+// search.
 func BoxSetTitle(name string) string {
 	name = strings.TrimSpace(name)
-	const suffix = " collection"
+	const suffix = " " + boxSetNameSuffix
 	if len(name) > len(suffix) && strings.EqualFold(name[len(name)-len(suffix):], suffix) {
 		return name[:len(name)-len(suffix)] + " Box Set"
 	}
 	return name
 }
 
-// boxSetTitleSQL is BoxSetTitle of c.name, lowercased.
-const boxSetTitleSQL = `lower(regexp_replace(btrim(c.name), '(.) collection$', '\1 box set', 'i'))`
+// boxSetStemSQL is c.name without the "Collection" BoxSetTitle replaces,
+// lowercased; boxSetSuffixedSQL reports whether it had one.
+const (
+	boxSetStemSQL     = `lower(regexp_replace(c.name, '(\S)\s+collection\s*$', '\1', 'i'))`
+	boxSetSuffixedSQL = `(c.name ~* '\S\s+collection\s*$')`
+)
+
+// boxSetSuffixWords are the query words a name's "Collection" or "Box Set"
+// suffix answers, so "harry potter box set" and "harry potter collection"
+// both find "Harry Potter Collection". They count only beside a word the rest
+// of the name matches: "box" alone does not find every box set.
+var boxSetSuffixWords = map[string]bool{"box": true, "set": true, boxSetNameSuffix: true}
+
+// boxSetNameSuffix ends a TMDB collection's name ("Harry Potter Collection").
+const boxSetNameSuffix = "collection"
 
 // BoxSetContentID is the synthetic content ID of a box set card.
 func BoxSetContentID(collectionID int64) string {
@@ -538,26 +552,39 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 		return nil, nil
 	}
 	patterns := make([]string, 0, len(words))
+	namePatterns := []string{}
+	suffixPatterns := []string{}
 	for _, word := range words {
-		patterns = append(patterns, "%"+escapePrefixForLike(word)+"%")
+		pattern := "%" + escapePrefixForLike(word) + "%"
+		patterns = append(patterns, pattern)
+		if boxSetSuffixWords[word] {
+			suffixPatterns = append(suffixPatterns, pattern)
+		} else {
+			namePatterns = append(namePatterns, pattern)
+		}
 	}
 	with, from, args, err := e.visibleCollectionMovies(QueryDefinition{MediaScope: playableTypeMovie, LibraryIDs: libraryIDs}, access)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, patterns, limit, offset)
-	patternIdx := len(args) - 2
+	args = append(args, patterns, namePatterns, suffixPatterns, limit, offset)
+	patternIdx := len(args) - 4
+	// A name matches when one query word is in its stem, the other words
+	// are too, and the suffix words are either there or answered by its
+	// suffix.
+	nameMatch := fmt.Sprintf(`(%[1]s LIKE ANY($%[3]d::text[]) AND %[1]s LIKE ALL($%[4]d::text[]) AND (%[2]s OR %[1]s LIKE ALL($%[5]d::text[])))`,
+		boxSetStemSQL, boxSetSuffixedSQL, patternIdx, patternIdx+1, patternIdx+2)
 	// Grouping the movies the viewer can see by collection keeps only
 	// collections with such a movie, so matches elsewhere do not use up the
 	// candidates a page reads.
 	sql := fmt.Sprintf(`%sSELECT bsm.tmdb_collection_id
 		%s
 		GROUP BY bsm.tmdb_collection_id, c.name
-		HAVING %[6]s LIKE ALL($%[3]d::text[])
+		HAVING %[6]s
 			OR count(*) FILTER (WHERE lower(mi.title) LIKE ALL($%[3]d::text[])) >= 2
-		ORDER BY CASE WHEN %[6]s LIKE ALL($%[3]d::text[]) THEN length(%[6]s) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
+		ORDER BY CASE WHEN %[6]s THEN length(%[7]s) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
 		LIMIT $%[4]d OFFSET $%[5]d`,
-		with, from, patternIdx, patternIdx+1, patternIdx+2, boxSetTitleSQL)
+		with, from, patternIdx, patternIdx+3, patternIdx+4, nameMatch, boxSetStemSQL)
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching box sets: %w", err)
