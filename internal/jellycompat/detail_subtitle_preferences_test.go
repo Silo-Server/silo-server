@@ -174,6 +174,7 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		mode       string
+		language   string
 		sig        *userstore.SubtitleTrackSignature
 		showForced bool
 		sidecars   bool
@@ -191,6 +192,11 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 			{Index: 2, Codec: "subrip", Language: "en-US", Title: "Forced", Forced: true},
 			{Index: 3, Codec: "subrip", Language: "en-US"},
 		}, want: 2},
+		{name: "regional preference remembers a now bare forced track", mode: "always", language: "en-US", sig: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en-US", Codec: "subrip", Label: "Forced", Forced: true}, want: 2},
+		{name: "regional preference remembers a sibling region forced track", mode: "always", language: "en-US", sig: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en-US", Codec: "subrip", Label: "Forced", Forced: true}, tracks: []catalog.VersionSubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "en-GB", Title: "Forced", Forced: true},
+			{Index: 3, Codec: "subrip", Language: "en-GB"},
+		}, want: 2},
 		// As in the web player, a closer language tag outranks the forced
 		// trait, and the signature then prefers the plain full track over
 		// the file's default SDH one.
@@ -205,6 +211,9 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			detail := &upstreamItemDetail{SubtitleLanguage: "en", SubtitleMode: tc.mode, SubtitleModeSet: true, ShowForcedSubtitles: tc.showForced, SubtitleTrackSignature: tc.sig}
+			if tc.language != "" {
+				detail.SubtitleLanguage = tc.language
+			}
 			v, dl := version, []subtitles.DownloadedSubtitle(nil)
 			if tc.sidecars {
 				v, dl = withSidecars, downloaded
