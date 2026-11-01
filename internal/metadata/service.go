@@ -7052,8 +7052,100 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 	}
 
-	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable, new(now))
+	// A by-date file has no episode number to build a scanner_fallback
+	// placeholder from, so the episode debt above never sees it. One that aired
+	// after every stored episode proves the stored list is behind the provider:
+	// the series itself owes the refresh that fetches the new episodes.
+	behind := s.seriesHasFilesPastStoredEpisodes(ctx, seriesID, episodes)
+	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable || behind, new(now))
+	if behind {
+		s.requestSeriesEpisodeListRefresh(ctx, seriesID, now)
+	}
 	return true
+}
+
+// seriesHasFilesPastStoredEpisodes reports whether an unlinked by-date file of
+// the series aired after the newest of episodes and matches no stored episode.
+// An unknown date inside the stored range is not counted: the provider has
+// already listed that stretch, so a refresh is not expected to add it.
+func (s *MetadataService) seriesHasFilesPastStoredEpisodes(ctx context.Context, seriesID string, episodes []*models.Episode) bool {
+	linker, ok := s.fileRepo.(EpisodeLinker)
+	if !ok || s.itemRepo == nil {
+		return false
+	}
+	files, err := linker.ListBySeriesUnlinked(ctx, seriesID)
+	if err != nil || len(files) == 0 {
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: failed to list unlinked series files for completeness check", "component", "metadata",
+				"series_id", seriesID, "error", err)
+		}
+		return false
+	}
+	newestStored := ""
+	for _, episode := range episodes {
+		if episode != nil && episode.AirDate != nil {
+			newestStored = max(newestStored, episode.AirDate.UTC().Format(time.DateOnly))
+		}
+	}
+	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to load naming roots for completeness check", "component", "metadata",
+			"series_id", seriesID, "error", err)
+		return false
+	}
+	var airDates []string
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		if hint := parseEpisodeLinkHint(file, rootsByFolder[file.MediaFolderID]...); hint.ok && hint.airDate > newestStored {
+			airDates = append(airDates, hint.airDate)
+		}
+	}
+	if len(airDates) == 0 {
+		return false
+	}
+	// The episode list above holds only episodes available in a library; a
+	// stored episode on the file's date means the file is ambiguous, not new.
+	stored, err := s.episodeRepo.ListBySeriesAndAirDates(ctx, seriesID, airDates)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to load episodes by air date for completeness check", "component", "metadata",
+			"series_id", seriesID, "error", err)
+		return false
+	}
+	for _, airDate := range airDates {
+		if len(stored[airDate]) == 0 {
+			item, err := s.itemRepo.GetByID(ctx, seriesID)
+			return err == nil && strings.EqualFold(strings.TrimSpace(item.Status), "matched")
+		}
+	}
+	return false
+}
+
+// requestSeriesEpisodeListRefresh queues episode-incomplete debt on the series
+// so the scheduled refresh fetches its episode list. Debt that already carries
+// that reason keeps its own schedule and attempt count, so a series whose
+// provider never lists the episode backs off and parks like other episode debt
+// instead of being lifted back to due on every sweep.
+func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, seriesID string, now time.Time) {
+	if s.refreshDebtRepo == nil {
+		return
+	}
+	debt, err := s.refreshDebtRepo.GetTarget(ctx, RefreshTargetItem, seriesID)
+	switch {
+	case err == nil && debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete):
+		return
+	case err != nil && !errors.Is(err, ErrRefreshDebtNotFound):
+		slog.WarnContext(ctx, "metadata: failed to read series refresh debt", "component", "metadata",
+			"series_id", seriesID, "error", err)
+		return
+	}
+	reasonMask := RefreshDebtReasonEpisodeIncomplete
+	if err := s.refreshDebtRepo.RequestDue(ctx, RefreshTargetItem, seriesID, refreshDebtPriority(reasonMask), reasonMask,
+		now.UTC(), metadataRefreshNudgeCooldown); err != nil {
+		slog.WarnContext(ctx, "metadata: failed to queue series episode list refresh", "component", "metadata",
+			"series_id", seriesID, "error", err)
+	}
 }
 
 func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, episode *models.Episode, now time.Time) error {
