@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func (h *CatalogSeedHandler) ImportCatalog(ctx context.Context, source CatalogIm
 	case source.LocalPath != "":
 		data, err = readLocalImportFile(source.LocalPath)
 	case source.RemoteURL != "":
-		data, err = readImportDataFromRemoteURL(ctx, source.RemoteURL)
+		data, err = catalogseed.DownloadRemoteBundle(ctx, source.RemoteURL)
 	case source.ArtifactKey != "":
 		data, err = h.readImportDataFromArtifactKey(ctx, source.ArtifactKey)
 	default:
@@ -92,7 +93,7 @@ func (h *CatalogSeedHandler) CreateCatalogImportJob(ctx context.Context, userID 
 		}
 		req.LocalPath, req.SourceLabel = path, filepath.Base(path)
 	case source.RemoteURL != "":
-		if _, err := readImportDataFromRemoteURL(ctx, source.RemoteURL); err != nil {
+		if _, err := catalogseed.DownloadRemoteBundle(ctx, source.RemoteURL); err != nil {
 			return nil, catalogImportSourceProblem(err)
 		}
 		req.RemoteURL, req.SourceLabel = source.RemoteURL, source.RemoteURL
@@ -118,6 +119,9 @@ func (h *CatalogSeedHandler) CreateCatalogImportJob(ctx context.Context, userID 
 func catalogImportSourceProblem(err error) error {
 	if errors.Is(err, errCatalogSeedImportSourceUnavailable) {
 		return apiError(http.StatusServiceUnavailable, "service_unavailable", "Catalog import storage is unavailable")
+	}
+	if errors.Is(err, catalogseed.ErrRemoteBundleTooLarge) {
+		return apiError(http.StatusBadRequest, "bad_request", "The remote catalog seed is larger than the "+strconv.FormatInt(catalogseed.MaxRemoteBundleBytes>>30, 10)+" GiB download limit")
 	}
 	return apiError(http.StatusBadRequest, "bad_request", "Cannot load the selected catalog import source")
 }

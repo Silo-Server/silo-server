@@ -230,7 +230,7 @@ type Transport struct {
 // connect to, which covers redirects and DNS answers that change after a
 // URL was checked. Each configure function adjusts both pools, for settings
 // such as a response header timeout; it must not replace the dialer or set a
-// proxy.
+// proxy. Use DialTimeout to shorten the connect timeout.
 func NewTransport(configure ...func(*http.Transport)) *Transport {
 	t := &Transport{public: newGuardedTransport(false), private: newGuardedTransport(true)}
 	for _, fn := range configure {
@@ -251,6 +251,20 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (t *Transport) CloseIdleConnections() {
 	t.public.CloseIdleConnections()
 	t.private.CloseIdleConnections()
+}
+
+// DialTimeout returns a NewTransport option that bounds each connection
+// attempt to d instead of the default 30 seconds. It wraps the guarded dialer
+// rather than replacing it, so every address is still checked.
+func DialTimeout(d time.Duration) func(*http.Transport) {
+	return func(t *http.Transport) {
+		dial := t.DialContext
+		t.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(ctx, d)
+			defer cancel()
+			return dial(ctx, network, address)
+		}
+	}
 }
 
 // NewClient returns an HTTP client over a new Transport.
