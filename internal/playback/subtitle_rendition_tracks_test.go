@@ -76,6 +76,37 @@ func TestSubtitleRenditionNames(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("many repeats", func(t *testing.T) {
+		// 1,000 tracks, the index's limit, all named alike; and labels that
+		// already hold the suffixes later repeats would take.
+		long := make([]string, 1000)
+		for i := range long {
+			long[i] = strings.Repeat("x", 8192)
+		}
+		taken := make([]string, 1000)
+		for i := range taken {
+			taken[i] = "English"
+			if i < 500 {
+				taken[i] = fmt.Sprintf("English (%d)", i+2)
+			}
+		}
+		for _, labels := range [][]string{long, taken} {
+			var names []string
+			// Each name costs a bounded number of allocations; a search that
+			// restarts at " (2)" costs one per earlier repeat.
+			if allocs := testing.AllocsPerRun(1, func() { names = SubtitleRenditionNames(labels, nil) }); allocs > float64(8*len(labels)) {
+				t.Fatalf("%d names took %.0f allocations", len(labels), allocs)
+			}
+			seen := make(map[string]bool, len(names))
+			for _, name := range names {
+				if seen[strings.ToLower(name)] {
+					t.Fatalf("duplicate name %q", name)
+				}
+				seen[strings.ToLower(name)] = true
+			}
+		}
+	})
 }
 
 func TestOnDemandSubtitleRenditionPlaylists(t *testing.T) {
@@ -827,6 +858,46 @@ func TestPlanPlaybackV3ListsRemuxRenditionsOnDemand(t *testing.T) {
 
 // A malformed file that repeats a container track number lists the number
 // once, under its first track, so the recipe stays valid.
+// A file with more text tracks than a plan lists keeps the first ones, and
+// the selected one when it comes later.
+func TestPlanPlaybackV3ListsAtMostMaxRenditions(t *testing.T) {
+	const tracks = maxOnDemandSubtitleRenditions + 6
+	for _, selected := range []int{-1, tracks - 1} {
+		input := onDemandPlannerInputV3(t)
+		file := input.EffectiveFile
+		file.SubtitleTracks = make([]models.SubtitleTrack, tracks)
+		numbers := make([]uint64, tracks)
+		for i := range file.SubtitleTracks {
+			numbers[i] = uint64(10 + i)
+			file.SubtitleTracks[i] = models.SubtitleTrack{Index: 2 + i, ContainerTrackID: strconv.Itoa(10 + i), Codec: "subrip", Language: "eng", Title: "English"}
+		}
+		input.CueIndexedSubtitleTracks = indexedV3(numbers...)
+		input.Request.SubtitleTrackIndex, input.Request.SubtitleTrackID = nil, ""
+		if selected >= 0 {
+			index := len(file.ExternalSubtitles) + selected
+			input.Request.SubtitleTrackIndex = &index
+			input.Request.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", index)
+		}
+		result := PlanPlaybackV3(input)
+		listed := result.SubtitleRenditionTracks
+		if result.Plan == nil || len(listed) != maxOnDemandSubtitleRenditions || !FreezeExecutableRecipeV3(result).ValidFor(*result.Plan) {
+			t.Fatalf("selected %d: %d renditions, %s", selected, len(listed), ExplainPlannerResultV3(result))
+		}
+		last := maxOnDemandSubtitleRenditions - 1
+		if selected >= 0 {
+			last--
+			if got := listed[len(listed)-1]; got.TrackNumber != numbers[selected] || !got.Default {
+				t.Fatalf("selected track listed as %+v", got)
+			}
+		}
+		for i := range last + 1 {
+			if listed[i].TrackNumber != numbers[i] || listed[i].Default {
+				t.Fatalf("selected %d: rendition %d = %+v", selected, i, listed[i])
+			}
+		}
+	}
+}
+
 func TestPlanPlaybackV3ListsARepeatedTrackNumberOnce(t *testing.T) {
 	input := onDemandPlannerInputV3(t)
 	input.EffectiveFile.SubtitleTracks[3].ContainerTrackID = "3"

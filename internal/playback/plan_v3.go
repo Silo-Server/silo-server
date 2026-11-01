@@ -1681,6 +1681,11 @@ func applyHLSSubtitleRenditionsV3(input PlannerInputV3, plan *PlanV3, subtitle S
 	return hlsRenditionsV3{carried: applyHLSSubtitleRenditionUnlessAttemptedV3(input, plan, subtitle)}
 }
 
+// maxOnDemandSubtitleRenditions bounds the on-demand renditions one plan
+// lists, and with them its multivariant playlist and recipe. Real files
+// rarely carry more text tracks; the rest keep their sidecar.
+const maxOnDemandSubtitleRenditions = 64
+
 // onDemandRenditionV3 is an inventory row an HLS plan lists as an on-demand
 // rendition: its position in the plan's inventory and the track.
 type onDemandRenditionV3 struct {
@@ -1731,6 +1736,7 @@ func hlsOnDemandSubtitleRenditionsV3(input PlannerInputV3, plan PlanV3, subtitle
 	if len(renditions) == 0 || !selectedListed && selectedTextRenditionV3(subtitle, input.Request) {
 		return nil, SubtitleRenditionSource{}
 	}
+	renditions = firstOnDemandRenditionsV3(renditions, maxOnDemandSubtitleRenditions)
 	labels, languages := make([]string, len(renditions)), make([]string, len(renditions))
 	for i, rendition := range renditions {
 		labels[i], languages[i] = plan.Subtitle.Inventory[rendition.row].Label, rendition.track.Language
@@ -1739,6 +1745,18 @@ func hlsOnDemandSubtitleRenditionsV3(input PlannerInputV3, plan PlanV3, subtitle
 		renditions[i].track.Name = name
 	}
 	return renditions, indexed.Source
+}
+
+// firstOnDemandRenditionsV3 keeps the first limit renditions, in inventory
+// order, with the selected one taking the last place when it comes later.
+func firstOnDemandRenditionsV3(renditions []onDemandRenditionV3, limit int) []onDemandRenditionV3 {
+	if len(renditions) <= limit {
+		return renditions
+	}
+	if i := slices.IndexFunc(renditions[limit:], func(r onDemandRenditionV3) bool { return r.track.Default }); i >= 0 {
+		renditions[limit-1] = renditions[limit+i]
+	}
+	return renditions[:limit]
 }
 
 // onDemandRenditionCandidatesV3 returns the plan's embedded inventory rows a
