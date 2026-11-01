@@ -24,6 +24,9 @@ type providerError struct {
 	// audio is set for a transcription request, so a "too large" answer can
 	// be told apart from one for a text request.
 	audio bool
+	// jobChunks is set when the audio was cut to a per-job chunk length (live
+	// jobs) rather than the Audio per request setting.
+	jobChunks bool
 }
 
 func (e *providerError) Error() string { return e.err.Error() }
@@ -37,26 +40,27 @@ var ErrNoSpeech = errors.New("no speech recognized in the audio track")
 // provider responses, file paths, or other diagnostics; the raw error is
 // logged instead. Players show them as-is.
 const (
-	failureGeneric        = "Subtitle processing stopped because of an unexpected server error. Try again later."
-	failureCancelled      = "Subtitle processing was canceled."
-	failureInterrupted    = "Subtitle processing stopped when the server restarted. Try again."
-	failureBilling        = "The AI provider has no available credit or has reached its spending limit. Ask a server administrator to check AI Services."
-	failureKeyRejected    = "The AI provider rejected the server's credentials. Ask a server administrator to check AI Services."
-	failurePlanIneligible = "The ChatGPT account connected to this server can't share its plan usage. Ask a server administrator to check AI Services."
-	failureModelNotFound  = "The AI provider doesn't recognize the configured model. Ask a server administrator to check AI Services."
-	failureAudioTooLarge  = "The AI provider rejected the audio as too large. Ask a server administrator to lower Audio per request in AI Services."
-	failureTextTooLarge   = "The AI provider rejected the subtitle text as too large. Ask a server administrator to lower Subtitle lines per request in AI Services."
-	failureRateLimited    = "The AI provider is limiting requests right now. Try again in a few minutes."
-	failureUnavailable    = "The AI provider is unavailable right now. Try again later."
-	failureRejected       = "The AI provider rejected the request. Ask a server administrator to check AI Services."
-	failureTimeout        = "The AI provider took too long to respond. Try again later."
-	failureUnreachable    = "The server couldn't reach the AI provider. Try again later, or ask a server administrator to check AI Services."
-	failureUnusableOutput = "The AI model returned a response that couldn't be used. Try again, or ask a server administrator to choose another model."
-	failureNoSpeech       = "No speech was recognized in this audio track."
-	failureNoAudio        = "This file has no audio track to transcribe."
-	failureSourceText     = "This subtitle track can't be translated. Choose a text subtitle track such as SRT or WebVTT."
-	failureSourceMissing  = "The selected track is no longer available. Reopen the subtitle menu and try again."
-	failureSourceEmpty    = "This subtitle track has no lines to translate. Choose another subtitle track."
+	failureGeneric           = "Subtitle processing stopped because of an unexpected server error. Try again later."
+	failureCancelled         = "Subtitle processing was canceled."
+	failureInterrupted       = "Subtitle processing stopped when the server restarted. Try again."
+	failureBilling           = "The AI provider has no available credit or has reached its spending limit. Ask a server administrator to check AI Services."
+	failureKeyRejected       = "The AI provider rejected the server's credentials. Ask a server administrator to check AI Services."
+	failurePlanIneligible    = "The ChatGPT account connected to this server can't share its plan usage. Ask a server administrator to check AI Services."
+	failureModelNotFound     = "The AI provider doesn't recognize the configured model. Ask a server administrator to check AI Services."
+	failureAudioTooLarge     = "The AI provider rejected the audio as too large. Ask a server administrator to lower Audio per request in AI Services."
+	failureLiveAudioTooLarge = "The AI provider rejected live audio as too large. Ask a server administrator to check AI Services."
+	failureTextTooLarge      = "The AI provider rejected the subtitle text as too large. Ask a server administrator to lower Subtitle lines per request in AI Services."
+	failureRateLimited       = "The AI provider is limiting requests right now. Try again in a few minutes."
+	failureUnavailable       = "The AI provider is unavailable right now. Try again later."
+	failureRejected          = "The AI provider rejected the request. Ask a server administrator to check AI Services."
+	failureTimeout           = "The AI provider took too long to respond. Try again later."
+	failureUnreachable       = "The server couldn't reach the AI provider. Try again later, or ask a server administrator to check AI Services."
+	failureUnusableOutput    = "The AI model returned a response that couldn't be used. Try again, or ask a server administrator to choose another model."
+	failureNoSpeech          = "No speech was recognized in this audio track."
+	failureNoAudio           = "This file has no audio track to transcribe."
+	failureSourceText        = "This subtitle track can't be translated. Choose a text subtitle track such as SRT or WebVTT."
+	failureSourceMissing     = "The selected track is no longer available. Reopen the subtitle menu and try again."
+	failureSourceEmpty       = "This subtitle track has no lines to translate. Choose another subtitle track."
 
 	// Persisted by the cancel paths.
 	storedCancelled            = "cancelled"              //nolint:misspell // Preserve the existing persisted message.
@@ -65,7 +69,7 @@ const (
 
 var publicFailureReasons = map[string]bool{
 	failureGeneric: true, failureBilling: true, failureKeyRejected: true, failurePlanIneligible: true, failureModelNotFound: true,
-	failureAudioTooLarge: true, failureTextTooLarge: true, failureRateLimited: true, failureUnavailable: true, failureRejected: true,
+	failureAudioTooLarge: true, failureLiveAudioTooLarge: true, failureTextTooLarge: true, failureRateLimited: true, failureUnavailable: true, failureRejected: true,
 	failureTimeout: true, failureUnreachable: true, failureUnusableOutput: true, failureNoSpeech: true,
 	failureNoAudio: true, failureSourceText: true, failureSourceMissing: true, failureSourceEmpty: true,
 }
@@ -121,6 +125,9 @@ func providerFailureReason(provider *providerError) string {
 	case llm.FailureTooLarge:
 		// A transcribe_translate job also sends text, so the request that
 		// failed, not the job kind, names the setting to lower.
+		if provider.audio && provider.jobChunks {
+			return failureLiveAudioTooLarge
+		}
 		if provider.audio {
 			return failureAudioTooLarge
 		}
