@@ -600,6 +600,7 @@ DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
 PATCH /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
 GET /api/v2/ebooks/{content_id}/files/{file_id}/read	non-media
 HEAD /api/v2/ebooks/{content_id}/files/{file_id}/read	non-media
+GET /api/v2/ebooks/{content_id}/files/{file_id}/text-pages/{page_index}	non-media
 GET /api/v2/ebooks/{content_id}/progress	non-media
 PUT /api/v2/ebooks/{content_id}/progress	non-media
 GET /api/v2/ebooks/{content_id}/reader-config	non-media
@@ -1915,6 +1916,7 @@ DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
 PATCH /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
 GET /api/v2/ebooks/{content_id}/files/{file_id}/read	non-media
 HEAD /api/v2/ebooks/{content_id}/files/{file_id}/read	non-media
+GET /api/v2/ebooks/{content_id}/files/{file_id}/text-pages/{page_index}	non-media
 GET /api/v2/ebooks/{content_id}/progress	non-media
 PUT /api/v2/ebooks/{content_id}/progress	non-media
 GET /api/v2/ebooks/{content_id}/reader-config	non-media
