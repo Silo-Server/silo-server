@@ -1821,7 +1821,8 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 // it, so their cards carry the same catalog fields and poster badges. It copies
 // the item as given: only Home and library rows localize their items first.
 // Callers add the per-request parts: artwork URLs, overlay summary, user state
-// and row metadata.
+// and row metadata. The frozen v1 recommendation and Watch Tonight routes drop
+// the badge fields again (v1RecommendationCard).
 func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	resp := sectionItemResponse{
 		ContentID:              item.ContentID,

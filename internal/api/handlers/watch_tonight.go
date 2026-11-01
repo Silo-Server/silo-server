@@ -65,6 +65,9 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 		writeAPIError(w, err)
 		return
 	}
+	for i := range resp.Items {
+		resp.Items[i].sectionItemResponse = resp.Items[i].v1WatchTonightCard()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

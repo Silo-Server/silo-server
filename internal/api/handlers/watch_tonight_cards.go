@@ -112,6 +112,10 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 		writeAPIError(w, err)
 		return
 	}
+	// The swipe card's own runtime stays: v1 always sent it.
+	for i := range resp.Cards {
+		resp.Cards[i].sectionItemResponse = resp.Cards[i].v1WatchTonightCard()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
