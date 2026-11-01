@@ -944,6 +944,18 @@ func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []strin
 	return conditions
 }
 
+// listedItemAccessConditions is itemAccessConditions for listings and their
+// counts: with no library restriction it still requires the item to be in a
+// library, so an item held only by the scanner's file removal grace is left
+// out (see InSomeLibraryWhere).
+func listedItemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []string {
+	conditions := itemAccessConditions(access, args, argIdx)
+	if access.AllowedLibraryIDs == nil && len(access.DisabledLibraryIDs) == 0 {
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
+	}
+	return conditions
+}
+
 // CountVisiblePersonalCollectionMembers counts, per collection, the members of
 // the account's hand-picked or imported personal collections that the viewer
 // can see, as their catalog view counts them. It ignores smart definitions and
@@ -980,7 +992,7 @@ func buildCountVisiblePersonalCollectionMembersSQL(userID int, collectionIDs []s
             WHERE upci.user_id = $1 AND upci.collection_id = ANY($2) AND upci.sub_item_id = ''`
 	args := []any{userID, collectionIDs}
 	argIdx := 3
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range listedItemAccessConditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 	// The catalog view never lists manga chapters as items.
