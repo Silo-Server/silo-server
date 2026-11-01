@@ -235547,6 +235547,9 @@
           "keyframe_playlist": {
             "type": "boolean"
           },
+          "require_audio_track": {
+            "type": "boolean"
+          },
           "require_ready": {
             "type": "boolean"
           },
@@ -235693,6 +235696,9 @@
             "type": "string"
           },
           "keyframe_playlist": {
+            "type": "boolean"
+          },
+          "require_audio_track": {
             "type": "boolean"
           },
           "session_id": {
