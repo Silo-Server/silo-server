@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -1430,5 +1431,63 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 				}
 			}
 		})
+	}
+}
+
+// failingAirDateEpisodeRepo fails the air-date lookup the completeness sweep
+// runs for a series' unlinked by-date files.
+type failingAirDateEpisodeRepo struct {
+	*fakeEpisodeRepo
+}
+
+func (failingAirDateEpisodeRepo) ListBySeriesAndAirDates(context.Context, string, []string) (map[string][]*models.Episode, error) {
+	return nil, errors.New("air-date lookup failed")
+}
+
+// TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails
+// covers a failed by-date check: clearing the flag would let the refresh's
+// settle drop the series debt, the only trigger left for the unlinked file.
+func TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails(t *testing.T) {
+	h := newFallbackTestHarness()
+	debts := newFakeRefreshDebtRepo()
+	h.service.refreshDebtRepo = debts
+	ctx := context.Background()
+	const seriesID = "series-daily-check-fails"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Friday", TvdbID: "1001", AirDate: mustDate(t, "2024-05-03")},
+	)
+	item, err := h.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.EpisodeMetadataIncomplete = true
+	if err := h.itemRepo.Upsert(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.MetadataRefreshDebt{
+		TargetType:    RefreshTargetItem,
+		ContentID:     seriesID,
+		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
+		Priority:      refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		AttemptCount:  1,
+		NextRefreshAt: time.Now().Add(24 * time.Hour).Truncate(time.Second),
+	}
+	debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)] = queued
+	addAirDateFile(h, seriesID, 301, "/media/tv/Daily Show (2024)/Season 01/Daily Show (2024) - 2024-05-06 - Episode.mkv")
+	h.service.episodeRepo = failingAirDateEpisodeRepo{fakeEpisodeRepo: h.episodeRepo}
+
+	if h.service.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now()) {
+		t.Error("sweep reported success after the by-date check failed")
+	}
+	item, err = h.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !item.EpisodeMetadataIncomplete {
+		t.Error("EpisodeMetadataIncomplete cleared after the by-date check failed")
+	}
+	if debt := debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)]; debt == nil || debt.AttemptCount != 1 ||
+		!debt.NextRefreshAt.Equal(queued.NextRefreshAt) {
+		t.Errorf("series debt = %+v, want it kept as queued", debt)
 	}
 }

@@ -6996,7 +6996,8 @@ func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, series
 
 // refreshSeriesEpisodeMetadataState re-syncs the series' episode refresh debt
 // and incomplete flag. It reports false when it could not read the series'
-// debt or episodes; failures on single rows are logged and do not count.
+// debt, episodes or unlinked by-date files; failures on single rows are logged
+// and do not count.
 func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context, seriesID string, now time.Time) bool {
 	if s == nil || s.episodeRepo == nil {
 		return true
@@ -7068,7 +7069,15 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 	// after the series' newest library episode and matches no stored episode
 	// shows the stored list is behind the provider: the series itself owes the
 	// refresh that fetches the new episodes.
-	newestUnstored := s.newestUnstoredFileAirDate(ctx, seriesID, episodes, now)
+	//
+	// A failed check leaves the flag and the series debt as they are, like a
+	// failed read above: clearing them would drop the only refresh trigger.
+	newestUnstored, err := s.newestUnstoredFileAirDate(ctx, seriesID, episodes, now)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to check unlinked by-date files for completeness", "component", "metadata",
+			"series_id", seriesID, "error", err)
+		return false
+	}
 	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable || newestUnstored != "", new(now))
 	if newestUnstored != "" {
 		s.requestSeriesEpisodeListRefresh(ctx, seriesID, newestUnstored, now)
@@ -7084,18 +7093,17 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 // add it. Nor is a date after tomorrow (UTC), which has not aired in any time
 // zone: such a name is almost always wrong, and it would restart parked debt
 // on every sweep.
-func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesID string, episodes []*models.Episode, now time.Time) string {
+func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesID string, episodes []*models.Episode, now time.Time) (string, error) {
 	linker, ok := s.fileRepo.(EpisodeLinker)
 	if !ok || s.itemRepo == nil {
-		return ""
+		return "", nil
 	}
 	files, err := linker.ListBySeriesUnlinked(ctx, seriesID)
-	if err != nil || len(files) == 0 {
-		if err != nil {
-			slog.WarnContext(ctx, "metadata: failed to list unlinked series files for completeness check", "component", "metadata",
-				"series_id", seriesID, "error", err)
-		}
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("listing unlinked files: %w", err)
+	}
+	if len(files) == 0 {
+		return "", nil
 	}
 	newestStored := ""
 	for _, episode := range episodes {
@@ -7105,9 +7113,7 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 	}
 	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
 	if err != nil {
-		slog.WarnContext(ctx, "metadata: failed to load naming roots for completeness check", "component", "metadata",
-			"series_id", seriesID, "error", err)
-		return ""
+		return "", fmt.Errorf("loading naming roots: %w", err)
 	}
 	latestAired := now.UTC().AddDate(0, 0, 1).Format(time.DateOnly)
 	var airDates []string
@@ -7121,15 +7127,13 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 		}
 	}
 	if len(airDates) == 0 {
-		return ""
+		return "", nil
 	}
 	// The episode list above holds only episodes available in a library; a
 	// stored episode on the file's date means the file is ambiguous, not new.
 	stored, err := s.episodeRepo.ListBySeriesAndAirDates(ctx, seriesID, airDates)
 	if err != nil {
-		slog.WarnContext(ctx, "metadata: failed to load episodes by air date for completeness check", "component", "metadata",
-			"series_id", seriesID, "error", err)
-		return ""
+		return "", fmt.Errorf("loading episodes by air date: %w", err)
 	}
 	newest := ""
 	for _, airDate := range airDates {
@@ -7138,12 +7142,16 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 		}
 	}
 	if newest == "" {
-		return ""
+		return "", nil
 	}
-	if item, err := s.itemRepo.GetByID(ctx, seriesID); err != nil || !strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
-		return ""
+	item, err := s.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		return "", fmt.Errorf("loading series: %w", err)
 	}
-	return newest
+	if !strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return "", nil
+	}
+	return newest, nil
 }
 
 // requestSeriesEpisodeListRefresh queues episode-incomplete debt on the series
