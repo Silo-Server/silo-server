@@ -1,95 +1,61 @@
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTestUtils";
-import AdminAccessGroups from "./AdminAccessGroups";
 import { stubRadixDom } from "./adminPage.test-support";
+import {
+  GROUP,
+  INHERIT_LIMIT,
+  pickOption,
+  renderPage,
+  REQUEST_SETTINGS,
+} from "./AdminAccessGroups.test-support";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
-vi.mock("@/hooks/queries/admin/users", () => ({
+const adminUsers = vi.hoisted(() => ({
+  update: vi.fn(),
+  currentGroups: new Map<number, number | null>(),
+  data: [] as Array<{
+    id: number;
+    username: string;
+    email: string;
+    role: string;
+    access_group_id: number | null;
+    requests_allowed?: boolean | null;
+  }>,
+}));
+vi.mock("@/hooks/queries/admin/users", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/admin/users")>()),
   useAdminUsers: () => ({
-    data: [],
+    data: adminUsers.data,
     isPending: false,
     isError: false,
     isSuccess: true,
     refetch: vi.fn(),
   }),
 }));
+vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
+  updateAdminUser: (...args: unknown[]) => adminUsers.update(...args),
+  getAdminUser: async (id: number) => ({
+    user: {
+      id,
+      access_group_id: adminUsers.currentGroups.has(id)
+        ? adminUsers.currentGroups.get(id)
+        : adminUsers.data.find((candidate) => candidate.id === id)?.access_group_id,
+    },
+    etag: `"user-${id}"`,
+    profileContext: null,
+  }),
+}));
 const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 
 stubRadixDom();
-
-async function pickOption(
-  user: ReturnType<typeof userEvent.setup>,
-  combobox: string,
-  option: string,
-) {
-  await user.click(screen.getByRole("combobox", { name: combobox }));
-  await user.click(await screen.findByRole("option", { name: option }));
-}
-
-const GROUP = {
-  id: "1",
-  name: "Kids",
-  description: "",
-  library_ids: ["2"],
-  max_playback_quality: "1080p",
-  download_allowed: false,
-  download_transcode_allowed: false,
-  transcode_allowed: true,
-  audio_transcode_allowed: true,
-  max_streams: 1,
-  max_transcodes: 0,
-  max_remote_stream_bitrate_kbps: 0,
-  max_local_stream_bitrate_kbps: 0,
-  max_profiles: 5,
-  allowed_permissions: [] as string[],
-  requests_allowed: false,
-  is_default: true,
-  member_count: 3,
-  created_at: "2026-07-02T12:00:00Z",
-  updated_at: "2026-07-02T12:00:00Z",
-};
-
-function renderPage(initialPath = "/admin/access-groups") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createMemoryRouter(
-    [
-      { path: "/admin", element: <p>Admin home</p> },
-      { path: "/admin/access-groups", element: <AdminAccessGroups /> },
-      { path: "/admin/access-groups/:id", element: <AdminAccessGroups /> },
-    ],
-    { initialEntries: ["/admin", initialPath], initialIndex: 1 },
-  );
-  render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
-  return router;
-}
-
-const REQUEST_SETTINGS = {
-  requests_enabled: true,
-  global_max_requests: 12,
-  global_window_days: 14,
-  global_auto_approval_enabled: true,
-  force_dual_quality: false,
-};
-const INHERIT_LIMIT = {
-  group_id: "1",
-  limit_mode: "inherit",
-  max_requests: null,
-  window_days: null,
-  approval_mode: "inherit",
-};
 
 describe("AdminAccessGroups", () => {
   let putBody: unknown;
@@ -162,6 +128,14 @@ describe("AdminAccessGroups", () => {
             { id: 3, name: "Anime", type: "series", enabled: true },
           ]);
         }
+        if (url === "/api/v2/libraries") {
+          return jsonResponse({
+            items: [
+              { id: "2", name: "Movies", type: "movie", enabled: true },
+              { id: "3", name: "Anime", type: "series", enabled: true },
+            ],
+          });
+        }
         if (url === "/api/v2/admin/access-groups/1" && method === "PUT") {
           putBody = JSON.parse(String(init?.body));
           return new Response(JSON.stringify({ ...GROUP, download_allowed: true }), {
@@ -176,6 +150,8 @@ describe("AdminAccessGroups", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    adminUsers.currentGroups.clear();
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
