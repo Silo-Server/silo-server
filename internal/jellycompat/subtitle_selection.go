@@ -285,8 +285,19 @@ func compatDetailSubtitleStreamIndex(detail *upstreamItemDetail, version catalog
 	// English one, even when forced tracks are otherwise hidden; Jellyfin
 	// clients get the same track.
 	if mode == compatSubtitleAlways {
-		if index := compatSignatureSubtitleIndex(candidates, detail.SubtitleTrackSignature); index != nil {
+		sig := detail.SubtitleTrackSignature
+		if index := compatSignatureSubtitleIndex(candidates, sig); index != nil {
 			return index
+		}
+		// A remux can retitle the remembered forced track, or a rescan add a
+		// region to its language. Rank the preferred language's tracks
+		// against the signature as the web player does, before forced tracks
+		// are hidden, so the forced track still wins. Other signatures keep
+		// Jellyfin's selection.
+		if !sig.IsZero() && sig.Forced && len(preferred) > 0 {
+			if index := compatSignatureFallbackSubtitleIndex(candidates, preferred[0], sig); index != nil {
+				return index
+			}
 		}
 	}
 	if !detail.ShowForcedSubtitles {
@@ -302,7 +313,7 @@ func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *use
 	if sig.IsZero() {
 		return nil
 	}
-	same := func(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
+	same := compatSameSignatureTrait
 	for _, c := range candidates {
 		if same(c.Source, sig.Source) &&
 			same(c.Language, sig.Language) &&
@@ -314,6 +325,103 @@ func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *use
 		}
 	}
 	return nil
+}
+
+// compatSignatureFallbackSubtitleIndex ports the Silo web player's Always
+// fallback for a signature no candidate matches exactly
+// (findPreferredSubtitleIndexWithSignature): among the candidates in the
+// preferred language, the closest language tag wins, then the most matching
+// signature traits, then a full, plain, text, embedded track. The web player
+// also ranks tracks it would burn in last, which depends on a renderer
+// jellycompat does not know. It returns nil when no candidate is in the
+// preferred language.
+func compatSignatureFallbackSubtitleIndex(candidates []compatSubtitleCandidate, preferred string, sig *userstore.SubtitleTrackSignature) *int {
+	same := compatSameSignatureTrait
+	score := func(c compatSubtitleCandidate) int {
+		score := 0
+		if same(c.Source, sig.Source) {
+			score += 4
+		}
+		if c.Forced == sig.Forced {
+			score += 2
+		}
+		if c.HearingImpaired == sig.HearingImpaired {
+			score += 2
+		}
+		if same(c.Codec, sig.Codec) {
+			score++
+		}
+		if same(c.Label, sig.Label) {
+			score++
+		}
+		return score
+	}
+	priority := func(c compatSubtitleCandidate) int {
+		priority := 0
+		if c.Forced {
+			priority += 16
+		}
+		if c.HearingImpaired {
+			priority += 8
+		}
+		if compatBitmapSubtitle(c.Codec) {
+			priority += 4
+		}
+		switch c.Source {
+		case playback.SubtitleSourceExternalV3:
+			priority++
+		case playback.SubtitleSourceDownloadedV3:
+			priority += 2
+		}
+		return priority
+	}
+	var best *int
+	var bestRank, bestScore, bestPriority int
+	for _, c := range candidates {
+		rank := compatLanguageMatchRank(c.Language, preferred)
+		if rank < 0 {
+			continue
+		}
+		s, p := score(c), priority(c)
+		if best == nil || rank < bestRank || (rank == bestRank && (s > bestScore || (s == bestScore && p < bestPriority))) {
+			best, bestRank, bestScore, bestPriority = intPtr(c.Index), rank, s, p
+		}
+	}
+	return best
+}
+
+// compatLanguageMatchRank orders a candidate the preferred language matches
+// as the web player does: the same tag, then the bare language, then another
+// variant of it. It is -1 when the preference does not match the candidate.
+func compatLanguageMatchRank(language, preferred string) int {
+	if !compatContainsLanguage([]string{preferred}, language) {
+		return -1
+	}
+	candidate := lang.CompatibleTag(language)
+	switch {
+	case candidate == lang.CompatibleTag(preferred):
+		return 0
+	case !strings.Contains(candidate, "-"):
+		return 1
+	default:
+		return 2
+	}
+}
+
+// compatBitmapSubtitle mirrors the web player's isBitmapCodec.
+func compatBitmapSubtitle(codec string) bool {
+	switch compatSubtitleProfileFormat(codec) {
+	case "pgssub", "dvdsub", "dvbsub", "dvb_teletext": //nolint:goconst // the bitmap formats compatSubtitleProfileFormat returns
+		return true
+	default:
+		return false
+	}
+}
+
+// compatSameSignatureTrait compares a candidate's trait with a remembered
+// signature's, ignoring case and surrounding space.
+func compatSameSignatureTrait(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 // compatSubtitleTrackLabel is the label the playback v3 inventory gives a
