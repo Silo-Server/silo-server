@@ -1142,6 +1142,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			// Fully qualify webhook URLs when the public base URL is known.
 			autoscanHandler.SetPublicURL(deps.PublicURL)
+			// The v1 and v2 webhook routes share the autoscan_webhook budget,
+			// which only refuses unknown tokens: arr does not retry a refused
+			// delivery, so one with a real token over it is still admitted.
+			if deps.RateLimitMW != nil {
+				deps.RateLimitMW.AdmitOverEndpointBudget("autoscan_webhook", autoscanHandler.KnowsWebhookToken)
+			}
 		}
 
 		if deps.PersonRepo != nil {
@@ -3354,6 +3360,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Silo session; the URL's bearer token authenticates the delivery and
 		// maps it to its Autoscan source. Rate limited per-IP (plus the
 		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
+		// The per-endpoint limit only refuses unknown tokens (see
+		// AdmitOverEndpointBudget where the handler is built).
 		if autoscanHandler != nil {
 			if deps.RateLimitMW != nil {
 				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).
