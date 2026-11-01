@@ -4012,6 +4012,12 @@ export type PluginRuntimeState = "stopped" | "starting" | "running" | "backoff" 
  * supervises (started at boot, restarted after a crash); `backoff` and
  * `failed` only occur for those.
  */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
+}
+
 export interface PluginRuntime {
   resident: boolean;
   state: PluginRuntimeState;
@@ -4045,6 +4051,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** The last automatic update that failed; absent when the last check did not fail. */
+  update_failure?: PluginUpdateFailure | null;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

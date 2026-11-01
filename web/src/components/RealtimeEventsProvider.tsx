@@ -812,6 +812,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               { queryKey: adminKeys.taskHistory(task.key) },
               { queryKey: adminKeys.taskMetrics(task.key) },
             );
+            // A finished plugin update check may have updated plugins or
+            // recorded a refused update on them.
+            if (task.key === "check_plugin_updates") {
+              filters.push({ queryKey: adminKeys.pluginInstallations() });
+            }
           }
           refreshQueries(...filters);
         }

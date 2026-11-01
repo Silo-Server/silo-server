@@ -71,3 +71,55 @@ func seedResidentQueryInstallation(t *testing.T, pool *pgxpool.Pool, enabled boo
 	})
 	return id
 }
+
+// A refused automatic update is stored on the installation row, read back by
+// List, and dropped by an explicit clear or once the installed version changes.
+func TestInstallationStoreUpdateFailureDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstallationStore(pool)
+	ctx := t.Context()
+	id := seedResidentQueryInstallation(t, pool, true)
+	failedAt := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+	readFailure := func() *UpdateFailure {
+		t.Helper()
+		installations, err := store.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, installation := range installations {
+			if installation.ID == id {
+				return installation.UpdateFailure
+			}
+		}
+		t.Fatalf("installation %d not listed", id)
+		return nil
+	}
+	record := func() {
+		t.Helper()
+		if err := store.Update(ctx, id, UpdateInstallationInput{UpdateFailure: &UpdateFailure{Version: "1.1.0", Reason: "refused", FailedAt: failedAt}}); err != nil {
+			t.Fatal(err)
+		}
+		got := readFailure()
+		if got == nil || got.Version != "1.1.0" || got.Reason != "refused" || !got.FailedAt.Equal(failedAt) {
+			t.Fatalf("stored failure = %+v, want 1.1.0 refused at %s", got, failedAt)
+		}
+	}
+
+	record()
+	if err := store.Update(ctx, id, UpdateInstallationInput{ClearUpdateFailure: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFailure(); got != nil {
+		t.Fatalf("failure after clear = %+v, want nil", got)
+	}
+
+	record()
+	version := "1.1.0"
+	if err := store.Update(ctx, id, UpdateInstallationInput{Version: &version}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFailure(); got != nil {
+		t.Fatalf("failure after version change = %+v, want nil", got)
+	}
+}

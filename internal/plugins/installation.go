@@ -44,6 +44,18 @@ type Installation struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	RuntimeGeneration int64 `json:"-"`
+	// UpdateFailure is the last automatic update Silo refused to apply, or
+	// nil. A changed installed version or a later pass that does not fail
+	// clears it.
+	UpdateFailure *UpdateFailure `json:"-"`
+}
+
+// UpdateFailure records an automatic update that was refused. Reason is
+// written for the admin and carries no URL, checksum or credential.
+type UpdateFailure struct {
+	Version  string
+	Reason   string
+	FailedAt time.Time
 }
 
 // IsBuiltin reports whether this is the reserved builtin-host installation.
@@ -92,6 +104,11 @@ type UpdateInstallationInput struct {
 	// comes from. A nil RepositoryID clears it, as for an uploaded package.
 	SetRepository bool
 	RepositoryID  *int
+	// UpdateFailure records a refused automatic update; ClearUpdateFailure
+	// removes the record. Setting Version also removes it, since the record
+	// is about updating from the version that was installed.
+	UpdateFailure      *UpdateFailure
+	ClearUpdateFailure bool
 }
 
 type InstallationStore struct {
@@ -102,13 +119,15 @@ func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
 	return &InstallationStore{pool: pool}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation, update_failed_version, update_failure_reason, update_failed_at`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
 func scanInstallation(row pgx.Row) (*Installation, error) {
 	var installation Installation
 	var repositoryID *int
+	var failedVersion, failureReason *string
+	var failedAt *time.Time
 	if err := row.Scan(
 		&installation.ID,
 		&repositoryID,
@@ -122,6 +141,9 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.CreatedAt,
 		&installation.UpdatedAt,
 		&installation.RuntimeGeneration,
+		&failedVersion,
+		&failureReason,
+		&failedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -129,6 +151,9 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		return nil, fmt.Errorf("scanning plugin installation: %w", err)
 	}
 	installation.RepositoryID = repositoryID
+	if failedVersion != nil && failureReason != nil && failedAt != nil {
+		installation.UpdateFailure = &UpdateFailure{Version: *failedVersion, Reason: *failureReason, FailedAt: *failedAt}
+	}
 	return &installation, nil
 }
 
@@ -343,6 +368,14 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		setClauses = append(setClauses, fmt.Sprintf("repository_id = $%d", argIndex))
 		args = append(args, input.RepositoryID)
 		argIndex++
+	}
+	switch {
+	case input.UpdateFailure != nil:
+		setClauses = append(setClauses, fmt.Sprintf("update_failed_version = $%d, update_failure_reason = $%d, update_failed_at = $%d", argIndex, argIndex+1, argIndex+2))
+		args = append(args, input.UpdateFailure.Version, input.UpdateFailure.Reason, input.UpdateFailure.FailedAt)
+		argIndex += 3
+	case input.ClearUpdateFailure || input.Version != nil:
+		setClauses = append(setClauses, "update_failed_version = NULL, update_failure_reason = NULL, update_failed_at = NULL")
 	}
 
 	if len(setClauses) > 0 {

@@ -18371,6 +18371,8 @@ export interface components {
       /** @enum {string} */
       source_kind: "silo" | "approved_community" | "external";
       task_bindings: components["schemas"]["AdminPluginTaskBinding"][];
+      /** @description The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin. */
+      update_failure?: components["schemas"]["AdminPluginUpdateFailure"];
       update_policy: string;
       /**
        * Format: date-time
@@ -18514,6 +18516,17 @@ export interface components {
       trigger?: {
         [key: string]: unknown;
       };
+    };
+    AdminPluginUpdateFailure: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      failed_at: string;
+      /** @description Why the update was refused, written for the administrator; it names no URL or checksum */
+      reason: string;
+      /** @description The version Silo tried and failed to install */
+      version: string;
     };
     AdminPluginUploadForm: {
       /**
