@@ -1142,6 +1142,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			// Fully qualify webhook URLs when the public base URL is known.
 			autoscanHandler.SetPublicURL(deps.PublicURL)
+			// The v1 and v2 webhook routes share the autoscan_webhook budget,
+			// which only refuses unknown tokens: arr does not retry a refused
+			// delivery, so one with a real token over it is still admitted.
+			if deps.RateLimitMW != nil {
+				deps.RateLimitMW.AdmitOverEndpointBudget("autoscan_webhook", autoscanHandler.KnowsWebhookToken)
+			}
 		}
 
 		if deps.PersonRepo != nil {
@@ -1177,6 +1183,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Personal collections without an uploaded or imported poster show a
 	// collage of their titles; it needs artwork storage and poster signing.
 	var personalCollages *catalog.PersonalCollectionCollages
+	var personalMemberCounts *catalog.PersonalCollectionMemberCounts
+	if deps.DB != nil {
+		personalMemberCounts = catalog.NewPersonalCollectionMemberCounts(deps.DB)
+	}
 	if deps.DB != nil && detailSvc != nil {
 		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
 			personalCollages = deps.PersonalCollectionCollages
@@ -1263,6 +1273,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.CollectionOwners = collectionOwners
 		collectionHandler.Collages = personalCollages
+		collectionHandler.MemberCounts = personalMemberCounts
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -2184,6 +2195,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.UserCollectionPool = deps.DB
 		libraryCollectionHandler.CollectionOwners = collectionOwners
 		libraryCollectionHandler.PersonalCollages = personalCollages
+		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
@@ -3348,6 +3360,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Silo session; the URL's bearer token authenticates the delivery and
 		// maps it to its Autoscan source. Rate limited per-IP (plus the
 		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
+		// The per-endpoint limit only refuses unknown tokens (see
+		// AdmitOverEndpointBudget where the handler is built).
 		if autoscanHandler != nil {
 			if deps.RateLimitMW != nil {
 				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).

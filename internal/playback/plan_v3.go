@@ -739,7 +739,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
-					(source.VideoCodec == transcodeCodecH264 || source.VideoCodec == transcodeCodecHEVC) {
+					HLSCopyFitsMPEGTS(source.VideoCodec, "") {
 					// HLS carries only H.264 and HEVC in MPEG-TS; other copied
 					// codecs keep fMP4. MPEG-TS has no sample entry; the
 					// executor still keeps a preserved Dolby Vision
@@ -2018,6 +2018,16 @@ func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) 
 	}
 	width, height = encodedFrame(source.Width, source.Height, source.Width, source.Height)
 	return heightLabel(height), width, height
+}
+
+// HLSCopyFitsMPEGTS reports whether HLS can carry a copied video and audio
+// codec in MPEG-TS segments. An empty audio codec checks the video alone.
+func HLSCopyFitsMPEGTS(videoCodec, audioCodec string) bool {
+	switch normalizeCodecV3(videoCodec) {
+	case transcodeCodecH264, transcodeCodecHEVC:
+		return audioCodec == "" || hlsNativeAudioCodecV3(audioCodec)
+	}
+	return false
 }
 
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied

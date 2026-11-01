@@ -170,6 +170,10 @@ type PlaybackMediaSource struct {
 	encodeCeilingKbps     int
 	h264EncodeCeilingKbps int
 
+	// hlsRemuxInTS marks a copy the client accepts only as MPEG-TS. PlaybackInfo
+	// reads it once the route is final, so it is not stored.
+	hlsRemuxInTS bool
+
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
 	preservedJSON map[string]json.RawMessage
