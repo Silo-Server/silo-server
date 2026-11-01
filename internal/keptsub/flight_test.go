@@ -1,6 +1,7 @@
 package keptsub
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -445,7 +447,7 @@ func TestPinReleaseScansOnlyOverBudget(t *testing.T) {
 	s := NewStore(newMemRepo(), &memBlobs{}, Options{MirrorDir: func() string { return dir }, MirrorMaxBytes: 1 << 20})
 	write := func(body string) (string, func()) {
 		t.Helper()
-		path, _, _, release, err := s.writeMirror(dir, ".mks", func(w io.Writer) error {
+		path, _, _, release, err := s.writeMirror(dir, ".mks", nil, func(w io.Writer) error {
 			_, err := io.WriteString(w, body)
 			return err
 		})
@@ -573,5 +575,113 @@ func TestQueuedReadStopsWhenItsCallersGo(t *testing.T) {
 				t.Fatal("a stopped read kept the track")
 			}
 		})
+	}
+}
+
+// A node without a kept track's local copy fetches one only while fewer
+// than maxMirrorFetches fetches run and copies being written leave room in
+// the budget; otherwise it streams the object from storage, checked against
+// its row, and writes no copy. Room for a fetch is made before it fetches.
+func TestMirrorFetchesAreAdmitted(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
+	want := demux(t, ffmpeg, path, 0, 0, 0)
+	// keptOnColdNode keeps the track, then drops the node's copies.
+	keptOnColdNode := func(t *testing.T) (*Store, *memBlobs, *Track) {
+		t.Helper()
+		s, repo, blobs := newTestStore(t, ffmpeg)
+		if _, err := s.WholeTrack(t.Context(), path, ref); err != nil {
+			t.Fatal(err)
+		}
+		kept, _ := repo.Track(t.Context(), file.ID, 1)
+		if err := os.RemoveAll(s.mirrorDir()); err != nil {
+			t.Fatal(err)
+		}
+		return s, blobs, kept
+	}
+	for _, tc := range []struct {
+		name   string
+		full   func(*testing.T, *Store)
+		tamper bool
+	}{
+		{name: "fetches running", full: fillMirrorFetches},
+		{name: "room held by copies being written", full: func(t *testing.T, s *Store) { s.mirrorReserved = s.opts.MirrorMaxBytes }},
+		{name: "tampered object", full: fillMirrorFetches, tamper: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, blobs, kept := keptOnColdNode(t)
+			tc.full(t, s)
+			if tc.tamper {
+				blobs.objects[kept.BlobKey] = bytes.Repeat([]byte("x"), len(blobs.objects[kept.BlobKey]))
+			}
+			in, err := s.WholeTrack(t.Context(), path, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := in.Stream()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, readErr := io.ReadAll(r)
+			_ = r.Close()
+			if _, fromStorage := r.(*checkedObject); !fromStorage {
+				t.Fatalf("the stream is a %T, not the object in storage", r)
+			}
+			switch {
+			case tc.tamper:
+				if readErr == nil || !strings.Contains(readErr.Error(), "SHA-256") {
+					t.Fatalf("a tampered object was read: %v", readErr)
+				}
+			case readErr != nil:
+				t.Fatal(readErr)
+			default:
+				if got := convert(t, ffmpeg, in); got != want {
+					t.Fatalf("the object converts to %q, want %q", got, want)
+				}
+			}
+			if entries, _ := os.ReadDir(s.mirrorDir()); len(entries) != 0 {
+				t.Fatalf("a copy was written: %v", entries)
+			}
+		})
+	}
+	t.Run("room is made before fetching", func(t *testing.T) {
+		s, blobs, kept := keptOnColdNode(t)
+		if err := os.MkdirAll(s.mirrorDir(), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		old := filepath.Join(s.mirrorDir(), "old.mks")
+		if err := os.WriteFile(old, make([]byte, 1000), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The old copy and the fetched one don't both fit.
+		s.opts.MirrorMaxBytes = 1000 + kept.Bytes - 1
+		var oldAtFetch atomic.Bool
+		blobs.getHook = func() {
+			_, err := os.Stat(old)
+			oldAtFetch.Store(err == nil)
+		}
+		in, err := s.WholeTrack(t.Context(), path, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := convert(t, ffmpeg, in); got != want {
+			t.Fatalf("the copy converts to %q, want %q", got, want)
+		}
+		if _, err := os.Stat(filepath.Join(s.mirrorDir(), mirrorName(kept))); err != nil || oldAtFetch.Load() {
+			t.Fatalf("copy %v; old copy still there when the fetch began: %v", err, oldAtFetch.Load())
+		}
+	})
+}
+
+// fillMirrorFetches takes every fetch the process admits until the test ends.
+func fillMirrorFetches(t *testing.T, _ *Store) {
+	t.Helper()
+	for range maxMirrorFetches {
+		finish, err := reserveMirrorFetch(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(finish)
 	}
 }
