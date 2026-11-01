@@ -18,6 +18,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -42,9 +43,55 @@ func TestSubtitleRenditionNames(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("names = %q, want %q", got, want)
 	}
+
+	t.Run("existing suffixes and case", func(t *testing.T) {
+		got := SubtitleRenditionNames(
+			[]string{"English", "English (2)", "english", "ENGLISH", "english (2)", "Éclair", "ÉCLAIR"}, nil,
+		)
+		want := []string{"English", "English (2)", "english (3)", "ENGLISH (4)", "english (2) (2)", "Éclair", "ÉCLAIR (2)"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("names = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("bounded duplicate names", func(t *testing.T) {
+		for _, label := range []string{strings.Repeat("x", 8192), strings.Repeat("界", 2730), strings.Repeat("\xff", 8192)} {
+			labels := make([]string, 32)
+			for i := range labels {
+				labels[i] = label
+			}
+			// An empty label must apply the same limit to its language fallback.
+			labels[0] = ""
+			names := SubtitleRenditionNames(labels, []string{label})
+			seen := make(map[string]bool, len(names))
+			for i, name := range names {
+				if len(name) > 256 || !utf8.ValidString(name) || name == "" {
+					t.Fatalf("name %d has %d bytes, valid UTF-8: %v", i, len(name), utf8.ValidString(name))
+				}
+				key := strings.ToLower(name)
+				if seen[key] {
+					t.Fatalf("duplicate name %d: %q", i, name)
+				}
+				seen[key] = true
+			}
+		}
+	})
 }
 
 func TestOnDemandSubtitleRenditionPlaylists(t *testing.T) {
+	t.Run("long names from existing recipes", func(t *testing.T) {
+		opts := subtitleRenditionTestOpts(t.TempDir())
+		opts.SubtitleRenditionTracks = onDemandTestTracks()[:2]
+		name := strings.Repeat("x", 512)
+		opts.SubtitleRenditionTracks[0].Name = name
+		opts.SubtitleRenditionTracks[1].Name = name + " (2)"
+		master := string(subtitleRenditionMultivariantPlaylist(opts, ""))
+		for _, track := range opts.SubtitleRenditionTracks {
+			if !strings.Contains(master, `NAME="`+track.Name+`"`) {
+				t.Fatal("playlist changed a name carried by an existing recipe")
+			}
+		}
+	})
 	for _, copyRemux := range []bool{false, true} {
 		t.Run(fmt.Sprintf("copy=%v", copyRemux), func(t *testing.T) {
 			dir := t.TempDir()

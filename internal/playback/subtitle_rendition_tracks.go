@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/lang"
@@ -147,23 +148,39 @@ func keptRenditionWindowSource(opts TranscodeOpts, number uint64) (EmbeddedSubti
 // SubtitleRenditionNames turns inventory labels into the NAMEs of one
 // rendition group, which HLS requires to differ: characters a quoted-string
 // can't hold are replaced, an empty label falls back to fallback (the row's
-// language) or "Subtitles", and a repeated name gets " (2)", " (3)"...
+// language) or "Subtitles", and a repeated name gets " (2)", " (3)"... Names
+// fit in 256 UTF-8 bytes, including the suffix.
 func SubtitleRenditionNames(labels, fallbacks []string) []string {
+	// Leave room for the suffix even when its number fills a 64-bit int.
+	const baseBytes = 256 - 24
 	names := make([]string, len(labels))
-	seen := make(map[string]bool, len(labels))
+	// An absent key is unused; an occupied key records its next suffix.
+	nextSuffix := make(map[string]int, len(labels))
 	for i, label := range labels {
-		name := hlsQuotedStringValue(label)
+		name := hlsQuotedStringValueLimit(label, baseBytes)
 		if name == "" && i < len(fallbacks) {
-			name = hlsQuotedStringValue(fallbacks[i])
+			name = hlsQuotedStringValueLimit(fallbacks[i], baseBytes)
 		}
 		if name == "" {
 			name = SubtitleRenditionName
 		}
+		key := strings.ToLower(name)
 		unique := name
-		for n := 2; seen[strings.ToLower(unique)]; n++ {
-			unique = fmt.Sprintf("%s (%d)", name, n)
+		n := nextSuffix[key]
+		if n == 0 {
+			n = 2
+		} else {
+			for {
+				unique = name + " (" + strconv.Itoa(n) + ")"
+				n++
+				uniqueKey := strings.ToLower(unique)
+				if nextSuffix[uniqueKey] == 0 {
+					nextSuffix[uniqueKey] = 2
+					break
+				}
+			}
 		}
-		seen[strings.ToLower(unique)] = true
+		nextSuffix[key] = n
 		names[i] = unique
 	}
 	return names
@@ -173,14 +190,25 @@ func SubtitleRenditionNames(labels, fallbacks []string) []string {
 // hold a double quote, CR or LF: quotes become apostrophes and control
 // characters are dropped.
 func hlsQuotedStringValue(s string) string {
-	s = strings.ReplaceAll(s, `"`, "'")
-	s = strings.Map(func(r rune) rune {
+	return hlsQuotedStringValueLimit(s, math.MaxInt)
+}
+
+func hlsQuotedStringValueLimit(s string, maxBytes int) string {
+	var value strings.Builder
+	value.Grow(min(len(s), maxBytes))
+	for _, r := range s {
 		if r < 0x20 || r == 0x7f {
-			return -1
+			continue
 		}
-		return r
-	}, s)
-	return strings.TrimSpace(s)
+		if r == '"' {
+			r = '\''
+		}
+		if value.Len()+utf8.RuneLen(r) > maxBytes {
+			break
+		}
+		value.WriteRune(r)
+	}
+	return strings.TrimSpace(value.String())
 }
 
 // renditionTrack returns the listed on-demand track with the given number.
