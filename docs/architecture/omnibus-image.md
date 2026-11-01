@@ -120,30 +120,21 @@ configuration it cannot run with, belongs in the `silo` binary. Keep it there,
 so that a container started with `silo` as its entrypoint, or an image built
 around the binary, behaves the same as this one.
 
-With the entrypoint set to `silo` and a non-root `user:` (Kubernetes
-`runAsUser`), Silo runs as that uid with no init. It needs no capabilities, so
-`cap_drop: [ALL]` and `no-new-privileges` work. Compared with a root start:
+A container started with `silo` as its entrypoint and a non-root uid runs
+none of the init, so code in the binary must not rely on what the init does:
 
-- No bundled services: `DATABASE_URL` names an external PostgreSQL, and
-  `REDIS_URL` an external Redis where one is needed.
-- No `PUID` mapping and no ownership changes. Directories Silo writes must
-  already exist and belong to the uid. `/var/lib/silo` links to `/config/silo`,
-  which only `init-config` creates, and Silo's storage refuses a root reached
-  through a dangling link, so mount `/config` with a `silo` directory in it, or
-  mount the plugin, artwork, and compat directories under `/var/lib/silo` as
-  `docker-compose.advanced.yml` does. Mount the transcode and prepared-download
-  directories under `/tmp` too, since the image creates them as root's. The
-  media must be readable by the uid.
-- No GPU group discovery: give the uid the devices' groups with `group_add`
-  (Kubernetes `supplementalGroups`).
-- No `FILE__` variables and no supervisor: secrets come from the environment,
-  and the container's restart policy restarts Silo.
-- NET_ADMIN added to the container stays in the bounding set only: Docker
-  gives a non-root process no permitted or effective capabilities, so Silo
+- Nothing creates `/config/silo`, maps `PUID`, or re-owns a directory. Silo's
+  storage refuses a root reached through the dangling `/var/lib/silo` link
+  rather than writing somewhere else.
+- No bundled services, `FILE__` loading, GPU group discovery, or supervisor.
+- The working directory is `/`, and Docker sets `HOME` to `/` for a uid with no
+  passwd entry. That is why the Jellyfin Web installer keeps npm's cache in its
+  own workspace.
+- NET_ADMIN added to the container does not reach a non-root process, so Silo
   starts without its helper (see [TCP congestion control](tcp-congestion.md)).
-- The working directory is `/`, so Silo reads no `/config/silo/.env`, and
-  Docker sets `HOME` to `/` for a uid with no passwd entry. The Jellyfin Web
-  installer keeps npm's cache in its own workspace for that reason.
+
+How to deploy this way is in the user manual:
+[Run Silo without root](https://siloserver.org/docs/docker#run-silo-without-root).
 
 ## Accounts and data
 
