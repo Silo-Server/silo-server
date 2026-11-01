@@ -140,6 +140,7 @@ jobs:
           if [ -f scripts/test_lint_changed.py ]; then
             python3 scripts/test_lint_changed.py
           fi
+          python3 scripts/release/test_release_version.py
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
       - name: Check action SHA pins

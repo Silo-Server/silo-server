@@ -25,7 +25,9 @@ BUILD_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)
 BUILD_DIRTY ?= $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo true || echo false)
 BUILD_NUMBER ?=
 BUILD_DATE ?=
-GO_LDFLAGS := -X $(BUILDINFO_PKG).revisionOverride=$(BUILD_REVISION) -X $(BUILDINFO_PKG).dirtyOverride=$(BUILD_DIRTY) -X $(BUILDINFO_PKG).buildNumberOverride=$(BUILD_NUMBER) -X $(BUILDINFO_PKG).builtAtOverride=$(BUILD_DATE)
+# A release version such as 0.24.0; release images get theirs from a file instead.
+BUILD_VERSION ?=
+GO_LDFLAGS := -X $(BUILDINFO_PKG).revisionOverride=$(BUILD_REVISION) -X $(BUILDINFO_PKG).dirtyOverride=$(BUILD_DIRTY) -X $(BUILDINFO_PKG).buildNumberOverride=$(BUILD_NUMBER) -X $(BUILDINFO_PKG).builtAtOverride=$(BUILD_DATE) -X $(BUILDINFO_PKG).versionOverride=$(BUILD_VERSION)
 
 # Build the frontend (requires pnpm)
 frontend:

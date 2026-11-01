@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main, apiv2]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -32,13 +32,12 @@ jobs:
       built_at: ${{ steps.identity.outputs.built_at }}
       image_version: ${{ steps.identity.outputs.image_version }}
     if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       contains(fromJSON('["main","apiv2"]'), github.event.workflow_run.head_branch))
+       github.event.workflow_run.head_branch == 'main')
     steps:
       - name: Resolve build identity
         id: identity
@@ -112,8 +111,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # The base image is the omnibus build's starting point, not a published
-      # image: its only tag is the commit SHA with -base added. latest,
-      # build-N, apiv2, and the bare SHA belong to the omnibus image.
+      # image: its only tag is the commit SHA with -base added. dev, latest,
+      # build-N, and the bare SHA belong to the omnibus image.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
         env:
@@ -125,9 +124,11 @@ jobs:
           docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${BASE_TAG}"
 
   # The published image: PostgreSQL, Redis, Meilisearch, and s6-overlay
-  # layered on the base image the merge job just pushed. It carries latest,
-  # build-N, apiv2, and the commit SHA. Its digest artifacts are named so the
-  # merge job's digests-* pattern never picks them up.
+  # layered on the base image the merge job just pushed. It carries dev,
+  # build-N, the commit SHA, and latest until the first release
+  # (release-published.yml adds version tags and moves latest after that).
+  # Its digest artifacts are named so the merge job's digests-* pattern never
+  # picks them up.
   omnibus:
     needs: [prepare, merge]
     if: "!cancelled() && needs.merge.result == 'success'"
@@ -151,6 +152,7 @@ jobs:
     needs: [prepare, omnibus]
     if: "!cancelled() && needs.prepare.result == 'success' && needs.omnibus.result == 'success'"
     permissions:
+      contents: read # compare commits
       packages: write
 
     steps:
@@ -179,17 +181,43 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=raw,value=latest,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
-            type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
+            type=raw,value=build-${{ needs.prepare.outputs.build_number }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
 
+      # dev, and latest until the first release, only move forward: a re-run of
+      # an older CI run gets its own build-N and SHA tags but leaves them on the
+      # newer commit. Once a release exists, release-published.yml owns latest.
+      # Both are decided right before pushing, so a build that started before
+      # the first release can't overwrite its latest. One that checks in the
+      # seconds before that release pushes still could; re-running Release
+      # published puts it back.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          # shellcheck disable=SC2046
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          tags="$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          dev_revision="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:dev" --format '{{json .Image}}' 2>/dev/null |
+            jq -r 'if has("linux/amd64") then ."linux/amd64" else . end | .config.Labels["org.opencontainers.image.revision"] // ""')" || dev_revision=""
+          order="ahead"
+          if [[ -n "$dev_revision" && "$dev_revision" != "$HEAD_SHA" ]]; then
+            # Only a commit behind dev's holds dev back. Diverged history (a
+            # rewritten main) or a revision GitHub can't compare moves dev on.
+            order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${dev_revision}...${HEAD_SHA}" --jq .status)" || order="unknown"
+          fi
+          if [[ "$order" != "behind" ]]; then
+            tags+=" -t ${REGISTRY}/${IMAGE_LC}:dev"
+            # A failed lookup stops the job rather than reading as "no release yet".
+            release_tags="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" 'refs/tags/v[0-9]*')" || exit 1
+            if [[ -z "$release_tags" ]]; then
+              tags+=" -t ${REGISTRY}/${IMAGE_LC}:latest"
+            fi
+          else
+            echo "::notice::dev holds ${dev_revision::9}, which is newer than ${HEAD_SHA::9}; leaving dev and latest there."
+          fi
+          # shellcheck disable=SC2046,SC2086
+          docker buildx imagetools create $tags \
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
 
       - name: Inspect manifest list

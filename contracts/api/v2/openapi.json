@@ -50168,9 +50168,9 @@
             "type": "string"
           },
           "server_version": {
-            "description": "Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it.",
+            "description": "Server build identity: the release version for a release build (for example 0.24.0 or 1.0.0-rc.1), otherwise the short revision; +dirty when built from a modified tree, or \"unavailable\". Diagnostic only: never feature-detect on it.",
             "examples": [
-              "1.0.0-dev"
+              "1.0.0-rc.1"
             ],
             "type": "string"
           }

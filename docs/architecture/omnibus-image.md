@@ -18,8 +18,10 @@ services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
 from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
 names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
-set to that tag and publishes the result as `<full SHA>`, plus `build-N` and
-`latest` on the default branch or `apiv2` on the `apiv2` branch.
+set to that tag and publishes the result as `<full SHA>`, `build-N`, and `dev`,
+plus `latest` until the first release. A published release adds its version
+tags and moves `latest`; see
+[release versioning](../release-versioning.md#container-tags).
 
 Builds from before this layout published the base image under those tags and
 the omnibus image under the same tags with `-aio` added, with `aio` in place of
