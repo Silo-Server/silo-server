@@ -54,8 +54,8 @@ it does not omit the operation.
 ## WebSocket origin behind a reverse proxy
 
 The v2 events, playback-control, watch-together and admin-log sockets share a
-strict browser Origin check (`socketOriginAllowed`). It accepts an exact scheme and
-host match against any of:
+strict browser Origin check (`socketOriginAllowed`). It accepts an `http` or `https`
+Origin only on an exact scheme and host match against any of:
 
 - the admin-configured Silo public URL, which must identify this deployment;
 - the request's own scheme and Host (including port), so a browser that loaded the
@@ -68,6 +68,12 @@ A browser always sends the origin of the page it loaded, so a cross-site page
 cannot make its Origin match the Host it connects to. Every socket also requires
 a single-use ticket minted by an authenticated request, and native clients
 without Origin still need that ticket.
+
+An opaque Origin (`null`) or one with a non-web scheme (`file://`, an app scheme)
+is treated like no Origin. Packaged TV and desktop apps load their pages from the
+device and cannot choose the header. The ticket, not the Origin, is what stops
+cross-site use: its mint answer is not readable cross-origin, so a hostile page
+that sends `null` from a sandboxed frame has no ticket to offer.
 
 For the request's own origin, the check uses the request Host and its
 transport scheme. A TLS-terminating proxy can supply a single `X-Forwarded-Proto`

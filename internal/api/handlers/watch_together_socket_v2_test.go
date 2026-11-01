@@ -277,7 +277,7 @@ func TestRoomSocketV2MalformedBeforeConsume(t *testing.T) {
 			case "version":
 				r.Header.Set("Sec-WebSocket-Version", "12")
 			case "origin":
-				r.Header.Set("Origin", "null")
+				r.Header.Set("Origin", "https://foreign.test")
 			case "duplicate_origin":
 				r.Header["Origin"] = []string{"http://example.test", "http://example.test"}
 			}
