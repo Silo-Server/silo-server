@@ -134,6 +134,7 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
+	DeleteParkedTargetDebt(ctx context.Context, targetType, contentID string, reasonMask int64, attemptCount int, nextRefreshAt time.Time) (bool, error)
 	SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error)
 	DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error
 }
@@ -7158,11 +7159,16 @@ func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, s
 			return
 		}
 		// Parked debt carries no other reason and, neither due nor leased, no
-		// claim, so dropping the row loses its attempt count and last error,
-		// and ClaimDue cannot take it before RequestDue runs.
-		if err := s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetItem, seriesID); err != nil {
+		// claim, so dropping the row loses only its attempt count and last
+		// error. The delete holds only while the row is as read: a nudge that
+		// made it due or a refresh that claimed it since owns the row.
+		deleted, err := s.refreshDebtRepo.DeleteParkedTargetDebt(ctx, RefreshTargetItem, seriesID, debt.ReasonMask, debt.AttemptCount, debt.NextRefreshAt)
+		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to restart parked series refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)
+			return
+		}
+		if !deleted {
 			return
 		}
 	case err != nil && !errors.Is(err, ErrRefreshDebtNotFound):

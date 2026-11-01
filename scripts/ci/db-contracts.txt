@@ -706,3 +706,7 @@
 # Personal collection list reads remember counts and collages with no source
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
+
+# Restarting parked series refresh debt leaves a row that a nudge made due or a
+# refresh claimed after the read to that writer.
+./internal/metadata TestDeleteParkedTargetDebtOnlyWhenUnchangedDB

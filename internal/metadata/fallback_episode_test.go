@@ -1320,6 +1320,27 @@ func TestEnsureSeriesEpisodeLinks_CoalescesConcurrentFallbackWork(t *testing.T) 
 	}
 }
 
+// claimAfterReadDebtRepo makes a refresh claim each row just after the sweep
+// reads it, as a nudge followed by ClaimDue can between the sweep's read and
+// its restart.
+type claimAfterReadDebtRepo struct {
+	*fakeRefreshDebtRepo
+}
+
+func (r *claimAfterReadDebtRepo) GetTarget(ctx context.Context, targetType, contentID string) (*models.MetadataRefreshDebt, error) {
+	debt, err := r.fakeRefreshDebtRepo.GetTarget(ctx, targetType, contentID)
+	if err == nil {
+		r.mu.Lock()
+		row := r.debts[fakeRefreshDebtKey(targetType, contentID)]
+		lease := time.Now().Add(RefreshDebtLeaseDuration)
+		row.NextRefreshAt = time.Now().Add(-time.Minute)
+		row.LeaseExpiresAt = &lease
+		row.AttemptCount++
+		r.mu.Unlock()
+	}
+	return debt, err
+}
+
 // TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes covers
 // issue #3340: a by-date file that aired after every stored episode proves the
 // stored episode list is behind, so the series must be refreshed even though
@@ -1346,6 +1367,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		name           string
 		fileDate       string
 		existing       *models.MetadataRefreshDebt
+		claimAfterRead bool
 		wantIncomplete bool
 		wantDue        bool
 	}{
@@ -1354,11 +1376,15 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-05", existing: parked, wantIncomplete: true},
 		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
 		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
+		{name: "debt claimed after the sweep reads it is left to its claim", fileDate: "2024-05-06", existing: parked, claimAfterRead: true, wantIncomplete: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFallbackTestHarness()
 			debts := newFakeRefreshDebtRepo()
 			h.service.refreshDebtRepo = debts
+			if tc.claimAfterRead {
+				h.service.refreshDebtRepo = &claimAfterReadDebtRepo{fakeRefreshDebtRepo: debts}
+			}
 			ctx := context.Background()
 			const seriesID = "series-daily-behind"
 			seedAirDateSeries(ctx, t, h, seriesID,
@@ -1385,6 +1411,10 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 			}
 			debt := debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)]
 			switch {
+			case tc.claimAfterRead:
+				if debt == nil || debt.LeaseExpiresAt == nil || debt.AttemptCount != tc.existing.AttemptCount+1 {
+					t.Errorf("claimed debt = %+v, want the claim's row kept", debt)
+				}
 			case tc.existing != nil && !tc.wantDue:
 				if debt == nil || debt.Priority != tc.existing.Priority || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
 					t.Errorf("parked debt changed: %+v", debt)
