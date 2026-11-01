@@ -806,6 +806,10 @@
             "burn_in_only"
           ]
         },
+        "unplayable": {
+          "type": "boolean",
+          "description": "Omitted when false: no route can show this track. The server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable."
+        },
         "url": {
           "type": "string"
         },

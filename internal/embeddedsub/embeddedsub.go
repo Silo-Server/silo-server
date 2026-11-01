@@ -199,14 +199,20 @@ type Track struct {
 	mp4 *mp4Track
 }
 
-// FFmpegCodec is the codec name FFmpeg gives the track: what a probe of the
-// source records as the stream's codec. It is "" for a Matroska CodecID
-// FFmpeg doesn't recognize.
+// FFmpegCodec is the codec name FFmpeg reads the track's packets as from
+// what WriteStream writes. That is what a probe of the source records as
+// the stream's codec, except for a track FFmpeg can't demux from the
+// source but reads once WriteStream rewrites it
+// (matroska.IndexOnlySubtitleCodec). It is "" for any other Matroska
+// CodecID FFmpeg doesn't recognize.
 func (t *Track) FFmpegCodec() string {
 	if t.mp4 != nil {
 		return "mov_text"
 	}
-	return matroska.FFmpegSubtitleCodec(t.CodecID)
+	if codec := matroska.FFmpegSubtitleCodec(t.CodecID); codec != "" {
+		return codec
+	}
+	return matroska.IndexOnlySubtitleCodec(t.CodecID)
 }
 
 // Cue is one index entry: where one packet of the track is.
@@ -250,6 +256,9 @@ type Packet struct {
 	// media ticks, which the MP4 stream WriteStream writes keeps.
 	mp4DTS   int64
 	mp4Delta uint32
+	// addition is an S_TEXT/WEBVTT block's BlockAdditional: the cue's
+	// settings and identifier, which WriteMKS moves into the packet.
+	addition []byte
 }
 
 // End is when the packet stops displaying, or PTS when its duration is

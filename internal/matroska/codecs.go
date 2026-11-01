@@ -41,3 +41,24 @@ func FFmpegSubtitleCodec(codecID string) string {
 	}
 	return ""
 }
+
+// Matroska's own WebVTT CodecID, and the WebM one FFmpeg reads. They store a
+// cue differently: S_TEXT/WEBVTT keeps the cue text in the block and the cue
+// settings and identifier in its BlockAdditions, D_WEBVTT/SUBTITLES all three
+// in the block.
+const (
+	CodecIDWebVTT     = "S_TEXT/WEBVTT"
+	CodecIDWebMWebVTT = "D_WEBVTT/SUBTITLES"
+)
+
+// IndexOnlySubtitleCodec returns the FFmpeg codec name of a subtitle CodecID
+// FFmpeg's Matroska demuxer doesn't recognize but whose packets Silo reads
+// through the file's index and hands FFmpeg as that codec
+// (embeddedsub.WriteStream), or "". FFmpeg can't demux such a track from the
+// source, so only the routes that read the index carry it.
+func IndexOnlySubtitleCodec(codecID string) string {
+	if codecID == CodecIDWebVTT {
+		return FFmpegCodecWebVTT
+	}
+	return ""
+}

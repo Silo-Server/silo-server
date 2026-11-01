@@ -34,6 +34,9 @@ type matroskaBlock struct {
 	// duration is the BlockDuration in ticks, when hasDuration.
 	duration    int64
 	hasDuration bool
+	// addition is a BlockGroup's BlockAdditional with BlockAddID 1, nil when
+	// it has none. It shares data's memory.
+	addition []byte
 }
 
 // parseBlockElement parses the data of a SimpleBlock or BlockGroup.
@@ -50,6 +53,7 @@ func parseBlockElement(id uint64, data []byte) (matroskaBlock, error) {
 			references  int
 			duration    uint64
 			hasDuration bool
+			addition    []byte
 		)
 		if !matroska.ChildrenComplete(data, func(id uint64, v []byte) {
 			switch id {
@@ -59,6 +63,8 @@ func parseBlockElement(id uint64, data []byte) (matroskaBlock, error) {
 				duration, hasDuration = matroska.Uint(v), true
 			case matroska.IDReferenceBlock:
 				references++
+			case matroska.IDBlockAdditions:
+				addition = blockAddition(v)
 			}
 		}) {
 			return matroskaBlock{}, corrupt("malformed block group")
@@ -72,9 +78,36 @@ func parseBlockElement(id uint64, data []byte) (matroskaBlock, error) {
 		if hasDuration && duration <= math.MaxInt64 {
 			b.duration, b.hasDuration = int64(duration), true
 		}
+		b.addition = addition
 		return b, err
 	}
 	return matroskaBlock{}, corrupt("element %#x is not a block", id)
+}
+
+// blockAddition returns the BlockAdditional of a BlockAdditions element's
+// BlockMore with BlockAddID 1, which a BlockMore without an ID has, or nil.
+// Additions it can't parse are ignored: no codec the reader serves needs
+// them to decode a packet.
+func blockAddition(data []byte) []byte {
+	var found []byte
+	matroska.ChildrenComplete(data, func(id uint64, more []byte) {
+		if id != matroska.IDBlockMore || found != nil {
+			return
+		}
+		addID, additional := uint64(1), []byte(nil)
+		matroska.ChildrenComplete(more, func(id uint64, v []byte) {
+			switch id {
+			case matroska.IDBlockAddID:
+				addID = matroska.Uint(v)
+			case matroska.IDBlockAdditional:
+				additional = v
+			}
+		})
+		if addID == 1 && additional != nil {
+			found = additional
+		}
+	})
+	return found
 }
 
 // parseBlock parses a Block or SimpleBlock body: track number, relative
