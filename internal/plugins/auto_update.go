@@ -537,6 +537,7 @@ func (s *AutoUpdateService) recordUpdateFailure(
 			Reason:   updateFailureReason(updateErr),
 			FailedAt: time.Now().UTC(),
 		}
+		input.IfVersion = &existing.Version
 	case updateErr == nil && existing.UpdateFailure != nil:
 		input.ClearUpdateFailure = true
 	default:

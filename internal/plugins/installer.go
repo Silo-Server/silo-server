@@ -321,6 +321,8 @@ func (i *Installer) replaceBinary(
 	updated.InstallPath = binaryPath
 	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
+	// Changing the version cleared the stored refused update.
+	updated.UpdateFailure = nil
 
 	return &InstallResult{
 		Installation: &updated,
@@ -410,6 +412,8 @@ func (i *Installer) replaceArchive(
 	updated.InstallPath = binaryPath
 	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
+	// Changing the version cleared the stored refused update.
+	updated.UpdateFailure = nil
 
 	return &InstallResult{
 		Installation: &updated,

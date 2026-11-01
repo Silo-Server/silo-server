@@ -196,6 +196,9 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 			for _, update := range installations.updates {
 				if update.UpdateFailure != nil {
 					recorded = update.UpdateFailure
+					if update.IfVersion == nil || *update.IfVersion != tt.installed {
+						t.Fatalf("failure write guarded on %v, want installed version %q", update.IfVersion, tt.installed)
+					}
 				}
 				cleared = cleared || update.ClearUpdateFailure
 			}

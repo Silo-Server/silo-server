@@ -109,6 +109,11 @@ type UpdateInstallationInput struct {
 	// is about updating from the version that was installed.
 	UpdateFailure      *UpdateFailure
 	ClearUpdateFailure bool
+	// IfVersion, when set, applies the row's column writes only while the
+	// installed version still equals it; otherwise they are a no-op. It does
+	// not guard Capabilities. An update check uses it so a refusal can't land
+	// on a newer version that a concurrent manual update installed.
+	IfVersion *string
 }
 
 type InstallationStore struct {
@@ -381,16 +386,24 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	if len(setClauses) > 0 {
 		setClauses = append(setClauses, "updated_at = NOW()")
 		args = append(args, id)
+		where := fmt.Sprintf("id = $%d", argIndex)
+		if input.IfVersion != nil {
+			args = append(args, *input.IfVersion)
+			where += fmt.Sprintf(" AND version = $%d", argIndex+1)
+		}
 		query := fmt.Sprintf(
-			"UPDATE plugin_installations SET %s WHERE id = $%d",
+			"UPDATE plugin_installations SET %s WHERE %s",
 			strings.Join(setClauses, ", "),
-			argIndex,
+			where,
 		)
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("updating plugin installation: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
+			if input.IfVersion != nil {
+				return nil
+			}
 			return ErrInstallationNotFound
 		}
 	}

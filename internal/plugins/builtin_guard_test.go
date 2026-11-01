@@ -115,6 +115,16 @@ func TestInstallationStoreUpdateFailureDB(t *testing.T) {
 	}
 
 	record()
+	// A failure recorded against a version that is no longer installed (a
+	// manual update won the race) leaves the row alone.
+	stale := "0.9.0"
+	if err := store.Update(ctx, id, UpdateInstallationInput{IfVersion: &stale, UpdateFailure: &UpdateFailure{Version: "2.0.0", Reason: "late", FailedAt: failedAt}}); err != nil {
+		t.Fatalf("stale guarded write = %v, want a no-op", err)
+	}
+	if got := readFailure(); got == nil || got.Version != "1.1.0" {
+		t.Fatalf("failure after stale guarded write = %+v, want the 1.1.0 record kept", got)
+	}
+
 	version := "1.1.0"
 	if err := store.Update(ctx, id, UpdateInstallationInput{Version: &version}); err != nil {
 		t.Fatal(err)
