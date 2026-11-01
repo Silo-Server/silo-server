@@ -125,6 +125,7 @@ or, for an on-demand segment, with an empty segment.
 | What | Bound |
 | --- | --- |
 | Matroska metadata reads | EBML header 4 KiB, SeekHead and Info 1 MiB, Tracks and Cues 16 MiB, Tags 8 MiB; Info, Tracks, Cues and Tags together 32 MiB per index read |
+| Matroska layout | 64 top-level elements read before the first cluster; 8 SeekHeads followed and 4 Tags elements read, each SeekHead's entries visited without keeping a list; Chapters and Attachments aren't read |
 | Matroska tracks | 1,000 TrackEntries; 8 ContentEncodings kept per entry |
 | Matroska frame-count tags | counts only for indexed subtitle TrackUIDs, at most 1,000; targets are visited without retaining a list, including repeated UIDs |
 | Codec-private data | 16 MiB of decompression shared by an index's tracks, old and new buffers counted while one grows; a track past it is unsupported |

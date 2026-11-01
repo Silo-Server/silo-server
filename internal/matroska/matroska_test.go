@@ -160,7 +160,9 @@ func TestSeekEntries(t *testing.T) {
 	head := slices.Concat(seek(IDInfo, 100), seek(IDCues, 1<<40), seek(IDSeekHead, 5000),
 		AppendElement(nil, IDSeek, AppendUint(nil, IDSeekPosition, 9))) // no ID
 	want := []SeekEntry{{IDInfo, 100}, {IDCues, 1 << 40}, {IDSeekHead, 5000}}
-	if got := SeekEntries(head); !slices.Equal(got, want) {
+	var got []SeekEntry
+	WalkSeekEntries(head, func(e SeekEntry) { got = append(got, e) })
+	if !slices.Equal(got, want) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
 	}
 	if pos, ok := SeekPosition(head, IDCues); !ok || pos != 1<<40 {
