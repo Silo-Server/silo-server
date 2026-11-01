@@ -219,7 +219,7 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("datePlayed"); played && raw != "" {
-		date, parseErr := time.Parse(time.RFC3339Nano, raw)
+		date, parseErr := parseDatePlayed(raw)
 		if parseErr != nil {
 			writeError(w, 400, "BadRequest", "Invalid datePlayed")
 			return
@@ -242,6 +242,29 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.HandleGetUserData(w, r)
+}
+
+// datePlayedLayouts are the datePlayed forms Jellyfin's legacy binder
+// accepts: the compact Emby form first, then ISO 8601 with or without an
+// offset and with any fraction. A value without an offset is read as UTC.
+var datePlayedLayouts = []string{
+	"20060102150405",
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05.999999999",
+}
+
+// parseDatePlayed reads a mark-played datePlayed query value.
+func parseDatePlayed(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	var err error
+	for _, layout := range datePlayedLayouts {
+		date, parseErr := time.Parse(layout, raw)
+		if parseErr == nil {
+			return date, nil
+		}
+		err = parseErr
+	}
+	return time.Time{}, err
 }
 
 func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {

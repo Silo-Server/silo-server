@@ -37,7 +37,7 @@ owns registration; the native `/api/v1` contract is separate.
 |---|---|
 | `GET`, `POST /UserItems/{itemId}/UserData` | Read or partially update the current profile's state; POST returns the resulting user-data DTO. |
 | `GET`, `POST /Users/{userId}/Items/{itemId}/UserData` | Legacy aliases with the same profile and item access checks. |
-| `POST`, `DELETE /UserPlayedItems/{itemId}` and `/Users/{userId}/PlayedItems/{itemId}` | Mark played or unplayed; return HTTP 200 and the resulting DTO. POST accepts `datePlayed`. |
+| `POST`, `DELETE /UserPlayedItems/{itemId}` and `/Users/{userId}/PlayedItems/{itemId}` | Mark played or unplayed; return HTTP 200 and the resulting DTO. POST accepts `datePlayed` in the forms Jellyfin binds: compact `yyyyMMddHHmmss` (UTC), or ISO 8601 with or without an offset (UTC when absent). |
 | `POST /Users/Configuration`, `/Users/{userId}/Configuration` | Persist profile settings and client presentation preferences; return 204. Current-user responses return effective settings. |
 | `GET`, `POST /DisplayPreferences/{displayPreferencesId}` | Store preferences separately by account, profile, client, and preference ID. Writes return 204. Reads always include `skipBackLength` and `skipForwardLength`, defaulting to 10000 and 30000 ms as Jellyfin does. As in Jellyfin 12, a write without either stores 15000 ms for it, and empty `landing-*` values are dropped. |
 | `GET /Localization/Cultures` | Language choices with two- and three-letter ISO codes. Accepts case-insensitive paths, including `/Localization/cultures`. |

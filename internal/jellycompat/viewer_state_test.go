@@ -107,8 +107,17 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	for _, key := range []string{"datePlayed", "DATEPLAYED"} {
-		t.Run(key, func(t *testing.T) {
+	// Jellyfin binds datePlayed with its legacy binder: the compact
+	// yyyyMMddHHmmss form (read as UTC) that Emby-era clients send, then
+	// ordinary ISO 8601 with or without an offset (#3257).
+	for _, tc := range []struct{ name, query string }{
+		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z"},
+		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z"},
+		{"legacy compact", "DatePlayed=20250203040506"},
+		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00"},
+		{"no offset", "datePlayed=2025-02-03T04:05:06.000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
 			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
@@ -117,7 +126,7 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 			rec := httptest.NewRecorder()
-			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+key+"=2025-02-03T04:05:06Z", "", "itemId", id, session))
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+tc.query, "", "itemId", id, session))
 			var dto itemUserDataDTO
 			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
 			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
