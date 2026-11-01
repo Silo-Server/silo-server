@@ -242,7 +242,13 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 
 	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
 	for _, existing := range installed {
-		if existing == nil || existing.RepositoryID == nil {
+		if existing == nil {
+			continue
+		}
+		if existing.RepositoryID == nil {
+			// An uploaded plugin, or one whose repository was deleted, has no
+			// automatic update left to fail, so drop any refusal it kept.
+			s.recordUpdateFailure(ctx, existing, CatalogEntry{}, autoUpdateOutcomeNone, nil, &summary)
 			continue
 		}
 		// The reserved builtin row must never be matched against catalog
@@ -520,7 +526,8 @@ const maxUpdateFailureReasonRunes = 500
 // admin-facing reason, and a pass that handled the plugin without failing
 // clears an earlier record. A plugin missing from this pass's catalog (its
 // repository may be unreachable for now) keeps its record. A write failure
-// is counted in the summary and does not stop the pass.
+// is counted in the summary and does not stop the pass; a plugin uninstalled
+// since the pass listed it has nothing left to record.
 func (s *AutoUpdateService) recordUpdateFailure(
 	ctx context.Context,
 	existing *Installation,
@@ -543,7 +550,7 @@ func (s *AutoUpdateService) recordUpdateFailure(
 	default:
 		return
 	}
-	if err := s.installations.Update(ctx, existing.ID, input); err != nil {
+	if err := s.installations.Update(ctx, existing.ID, input); err != nil && !errors.Is(err, ErrInstallationNotFound) {
 		summary.recordFailuref("record update result for plugin %s: %v", existing.PluginID, err)
 	}
 }

@@ -161,6 +161,8 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 		stored         *UpdateFailure
 		catalogVersion string
 		replaceErr     error
+		noRepository   bool
+		storeErr       error
 		wantFailure    *UpdateFailure
 		wantClear      bool
 	}{
@@ -171,14 +173,19 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 		{name: "applied update clears the refusal", installed: "1.0.0", stored: earlier, catalogVersion: "1.2.0", wantClear: true},
 		{name: "catalog no longer newer clears the refusal", installed: "1.1.0", stored: earlier, catalogVersion: "1.1.0", wantClear: true},
 		{name: "plugin missing from the catalog keeps the refusal", installed: "1.0.0", stored: earlier},
+		{name: "plugin whose repository was deleted clears the refusal", installed: "1.0.0", stored: earlier, catalogVersion: "1.1.0", noRepository: true, wantClear: true},
+		{name: "plugin uninstalled during the pass is not a failure", installed: "1.1.0", stored: earlier, catalogVersion: "1.1.0", storeErr: ErrInstallationNotFound, wantClear: true},
 		{name: "nothing recorded and nothing failed writes nothing", installed: "1.1.0", catalogVersion: "1.1.0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installations := &fakeAutoUpdateInstallations{list: []*Installation{{
+			installations := &fakeAutoUpdateInstallations{updateErr: tt.storeErr, list: []*Installation{{
 				ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: tt.installed,
 				UpdatePolicy: "auto", Enabled: true, UpdateFailure: tt.stored,
 			}}}
+			if tt.noRepository {
+				installations.list[0].RepositoryID = nil
+			}
 			catalog := &fakeAutoUpdateCatalog{resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"}}
 			if tt.catalogVersion != "" {
 				catalog.entries = []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: tt.catalogVersion}}}
@@ -187,8 +194,12 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 				&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
 				installations, catalog, &fakeAutoUpdateInstaller{replaceErr: tt.replaceErr}, &fakeAutoUpdateHost{}, nil, nil,
 			)
-			if _, err := service.Check(context.Background(), AutoUpdateOptions{}); err != nil {
+			summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+			if err != nil {
 				t.Fatalf("Check() returned error: %v", err)
+			}
+			if tt.replaceErr == nil && len(summary.Failures) > 0 {
+				t.Fatalf("summary failures = %v, want none", summary.Failures)
 			}
 
 			var recorded *UpdateFailure
@@ -369,6 +380,7 @@ func (f *fakeAutoUpdateRepositories) Create(_ context.Context, input CreateRepos
 type fakeAutoUpdateInstallations struct {
 	list       []*Installation
 	updates    []UpdateInstallationInput
+	updateErr  error
 	deletedIDs []int
 }
 
@@ -378,7 +390,7 @@ func (f *fakeAutoUpdateInstallations) List(context.Context) ([]*Installation, er
 
 func (f *fakeAutoUpdateInstallations) Update(_ context.Context, _ int, input UpdateInstallationInput) error {
 	f.updates = append(f.updates, input)
-	return nil
+	return f.updateErr
 }
 
 func (f *fakeAutoUpdateInstallations) Delete(_ context.Context, id int) error {
