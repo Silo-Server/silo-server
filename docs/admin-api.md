@@ -335,10 +335,9 @@ proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
 A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. Set
-`NODE_URL` explicitly on every node. Without it a node guesses
-`http://localhost:<port>` and adopts whatever row carries that URL, which on a
-multi-node deployment can be a different machine's policy.
+against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
+or transcode node refuses to start without `NODE_URL`: a URL guessed from its
+listen port could match a different machine's row and adopt its policy.
 
 If the URL does not match, the node falls back to `NODE_NAME` against the
 registered name. This covers split-horizon topologies where `stream_nodes.url`

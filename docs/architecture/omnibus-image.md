@@ -30,9 +30,10 @@ which has no PostgreSQL or s6.
 The omnibus image is not a drop-in replacement for the base image, which an
 install that pulled `latest` before this layout ran. It runs Silo as `PUID` (911 unless set) instead of root, so media that only root could
 read becomes unreadable; re-owns the bind-mounted Silo, transcode, and download
-directories to that account on first start; needs root to start, so a
-container `user:` or a Kubernetes `runAsUser` stops it; refuses a proxy or
-transcode node without `NODE_URL`; and starts `/init` rather than `silo`.
+directories to that account on first start; and starts `/init` rather than
+`silo`. `/init` needs root, so a container `user:` or a Kubernetes
+`runAsUser` also sets the entrypoint to `silo` (see
+[Starting without root](#starting-without-root)).
 
 Because the omnibus image starts from the base one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
@@ -56,7 +57,9 @@ Two versions are load-bearing for existing installs:
 The s6-rc services under `omnibus/rootfs/etc/s6-overlay/s6-rc.d` start in this
 order:
 
-1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`. The path
+1. `init-envfile` stops a start as any uid but 0 with a pointer to
+   [Starting without root](#starting-without-root), since every init script
+   needs root. It turns each `FILE__NAME=/path` variable into `NAME`. The path
    must resolve, outside `/config`, to a regular file that group and others
    cannot write and that no service account owns, in directories only root can
    change (sticky directories count); otherwise a service account could point
@@ -107,6 +110,40 @@ same `/config` refuses to start PostgreSQL. Bundled Redis keeps an append-only
 file (`appendfsync everysec`), forced on the command line even with a
 `redis.conf`: a snapshot alone can restore a playback session older than its
 revocation. A host crash can still lose about a second of writes.
+
+## Starting without root
+
+The init scripts only do container work: map the `silo` account onto `PUID`,
+lay out `/config`, hand directories to the service accounts, and run the
+bundled services. What Silo needs to behave correctly, including refusing a
+configuration it cannot run with, belongs in the `silo` binary. Keep it there,
+so that a container started with `silo` as its entrypoint, or an image built
+around the binary, behaves the same as this one.
+
+With the entrypoint set to `silo` and a non-root `user:` (Kubernetes
+`runAsUser`), Silo runs as that uid with no init. It needs no capabilities, so
+`cap_drop: [ALL]` and `no-new-privileges` work. Compared with a root start:
+
+- No bundled services: `DATABASE_URL` names an external PostgreSQL, and
+  `REDIS_URL` an external Redis where one is needed.
+- No `PUID` mapping and no ownership changes. Directories Silo writes must
+  already exist and belong to the uid. `/var/lib/silo` links to `/config/silo`,
+  which only `init-config` creates, and Silo's storage refuses a root reached
+  through a dangling link, so mount `/config` with a `silo` directory in it, or
+  mount the plugin, artwork, and compat directories under `/var/lib/silo` as
+  `docker-compose.advanced.yml` does. Mount the transcode and prepared-download
+  directories under `/tmp` too, since the image creates them as root's. The
+  media must be readable by the uid.
+- No GPU group discovery: give the uid the devices' groups with `group_add`
+  (Kubernetes `supplementalGroups`).
+- No `FILE__` variables and no supervisor: secrets come from the environment,
+  and the container's restart policy restarts Silo.
+- NET_ADMIN added to the container stays in the bounding set only: Docker
+  gives a non-root process no permitted or effective capabilities, so Silo
+  starts without its helper (see [TCP congestion control](tcp-congestion.md)).
+- The working directory is `/`, so Silo reads no `/config/silo/.env`, and
+  Docker sets `HOME` to `/` for a uid with no passwd entry. The Jellyfin Web
+  installer keeps npm's cache in its own workspace for that reason.
 
 ## Accounts and data
 
@@ -198,14 +235,14 @@ working.
 ## Nodes
 
 The same image runs a proxy or transcode node. With `MODE=proxy` or
-`MODE=transcode`, `init-config` requires `DATABASE_URL`, `REDIS_URL`, and
-`NODE_URL` (without it Silo guesses a URL from its listen port, and two nodes
-would share session keys), starts none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
+`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`,
+starts none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
 and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
 `POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
 changes the shared database's schema or settings. `/config` holds the node's
-own state. An administrator adds the node on the main server, which then checks
-its health over `NODE_URL`.
+own state. Silo itself refuses to start either mode without `NODE_URL`, the
+node's identity. An administrator adds the node on the main server, which then
+checks its health over `NODE_URL`.
 
 A main server shares its bundled services with nodes when `.env` sets
 `ENABLE_NODE_ACCESS=true` and the two commented port lines in
