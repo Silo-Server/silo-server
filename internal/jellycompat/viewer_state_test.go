@@ -80,7 +80,8 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if err != nil || len(afterDateEdit) != len(beforeDateEdit) || dto.PlaybackPositionTicks != 15000000000 || dto.LastPlayedDate != "2023-01-01T00:00:00Z" {
 		t.Fatalf("date-only edit changed history/progress: %+v %v", dto, err)
 	}
-	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00Z"}`)
+	// Jellyfin reads a LastPlayedDate without an offset as UTC (#3257).
+	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00.0000000"}`)
 	if dto.Played || dto.PlaybackPositionTicks != 50000000 || dto.LastPlayedDate != "2024-01-01T00:00:00Z" {
 		t.Fatalf("historical edit suppressed: %+v", dto)
 	}
@@ -107,8 +108,21 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	for _, key := range []string{"datePlayed", "DATEPLAYED"} {
-		t.Run(key, func(t *testing.T) {
+	// Jellyfin's legacy binder takes the compact yyyyMMddHHmmss form as UTC
+	// and falls back to its default binder, which also takes a date-time
+	// without an offset (#3257).
+	for _, tc := range []struct{ name, query, want string }{
+		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"legacy compact", "DatePlayed=20250203040506", "2025-02-03T04:05:06Z"},
+		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00", "2025-02-03T04:05:06Z"},
+		{"no offset", "datePlayed=2025-02-03T04:05:06.000", "2025-02-03T04:05:06Z"},
+		{"space separator", "datePlayed=2025-02-03%2004:05:06", "2025-02-03T04:05:06Z"},
+		{"offset without colon", "datePlayed=2025-02-03T05:05:06%2B0100", "2025-02-03T04:05:06Z"},
+		{"minutes", "datePlayed=2025-02-03T04:05", "2025-02-03T04:05:00Z"},
+		{"date only", "datePlayed=2025-02-03", "2025-02-03T00:00:00Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
 			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
@@ -117,10 +131,10 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 			rec := httptest.NewRecorder()
-			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+key+"=2025-02-03T04:05:06Z", "", "itemId", id, session))
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+tc.query, "", "itemId", id, session))
 			var dto itemUserDataDTO
 			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
+			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != tc.want {
 				t.Fatalf("mark played %d %+v %s", rec.Code, dto, rec.Body.String())
 			}
 			rec = httptest.NewRecorder()
