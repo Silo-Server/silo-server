@@ -467,7 +467,7 @@ func TestOversizedMirrorStillKeepsTrack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newly read track could not reach storage: %v", err)
 	}
-	stream, err := in.Stream()
+	stream, err := in.Stream(t.Context())
 	if err != nil {
 		t.Fatalf("oversized stored track could not be consumed: %v", err)
 	}

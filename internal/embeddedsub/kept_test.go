@@ -82,7 +82,7 @@ func TestKeptTrackStandsInForTheSource(t *testing.T) {
 				t.Fatal(err)
 			}
 			stream := &playback.SubtitlePacketInput{
-				Stream:          func() (io.ReadCloser, error) { return os.Open(keptPath) },
+				Stream:          func(context.Context) (io.ReadCloser, error) { return os.Open(keptPath) },
 				StreamFormat:    idx.StreamFormat(),
 				SourceStartTime: start,
 			}
@@ -253,7 +253,7 @@ func TestDemuxCopyStandsInForTheSource(t *testing.T) {
 				t.Fatalf("demux with a copy serves differently\n%s", firstDifference(want, got.Bytes()))
 			}
 			fromCopy, err := fromPackets(ctx, ffmpeg, &playback.SubtitlePacketInput{
-				Stream: func() (io.ReadCloser, error) { return os.Open(copyPath) }, StreamFormat: c.format, SourceStartTime: start,
+				Stream: func(context.Context) (io.ReadCloser, error) { return os.Open(copyPath) }, StreamFormat: c.format, SourceStartTime: start,
 			}, x)
 			if err != nil {
 				t.Fatal(err)

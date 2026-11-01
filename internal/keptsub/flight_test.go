@@ -619,7 +619,7 @@ func TestMirrorFetchesAreAdmitted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := in.Stream()
+			r, err := in.Stream(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}

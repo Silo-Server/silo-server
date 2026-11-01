@@ -127,7 +127,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	cmd.Stderr = stderrBuf
 
 	start := time.Now()
-	wait, err := startSubtitleCommand(cmd, opts.Packets)
+	wait, err := startSubtitleCommand(extractCtx, cmd, opts.Packets)
 	if err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}

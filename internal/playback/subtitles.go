@@ -142,7 +142,7 @@ func runSubtitleExtract(ctx context.Context, ffmpeg string, args []string, in *S
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	wait, err := startSubtitleCommand(cmd, in)
+	wait, err := startSubtitleCommand(ctx, cmd, in)
 	if err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}

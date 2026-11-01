@@ -217,6 +217,12 @@ A conversion of a kept track, which holds packets, that yields no cue is a
 failure however FFmpeg exited: the request demuxes the source instead, and
 the empty result is neither served nor cached.
 
+Stream opens use the conversion's context, including a direct read from
+storage when mirror admission is full. Canceling conversion closes its
+opened reader; when FFmpeg exits, the input context is canceled before the
+feeder is joined. An output-write failure can therefore stop storage I/O
+without waiting for the parent request to end.
+
 **Local copies.** A node copies a kept stream it reads to
 `<transcode dir>/subtitle-cache/kept/<sha256>.<ext>` and serves from there; a
 fetched copy must match its hash. Copies never go stale, since the name is the

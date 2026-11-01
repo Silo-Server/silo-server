@@ -43,7 +43,7 @@ func (f *fakeEmbeddedSource) WholeTrack(context.Context, string, EmbeddedSubtitl
 	if f.whole != nil {
 		return nil, f.whole
 	}
-	return &SubtitlePacketInput{StreamFormat: "matroska", Stream: func() (io.ReadCloser, error) {
+	return &SubtitlePacketInput{StreamFormat: "matroska", Stream: func(context.Context) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("kept")), nil
 	}}, nil
 }
@@ -55,7 +55,7 @@ func (f *fakeEmbeddedSource) Window(_ context.Context, _ string, _ EmbeddedSubti
 	if f.window != nil {
 		return nil, f.window
 	}
-	return &SubtitlePacketInput{StreamFormat: "matroska", Stream: func() (io.ReadCloser, error) {
+	return &SubtitlePacketInput{StreamFormat: "matroska", Stream: func(context.Context) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("window")), nil
 	}}, nil
 }
@@ -85,7 +85,7 @@ var testEmbeddedRef = &EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: 2, Conta
 // KeepPath when asked. failPackets fails a conversion of packets before it
 // writes anything.
 func fakeConvert(calls *[]StreamExtractOpts, mu *sync.Mutex, failPackets bool) SUPExtractFunc {
-	return func(_ context.Context, opts StreamExtractOpts) error {
+	return func(ctx context.Context, opts StreamExtractOpts) error {
 		mu.Lock()
 		*calls = append(*calls, opts)
 		mu.Unlock()
@@ -93,7 +93,7 @@ func fakeConvert(calls *[]StreamExtractOpts, mu *sync.Mutex, failPackets bool) S
 			if failPackets {
 				return errors.New("conversion failed")
 			}
-			r, err := opts.Packets.Stream()
+			r, err := opts.Packets.Stream(ctx)
 			if err != nil {
 				return err
 			}
