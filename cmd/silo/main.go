@@ -1176,17 +1176,9 @@ func main() {
 		// Resolved before the watcher starts: NODE_URL is this process's
 		// stream_nodes identity, and the watcher needs it on its very first
 		// load to overlay the node's own acceleration overrides.
+		// config.LoadBootstrap refuses these modes without it.
 		nodeURL := os.Getenv("NODE_URL")
 		nodeName := os.Getenv("NODE_NAME")
-		if nodeURL == "" {
-			nodeURL = "http://localhost" + cfg.Server.Listen
-			// The guess is this process's whole identity: it keys session
-			// bookkeeping *and* selects the stream_nodes row whose acceleration
-			// overrides this node adopts. Two nodes listening on the same port
-			// guess the same URL and would share both.
-			slog.Warn("NODE_URL not set, using listen address — session keys may collide across nodes, and this node adopts the acceleration overrides of whichever stream_nodes row carries that URL",
-				"node_url", nodeURL)
-		}
 		if nodeName == "" {
 			nodeName = mode
 		}
