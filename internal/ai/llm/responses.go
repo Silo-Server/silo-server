@@ -16,7 +16,10 @@ const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceede
 const subscriptionUserNotEligible = "subscription_sharing_user_not_eligible"
 const subscriptionInvalidUser = "subscription_sharing_invalid_user"
 const responseFailedEvent = "response.failed"
-const responseServerError = "server_error"
+const (
+	responseServerError       = "server_error"
+	responseRateLimitExceeded = "rate_limit_exceeded"
+)
 
 var ErrPlanIneligible = errors.New("this account cannot share ChatGPT plan usage; check ChatGPT usage settings")
 
@@ -202,6 +205,9 @@ func readResponseStream(data io.Reader) (string, error) {
 			}
 			if code == responseServerError {
 				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT is temporarily unavailable"}
+			}
+			if code == responseRateLimitExceeded {
+				return &HTTPError{StatusCode: http.StatusTooManyRequests, Code: code, message: "ChatGPT is rate limiting requests"}
 			}
 			if code == subscriptionUsageLimitExceeded {
 				return &permanentError{ErrQuotaExhausted}

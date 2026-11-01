@@ -60,7 +60,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			if isExhaustedQuota(data) {
 				return &permanentError{ErrQuotaExhausted}
 			}
-			if response.Error.Code == "rate_limit_exceeded" {
+			if response.Error.Code == responseRateLimitExceeded {
 				return &HTTPError{StatusCode: http.StatusTooManyRequests, Code: response.Error.Code, message: "responses API is rate limiting requests"}
 			}
 			if response.Error.Code == responseServerError {

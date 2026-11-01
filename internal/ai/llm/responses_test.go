@@ -266,11 +266,17 @@ func TestSubscriptionRecoversUnauthorizedOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestSubscriptionUsageUnavailableRetries(t *testing.T) {
+func TestSubscriptionTransientStreamFailuresRetry(t *testing.T) {
+	if isExhaustedQuota([]byte(`{"error":{"code":"subscription_sharing_usage_unavailable"}}`)) {
+		t.Fatal("temporary usage failure classified as exhausted quota")
+	}
+	for _, code := range []string{"subscription_sharing_usage_unavailable", "rate_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) { testSubscriptionStreamFailureRetries(t, code) })
+	}
+}
+
+func testSubscriptionStreamFailureRetries(t *testing.T, code string) {
 	synctest.Test(t, func(t *testing.T) {
-		if isExhaustedQuota([]byte(`{"error":{"code":"subscription_sharing_usage_unavailable"}}`)) {
-			t.Fatal("temporary usage failure classified as exhausted quota")
-		}
 		calls := 0
 		client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
 			ChatGPTTokenSource:   testTokenSource(func(context.Context) (string, error) { return "token", nil }),
@@ -278,7 +284,7 @@ func TestSubscriptionUsageUnavailableRetries(t *testing.T) {
 		})
 		client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			calls++
-			body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_unavailable\"}}}\n\n"
+			body := fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q}}}\n\n", code)
 			if calls > 1 {
 				body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"
 			}
