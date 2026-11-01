@@ -232,7 +232,8 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 // endpoint's own budget, or a forwarding peer's share of it, is spent. The
 // per-address request budget and the global budget still apply. admit runs
 // only for a request those budgets would refuse, so it may do a lookup the
-// handler repeats.
+// handler repeats; those checks are themselves capped per connection
+// address (see admitOverBudget).
 //
 // It is for public endpoints whose callers prove themselves with a
 // high-entropy secret the middleware cannot see, such as an autoscan source
@@ -246,6 +247,27 @@ func (mw *Middleware) AdmitOverEndpointBudget(endpoint string, admit func(*http.
 		mw.overBudget = map[string]func(*http.Request) bool{}
 	}
 	mw.overBudget[endpoint] = admit
+}
+
+// admitOverBudget runs the endpoint's admission check for a request its
+// endpoint budget refused. Each check costs the caller a lookup, so checks
+// spend their own budget, keyed by the connection's own address rather than
+// a forwarded client address the sender can rotate, and sized like the
+// forwarding peer's share of the endpoint budget. Past it the request is
+// refused without a check.
+func (mw *Middleware) admitOverBudget(r *http.Request, admit func(*http.Request) bool, clientIP, endpoint string, epRate Rate) bool {
+	if admit == nil {
+		return false
+	}
+	conn := clientip.PeerIP(r.Context())
+	if conn == "" {
+		conn = clientIP
+	}
+	key := fmt.Sprintf("authadmit:%s:%s", SourceKey(conn), endpoint)
+	if !mw.perKey.Allow(r.Context(), key, authPeerRate(epRate)).Allowed {
+		return false
+	}
+	return admit(r)
 }
 
 type rateLimitError struct {
@@ -314,7 +336,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 							epResult = mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
 						}
 					}
-					if !epResult.Allowed && (admit == nil || !admit(r)) {
+					if !epResult.Allowed && !mw.admitOverBudget(r, admit, clientIP, endpoint, epRate) {
 						writeRateLimitResponse(w, epResult, reject)
 						return
 					}

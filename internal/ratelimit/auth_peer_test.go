@@ -328,3 +328,35 @@ func TestAuthEndpointHandlerAdmissionDoesNotLiftAddressBudget(t *testing.T) {
 		t.Fatalf("codes = %v, want the per-address budget to refuse the second request", codes)
 	}
 }
+
+// Checking a request over the endpoint budget costs a lookup, so those checks
+// spend their own budget keyed by the connection's address, which forwarding
+// headers cannot rotate: ten times the endpoint's (one a minute, so ten
+// checks). Past it, requests are refused without one.
+func TestAuthEndpointHandlerBoundsAdmissionChecksPerConnection(t *testing.T) {
+	mw := newAuthLimitMiddleware(t)
+	mw.cfg.AuthEndpoints = map[string]AuthEndpointConfig{"autoscan_webhook": {RequestsPerMinute: 1, Burst: 2}}
+	checks := 0
+	mw.AdmitOverEndpointBudget("autoscan_webhook", func(*http.Request) bool {
+		checks++
+		return false
+	})
+	trusted, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := clientip.Middleware(clientip.NewResolver(trusted))(
+		mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})))
+	peer, clients := randomPrivatePeer(), randomClientNet()
+	for i := range 100 {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/autoscan/webhooks/t", nil)
+		req.RemoteAddr = peer + ":40000"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250))
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if checks != 10 {
+		t.Fatalf("admission checks = %d, want 10 from one connection", checks)
+	}
+}
