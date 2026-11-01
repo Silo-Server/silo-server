@@ -117,11 +117,12 @@ ambiguous is skipped with a warning.
 
 A by-date file has no episode number, so it never gets a `scanner_fallback` placeholder. Instead,
 the series completeness sweep (`refreshSeriesEpisodeMetadataState`) checks for an unlinked by-date
-file in a matched series that aired after every stored episode and matches none. Such a file
-proves the stored episode list is behind, so the sweep marks the series episode-incomplete and
-queues episode-incomplete debt on the series item. An unknown date inside the stored range does
-not count. Existing episode-incomplete debt keeps its backoff. Parked debt restarts with no
-attempts only for a file that aired on or after the day of the debt's last attempt. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`
+file in a matched series that aired after the newest episode the series has in a library and
+matches no stored episode. Such a file shows the stored episode list is behind, so the sweep
+marks the series episode-incomplete and queues episode-incomplete debt on the series item. An
+unknown date inside that range does not count, and neither does a date after tomorrow (UTC),
+which has not aired anywhere yet. Existing episode-incomplete debt keeps its backoff. Parked
+debt restarts with no attempts only for a file that aired on or after the day of the debt's last attempt. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`
 covers these rules.
 
 ## A changed root waits for a rescan

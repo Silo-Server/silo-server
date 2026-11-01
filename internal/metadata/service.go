@@ -7055,9 +7055,10 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 
 	// A by-date file has no episode number to build a scanner_fallback
 	// placeholder from, so the episode debt above never sees it. One that aired
-	// after every stored episode proves the stored list is behind the provider:
-	// the series itself owes the refresh that fetches the new episodes.
-	newestUnstored := s.newestUnstoredFileAirDate(ctx, seriesID, episodes)
+	// after the series' newest library episode and matches no stored episode
+	// shows the stored list is behind the provider: the series itself owes the
+	// refresh that fetches the new episodes.
+	newestUnstored := s.newestUnstoredFileAirDate(ctx, seriesID, episodes, now)
 	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable || newestUnstored != "", new(now))
 	if newestUnstored != "" {
 		s.requestSeriesEpisodeListRefresh(ctx, seriesID, newestUnstored, now)
@@ -7070,8 +7071,10 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 // match no stored episode, or "" when there is none or the series is not
 // matched. An unknown date inside the stored range is not counted: the
 // provider has already listed that stretch, so a refresh is not expected to
-// add it.
-func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesID string, episodes []*models.Episode) string {
+// add it. Nor is a date after tomorrow (UTC), which has not aired in any time
+// zone: such a name is almost always wrong, and it would restart parked debt
+// on every sweep.
+func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesID string, episodes []*models.Episode, now time.Time) string {
 	linker, ok := s.fileRepo.(EpisodeLinker)
 	if !ok || s.itemRepo == nil {
 		return ""
@@ -7096,12 +7099,14 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 			"series_id", seriesID, "error", err)
 		return ""
 	}
+	latestAired := now.UTC().AddDate(0, 0, 1).Format(time.DateOnly)
 	var airDates []string
 	for _, file := range files {
 		if file == nil {
 			continue
 		}
-		if hint := parseEpisodeLinkHint(file, rootsByFolder[file.MediaFolderID]...); hint.ok && hint.airDate > newestStored {
+		if hint := parseEpisodeLinkHint(file, rootsByFolder[file.MediaFolderID]...); hint.ok &&
+			hint.airDate > newestStored && hint.airDate <= latestAired {
 			airDates = append(airDates, hint.airDate)
 		}
 	}

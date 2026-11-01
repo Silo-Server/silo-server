@@ -1373,6 +1373,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 	}{
 		{name: "file newer than stored episodes", fileDate: "2024-05-06", wantIncomplete: true, wantDue: true},
 		{name: "unknown date inside stored range", fileDate: "2024-05-02"},
+		{name: "parked debt ignores a date that has not aired", fileDate: "2099-01-01", existing: parked},
 		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-05", existing: parked, wantIncomplete: true},
 		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
 		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
