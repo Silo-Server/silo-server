@@ -738,12 +738,18 @@ working (`internal/jellycompat/transcode_failover.go`):
   the client sees: an API-egress
   transcode may move to another node or to this process, a proxy-egress one only
   to another transcode node behind the same proxy. Under the session lifecycle
-  lock, and only while the transport still runs on the dead node, it rewrites the
+  lock, and only while the transport still runs on the dead node, it first
+  swaps the compat row's recipe and route to the new executor, then rewrites the
   `noderecipe` record to name the new node (or deletes it for a local move), then
-  the compat row's recipe and route and the upstream session. Moves are
-  single-flighted per session. A move skips an ended play, and a stop deletes
-  the record under the same lock, so a stop that races a move still leaves no
-  record behind.
+  the upstream session. A failed record write puts the compat row back. Moves
+  are single-flighted per session. A move skips an ended play, and a stop
+  deletes the record under the same lock, so a stop that races a move still
+  leaves no record behind.
+- **Two API servers.** The lock and the single-flight are per process, so two
+  API servers that both hold the play can each run a move. The durable compat
+  store's update is a compare-and-swap on the shared row, and it settles the
+  race: the server whose swap loses writes nothing, neither the record nor its
+  upstream session, and relays to the node the winner picked.
 - **Rebuild.** Nothing is started eagerly. The new node rebuilds the transcode
   from the rewritten record on the next request, seeked to the requested
   segment, exactly as after its own restart; a local move goes through the
@@ -764,9 +770,11 @@ working (`internal/jellycompat/transcode_failover.go`):
   read that fails keeps the node it last found. Native
   tokens carry their recipe; the proxy does not follow them, because native
   clients replan.
-- **Old node.** Central asks the dead node to stop the transport in the
-  background, in case it is only unreachable from the relay (for example, a
-  split between the proxy and the node). The node leaves the record, which now
+- **Old node.** Central asks the dead node to release the transport in the
+  background (a stop with `fence=0`), in case it is only unreachable from the
+  relay (for example, a split between the proxy and the node). A release leaves
+  the transport id rebuildable on that node, so a later move back to it works.
+  The node leaves the record, which now
   names the new node (`noderecipe.Store.DeleteUnlessMoved`). A node that cannot
   tell (an older binary, or a card without node row ids) deletes it anyway; for
   that case central writes the session's current recipe again after the stop,

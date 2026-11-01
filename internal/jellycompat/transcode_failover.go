@@ -271,9 +271,12 @@ func compatMoveRouteUsable(decision noderouting.Decision, proxyEgress bool, assi
 // switch, restart, or stop wins and the move commits nothing. A stop that
 // lands during the commit deletes the record after it.
 //
-// The node recipe record is written first: it is what the new node rebuilds
-// from and what a proxy follows, and its failure leaves everything else as it
-// was. The compat store and the upstream session follow.
+// The compat store is written first. With the durable store its update is a
+// compare-and-swap on the shared row, which is what settles a move that two
+// API servers run for one session: the one whose swap loses writes nothing
+// and returns where the winner moved the transport. Only the winner then
+// writes the node recipe record, which the new node rebuilds from and a proxy
+// follows. A failed record write puts the compat session back.
 func (h *PlaybackHandler) commitCompatTranscodeMove(
 	ctx context.Context,
 	playSessionID, upstreamSessionID, deadNodeURL, nodeURL string,
@@ -303,11 +306,8 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 	// again from the new executor's configuration and capabilities.
 	next.HWAccel, next.EncoderHWAccel, next.HWDevice, next.ToneMapFilter = "", "", "", ""
 
-	if err := h.writeMovedNodeRecipe(ctx, upstreamSessionID, nodeURL, next); err != nil {
-		return "", err
-	}
 	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
-		if current.Recipe == nil || !sameCompatNode(current.Recipe.TranscodeNodeURL, deadNodeURL) {
+		if current.Terminal || current.Recipe == nil || !sameCompatNode(current.Recipe.TranscodeNodeURL, deadNodeURL) {
 			return errCompatMoveNoSession
 		}
 		recipe := next
@@ -316,8 +316,20 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 		current.RoutingAssignment = &committed
 		return nil
 	}); err != nil {
+		if errors.Is(err, errCompatMoveNoSession) {
+			// Another API server moved or stopped the play first. The store
+			// now holds its row; relay to where it moved the transport.
+			if winner, ok := h.playbackStore.Get(playSessionID); ok && !winner.Terminal && winner.Recipe != nil &&
+				!sameCompatNode(winner.Recipe.TranscodeNodeURL, deadNodeURL) {
+				return winner.Recipe.TranscodeNodeURL, nil
+			}
+			return "", errCompatMoveNoSession
+		}
 		return "", fmt.Errorf("record moved transcode: %w",
-			errors.Join(err, h.undoCompatTranscodeMove(ctx, playSessionID, upstreamSessionID, previous, next, previousAssignment)))
+			errors.Join(err, h.undoCompatTranscodeMove(playSessionID, previous, next, previousAssignment)))
+	}
+	if err := h.writeMovedNodeRecipe(ctx, upstreamSessionID, nodeURL, next); err != nil {
+		return "", errors.Join(err, h.undoCompatTranscodeMove(playSessionID, previous, next, previousAssignment))
 	}
 	if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, nodeURL); err != nil {
 		slog.WarnContext(ctx, "record moved transcode on the upstream session", "component", "jellycompat",
@@ -359,28 +371,19 @@ func (h *PlaybackHandler) writeMovedNodeRecipe(ctx context.Context, upstreamSess
 	return nil
 }
 
-// undoCompatTranscodeMove restores the node recipe record and the compat
-// session after the compat store refused the move, and returns what it could
-// not restore.
+// undoCompatTranscodeMove puts the compat session back on the dead node after
+// the move could not be recorded: the durable store failed its database write
+// after it already applied the move to its live cache, or the node recipe
+// record could not be written. It undoes exactly that move, so the compat
+// session names the dead node again, like the record and the upstream session,
+// and a later move request is not ignored. The record is never touched here:
+// it still names the dead node, or another API server's move rewrote it.
 func (h *PlaybackHandler) undoCompatTranscodeMove(
-	ctx context.Context,
-	playSessionID, upstreamSessionID string,
+	playSessionID string,
 	previous, next playback.RecipeCard,
 	previousAssignment *playback.NodeRoutingAssignment,
 ) error {
-	var err error
-	if h.RecipeNodeStore != nil {
-		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		if restoreErr := h.RecipeNodeStore.Put(restoreCtx, upstreamSessionID, previous); restoreErr != nil {
-			err = errors.Join(err, fmt.Errorf("restore node transcode recipe: %w", restoreErr))
-		}
-		cancel()
-	}
-	// A durable store can fail its database write after it already applied
-	// the move to its live cache. Undo exactly that move, so the compat
-	// session names the dead node again, like the record and the upstream
-	// session, and a later move request is not ignored.
-	if restoreErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		if current.Recipe != nil && reflect.DeepEqual(*current.Recipe, next) {
 			restored := previous
 			current.Recipe = &restored
@@ -390,16 +393,18 @@ func (h *PlaybackHandler) undoCompatTranscodeMove(
 			}
 		}
 		return nil
-	}); restoreErr != nil {
-		err = errors.Join(err, fmt.Errorf("restore compat transcode route: %w", restoreErr))
+	}); err != nil {
+		return fmt.Errorf("restore compat transcode route: %w", err)
 	}
-	return err
+	return nil
 }
 
 // retireCompatTranscodeOnDeadNode asks the node the transport left to drop it,
 // in case that node is only unreachable from the relay and still runs FFmpeg.
-// The node keeps the transport's node recipe record when it names another node
-// (noderecipe.Store.DeleteUnlessMoved).
+// The stop is a release: the transport keeps its id on the new executor, and
+// a fenced stop would make the old node refuse that id for the token lifetime
+// if a later move picked the node again. The node keeps the transport's node
+// recipe record when it names another node (noderecipe.Store.DeleteUnlessMoved).
 //
 // A node that cannot tell (an older binary, or a card without node row ids)
 // deletes the record anyway. A remote move therefore writes the record again
@@ -415,7 +420,7 @@ func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(
 	go func() {
 		stopCtx, cancel := context.WithTimeout(detached, compatTranscodeMoveTimeout)
 		defer cancel()
-		if err := h.tm.CancelRemoteTranscode(stopCtx, upstreamSessionID, deadNodeURL); err != nil {
+		if err := h.tm.ReleaseRemoteTranscode(stopCtx, upstreamSessionID, deadNodeURL); err != nil {
 			// Expected when the node is down. When it is only unreachable from
 			// here, its idle reaper ends the transcode.
 			slog.InfoContext(detached, "could not stop the transcode on the node it moved off", "component", "jellycompat",

@@ -367,8 +367,9 @@ func TestCompatMoveOfMovedTranscodeReturnsCurrentNode(t *testing.T) {
 }
 
 // The proxy lost the old node, but the API can still reach it, so the
-// background stop lands. A node deletes a transport's record when it stops
-// it; the moved record names the new node and must survive that stop.
+// background stop lands. The stop is a release, which leaves the transport id
+// rebuildable there. A node deletes a transport's record when it stops it; the
+// moved record names the new node and must survive that stop.
 func TestCompatMoveSurvivesOldNodeStop(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
@@ -388,6 +389,11 @@ func TestCompatMoveSurvivesOldNodeStop(t *testing.T) {
 				if r.Method != http.MethodDelete || r.URL.Path != "/transcode/upstream-1" {
 					http.NotFound(w, r)
 					return
+				}
+				// A fenced stop would make this node refuse the transport id
+				// for the token lifetime, so a later move back here would fail.
+				if fence := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam); fence != "0" {
+					t.Errorf("old node stop fence = %q, want a release (fence=0)", fence)
 				}
 				// What handleStop does with the shared record.
 				self := playback.RecipeExecutor{NodeID: compatMoveDeadNodeID, NodeURL: f.deadURL}
@@ -617,11 +623,39 @@ func (s *putHookRecipeStore) Put(ctx context.Context, sessionID string, card pla
 	return s.stubRecipeNodeStore.Put(ctx, sessionID, card)
 }
 
+// serialCompatSessionManager serializes the session manager calls a stop and
+// a move's commit make from different goroutines.
+type serialCompatSessionManager struct {
+	mu sync.Mutex
+	*testCompatSessionManager
+}
+
+func (m *serialCompatSessionManager) StopSession(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.testCompatSessionManager.StopSession(sessionID)
+}
+
+func (m *serialCompatSessionManager) GetSession(sessionID string) (*playback.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.testCompatSessionManager.GetSession(sessionID)
+}
+
+func (m *serialCompatSessionManager) SetTranscodeNodeURL(sessionID, url string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.testCompatSessionManager.SetTranscodeNodeURL(sessionID, url)
+}
+
 // A stop that lands while a move rewrites the node recipe record must still
 // leave no record behind: a record of a stopped play lets a node that comes
 // back, or a still-valid proxy token, rebuild the transcode.
 func TestCompatStopDuringMoveLeavesNoRecipe(t *testing.T) {
 	f := newCompatMoveFixture(t, true, noderouting.EgressAPI)
+	// The stop and the rest of the move's commit both reach the session
+	// manager, which a real one serializes.
+	f.handler.sessionMgr = &serialCompatSessionManager{testCompatSessionManager: f.sessions}
 	playSession := f.playSession(t)
 	stopped := make(chan struct{})
 	f.handler.RecipeNodeStore = &putHookRecipeStore{stubRecipeNodeStore: f.recipes, onPut: func() {
@@ -646,5 +680,81 @@ func TestCompatStopDuringMoveLeavesNoRecipe(t *testing.T) {
 	}
 	if card, ok := f.recipes.Get("upstream-1"); ok {
 		t.Fatalf("a stopped play kept a node recipe naming %q (operations %v)", card.TranscodeNodeURL, f.recipes.Operations())
+	}
+}
+
+// staleCopyPlaybackStore is another API server's view of a play: its cached
+// copy still names the dead node, while the shared row it updates already
+// names where the first server moved the transcode. Like the durable store,
+// a rejected update replaces the cached copy with the row.
+type staleCopyPlaybackStore struct {
+	CompatPlaybackStore
+	mu    sync.Mutex
+	stale *PlaybackSession
+}
+
+func (s *staleCopyPlaybackStore) staleCopy() (*PlaybackSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stale == nil {
+		return nil, false
+	}
+	copied := *s.stale
+	return &copied, true
+}
+
+func (s *staleCopyPlaybackStore) Get(id string) (*PlaybackSession, bool) {
+	if stale, ok := s.staleCopy(); ok && stale.ID == id {
+		return stale, true
+	}
+	return s.CompatPlaybackStore.Get(id)
+}
+
+func (s *staleCopyPlaybackStore) FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool) {
+	if stale, ok := s.staleCopy(); ok && stale.UpstreamSessionID == upstreamSessionID {
+		return stale, true
+	}
+	return s.CompatPlaybackStore.FindByUpstreamSessionID(upstreamSessionID)
+}
+
+func (s *staleCopyPlaybackStore) Update(id string, fn func(*PlaybackSession) error) error {
+	s.mu.Lock()
+	s.stale = nil
+	s.mu.Unlock()
+	return s.CompatPlaybackStore.Update(id, fn)
+}
+
+// Two API servers hold the same play and both run a move off the dead node.
+// The first one moved it to another node and rewrote the record. The second
+// loses the compare-and-swap on the shared row: it must leave the record
+// alone and relay to the first server's node. Writing its own node and then
+// restoring the dead one would leave the record naming the dead node while
+// every copy of the play names the new one, so no server would answer the
+// proxy's move requests.
+func TestCompatMoveThatLosesToAnotherServerLeavesItsRecord(t *testing.T) {
+	f := newCompatMoveFixture(t, true, noderouting.EgressProxy)
+	stale := *f.playSession(t)
+	const winnerURL = "http://winner-node.invalid"
+	if err := f.store.Update("play-1", func(current *PlaybackSession) error {
+		recipe := *current.Recipe
+		recipe.TranscodeNodeURL = winnerURL
+		current.Recipe = &recipe
+		return nil
+	}); err != nil {
+		t.Fatalf("first server's move: %v", err)
+	}
+	winnerCard := f.storedRecipe(t)
+	winnerCard.TranscodeNodeURL = winnerURL
+	f.recipes.cards["upstream-1"] = winnerCard
+	f.handler.playbackStore = &staleCopyPlaybackStore{CompatPlaybackStore: f.store, stale: &stale}
+
+	nodeURL, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", f.deadURL)
+
+	if card := f.storedRecipe(t); card.TranscodeNodeURL != winnerURL {
+		t.Fatalf("record names %q after a lost move, want the first server's %q (operations %v)",
+			card.TranscodeNodeURL, winnerURL, f.recipes.Operations())
+	}
+	if err != nil || nodeURL != winnerURL {
+		t.Fatalf("lost move = %q, %v; want the first server's node %q", nodeURL, err, winnerURL)
 	}
 }
