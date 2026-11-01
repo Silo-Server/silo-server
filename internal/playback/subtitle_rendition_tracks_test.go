@@ -547,6 +547,7 @@ func TestOnDemandSegmentsAheadOfTheGenerationStartOnTheGrid(t *testing.T) {
 	}{
 		{"delay below one segment", 1.5},
 		{"delay above one segment", 3},
+		{"delay of several segments", 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// The running generation from segment 0 has written segments 0 and 1, and
