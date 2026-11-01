@@ -85,8 +85,12 @@ const mediaSearchTitleVector = `mi.search_title_vector`
 
 const mediaSearchOverviewVector = `mi.search_overview_vector`
 
+// mixedSearchOrder leads with media_rank, so every series, movie, and other
+// catalog item ranks above every episode. An episode often carries its show's
+// name: Dexter's pilot is titled "Dexter", and its one-title document outranked
+// the series on every key after exact title.
 func mixedSearchOrder(prefix string) string {
-	return fmt.Sprintf(`%[1]sexact_title_match DESC, %[1]scontiguous_title_match DESC, %[1]syear_match DESC,
+	return fmt.Sprintf(`%[1]smedia_rank DESC, %[1]sexact_title_match DESC, %[1]scontiguous_title_match DESC, %[1]syear_match DESC,
 	%[1]sphrase_rank DESC, %[1]stitle_prefix_rank DESC, %[1]soverview_rank DESC,
 	LOWER(%[1]stitle) ASC, %[1]scontent_id ASC`, prefix)
 }
@@ -692,6 +696,7 @@ func buildMixedSearchCandidateBranch(
 			%s AS content_id,
 			%s AS type,
 			%s AS title,
+			CASE WHEN %s = 'episode' THEN 0 ELSE 1 END AS media_rank,
 			CASE WHEN $%d <> '' AND (%s) THEN 1 ELSE 0 END AS exact_title_match,
 			CASE WHEN $%d <> '' THEN %s ELSE 0 END AS contiguous_title_match,
 			CASE WHEN $%d::int IS NOT NULL AND (%s) = $%d::int THEN 1 ELSE 0 END AS year_match,
@@ -701,6 +706,7 @@ func buildMixedSearchCandidateBranch(
 		FROM %s
 		WHERE %s`,
 		selectModifier, contentIDExpr, typeExpr, titleExpr,
+		typeExpr,
 		exactIdx, strings.Join(exactArms, " OR "),
 		exactIdx, positionExpr,
 		yearIdx, yearExpr, yearIdx,

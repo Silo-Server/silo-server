@@ -91,7 +91,7 @@ func TestSearchRelevancePostgres(t *testing.T) {
 	t.Run("pages match one page", func(t *testing.T) {
 		// "The Godfather Part II" and the four-word alias tie at rank 1/5,
 		// which a real rank could not carry across a page boundary.
-		for _, query := range []string{"the godfather", "star wars", "the god place"} {
+		for _, query := range []string{"the godfather", "star wars", "the god place", "dexter"} {
 			if got, want := searchPages(t, repo, query, filter), search(t, query); !slices.Equal(got, want) {
 				t.Fatalf("%q one row per page = %v, want %v", query, got, want)
 			}
@@ -111,6 +111,13 @@ func TestSearchRelevancePostgres(t *testing.T) {
 			if got := search(t, query); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
 				t.Errorf("%q results = %v, want %v", query, got, want)
 			}
+		}
+	})
+	t.Run("episodes rank below series and movies", func(t *testing.T) {
+		// Dexter's pilot carries the show's exact title.
+		got := search(t, "dexter")
+		if !slices.Equal(got, ids("dexter", "dexter-new-blood", "dexter-pilot")) {
+			t.Fatalf("results = %v, want both series, then the episode", got)
 		}
 	})
 	t.Run("repeated words do not outrank shorter titles", func(t *testing.T) {
@@ -198,6 +205,8 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 		{"pokemon-ascii", "movie", "Pokemon Detective Origins", ""},
 		{"wilde", "movie", "Dorian Gray", "Le Portrait de Dorian Gray: Œuvre de Wilde"},
 		{"wilde-ascii", "movie", "Oeuvre of Wilde", ""},
+		{"dexter", "series", "Dexter", ""},
+		{"dexter-new-blood", "series", "Dexter: New Blood", ""},
 	} {
 		exec(`INSERT INTO media_items(content_id,type,title,year) VALUES($1,$2,$3,2000)`, id(item.name), item.kind, item.title)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id(item.name), library)
@@ -210,6 +219,8 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 	for _, alias := range []string{"Harbor", "The Harbor", "Old Harbor", "Harbor Days"} {
 		addAlias("harbor-tales", alias)
 	}
+	exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,1,'Dexter')`, id("dexter-pilot"), id("dexter"))
+	exec(`INSERT INTO episode_libraries(episode_id,media_folder_id,first_seen_at) VALUES($1,$2,NOW())`, id("dexter-pilot"), library)
 	return library, id
 }
 

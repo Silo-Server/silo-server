@@ -58,7 +58,7 @@ type searchCursorSQL struct {
 
 func searchFTSTerms() []queryCursorTerm {
 	terms := []queryCursorTerm{}
-	for _, expression := range []string{"exact_title_match", "contiguous_title_match", "year_match", "phrase_rank", "title_prefix_rank", "overview_rank"} {
+	for _, expression := range []string{"media_rank", "exact_title_match", "contiguous_title_match", "year_match", "phrase_rank", "title_prefix_rank", "overview_rank"} {
 		terms = append(terms, queryCursorTerm{expression: expression, kind: cursorKindNumber, descending: true, nullsLast: false})
 	}
 	return append(terms, queryCursorTerm{expression: searchLowerTitleExpression, kind: cursorKindText, nullsLast: true}, queryCursorTerm{expression: cursorContentIDColumn, kind: cursorKindText, nullsLast: true})
