@@ -3257,9 +3257,11 @@ Plugins declaring `network_access_provider.v1` are resident; every other plugin 
 first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
 server failed, with `last_error` saying why. A later successful launch, an administrator
 restart, an update or a configuration change clears that failure. A plugin that isn't running
-also reports `failed` while its stored archive can't be read (it won't open or extract, or
-doesn't match the installation); the installation is still listed, without its manifest
-fields, so it can be turned off or uninstalled.
+also reports `failed` when the answering server has to restore its files from the stored
+archive and the archive can't be read (it won't open or extract, or doesn't match the
+installation). That server still lists the installation, without its manifest fields, so it
+can be turned off or uninstalled; a server that still has a good copy of the files is
+unaffected.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete

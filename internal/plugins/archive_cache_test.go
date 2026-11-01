@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -205,6 +206,23 @@ func TestArchiveCacheEnsureMarksOnlyDamagedArchivesUnreadable(t *testing.T) {
 	corruptEntry := buffer.Bytes()
 	corruptEntry[bytes.Index(corruptEntry, []byte("extra entry data"))] ^= 0xff
 
+	// The binary entry is marked as a directory. The archive opens and its
+	// checksums match, but extraction writes a directory where the binary goes.
+	dirManifest, dirManifestBytes, _ := binaryRelease(t, "0.0.19", nil)
+	var dirBuffer bytes.Buffer
+	dirWriter := zip.NewWriter(&dirBuffer)
+	if err := writeArchiveEntry(dirWriter, "manifest.json", dirManifestBytes); err != nil {
+		t.Fatal(err)
+	}
+	dirHeader := &zip.FileHeader{Name: "plugin", Method: zip.Store}
+	dirHeader.SetMode(fs.ModeDir | 0o755)
+	if _, err := dirWriter.CreateHeader(dirHeader); err != nil {
+		t.Fatal(err)
+	}
+	if err := dirWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	for _, tc := range []struct {
 		name  string
 		store *legacyArchiveStore
@@ -215,6 +233,9 @@ func TestArchiveCacheEnsureMarksOnlyDamagedArchivesUnreadable(t *testing.T) {
 		}}},
 		{name: "entry fails its CRC", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
 			InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: corruptEntry,
+		}}},
+		{name: "binary is a directory entry", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: dirManifestBytes, Checksum: dirManifest.GetChecksum(), Bytes: dirBuffer.Bytes(),
 		}}},
 		{name: "store fails", store: &legacyArchiveStore{getErr: errors.New("db unavailable")}},
 	} {

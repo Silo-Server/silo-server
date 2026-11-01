@@ -213,7 +213,13 @@ func (c *ArchiveCache) ensure(
 	info, err := c.validateInstalledFiles(binaryPath, manifest)
 	if err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		// The files were just written from the archive, so a failure other
+		// than this host's disk is the archive's too: the binary or a packaged
+		// asset stored as a directory entry.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		}
+		return nil, unreadableArchivef("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
 	if c.root != "" {
 		// Proxy caches may contain a binary installed by an API host on a
