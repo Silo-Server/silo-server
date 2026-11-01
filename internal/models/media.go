@@ -515,6 +515,11 @@ type SubtitleTrack struct {
 	HearingImpaired  bool   `json:"hearing_impaired"`
 	External         bool   `json:"external"`
 	FileName         string `json:"file_name,omitempty"`
+	// IndexOnly marks an embedded track FFmpeg can't demux from the source,
+	// such as a Matroska S_TEXT/WEBVTT track, which the server reads through
+	// the container's index instead (embeddedsub). No route that demuxes the
+	// source with FFmpeg, on the server or in a client, can carry it.
+	IndexOnly bool `json:"index_only,omitempty"`
 }
 
 // ExternalSubtitle represents a sidecar subtitle file stored as JSONB.

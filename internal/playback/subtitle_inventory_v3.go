@@ -72,6 +72,9 @@ type SubtitleInventoryItemV3 struct {
 	Default         bool   `json:"default"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	Delivery        string `json:"delivery"`
+	// Unplayable marks a track no route can show. It still holds its
+	// ordinal; selecting it gets a subtitle_codec_unsupported terminal.
+	Unplayable bool `json:"unplayable,omitempty" doc:"No route can show this track: the server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable."`
 	// URL is the session-scoped sidecar URL, present only on
 	// SubtitleDeliverySidecarV3 tracks and only once a session exists.
 	URL string `json:"url,omitempty" format:"uri-reference"`
@@ -352,6 +355,7 @@ func subtitleInventoryItemV3(fileID, combinedIndex int, source, codec, language,
 		Default:         isDefault,
 		HearingImpaired: hearingImpaired,
 		Delivery:        subtitleDeliveryClassV3(source, codec),
+		Unplayable:      !subtitleCodecRoutableV3(codec),
 	}
 }
 

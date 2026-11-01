@@ -70,6 +70,10 @@ const (
 	IDBlock                = 0xA1
 	IDBlockDuration        = 0x9B
 	IDReferenceBlock       = 0xFB
+	IDBlockAdditions       = 0x75A1
+	IDBlockMore            = 0xA6
+	IDBlockAddID           = 0xEE
+	IDBlockAdditional      = 0xA5
 	IDTags                 = 0x1254C367
 	IDTag                  = 0x7373
 	IDTargets              = 0x63C0

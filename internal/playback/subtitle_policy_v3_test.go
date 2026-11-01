@@ -41,12 +41,63 @@ func TestResolveSubtitlePolicyV3DoesNotOfferDVBTeletextAsClientBitmap(t *testing
 }
 
 func TestResolveSubtitlePolicyV3UnknownCodecIsExplicitlyUnsupported(t *testing.T) {
-	resolve := subtitlePolicyForTrackV3("arib_caption", 0)
-	for _, transcodeAllowed := range []bool{true, false} {
-		result := resolve(transcodeAllowed)
-		if result.Terminal == nil || result.Terminal.Reason != "subtitle_codec_unsupported" {
-			t.Fatalf("transcodeAllowed=%v: unknown codec must be explicitly unsupported, got %#v", transcodeAllowed, result)
+	for codec, message := range map[string]string{
+		"arib_caption": "Subtitle format arib_caption has no validated rendering or burn-in route.",
+		// A format the probe couldn't name has no name to give.
+		"": "The subtitle track's format was not recognized, so it has no validated rendering or burn-in route.",
+	} {
+		resolve := subtitlePolicyForTrackV3(codec, 0)
+		for _, transcodeAllowed := range []bool{true, false} {
+			result := resolve(transcodeAllowed)
+			if result.Terminal == nil || result.Terminal.Reason != "subtitle_codec_unsupported" || result.Terminal.Message != message {
+				t.Fatalf("codec %q, transcodeAllowed=%v: unknown codec must be explicitly unsupported, got %#v", codec, transcodeAllowed, result.Terminal)
+			}
 		}
+	}
+}
+
+// The inventory marks exactly the tracks the policy refuses as unsupported,
+// so a client can list them as unavailable instead of offering them.
+func TestSubtitleInventoryV3MarksTracksWithoutARouteUnplayable(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Format: "srt"}}
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, Codec: ""}, {Index: 3, Codec: "webvtt", IndexOnly: true}, {Index: 4, Codec: "dvd_subtitle"}, {Index: 5, Codec: "arib_caption"}}
+	want := []bool{false, true, false, false, true}
+	items := BuildSubtitleInventoryV3(file, nil)
+	for i, item := range items {
+		if item.Unplayable != want[i] {
+			t.Errorf("track %d (%s %q): unplayable = %v, want %v", i, item.Source, item.Codec, item.Unplayable, want[i])
+		}
+	}
+	if len(items) != len(want) {
+		t.Fatalf("inventory has %d tracks, want %d", len(items), len(want))
+	}
+}
+
+// A track FFmpeg can't demux from the source (Matroska S_TEXT/WEBVTT) renders
+// from its sidecar, which the server reads through the index, but can't be
+// burned in: burn-in demuxes the source.
+func TestResolveSubtitlePolicyV3KeepsIndexOnlyTracksOffBurnIn(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.ExternalSubtitles = nil
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, ContainerTrackID: "3", Codec: "webvtt", IndexOnly: true}}
+	req := validStartRequestV3()
+	req.SubtitleTrackIndex = new(0)
+	resolve := func() SubtitlePolicyResultV3 {
+		return ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
+	}
+	if got := resolve(); got.Terminal != nil || got.RequiresBurn || got.Decision.Mode != SubtitleRenderV3 || got.Codec != "webvtt" {
+		t.Fatalf("sidecar: %#v", got)
+	}
+	caps := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	caps.Subtitles.SidecarText = false
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = caps
+	if got := resolve(); got.Terminal == nil || got.Terminal.Reason != "subtitle_burn_in_source_unsupported" || got.RequiresBurn {
+		t.Fatalf("without a sidecar: %#v", got)
+	}
+	file.SubtitleTracks[0].IndexOnly = false
+	if got := resolve(); !got.RequiresBurn {
+		t.Fatalf("an ordinary WebVTT track without a sidecar burns in: %#v", got)
 	}
 }
 
