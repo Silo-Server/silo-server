@@ -458,6 +458,10 @@
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
 
+# A refused automatic plugin update stays on its installation until it is
+# cleared or the installed version changes.
+./internal/plugins TestInstallationStoreUpdateFailureDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset

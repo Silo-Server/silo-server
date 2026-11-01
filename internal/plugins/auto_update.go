@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/semver"
 
@@ -241,7 +242,13 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 
 	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
 	for _, existing := range installed {
-		if existing == nil || existing.RepositoryID == nil {
+		if existing == nil {
+			continue
+		}
+		if existing.RepositoryID == nil {
+			// An uploaded plugin, or one whose repository was deleted, has no
+			// automatic update left to fail, so drop any refusal it kept.
+			s.recordUpdateFailure(ctx, existing, CatalogEntry{}, autoUpdateOutcomeNone, nil, &summary)
 			continue
 		}
 		// The reserved builtin row must never be matched against catalog
@@ -260,6 +267,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 			continue
 		}
 		outcome, err := s.handleExistingPlugin(ctx, existing, entry)
+		s.recordUpdateFailure(ctx, existing, entry, outcome, err, &summary)
 		if err != nil {
 			summary.recordFailuref("process plugin update %s: %v", existing.PluginID, err)
 			continue
@@ -504,6 +512,61 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 		"available_version", newVersion,
 	)
 	return nil
+}
+
+// updateFailureGenericReason is shown for a refused automatic update whose
+// error was not written for the admin; the server log has the detail.
+const updateFailureGenericReason = "Silo couldn't install it. The server log has the details."
+
+// maxUpdateFailureReasonRunes bounds the stored reason shown in web admin.
+const maxUpdateFailureReasonRunes = 500
+
+// recordUpdateFailure keeps the installation's refused-update record in step
+// with this pass: a failed automatic update records the version and an
+// admin-facing reason, and a pass that handled the plugin without failing
+// clears an earlier record. A plugin missing from this pass's catalog (its
+// repository may be unreachable for now) keeps its record. A write failure
+// is counted in the summary and does not stop the pass; a plugin uninstalled
+// since the pass listed it has nothing left to record.
+func (s *AutoUpdateService) recordUpdateFailure(
+	ctx context.Context,
+	existing *Installation,
+	entry CatalogEntry,
+	outcome autoUpdateOutcome,
+	updateErr error,
+	summary *AutoUpdateSummary,
+) {
+	var input UpdateInstallationInput
+	switch {
+	case updateErr != nil && outcome == autoUpdateOutcomeUpdated:
+		input.UpdateFailure = &UpdateFailure{
+			Version:  entry.Manifest.GetVersion(),
+			Reason:   updateFailureReason(updateErr),
+			FailedAt: time.Now().UTC(),
+		}
+		input.IfVersion = &existing.Version
+	case updateErr == nil && existing.UpdateFailure != nil:
+		input.ClearUpdateFailure = true
+	default:
+		return
+	}
+	if err := s.installations.Update(ctx, existing.ID, input); err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		summary.recordFailuref("record update result for plugin %s: %v", existing.PluginID, err)
+	}
+}
+
+// updateFailureReason is the admin-facing reason for a refused update: a
+// PackageError's message, which names no URL or checksum, or a generic line.
+func updateFailureReason(err error) string {
+	packageErr, ok := AsPackageError(err)
+	if !ok || strings.TrimSpace(packageErr.Message) == "" {
+		return updateFailureGenericReason
+	}
+	reason := logredact.SanitizeText(packageErr.Message)
+	if runes := []rune(reason); len(runes) > maxUpdateFailureReasonRunes {
+		reason = string(runes[:maxUpdateFailureReasonRunes-1]) + "…"
+	}
+	return reason
 }
 
 type repositoryPluginKey struct {

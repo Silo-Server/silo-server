@@ -168,6 +168,11 @@ describe("pluginStatus", () => {
       attention: true,
       rank: 2,
     });
+    const refused = installation({
+      update_failure: { version: "2.0.0", reason: "refused", failed_at: "2026-11-01T12:00:00Z" },
+    });
+    expect(pluginStatus(refused)).toMatchObject({ label: "Active", attention: true, rank: 2 });
+    expect(matchesInstalledFilter(refused, "attention")).toBe(true);
     expect(pluginStatus(installation())).toMatchObject({ label: "Active", attention: false });
   });
 

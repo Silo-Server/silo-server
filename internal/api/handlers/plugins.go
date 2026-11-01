@@ -200,6 +200,9 @@ type PluginInstallationView struct {
 	// Runtime is the process state the v2 contract exposes as `runtime`. The
 	// frozen v1 bridge does not carry it.
 	Runtime *PluginRuntimeView `json:"-"`
+	// UpdateFailure is the last refused automatic update, exposed by v2 as
+	// `update_failure`. The frozen v1 bridge does not carry it.
+	UpdateFailure *plugins.UpdateFailure `json:"-"`
 }
 
 // PluginRuntimeView is one installation's process state. Resident marks a
@@ -1490,6 +1493,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		CreatedAt:          installation.CreatedAt,
 		UpdatedAt:          installation.UpdatedAt,
 		Runtime:            runtime,
+		UpdateFailure:      installation.UpdateFailure,
 	}, nil
 }
 

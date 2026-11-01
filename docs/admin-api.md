@@ -3273,6 +3273,14 @@ capabilities (installations, catalog entries, and the install, upload and update
 when the plugin declares neither. For an installation they come from the capability stored at
 install or update, which is what routing reads.
 
+An installation whose last automatic update failed carries `update_failure`: the `version`
+Silo tried, the `reason` (the same administrator-facing text a manual update would show, or a
+generic line pointing at the server log; never a URL or checksum) and `failed_at`. The update
+check records it on the installation row, so every node returns it. It disappears when the
+installed version changes or a later check handles the plugin without failing; a check that
+cannot reach the plugin's repository leaves it in place. The frozen `/api/v1` view does not
+carry it.
+
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
 routes under captured profile authority and drain pages with a bounded loop; a stale

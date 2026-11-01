@@ -662,7 +662,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "tasks":
         // Reconnect must also catch up history/metrics for tasks that finished
         // while disconnected. One sweep avoids refetching each detail twice.
-        refreshQueries({ queryKey: adminKeys.tasks() });
+        // A plugin update check that finished meanwhile may have changed the
+        // installations too.
+        refreshQueries(
+          { queryKey: adminKeys.tasks() },
+          { queryKey: adminKeys.pluginInstallations() },
+        );
         break;
       case "scans":
         hydrateScans(queryClient, (message.data as ScanRun[]) ?? []);
@@ -812,6 +817,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               { queryKey: adminKeys.taskHistory(task.key) },
               { queryKey: adminKeys.taskMetrics(task.key) },
             );
+            // A finished plugin update check may have updated plugins or
+            // recorded a refused update on them.
+            if (task.key === "check_plugin_updates") {
+              filters.push({ queryKey: adminKeys.pluginInstallations() });
+            }
           }
           refreshQueries(...filters);
         }

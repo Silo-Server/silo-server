@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -144,6 +145,91 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 			t.Fatalf("onChange calls = %d, want 0", calls)
 		}
 	})
+}
+
+// A refused automatic update is recorded on the installation so web admin
+// can show it, and a later pass that no longer fails clears it.
+func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
+	refusal := &PackageError{
+		Message: "The downloaded plugin doesn't match the SHA-256 checksum its catalog lists, so Silo didn't install it.",
+		Err:     errors.New("binary checksum mismatch: expected 00, got cf"),
+	}
+	earlier := &UpdateFailure{Version: "1.1.0", Reason: "earlier refusal"}
+	tests := []struct {
+		name           string
+		installed      string
+		stored         *UpdateFailure
+		catalogVersion string
+		replaceErr     error
+		noRepository   bool
+		storeErr       error
+		wantFailure    *UpdateFailure
+		wantClear      bool
+	}{
+		{name: "package refusal records the admin message", installed: "1.0.0", catalogVersion: "1.1.0", replaceErr: refusal,
+			wantFailure: &UpdateFailure{Version: "1.1.0", Reason: refusal.Message}},
+		{name: "other failure records a generic reason", installed: "1.0.0", catalogVersion: "1.1.0", replaceErr: errors.New("write /srv/plugins: token=hunter2 denied"),
+			wantFailure: &UpdateFailure{Version: "1.1.0", Reason: updateFailureGenericReason}},
+		{name: "applied update clears the refusal", installed: "1.0.0", stored: earlier, catalogVersion: "1.2.0", wantClear: true},
+		{name: "catalog no longer newer clears the refusal", installed: "1.1.0", stored: earlier, catalogVersion: "1.1.0", wantClear: true},
+		{name: "plugin missing from the catalog keeps the refusal", installed: "1.0.0", stored: earlier},
+		{name: "plugin whose repository was deleted clears the refusal", installed: "1.0.0", stored: earlier, catalogVersion: "1.1.0", noRepository: true, wantClear: true},
+		{name: "plugin uninstalled during the pass is not a failure", installed: "1.1.0", stored: earlier, catalogVersion: "1.1.0", storeErr: ErrInstallationNotFound, wantClear: true},
+		{name: "nothing recorded and nothing failed writes nothing", installed: "1.1.0", catalogVersion: "1.1.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			installations := &fakeAutoUpdateInstallations{updateErr: tt.storeErr, list: []*Installation{{
+				ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: tt.installed,
+				UpdatePolicy: "auto", Enabled: true, UpdateFailure: tt.stored,
+			}}}
+			if tt.noRepository {
+				installations.list[0].RepositoryID = nil
+			}
+			catalog := &fakeAutoUpdateCatalog{resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"}}
+			if tt.catalogVersion != "" {
+				catalog.entries = []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: tt.catalogVersion}}}
+			}
+			service := NewAutoUpdateService(
+				&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+				installations, catalog, &fakeAutoUpdateInstaller{replaceErr: tt.replaceErr}, &fakeAutoUpdateHost{}, nil, nil,
+			)
+			summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+			if err != nil {
+				t.Fatalf("Check() returned error: %v", err)
+			}
+			if tt.replaceErr == nil && len(summary.Failures) > 0 {
+				t.Fatalf("summary failures = %v, want none", summary.Failures)
+			}
+
+			var recorded *UpdateFailure
+			var cleared bool
+			for _, update := range installations.updates {
+				if update.UpdateFailure != nil {
+					recorded = update.UpdateFailure
+					if update.IfVersion == nil || *update.IfVersion != tt.installed {
+						t.Fatalf("failure write guarded on %v, want installed version %q", update.IfVersion, tt.installed)
+					}
+				}
+				cleared = cleared || update.ClearUpdateFailure
+			}
+			if cleared != tt.wantClear {
+				t.Fatalf("cleared = %v, want %v (updates %+v)", cleared, tt.wantClear, installations.updates)
+			}
+			if tt.wantFailure == nil {
+				if recorded != nil {
+					t.Fatalf("recorded failure %+v, want none", recorded)
+				}
+				return
+			}
+			if recorded == nil {
+				t.Fatalf("no failure recorded, want %+v", tt.wantFailure)
+			}
+			if recorded.Version != tt.wantFailure.Version || recorded.Reason != tt.wantFailure.Reason || recorded.FailedAt.IsZero() {
+				t.Fatalf("recorded failure = %+v, want version %q reason %q and a time", recorded, tt.wantFailure.Version, tt.wantFailure.Reason)
+			}
+		})
+	}
 }
 
 func TestCompareVersions(t *testing.T) {
@@ -294,6 +380,7 @@ func (f *fakeAutoUpdateRepositories) Create(_ context.Context, input CreateRepos
 type fakeAutoUpdateInstallations struct {
 	list       []*Installation
 	updates    []UpdateInstallationInput
+	updateErr  error
 	deletedIDs []int
 }
 
@@ -303,7 +390,7 @@ func (f *fakeAutoUpdateInstallations) List(context.Context) ([]*Installation, er
 
 func (f *fakeAutoUpdateInstallations) Update(_ context.Context, _ int, input UpdateInstallationInput) error {
 	f.updates = append(f.updates, input)
-	return nil
+	return f.updateErr
 }
 
 func (f *fakeAutoUpdateInstallations) Delete(_ context.Context, id int) error {
@@ -341,6 +428,7 @@ type replaceRemoteCall struct {
 }
 
 type fakeAutoUpdateInstaller struct {
+	replaceErr    error
 	replaceBinary []replaceBinaryCall
 	replaceRemote []replaceRemoteCall
 	binary        []InstallBinaryRequest
@@ -364,6 +452,9 @@ func (f *fakeAutoUpdateInstaller) ReplaceRemote(_ context.Context, existing *Ins
 
 func (f *fakeAutoUpdateInstaller) ReplaceBinary(_ context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error) {
 	f.replaceBinary = append(f.replaceBinary, replaceBinaryCall{existingID: existing.ID, req: req})
+	if f.replaceErr != nil {
+		return nil, f.replaceErr
+	}
 	return &InstallResult{Installation: existing}, nil
 }
 
