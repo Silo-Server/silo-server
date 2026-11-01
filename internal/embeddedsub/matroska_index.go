@@ -304,11 +304,11 @@ func locateElements(r io.ReaderAt, head []byte, l *segmentLayout) error {
 			}
 			return err
 		}
-		for _, e := range matroska.SeekEntries(data) {
+		matroska.WalkSeekEntries(data, func(e matroska.SeekEntry) {
 			if e.Position <= math.MaxInt64-l.start {
 				record(e.ID, l.start+e.Position)
 			}
-		}
+		})
 	}
 	return nil
 }

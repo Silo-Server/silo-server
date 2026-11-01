@@ -11,10 +11,10 @@ type SeekEntry struct {
 // them can't overflow.
 const maxPosition = 1 << 62
 
-// SeekEntries returns a SeekHead's entries in file order. An entry missing
-// its ID or position, or whose position doesn't fit, is left out.
-func SeekEntries(seekHead []byte) []SeekEntry {
-	var entries []SeekEntry
+// WalkSeekEntries calls fn with each of a SeekHead's entries in file order,
+// keeping no list a crafted SeekHead of tiny entries could expand. An entry
+// missing its ID or position, or whose position doesn't fit, is left out.
+func WalkSeekEntries(seekHead []byte, fn func(SeekEntry)) {
 	Children(seekHead, func(id uint64, seek []byte) {
 		if id != IDSeek {
 			return
@@ -34,10 +34,9 @@ func SeekEntries(seekHead []byte) []SeekEntry {
 			}
 		})
 		if seekID != 0 && seekPos >= 0 {
-			entries = append(entries, SeekEntry{ID: seekID, Position: seekPos})
+			fn(SeekEntry{ID: seekID, Position: seekPos})
 		}
 	})
-	return entries
 }
 
 // SeekPosition returns the position, relative to the segment's data, of the
@@ -47,24 +46,9 @@ func SeekPosition(seekHead []byte, target uint64) (int64, bool) {
 		pos   int64
 		found bool
 	)
-	Children(seekHead, func(id uint64, seek []byte) {
-		if id != IDSeek || found {
-			return
-		}
-		var seekID uint64
-		seekPos := int64(-1)
-		Children(seek, func(id uint64, v []byte) {
-			switch id {
-			case IDSeekID:
-				seekID = Uint(v)
-			case IDSeekPosition:
-				if p := Uint(v); p < maxPosition {
-					seekPos = int64(p)
-				}
-			}
-		})
-		if seekID == target && seekPos >= 0 {
-			pos, found = seekPos, true
+	WalkSeekEntries(seekHead, func(e SeekEntry) {
+		if !found && e.ID == target {
+			pos, found = e.Position, true
 		}
 	})
 	return pos, found
