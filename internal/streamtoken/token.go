@@ -29,6 +29,14 @@ const (
 	// PlayMethodCopyFMP4Transcode makes the versioned copy-video timestamp and
 	// bitstream recipe fail closed on readers predating that recipe.
 	PlayMethodCopyFMP4Transcode = "transcode_copy_fmp4_v1"
+	// PlayMethodSubtitleRenditionsTranscode and
+	// PlayMethodSubtitleRenditionsCopyFMP4 mark a transcode, or a copy-video
+	// transcode, that serves on-demand subtitle renditions. Readers predating
+	// them refuse the token instead of rebuilding the stream with the selected
+	// track's rendition alone, which would answer every other track's
+	// playlist with that track's cues.
+	PlayMethodSubtitleRenditionsTranscode = "transcode_subtitle_renditions_v1"
+	PlayMethodSubtitleRenditionsCopyFMP4  = "transcode_copy_fmp4_subtitle_renditions_v1"
 	// PlayMethodThemeDirect and PlayMethodThemeAAC authorize a detail-page
 	// theme song: its original bytes, or its progressive AAC conversion. They
 	// are not playback sessions, and workers that predate them reject them, so
@@ -67,6 +75,7 @@ type Claims struct {
 	AudioCodec             string  `json:"ac,omitempty"`
 	AudioChannels          int     `json:"ach,omitempty"`
 	AudioTrackIndex        int     `json:"ati,omitempty"`
+	RequireAudioTrack      bool    `json:"rat,omitempty"`
 	AudioOnly              bool    `json:"ao,omitempty"`
 	// CopyAudioCodec is the codec of the source audio track a remux copies.
 	// The remux adds aac_adtstoasc for a copied AAC track. Absent in older
@@ -156,6 +165,16 @@ type Claims struct {
 	TargetCodecAudio       string  `json:"tca,omitempty"`
 	TargetAudioChannels    int     `json:"tac,omitempty"`
 	TargetAudioBitrateKbps int     `json:"tabr,omitempty"`
+
+	// SubtitleRenditionTracks lists the on-demand subtitle renditions by
+	// container track number, in order, SubtitleRenditionDefault names the
+	// default one (0 for none), and SubtitleRenditionSourceSize and
+	// SubtitleRenditionSourceModTime the source version they read. A token
+	// that carries them has a PlayMethodSubtitleRenditions* method.
+	SubtitleRenditionTracks        []uint64 `json:"srt,omitempty"`
+	SubtitleRenditionDefault       uint64   `json:"srd,omitempty"`
+	SubtitleRenditionSourceSize    int64    `json:"srs,omitempty"`
+	SubtitleRenditionSourceModTime int64    `json:"srm,omitempty"`
 
 	// HLSVariableSubstitution records the client's hls_variable_substitution_v1
 	// delivery feature, so the relay and a reconstruct keep the playlist form

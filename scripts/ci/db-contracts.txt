@@ -26,6 +26,7 @@
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestMatroskaTrackBackfillRecordsIndexOnlyWebVTT
 ./internal/scanner TestHDR10PlusBackfillRecordsFrameStatusDB
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
@@ -38,6 +39,15 @@
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# Movie box sets: grouping by viewer access and the minimum, grouped browse
+# and letters, search, sync bookkeeping, and collection artwork.
+./internal/catalog TestBoxSetGroupsDB
+./internal/catalog TestBoxSetGroupedBrowseDB
+./internal/catalog TestBoxSetSearchAndSyncDB
+./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
+./internal/catalog TestMovieBoxSetDB
+./internal/catalog TestBoxSetCollectionArtworkDB
 
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
@@ -267,6 +277,11 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
+./internal/keptsub TestKeptTrackRowsAndGarbageDB
+./internal/keptsub TestKeptTracksGoWithTheirFileDB
+./internal/keptsub TestSubtitleTrackClaimsDB
+./internal/keptsub TestQueueCollectionDB
+./internal/blobgc TestCollectorDeletesFromTheNamespaceStoreS3DB
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
 ./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres
 ./migrations TestSubtitleTimingFileReplacePostgres
@@ -399,6 +414,9 @@
 
 # Stored sidecar subtitles take the scanner's reading of their names.
 ./internal/database TestPostgresExternalSubtitleNameBackfill
+
+# The Postgres auto-tuning restart warning lists only settings a restart would change.
+./internal/database TestPostgresSettingsPendingRestartPostgres
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -703,6 +721,10 @@
 # Personal collection list reads remember counts and collages with no source
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
+
+# The artwork reconcile verify sweep and bulk reset leave bundled app-relative
+# collection posters alone: neither checks them against storage nor clears them.
+./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
 
 # Series watch counts answer only series the viewer may see (not podcast shows),
 # with the same counts from the SQL rollup and the per-episode fold.

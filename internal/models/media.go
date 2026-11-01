@@ -27,6 +27,12 @@ type MediaFolder struct {
 	// TrickplayEnabled generates seek-bar previews for the library's video
 	// files (internal/trickplay). Off by default.
 	TrickplayEnabled bool
+	// BoxSetsEnabled browses the movies TMDB lists in one collection as a
+	// single box set card once at least BoxSetMinMovies of them are in the
+	// library. BoxSetsInSearch also lists matching box sets in search.
+	BoxSetsEnabled  bool
+	BoxSetMinMovies int
+	BoxSetsInSearch bool
 	// RealtimeMonitoring is the library's real-time monitoring switch. It
 	// takes effect only while the server-wide scanner.realtime_monitoring
 	// setting is on and the library is enabled.
@@ -509,6 +515,11 @@ type SubtitleTrack struct {
 	HearingImpaired  bool   `json:"hearing_impaired"`
 	External         bool   `json:"external"`
 	FileName         string `json:"file_name,omitempty"`
+	// IndexOnly marks an embedded track FFmpeg can't demux from the source,
+	// such as a Matroska S_TEXT/WEBVTT track, which the server reads through
+	// the container's index instead (embeddedsub). No route that demuxes the
+	// source with FFmpeg, on the server or in a client, can carry it.
+	IndexOnly bool `json:"index_only,omitempty"`
 }
 
 // ExternalSubtitle represents a sidecar subtitle file stored as JSONB.

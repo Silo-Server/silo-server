@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // The functions below are the os, path/filepath, and os/exec calls Silo makes
@@ -119,12 +121,13 @@ func Readlink(name string) (string, error) {
 	return Encode(target), nil
 }
 
-// CommandContext is exec.CommandContext with every argument decoded, so an
-// encoded media path reaches ffmpeg or ffprobe as the real file name, also
+// CommandContext is procgroup.CommandContext with every argument decoded, so
+// an encoded media path reaches ffmpeg or ffprobe as the real file name, also
 // when it is embedded in a larger argument such as a filter graph. Arguments
-// without reserved code points pass through unchanged.
+// without reserved code points pass through unchanged. As with procgroup, the
+// end of ctx kills every process the command started.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, DecodeAll(args)...) //nolint:gosec // same contract as exec.CommandContext; callers pass configured tool binaries and separate arguments, no shell
+	return procgroup.CommandContext(ctx, name, DecodeAll(args)...)
 }
 
 // DecodeAll decodes each string in args. It returns args itself when no

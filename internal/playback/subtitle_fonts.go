@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
@@ -186,7 +188,7 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	}
 	data, readErr := io.ReadAll(io.LimitReader(stdout, expected+1))
 	if readErr != nil || int64(len(data)) > expected {
-		_ = cmd.Process.Kill()
+		_ = procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, errors.New("subtitle fonts: attachment data exceeds probed size or could not be read")
 	}
@@ -235,7 +237,7 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 	const maxProbeBytes = 1 << 20
 	out, readErr := io.ReadAll(io.LimitReader(stdout, maxProbeBytes+1))
 	if readErr != nil || len(out) > maxProbeBytes {
-		_ = cmd.Process.Kill()
+		_ = procgroup.Kill(cmd)
 		_ = cmd.Wait()
 		return nil, errors.New("subtitle fonts: attachment metadata exceeds probe limit or could not be read")
 	}

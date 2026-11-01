@@ -106,10 +106,11 @@ func registerPlaybackDelivery(reg *Registry) {
 			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.", Schema: &huma.Schema{Type: huma.TypeString}},
 		}
 		if route.id == playbackSegmentOperation {
-			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Description: "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
+			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Description: "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. sub_<track>_NNNNN.vtt names a segment of the on-demand rendition of container track <track> (hls_subtitle_renditions_all_v1), read from the source when it is requested.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
 		}
 		if route.id == "getPlaybackManifest" {
-			params = append(params, &huma.Param{Name: playback.SubtitleRenditionQueryParam, In: playbackParamQuery, Description: "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"video", "subtitles"}}})
+			params = append(params, &huma.Param{Name: playback.SubtitleRenditionQueryParam, In: playbackParamQuery, Description: "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"video", "subtitles"}}},
+				&huma.Param{Name: playback.SubtitleRenditionTrackQueryParam, In: playbackParamQuery, Description: "Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer.", Schema: &huma.Schema{Type: huma.TypeString, Pattern: "^[1-9][0-9]{0,19}$"}})
 		}
 		subtitle := route.id == playbackSubtitleOperation || route.id == playbackSubtitleHead
 		if subtitle {

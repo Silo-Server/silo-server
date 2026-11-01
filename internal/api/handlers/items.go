@@ -359,6 +359,8 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	// BoxSet describes a box set card (type box_set). Served by v2 only.
+	BoxSet *BoxSetView `json:"-"`
 }
 
 type sortMetricsResponse struct {
