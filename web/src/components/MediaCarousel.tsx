@@ -49,6 +49,11 @@ interface MediaCarouselProps {
   onViewAll?: () => void;
   /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
   viewAllHref?: string;
+  /**
+   * The slide to show, such as the item the page is about. The carousel jumps
+   * to it again whenever it changes, as when the page moves to another item.
+   */
+  startSlide?: number;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -209,6 +214,7 @@ export default function MediaCarousel({
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
   viewAllHref,
+  startSlide,
   headerActions,
   edgePadding = true,
   compact = false,
@@ -217,7 +223,16 @@ export default function MediaCarousel({
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  useEffect(() => {
+    if (!emblaApi || startSlide === undefined) return;
+    // Slides scroll in groups, so jump to the snap whose group holds the slide.
+    const snap = emblaApi
+      .internalEngine()
+      .slideRegistry.findIndex((slides) => slides.includes(startSlide));
+    if (snap >= 0) emblaApi.scrollTo(snap, true);
+  }, [emblaApi, startSlide]);
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
@@ -259,7 +274,7 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
               <h2 className={titleClass}>
