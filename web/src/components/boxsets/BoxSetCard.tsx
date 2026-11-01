@@ -5,7 +5,6 @@ import MediaCardArtwork, {
   MEDIA_CARD_TITLE_CLASS,
 } from "@/components/MediaCardArtwork";
 import type { BoxSetSummary } from "@/api/types";
-import { useUICustomization } from "@/hooks/useUICustomization";
 import { boxSetFilmCount, boxSetYears } from "@/lib/boxSets";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
 
@@ -24,9 +23,6 @@ export default function BoxSetCard({
   posterUrl?: string;
   posterThumbhash?: string;
 }) {
-  const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
   const href = buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id });
   const progress = boxSet.movie_count > 0 ? boxSet.played_count / boxSet.movie_count : 0;
   const meta =
@@ -82,18 +78,14 @@ export default function BoxSetCard({
           </MediaCardArtwork>
         </ViewTransitionLink>
       </div>
-      {showCaption ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
-            {boxSet.title}
-          </ViewTransitionLink>
-          {showMetadata ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
-              {meta}
-            </ViewTransitionLink>
-          ) : null}
-        </div>
-      ) : null}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+          {boxSet.title}
+        </ViewTransitionLink>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
+          {meta}
+        </ViewTransitionLink>
+      </div>
     </div>
   );
 }
