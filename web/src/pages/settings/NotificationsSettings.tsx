@@ -442,8 +442,7 @@ function EmailSection() {
 
   const hasAddress = prefs.custom_email !== "";
   const types = prefs.types?.length ? prefs.types : ["episode", "movie"];
-  const save = (update: Partial<NotificationEmailPreferencesUpdate>) =>
-    updatePrefs.mutate(update);
+  const save = (update: Partial<NotificationEmailPreferencesUpdate>) => updatePrefs.mutate(update);
   const toggleType = (type: string, on: boolean) => {
     const next = on ? [...new Set([...types, type])] : types.filter((t) => t !== type);
     if (next.length === 0) return;

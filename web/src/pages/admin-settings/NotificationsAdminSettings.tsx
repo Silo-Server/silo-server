@@ -110,8 +110,6 @@ const PUSH_RELAY_ADVANCED_KEYS = [
   "notifications.push_relay_deployment_id",
 ];
 
-
-
 const EMAIL_CHANNEL_ADVANCED_KEYS = ["notifications.email.digest_hour"];
 
 const DISCORD_ADVANCED_KEYS = [
