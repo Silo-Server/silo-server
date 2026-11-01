@@ -923,11 +923,7 @@ func parsePremiereDateBound(raw string, isMin bool) string {
 	if raw == "" {
 		return ""
 	}
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999Z0700", "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
-		t, err := time.Parse(layout, raw)
-		if err != nil {
-			continue
-		}
+	if t, err := parseJellyfinDate(raw); err == nil {
 		t = t.UTC()
 		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		if isMin && t.After(day) {

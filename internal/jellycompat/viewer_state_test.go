@@ -117,6 +117,8 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 		{"legacy compact", "DatePlayed=20250203040506", "2025-02-03T04:05:06Z"},
 		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00", "2025-02-03T04:05:06Z"},
 		{"no offset", "datePlayed=2025-02-03T04:05:06.000", "2025-02-03T04:05:06Z"},
+		{"space separator", "datePlayed=2025-02-03%2004:05:06", "2025-02-03T04:05:06Z"},
+		{"offset without colon", "datePlayed=2025-02-03T05:05:06%2B0100", "2025-02-03T04:05:06Z"},
 		{"minutes", "datePlayed=2025-02-03T04:05", "2025-02-03T04:05:00Z"},
 		{"date only", "datePlayed=2025-02-03", "2025-02-03T00:00:00Z"},
 	} {
