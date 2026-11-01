@@ -226,6 +226,9 @@ func TestEncodeTargetStopsAtTheSourceRate(t *testing.T) {
 	}{
 		{name: "ceiling far above the source", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 120_000_000, wantKbps: 23_400, wantReason: "VideoCodecNotSupported"},
 		{name: "the video track's rate leaves out the audio", codec: "mpeg2video", sourceKbps: 7000, videoKbps: 2900, maxBitrate: 120_000_000, wantKbps: 2900, wantReason: "VideoCodecNotSupported"},
+		{name: "a track rate above the file's is ignored", codec: "mpeg2video", sourceKbps: 9000, videoKbps: 38_000, maxBitrate: 120_000_000, wantKbps: 9000, wantReason: "VideoCodecNotSupported"},
+		{name: "a track rate far below the file's is ignored", codec: "mpeg2video", sourceKbps: 20_000, videoKbps: 50, maxBitrate: 120_000_000, wantKbps: 20_000, wantReason: "VideoCodecNotSupported"},
+		{name: "a tiny source stops at the encoder's minimum", codec: "mpeg2video", sourceKbps: 30, maxBitrate: 120_000_000, wantKbps: compatMinEncodeKbps, wantReason: "VideoCodecNotSupported"},
 		{name: "low-bitrate source keeps its size", codec: "mpeg2video", sourceKbps: 1500, maxBitrate: 120_000_000, wantKbps: 1500, wantReason: "VideoCodecNotSupported"},
 		{name: "HEVC source gets H.264 headroom", codec: "hevc", sourceKbps: 6000, maxBitrate: 120_000_000, wantKbps: 10_000, wantReason: "VideoCodecNotSupported"},
 		{name: "ceiling below the source still wins", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 8_820_000, wantKbps: 8187, wantReason: "VideoBitrateNotSupported"},

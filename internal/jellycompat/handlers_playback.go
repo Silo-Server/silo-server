@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -2758,9 +2759,10 @@ const compatMinEncodeKbps = 64
 // to videoCodec aims for, and the ceiling they were fit to: the client's limit
 // less audio and mux overhead, capped by the profile's own limits for that
 // codec. The resolution class follows that ceiling, so a limit near a class
-// floor does not earn a class its video bitrate cannot fill, and a source
-// already below the ceiling keeps its size. The bitrate stops at the source's
-// equivalent rate, since a re-encode cannot add what the source does not have.
+// floor does not earn a class its video bitrate cannot fill, and the source's
+// rate never lowers the class. The bitrate stops at what the source can use
+// (compatSourceEncodeKbps), since a re-encode cannot add what the source does
+// not have.
 func compatEncodeTarget(profile DeviceProfile, videoCodec string, maxBitrate int64, audioBitrateKbps int, version catalog.FileVersion, sourceVideo models.VideoTrack) (int, string, int) {
 	maxVideoBitrate, maxHeight, maxWidth := profile.encodeLimits(videoCodec)
 	budget := 0
@@ -2772,14 +2774,27 @@ func compatEncodeTarget(profile DeviceProfile, videoCodec string, maxBitrate int
 	}
 	resolution := compatFitResolution(compatTargetResolutionForBitrate(int64(max(budget, 0)), sourceVideo), sourceVideo, maxHeight, maxWidth)
 	target := budget
-	sourceKbps := playback.SourceVideoKbps(version.Bitrate, sourceVideo.Bitrate)
-	if source := playback.EncodeEquivalentKbps(sourceKbps, version.CodecVideo, videoCodec); source > 0 && target > 0 {
+	if source := compatSourceEncodeKbps(version, sourceVideo, videoCodec); source > 0 && target > 0 {
 		target = min(target, source)
 		if target < compatMinEncodeKbps && budget >= compatMinEncodeKbps {
 			target = compatMinEncodeKbps
 		}
 	}
 	return target, resolution, budget
+}
+
+// compatSourceEncodeKbps is the rate an encode of the source to videoCodec
+// needs for the same quality, or 0 when the source's rate is unknown. A track
+// rate above the file's is impossible and one far below it is suspect, so
+// either falls back to the file's rate: a target that is too high costs only
+// bandwidth, while a bogus low one ruins the picture.
+func compatSourceEncodeKbps(version catalog.FileVersion, sourceVideo models.VideoTrack, videoCodec string) int {
+	fileKbps := playback.SourceVideoKbps(version.Bitrate, 0)
+	videoKbps := playback.SourceVideoKbps(version.Bitrate, sourceVideo.Bitrate)
+	if fileKbps > 0 && (videoKbps > fileKbps || videoKbps < fileKbps/4) {
+		videoKbps = fileKbps
+	}
+	return playback.EncodeEquivalentKbps(videoKbps, cmp.Or(sourceVideo.Codec, version.CodecVideo), videoCodec)
 }
 
 // supportedHLSRemuxAudioStreamIndexes freezes the copy-safe switch targets. A
