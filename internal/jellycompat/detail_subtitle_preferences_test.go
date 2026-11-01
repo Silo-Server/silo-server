@@ -169,12 +169,16 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 		catalog.VersionSubtitleTrack{Index: 5, Codec: "ass", Language: "en", Title: "movie.en.ass", TitleIsFallback: true, EmbeddedTitle: "Signs", FileName: "movie.en.ass", External: true})
 	downloaded := []subtitles.DownloadedSubtitle{{MediaFileID: 7, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "Release", Provider: "provider"}}
 	forcedEnglish := &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en", Codec: "subrip", Label: "Forced", Forced: true}
+	// The forced track as it was before a remux retitled it "Forced Signs".
+	retitledForced := &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en", Codec: "subrip", Label: "Old Forced", Forced: true}
 	for _, tc := range []struct {
 		name       string
 		mode       string
+		language   string
 		sig        *userstore.SubtitleTrackSignature
 		showForced bool
 		sidecars   bool
+		tracks     []catalog.VersionSubtitleTrack // replaces the version's tracks
 		want       int
 	}{
 		{name: "always picks the remembered forced track", mode: "always", sig: forcedEnglish, showForced: true, want: 2},
@@ -182,15 +186,40 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 		{name: "always without a signature", mode: "always", showForced: true, want: 3},
 		{name: "no track matches the signature", mode: "always", sig: &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "ass"}, showForced: true, want: 3},
 		{name: "remembered forced track wins over hidden forced tracks", mode: "always", sig: forcedEnglish, want: 2},
+		{name: "remembered forced track after a retitle", mode: "always", sig: retitledForced, want: 2},
+		{name: "remembered forced track after a retitle with forced shown", mode: "always", sig: retitledForced, showForced: true, want: 2},
+		{name: "remembered forced track after a region change", mode: "always", sig: forcedEnglish, tracks: []catalog.VersionSubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "en-US", Title: "Forced", Forced: true},
+			{Index: 3, Codec: "subrip", Language: "en-US"},
+		}, want: 2},
+		{name: "regional preference remembers a now bare forced track", mode: "always", language: "en-US", sig: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en-US", Codec: "subrip", Label: "Forced", Forced: true}, want: 2},
+		{name: "regional preference remembers a sibling region forced track", mode: "always", language: "en-US", sig: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en-US", Codec: "subrip", Label: "Forced", Forced: true}, tracks: []catalog.VersionSubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "en-GB", Title: "Forced", Forced: true},
+			{Index: 3, Codec: "subrip", Language: "en-GB"},
+		}, want: 2},
+		// As in the web player, a closer language tag outranks the forced
+		// trait, and the signature then prefers the plain full track over
+		// the file's default SDH one.
+		{name: "remembered forced track ranked below a closer full track", mode: "always", sig: forcedEnglish, tracks: []catalog.VersionSubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "en-US", Title: "Forced", Forced: true},
+			{Index: 3, Codec: "subrip", Language: "en"},
+			{Index: 4, Codec: "subrip", Language: "en", Title: "SDH", HearingImpaired: true, Default: true},
+		}, want: 3},
 		{name: "remembered downloaded track", mode: "always", sig: &userstore.SubtitleTrackSignature{Source: "downloaded", Language: "en", Codec: "srt", Label: "Release (provider)"}, showForced: true, sidecars: true, want: 6},
 		{name: "remembered untitled sidecar by embedded title", mode: "always", sig: &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "ass", Label: "Signs"}, showForced: true, sidecars: true, want: 5},
 		{name: "off ignores the signature", mode: "off", sig: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en", Codec: "subrip", Label: "SDH", HearingImpaired: true}, showForced: true, want: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			detail := &upstreamItemDetail{SubtitleLanguage: "en", SubtitleMode: tc.mode, SubtitleModeSet: true, ShowForcedSubtitles: tc.showForced, SubtitleTrackSignature: tc.sig}
+			if tc.language != "" {
+				detail.SubtitleLanguage = tc.language
+			}
 			v, dl := version, []subtitles.DownloadedSubtitle(nil)
 			if tc.sidecars {
 				v, dl = withSidecars, downloaded
+			}
+			if tc.tracks != nil {
+				v.SubtitleTracks = tc.tracks
 			}
 			got := -1
 			if index := compatDetailSubtitleStreamIndex(detail, v, dl, "", intPtr(1)); index != nil {
