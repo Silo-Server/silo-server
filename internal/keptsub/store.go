@@ -53,6 +53,18 @@ const (
 	// keptMaxBytes bounds the packets one whole read holds. It is above
 	// nearly every film's PGS track; a larger track is demuxed instead.
 	keptMaxBytes = 128 << 20
+	// keptTextMaxBytes bounds a kept text track, and a whole read of one:
+	// real ones are kilobytes to a few megabytes, heavy ASS typesetting tens.
+	keptTextMaxBytes = 32 << 20
+	// fileKeptMaxBytes bounds what one media file's kept tracks hold
+	// together, and so do the file's own bytes: its tracks are parts of it,
+	// so more than that means packets the file points at more than once.
+	fileKeptMaxBytes = 1 << 30
+	// keptStoreMaxBytes bounds every kept track together; past it the least
+	// recently used go, and the collector deletes their objects.
+	keptStoreMaxBytes = 64 << 30
+	// keptTouchInterval is how often a kept track's use is recorded.
+	keptTouchInterval = time.Hour
 	// orphanGrace is when the collector checks a stored object no row may
 	// name: one stored just before its row failed to land.
 	orphanGrace = 24 * time.Hour
@@ -118,6 +130,9 @@ type Store struct {
 
 	// reads holds a slot per whole read running (wholeReads).
 	reads chan struct{}
+	// limits are the kept-track bounds (keptTextMaxBytes, fileKeptMaxBytes,
+	// keptStoreMaxBytes); tests lower them.
+	limits keptLimits
 
 	mu      sync.Mutex
 	flights map[flightKey]*flight
@@ -135,6 +150,8 @@ type Store struct {
 	mirrorUsed       map[string]time.Time
 	mirrorPins       map[string]int
 	mirrorOverBudget map[string]bool
+	// touched is when each kept track's use was last recorded.
+	touched map[trackKey]time.Time
 }
 
 // NewStore returns a Store over repo and blobs, or nil without either.
@@ -152,6 +169,8 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		opts:         opts,
 		pollInterval: defaultPollInterval,
 		flights:      map[flightKey]*flight{},
+		limits:       keptLimits{text: keptTextMaxBytes, file: fileKeptMaxBytes, store: keptStoreMaxBytes},
+		touched:      map[trackKey]time.Time{},
 		// Per source file; see maxWholeFlights.
 		fileFlightLimit: maxFileFlights,
 		// A request's wait on a whole read; see foregroundWait.
@@ -224,6 +243,7 @@ func (s *Store) WholeTrack(ctx context.Context, path string, ref playback.Embedd
 		if err != nil {
 			return nil, err
 		}
+		s.touch(ctx, t)
 		in := s.streamInput(t)
 		release()
 		return in, nil
@@ -320,6 +340,7 @@ func (s *Store) keptWindow(ctx context.Context, t *Track, from, to time.Duration
 		return nil, err
 	}
 	defer release()
+	s.touch(ctx, t)
 	idx, err := s.indexes.Index(ctx, local)
 	if err != nil {
 		return nil, err
@@ -406,6 +427,11 @@ func (s *Store) readWhole(ctx context.Context, f *flight, path string, ref playb
 	if t, err := s.repo.Track(ctx, ref.MediaFileID, ref.StreamIndex); err == nil && t.matches(v, ref) {
 		return t, nil
 	}
+	// A file whose kept tracks already fill its share keeps no more, so the
+	// track isn't read only to be refused.
+	if err := s.fileHasRoom(ctx, ref.MediaFileID, ref.StreamIndex, v.size, 1); err != nil {
+		return nil, err
+	}
 	token := uuid.NewString()
 	claimed, err := s.repo.Claim(ctx, ref.MediaFileID, ref.StreamIndex, token, claimLease)
 	if err != nil {
@@ -483,7 +509,7 @@ func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref pla
 		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo,
-		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: keptMaxBytes})
+		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: s.trackMaxBytes(ref.Codec)})
 	if err != nil {
 		return nil, embeddedsub.ReadStats{}, nil, err
 	}
@@ -614,7 +640,7 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	if err != nil {
 		return err
 	}
-	if info.Size() >= playback.MaxDemuxCopyBytes {
+	if info.Size() >= playback.MaxDemuxCopyBytes || info.Size() > s.trackMaxBytes(ref.Codec) {
 		return embeddedsub.ErrTooLarge
 	}
 	idx, err := embeddedsub.ReadIndex(ctx, demuxCopy.Path)
@@ -679,8 +705,35 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 // names is live and stays. The object goes before the row, so a row never
 // names a missing object.
 func (s *Store) keep(ctx context.Context, t *Track, local string) error {
+	if t.Bytes > s.trackMaxBytes(t.Codec) {
+		return fmt.Errorf("%w: a kept %s track of %d bytes", embeddedsub.ErrTooLarge, t.Codec, t.Bytes)
+	}
+	if err := s.fileHasRoom(ctx, t.MediaFileID, t.StreamIndex, t.SourceSize, t.Bytes); err != nil {
+		return err
+	}
 	t.BlobKey = blobKey(t)
-	if err := s.repo.QueueCollection(ctx, t.BlobKey, orphanGrace); err != nil {
+	// The key names the bytes: a row that already names it has them stored.
+	if old, err := s.repo.Track(ctx, t.MediaFileID, t.StreamIndex); err != nil || old == nil || old.BlobKey != t.BlobKey {
+		if err := s.store(ctx, t.BlobKey, local); err != nil {
+			return err
+		}
+	}
+	if err := s.repo.PutTrack(ctx, *t); err != nil {
+		return err
+	}
+	s.noteUse(t) // writing the row recorded its use
+	if n, err := s.repo.EvictBeyond(ctx, s.limits.store); err != nil {
+		slog.WarnContext(ctx, "evicting kept subtitle tracks failed", "component", "keptsub", "error", err)
+	} else if n > 0 {
+		slog.InfoContext(ctx, "evicted least recently used kept subtitle tracks", "component", "keptsub", "tracks", n)
+	}
+	return nil
+}
+
+// store puts the local copy at local under key, queued for the collector
+// first (see keep).
+func (s *Store) store(ctx context.Context, key, local string) error {
+	if err := s.repo.QueueCollection(ctx, key, orphanGrace); err != nil {
 		return err
 	}
 	f, err := os.Open(local) //nolint:gosec // G304: a copy under the mirror directory, named by its hash
@@ -688,10 +741,64 @@ func (s *Store) keep(ctx context.Context, t *Track, local string) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	if err := s.blobs.PutStream(ctx, t.BlobKey, f, "application/octet-stream"); err != nil {
+	if err := s.blobs.PutStream(ctx, key, f, "application/octet-stream"); err != nil {
 		return fmt.Errorf("store kept subtitle track: %w", err)
 	}
-	return s.repo.PutTrack(ctx, *t)
+	return nil
+}
+
+// keptLimits bounds what is kept: one text track, one file's tracks
+// together (below its own size too), and every kept track together.
+type keptLimits struct{ text, file, store int64 }
+
+// trackMaxBytes bounds a kept track of codec, and a whole read of one.
+func (s *Store) trackMaxBytes(codec string) int64 {
+	if codecFamily(codec) == codecPGS {
+		return keptMaxBytes
+	}
+	return min(s.limits.text, keptMaxBytes)
+}
+
+// fileHasRoom reports, with ErrTooLarge, a stream of the file whose n more
+// kept bytes the file's share has no room for: other streams' kept bytes and
+// n together may not pass the file's size or limits.file.
+func (s *Store) fileHasRoom(ctx context.Context, fileID, streamIndex int, sourceSize, n int64) error {
+	kept, err := s.repo.FileKeptBytes(ctx, fileID, streamIndex)
+	if err != nil {
+		return err
+	}
+	if share := min(sourceSize, s.limits.file); kept+n > share {
+		return fmt.Errorf("%w: file %d keeps %d bytes of subtitle tracks, %d more would pass its %d", embeddedsub.ErrTooLarge, fileID, kept, n, share)
+	}
+	return nil
+}
+
+// touch records that t was just used, at most once per keptTouchInterval
+// in this process, for least-recently-used eviction.
+func (s *Store) touch(ctx context.Context, t *Track) {
+	if !s.noteUse(t) {
+		return
+	}
+	if err := s.repo.Touch(ctx, t.MediaFileID, t.StreamIndex); err != nil {
+		slog.DebugContext(ctx, "recording kept subtitle track use failed", "component", "keptsub", "error", err)
+	}
+}
+
+// noteUse notes that t is used now, and reports whether its use was last
+// noted keptTouchInterval or more ago.
+func (s *Store) noteUse(t *Track) bool {
+	k := trackKey{fileID: t.MediaFileID, stream: t.StreamIndex}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now.Sub(s.touched[k]) < keptTouchInterval {
+		return false
+	}
+	if len(s.touched) >= startTimesKept {
+		clear(s.touched)
+	}
+	s.touched[k] = now
+	return true
 }
 
 // blobKey is subtitles/embedded/<file id>/<stream index>-<sha256>.<ext>.

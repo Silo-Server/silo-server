@@ -280,6 +280,7 @@
 ./internal/keptsub TestKeptTracksGoWithTheirFileDB
 ./internal/keptsub TestSubtitleTrackClaimsDB
 ./internal/keptsub TestQueueCollectionDB
+./internal/keptsub TestKeptTrackBudgetDB
 ./internal/blobgc TestCollectorDeletesFromTheNamespaceStoreS3DB
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
 ./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres

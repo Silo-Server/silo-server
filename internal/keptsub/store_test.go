@@ -456,6 +456,92 @@ func TestSlowReadsHandOverToTheDemux(t *testing.T) {
 	})
 }
 
+// What is kept stays within a text track's cap, its file's share, and the
+// store's budget, past which the least recently used tracks go.
+func TestKeptTracksStayWithinTheirBounds(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	en, de := *playback.EmbeddedSubtitleRefFor(file, 0), *playback.EmbeddedSubtitleRefFor(file, 1)
+
+	t.Run("text track over its cap", func(t *testing.T) {
+		s, repo, blobs := newTestStore(t, ffmpeg)
+		s.limits.text = 16
+		if _, err := s.WholeTrack(t.Context(), path, en); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("an oversized text track: %v, want ErrTooLarge", err)
+		}
+		if puts, _ := repo.counts(); puts != 0 || blobs.puts != 0 {
+			t.Fatal("an oversized text track was kept")
+		}
+	})
+
+	t.Run("file share and unchanged content", func(t *testing.T) {
+		s, repo, blobs := newTestStore(t, ffmpeg)
+		if _, err := s.WholeTrack(t.Context(), path, en); err != nil {
+			t.Fatal(err)
+		}
+		kept, _ := repo.Track(t.Context(), file.ID, en.StreamIndex)
+		// Room for less than the track: read, then refused.
+		s.limits.file = kept.Bytes + 1
+		if _, err := s.WholeTrack(t.Context(), path, de); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("a track past its file's share: %v, want ErrTooLarge", err)
+		}
+		// No room at all: refused before a read.
+		s.limits.file = kept.Bytes
+		_, claims := repo.counts()
+		if _, err := s.WholeTrack(t.Context(), path, de); !errors.Is(err, embeddedsub.ErrTooLarge) {
+			t.Fatalf("a track of a full file: %v, want ErrTooLarge", err)
+		}
+		if puts, after := repo.counts(); puts != 1 || after != claims {
+			t.Fatalf("a track past its file's share was read (%d claims) or kept (%d rows)", after-claims, puts)
+		}
+		// The file changes but the track doesn't: read again, its row is
+		// replaced and its stored object reused.
+		later := time.Now().Add(time.Hour)
+		if err := os.Chtimes(path, later, later); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.WholeTrack(t.Context(), path, en); err != nil {
+			t.Fatalf("a track within its file's share: %v", err)
+		}
+		if puts, _ := repo.counts(); puts != 2 || blobs.puts != 1 {
+			t.Fatalf("unchanged content: %d rows written, %d objects stored", puts, blobs.puts)
+		}
+	})
+
+	t.Run("least recently used go first", func(t *testing.T) {
+		s, repo, _ := newTestStore(t, ffmpeg)
+		refs := make([]playback.EmbeddedSubtitleRef, 3)
+		for i := range refs {
+			refs[i] = en
+			refs[i].MediaFileID = 50 + i
+		}
+		for _, ref := range refs[:2] {
+			if _, err := s.WholeTrack(t.Context(), path, ref); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// An hour on, the first is used again.
+		s.mu.Lock()
+		clear(s.touched)
+		s.mu.Unlock()
+		if _, err := s.WholeTrack(t.Context(), path, refs[0]); err != nil {
+			t.Fatal(err)
+		}
+		// Room for two: the third evicts the second, used less recently
+		// than the first.
+		first, _ := repo.Track(t.Context(), refs[0].MediaFileID, en.StreamIndex)
+		s.limits.store = 2 * first.Bytes
+		if _, err := s.WholeTrack(t.Context(), path, refs[2]); err != nil {
+			t.Fatal(err)
+		}
+		for i, want := range []bool{true, false, true} {
+			if got, _ := repo.Track(t.Context(), refs[i].MediaFileID, en.StreamIndex); (got != nil) != want {
+				t.Fatalf("track %d kept = %v, want %v", i, got != nil, want)
+			}
+		}
+	})
+}
+
 // A storage budget must not prevent a freshly read track from reaching
 // durable storage before its local mirror becomes eligible for eviction.
 func TestOversizedMirrorStillKeepsTrack(t *testing.T) {

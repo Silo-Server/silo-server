@@ -228,6 +228,53 @@ func TestQueueCollectionDB(t *testing.T) {
 	}
 }
 
+// Past the budget the least recently used rows go and their objects are
+// queued. The rows here are huge and long unused, so they rank after every
+// other row and the budget leaves other rows alone.
+func TestKeptTrackBudgetDB(t *testing.T) {
+	f := newDBFixture(t)
+	ctx := t.Context()
+	file := f.file(t)
+	const huge = int64(1) << 50
+	rows := []Track{keptRow(file, 1, "a"), keptRow(file, 2, "b"), keptRow(file, 3, "c")}
+	for i, tr := range rows {
+		tr.Bytes = huge
+		if err := f.repo.PutTrack(ctx, tr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(ctx, `UPDATE public.embedded_subtitle_tracks SET updated_at = '1971-01-01'::timestamptz + $3 * interval '1 day'
+			WHERE media_file_id = $1 AND embedded_stream_index = $2`, file, tr.StreamIndex, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if kept, err := f.repo.FileKeptBytes(ctx, file, 2); err != nil || kept != 2*huge {
+		t.Fatalf("file's other tracks hold %d bytes, %v; want %d", kept, err, 2*huge)
+	}
+
+	// The first is used: now the second is the least recently used.
+	if err := f.repo.Touch(ctx, file, 1); err != nil {
+		t.Fatal(err)
+	}
+	var others int64
+	if err := f.pool.QueryRow(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM public.embedded_subtitle_tracks WHERE media_file_id <> $1`, file).Scan(&others); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := f.repo.EvictBeyond(ctx, others+3*huge); err != nil || n != 0 {
+		t.Fatalf("within the budget: %d evicted, %v", n, err)
+	}
+	if n, err := f.repo.EvictBeyond(ctx, others+2*huge); err != nil || n != 1 {
+		t.Fatalf("over the budget: %d evicted, %v; want 1", n, err)
+	}
+	for i, want := range []bool{true, false, true} {
+		if got, err := f.repo.Track(ctx, file, rows[i].StreamIndex); err != nil || (got != nil) != want {
+			t.Fatalf("track %d kept = %v (%v), want %v", i, got != nil, err, want)
+		}
+	}
+	if q := f.queued(t, file); !slices.Equal(q, []string{rows[1].BlobKey}) {
+		t.Fatalf("queued after eviction: %v", q)
+	}
+}
+
 func TestSubtitleTrackClaimsDB(t *testing.T) {
 	f := newDBFixture(t)
 	ctx := t.Context()
