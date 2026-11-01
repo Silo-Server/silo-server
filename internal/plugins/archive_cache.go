@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -356,7 +357,10 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 		if err := validateRelativePath(file.Name, "plugin archive"); err != nil {
 			return nil, nil, nil, err
 		}
-		key := archivePathKey(file.Name)
+		key, err := archivePathKey(file.Name)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if other, ok := extracted[key]; ok && (!other.FileInfo().IsDir() || !file.FileInfo().IsDir()) {
 			return nil, nil, nil, fmt.Errorf("plugin archive entries %q and %q extract to the same path", other.Name, file.Name)
 		}
@@ -364,7 +368,7 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 		files[file.Name] = file
 	}
 	for key, file := range extracted {
-		for parent := filepath.Dir(key); parent != "."; parent = filepath.Dir(parent) {
+		for child, parent := key, filepath.Dir(key); parent != child; child, parent = parent, filepath.Dir(parent) {
 			if entry, ok := extracted[parent]; ok && !entry.FileInfo().IsDir() {
 				return nil, nil, nil, fmt.Errorf("plugin archive entry %q is inside file %q", file.Name, entry.Name)
 			}
@@ -409,9 +413,16 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 
 // archivePathKey is the path extraction writes an entry to, in a form where
 // names a case- and normalization-insensitive filesystem (such as APFS) treats
-// as one file compare equal: the Unicode canonical caseless match.
-func archivePathKey(name string) string {
-	return norm.NFD.String(cases.Fold().String(norm.NFD.String(filepath.Clean(name))))
+// as one file compare equal: the Unicode canonical caseless match. It refuses
+// a name no file can have (NUL), and one whose key holds a combining grapheme
+// joiner: NFD inserts one after 30 combining marks in a row, so canonically
+// equivalent names could then get different keys.
+func archivePathKey(name string) (string, error) {
+	key := norm.NFD.String(cases.Fold().String(norm.NFD.String(filepath.Clean(name))))
+	if strings.ContainsAny(key, "\x00\u034f") {
+		return "", fmt.Errorf("plugin archive entry %q has an unsupported file name", name)
+	}
+	return key, nil
 }
 
 func regularArchiveEntry(files map[string]*zip.File, name string) (*zip.File, error) {
