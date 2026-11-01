@@ -32,10 +32,19 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
-| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}` |
+| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}`, in the operational store (see below) |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+
+Kept embedded subtitle tracks come from users' media and are never delivered to
+browsers, so they are kept in the operational store, never in a bucket whose
+objects can be read outside the server's own authorization. With no operational
+store (an S3 backend with no private bucket), they use the assets bucket only
+while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
+`cloudflare_token` delivery nothing is kept, and tracks are read through their
+index or demuxed instead. The blob collector and sweep reach them in whichever
+store holds them (`blobgc.Namespace.Store`).
 
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
