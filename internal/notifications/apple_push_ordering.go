@@ -147,6 +147,9 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 			}
 			return result, tx.Commit(ctx)
 		}
+	} else if storedUser != 0 && storedUser != cmd.UserID {
+		// A reset keeps the owning account until that account registers again.
+		return ApplePushReceipt{}, ErrPushInstallationProof
 	} else if err = checkPushInstallationOwner(ctx, tx, cmd.DeviceID, PushPlatformApple, cmd.UserID); err != nil {
 		return ApplePushReceipt{}, err
 	}
@@ -314,10 +317,12 @@ type ApplePushReset struct {
 // ResetApplePushInstallation clears an installation the caller's account owns
 // so its next registration binds a new key at any generation. It deletes the
 // installation's Apple rows, whose pending attempts cascade, under the
-// installation lock. The row itself is blanked rather than deleted, so a
-// registration waiting on the lock reads an unclaimed installation instead of
-// a vanished one. It reports false, writing nothing, for an installation with
-// no ordered record or one already bound to the caller's key. An installation
+// installation lock. The row itself is cleared rather than deleted, so a
+// registration waiting on the lock reads a cleared installation instead of a
+// vanished one. The row keeps its account, so no other account can bind the
+// device_id before the owner registers again. It reports false, writing
+// nothing, for an installation with no ordered record or one already bound to
+// the caller's key. An installation
 // another account owns returns ErrPushInstallationProof.
 func (r *PushDeviceRepository) ResetApplePushInstallation(ctx context.Context, cmd ApplePushReset) (bool, error) {
 	if r == nil || r.pool == nil {
@@ -354,7 +359,7 @@ func (r *PushDeviceRepository) ResetApplePushInstallation(ctx context.Context, c
 	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE device_id=$1 AND platform=$2`, cmd.DeviceID, PushPlatformApple); err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE apple_push_installations SET installation_key_hash='',generation=0,user_id=0,profile_id='',intent_hash='',registration_id='',server_device_id='',push_mode='' WHERE device_id=$1`, cmd.DeviceID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE apple_push_installations SET installation_key_hash='',generation=0,profile_id='',intent_hash='',registration_id='',server_device_id='',push_mode='' WHERE device_id=$1`, cmd.DeviceID); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)

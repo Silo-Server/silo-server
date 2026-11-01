@@ -483,6 +483,15 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	if n := count(`SELECT count(*) FROM push_devices`); n != 0 {
 		t.Fatalf("reset installation keeps %d rows", n)
 	}
+	// Until the owner registers again, the cleared installation stays reserved
+	// for its account against the ordered and the legacy writer alike.
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account binding a reset installation=%v", err)
+	}
+	legacy := ApplePushDeviceRegistration{UserID: foreign.UserID, ProfileID: foreign.ProfileID, DeviceID: foreign.DeviceID, APNsToken: foreign.APNsToken, APNsEnvironment: foreign.APNsEnvironment, APNsTopic: foreign.APNsTopic, PushMode: foreign.PushMode}
+	if _, err = repo.UpsertApple(ctx, legacy, cipher); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("legacy writer of another account on a reset installation=%v", err)
+	}
 	again, err := repo.ApplyApplePushAndFinalize(ctx, reinstalled, cipher, nil)
 	if err != nil || !again.Enabled || again.Generation != 1 {
 		t.Fatalf("register after reset=%+v err=%v", again, err)

@@ -121,7 +121,9 @@ X-Push-Installation-Key: <the app's current installation secret>
 installation is bound to, from any of its profiles. Display tokens and API keys
 are refused. Under the installation lock it deletes the installation's Apple
 push rows, which also drops their queued delivery attempts, and clears the
-stored key, owner and generation. It answers `200`:
+stored key and generation. The installation stays reserved for the account
+until that account registers again: another account's ordered or legacy
+registration for the `device_id` is still refused. It answers `200`:
 
 - `{"reset": true}` when it cleared a binding.
 - `{"reset": false}` when there was nothing to clear: the server has no ordered
@@ -129,14 +131,15 @@ stored key, owner and generation. It answers `200`:
   key. The second case makes a retry safe: a reset repeated after its answer
   was lost leaves the registration that followed it alone, and that
   registration's generation still orders later intents.
-- `403 permission_denied` when another account owns the installation. Nothing
-  changes.
+- `403 permission_denied` when another account owns the installation, when
+  `X-Push-Installation-Key` is not a canonical installation key, or when the
+  credential is not a current login session. Nothing changes.
 
 Then register again with the same key the reset carried. The cleared
 installation accepts any positive generation, so the app can restart its counter
 at 1. A provider request already sent cannot be recalled, and a registration
-that reaches the server after the reset binds the installation, as a first
-registration would. The app should send the reset and the registration after
+from the same account that reaches the server after the reset binds the
+installation, as a first registration would. The app should send the reset and the registration after
 it on the same serialized path as its other registrations for that device. A
 registration with an older key that is still in flight can otherwise bind first,
 and the next registration with the new key gets `push_installation_key_mismatch`
