@@ -25,6 +25,7 @@ import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogethe
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import SeasonCarousel from "./SeasonCarousel";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
+import { useEpisodePlaybackList } from "./useEpisodePlaybackList";
 import MetadataBadges from "./components/MetadataBadges";
 import TrailersSection from "./components/TrailersSection";
 import ExtrasSection from "./components/ExtrasSection";
@@ -106,6 +107,12 @@ export default function SeriesContent({
 
   const primaryAction = resolveSeriesPrimaryAction(item);
   const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id, libraryId);
+  const singleSeasonEpisodes = singleSeasonEpisodesQuery.data?.episodes ?? [];
+  const { episodes: singleSeasonPlaybackEpisodes } = useEpisodePlaybackList(
+    singleSeason?.content_id,
+    libraryId,
+    singleSeasonEpisodes,
+  );
   // A single-season show lists its episodes here rather than on a season
   // page, so this page starts the season's on-view translation (the season
   // job covers its episodes) when an episode reports a missing description.
@@ -265,7 +272,8 @@ export default function SeriesContent({
                     </div>
                   </div>
                   <SeasonEpisodeGrid
-                    episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}
+                    episodes={singleSeasonEpisodes}
+                    playbackEpisodes={singleSeasonPlaybackEpisodes}
                     isLoading={singleSeasonEpisodesQuery.isLoading}
                     episodeLinkState={singleSeasonEpisodeLinkState}
                     libraryId={libraryId}

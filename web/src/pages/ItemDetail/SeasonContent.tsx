@@ -25,6 +25,7 @@ import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
+import { useEpisodePlaybackList } from "./useEpisodePlaybackList";
 
 function seasonLabel(seasonNumber: number, title?: string) {
   if (title) return title;
@@ -72,20 +73,15 @@ export default function SeasonContent({
   const seriesId = item.series_id;
   const seriesHref = seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/";
   const firstEpisode = episodes[0];
-  // With catalog.scope_versions_to_library on, a list read under a library
-  // holds only that library's files, but playback uses every version. When an
-  // episode shows no file here, the season's unscoped list decides what plays.
-  const needsUnscopedFiles =
-    libraryId !== undefined && episodes.some((episode) => (episode.files?.length ?? 0) === 0);
-  const { data: unscopedEpisodesData } = useItemEpisodes(
-    needsUnscopedFiles ? item.content_id : undefined,
+  const { episodes: playbackEpisodes, pending: unscopedPending } = useEpisodePlaybackList(
+    item.content_id,
+    libraryId,
+    episodes,
   );
-  const playbackEpisodes =
-    (needsUnscopedFiles ? unscopedEpisodesData?.episodes : undefined) ?? episodes;
   const playableEpisodes = playbackEpisodes.filter((episode) => (episode.files?.length ?? 0) > 0);
-  // Until that list arrives (or if it fails), an episode with no file here may
-  // still play from another library, so the season's episode count stands in.
-  const unscopedPending = needsUnscopedFiles && !unscopedEpisodesData;
+  // Until the unscoped list arrives (or if it fails), an episode with no file
+  // here may still play from another library, so the season's episode count
+  // stands in.
   const canShuffle = playableEpisodes.length > 1 || (unscopedPending && episodes.length > 1);
   // The scoped list can't name the first unwatched playable episode, so Watch
   // Party gets no target (its sheet asks for one) until the unscoped list does.
@@ -220,6 +216,7 @@ export default function SeasonContent({
 
             <SeasonEpisodeGrid
               episodes={episodes}
+              playbackEpisodes={playbackEpisodes}
               isLoading={episodesLoading}
               episodeLinkState={episodeLinkState}
               libraryId={libraryId}

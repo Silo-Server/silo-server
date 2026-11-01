@@ -80,7 +80,7 @@ vi.mock("@/components/MediaItemMenu", () => ({
 }));
 
 vi.mock("@/components/CardPlayOverlay", () => ({
-  default: () => null,
+  default: ({ contentId }: { contentId: string }) => <span data-play-overlay={contentId} />,
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
@@ -267,7 +267,7 @@ describe("SeasonContent", () => {
     );
   });
 
-  it("picks the watch party target from every library when the opened one lacks an episode", () => {
+  it("picks Play and the watch party target from every library when the opened one lacks an episode", () => {
     const episode = (n: number, files: object[], played: boolean) => ({
       content_id: `episode-${n}`,
       title: `Episode ${n}`,
@@ -297,13 +297,15 @@ describe("SeasonContent", () => {
       error: null,
     }));
     const item = makeSeasonItem();
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
         <SeasonContent item={item} libraryId={4} />
       </MemoryRouter>,
     );
 
     expect(mocks.useItemEpisodes).toHaveBeenCalledWith(item.content_id);
+    // Episode 2's card still plays, from the file only the other library has.
+    expect(html).toContain('data-play-overlay="episode-2"');
     expect(mocks.useDetailWatchTogether).toHaveBeenLastCalledWith(
       expect.objectContaining({ target: expect.objectContaining({ content_id: "episode-2" }) }),
     );

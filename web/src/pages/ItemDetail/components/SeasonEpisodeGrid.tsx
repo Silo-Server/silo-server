@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -35,6 +35,12 @@ const VISIBLE_EPISODE_ROWS = 4;
 
 interface SeasonEpisodeGridProps {
   episodes: EpisodeListItem[];
+  /**
+   * The same episodes with every file playback can use (see
+   * useEpisodePlaybackList). Play and the unreadable badge follow these;
+   * defaults to `episodes`.
+   */
+  playbackEpisodes?: EpisodeListItem[];
   isLoading: boolean;
   episodeLinkState?: EpisodeNavigationState;
   /** The page's library scope, kept on each episode link. */
@@ -43,6 +49,7 @@ interface SeasonEpisodeGridProps {
 
 export default function SeasonEpisodeGrid({
   episodes,
+  playbackEpisodes,
   isLoading,
   episodeLinkState,
   libraryId,
@@ -52,6 +59,10 @@ export default function SeasonEpisodeGrid({
   const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
   const prefetchEpisode = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
+  const playbackById = useMemo(
+    () => new Map((playbackEpisodes ?? []).map((episode) => [episode.content_id, episode])),
+    [playbackEpisodes],
+  );
 
   if (isLoading) {
     return <EpisodeGridSkeleton />;
@@ -76,6 +87,7 @@ export default function SeasonEpisodeGrid({
         <SeasonEpisodeCard
           key={episode.content_id}
           episode={episode}
+          playbackEpisode={playbackById.get(episode.content_id) ?? episode}
           episodeLinkState={episodeLinkState}
           libraryId={libraryId}
           overlayPrefs={overlayPrefs}
@@ -94,6 +106,7 @@ export default function SeasonEpisodeGrid({
 
 function SeasonEpisodeCard({
   episode,
+  playbackEpisode,
   episodeLinkState,
   libraryId,
   overlayPrefs,
@@ -102,6 +115,7 @@ function SeasonEpisodeCard({
   onPrefetch,
 }: {
   episode: EpisodeListItem;
+  playbackEpisode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
   libraryId?: number;
   overlayPrefs: CardOverlayPrefs | null;
@@ -124,8 +138,8 @@ function SeasonEpisodeCard({
     contentId: episode.content_id,
     libraryId: episodeLinkLibraryId(episode, libraryId),
   });
-  const unreadable = episodeFilesUnreadable(episode);
-  const playable = (episode.files ?? []).some((file) => !file.unreadable);
+  const unreadable = episodeFilesUnreadable(playbackEpisode);
+  const playable = (playbackEpisode.files ?? []).some((file) => !file.unreadable);
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
