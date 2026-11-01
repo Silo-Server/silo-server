@@ -8,7 +8,10 @@ import (
 	"io"
 	"math"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -125,6 +128,110 @@ func TestMP4RoundTrip(t *testing.T) {
 	if got := text(res.Packets); !slices.Equal(got, want[1:2]) {
 		t.Fatalf("rewritten window = %+v", got)
 	}
+}
+
+// A timed-out cache load still owns its movie buffer until the read and
+// parsing finish. Distinct caches must share construction capacity, and a
+// refused load must be retryable when that capacity is returned.
+func TestMP4IndexBoundsDetachedConstruction(t *testing.T) {
+	var file bytes.Buffer
+	if err := writeMP4(&file, &Track{mp4: testMP4Track(nil)}, []Packet{{Data: textSample("x"), mp4Delta: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	data := file.Bytes()
+	moovOffset := int64(binary.BigEndian.Uint32(data))
+	moovSize := int(binary.BigEndian.Uint32(data[moovOffset:]))
+	for _, failRead := range []bool{false, true} {
+		name := "success"
+		if failRead {
+			name = "read failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			previous := mp4IndexBytes
+			// Two small movies fit, including the conservative sample-table
+			// allowance, without allocating large movie buffers in the test.
+			mp4IndexBytes = newBudget(60 << 20)
+			defer func() { mp4IndexBytes = previous }()
+			synctest.Test(t, func(t *testing.T) {
+				release := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer func() {
+					unblock()
+					synctest.Wait()
+				}()
+				var reads atomic.Int32
+				reader := mp4ConstructionReader{readAt: func(p []byte, off int64) (int, error) {
+					if off == moovOffset && len(p) == moovSize {
+						reads.Add(1)
+						<-release // an in-progress filesystem read ignores cancellation
+						if failRead {
+							return 0, io.ErrUnexpectedEOF
+						}
+					}
+					return bytes.NewReader(data).ReadAt(p, off)
+				}}
+				var caches []*Cache
+				var paths []string
+				for range 3 {
+					path := writeFixture(t, data)
+					cache := NewCache(1 << 20)
+					cache.readIndex = func(context.Context, string) (*Index, error) {
+						// Keep only the top-level header in hand so the parser
+						// reads the movie through the controlled ReaderAt.
+						return readMP4Index(reader, int64(len(data)), data[:16])
+					}
+					caches, paths = append(caches, cache), append(paths, path)
+				}
+				for i := range 2 {
+					ctx, cancel := context.WithCancel(t.Context())
+					done := make(chan error, 1)
+					go func() {
+						_, err := caches[i].Index(ctx, paths[i])
+						done <- err
+					}()
+					synctest.Wait()
+					cancel()
+					if err := <-done; !errors.Is(err, context.Canceled) {
+						t.Fatalf("abandoned load %d: %v", i, err)
+					}
+				}
+				// Let the shared load deadline expire as well as the callers.
+				if _, err := caches[0].Index(t.Context(), paths[0]); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("shared load deadline: %v", err)
+				}
+				if _, err := caches[2].Index(t.Context(), paths[2]); !errors.Is(err, errIndexReadBusy) {
+					t.Fatalf("construction beyond byte limit: %v, want busy", err)
+				}
+				if got := reads.Load(); got != 2 {
+					t.Fatalf("started %d movie reads, want 2", got)
+				}
+				unblock()
+				synctest.Wait()
+				if got := mp4IndexBytes.left.Load(); got != 60<<20 {
+					t.Fatalf("construction capacity after workers finish: %d", got)
+				}
+				// The busy result was not cached or recorded as unsupported.
+				if idx, err := caches[2].Index(t.Context(), paths[2]); failRead {
+					if !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Fatalf("retry after read failure: %v", err)
+					}
+				} else if err != nil || len(idx.Tracks) != 1 || idx.Tracks[0].Unsupported != "" {
+					t.Fatalf("retry after capacity returns: %+v, %v", idx, err)
+				}
+				if got := mp4IndexBytes.left.Load(); got != 60<<20 {
+					t.Fatalf("construction capacity after retry: %d", got)
+				}
+			})
+		})
+	}
+}
+
+type mp4ConstructionReader struct {
+	readAt func([]byte, int64) (int, error)
+}
+
+func (r mp4ConstructionReader) ReadAt(p []byte, off int64) (int, error) {
+	return r.readAt(p, off)
 }
 
 func TestMP4TracksTheReaderRefuses(t *testing.T) {

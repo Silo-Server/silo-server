@@ -33,6 +33,11 @@ const (
 	mp4MaxRead = 1 << 20
 )
 
+// mp4IndexBytes bounds construction across readers and caches, before cache
+// eviction can apply. A blocked movie read keeps its reservation until the
+// parser returns, even after its callers have given up.
+var mp4IndexBytes = newBudget(256 << 20)
+
 const (
 	// mp4BoxFtyp and mp4BoxMoov are the file type and movie boxes.
 	mp4BoxFtyp = "ftyp"
@@ -172,7 +177,20 @@ func isMP4(head []byte) bool {
 
 // readMP4Index reads an MP4 or MOV file's text tracks from its moov box.
 func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
-	moov, ftyp, err := findMoov(r, size, head)
+	b, reserved := mp4IndexBytes, 0
+	defer func() { b.give(reserved) }()
+	reserve := func(moovBytes int) error {
+		// Cover the movie, every expanded 24-byte sample, and cloned boxes.
+		// Double the clone allowance and leave 4 MiB for track/slice metadata
+		// and allocation rounding. Small movies still allow eight loaders.
+		n := moovBytes + maxMP4Samples*24 + 2*min(moovBytes, maxMP4KeptBytes) + (4 << 20)
+		if err := b.take(n); err != nil {
+			return errIndexReadBusy
+		}
+		reserved = n
+		return nil
+	}
+	moov, ftyp, err := findMoov(r, size, head, reserve)
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +249,8 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 
 // findMoov walks the top-level boxes, reading their headers, to the moov
 // box, which it reads whole and returns the payload of. It also returns the
-// ftyp box, if any.
-func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err error) {
+// ftyp box, if any. reserve admits construction before the movie is read.
+func findMoov(r io.ReaderAt, size int64, head []byte, reserve func(int) error) (moov, ftyp []byte, err error) {
 	for pos, n := int64(0), 0; pos+8 <= size && n < maxTopLevelBoxes; n++ {
 		hdr := tail(head, pos)
 		if len(hdr) < 16 {
@@ -270,6 +288,9 @@ func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err er
 		case mp4BoxMoov:
 			if boxSize > maxMoovSize {
 				return nil, nil, fmt.Errorf("%w: MP4 moov of %d bytes is over the limit", ErrMalformed, boxSize)
+			}
+			if err := reserve(int(boxSize)); err != nil {
+				return nil, nil, err
 			}
 			box, err := readBox(r, head, pos, boxSize)
 			if err != nil {
