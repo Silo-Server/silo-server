@@ -1336,11 +1336,12 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		LastAttemptAt: &lastAttempt,
 		NextRefreshAt: time.Now().Add(refreshDebtTerminalDelay).Truncate(time.Second),
 	}
-	// A refresh that claimed the row for its third attempt holds a lease and
-	// settles the row itself.
+	// A refresh that claimed the due row for its third attempt holds a lease
+	// and settles the row itself.
 	leaseExpires := time.Now().Add(time.Hour)
 	claimed := *parked
 	claimed.LeaseExpiresAt = &leaseExpires
+	claimed.NextRefreshAt = time.Now().Add(-time.Minute).Truncate(time.Second)
 	for _, tc := range []struct {
 		name           string
 		fileDate       string
