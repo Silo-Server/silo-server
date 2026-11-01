@@ -868,50 +868,83 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 	}
 }
 
-func TestStartRemoteTranscodeRejectsOldNodeAfterStaleAudioCapabilityProbe(t *testing.T) {
-	version := testCompatVersion()
-	version.AudioTracks[1].Channels = 6
-	source := testCompatSource(NewResourceIDCodec(), version)
-	deleted := make(chan string, 1)
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
-			writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
-			}}})
-		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
-			// Simulate a pre-v2 replacement: it accepts the unknown request fields
-			// but cannot return the audio recipe receipt.
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{Status: "started"})
-		case r.Method == http.MethodDelete:
-			deleted <- r.URL.Path
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer node.Close()
+func TestStartRemoteTranscodeRejectsOldNodeWithoutRecipeAttestation(t *testing.T) {
+	surround := testCompatVersion()
+	surround.AudioTracks[1].Channels = 6
+	tsCopy := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+	tsCopy.HLSRemux, tsCopy.HLSRemuxMPEGTS = true, true
+	for _, tc := range []struct {
+		name    string
+		source  PlaybackMediaSource
+		respond func(transcodenode.TranscodeStartRequest) transcodenode.TranscodeStartResponse
+		want    error
+	}{{
+		// A pre-v2 replacement after a stale capability probe accepts the
+		// unknown request fields but cannot return the audio recipe receipt.
+		name:   "audio downmix",
+		source: testCompatSource(NewResourceIDCodec(), surround),
+		respond: func(transcodenode.TranscodeStartRequest) transcodenode.TranscodeStartResponse {
+			return transcodenode.TranscodeStartResponse{Status: "started"}
+		},
+		want: transcodenode.ErrAudioRecipeAttestationMismatch,
+	}, {
+		// A node built before MPEG-TS copies attests everything else and
+		// packages the copy as fMP4.
+		name:   "mpeg-ts copy",
+		source: tsCopy,
+		respond: func(req transcodenode.TranscodeStartRequest) transcodenode.TranscodeStartResponse {
+			return transcodenode.TranscodeStartResponse{
+				SessionID: req.SessionID, Status: "started",
+				CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
+				ThrottleSeconds:       req.ThrottleSeconds,
+				KeyframePlaylist:      req.KeyframePlaylist,
+			}
+		},
+		want: transcodenode.ErrCopyVideoMPEGTSAttestationMismatch,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			deleted := make(chan string, 1)
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+					writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
+						Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+					}}})
+				case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+					var req transcodenode.TranscodeStartRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					writeJSON(w, http.StatusAccepted, tc.respond(req))
+				case r.Method == http.MethodDelete:
+					deleted <- r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer node.Close()
 
-	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
-	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
-	handler := &PlaybackHandler{
-		JWTSecret: "secret", playbackStore: playbackStore,
-		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
-			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL},
-		}},
-		tm: playback.NewTranscodeManager(),
-	}
-	err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}, 0, node.URL)
-	if !errors.Is(err, transcodenode.ErrAudioRecipeAttestationMismatch) {
-		t.Fatalf("startRemoteTranscode error = %v, want audio recipe attestation mismatch", err)
-	}
-	select {
-	case path := <-deleted:
-		if path != "/transcode/upstream-1" {
-			t.Fatalf("cleanup path = %q, want /transcode/upstream-1", path)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("unattested remote job was not stopped")
+			playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+			playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+			handler := &PlaybackHandler{
+				JWTSecret: "secret", playbackStore: playbackStore,
+				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: tc.source.FileID, PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL},
+				}},
+				tm: playback.NewTranscodeManager(),
+			}
+			err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", tc.source, &models.MediaFile{ID: tc.source.FileID, FilePath: "/media/movie.mkv"}, 0, node.URL)
+			if !errors.Is(err, tc.want) || !errors.Is(err, errRemoteTranscodeStartFailed) {
+				t.Fatalf("startRemoteTranscode error = %v, want retryable %v", err, tc.want)
+			}
+			select {
+			case path := <-deleted:
+				if path != "/transcode/upstream-1" {
+					t.Fatalf("cleanup path = %q, want /transcode/upstream-1", path)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("unattested remote job was not stopped")
+			}
+		})
 	}
 }
 
