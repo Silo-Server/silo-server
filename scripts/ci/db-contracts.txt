@@ -707,6 +707,6 @@
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
 
-# The artwork reconcile sweep leaves bundled app-relative collection posters
-# alone: it neither checks them against storage nor counts them as errors.
+# The artwork reconcile verify sweep and bulk reset leave bundled app-relative
+# collection posters alone: neither checks them against storage nor clears them.
 ./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
