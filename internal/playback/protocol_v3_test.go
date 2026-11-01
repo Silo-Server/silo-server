@@ -1279,6 +1279,60 @@ func TestVideoEligibleV3SoftwareEntryCanFollowARejectingHardwareEntryForTheSameC
 	}
 }
 
+// An HEVC level tag above an exact hardware decoder's highest level is
+// admitted only when the tag sits in the decoder's level family (same picture
+// size, buffer, slice and tile limits) and the source's sample rate and
+// bitrate fit the decoder's own level, so the tags differ by declared bitrate
+// alone. Everything else still has to fit the reported level.
+func TestVideoEligibleV3HEVCLevelAboveDecoderWithinItsFamily(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		evidence      CapabilityEvidenceV3
+		software      bool
+		level         int
+		decoderLevel  int
+		width, height int
+		frameRate     float64
+		bitrateKbps   int
+		want          bool
+	}{
+		// x265 tags a 4K24 encode 5.2 when its VBV ceiling (180 Mb/s)
+		// exceeds 5.1 High tier's 160 Mb/s.
+		{name: "5.2 4K24 at 37 Mb/s on a 5.1 decoder", level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900, want: true},
+		{name: "5.1 4K24 at 20 Mb/s on a 5.0 decoder", level: 153, decoderLevel: 150, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 20_000, want: true},
+		{name: "6.2 needs a larger picture and buffer family", level: 186, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 30_000},
+		{name: "bitrate above 5.1 Main tier", level: 156, width: 3840, height: 2160, frameRate: 24, bitrateKbps: 45_000},
+		{name: "sample rate above 5.1", level: 156, width: 3840, height: 2160, frameRate: 120, bitrateKbps: 30_000},
+		{name: "declared entries keep the strict level", evidence: EvidenceDeclaredV3, level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900},
+		{name: "software entries keep the strict level", software: true, level: 156, width: 3840, height: 1916, frameRate: 23.976, bitrateKbps: 36_900},
+	} {
+		source := SourceDescriptorV3{
+			VideoCodec: "hevc", VideoProfile: "main 10", VideoLevel: tc.level, BitDepth: 10,
+			Width: tc.width, Height: tc.height, FrameRate: tc.frameRate, BitrateKbps: tc.bitrateKbps,
+		}
+		decoderLevel := tc.decoderLevel
+		if decoderLevel == 0 {
+			decoderLevel = 153
+		}
+		req := validStartRequestV3()
+		req.Capabilities.CodecsVideo = []string{"hevc"}
+		req.Capabilities.CodecsVideoHardware = []string{"hevc"}
+		if tc.evidence != "" {
+			req.Capabilities.VideoEvidence = tc.evidence
+		}
+		if tc.software {
+			req.ClientFeatures = append(req.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+		}
+		req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+			Codec: "hevc", Profiles: []string{"main", "main 10"}, Levels: []int{decoderLevel}, BitDepths: []int{8, 10},
+			MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 120, MaxBitrateKbps: 200_000, Hardware: !tc.software,
+		}}
+		if eligible, _ := videoEligibleV3(source, req); eligible != tc.want {
+			t.Errorf("%s: eligible = %v, want %v", tc.name, eligible, tc.want)
+		}
+	}
+}
+
 // An exact decoder's reported frame rate holds at its largest size, as for
 // encode targets, so a smaller source may run faster within the same
 // macroblock rate up to 60 fps, while the maximum size still binds. A platform-attested or

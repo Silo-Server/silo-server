@@ -560,13 +560,16 @@ populating them:
 | Field | Match |
 | --- | --- |
 | `profiles` | Case-insensitive profile identity against the source profile. H.264 ignores presentation separators, and a decoder reporting Baseline also accepts the narrower Constrained Baseline source profile; the reverse is not inferred |
-| `levels` | **At-least**: any listed level ≥ the source level passes |
+| `levels` | **At-least**: any listed level ≥ the source level passes. An `exact` hardware HEVC entry also passes a source tagged above its highest level when both levels share a picture-size family (4–4.1, 5–5.2, 6–6.2) and the source's luma sample rate and bitrate fit the entry's level, with bitrate held to the Main-tier limit |
 | `bit_depths` | Exact integer equality |
 
 So a decoder that tops out at H.264 level 4.1 may report `[41]` and still
 validate a level-3.0 stream, while a decoder that handles 8- and 10-bit must
 list both — `[10]` alone rejects an 8-bit source. Levels use the integer form
-(4.1 → `41`).
+(4.1 → `41`), except HEVC, which uses `general_level_idc` (5.1 → `153`), the
+value FFmpeg probes. The HEVC family rule exists because encoders also choose
+the level from their declared buffer and peak bitrate: x265 tags a 4K24 encode
+with a 180 Mb/s VBV ceiling as 5.2, though a 5.1 decoder handles its pictures.
 
 **Every validated video route requires complete routing metadata.** Before any
 tier logic runs, the server requires video codec, bit depth, width, height,
