@@ -885,6 +885,10 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 	defer healthy.Close()
 	down := httptest.NewServer(http.NotFoundHandler())
 	down.Close()
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":5000}}`))
+	}))
+	defer oversized.Close()
 
 	postgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
 	for _, tc := range []struct {
@@ -894,6 +898,7 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 		staleSchema bool
 		circuitOpen bool
 		wantResult  SearchContinuationCapabilities
+		wantErr     error
 	}{
 		{name: "healthy index", url: healthy.URL, activeUID: "silo_media_items", wantResult: SearchContinuationCapabilities{
 			Provider: SearchProviderMeilisearch, ResultWindowLimit: 1000,
@@ -903,6 +908,8 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 		{name: "index not built", url: healthy.URL, wantResult: postgres},
 		{name: "index schema mismatch", url: healthy.URL, activeUID: "silo_media_items", staleSchema: true, wantResult: postgres},
 		{name: "circuit open", url: healthy.URL, activeUID: "silo_media_items", circuitOpen: true, wantResult: postgres},
+		// A window Silo cannot rank is a configuration error, not a fallback.
+		{name: "window unsupported", url: oversized.URL, activeUID: "silo_media_items", wantErr: ErrSearchWindowUnsupported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: tc.url})
@@ -921,6 +928,12 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 			resolver := &CatalogResolver{searchProvider: provider}
 
 			got, err := resolver.SearchContinuationCapabilities(t.Context())
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("SearchContinuationCapabilities error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("SearchContinuationCapabilities error = %v", err)
 			}

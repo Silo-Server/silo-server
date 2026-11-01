@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -155,37 +154,15 @@ func (r *CatalogResolver) SearchContinuationCapabilities(ctx context.Context) (S
 	if provider.sessions == nil {
 		return result, ErrSearchContinuationUnavailable
 	}
-	// While the index cannot be read, every search falls back to PostgreSQL,
-	// so report that path rather than failing feature detection.
-	// The checks follow createRankingSession.
-	servedByPostgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
-	if provider.stateRepo == nil {
-		return servedByPostgres, nil
-	}
-	if _, blocked := provider.circuitBlocked(time.Now()); blocked {
-		return servedByPostgres, nil
-	}
-	state, _, err := provider.indexState(ctx)
-	if errors.Is(err, context.Canceled) {
-		return result, err
-	}
-	if err != nil || strings.TrimSpace(state.ActiveIndexUID) == "" {
-		return servedByPostgres, nil //nolint:nilerr // searches fall back to PostgreSQL on this error too
-	}
-	if catalogSearchMeilisearchIndexCompatibility(state.SchemaVersion, provider.config.Embedder, provider.config.IndexTypes,
-		provider.config.SemanticEnabled, provider.config.BinaryQuantized) == catalogSearchIndexIncompatible {
-		return servedByPostgres, nil
-	}
-	settings, err := provider.client.GetSettings(ctx, state.ActiveIndexUID)
-	if errors.Is(err, context.Canceled) {
-		return result, err
+	_, _, window, err := provider.rankingIndex(ctx)
+	if errors.Is(err, ErrSearchProviderFallback) && !errors.Is(err, context.Canceled) {
+		// Ranking sessions fall back to PostgreSQL in this state, so report
+		// that path rather than failing feature detection.
+		return SearchContinuationCapabilities{Provider: SearchProviderPostgres}, nil
 	}
 	if err != nil {
-		return servedByPostgres, nil //nolint:nilerr // searches fall back to PostgreSQL on this error too
+		return result, err
 	}
-	result.ResultWindowLimit = settings.Pagination.MaxTotalHits
-	if result.ResultWindowLimit < 1 || result.ResultWindowLimit > meilisearchCandidateScanCap {
-		return result, ErrSearchWindowUnsupported
-	}
+	result.ResultWindowLimit = window
 	return result, nil
 }
