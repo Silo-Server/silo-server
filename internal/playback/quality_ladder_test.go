@@ -560,18 +560,20 @@ func TestLadderClassForSize(t *testing.T) {
 
 func TestEncodeEquivalentKbps(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		srcKbps  int
-		srcCodec string
-		want     int
+		name        string
+		srcKbps     int
+		srcCodec    string
+		targetCodec string
+		want        int
 	}{
-		{"an H.264 source keeps its rate", 12000, "h264", 12000},
-		{"an HEVC source counts at its H.264-equivalent rate", 12000, "hevc", 20000},
-		{"an unknown source rate", 0, "h264", 0},
+		{"an H.264 source keeps its rate", 12000, "h264", transcodeCodecH264, 12000},
+		{"an HEVC source counts at its H.264-equivalent rate", 12000, "hevc", transcodeCodecH264, 20000},
+		{"an H.264 source needs less as HEVC", 20000, "h264", transcodeCodecHEVC, 12000},
+		{"an unknown source rate", 0, "h264", transcodeCodecH264, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := EncodeEquivalentKbps(tc.srcKbps, tc.srcCodec, transcodeCodecH264); got != tc.want {
-				t.Errorf("EncodeEquivalentKbps(%d, %q) = %d, want %d", tc.srcKbps, tc.srcCodec, got, tc.want)
+			if got := EncodeEquivalentKbps(tc.srcKbps, tc.srcCodec, tc.targetCodec); got != tc.want {
+				t.Errorf("EncodeEquivalentKbps(%d, %q, %q) = %d, want %d", tc.srcKbps, tc.srcCodec, tc.targetCodec, got, tc.want)
 			}
 		})
 	}

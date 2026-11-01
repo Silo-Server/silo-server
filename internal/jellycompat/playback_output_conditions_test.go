@@ -218,12 +218,14 @@ func TestEncodeTargetStopsAtTheSourceRate(t *testing.T) {
 		name           string
 		codec          string
 		sourceKbps     int
+		videoKbps      int
 		maxBitrate     int64
 		wantKbps       int
 		wantResolution string
 		wantReason     string
 	}{
 		{name: "ceiling far above the source", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 120_000_000, wantKbps: 23_400, wantReason: "VideoCodecNotSupported"},
+		{name: "the video track's rate leaves out the audio", codec: "mpeg2video", sourceKbps: 7000, videoKbps: 2900, maxBitrate: 120_000_000, wantKbps: 2900, wantReason: "VideoCodecNotSupported"},
 		{name: "low-bitrate source keeps its size", codec: "mpeg2video", sourceKbps: 1500, maxBitrate: 120_000_000, wantKbps: 1500, wantReason: "VideoCodecNotSupported"},
 		{name: "HEVC source gets H.264 headroom", codec: "hevc", sourceKbps: 6000, maxBitrate: 120_000_000, wantKbps: 10_000, wantReason: "VideoCodecNotSupported"},
 		{name: "ceiling below the source still wins", codec: "mpeg2video", sourceKbps: 23_400, maxBitrate: 8_820_000, wantKbps: 8187, wantReason: "VideoBitrateNotSupported"},
@@ -232,7 +234,7 @@ func TestEncodeTargetStopsAtTheSourceRate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			version := catalog.FileVersion{
 				FileID: 42, Container: "mkv", CodecVideo: tc.codec, CodecAudio: "aac", Bitrate: tc.sourceKbps, Resolution: "1080p",
-				VideoTracks: []models.VideoTrack{{Codec: tc.codec, Width: 1920, Height: 1080, FrameRate: "24"}},
+				VideoTracks: []models.VideoTrack{{Codec: tc.codec, Width: 1920, Height: 1080, FrameRate: "24", Bitrate: tc.videoKbps}},
 				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
 			}
 			profile := DeviceProfile{

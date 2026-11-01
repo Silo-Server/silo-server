@@ -780,13 +780,14 @@ profile sets on `VideoBitrate`, `Height` and `Width`, in its `Video` codec
 profiles for `h264` (those without a `Container` or `ApplyConditions`) and its
 HLS video transcoding profiles, instead of being refused for exceeding them:
 the video bitrate is capped and the frame is scaled to fit, keeping its aspect
-ratio. Unlike Jellyfin, the video bitrate also stops at the source's rate,
-converted to the output codec's efficiency, so a client's generous
+ratio. Unlike Jellyfin, the video bitrate also stops at the source's video
+rate, converted to the output codec's efficiency, so a client's generous
 `MaxStreamingBitrate` does not inflate the encode. The ceiling alone picks the
 frame size, so a low-bitrate source is not scaled down. A stored device profile
 keeps `IsRequired: false`; a missing key reads back as `true`. A profile that
-lists transcoding profiles but no `DirectPlayProfiles` gets no direct play or direct stream, as in Jellyfin; Roku
-clients send one to ask for a remux after direct play fails.
+lists transcoding profiles but no `DirectPlayProfiles` gets no direct play or
+direct stream, as in Jellyfin; Roku clients send one to ask for a remux after
+direct play fails.
 
 ## Transcode reasons
 

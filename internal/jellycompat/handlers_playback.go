@@ -2772,7 +2772,8 @@ func compatEncodeTarget(profile DeviceProfile, videoCodec string, maxBitrate int
 	}
 	resolution := compatFitResolution(compatTargetResolutionForBitrate(int64(max(budget, 0)), sourceVideo), sourceVideo, maxHeight, maxWidth)
 	target := budget
-	if source := playback.EncodeEquivalentKbps(version.Bitrate, version.CodecVideo, videoCodec); source > 0 && target > 0 {
+	sourceKbps := playback.SourceVideoKbps(version.Bitrate, sourceVideo.Bitrate)
+	if source := playback.EncodeEquivalentKbps(sourceKbps, version.CodecVideo, videoCodec); source > 0 && target > 0 {
 		target = min(target, source)
 		if target < compatMinEncodeKbps && budget >= compatMinEncodeKbps {
 			target = compatMinEncodeKbps
