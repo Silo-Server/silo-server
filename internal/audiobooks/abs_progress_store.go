@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -100,7 +101,7 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 		WHERE wp.user_id = $1
 		  AND wp.profile_id = $2
 		  AND mi.type = 'audiobook'
-		  AND EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)
+		  AND `+catalog.InSomeLibraryWhere("mi.content_id")+`
 		ORDER BY wp.updated_at DESC
 		LIMIT $3`,
 		uid, profileID, limit,

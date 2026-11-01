@@ -511,13 +511,7 @@ func appendWorkItemsAccessFilters(conditions *[]string, args *[]any, argIdx *int
 			*argIdx = *argIdx + 1
 		}
 	} else {
-		// A book in no library (held through the file removal grace, or
-		// under an offline root) has left the catalog; never list it.
-		*conditions = append(*conditions, `
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = lwi.content_id
-				)`)
+		*conditions = append(*conditions, catalog.InSomeLibraryWhere("lwi.content_id"))
 		if len(filter.DisabledLibraryIDs) > 0 {
 			*conditions = append(*conditions, fmt.Sprintf(`
 				NOT EXISTS (

@@ -13,13 +13,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// TestABSStoreHidesBooksWithoutLibraryDB covers a book that has left every
+// TestABSListsLeaveOutBooksInNoLibraryDB covers a book that has left every
 // library but still exists: one held through the file removal grace, or under
-// an offline root. ABS author, series, and search reads, and the by-ID reads
-// that resume, collection, and playlist listings hydrate through, must not
-// return it, even for a viewer without library restrictions. Its progress must
-// not use up the progress list's limit either.
-func TestABSStoreHidesBooksWithoutLibraryDB(t *testing.T) {
+// an offline root. ABS author, series, and search lists, and the batch
+// hydration behind the in-progress shelf, must not return it, even for a viewer
+// without library restrictions. Its progress must not use up the progress
+// list's limit either.
+func TestABSListsLeaveOutBooksInNoLibraryDB(t *testing.T) {
 	f := seedHiddenBookFixture(t)
 	pool, series, listed, held, authorID, userID := f.pool, f.series, f.listed, f.held, f.authorID, f.userID
 	ctx := t.Context()
@@ -40,13 +40,6 @@ func TestABSStoreHidesBooksWithoutLibraryDB(t *testing.T) {
 	byID, err := store.GetAudiobooksByIDs(ctx, []string{listed, held}, unrestricted)
 	if err != nil {
 		t.Fatalf("GetAudiobooksByIDs: %v", err)
-	}
-	single, err := store.GetAudiobookByID(ctx, held, unrestricted)
-	if err != nil {
-		t.Fatalf("GetAudiobookByID: %v", err)
-	}
-	if single != nil {
-		t.Errorf("GetAudiobookByID returned held book %s", held)
 	}
 	progress, err := (&ABSProgressStore{Pool: pool}).ListProgressForAudiobooks(ctx, strconv.Itoa(userID), "", 1)
 	if err != nil {

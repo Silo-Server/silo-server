@@ -22,9 +22,9 @@ same file returning, within the grace restores the title as it was:
   the grace deletes it. A zero grace deletes at once. Ebook and manga items are
   deleted at once regardless: chapter and series listings read child tables
   (such as `manga_chapters`) that only an item delete clears. Audiobook
-  listings (Audiobookshelf, related rows, work pages) and Audiobookshelf by-ID
-  reads require a library membership, so a held audiobook stays out of its
-  author and series lists. A monitored rename of a book folder can scan the old
+  listings (Audiobookshelf lists and the progress they hydrate, a book's
+  related rows, work pages) also require a library membership, so a held
+  audiobook stays out of its author and series lists. A monitored rename of a book folder can scan the old
   path first; the hold keeps the book until the new path's scan matches it by
   its author, narrator, year, duration, and title tags. An untagged book gets a
   new item.

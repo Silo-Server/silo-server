@@ -86,11 +86,7 @@ var _ abs.MediaStore = (*ABSMediaStore)(nil)
 // it is of type 'audiobook'. Returns nil and a wrapped error for any other
 // outcome; the caller interprets a nil result as not-found.
 func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, access catalog.AccessFilter) (*models.MediaItem, error) {
-	ids, err := s.idsInALibrary(ctx, []string{contentID})
-	if err != nil {
-		return nil, fmt.Errorf("abs_media_store: get audiobook %q: %w", contentID, err)
-	}
-	items, err := s.Items.GetByIDsWithAccess(ctx, ids, access)
+	items, err := s.Items.GetByIDsWithAccess(ctx, []string{contentID}, access)
 	if err != nil {
 		return nil, fmt.Errorf("abs_media_store: get audiobook %q: %w", contentID, err)
 	}
@@ -156,16 +152,15 @@ func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []str
 }
 
 // idsInALibrary returns the contentIDs that belong to at least one library.
-// Progress, collections, and playlists keep the IDs of books that have left
-// every library (held through the file removal grace, or under an offline
-// root), and an unrestricted viewer's by-ID read would otherwise return them.
+// GetAudiobooksByIDs hydrates listings, and progress keeps the IDs of books in
+// no library (held through the file removal grace), which an unrestricted
+// viewer's by-ID read would otherwise return. See catalog.InSomeLibraryWhere.
 func (s *ABSMediaStore) idsInALibrary(ctx context.Context, contentIDs []string) ([]string, error) {
 	if len(contentIDs) == 0 || s.Pool == nil {
 		return contentIDs, nil
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT DISTINCT content_id FROM media_item_libraries WHERE content_id = ANY($1)
-	`, contentIDs)
+		SELECT cid FROM unnest($1::text[]) AS cid WHERE `+catalog.InSomeLibraryWhere("cid"), contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load library memberships: %w", err)
 	}
@@ -403,12 +398,7 @@ func appendAudiobookAccessConditions(alias string, filter catalog.AccessFilter, 
 			*argIdx = *argIdx + 1
 		}
 	} else {
-		// A book in no library (held through the file removal grace, or
-		// under an offline root) has left the catalog; never list it.
-		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (
-			SELECT 1 FROM media_item_libraries mil_present
-			WHERE mil_present.content_id = %s.content_id
-		)`, alias))
+		*conditions = append(*conditions, catalog.InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf(`NOT EXISTS (
