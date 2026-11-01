@@ -32,7 +32,7 @@ function describeRejection(decision: MatchDecision): string | undefined {
     case "below_floor":
       return "No eligible result reached the minimum score.";
     case "lone_candidate":
-      return "A single result needs a higher score when nothing else, such as a matching year, confirms it.";
+      return "A single result needs a higher score when nothing else confirms it.";
     case "year_mismatch":
       return "The best result's year is more than 2 years from the item's year.";
     case "ambiguous":
