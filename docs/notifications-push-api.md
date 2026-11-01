@@ -9,8 +9,11 @@ push registration.
 > **API lifecycle:** the operations below are the stable `/api/v2` native contract,
 > which locks with Silo 1.0. The frozen alpha `/api/v1` surface serves the same
 > Apple display-token flow at the matching `/api/v1` paths through the pre-1.0
-> bridge window, after which Silo answers the whole `/api/v1` namespace with
-> `410 Gone` and the `client_upgrade_required` problem code. See
+> bridge window. After the bridge window, and once a maintainer decides to retire
+> it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API
+> listener answers the `/api/v1` business routes with `410 Gone` and the
+> `client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready`
+> keep answering. See
 > [the native API contract](architecture/api-contract.md).
 
 Android is unaffected: it fetches `GET /api/v2/notifications/{id}` through the app's
@@ -85,8 +88,9 @@ the display credential:
   Apple client re-registers a week ahead.
 - Both fields are omitted when the server cannot mint a token. Clients must
   fall back to the access token in that case.
-- Registration with an API key (`sa_` prefix) never returns a token: there is
-  no login session to bind.
+- `registerApplePushDevice` requires a current login session, so an API key
+  (`sa_` prefix) gets `403 permission_denied`. The frozen v1 route registers an
+  API-key caller without a display token.
 
 Store the token where the extension can read it (the Apple client uses the
 shared Keychain access group) and clear it on sign-out, server removal, or
@@ -176,9 +180,9 @@ the same way.
 
 ## Ordered Android registration
 
-`GET /api/v2/notifications/push/devices/capabilities` describes the
-`ordered_android_v1` registration contract and whether local registration storage
-is configured. It requires the acting login/profile. `registration_available`
+`GET /api/v2/notifications/push/devices/capabilities` reports `platforms`
+(`["android"]`) and `registration_available`, which says whether local registration
+storage is configured. It requires the acting login/profile. `registration_available`
 is independent of relay delivery availability; use notification capabilities
 for delivery configuration. Apple registration and browser web push remain
 separate contracts.
