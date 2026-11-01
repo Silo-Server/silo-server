@@ -834,10 +834,11 @@ answers the box set a movie's page shows, as `getCatalogBoxSet` would answer
 it: from `library_id`, or else the first of the movie's libraries with box sets
 on, when the viewer can see the movie and at least `box_set_min_movies` of the
 collection's movies there. `box_set` is absent when there is none, including
-for any item that is not a movie; like the membership reads (see
-personal-lists in the API contract), that ordinary answer is a `200`, and `404`
-is kept for an item that is missing or hidden from the viewer. Clients show it as a row of the box set's
-movies on the movie page, marking the movie being viewed.
+for a title that is not a movie (a series or an audiobook); like the
+membership reads (see personal-lists in the API contract), that ordinary
+answer is a `200`. `404` is kept for an ID that is missing, hidden from the
+viewer, or not a catalog title (an episode or season ID). Clients show it as a
+row of the box set's movies on the movie page, marking the movie being viewed.
 
 A box set's `title` is its TMDB collection name with a trailing "Collection"
 shown as "Box Set" ("Harry Potter Collection" is "Harry Potter Box Set"), so it

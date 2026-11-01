@@ -266,7 +266,8 @@ func (h *CatalogHandler) BoxSet(ctx context.Context, v ItemViewer, collectionID 
 // ItemBoxSet returns the box set a movie's page shows: the movie's box set
 // as the viewer sees it, in libraryID or, when it is 0, the first of the
 // movie's libraries with box sets on. It is nil when the item has none, and
-// a 404 only when the item is missing or hidden from the viewer, so a page
+// a 404 only when the item is missing, hidden from the viewer, or not a
+// catalog title (episodes and seasons are not in media_items), so a page
 // asking for every movie does not read as probing (issue #952).
 func (h *CatalogHandler) ItemBoxSet(ctx context.Context, v ItemViewer, contentID string, libraryID int) (*BoxSetDetailView, error) {
 	if h == nil || h.boxSets == nil || h.resolver == nil || h.itemsH == nil {

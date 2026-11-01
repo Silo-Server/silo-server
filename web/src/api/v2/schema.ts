@@ -6894,7 +6894,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 only when the item is missing or hidden. */
+    /** The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 when the ID is missing, hidden, or not a catalog title (an episode or season). */
     get: operations["getCatalogItemBoxSet"];
     put?: never;
     post?: never;

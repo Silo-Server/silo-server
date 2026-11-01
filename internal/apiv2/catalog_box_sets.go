@@ -106,7 +106,7 @@ func registerCatalogBoxSets(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/box-sets/{id}", opGetCatalogBoxSet, "catalog",
 		"One box set of a library with its movies the viewer can see there, in collection order. 404 when the library has box sets off or the viewer can see too few of its movies.")), reg.getCatalogBoxSet)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/box-set", opGetItemBoxSet, "catalog",
-		"The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 only when the item is missing or hidden.")), reg.getCatalogItemBoxSet)
+		"The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 when the ID is missing, hidden, or not a catalog title (an episode or season).")), reg.getCatalogItemBoxSet)
 }
 
 func (reg *Registry) boxSets() (BoxSetService, *Problem) {
