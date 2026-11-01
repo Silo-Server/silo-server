@@ -332,6 +332,12 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web/caf\u00e9.js"}}, testBinaryEntry,
 				testZipEntry{name: "web/caf\u00e9.js", data: []byte("checked")}, testZipEntry{name: "web/cafe\u0301.js", data: []byte("other")})
 		}},
+		{name: "long combining sequence alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			checked := "web/a" + strings.Repeat("\u0301", 30) + "\u0327.js"
+			alias := "web/a\u0327" + strings.Repeat("\u0301", 30) + ".js"
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: checked}}, testBinaryEntry,
+				testZipEntry{name: checked, data: []byte("checked")}, testZipEntry{name: alias, data: []byte("other")})
+		}},
 		{name: "entry inside binary", want: "archive couldn't be read", write: func(t *testing.T, path string) {
 			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "plugin/x", data: []byte("x")})
 		}},
