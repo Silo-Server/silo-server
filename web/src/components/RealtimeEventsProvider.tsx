@@ -662,7 +662,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "tasks":
         // Reconnect must also catch up history/metrics for tasks that finished
         // while disconnected. One sweep avoids refetching each detail twice.
-        refreshQueries({ queryKey: adminKeys.tasks() });
+        // A plugin update check that finished meanwhile may have changed the
+        // installations too.
+        refreshQueries(
+          { queryKey: adminKeys.tasks() },
+          { queryKey: adminKeys.pluginInstallations() },
+        );
         break;
       case "scans":
         hydrateScans(queryClient, (message.data as ScanRun[]) ?? []);

@@ -4012,12 +4012,6 @@ export type PluginRuntimeState = "stopped" | "starting" | "running" | "backoff" 
  * supervises (started at boot, restarted after a crash); `backoff` and
  * `failed` only occur for those.
  */
-export interface PluginUpdateFailure {
-  version: string;
-  reason: string;
-  failed_at: string;
-}
-
 export interface PluginRuntime {
   resident: boolean;
   state: PluginRuntimeState;
@@ -4025,6 +4019,13 @@ export interface PluginRuntime {
   last_error?: string;
   last_started_at?: string;
   next_restart_at?: string;
+}
+
+/** The last automatic update Silo refused to install, and why. */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
 }
 
 export interface PluginInstallation {
