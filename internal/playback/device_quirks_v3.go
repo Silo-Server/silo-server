@@ -99,7 +99,9 @@ func firefoxMatroskaAACTimingQuirkV3(source SourceDescriptorV3, request StartReq
 // starts past zero. A seeked stream copy begins at the keyframe before the
 // requested position, and the RASL pictures that precede that CRA in
 // presentation order reference frames the copy never sent. macOS Firefox
-// rejects the stream at that boundary instead of skipping them.
+// rejects the stream at that boundary instead of skipping them, and it also
+// shows nothing from a stream that starts on a CRA at all, so the remux leads
+// the copy with the source's first frame (see remuxIDRPrimer).
 func firefoxMacOSHEVCResumeLeadingPictureDropV3(source SourceDescriptorV3, request StartRequestV3) bool {
 	if !isFirefoxWebV3(request) || normalizeCodecV3(source.VideoCodec) != transcodeCodecHEVC {
 		return false
