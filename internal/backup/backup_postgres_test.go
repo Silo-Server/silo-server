@@ -101,15 +101,18 @@ func setSetting(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSet
 }
 
 // roundTripSeed is what the round trip writes before backing up.
+var storageIdentities = []string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey}
+
 type roundTripSeed struct {
 	secretKey, secretValue string
 	missingKey             string
 	blobs                  map[string][]byte
 }
 
-// seedRoundTrip writes an encrypted setting, a branding asset, a library with
-// a poster, a library whose poster is gone, and a profile with an uploaded
-// avatar, all removed again when the test ends.
+// seedRoundTrip writes an encrypted setting, recorded storage identities, a
+// branding asset, a library with a poster, a library whose poster is gone,
+// and a profile with an uploaded avatar, all removed again when the test
+// ends.
 func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, store blobstore.Store) roundTripSeed {
 	t.Helper()
 	ctx := t.Context()
@@ -117,6 +120,10 @@ func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.Encrypted
 	seed := roundTripSeed{secretKey: "s3.operational_token_secret", secretValue: "token-" + suffix, missingKey: "library-posters/" + suffix + "-gone.jpg"}
 	setSetting(t, pool, settings, seed.secretKey, seed.secretValue)
 	setSetting(t, pool, settings, "branding.mark_light_ref", suffix+".webp")
+	// The source's recorded stores, which a separate restore must not keep.
+	for _, key := range storageIdentities {
+		setSetting(t, pool, settings, key, "local|/elsewhere")
+	}
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, sql, args...); err != nil {
@@ -178,13 +185,6 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := seedRoundTrip(t, pool, settings, store)
-	// The source's recorded stores, which a separate restore must not keep.
-	identities := []string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey}
-	for _, key := range identities {
-		if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'local|/elsewhere')`, key); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	serverID := "round-trip-" + randomHex(t, 4)
 	svc := New(Options{
@@ -230,7 +230,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 	want := slices.Clone(src.Manifest.Tables)
 	for i := range want {
 		if want[i].Name == "server_settings" {
-			want[i].Rows -= int64(len(identities))
+			want[i].Rows -= int64(len(storageIdentities))
 		}
 	}
 	if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {

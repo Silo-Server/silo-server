@@ -166,8 +166,12 @@ other. On a local artwork backend that is the shared-volume requirement
 artwork already has in a multi-server deployment
 ([blob-storage.md](blob-storage.md)).
 
-Local backups hold the same data as the database, password hashes included,
-and sit in the data folder with the database's protection. Downloads are
+Local backups hold the same data as the database, password hashes included.
+The local destination writes them readable by the server's account only:
+`backups/` and every folder under it are 0700, each object 0600, where the
+store's own modes are 0755 and 0644. `backups/` is made private before an
+object is written, so a file is never readable by another account while it
+is written. Downloads are
 short-lived and scoped to one object: a presigned URL where the store can
 presign, or a link to `GET /api/v2/admin/backups/{id}/objects/{name}` signed
 under its own capability domain (`artworkurl.NewBackupObjectSigner`) where it

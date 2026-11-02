@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -62,8 +65,52 @@ func NewStoreDestination(store blobstore.Store) Destination { //nolint:iface // 
 
 func (d StoreDestination) Name() string { return DestinationDefault }
 
+// Put writes key and leaves it readable by this account only: a backup holds
+// password hashes and settings, and the store's own modes (0755 folders,
+// 0644 files) would let any account on the host that can reach the store
+// root read it. The backups folder is made private before the write, so the
+// object is never readable by others, even while it is written.
 func (d StoreDestination) Put(ctx context.Context, key string, r io.Reader) error {
-	return d.Store.PutStream(ctx, key, r, "application/octet-stream")
+	dir, local := d.localRoot()
+	if !local {
+		return d.Store.PutStream(ctx, key, r, "application/octet-stream")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	top := strings.TrimSuffix(RootPrefix, "/")
+	if err := root.Mkdir(top, privateDirMode); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("creating the backups folder: %w", err)
+	}
+	if err := root.Chmod(top, privateDirMode); err != nil {
+		return fmt.Errorf("restricting the backups folder: %w", err)
+	}
+	if err := d.Store.PutStream(ctx, key, r, "application/octet-stream"); err != nil {
+		return err
+	}
+	if err := root.Chmod(key, privateFileMode); err != nil {
+		return fmt.Errorf("restricting %s: %w", key, err)
+	}
+	for folder := path.Dir(key); folder != top && folder != "." && folder != "/"; folder = path.Dir(folder) {
+		if err := root.Chmod(folder, privateDirMode); err != nil {
+			return fmt.Errorf("restricting %s: %w", folder, err)
+		}
+	}
+	return nil
+}
+
+// Modes of a local destination's backup folders and objects.
+const (
+	privateDirMode  fs.FileMode = 0o700
+	privateFileMode fs.FileMode = 0o600
+)
+
+// localRoot is the directory a local store writes to.
+func (d StoreDestination) localRoot() (string, bool) {
+	root, ok := strings.CutPrefix(blobstore.Location(d.Store), blobstore.BackendLocal+"|")
+	return root, ok && root != ""
 }
 
 func (d StoreDestination) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
@@ -104,8 +151,8 @@ func (d StoreDestination) Delete(ctx context.Context, keys ...string) error {
 func (d StoreDestination) Probe(ctx context.Context) error { return d.Store.Probe(ctx) }
 
 func (d StoreDestination) FreeBytes(context.Context) (uint64, bool, error) {
-	root, ok := strings.CutPrefix(blobstore.Location(d.Store), blobstore.BackendLocal+"|")
-	if !ok || root == "" {
+	root, ok := d.localRoot()
+	if !ok {
 		return 0, false, nil
 	}
 	var st unix.Statfs_t
