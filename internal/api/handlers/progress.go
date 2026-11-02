@@ -183,6 +183,10 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 	return h.listProgressFrom(ctx, store, profileID, q)
 }
 
+// maxProgressRefillBatch caps one store read in ListProgressPage's refill
+// loop, and with it the IDs one access-filter query checks.
+const maxProgressRefillBatch = 1000
+
 // ListProgressPage is the keyset listing v2 listProgress serves: up to limit
 // rows the viewer may see, in the requested library, ordered by
 // (updated_at DESC, media_item_id DESC) and strictly after the key; the bool
@@ -197,17 +201,21 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 // row; because the store resumes strictly after that key, rows filtered out
 // between two emitted rows are simply re-read and re-dropped on the next
 // page, which costs a little work and never skips or repeats a match. The
-// loop is bounded by the profile's own progress rows (its personal data), a
-// set that stays small relative to the catalog.
+// loop is bounded by the profile's own progress rows (its personal data).
+// Rows the filters drop can still be most of them (removed titles, or IDs a
+// client wrote that never named a catalog item), so each refill doubles the
+// batch up to maxProgressRefillBatch: a long run of dropped rows costs a few
+// large queries, not a query pair per limit+1 rows.
 func (h *ProgressHandler) ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	want := limit + 1
+	size := want
 	matches := make([]userstore.WatchProgress, 0, want)
 	for len(matches) < want {
-		batch, err := store.ListProgressPage(ctx, profileID, status, after, want)
+		batch, err := store.ListProgressPage(ctx, profileID, status, after, size)
 		if err != nil {
 			return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		}
@@ -216,11 +224,12 @@ func (h *ProgressHandler) ListProgressPage(ctx context.Context, userID int, prof
 			return nil, false, err
 		}
 		matches = append(matches, kept...)
-		if len(batch) < want {
+		if len(batch) < size {
 			break
 		}
 		last := batch[len(batch)-1]
 		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+		size = max(want, min(size*2, maxProgressRefillBatch))
 	}
 	if len(matches) > limit {
 		return matches[:limit], true, nil

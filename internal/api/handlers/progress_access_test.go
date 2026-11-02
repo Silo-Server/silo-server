@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -52,13 +53,21 @@ func ids(entries []userstore.WatchProgress) []string {
 	return out
 }
 
+// pageProgressStore serves rows already in listing order, resuming after the
+// key's media item, and counts its reads.
 type pageProgressStore struct {
 	userstore.UserStore
-	rows []userstore.WatchProgress
+	rows  []userstore.WatchProgress
+	reads int
 }
 
-func (s *pageProgressStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
-	return s.rows, nil
+func (s *pageProgressStore) ListProgressPage(_ context.Context, _, _ string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	s.reads++
+	start := 0
+	if after != nil {
+		start = slices.IndexFunc(s.rows, func(r userstore.WatchProgress) bool { return r.MediaItemID == after.MediaItemID }) + 1
+	}
+	return s.rows[start:min(start+limit, len(s.rows))], nil
 }
 
 func (s *pageProgressStore) ForUser(context.Context, int) (userstore.UserStore, error) {
@@ -81,6 +90,32 @@ func TestListProgressPageDropsRemovedItemsForUnrestrictedViewer(t *testing.T) {
 	}
 	if !slices.Equal(ids(got), []string{"kept"}) || hasMore {
 		t.Fatalf("entries = %v has_more = %v, want [kept] false", ids(got), hasMore)
+	}
+}
+
+// A profile can hold many rows the filter drops ahead of its visible ones;
+// one page must still find the visible rows without a store read per
+// limit+1 dropped rows.
+func TestListProgressPageSkipsManyRemovedItemsInFewReads(t *testing.T) {
+	rows := make([]string, 0, 5002)
+	for i := range 5000 {
+		rows = append(rows, fmt.Sprintf("removed-%04d", i))
+	}
+	rows = append(rows, "kept-1", "kept-2")
+	store := &pageProgressStore{rows: entries(rows...)}
+	h := NewProgressHandler(store)
+	h.LibraryLookup = &fakeProgressLookup{accessible: map[string]bool{"kept-1": true, "kept-2": true}}
+	ctx := access.SetScope(t.Context(), access.Scope{})
+
+	got, hasMore, err := h.ListProgressPage(ctx, 1, "p", "in_progress", 0, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ids(got), []string{"kept-1"}) || !hasMore {
+		t.Fatalf("entries = %v has_more = %v, want [kept-1] true", ids(got), hasMore)
+	}
+	if store.reads > 15 {
+		t.Fatalf("store reads = %d, want at most 15 for 5000 dropped rows", store.reads)
 	}
 }
 
