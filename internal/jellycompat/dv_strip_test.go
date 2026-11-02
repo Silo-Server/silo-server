@@ -3,12 +3,14 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -551,5 +553,24 @@ func TestCompatDVStripIgnoresUnroutableNodes(t *testing.T) {
 
 	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
 		t.Fatal("an unhealthy or disabled node made the strip executable")
+	}
+}
+
+// Under a server cap too low for any encode, the capped pass never loads the
+// tone-map policy, so the check without the cap is the first to. A failed
+// lookup there leaves the HDR encode unknown, not impossible: the answer is
+// the same temporary 503 the negotiation loop gives, not NoCompatibleStream.
+func TestPlaybackInfoToneMapPolicyFailureWithoutCapIsTemporary(t *testing.T) {
+	version := hdr10PlusRangeTestVersion("HDR10")
+	version.Resolution, version.Bitrate = "1080p", 8_000
+	version.VideoTracks[0].Width, version.VideoTracks[0].Height = 1920, 1080
+	handler, routeID := newUnreadablePlaybackInfoHandler(t, version)
+	handler.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 50, MaxRemoteStreamBitrateKbps: 50}}
+	handler.SettingsRepo = stubSettingsReader{err: errors.New("settings store unavailable")}
+	body := `{"DeviceProfile":{"DirectPlayProfiles":[],"TranscodingProfiles":[{"Type":"Video","Container":"ts","Protocol":"hls","VideoCodec":"h264","AudioCodec":"aac"}]}}`
+
+	rec := servePlaybackInfo(handler, routeID, body)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "Tone-map policy is temporarily unavailable") {
+		t.Fatalf("status = %d, body = %s; want 503 for the unknown tone-map policy", rec.Code, rec.Body.String())
 	}
 }
