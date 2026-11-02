@@ -61,7 +61,7 @@ func (w watchedTitle) snapshot() Snapshot {
 		ReleaseDate: w.ReleaseDate, PosterPath: w.PosterPath, Certification: w.Certification, VoteAverage: w.VoteAverage}
 }
 
-func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner) ([]keyedEntry, error) {
+func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner, keep userdata.Keep) ([]keyedEntry, error) {
 	rows, err := tx.Query(ctx, sql, owner.UserID, owner.ProfileID)
 	if err != nil {
 		return nil, err
@@ -73,17 +73,20 @@ func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owne
 		if err := rows.Scan(&e.Item, &e.At); err != nil {
 			return nil, err
 		}
+		if !keep.Has(e.Item) {
+			continue
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
 }
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
-	favorites, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_favorites WHERE user_id = $1 AND profile_id = $2 ORDER BY added_at, media_item_id`, owner)
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
+	favorites, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_favorites WHERE user_id = $1 AND profile_id = $2 ORDER BY added_at, media_item_id`, owner, keep)
 	if err != nil {
 		return userdata.Export{}, fmt.Errorf("reading favorites: %w", err)
 	}
-	watchlist, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 ORDER BY sort_index NULLS LAST, added_at, media_item_id`, owner)
+	watchlist, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 ORDER BY sort_index NULLS LAST, added_at, media_item_id`, owner, keep)
 	if err != nil {
 		return userdata.Export{}, fmt.Errorf("reading the watchlist: %w", err)
 	}

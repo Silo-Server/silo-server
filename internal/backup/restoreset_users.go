@@ -436,7 +436,7 @@ func exportUser(ctx context.Context, tx pgx.Tx, account AccountEntry) (UserDocum
 		}
 		p.Data = map[string]json.RawMessage{}
 		for _, t := range userDataTypes {
-			exp, err := t.Export(ctx, tx, userdata.Owner{UserID: account.ID, ProfileID: p.ID})
+			exp, err := t.Export(ctx, tx, userdata.Owner{UserID: account.ID, ProfileID: p.ID}, nil)
 			if err != nil {
 				return doc, nil, &exportError{part: t.ID(), profile: p.ID, err: err}
 			}

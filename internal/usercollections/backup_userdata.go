@@ -92,7 +92,7 @@ var collectionTypes = func() map[string]bool {
 	return out
 }()
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT c.id, c.name, c.description, c.collection_type, c.is_shared, c.include_in_server_collections, c.query_definition::text,
 			COALESCE(c.display_query_definition::text, ''), c.sort_config::text, c.source_url, c.source_config::text, c.sync_schedule,
@@ -154,6 +154,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 		if err := rows.Scan(&id, &item); err != nil {
 			rows.Close()
 			return userdata.Export{}, err
+		}
+		if !keep.Has(item) {
+			continue
 		}
 		doc.Collections[index[id]].Items = append(doc.Collections[index[id]].Items, item)
 		items = append(items, item)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -100,8 +102,11 @@ func (t *ProfileTransfer) Capability() ProfileExportCapability {
 	return ProfileExportCapability{Format: ProfileExportFormat, Version: ProfileExportVersion, MaxImportBytes: MaxProfileImportBytes, DataTypes: UserDataTypeIDs()}
 }
 
-// Export writes the profile's data, read in one snapshot.
-func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID string) ([]byte, error) {
+// Export writes the profile's data, read in one snapshot, as the profile
+// may see it now: rows about titles its library access or maturity limits
+// hide are left out, as every other read of its data leaves them out.
+func (t *ProfileTransfer) Export(ctx context.Context, scope ProfileImportScope) ([]byte, error) {
+	userID, profileID := scope.UserID, scope.ProfileID
 	serverID, err := t.serverID(ctx)
 	if err != nil {
 		return nil, err
@@ -120,9 +125,14 @@ func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID stri
 	if err != nil {
 		return nil, err
 	}
+	owner := userdata.Owner{UserID: userID, ProfileID: profileID}
+	keep, err := exportVisibility(ctx, tx, owner, scope)
+	if err != nil {
+		return nil, err
+	}
 	var items []string
 	for _, dt := range userDataTypes {
-		exp, err := dt.Export(ctx, tx, userdata.Owner{UserID: userID, ProfileID: profileID})
+		exp, err := dt.Export(ctx, tx, owner, keep)
 		if err != nil {
 			return nil, fmt.Errorf("exporting %s: %w", dt.ID(), err)
 		}
@@ -135,8 +145,39 @@ func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID stri
 	return json.Marshal(doc)
 }
 
-// ProfileImportScope is the signed-in profile an import writes to, from the
-// session, and what it may see.
+// exportVisibility is the Keep of a profile's export: every item the
+// profile's data names, read in the export's snapshot, checked once against
+// the catalog visibility the importer applies (contentFilter). The data is
+// read twice, first to learn which items it names.
+func exportVisibility(ctx context.Context, tx pgx.Tx, owner userdata.Owner, scope ProfileImportScope) (userdata.Keep, error) {
+	var ids []string
+	for _, dt := range userDataTypes {
+		exp, err := dt.Export(ctx, tx, owner, nil)
+		if err != nil {
+			return nil, fmt.Errorf("exporting %s: %w", dt.ID(), err)
+		}
+		ids = append(ids, exp.Items...)
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, scope.AllowedLibraryIDs, nil, scope.Maturity)
+	if err != nil {
+		return nil, fmt.Errorf("checking access to items: %w", err)
+	}
+	// An id the catalog no longer holds hides nothing: no read can show it,
+	// and the export keeps the profile's own record of it for another server.
+	known, err := newItemResolver(ctx, tx, nil, ids)
+	if err != nil {
+		return nil, err
+	}
+	return func(id string) bool { return visible[id] || !known.present[id] }, nil
+}
+
+// ProfileImportScope is the signed-in profile an import writes to or an
+// export reads, from the session, and what it may see.
 type ProfileImportScope struct {
 	UserID    int
 	ProfileID string

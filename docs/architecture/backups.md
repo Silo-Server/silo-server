@@ -877,7 +877,12 @@ A signed-in profile downloads and imports its own data as a
 `format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
 data type's document, as in a user document), and `items`. It never holds
 account fields, password or PIN hashes, access fields, or allowed libraries.
-Personal collection posters are not carried.
+Personal collection posters are not carried. The export holds what the
+profile may see now, as every other read of its data does: rows about titles
+outside its libraries or above its content-rating or advisory limits are left
+out, and so are those titles' item references (`userdata.Keep`, checked once
+in the export's snapshot). A title the catalog no longer holds stays, since
+no read can show it. A server backup's user documents are not filtered.
 
 An import writes only the profile of the session, never one the document
 names, in one transaction, with the merge rules above. It refuses a document

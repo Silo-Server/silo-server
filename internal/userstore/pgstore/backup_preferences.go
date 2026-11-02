@@ -135,7 +135,7 @@ var restorableScopes = map[settingscontract.Scope]bool{
 	settingscontract.ScopeProfileLibrary: true, settingscontract.ScopeProfileSeries: true,
 }
 
-func (PreferencesBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (PreferencesBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	doc := preferencesDocument{Settings: []settingPreference{}, Audio: []audioPreference{}, Subtitles: []subtitlePreference{},
 		LibraryPlayback: []libraryPreference{}, SeriesPlayback: []seriesPreference{}, CollectionSort: []collectionSort{}}
 	var items []string
@@ -153,6 +153,9 @@ func (PreferencesBackupData) Export(ctx context.Context, tx pgx.Tx, owner userda
 		if err := rows.Scan(&s.Key, &s.Scope, &s.ClientFamily, &s.Library, &s.Series, &value); err != nil {
 			return err
 		}
+		if s.Series != "" && !keep.Has(s.Series) {
+			return nil
+		}
 		s.Value = json.RawMessage(value)
 		doc.Settings = append(doc.Settings, s)
 		if s.Series != "" {
@@ -163,7 +166,7 @@ func (PreferencesBackupData) Export(ctx context.Context, tx pgx.Tx, owner userda
 	if err != nil {
 		return userdata.Export{}, fmt.Errorf("reading setting values: %w", err)
 	}
-	if err := exportTrackPreferences(ctx, tx, owner, &doc, &items); err != nil {
+	if err := exportTrackPreferences(ctx, tx, owner, keep, &doc, &items); err != nil {
 		return userdata.Export{}, err
 	}
 	if doc.SectionOverrides, err = exportSectionOverrides(ctx, tx, owner); err != nil {
@@ -203,13 +206,16 @@ func (p profilePreferences) differing(other profilePreferences) []string {
 
 // exportTrackPreferences reads the per-series and per-library track and
 // quality choices and the collection sort orders.
-func exportTrackPreferences(ctx context.Context, tx pgx.Tx, owner userdata.Owner, doc *preferencesDocument, items *[]string) error {
+func exportTrackPreferences(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep, doc *preferencesDocument, items *[]string) error {
 	err := collectRows(ctx, tx, `SELECT series_id, audio_track_index, audio_language, audio_track_signature::text, updated_at
 		FROM user_audio_preferences WHERE user_id = $1 AND profile_id = $2 ORDER BY series_id`, owner, func(rows pgx.Rows) error {
 		var a audioPreference
 		var signature string
 		if err := rows.Scan(&a.Series, &a.TrackIndex, &a.Language, &signature, &a.UpdatedAt); err != nil {
 			return err
+		}
+		if !keep.Has(a.Series) {
+			return nil
 		}
 		a.Signature = json.RawMessage(signature)
 		doc.Audio = append(doc.Audio, a)
@@ -226,6 +232,9 @@ func exportTrackPreferences(ctx context.Context, tx pgx.Tx, owner userdata.Owner
 		var signature string
 		if err := rows.Scan(&s.Series, &s.Language, &s.TrackIndex, &s.ExternalPath, &s.Mode, &s.ShowForcedSubtitles, &signature, &s.UpdatedAt); err != nil {
 			return err
+		}
+		if !keep.Has(s.Series) {
+			return nil
 		}
 		s.Signature = json.RawMessage(signature)
 		doc.Subtitles = append(doc.Subtitles, s)
@@ -252,6 +261,9 @@ func exportTrackPreferences(ctx context.Context, tx pgx.Tx, owner userdata.Owner
 		var s seriesPreference
 		if err := rows.Scan(&s.Series, &s.Resolution, &s.HDR, &s.CodecVideo, &s.FileID, &s.EditionKey, &s.UpdatedAt); err != nil {
 			return err
+		}
+		if !keep.Has(s.Series) {
+			return nil
 		}
 		doc.SeriesPlayback = append(doc.SeriesPlayback, s)
 		*items = append(*items, s.Series)

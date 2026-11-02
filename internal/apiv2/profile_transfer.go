@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/backup"
 )
 
@@ -16,7 +17,7 @@ import (
 // data (docs/architecture/backups.md, "Profile export").
 type ProfileTransferService interface {
 	Capability() backup.ProfileExportCapability
-	Export(ctx context.Context, userID int, profileID string) ([]byte, error)
+	Export(ctx context.Context, scope backup.ProfileImportScope) ([]byte, error)
 	Import(ctx context.Context, scope backup.ProfileImportScope, data []byte) (*backup.ProfileImportResult, error)
 }
 
@@ -89,13 +90,19 @@ func registerProfileTransfer(reg *Registry) {
 		})
 
 	export := humaOp(http.MethodGet, Prefix+"/profile/export", "exportProfile", "profiles",
-		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences. It carries no account fields, password or PIN hashes, or access fields.")
+		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields.")
+	export.Errors = []int{http.StatusForbidden}
 	Register(reg, viewerOperation(export), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
 		svc := reg.deps.ProfileTransfer
 		if svc == nil {
 			return nil, unavailable("profile export")
 		}
-		data, err := svc.Export(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
+		// An export reads the profile's data as the profile may see it now.
+		scope, ok := scopeFrom(ctx)
+		if !ok || scope.ProfileID == "" || scope.ProfileID != profileFrom(ctx) {
+			return nil, NewProblem(TypeProfileVerificationRequired, "Choose a profile to export.")
+		}
+		data, err := svc.Export(ctx, profileTransferScope(claimsFrom(ctx).UserID, scope))
 		if err != nil {
 			return nil, profileTransferProblem(err)
 		}
@@ -125,11 +132,7 @@ func registerProfileTransfer(reg *Registry) {
 			if !scope.ProfileVerified || scope.PINVerificationSkipped {
 				return nil, NewProblem(TypeProfileVerificationRequired, "Importing into a PIN-protected profile requires entering its PIN.")
 			}
-			target := backup.ProfileImportScope{UserID: claimsFrom(ctx).UserID, ProfileID: scope.ProfileID, Maturity: scope.MaturityLimits}
-			if scope.LibrariesRestricted {
-				target.AllowedLibraryIDs = append(append([]int{}, scope.AllowedLibraryIDs...), scope.HiddenLibraryIDs...)
-			}
-			res, err := svc.Import(ctx, target, in.RawBody)
+			res, err := svc.Import(ctx, profileTransferScope(claimsFrom(ctx).UserID, scope), in.RawBody)
 			if err != nil {
 				return nil, profileTransferProblem(err)
 			}
@@ -154,4 +157,14 @@ func profileTransferProblem(err error) error {
 		return NewProblem(TypeValidationFailed, invalid.Error())
 	}
 	return serviceProblem(err)
+}
+
+// profileTransferScope is the acting profile and what it may see, for an
+// export or an import of its own data.
+func profileTransferScope(userID int, scope access.Scope) backup.ProfileImportScope {
+	out := backup.ProfileImportScope{UserID: userID, ProfileID: scope.ProfileID, Maturity: scope.MaturityLimits}
+	if scope.LibrariesRestricted {
+		out.AllowedLibraryIDs = append(append([]int{}, scope.AllowedLibraryIDs...), scope.HiddenLibraryIDs...)
+	}
+	return out
 }

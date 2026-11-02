@@ -17,8 +17,8 @@ func (f *fakeProfileTransfer) Capability() backup.ProfileExportCapability {
 	return backup.ProfileExportCapability{Format: backup.ProfileExportFormat, Version: 1, MaxImportBytes: 10, DataTypes: []string{"ratings"}}
 }
 
-func (f *fakeProfileTransfer) Export(_ context.Context, userID int, profileID string) ([]byte, error) {
-	f.exports = append(f.exports, profileID)
+func (f *fakeProfileTransfer) Export(_ context.Context, scope backup.ProfileImportScope) ([]byte, error) {
+	f.exports = append(f.exports, scope.ProfileID)
 	return []byte(`{"format":"silo-profile-export","version":1}`), nil
 }
 
