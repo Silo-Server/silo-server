@@ -8,7 +8,7 @@ support them: Simkl and watch-sync plugins that advertise `sync_dropped`.
 
 `user_dropped_series` holds one row per profile and dropped series, with the time it was
 dropped. A drop is **active** while no episode of the series has watch progress, or a
-history-hide stamp (mark unwatched, remove from history), newer than `dropped_at`. So
+history cutoff (mark unwatched, remove from history), newer than `dropped_at`. So
 watching any episode again undrops the series, whichever path recorded the watch, and no
 writer needs to know about drops. Clearing an episode's resume position is a progress write
 too, so like mark unwatched it ends the drop. Imported history keeps its original watch time, so

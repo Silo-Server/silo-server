@@ -118,11 +118,18 @@ func NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth int) string {
 type SourceKind string
 
 const (
-	SourcePQ        SourceKind = "pq"
-	SourceHLG       SourceKind = DynamicRangeHLG
-	SourceHLGBT709  SourceKind = "hlg_bt709"
-	SourceSDRBT709  SourceKind = "sdr_bt709"
-	SourceSDRBT2020 SourceKind = "sdr_bt2020"
+	SourcePQ SourceKind = "pq"
+	// SourcePQFullRange is a PQ BT.2020 signal whose stream is tagged full
+	// (pc) range. A container can tag a stream full range while its bitstream
+	// codes limited levels, so its graphs take the range from the decoded
+	// frames instead of declaring one. Only executors whose filter reads that
+	// range convert it; read as limited range, full-range shadows and
+	// highlights come out stretched.
+	SourcePQFullRange SourceKind = "pq_full_range"
+	SourceHLG         SourceKind = DynamicRangeHLG
+	SourceHLGBT709    SourceKind = "hlg_bt709"
+	SourceSDRBT709    SourceKind = "sdr_bt709"
+	SourceSDRBT2020   SourceKind = "sdr_bt2020"
 	// SourceDolbyVision is a Dolby Vision base layer that is not a standard
 	// signal on its own: Profile 5's IPTPQc2, or a compatibility id of 0. Only
 	// an executor that applies the stream's RPU reshaping can convert it; read
@@ -206,13 +213,21 @@ func NeedsToneMap(file *models.MediaFile) bool {
 	return false
 }
 
+// VideoRangeTypeIsHDR10Plus reports whether a stored video range type names
+// HDR10+. The scanner spells it "HDR10Plus" (also inside DOVIWithHDR10Plus);
+// "HDR10+" is accepted for values written by other tools.
+func VideoRangeTypeIsHDR10Plus(rangeType string) bool {
+	value := strings.ToLower(rangeType)
+	return strings.Contains(value, "hdr10plus") || strings.Contains(value, "hdr10+")
+}
+
 // DynamicRangeForVideoTrack derives a normalized dynamic-range label from the
 // scanner's Dolby Vision, HDR10+, transfer, and range metadata.
 func DynamicRangeForVideoTrack(track models.VideoTrack) string {
 	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
 		return DynamicRangeDolbyVision
 	}
-	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
+	if track.HDR10Plus || VideoRangeTypeIsHDR10Plus(track.VideoRangeType) {
 		return DynamicRangeHDR10Plus
 	}
 	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))
@@ -290,6 +305,12 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	}
 	if candidate == "" {
 		return SourceResolution{}
+	}
+	// Graphs for this kind trust the decoded frames' range, so the frames
+	// must prove they carry one.
+	if candidate == SourcePQ && rangeIsFull(normalizeColorValue(source.ColorRange)) {
+		candidate = SourcePQFullRange
+		preflight = true
 	}
 	complete, compatible := sourceMetadataCompatibility(candidate, source)
 	if !compatible || !complete {
@@ -370,7 +391,7 @@ func sourceMetadataCompatibility(kind SourceKind, source SourceMetadata) (comple
 		}
 	}
 	rangeValue := normalizeColorValue(source.ColorRange)
-	if rangeValue != "" && rangeValue != colorUnknown && rangeValue != colorUnspecified && !rangeIsLimited(rangeValue) {
+	if rangeValue != "" && rangeValue != colorUnknown && rangeValue != colorUnspecified && !colorRangeMatchesKind(kind, rangeValue) {
 		return complete, false
 	}
 	primaries := normalizeColorValue(source.ColorPrimaries)
@@ -406,7 +427,7 @@ func colorValueMatchesTransfer(kind SourceKind, value string) bool {
 		return true
 	}
 	switch kind {
-	case SourcePQ:
+	case SourcePQ, SourcePQFullRange:
 		return transferIsPQ(value)
 	case SourceHLG, SourceHLGBT709:
 		return transferIsHLG(value)
@@ -463,6 +484,21 @@ func rangeIsLimited(value string) bool {
 	return value == "tv" || value == "mpeg" || value == "limited"
 }
 
+// rangeIsFull recognizes FFmpeg's names for full-range video levels.
+func rangeIsFull(value string) bool {
+	return value == "pc" || value == "jpeg" || value == "full"
+}
+
+// colorRangeMatchesKind accepts either explicit range for SourcePQFullRange,
+// whose graphs read it from the frame, and requires limited range for every
+// other kind.
+func colorRangeMatchesKind(kind SourceKind, value string) bool {
+	if kind == SourcePQFullRange {
+		return rangeIsFull(value) || rangeIsLimited(value)
+	}
+	return rangeIsLimited(value)
+}
+
 // SourceTransfer returns the FFmpeg transfer characteristic for a source kind.
 func SourceTransfer(kind SourceKind) string {
 	if kind == SourceHLG || kind == SourceHLGBT709 {
@@ -510,12 +546,12 @@ func SoftwareUploadFilter(kind SourceKind) string {
 
 // AllSourceKinds returns every base signal supported by capability probes.
 func AllSourceKinds() []SourceKind {
-	return append(StandardSourceKinds(), SourceDolbyVision)
+	return append(StandardSourceKinds(), SourcePQFullRange, SourceDolbyVision)
 }
 
 // StandardSourceKinds returns the base signals every executor class converts.
-// SourceDolbyVision is left out: only some executors apply the RPU, so its
-// absence does not make an inventory incomplete.
+// SourcePQFullRange and SourceDolbyVision are left out: only some filters
+// convert them, so their absence does not make every inventory incomplete.
 func StandardSourceKinds() []SourceKind {
 	return []SourceKind{SourcePQ, SourceHLG, SourceHLGBT709, SourceSDRBT709, SourceSDRBT2020}
 }
@@ -530,6 +566,15 @@ func FilterAppliesDolbyVision(filter string) bool {
 		return true
 	}
 	return false
+}
+
+// FilterConvertsFullRange reports whether a probed tone-map filter reads each
+// frame's range, the only safe way to convert SourcePQFullRange. The software
+// graphs' zscale and Jellyfin FFmpeg's tonemapx do. The hardware filters stay
+// off until each is shown to convert a full-range source to the same picture
+// as its limited-range copy.
+func FilterConvertsFullRange(filter string) bool {
+	return filter == SoftwareFilterBT2390 || filter == SoftwareFilterHable
 }
 
 // dolbyVisionOption makes RPU application explicit on SourceDolbyVision
@@ -616,9 +661,13 @@ func (c Capabilities) PreferredMode(policy Policy, kind SourceKind) Mode {
 // SourceParameters builds the FFmpeg setparams stage that declares the input
 // base signal before conversion. SourceDolbyVision is declared as the PQ
 // BT.2020 signal its RPU reshapes to; the RPU, not these tags, drives the
-// conversion.
+// conversion. SourcePQFullRange keeps each frame's own range.
 func SourceParameters(kind SourceKind) string {
-	return "setparams=range=tv:color_primaries=" + SourcePrimaries(kind) + ":color_trc=" + SourceTransfer(kind) + ":colorspace=" + SourceMatrix(kind)
+	rangeParameter := "range=tv:"
+	if kind == SourcePQFullRange {
+		rangeParameter = ""
+	}
+	return "setparams=" + rangeParameter + "color_primaries=" + SourcePrimaries(kind) + ":color_trc=" + SourceTransfer(kind) + ":colorspace=" + SourceMatrix(kind)
 }
 
 // SoftwareFilter builds the complete software conversion graph for a source

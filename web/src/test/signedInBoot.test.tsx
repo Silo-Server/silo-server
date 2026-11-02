@@ -7,6 +7,7 @@ import adminAccountImpersonate from "../../../contracts/api/v2/fixtures/admin_ac
 import eventsSocketTicket from "../../../contracts/api/v2/fixtures/events_socket_ticket.json";
 import getCurrentUserOk from "../../../contracts/api/v2/fixtures/get_current_user_ok.json";
 import getHomeLayoutOk from "../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
+import getImageCapabilitiesOk from "../../../contracts/api/v2/fixtures/get_image_capabilities_ok.json";
 import getSettingsContractCapabilitiesOk from "../../../contracts/api/v2/fixtures/get_settings_contract_capabilities_ok.json";
 import listEffectiveSettingsOk from "../../../contracts/api/v2/fixtures/list_effective_settings_ok.json";
 import listFavoritesOk from "../../../contracts/api/v2/fixtures/list_favorites_ok.json";
@@ -116,6 +117,7 @@ function serverRoutes() {
     "GET /api/v2/favorites": { body: listFavoritesOk },
     "GET /api/v2/user/libraries": { body: userLibraries },
     "GET /api/v2/home/layout": { body: getHomeLayoutOk },
+    "GET /api/v2/images/capabilities": { body: getImageCapabilitiesOk },
     "GET /api/v2/onboarding/state": {
       body: { tour_id: "welcome", done: true },
       headers: { ETag: '"onboarding-1"' },
@@ -216,12 +218,22 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 13,
+      // Includes the speed test schedule's capabilities read, which keeps the
+      // connection reading current for a playback start in the first seconds,
+      // and the images capability read, which sizes artwork requests.
+      total: 15,
     });
     // Home starts loading as soon as the token is back, beside the account read.
     const waveOf = (operation: string) =>
       server.requests.find((request) => request.operation?.startsWith(operation))?.wave;
     expect(waveOf("GET /api/v2/home/layout"), log).toBe(waveOf("GET /api/v2/account/me"));
+    // The connection reading and the artwork sizes never hold up the first screen.
+    expect(waveOf("GET /api/v2/playback/capabilities")!, log).toBeGreaterThan(
+      waveOf("GET /api/v2/home/layout")!,
+    );
+    expect(waveOf("GET /api/v2/images/capabilities")!, log).toBeGreaterThan(
+      waveOf("GET /api/v2/home/layout")!,
+    );
     // The session restore starts beside the public setup reads, not after them.
     expect(
       server.requests.filter((request) => request.wave === 1).map((request) => request.operation),
@@ -268,6 +280,8 @@ describe("app boot request budget", () => {
     signInReturningOwner();
     await boot(server);
     expect(screen.getByTestId("home"), describeRequests(server.requests)).toBeInTheDocument();
+    // A connection speed reading the session kept for playback starts.
+    storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, '{"readings":[],"writtenAt":0}');
 
     server.revokeSessions();
     await act(async () => {
@@ -280,6 +294,8 @@ describe("app boot request budget", () => {
     expect(screen.queryByTestId("home"), log).not.toBeInTheDocument();
     expect(appRouter!.state.location.pathname, log).toBe("/login");
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+    // A reading from before a sign-out goes with it.
+    expect(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE)).toBeNull();
     // One refused refresh is shared; nothing retries the rejected session.
     const refusedRefreshes = server.requests.filter(
       (request) => request.operation === "POST /api/v2/auth/refresh" && request.status === 401,
@@ -437,13 +453,10 @@ describe("app boot request budget", () => {
     signInReturningOwner();
     await boot(server);
     const bootRequests = server.requests.length;
-    // The bandwidth probe runs on its own timer whatever the tab does.
-    const sinceBoot = () =>
-      server.requests
-        .slice(bootRequests)
-        .filter((request) => request.operation !== "GET /api/v2/playback/bandwidth-probe");
+    const sinceBoot = () => server.requests.slice(bootRequests);
 
-    // A quick switch keeps the events socket open, so the cache is still current.
+    // A quick switch keeps the events socket open, so the cache is still current,
+    // and leaves the tab on the network whose speed it already read.
     await switchTabAway(server, 5_000);
     expect(describeRequests(sinceBoot())).toBe("");
 

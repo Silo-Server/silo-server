@@ -150,3 +150,10 @@ refused in vote rooms; the host switches to host picks first.
 
 The frozen v1 promotion route retains its winner-only gate and rejects
 promotion before any votes are cast.
+
+A room holds at most `maxRoomSuggestions` (200) suggestions. Every create,
+vote and unvote reloads and broadcasts the whole list, so the cap bounds what
+one small request costs. Both create paths (v1 `CreateSuggestion`, v2
+`CreateSuggestionOnce`) count the room's rows after locking its
+`watch_together_rooms` row `FOR UPDATE`, which keeps the cap exact when
+API servers create concurrently.

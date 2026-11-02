@@ -30,6 +30,8 @@ type fakeStore struct {
 	createEventErr error
 	deliveries     []WebhookDelivery
 	retried        []WebhookDelivery
+	retryDelays    []time.Duration // delay of each RetryWebhookDelivery call
+	retryMessages  []string        // last_error of each RetryWebhookDelivery call
 	completed      []int64
 	webhookErrors  map[string]string
 }
@@ -111,7 +113,9 @@ func (f *fakeStore) CompleteWebhookDelivery(_ context.Context, id int64, _ strin
 	f.completed = append(f.completed, id)
 	return nil
 }
-func (f *fakeStore) RetryWebhookDelivery(_ context.Context, id int64, lockedBy string, _ time.Duration, _ string) error {
+func (f *fakeStore) RetryWebhookDelivery(_ context.Context, id int64, lockedBy string, delay time.Duration, msg string) error {
+	f.retryDelays = append(f.retryDelays, delay)
+	f.retryMessages = append(f.retryMessages, msg)
 	for _, delivery := range f.deliveries {
 		if delivery.ID == id {
 			delivery.LockedBy = lockedBy
@@ -266,6 +270,10 @@ func (fakeResolver) ResolveVanishedPath(_ context.Context, path, trigger string)
 	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: scope, Trigger: trigger}, nil
 }
 
+func (r fakeResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
+}
+
 type distinctFolderResolver struct{}
 
 func (distinctFolderResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
@@ -302,6 +310,10 @@ func (distinctFolderResolver) ResolveVanishedPath(_ context.Context, path, trigg
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
+func (r distinctFolderResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
+}
+
 // unresolvableResolver treats every path as outside Silo's media folders,
 // returning a RequestError — the "none resolved → misconfiguration" signal.
 type unresolvableResolver struct{}
@@ -314,6 +326,10 @@ func (unresolvableResolver) ResolveMissingSubtree(context.Context, string, strin
 }
 func (unresolvableResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
+func (r unresolvableResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
 }
 
 // mixedTransientResolver resolves /mnt/media/ paths normally and fails every
@@ -334,6 +350,10 @@ func (mixedTransientResolver) ResolveVanishedPath(context.Context, string, strin
 	return nil, errors.New("listing folders: connection timeout")
 }
 
+func (r mixedTransientResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
+}
+
 // transientFailureResolver fails every resolve with a plain (non-RequestError)
 // error, simulating an internal fault such as a database timeout.
 type transientFailureResolver struct{}
@@ -346,6 +366,10 @@ func (transientFailureResolver) ResolveMissingSubtree(context.Context, string, s
 }
 func (transientFailureResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
 	return nil, errors.New("listing folders: connection timeout")
+}
+
+func (r transientFailureResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
 }
 
 // denySuppressor resolves paths normally but denies every claim, simulating a

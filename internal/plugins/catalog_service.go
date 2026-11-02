@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -186,14 +187,8 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 	}
 	slices.SortFunc(entries, func(left, right CatalogEntry) int {
 		if left.Manifest.GetPluginId() == right.Manifest.GetPluginId() {
-			switch {
-			case left.Manifest.GetVersion() < right.Manifest.GetVersion():
-				return -1
-			case left.Manifest.GetVersion() > right.Manifest.GetVersion():
-				return 1
-			default:
-				return 0
-			}
+			leftVersion, rightVersion := left.Manifest.GetVersion(), right.Manifest.GetVersion()
+			return cmp.Or(compareVersions(leftVersion, rightVersion), strings.Compare(leftVersion, rightVersion))
 		}
 		switch {
 		case left.Manifest.GetPluginId() < right.Manifest.GetPluginId():

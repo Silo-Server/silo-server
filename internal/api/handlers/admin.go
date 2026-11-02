@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -173,6 +175,10 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// BeforeServerSettingCommit runs inside the settings transaction for each
+	// setting whose effective value changes. An error rolls the save back. tx
+	// is nil when the settings store has no transactional update.
+	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
 	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
 	// Deleting an account drops its entries through the users foreign key,
 	// which can leave such titles behind. Nil skips the sweep.
@@ -182,6 +188,11 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// ProfileAvatars resolves the avatar on admin profile listings the way
+	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
+	ProfileAvatars interface {
+		ResolveAvatar(ctx context.Context, ref string) (source, url string)
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -515,21 +526,12 @@ func validateStreamLimits(maxStreams, maxTranscodes *int) error {
 	return nil
 }
 
-// actorIsScopedAPIKey reports whether the request is authenticated by an API
-// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
-// an unscoped key already acts with its owner's full authority, and a JWT
-// actor is the admin themselves.
-func actorIsScopedAPIKey(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && len(claims.APIKeyScopes) > 0
-}
-
 // rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
 // account, which it could then log into for an unscoped session. Provisioning
 // ordinary accounts — password included — stays in scope. It reports whether
 // it wrote a response.
 func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
-	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
+	if !apimw.IsScopedAPIKey(r.Context()) || role != roleAdmin {
 		return false
 	}
 	writeError(w, http.StatusForbidden, "insufficient_scope",
@@ -542,7 +544,7 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 // the administrator's password and obtain an unrestricted login session.
 // Callers check the account locked by the mutation transaction.
 func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
-	if !actorIsScopedAPIKey(ctx) {
+	if !apimw.IsScopedAPIKey(ctx) {
 		return nil
 	}
 	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
@@ -565,7 +567,7 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	id int,
 	req *updateUserRequest,
 ) (*models.User, bool) {
-	if !actorIsScopedAPIKey(r.Context()) {
+	if !apimw.IsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
 	target, blocked := h.loadTargetUser(w, r, id)
@@ -707,10 +709,9 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT user_id, MAX("timestamp") AS last_active_at
-		FROM activity_log
-		WHERE user_id = ANY($1::bigint[])
-		GROUP BY user_id`, userIDs)
+		SELECT user_id, last_active_at
+		FROM user_last_activity
+		WHERE user_id = ANY($1::bigint[])`, userIDs)
 	if err != nil {
 		return lastActive, fmt.Errorf("loading user last activity: %w", err)
 	}
@@ -941,6 +942,10 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
 			return
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			writeAPIError(w, apiErr)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
 		return
 	}
@@ -1089,6 +1094,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
 		case auth.IsDuplicate(err):
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+		case errors.Is(err, passwordhash.ErrBusy):
+			writeAPIError(w, busyError(err))
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		}
@@ -1754,8 +1761,13 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
+// The server generates the signing keys itself. An administrator who could set
+// one could mint tokens for any account, the Owner included, after a restart.
 var machineManagedSettingKeys = map[string]bool{
+	"auth.jwt_secret":                           true,
+	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
+	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	config.MediaImageSweepCheckpointKey:         true,
@@ -2345,7 +2357,7 @@ func (h *AdminHandler) normalizeBatchSetting(
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2433,6 +2445,8 @@ var adminSettingDependencyGroups = [][]string{
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
 	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
+	// A provider binding is checked against the registry it names.
+	append([]string{config.AIProvidersSettingKey}, config.AIProviderBindingKeys()...),
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -2618,6 +2632,13 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
 }
 
+func (h *AdminHandler) beforeServerSettingCommit(ctx context.Context, tx pgx.Tx, key, value string) error {
+	if h.BeforeServerSettingCommit == nil {
+		return nil
+	}
+	return h.BeforeServerSettingCommit(ctx, tx, key, value)
+}
+
 // HandleUpdateSettings handles PUT /admin/settings. Every requested value is
 // normalized and validated with the prospective values it depends on before
 // SetMany performs one transaction, so a multi-field save is all-or-nothing.
@@ -2762,6 +2783,14 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 					effectiveChanges[key] = true
 				}
 			}
+			for _, key := range keys {
+				if !effectiveChanges[key] {
+					continue
+				}
+				if err := h.beforeServerSettingCommit(ctx, tx, key, after[key]); err != nil {
+					return nil, err
+				}
+			}
 			if guard != nil {
 				committed := maps.Clone(stored)
 				maps.Copy(committed, writes)
@@ -2892,7 +2921,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {
@@ -3121,7 +3150,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
+			// A provider binding is checked against the registry the dependency
+			// group pulls in, as the batch write does.
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey ||
+				slices.Contains(config.AIProviderBindingKeys(), key) {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
@@ -3163,6 +3195,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				return nil, err
 			}
 			effectiveChanged = before[key] != after[key]
+			if effectiveChanged {
+				if err := h.beforeServerSettingCommit(ctx, tx, key, after[key]); err != nil {
+					return nil, err
+				}
+			}
 			if shouldPersistAdminSetting(stored, key, row, effectiveChanged) {
 				return map[string]string{key: row}, nil
 			}

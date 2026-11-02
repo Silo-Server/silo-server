@@ -69,7 +69,8 @@
             "android",
             "android-tv",
             "ios",
-            "tvos"
+            "tvos",
+            "roku"
           ],
           "maxLength": 32
         },

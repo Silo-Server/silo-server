@@ -23,7 +23,7 @@ interface SubtitleTranslateModalProps {
   translateEnabled?: boolean;
   transcribeEnabled?: boolean;
   isOpen: boolean;
-  onSubtitleJobAccepted?: (jobId: string) => void;
+  onSubtitleJobAccepted?: (jobId: string, resultSubtitleId?: string) => void;
   sessionId?: string;
   getStartPosition?: () => number;
   onClose: () => void;
@@ -233,8 +233,14 @@ export function SubtitleTranslateModal({
       ) {
         throw new Error("Subtitle processing returned an invalid job.");
       }
-      onSubtitleJobAccepted?.(res.job.id);
-      if (!res.live_delivery_attached) {
+      // A request the server had already finished returns the completed job;
+      // its stored track is selected directly, with no job left to report.
+      const reusedSubtitleId =
+        res.job.status === "completed" ? (res.job.result_subtitle_id ?? undefined) : undefined;
+      onSubtitleJobAccepted?.(res.job.id, reusedSubtitleId);
+      if (reusedSubtitleId) {
+        toast.info("These subtitles were already created, so the saved track is selected.");
+      } else if (!res.live_delivery_attached) {
         toast.info("Your subtitle job is underway. The track will appear when it's ready.");
       }
       handleClose();

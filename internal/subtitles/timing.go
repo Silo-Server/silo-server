@@ -342,6 +342,11 @@ func assEventBody(line []byte) (body []byte, displayed, ok bool) {
 // comma-terminated fields of body and the offset just past the n-th comma, or
 // nil when body has fewer than n commas. Later commas (in Text) are not split.
 func assFieldSpans(body []byte, n int) ([][2]int, int) {
+	// n comes from the file's Format line; check the line has enough commas
+	// before allocating so a huge Format cannot cost an n-sized slice per event.
+	if bytes.Count(body, []byte{','}) < n {
+		return nil, 0
+	}
 	spans := make([][2]int, 0, n)
 	pos := 0
 	for len(spans) < n {

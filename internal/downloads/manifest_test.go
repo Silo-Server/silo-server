@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -151,8 +152,9 @@ func TestManifestBuilderAssembles(t *testing.T) {
 		t.Fatalf("downloaded subtitle = %+v", m.Subtitles[1])
 	}
 	// A sidecar that cannot be read has no revision; a downloaded subtitle's
-	// is its row's, since its bytes change with timing.
-	if m.Subtitles[0].Revision != "" || m.Subtitles[1].Revision != "4" {
+	// is its delivery revision, which follows the row's, since its bytes
+	// change with timing.
+	if m.Subtitles[0].Revision != "" || m.Subtitles[1].Revision != "4-utf8" {
 		t.Fatalf("subtitle revisions = %q, %q", m.Subtitles[0].Revision, m.Subtitles[1].Revision)
 	}
 	if m.StableIdentity.ProviderIDs["imdb"] != "tt123" || m.StableIdentity.ProviderIDs["tmdb"] != "456" {
@@ -401,14 +403,32 @@ func TestServeEmbeddedSubtitleOnlyServesSidecarTracks(t *testing.T) {
 			t.Fatalf("ordinal %d err = %v, want ErrAssetNotFound", ordinal, err)
 		}
 	}
-	// A failed PGS extract after the shared cache committed its 200 must abort
-	// the response rather than end it as a complete track.
-	defer func() {
-		if rec := recover(); rec != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
-			t.Fatalf("failed committed extract recovered %v, want http.ErrAbortHandler", rec)
-		}
-	}()
-	_ = s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, 1)
+	for _, payload := range []string{"", "PGS"} {
+		t.Run(map[bool]string{false: "before output", true: "after output"}[payload != ""], func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf '"+payload+"'\nexit 1\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			s.artifacts = &ArtifactManager{liveCfg: func() *config.Config {
+				return &config.Config{Playback: config.PlaybackConfig{FFmpegPath: ffmpeg}}
+			}}
+			w := httptest.NewRecorder()
+			w.Code = 0 // Distinguish an uncommitted response from an implicit 200.
+			var recovered any
+			var err error
+			func() {
+				defer func() { recovered = recover() }()
+				err = s.serveEmbeddedSubtitle(w, req, dl, 1)
+			}()
+			if payload == "" {
+				if recovered != nil || err == nil || w.Code != 0 || w.Body.Len() != 0 {
+					t.Fatalf("before output: recovered %v, err %v, status %d, bytes %d", recovered, err, w.Code, w.Body.Len())
+				}
+			} else if recovered != http.ErrAbortHandler || w.Code != http.StatusOK || w.Body.String() != payload { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("after output: recovered %v, status %d, body %q", recovered, w.Code, w.Body.String())
+			}
+		})
+	}
 }
 
 func TestManifestNamesTheSeriesPosterForEpisodes(t *testing.T) {
@@ -510,7 +530,7 @@ func TestServeDownloadedSubtitleTimingAndRevalidation(t *testing.T) {
 	if rr.Code != http.StatusOK || rr.Body.String() != "1\n00:00:01,500 --> 00:00:02,500\nHello\n" {
 		t.Fatalf("GET = %d %q", rr.Code, rr.Body.String())
 	}
-	if etag != `"downloaded-7-3"` || rr.Header().Get("Cache-Control") != "private, no-cache" {
+	if etag != `"downloaded-7-3-utf8"` || rr.Header().Get("Cache-Control") != "private, no-cache" {
 		t.Fatalf("headers = %v", rr.Header())
 	}
 
@@ -535,7 +555,7 @@ func TestServeDownloadedSubtitleTimingAndRevalidation(t *testing.T) {
 	if err := serveDownloadedSubtitle(rr, req, &changed, []byte(stored)); err != nil {
 		t.Fatal(err)
 	}
-	if rr.Code != http.StatusOK || rr.Body.String() != stored || rr.Header().Get("ETag") != `"downloaded-7-4"` {
+	if rr.Code != http.StatusOK || rr.Body.String() != stored || rr.Header().Get("ETag") != `"downloaded-7-4-utf8"` {
 		t.Fatalf("stale validator = %d %q %q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
 	}
 }
@@ -568,7 +588,7 @@ func TestSidecarSubtitleTimingAndRevision(t *testing.T) {
 
 	s := &Service{externalTimings: timings}
 	rr := httptest.NewRecorder()
-	if err := s.serveExternalSubtitle(context.Background(), rr, httptest.NewRequest(http.MethodGet, "/", nil), 99, "srt", []byte(onDisk)); err != nil {
+	if err := s.serveExternalSubtitle(context.Background(), rr, httptest.NewRequest(http.MethodGet, "/", nil), 99, "srt", "", []byte(onDisk)); err != nil {
 		t.Fatal(err)
 	}
 	etag := rr.Header().Get("ETag")
@@ -578,7 +598,7 @@ func TestSidecarSubtitleTimingAndRevision(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("If-None-Match", etag)
 	rr = httptest.NewRecorder()
-	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", []byte(onDisk)); err != nil {
+	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", "", []byte(onDisk)); err != nil {
 		t.Fatal(err)
 	}
 	if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 {
@@ -588,7 +608,7 @@ func TestSidecarSubtitleTimingAndRevision(t *testing.T) {
 	// A new correction changes the revision, so the old validator misses.
 	timings[sha] = &subtitles.ExternalTiming{Timing: subtitles.Timing{Scale: 1}, Revision: 3}
 	rr = httptest.NewRecorder()
-	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", []byte(onDisk)); err != nil {
+	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", "", []byte(onDisk)); err != nil {
 		t.Fatal(err)
 	}
 	if rr.Code != http.StatusOK || rr.Body.String() != onDisk {

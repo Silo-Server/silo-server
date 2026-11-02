@@ -27,8 +27,15 @@ const (
 	adminTopActivityMaxLimit     = 25
 )
 
-// adminTopActivityWatchSourceFilter keeps only history written by playback on
-// this server, so the leaderboards count what people actually played here.
+// adminTopActivityPlayFilter keeps only history written by playback on this
+// server that reached the watched threshold, so the leaderboards count what
+// people actually finished here.
+//
+// Every playback stop writes its own row, so a title watched in ten sittings
+// has ten rows and only the last is completed. Counting completed rows makes
+// that one play, as the per-item play counts do; the time spent in the other
+// sittings still shows in total_seconds.
+//
 // Playback from Silo and Jellyfin clients both writes `playback` rows.
 // Marking something watched is not a play: `manual` rows (Silo clients) and
 // `jellycompat` rows (Jellyfin clients) are all marks, and marking a series
@@ -36,7 +43,7 @@ const (
 // known providers because plugin watch providers store their own arbitrary
 // keys in `source` — a denylist would silently count any newly installed
 // provider's imported backlog as local plays.
-const adminTopActivityWatchSourceFilter = `COALESCE(h.source, 'legacy') IN ('legacy', 'playback')`
+const adminTopActivityPlayFilter = `h.completed AND COALESCE(h.source, 'legacy') IN ('legacy', 'playback')`
 
 // adminTopActivityQuerier is the part of a pool or transaction the
 // leaderboard queries use.
@@ -210,9 +217,9 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 	// Episodes roll up to their series: a season binge should read as one show,
 	// not twelve one-play entries.
 	//
-	// Plays come from user_watch_history playback rows (marks are excluded,
-	// see adminTopActivityWatchSourceFilter), while total_seconds is watched
-	// time summed from finalized playback sessions —
+	// Plays come from completed user_watch_history playback rows (marks and
+	// unfinished sittings are excluded, see adminTopActivityPlayFilter), while
+	// total_seconds is watched time summed from finalized playback sessions —
 	// user_watch_history.duration_seconds is the media's full runtime, so
 	// summing it would report three hours for a movie someone abandoned after
 	// a minute. Sessions are windowed on ended_at
@@ -220,11 +227,8 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 	// before the cutoff but stopped inside the window counts toward both plays
 	// and watch time rather than only the former.
 	//
-	// watched_seconds records the final absolute position, not elapsed viewing
-	// time, so a session resumed at the one-hour mark would claim the first
-	// hour again; each session's contribution is therefore capped at its
-	// wall-clock length. Still an estimate — recording true elapsed playback
-	// needs a session start position, which does not exist yet.
+	// Each session contributes its measured watch time, or the capped estimate
+	// for rows recorded before measurement (see adminPlaybackWatchTimeSQL).
 	//
 	// The ranking is computed and limited first so the title lookup and the
 	// watched-seconds aggregate only run over the rows that survive.
@@ -236,15 +240,14 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 			FROM user_watch_history h
 			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
 			WHERE h.watched_at >= now() - make_interval(days => $1)
-			  AND `+adminTopActivityWatchSourceFilter+`
+			  AND `+adminTopActivityPlayFilter+`
 			GROUP BY 1
 			ORDER BY plays DESC, item_id
 			LIMIT $2
 		),
 		watched AS (
 			SELECT COALESCE(ep.series_id, p.media_item_id) AS item_id,
-			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
-			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
+			       SUM(`+adminPlaybackWatchTimeSQL("p")+`) AS total_seconds
 			FROM admin_playback_history p
 			LEFT JOIN episodes ep ON ep.content_id = p.media_item_id
 			WHERE p.ended_at >= now() - make_interval(days => $1)
@@ -301,7 +304,7 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 			       COUNT(*)::bigint AS plays
 			FROM user_watch_history h
 			WHERE h.watched_at >= now() - make_interval(days => $1)
-			  AND `+adminTopActivityWatchSourceFilter+`
+			  AND `+adminTopActivityPlayFilter+`
 			GROUP BY 1, 2
 			ORDER BY plays DESC, h.user_id, h.profile_id
 			LIMIT $2
@@ -309,8 +312,7 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 		watched AS (
 			SELECT p.user_id,
 			       p.profile_id,
-			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
-			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
+			       SUM(`+adminPlaybackWatchTimeSQL("p")+`) AS total_seconds
 			FROM admin_playback_history p
 			WHERE p.ended_at >= now() - make_interval(days => $1)
 			  AND EXISTS (

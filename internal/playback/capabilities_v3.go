@@ -49,11 +49,9 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.Width = track.Width
 		source.Height = track.Height
 		source.FrameRate = parseFrameRateV3(track.FrameRate)
-		if track.Bitrate > 0 {
-			source.BitrateKbps = normalizeBitrateKbpsV3(track.Bitrate)
-		}
+		source.BitrateKbps = SourceVideoKbps(file.Bitrate, track.Bitrate)
 		source.DynamicRange = normalizeDynamicRangeV3(track)
-		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
+		source.HDR10Plus = track.HDR10Plus || tonemap.VideoRangeTypeIsHDR10Plus(track.VideoRangeType)
 		source.DVProfile = track.DVProfile
 		if track.DVLevel >= 1 && track.DVLevel <= 13 {
 			source.DVLevel = track.DVLevel
@@ -120,6 +118,8 @@ const h264BaselineProfileV3 = "baseline"
 // result reports that the route was blocked by insufficient evidence for the
 // tier — the client claims the codec in its flat lists but the tier's
 // validation could not confirm the stream — rather than by device facts.
+// An exact decoder's frame rate may trade against its size up to
+// maxTradedFrameRateV3 (see decoderTakesFrameV3).
 func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, bool) {
 	if !routeVideoMetadataCompleteV3(source) {
 		return false, false
@@ -130,8 +130,23 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	case EvidenceDeclaredV3:
 		// Boolean support statements: copy routes are granted on a flat codec
 		// match (container and dynamic range are gated separately by the
-		// planner); there is no stricter validation to run.
-		return flatClaims, false
+		// planner). A declared decode entry can only narrow that claim: the
+		// web names the bit depths its codec probes accepted, so a browser
+		// that refuses H.264 High 10 is not handed a 10-bit copy.
+		if !flatClaims {
+			return false, false
+		}
+		named := false
+		for _, capability := range request.Capabilities.VideoDecode {
+			if !strings.EqualFold(capability.Codec, source.VideoCodec) {
+				continue
+			}
+			named = true
+			if videoDecodeTakesSourceV3(capability, source, false, false) {
+				return true, false
+			}
+		}
+		return !named, false
 	case EvidenceExactV3, EvidencePlatformAttestedV3:
 		softwareDecodeOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 		matchedCodec := false
@@ -142,21 +157,16 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 			}
 			matchedCodec = true
 			skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3 && capability.Hardware
-			if !skipProfileLevel {
-				if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
-					continue
-				}
-				if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
-					continue
-				}
+			// Only an exact entry reports a rate measured at its largest size;
+			// a platform-attested entry is a fixed, tested envelope. Android
+			// also caps a smaller frame's rate by the codec's overall
+			// frame-rate range, which the entry does not report, so the trade
+			// stops at maxTradedFrameRateV3.
+			rateAtMaxSize := request.Capabilities.VideoEvidence == EvidenceExactV3 &&
+				source.FrameRate <= maxTradedFrameRateV3+0.01
+			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel, rateAtMaxSize) {
+				return true, false
 			}
-			if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
-				continue
-			}
-			if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps {
-				continue
-			}
-			return true, false
 		}
 		// A flat-list claim with no validating decode entry means the tier's
 		// evidence could not confirm the stream, not that the device refused
@@ -165,6 +175,61 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	default:
 		return false, false
 	}
+}
+
+// videoDecodeTakesSourceV3 reports whether one decode entry's bounds admit
+// the source. An omitted bound is unconstrained. rateAtMaxSize lets the
+// source trade frame rate against size as decoderTakesFrameV3 describes;
+// otherwise the entry's rate is absolute.
+func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel, rateAtMaxSize bool) bool {
+	if !skipProfileLevel {
+		if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
+			return false
+		}
+		if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
+			return false
+		}
+	}
+	if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
+		return false
+	}
+	return decoderTakesFrameV3(capability, source.Width, source.Height, source.FrameRate, rateAtMaxSize) &&
+		(capability.MaxBitrateKbps <= 0 || source.BitrateKbps <= capability.MaxBitrateKbps)
+}
+
+// maxTradedFrameRateV3 is the highest source frame rate a copy route admits
+// by trading an exact decoder's rate against its size. It covers the 50 and
+// 60 fps sources the trade is for without assuming a frame-rate range the
+// decoder never reported.
+const maxTradedFrameRateV3 = 60
+
+// decoderTakesFrameRateV3 reports whether a decoder takes a frame rate at its
+// largest size; an unknown rate or limit always passes.
+func decoderTakesFrameRateV3(decoder VideoDecodeCapabilityV3, frameRate float64) bool {
+	return decoder.MaxFrameRate <= 0 || frameRate <= decoder.MaxFrameRate+0.01
+}
+
+// decoderTakesFrameV3 reports whether a decoder takes width x height video at
+// frameRate. The maximum width and height always bind. With rateAtMaxSize the
+// reported rate holds at the decoder's largest size (Android derives it
+// there), so a smaller frame may run faster within the same macroblock rate,
+// counted in 16x16 macroblocks as Android's performance points are: a 4K30
+// decoder takes 1080p60 but not 1080p120, and a 1080p30 one takes 720p60 but
+// not 1080p60. Otherwise, or without both sizes, the rate is absolute.
+func decoderTakesFrameV3(decoder VideoDecodeCapabilityV3, width, height int, frameRate float64, rateAtMaxSize bool) bool {
+	if (decoder.MaxWidth > 0 && width > decoder.MaxWidth) || (decoder.MaxHeight > 0 && height > decoder.MaxHeight) {
+		return false
+	}
+	if decoderTakesFrameRateV3(decoder, frameRate) {
+		return true
+	}
+	return rateAtMaxSize && decoder.MaxWidth > 0 && decoder.MaxHeight > 0 && width > 0 && height > 0 &&
+		float64(macroblocksV3(width, height))*frameRate <= float64(macroblocksV3(decoder.MaxWidth, decoder.MaxHeight))*(decoder.MaxFrameRate+0.01)
+}
+
+// macroblocksV3 counts the 16x16 macroblocks that cover a frame.
+func macroblocksV3(width, height int) int {
+	return ((width + 15) / 16) * ((height + 15) / 16)
 }
 
 // videoProfileSupportedV3 compares a source profile with the profiles an exact
@@ -327,9 +392,13 @@ func intersectDolbyVisionProfileLevelsV3(profiles []int, output, panel []DolbyVi
 // but a delivery that omits hdr_details would otherwise never see the panel's
 // limits at all.
 func hdr10OutputFitsSourceV3(hdr *HDRCapabilitiesV3, source SourceDescriptorV3) bool {
-	if hdr == nil || !hdr.HDR10 {
-		return false
-	}
+	return hdr != nil && hdr.HDR10 && hdr10LimitsFitSourceV3(hdr, source)
+}
+
+// hdr10LimitsFitSourceV3 reports whether the source is within the output's
+// HDR10 ceilings. HDR10+ is HDR10 plus dynamic metadata, so the same ceilings
+// bound an HDR10+ output.
+func hdr10LimitsFitSourceV3(hdr *HDRCapabilitiesV3, source SourceDescriptorV3) bool {
 	return !(hdr.HDR10MaxWidth > 0 && source.Width > hdr.HDR10MaxWidth ||
 		hdr.HDR10MaxHeight > 0 && source.Height > hdr.HDR10MaxHeight ||
 		hdr.HDR10MaxFrameRate > 0 && source.FrameRate > hdr.HDR10MaxFrameRate ||
@@ -354,8 +423,14 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDR10PlusV3:
-		claims.HDR10Plus = hdr != nil && hdr.HDR10Plus
-		return claims.HDR10Plus, claims
+		if hdr != nil && hdr.HDR10Plus && hdr10LimitsFitSourceV3(hdr, source) {
+			claims.HDR10Plus = true
+			return true, claims
+		}
+		// HDR10+ adds dynamic metadata to an HDR10 signal. An output that
+		// only claims HDR10 ignores the metadata and shows the HDR10 picture.
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
+		return claims.HDR10, claims
 	case DynamicRangeHLGV3:
 		claims.HLG = hdr != nil && hdr.HLG
 		return claims.HLG, claims
@@ -525,6 +600,15 @@ func parseFrameRateV3(value string) float64 {
 	}
 	v, _ := strconv.ParseFloat(value, 64)
 	return v
+}
+
+// SourceVideoKbps is a source's video rate: the video track's own rate when
+// the probe found one, or else the file's rate, which includes its audio.
+func SourceVideoKbps(fileKbps, videoTrackKbps int) int {
+	if videoTrackKbps > 0 {
+		return normalizeBitrateKbpsV3(videoTrackKbps)
+	}
+	return normalizeBitrateKbpsV3(fileKbps)
 }
 
 func normalizeBitrateKbpsV3(value int) int {

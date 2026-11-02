@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -539,5 +541,59 @@ func TestSaveProfileOverridesLegacyShapeCannotBypassGate(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for legacy-shape bypass, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveProfileOverridesRejectsOversizedItemLimit: the fetchers size their
+// buffers from item_limit, so a profile override above the admin cap is
+// refused before the store is touched. The cap itself reaches the store.
+func TestSaveProfileOverridesRejectsOversizedItemLimit(t *testing.T) {
+	for _, tc := range []struct {
+		limit    int
+		wantCode int
+	}{
+		{sections.MaxItemLimit + 1, http.StatusBadRequest},
+		{1_000_000_000, http.StatusBadRequest},
+		// No store is wired, so a value that passes validation fails there.
+		{sections.MaxItemLimit, http.StatusInternalServerError},
+	} {
+		h := &SectionHandler{}
+		body := []byte(fmt.Sprintf(`{"scope":"home","library_id":"","overrides":[{"id":"o1","section_id":"s1","item_limit":%d}]}`, tc.limit))
+		req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
+		ctx = apimw.SetProfileID(ctx, "p1")
+		rec := httptest.NewRecorder()
+
+		h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
+
+		if rec.Code != tc.wantCode {
+			t.Fatalf("item_limit %d: status = %d, want %d; body=%s", tc.limit, rec.Code, tc.wantCode, rec.Body.String())
+		}
+		if tc.wantCode == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "invalid_item_limit") {
+			t.Fatalf("item_limit %d: body = %s, want invalid_item_limit", tc.limit, rec.Body.String())
+		}
+	}
+}
+
+// TestListProfileOverridesCapsStoredItemLimit: a row saved before the cap
+// lists at the cap, so a client that saves back what it read is not refused.
+func TestListProfileOverridesCapsStoredItemLimit(t *testing.T) {
+	huge := 1_000_000_000
+	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{ID: "o1", SectionID: "s1", ItemLimit: &huge}}}
+	h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
+	q := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
+
+	listed, err := h.ListProfileOverrides(t.Context(), q)
+	if err != nil {
+		t.Fatalf("ListProfileOverrides: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ItemLimit == nil || *listed[0].ItemLimit != sections.MaxItemLimit {
+		t.Fatalf("listed = %+v, want one override with item_limit %d", listed, sections.MaxItemLimit)
+	}
+
+	writes := []SectionOverrideWrite{{ID: listed[0].ID, SectionID: listed[0].SectionID, ItemLimit: listed[0].ItemLimit}}
+	if err := h.SaveProfileOverrides(t.Context(), q, writes); err != nil {
+		t.Fatalf("saving the listed overrides back: %v", err)
 	}
 }

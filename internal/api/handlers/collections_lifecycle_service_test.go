@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -18,12 +20,16 @@ type lifecycleStore struct {
 	collection userstore.Collection
 	mutations  int
 	update     userstore.UpdateCollectionInput
+	deleteErr  error
 }
 
 func (s *lifecycleStore) GetCollection(context.Context, string) (*userstore.Collection, error) {
 	return &s.collection, nil
 }
-func (s *lifecycleStore) DeleteCollection(context.Context, string) error { s.mutations++; return nil }
+func (s *lifecycleStore) DeleteCollection(context.Context, string) error {
+	s.mutations++
+	return s.deleteErr
+}
 func (s *lifecycleStore) AddCollectionItem(context.Context, string, string, int) error {
 	s.mutations++
 	return nil
@@ -39,6 +45,9 @@ func (s *lifecycleStore) ReorderCollectionItems(context.Context, string, []strin
 func (s *lifecycleStore) UpdateCollection(_ context.Context, input userstore.UpdateCollectionInput) error {
 	s.mutations++
 	s.update = input
+	if input.PosterURL != nil {
+		s.collection.PosterURL = *input.PosterURL
+	}
 	return nil
 }
 func (s *lifecycleStore) ListCollectionItems(context.Context, string) ([]userstore.CollectionItem, error) {
@@ -108,6 +117,68 @@ func TestPersonalCollectionLifecycleProfileAccess(t *testing.T) {
 			_, err = h.GetPersonalCollection(t.Context(), 1, profile, "c")
 			if (err == nil) != tc.wantRead {
 				t.Errorf("get error = %v", err)
+			}
+		})
+	}
+}
+
+type failingPrefixStore struct{ *blobstoretest.Memory }
+
+func (failingPrefixStore) DeletePrefix(context.Context, string) (int, error) {
+	return 0, errors.New("storage unavailable")
+}
+
+// Deleting a personal collection reclaims its artwork directory once the row
+// is gone. A failed row delete keeps the artwork, and a failed sweep only logs.
+func TestDeletePersonalCollectionRemovesArtwork(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		deleteErr   error
+		failSweep   bool
+		wantErr     bool
+		wantRemoved bool
+	}{
+		{name: "deleted", wantRemoved: true},
+		{name: "row delete fails", deleteErr: errors.New("db down"), wantErr: true},
+		{name: "sweep fails", failSweep: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := blobstoretest.New()
+			for _, key := range []string{
+				"user-collection-images/c/poster/abc-small.webp",
+				"user-collection-images/c/collage/def.webp",
+				"user-collection-images/c2/poster/abc-small.webp",
+			} {
+				if err := objects.Put(t.Context(), key, []byte("x")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: "manual"}, deleteErr: tc.deleteErr}
+			h := NewCollectionHandler(lifecycleProvider{store: store})
+			h.ArtworkStore = objects
+			if tc.failSweep {
+				h.ArtworkStore = failingPrefixStore{objects}
+			}
+
+			err := h.DeletePersonalCollection(t.Context(), 1, "owner", "c")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("delete error = %v, want error %t", err, tc.wantErr)
+			}
+			remaining := make([]string, 0, len(objects.Objects))
+			for key := range objects.Objects {
+				remaining = append(remaining, key)
+			}
+			slices.Sort(remaining)
+			want := []string{
+				"user-collection-images/c/collage/def.webp",
+				"user-collection-images/c/poster/abc-small.webp",
+				"user-collection-images/c2/poster/abc-small.webp",
+			}
+			if tc.wantRemoved {
+				want = want[2:]
+			}
+			if !slices.Equal(remaining, want) {
+				t.Fatalf("remaining artwork = %v, want %v", remaining, want)
 			}
 		})
 	}
@@ -194,5 +265,29 @@ func TestSyncPersonalCollectionNotFoundVersusForbidden(t *testing.T) {
 		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != tc.want {
 			t.Errorf("shared=%t: sync error = %v; want %d", tc.shared, err, tc.want)
 		}
+	}
+}
+
+// A variant that fails to delete must not leave the collection pointing at
+// partly deleted artwork: the poster is cleared first and the failed cleanup
+// only leaves orphans (issue #2419).
+func TestDeletePersonalCollectionImageClearsPosterWhenVariantDeleteFails(t *testing.T) {
+	poster := "user-collection-images/c/poster/original.0000000000000001.webp"
+	store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: "manual", PosterURL: poster}}
+	artwork := &partialDeleteStore{okKeys: 1, stubListDeleteStore: stubListDeleteStore{keys: []string{
+		poster,
+		"user-collection-images/c/poster/w300.0000000000000001.webp",
+	}}}
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	h.ArtworkStore = artwork
+
+	if err := h.DeletePersonalCollectionImage(t.Context(), 1, "owner", "c", "poster"); err != nil {
+		t.Fatalf("DeletePersonalCollectionImage: %v", err)
+	}
+	if store.update.PosterURL == nil || *store.update.PosterURL != "" || store.update.PosterThumbhash == nil || *store.update.PosterThumbhash != "" {
+		t.Fatalf("poster reference not cleared: %#v", store.update)
+	}
+	if len(artwork.deleted) != 1 {
+		t.Fatalf("cleanup did not run after the clear: deleted %#v", artwork.deleted)
 	}
 }

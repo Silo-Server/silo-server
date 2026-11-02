@@ -9,6 +9,8 @@ import {
 } from "@/api/client";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 
+import { compatKeys } from "./keys";
+
 /** Whether and within which limits the caller may replace the account password. */
 export type AccountPasswordCapability = V2Result<"GET /api/v2/account/password/capability">;
 
@@ -24,6 +26,7 @@ export function useAccountPasswordCapability() {
 }
 
 export function useChangeAccountPassword() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: V2Body<"POST /api/v2/account/password">) => {
       // Bind the write to the profile that was active when the user submitted:
@@ -32,6 +35,11 @@ export function useChangeAccountPassword() {
       return profileContext
         ? v2("POST /api/v2/account/password", { body, profileContext })
         : v2("POST /api/v2/account/password", { body });
+    },
+    onSuccess: (_result, body) => {
+      // Otherwise Signed-in sessions keeps listing the sessions it just ended.
+      if (body.sign_out_other_sessions)
+        void queryClient.invalidateQueries({ queryKey: ["login-sessions"] });
     },
   });
 }
@@ -53,9 +61,11 @@ export function useAccountIdentities(enabled = true) {
 
 function invalidateSignInState(queryClient: ReturnType<typeof useQueryClient>) {
   // Linking turns local password sign-in off (except for break-glass
-  // accounts), so the password form's capability changes with it.
+  // accounts), so the password form's capability and Connect Apps'
+  // password_login_available change with it.
   void queryClient.invalidateQueries({ queryKey: accountIdentityKeys.all() });
   void queryClient.invalidateQueries({ queryKey: accountKeys.passwordCapability() });
+  void queryClient.invalidateQueries({ queryKey: compatKeys.all });
 }
 
 function requireIdentityMutationSession(session: SessionIdentitySnapshot) {

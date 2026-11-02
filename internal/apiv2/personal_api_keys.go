@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // PersonalAPIKeyService keeps credentials scoped to the login account, independently of profiles.
@@ -19,7 +20,7 @@ type PersonalAPIKeyService interface {
 	RevokePersonalAPIKey(context.Context, int, int64) error
 	// MayCreatePersonalAPIKey applies the household-manager rule to key
 	// creation: (account, acting profile, PIN verifier).
-	MayCreatePersonalAPIKey(context.Context, int, string, func(string) error) (bool, error)
+	MayCreatePersonalAPIKey(context.Context, int, string, func(*userstore.Profile) error) (bool, error)
 }
 
 type PersonalAPIKeyListItem struct {
@@ -61,6 +62,8 @@ func personalAPIKeyAccount(ctx context.Context) (int, *Problem) {
 func registerPersonalAPIKeys(reg *Registry) {
 	op := func(method, path, id string) Operation {
 		o := Operation{Operation: humaOp(method, Prefix+path, id, "api-keys", "Manage the login account's API keys."), Class: ClassAuthenticated, DemoRestricted: isMutatingMethod(method), ServiceBacked: true}
+		// Creating and revoking a key are credential actions the audit log records.
+		o.Audited = isMutatingMethod(method)
 		if method == http.MethodPost {
 			o.RetrySafety = RetrySafetyNonRetryable
 			o.DefaultStatus = http.StatusCreated
@@ -78,7 +81,10 @@ func registerPersonalAPIKeys(reg *Registry) {
 		return out, nil
 	})
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, op(http.MethodGet, "/api-keys", "listPersonalAPIKeys"), func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
+	list := op(http.MethodGet, "/api-keys", "listPersonalAPIKeys")
+	// An API key cannot list keys: 403 (personalAPIKeyAccount).
+	list.Errors = append(list.Errors, http.StatusForbidden)
+	Register(reg, list, func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p

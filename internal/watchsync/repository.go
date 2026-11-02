@@ -22,6 +22,7 @@ type Repository interface {
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
+	UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error
 	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
@@ -401,6 +402,52 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	return saved, nil
 }
 
+// UpdateConnectionSyncState writes one flow's bookkeeping to the saved
+// connection with id. Tokens, credentials and settings are never written, so
+// a token refresh during a long sync survives it, and a connection that was
+// disconnected meanwhile stays gone: there is no row to update, and no error.
+// A cleared error is kept while a deferral that has not ended explains it.
+func (r *PostgresRepository) UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error {
+	if id == "" {
+		return nil
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections
+		SET last_inbound_sync_at = COALESCE($2::timestamptz, last_inbound_sync_at),
+		    last_progress_sync_at = COALESCE($3::timestamptz, last_progress_sync_at),
+		    last_outbound_sync_at = COALESCE($4::timestamptz, last_outbound_sync_at),
+		    last_favorites_sync_at = COALESCE($5::timestamptz, last_favorites_sync_at),
+		    last_watchlist_sync_at = COALESCE($6::timestamptz, last_watchlist_sync_at),
+		    last_error = CASE
+		        WHEN $7::text IS NULL THEN last_error
+		        WHEN $7::text = '' AND rate_limited_until > $9::timestamptz THEN last_error
+		        ELSE $7::text
+		    END,
+		    rate_limited_until = CASE
+		        WHEN $8::timestamptz IS NOT NULL THEN $8::timestamptz
+		        WHEN rate_limited_until <= $9::timestamptz THEN NULL
+		        ELSE rate_limited_until
+		    END,
+		    sync_cursors = sync_cursors || $10::jsonb,
+		    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE id = $1::uuid
+	`,
+		id,
+		update.LastInboundSyncAt,
+		update.LastProgressSyncAt,
+		update.LastOutboundSyncAt,
+		update.LastFavoritesSyncAt,
+		update.LastWatchlistSyncAt,
+		update.LastError,
+		update.RateLimitedUntil,
+		update.ClearRateLimitBy,
+		encodeSyncCursors(mergeSyncCursors(nil, update.SyncCursors)),
+	); err != nil {
+		return fmt.Errorf("update watch provider connection sync state: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresRepository) GetConnection(
 	ctx context.Context,
 	provider string,
@@ -467,7 +514,6 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				import_watched_enabled
 				OR import_progress_enabled
 				OR export_watched_enabled
-				OR export_unwatched_enabled
 				OR import_favorites_enabled
 				OR export_favorites_enabled
 				OR sync_favorite_removals_enabled
@@ -692,8 +738,6 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 	switch kind {
 	case LocalWatchEventMarkedWatched:
 		predicate = "export_watched_enabled = true"
-	case LocalWatchEventMarkedUnwatched:
-		predicate = "export_unwatched_enabled = true"
 	default:
 		return nil, nil
 	}

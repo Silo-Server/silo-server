@@ -31,7 +31,7 @@ func OverlayOnline(stored, view *models.MediaFile) *models.MediaFile {
 	for i, target := range fileSegmentFields(&merged) {
 		from := viewFields[i]
 		online := from.payload(view, viewByKind[from.kind])
-		if !online.Present() {
+		if !online.Present() && !online.Absent() {
 			if existing := target.payload(stored, storedByKind[target.kind]); isProviderMarker(existing) && existing.Provider != nil {
 				target.clear()
 				delete(storedByKind, target.kind)
@@ -60,9 +60,10 @@ func OverlayOnline(stored, view *models.MediaFile) *models.MediaFile {
 	return &merged
 }
 
-// isProviderMarker reports whether p came from an online or plugin provider.
+// isProviderMarker reports whether p came from an online or plugin provider,
+// as a marker or as an absent answer. A kind with neither has no source.
 func isProviderMarker(p SegmentPayload) bool {
-	return p.Present() && (p.Source == models.MarkerSourceOnline || p.Source == models.MarkerSourcePlugin)
+	return p.Source == models.MarkerSourceOnline || p.Source == models.MarkerSourcePlugin
 }
 
 // segmentFields addresses one marker kind's columns on a file.

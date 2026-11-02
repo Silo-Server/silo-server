@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -95,5 +96,67 @@ func TestCatalogQueryRequestedLibraryOutsideAccessDB(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB covers issue
+// #2818: a browse that names no library (GET /api/v2/catalog?type=movie) by
+// an unrestricted viewer leaves out an item in no library, such as one whose
+// file was renamed away and that only the scanner's file removal grace keeps,
+// as that item's library page already does. The offset browse that v1 and
+// source-order lists use leaves it out too. The genre filter values leave out
+// a genre only that item carries, so no offered filter returns nothing.
+func TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := t.Context()
+	prefix := fmt.Sprintf("noLibrary-%d", time.Now().UnixNano())
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	member, orphan := prefix+"-member", prefix+"-orphan"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{member, orphan})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+	for _, id := range []string{member, orphan} {
+		batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'unmatched', ARRAY[$1])`, id)
+	}
+	batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, member, library)
+
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
+	for _, cursor := range []bool{false, true} {
+		result, err := resolver.Resolve(ctx, CatalogRequest{
+			Source:       CatalogSourceQuery,
+			Query:        QueryDefinition{MediaScope: "movie"},
+			NamePrefix:   prefix,
+			Limit:        50,
+			CursorPaging: cursor,
+		}, AccessFilter{})
+		if err != nil {
+			t.Fatalf("cursor=%v: resolve: %v", cursor, err)
+		}
+		if len(result.Items) != 1 || result.Items[0].ContentID != member || result.Total != 1 {
+			ids := make([]string, 0, len(result.Items))
+			for _, item := range result.Items {
+				ids = append(ids, item.ContentID)
+			}
+			t.Fatalf("cursor=%v: listed %v (total %d), want only %s", cursor, ids, result.Total, member)
+		}
+	}
+	browse := NewBrowseRepository(pool)
+	browsed, err := browse.Browse(ctx, BrowseFilters{Type: "movie", NamePrefix: prefix, Limit: 50})
+	if err != nil {
+		t.Fatalf("offset browse: %v", err)
+	}
+	if len(browsed.Items) != 1 || browsed.Items[0].ContentID != member || browsed.Total != 1 {
+		t.Fatalf("offset browse listed %d items (total %d), want only %s", len(browsed.Items), browsed.Total, member)
+	}
+	genres, err := browse.ListGenres(ctx, BrowseFilters{Type: "movie"})
+	if err != nil {
+		t.Fatalf("list genres: %v", err)
+	}
+	if !slices.Contains(genres, member) || slices.Contains(genres, orphan) {
+		t.Fatalf("genres include member %v and orphan %v, want only the member's", slices.Contains(genres, member), slices.Contains(genres, orphan))
 	}
 }

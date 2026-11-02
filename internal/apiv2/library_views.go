@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -23,7 +24,23 @@ type LibraryViewInput struct {
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
 	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	SectionItemLimitQuery
 	ArtworkQuery
+}
+
+// SectionItemLimitQuery is the optional per-row cap the aggregate section
+// reads (listHomeSections, listLibrarySections) accept. The maximum must
+// equal handlers.MaxSectionItemLimitCap, which getHomeCapabilities
+// advertises; TestHomeCapabilities pins the two.
+type SectionItemLimitQuery struct {
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter" example:"20"`
+}
+
+// sectionViewerCapped is sectionViewer with the request's per-row cap.
+func sectionViewerCapped(ctx context.Context, art imagesize.Request, itemLimit int) handlers.SectionViewer {
+	viewer := sectionViewer(ctx, art)
+	viewer.ItemLimitCap = itemLimit
+	return viewer
 }
 
 // LibrarySectionItemsInput is the getLibrarySectionItems query.
@@ -65,6 +82,7 @@ type Section struct {
 	IsCustom    bool          `json:"is_custom" example:"false"`
 	Customized  bool          `json:"customized" example:"false"`
 	Items       []CatalogItem `json:"items" doc:"Empty, never null"`
+	HasMore     bool          `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
 }
 
 // SectionCollection is a page's sections with their cards.
@@ -95,11 +113,11 @@ type CuratedCollection struct {
 	SortOrder         int             `json:"sort_order" example:"0"`
 	GroupID           *string         `json:"group_id" doc:"null when ungrouped"`
 	Featured          bool            `json:"featured" example:"false"`
-	PosterURL         string          `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
-	BackdropURL       string          `json:"backdrop_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL         string          `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	BackdropURL       string          `json:"backdrop_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
-	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from; empty otherwise"`
+	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI"`
 	QueryDefinition   json.RawMessage `json:"query_definition" doc:"Smart collection query; null when not a smart collection"`
 	SortConfig        json.RawMessage `json:"sort_config" doc:"Sort configuration document; null when default"`
 	SourceConfig      json.RawMessage `json:"source_config" doc:"Import source configuration; null when not imported"`
@@ -121,7 +139,7 @@ type CuratedCollection struct {
 type LibraryCollectionCard struct {
 	ID               string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
 	Title            string  `json:"title" example:"Oscar Winners"`
-	PosterURL        string  `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL        string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	ItemCount        int     `json:"item_count" example:"12"`
 	Featured         bool    `json:"featured,omitempty"`
@@ -166,7 +184,7 @@ type UserCollection struct {
 	Description      string  `json:"description,omitempty"`
 	CollectionType   string  `json:"collection_type" example:"manual"`
 	ItemCount        int     `json:"item_count" example:"4"`
-	PosterURL        string  `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterURL        string  `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	PosterIsCollage  bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt        Instant `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
@@ -265,11 +283,16 @@ func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 }
 
 func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
+	resumeRow := v.SectionType == string(sections.SectionContinueWatching) || v.SectionType == string(sections.SectionNextUp)
 	items := make([]CatalogItem, 0, len(v.Items))
 	for _, item := range v.Items {
-		items = append(items, catalogItemOfSection(item, sel))
+		card := catalogItemOfSection(item, sel)
+		if resumeRow {
+			withResumeEpisodeBackdrop(&card, item)
+		}
+		items = append(items, card)
 	}
-	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items}
+	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items, HasMore: v.HasMore}
 }
 
 func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySectionsInput) (*SectionCollectionOutput, error) {
@@ -284,7 +307,7 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.LibrarySections(ctx, id, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

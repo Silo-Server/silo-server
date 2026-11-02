@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
@@ -28,6 +30,9 @@ type PreferenceSettingsSnapshotter interface {
 // a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
 // can commit the legacy row and every canonical row as one unit.
 type PreferenceSettingsWriter interface {
+	// CheckProfilePINRevision compares the acting profile's revision and
+	// serializes PIN writes until this transaction ends. Missing rows fail.
+	CheckProfilePINRevision(ctx context.Context, id string, revision int64) (bool, error)
 	CreateProfile(ctx context.Context, profile Profile) error
 	ListSettings(ctx context.Context) ([]SettingEntry, error)
 	// ListProfileIDs reads the current household membership inside the same
@@ -65,6 +70,25 @@ type PreferenceSettingsTransactioner interface {
 	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
 }
 
+// AuditedProfileWriter is implemented by a PreferenceSettingsWriter that runs
+// in the server's PostgreSQL transaction. A domain audit row recorded through
+// AuditTx commits or rolls back with the profile write, and GetProfile reads
+// the profile inside that transaction. The SQLite backend has no such
+// transaction, so its profile writes record no domain audit rows.
+type AuditedProfileWriter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
+	AuditTx() pgx.Tx
+	GetProfile(ctx context.Context, id string) (*Profile, error)
+}
+
+// AuditedProfileDeleter deletes a profile like UserStore.DeleteProfile and
+// runs audit in the same PostgreSQL transaction, after the delete and before
+// the commit; an audit error rolls the delete back. audit receives the
+// profile as the transaction locked and deleted it, so a concurrent update
+// that committed first is reflected.
+type AuditedProfileDeleter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
+	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) error
+}
+
 // UserStore defines the interface for per-user data storage.
 // Both SQLite and Postgres backends implement this interface.
 type UserStore interface {
@@ -74,7 +98,6 @@ type UserStore interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	DeleteProfile(ctx context.Context, id string) error
-	VerifyPIN(ctx context.Context, profileID, pin string) (bool, error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error
@@ -137,7 +160,16 @@ type UserStore interface {
 	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
+	// RemoveHistoryItems removes the items' plays from history ("Remove from
+	// history"): it deletes the plays dated at or before removedAt, or before
+	// the newest play when that is later, hides any that arrive later with
+	// such a date, and clears the items' watched state and progress.
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
+	// ClearWatchedState marks the items unwatched: it deletes their progress
+	// and stops their plays dated at or before clearedAt, or before the
+	// newest play when that is later, from counting as watched or being
+	// imported again. The plays stay in history.
+	ClearWatchedState(ctx context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error
 	DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source WatchHistorySource) error
 	ListHomeDismissals(ctx context.Context, profileID, surface string) ([]HomeItemDismissal, error)
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error

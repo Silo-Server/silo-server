@@ -8,7 +8,6 @@ import {
   buildLibraryCollectionCatalogHref,
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
-import { useUICustomization } from "@/hooks/useUICustomization";
 
 // Shared poster card for the per-library Collections tab and every section of
 // the Collections page. Library (admin) collections get a sidebar-pin
@@ -29,7 +28,7 @@ export function CollectionPosterCard({
   libraryId?: number;
   /** Set on another profile's shared collection: shown as "by Name". */
   ownerName?: string;
-  /** The line under the name. When set, the caption always shows and the poster drops its count. */
+  /** The line under the name. When set, the poster drops its count. */
   meta?: ReactNode;
   /** One tag under the meta line (Shared, say). */
   tag?: ReactNode;
@@ -39,22 +38,16 @@ export function CollectionPosterCard({
   handle?: ReactNode;
 }) {
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
-  const { cardPresentation } = useUICustomization();
 
   const isUserCollection = kind === "user_collections";
   const href = isUserCollection
     ? buildUserCollectionCatalogHref(collection.id, collection.title)
     : buildLibraryCollectionCatalogHref(collection.id, collection.title, libraryId);
-  const showCaption = meta !== undefined || cardPresentation.caption !== "artwork";
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
   if (meta === undefined && ownerName) {
     subline = <div className="text-muted-foreground truncate text-xs">by {ownerName}</div>;
-  } else if (
-    meta === undefined &&
-    cardPresentation.caption === "title_metadata" &&
-    isUserCollection
-  ) {
+  } else if (meta === undefined && isUserCollection) {
     subline = <div className="text-muted-foreground text-xs">User collection</div>;
   }
 
@@ -65,8 +58,8 @@ export function CollectionPosterCard({
           {collection.poster_url ? (
             <img
               src={collection.poster_url}
-              // The caption names the card; without it the poster does.
-              alt={showCaption ? "" : collection.title}
+              // The caption names the card.
+              alt=""
               className={`h-full w-full object-cover transition duration-300 group-hover/card:scale-[1.05] ${
                 loaded ? "opacity-100" : "opacity-0"
               }`}
@@ -76,7 +69,7 @@ export function CollectionPosterCard({
             />
           ) : (
             <div
-              aria-hidden={showCaption}
+              aria-hidden
               className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm"
             >
               {isUserCollection && <User className="h-5 w-5 opacity-60" />}
@@ -89,12 +82,10 @@ export function CollectionPosterCard({
             </span>
           ) : null}
         </div>
-        {showCaption ? (
-          <div className="px-0.5 pt-2.5">
-            <div className="truncate text-[0.8125rem] font-semibold">{collection.title}</div>
-            {subline}
-          </div>
-        ) : null}
+        <div className="px-0.5 pt-2.5">
+          <div className="truncate text-[0.8125rem] font-semibold">{collection.title}</div>
+          {subline}
+        </div>
       </ViewTransitionLink>
       {meta !== undefined ? <div className="px-0.5">{meta}</div> : null}
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}

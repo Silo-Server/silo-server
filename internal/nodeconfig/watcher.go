@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type BootstrapOverrides struct {
 	Mode        string // from MODE env
 	DatabaseURL string // from DATABASE_URL env
 	JFListen    string // from JF_PORT env
+	ABSListen   string // from ABS_PORT env
 	RedisURL    string // from REDIS_URL env
 	// NodeURL is this process's own stream_nodes identity (from NODE_URL env),
 	// set only in proxy/transcode mode. It is what lets a node find its own row
@@ -54,6 +56,10 @@ type nodeHWOverrides struct {
 // registered yet), not an error. It is a field on the Watcher so the overlay
 // can be exercised without a database.
 type loadNodeHWOverrides func(ctx context.Context, nodeURL, nodeName string) (overrides nodeHWOverrides, found bool, err error)
+
+// ErrNoJWTSecret reports a settings snapshot without auth.jwt_secret. The
+// watcher never publishes such a config.
+var ErrNoJWTSecret = errors.New("auth.jwt_secret is empty; refusing a config without a signing secret")
 
 // Watcher watches for configuration changes in the database and
 // automatically reloads the Config when changes are detected.
@@ -438,6 +444,13 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 	if err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}
+	// auth.jwt_secret keys every token a node verifies. Publishing an empty
+	// one would let anyone sign a stream token for any path, so refuse it:
+	// the first load fails and the process does not start, and a reload
+	// keeps serving the last config that had a secret.
+	if strings.TrimSpace(newCfg.Auth.JWTSecret) == "" {
+		return ErrNoJWTSecret
+	}
 
 	// Re-apply bootstrap overrides — these are immutable for the process lifetime.
 	if w.bootstrap.Listen != "" {
@@ -452,6 +465,7 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 	if w.bootstrap.JFListen != "" {
 		newCfg.JellyfinCompat.Listen = w.bootstrap.JFListen
 	}
+	newCfg.AudiobookshelfCompat = newCfg.AudiobookshelfCompat.WithBootstrapListen(w.bootstrap.ABSListen)
 	newCfg.Redis = newCfg.Redis.WithBootstrapURL(w.bootstrap.RedisURL)
 
 	for _, normalize := range w.normalizers {
@@ -705,6 +719,16 @@ func (w *Watcher) logDuplicateNodeRows(ctx context.Context, nodeURL string, matc
 		"component", "nodeconfig", "node_url", nodeURL, "matched_urls", matched)
 }
 
+// reloadFailureLevel is the level a failed background reload logs at. A
+// missing signing secret is an error, not a hiccup: no setting change applies
+// until an operator puts auth.jwt_secret back.
+func reloadFailureLevel(err error) slog.Level {
+	if errors.Is(err, ErrNoJWTSecret) {
+		return slog.LevelError
+	}
+	return slog.LevelWarn
+}
+
 // poll runs the background loop that reloads config on timer or event.
 func (w *Watcher) poll(ctx context.Context) {
 	ticker := time.NewTicker(60 * time.Second)
@@ -716,11 +740,11 @@ func (w *Watcher) poll(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := w.reload(ctx); err != nil {
-				slog.WarnContext(ctx, "config poll reload failed", "component", "nodeconfig", "error", err)
+				slog.Log(ctx, reloadFailureLevel(err), "config poll reload failed", "component", "nodeconfig", "error", err)
 			}
 		case <-w.reloadCh:
 			if err := w.reload(ctx); err != nil {
-				slog.WarnContext(ctx, "config event reload failed", "component", "nodeconfig", "error", err)
+				slog.Log(ctx, reloadFailureLevel(err), "config event reload failed", "component", "nodeconfig", "error", err)
 			}
 		case <-w.drainRefreshCh:
 			w.refreshNodeDrain(ctx)

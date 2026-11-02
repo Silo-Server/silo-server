@@ -18,11 +18,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
 type TMDBClient interface {
 	SearchMedia(ctx context.Context, mediaType, query string, page int) (*tmdb.MediaPage, error)
-	DiscoverSection(ctx context.Context, section string, page int) (*tmdb.MediaPage, error)
+	ChartPage(ctx context.Context, params tmdb.ChartParams, page int) (*tmdb.MediaPage, error)
 	GetMediaDetail(ctx context.Context, mediaType string, id int) (*tmdb.MediaDetail, error)
 	DiscoverPage(ctx context.Context, mediaType string, params tmdb.DiscoverParams, page int) (*tmdb.MediaPage, error)
 }
@@ -91,6 +92,8 @@ type Service struct {
 	lifecycle         LifecycleNotifier
 	watchlistPref     WatchlistPreference
 	titleObserver     TitleObserver
+	discoverSnapshots DiscoverSnapshots
+	discoverRefresher DiscoverListRefresher
 	Now               func() time.Time
 }
 
@@ -102,10 +105,11 @@ type DiscoverySection struct {
 	TotalResults int           `json:"total_results"`
 	Results      []MediaResult `json:"results"`
 	// NextPage is the cursor to request for the following page, needed when
-	// rating-filter backfill consumes more than one TMDB page per request
-	// (page+1 would repeat consumed pages). 0 when there are no more pages.
-	// Additive v1 field; absent (0) also when the viewer is unrestricted and
-	// plain page+1 semantics apply.
+	// backfill (a rating ceiling, or a row hiding titles the library has)
+	// consumes more than one source page per request (page+1 would repeat
+	// consumed pages). 0 when there are no more pages; on the v2 layout, past
+	// TotalPages instead after a multi-page read reached the end. Additive v1
+	// field; absent (0) also when plain page+1 semantics apply.
 	NextPage int `json:"next_page,omitempty"`
 }
 
@@ -235,94 +239,39 @@ func (s *Service) hydrateCertifications(ctx context.Context, raw *tmdb.MediaPage
 	return out, nil
 }
 
-// Section backfill: fail-closed filtering hides most of a TMDB section page
-// for a restricted profile (typically 15+ of 20, since unrated titles are
-// dropped), which renders as a nearly empty carousel. To compensate, a
-// restricted viewer's section page consumes consecutive TMDB pages, starting
-// at the requested page, until a page's worth of titles survives filtering or
-// the per-request budget (sectionBackfillMaxPagesPerRequest) is spent.
+// Row backfill: fail-closed filtering hides most of a TMDB page for a
+// restricted profile (typically 15+ of 20, since unrated titles are
+// dropped), which renders as a nearly empty carousel; a row that hides titles
+// the library has thins out the same way. To compensate, such a row page
+// consumes consecutive source pages, starting at the requested page, until
+// enough titles survive or the per-request page budget is spent (see
+// fillRowPage).
 //
-// Pagination stays honest through two properties: `page` keeps plain TMDB
-// cursor semantics (same as for unrestricted viewers), and the response's
-// next_page reports the cursor after the last TMDB page actually consumed.
-// Every survivor from a consumed page is returned — nothing is trimmed and no
-// consumed page is partially dropped — so resuming at next_page never skips
-// or repeats an allowed title. The budget also bounds the cold-cache cost: a
-// permissive ceiling (R/TV-MA) fills from one TMDB page and stops immediately,
+// Pagination stays honest through two properties: `page` keeps the source's
+// own cursor semantics (same as for unrestricted viewers), and the response's
+// next_page reports the cursor after the last source page actually consumed.
+// Every survivor from a consumed page is returned and no consumed page is
+// partially dropped, so resuming at next_page never skips or repeats an
+// allowed title. The one exception is the Discover page itself: a row there
+// shows at most its limit, and a row it trims loses its cursor (its see all
+// page starts again at page 1). The budget also bounds the cold-cache cost: a
+// permissive ceiling (R/TV-MA) fills from one page and stops immediately,
 // while a strict ceiling spends at most the budget per request.
 const (
-	// Per-request TMDB page budgets. A single-section request can afford a
-	// deeper scan than the six-section DiscoverAll aggregate: on a cold
-	// certification cache each consumed page costs up to 20 cert lookups
-	// against the client's rate limiter, so DiscoverAll's worst case is
-	// 6 sections x sectionBackfillBudgetAggregate pages x 20. Keeping the
-	// aggregate budget small bounds the first-paint latency for a restricted
-	// profile; the per-section endpoint (carousel "load more") gets the
-	// deeper budget. Steady state is unaffected — certifications are cached
-	// for 7 days, shared across all profiles.
+	// Per-request source page budgets. A single row's page (its see all
+	// page) can afford a deeper scan than the Discover page, which renders
+	// every row at once: on a cold certification cache each consumed page
+	// costs up to 20 cert lookups against the client's rate limiter. A
+	// Discover page row reads ceil(limit/20) pages, plus one when it filters
+	// (see firstRowPage), so its worst case is rows x that x 20 lookups;
+	// /api/v1's six rows read sectionBackfillBudgetAggregate pages each.
+	// Steady state is unaffected: certifications are cached for 7 days,
+	// shared across all profiles.
 	sectionBackfillBudgetSingle    = 5
 	sectionBackfillBudgetAggregate = 2
-	sectionResultsPerPage          = 20
+	sectionResultsPerPage          = discoverrows.PageSize
 	sectionBackfillMaxPage         = 500 // TMDB hard-caps page at 500
 )
-
-func (s *Service) backfillSectionPage(ctx context.Context, section string, page, pageBudget int, ceiling string) (result *tmdb.MediaPage, nextPage int, err error) {
-	if page <= 0 {
-		page = 1
-	}
-	if pageBudget <= 0 {
-		pageBudget = 1
-	}
-
-	out := &tmdb.MediaPage{Page: page}
-	var results []tmdb.MediaResult
-	// Trending/popular orderings shift between fetches, so consecutive TMDB
-	// pages can overlap; dedupe within the request.
-	seen := map[certKey]bool{}
-	totalPages := page // until TMDB tells us the real count, assume the current page exists
-	consumed := 0
-	for next := page; consumed < pageBudget && next <= totalPages && next <= sectionBackfillMaxPage; next++ {
-		// Enough survived — stop before spending another TMDB page. Titles on
-		// unconsumed pages are not lost: next_page points at the first page
-		// this request did not consume.
-		if len(results) >= sectionResultsPerPage {
-			break
-		}
-		raw, err := s.tmdb.DiscoverSection(ctx, section, next)
-		if err != nil {
-			return nil, 0, err
-		}
-		if raw == nil {
-			break
-		}
-		consumed++
-		nextPage = next + 1
-		if raw.TotalPages > 0 {
-			totalPages = raw.TotalPages
-			out.TotalResults = raw.TotalResults
-		}
-		filtered, err := s.filterPageByCeiling(ctx, raw, ceiling)
-		if err != nil {
-			return nil, 0, err
-		}
-		for _, item := range filtered.Results {
-			key := certKey{mediaType: MediaType(item.MediaType), id: item.ID}
-			if !seen[key] {
-				seen[key] = true
-				results = append(results, item)
-			}
-		}
-	}
-	out.Results = results
-	// TotalPages/TotalResults stay TMDB's unfiltered counts — page keeps TMDB
-	// cursor semantics, and the filtered totals are unknowable without a full
-	// scan. next_page is the honest resume cursor.
-	out.TotalPages = totalPages
-	if nextPage > totalPages || nextPage > sectionBackfillMaxPage {
-		nextPage = 0 // exhausted
-	}
-	return out, nextPage, nil
-}
 
 // ensureCreateAllowedByCeiling rejects request submissions for titles above
 // the viewer's rating ceiling. List filtering alone is cosmetic — the create
@@ -644,89 +593,6 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 		return nil, err
 	}
 	return s.enrichPage(ctx, viewer, raw)
-}
-
-func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle, ceiling)
-}
-
-// discover renders one section for an already-resolved ceiling. Callers own
-// the ceiling lookup so a DiscoverAll fan-out resolves the viewer scope once,
-// not once per section per page.
-func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int, ceiling string) (*DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	section = strings.TrimSpace(section)
-	if _, ok := discoverySectionTitles[section]; !ok {
-		return nil, fmt.Errorf("%w: invalid discovery section", ErrInvalidInput)
-	}
-	var raw *tmdb.MediaPage
-	var err error
-	var nextPage int
-	if ceiling != "" {
-		raw, nextPage, err = s.backfillSectionPage(ctx, section, page, backfillBudget, ceiling)
-	} else {
-		raw, err = s.tmdb.DiscoverSection(ctx, section, page)
-	}
-	if err != nil {
-		return nil, err
-	}
-	enriched, err := s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
-	if err != nil {
-		return nil, err
-	}
-	return &DiscoverySection{
-		Key:          section,
-		Title:        discoverySectionTitles[section],
-		Page:         enriched.Page,
-		TotalPages:   enriched.TotalPages,
-		TotalResults: enriched.TotalResults,
-		Results:      enriched.Results,
-		NextPage:     nextPage,
-	}, nil
-}
-
-func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	sections := make([]DiscoverySection, len(discoverySectionOrder))
-	group, gctx := errgroup.WithContext(ctx)
-	group.SetLimit(externalIDHydrationConcurrency)
-	for i, key := range discoverySectionOrder {
-		i, key := i, key
-		group.Go(func() error {
-			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate, ceiling)
-			if err != nil {
-				return err
-			}
-			sections[i] = *section
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, err
-	}
-	return sections, nil
 }
 
 // GetDetail fetches a TMDB detail payload and overlays the same availability /
@@ -2490,29 +2356,11 @@ func (s *Service) routingRatingOf(ctx context.Context, req Request) (string, err
 // they were captured, or while TMDB was unreachable, and stores them. Routing
 // without them could send a title to the wrong server, so a TMDB failure is a
 // submission error and the submission retries. A request captured before its
-// rating was is given one, only when an enabled route checks ratings.
+// rating (or, for a series, its status) was is given one, only when an
+// enabled route checks it.
 func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes []Route) error {
 	if req.RoutingFacts.Captured() {
-		// A title TMDB had not rated yet (unreleased) is asked again a day
-		// later, so a rating route can still match it once it is rated.
-		stored := req.RoutingFacts.ContentRating
-		known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
-		if known || !routesCheckRating(routes, req.MediaType) {
-			return nil
-		}
-		rating, err := s.routingRatingOf(ctx, *req)
-		if err != nil {
-			return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
-		}
-		facts := req.RoutingFacts
-		now := s.now()
-		facts.ContentRating, facts.CapturedAt = &rating, &now
-		updated, err := s.store.SetRoutingFacts(ctx, req.ID, facts)
-		if err != nil {
-			return err
-		}
-		req.RoutingFacts = updated.RoutingFacts
-		return nil
+		return s.recheckCapturedFacts(ctx, req, routes)
 	}
 	detail := s.requestDetail(ctx, req.MediaType, req.TMDBID)
 	if detail == nil {
@@ -2534,6 +2382,72 @@ func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes [
 		return err
 	}
 	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	// Another API server may have stored its capture first, without what
+	// this one reads (a server not yet upgraded has no series status).
+	return s.recheckCapturedFacts(ctx, req, routes)
+}
+
+// recheckCapturedFacts gives captured facts what an enabled route needs and
+// they lack: a rating TMDB had not given yet, or a series' status.
+func (s *Service) recheckCapturedFacts(ctx context.Context, req *Request, routes []Route) error {
+	if err := s.recheckRoutingRating(ctx, req, routes); err != nil {
+		return err
+	}
+	return s.ensureSeriesStatus(ctx, req, routes)
+}
+
+// recheckRoutingRating reads a captured request's rating again when it has
+// none and an enabled route checks ratings: a title TMDB had not rated yet
+// (unreleased) is asked again a day later, so a rating route can still match
+// it once it is rated. Only the rating and its capture time are written, so
+// the read never replaces a fact another API server stored meanwhile.
+func (s *Service) recheckRoutingRating(ctx context.Context, req *Request, routes []Route) error {
+	stored := req.RoutingFacts.ContentRating
+	known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
+	if known || !routesCheckRating(routes, req.MediaType) {
+		return nil
+	}
+	rating, err := s.routingRatingOf(ctx, *req)
+	if err != nil {
+		return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
+	}
+	now := s.now()
+	updated, err := s.store.UpdateRoutingFacts(ctx, req.ID, RoutingFacts{ContentRating: &rating, CapturedAt: &now})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
+	return nil
+}
+
+// ensureSeriesStatus gives a series captured before status was one, only
+// when an enabled route checks status. It is read once, like the facts
+// captured with the request: a status TMDB has none for is not asked again,
+// and the capture time is left alone, since it times the rating's recheck.
+// A series TMDB no longer lists has no status, rather than a request that
+// can never be sent. The first status any API server stores wins, so every
+// server routes the request on the same one.
+func (s *Service) ensureSeriesStatus(ctx context.Context, req *Request, routes []Route) error {
+	if req.RoutingFacts.SeriesStatus != nil || !routesCheckSeriesStatus(routes, req.MediaType) {
+		return nil
+	}
+	if s.tmdb == nil {
+		return errors.New("could not read the series' status from TMDB to route it")
+	}
+	var status *string
+	switch detail, err := s.tmdb.GetMediaDetail(ctx, tmdbMediaType(req.MediaType), req.TMDBID); {
+	case errors.Is(err, tmdb.ErrNotFound):
+		status = new("")
+	case err != nil || detail == nil:
+		return fmt.Errorf("could not read the series' status from TMDB to route it: %w", err)
+	default:
+		status = seriesStatusOf(detail)
+	}
+	updated, err := s.store.FillRoutingFacts(ctx, req.ID, RoutingFacts{SeriesStatus: status})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
 	return nil
 }
 
@@ -3381,22 +3295,4 @@ func availabilityValue(available bool) Availability {
 		return AvailabilityAvailable
 	}
 	return AvailabilityMissing
-}
-
-var discoverySectionOrder = []string{
-	"trending_movies",
-	"trending_series",
-	"popular_movies",
-	"popular_series",
-	"upcoming_movies",
-	"on_air_series",
-}
-
-var discoverySectionTitles = map[string]string{
-	"trending_movies": "Trending Movies",
-	"trending_series": "Trending Series",
-	"popular_movies":  "Popular Movies",
-	"popular_series":  "Popular Series",
-	"upcoming_movies": "Upcoming Movies",
-	"on_air_series":   "On Air Series",
 }

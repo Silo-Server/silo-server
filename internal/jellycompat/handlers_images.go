@@ -416,7 +416,9 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 			if err := ensureAccessible(series); err != nil {
 				return catalog.ResolvedImageURL{}, false, err
 			}
-			if imageURL := h.imageURLForItem(ctx, season.PosterPath, "poster", series.BackdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
+			// A season's own backdrop wins over the series', as in season detail.
+			backdropPath := firstNonEmpty(season.BackdropPath, series.BackdropPath)
+			if imageURL := h.imageURLForItem(ctx, season.PosterPath, "poster", backdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
 				return imageURL, true, nil
 			}
 		} else if !errors.Is(err, catalog.ErrSeasonNotFound) {
@@ -801,6 +803,22 @@ func firstResolvedImageURL(candidates ...func() catalog.ResolvedImageURL) catalo
 }
 
 func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+	apiRoute := strings.HasPrefix(imageURL, "/api/")
+	// A HEAD asks only whether the image exists, and resolving it answered
+	// that. Redirecting would send the HEAD to a URL presigned for GET, which
+	// object stores reject, and proxying would fetch the whole image. Bundled
+	// assets below answer HEAD themselves.
+	if r.Method == http.MethodHead && (apiRoute || !strings.HasPrefix(imageURL, "/")) {
+		if !apiRoute {
+			if _, err := parseRemoteImageURL(imageURL); err != nil {
+				writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+				return
+			}
+		}
+		setCompatImageRouteNoStore(w.Header())
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	// App-relative references (bundled collection-template posters) have no
 	// remote origin to redirect or proxy to, so serve their bytes from the
 	// embedded frontend assets instead.

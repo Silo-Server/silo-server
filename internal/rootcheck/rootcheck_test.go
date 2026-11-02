@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func TestProbeMissingPath(t *testing.T) {
@@ -18,6 +20,25 @@ func TestProbeMissingPath(t *testing.T) {
 	}
 	if res.ErrorCode != ErrCodeNotFound {
 		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodeNotFound)
+	}
+}
+
+// Folders derived from catalog paths arrive fspath-encoded; a non-UTF-8
+// directory must probe as reachable.
+func TestProbeEncodedNonUTF8Directory(t *testing.T) {
+	t.Parallel()
+
+	raw := filepath.Join(t.TempDir(), "B\xe5rd")
+	if err := os.Mkdir(raw, 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(raw, "poster.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	res := Probe(fspath.Encode(raw))
+	if !res.Reachable || res.Empty {
+		t.Fatalf("Probe(encoded dir) = %+v, want reachable and non-empty", res)
 	}
 }
 

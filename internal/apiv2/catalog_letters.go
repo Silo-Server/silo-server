@@ -35,6 +35,7 @@ type CatalogLettersQuery struct {
 	Match     string              `json:"match,omitempty" enum:"all,any" doc:"How the groups combine; default all"`
 	Groups    []CatalogQueryGroup `json:"groups,omitempty" doc:"Rule groups, as on queryCatalogItems; empty matches everything"`
 	Order     string              `json:"order,omitempty" enum:"asc,desc" doc:"Title order the positions count in; default asc"`
+	Group     string              `json:"group,omitempty" enum:"box_set" doc:"Count the list a group=box_set browse pages, with each box set counted once under its first title"`
 }
 
 // CatalogLetter is one letter of the index.
@@ -68,6 +69,8 @@ func registerCatalogLetters(reg *Registry) {
 	op.DefaultStatus = http.StatusOK
 	operation := viewerOperation(op)
 	operation.RetrySafety = RetrySafetyNaturalIdempotent
+	// A user store that cannot run the query is 501 capability_unsupported.
+	operation.Errors = append(operation.Errors, http.StatusNotImplemented)
 	Register(reg, operation, reg.queryCatalogLetters)
 }
 
@@ -134,6 +137,7 @@ func (q CatalogLettersQuery) parse() (catalogpkg.CatalogRequest, *Problem) {
 		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "Invalid structured filters.").
 			WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
 	}
+	req.GroupBoxSets = q.Group == groupBoxSet
 	return req, nil
 }
 

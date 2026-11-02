@@ -36,12 +36,12 @@ type CalendarEvent struct {
 	SeriesID        *string  `json:"series_id,omitempty" example:"series:severance"`
 	SeasonNumber    *int     `json:"season_number,omitempty" example:"2"`
 	EpisodeNumber   *int     `json:"episode_number,omitempty" example:"1"`
-	AirDate         string   `json:"air_date" doc:"The source air date, YYYY-MM-DD" example:"2026-01-09"`
+	AirDate         string   `json:"air_date" format:"date" doc:"The source air date, YYYY-MM-DD" example:"2026-01-09"`
 	AirTime         *string  `json:"air_time,omitempty" doc:"Wall-clock time in the network's zone, HH:MM" example:"21:00"`
 	AirAt           *Instant `json:"air_at,omitempty" doc:"The airing as an instant, when the network's time and zone are known"`
 	AirTimezone     *string  `json:"air_timezone,omitempty" doc:"The network's IANA zone" example:"America/New_York"`
-	LocalAirDate    string   `json:"local_air_date" doc:"The air date in the viewer's zone, YYYY-MM-DD; the day this event is listed under" example:"2026-01-10"`
-	PosterURL       string   `json:"poster_url,omitempty" example:"https://s3.example.test/poster.jpg"`
+	LocalAirDate    string   `json:"local_air_date" format:"date" doc:"The air date in the viewer's zone, YYYY-MM-DD; the day this event is listed under" example:"2026-01-10"`
+	PosterURL       string   `json:"poster_url,omitempty" format:"uri-reference" example:"https://s3.example.test/poster.jpg"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
 	Watched         bool     `json:"watched" example:"false"`
 	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale; empty, never null"`
@@ -49,7 +49,7 @@ type CalendarEvent struct {
 
 // CalendarDay is one local day with its events in airing order.
 type CalendarDay struct {
-	Date  string          `json:"date" doc:"YYYY-MM-DD in the viewer's zone" example:"2026-01-10"`
+	Date  string          `json:"date" format:"date" doc:"YYYY-MM-DD in the viewer's zone" example:"2026-01-10"`
 	Items []CalendarEvent `json:"items" doc:"Empty, never null"`
 }
 
@@ -86,6 +86,10 @@ type HomeLayoutInput struct {
 	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
 	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
 	IncludeItems int `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards in each included section, exactly as getHomeSectionItems answers it with the same item_limit. The entries in sections keep each section's own item_limit. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
 }
 
@@ -104,7 +108,9 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	RowItemLimitMax     int `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -117,12 +123,17 @@ type HomeCapabilitiesOutput struct {
 
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
+	SectionItemLimitQuery
 	ArtworkQuery
 }
 
 // HomeSectionItemsInput is the getHomeSectionItems query.
 type HomeSectionItemsInput struct {
 	ID string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards: the section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps the section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
 }
 
@@ -165,7 +176,7 @@ type SeasonalVibe struct {
 	Name        string `json:"name" example:"Family Halloween"`
 	Title       string `json:"title" doc:"The row's title while this vibe is in season, unless the row sets its own" example:"Family Halloween"`
 	Description string `json:"description" example:"Spooky fun for all ages."`
-	ListURL     string `json:"list_url" doc:"The MDBList list behind the vibe" example:"https://mdblist.com/lists/purple_smurf/halloween-family2"`
+	ListURL     string `json:"list_url" format:"uri" doc:"The MDBList list behind the vibe" example:"https://mdblist.com/lists/purple_smurf/halloween-family2"`
 }
 
 // SeasonalTheme is one holiday a Seasonal Picks row can follow.
@@ -430,8 +441,10 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		return &HomeCapabilitiesOutput{Body: HomeCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
 	}
 	return &HomeCapabilitiesOutput{Body: HomeCapabilities{
-		Capability:      Capability{State: StateAvailable},
-		IncludeItemsMax: handlers.MaxHomeLayoutIncludedSections,
+		Capability:          Capability{State: StateAvailable},
+		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
+		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
+		RowItemLimitMax:     handlers.MaxSectionItemLimitCap,
 	}}, nil
 }
 
@@ -443,7 +456,7 @@ func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*H
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.Artwork()), in.IncludeItems)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -465,7 +478,7 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSections(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -485,7 +498,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

@@ -11,7 +11,7 @@ export async function registerNotificationRelay(
 ) {
   requireNotificationAuthority(profileContext);
   const result = await v2("POST /api/v2/admin/notifications/push/relay/register", {
-    body: { relay_url: relayURL },
+    body: { relay_url: relayURL.trim() },
     profileContext,
     retryAuthentication: false,
   });

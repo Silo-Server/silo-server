@@ -13,14 +13,9 @@ import { tmdbRating } from "@/components/ratings/ratings";
 import { MoreLikeThisRow } from "@/components/RecommendationGrid";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { SeasonStatus } from "@/components/RequestSeasonsDialog";
-import { useCreateMediaRequest } from "@/hooks/queries/useRequests";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
-import {
-  formatRequestSeasonMeta,
-  requestInputFromMediaResult,
-  tmdbImageURL,
-} from "@/lib/mediaRequests";
+import { formatRequestSeasonMeta, tmdbImageURL } from "@/lib/mediaRequests";
 import DetailHero from "./DetailHero";
 import DetailLayout, { DetailSection } from "./DetailLayout";
 import HeroCrewLine from "./components/HeroCrewLine";
@@ -136,9 +131,8 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
   );
 }
 
-/** "More Like This" for a TMDB title: request cards, each able to request its title. */
+/** "More Like This" for a TMDB title: request cards linking to each title's page. */
 function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
-  const createRequest = useCreateMediaRequest();
   const watchlist = useWatchlistTitleToggle();
   return (
     <MoreLikeThisRow
@@ -149,12 +143,6 @@ function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
           variant="discover"
           fluid
           item={item}
-          isSubmitting={
-            createRequest.isPending &&
-            createRequest.variables?.media_type === item.media_type &&
-            createRequest.variables?.tmdb_id === item.tmdb_id
-          }
-          onRequest={() => createRequest.mutate(requestInputFromMediaResult(item))}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
         />

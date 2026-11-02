@@ -9,6 +9,7 @@ OPTIONS /api/v2/*	non-media
 PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
+QUERY /api/v2/*	non-media
 TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
@@ -32,6 +33,12 @@ POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
 POST /api/v2/admin/ai/chatgpt/login	non-media
 POST /api/v2/admin/ai/chatgpt/login/complete	non-media
 GET /api/v2/admin/ai/chatgpt/models	non-media
+GET /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers/check	non-media
+DELETE /api/v2/admin/ai/providers/{id}	non-media
+PATCH /api/v2/admin/ai/providers/{id}	non-media
+GET /api/v2/admin/ai/providers/{id}/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media
@@ -60,12 +67,14 @@ GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
+GET /api/v2/admin/catalog/capabilities	non-media
 POST /api/v2/admin/catalog/export	non-media
 POST /api/v2/admin/catalog/export-jobs	non-media
 POST /api/v2/admin/catalog/export-jobs/{id}/publish	non-media
 POST /api/v2/admin/catalog/import	non-media
 POST /api/v2/admin/catalog/import-jobs	non-media
 GET /api/v2/admin/catalog/import-sources	non-media
+GET /api/v2/admin/catalog/items	non-media
 GET /api/v2/admin/catalog/local-import-sources	non-media
 GET /api/v2/admin/catalog/search/status	non-media
 GET /api/v2/admin/collection-groups/{group_id}/collections/order	non-media
@@ -107,6 +116,7 @@ PUT /api/v2/admin/dashboard/layout	non-media
 GET /api/v2/admin/devices	non-media
 GET /api/v2/admin/devices/capabilities	non-media
 GET /api/v2/admin/devices/{user_id}/{device_id}	non-media
+DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit	non-media
 GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
@@ -166,6 +176,7 @@ GET /api/v2/admin/ips	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
+POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
@@ -221,6 +232,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
@@ -242,6 +254,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
@@ -292,6 +305,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -354,6 +372,8 @@ GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
 GET /api/v2/admin/stats	non-media
+GET /api/v2/admin/stats/api-clients	non-media
+GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
 GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
@@ -464,13 +484,17 @@ GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
+GET /api/v2/catalog/box-sets	non-media
+GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
+GET /api/v2/catalog/items/{id}/box-set	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
@@ -526,6 +550,7 @@ GET /api/v2/compat/connect-info	non-media
 GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
+POST /api/v2/devices/push/apple/retire	non-media
 DELETE /api/v2/devices/{device_id}	non-media
 PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
@@ -586,6 +611,7 @@ GET /api/v2/favorites	non-media
 DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
+GET /api/v2/favorites/{item_id}/membership	non-media
 GET /api/v2/history	non-media
 GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
@@ -676,6 +702,7 @@ GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
 POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
+POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
@@ -703,7 +730,10 @@ POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
+POST /api/v2/playback/bandwidth-probe/results	non-media
 GET /api/v2/playback/capabilities	non-media
+GET /api/v2/playback/connection	non-media
+DELETE /api/v2/playback/connection/learned-limit	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
 GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
@@ -778,6 +808,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
@@ -900,6 +931,7 @@ PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media
+GET /api/v2/watchlist/{item_id}/membership	non-media
 GET /api/v2/webhook-sync/capabilities	non-media
 GET /api/v2/webhook-sync/connections	non-media
 POST /api/v2/webhook-sync/connections	non-media
@@ -1292,6 +1324,7 @@ OPTIONS /api/v2/*	non-media
 PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
+QUERY /api/v2/*	non-media
 TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
@@ -1315,6 +1348,12 @@ POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
 POST /api/v2/admin/ai/chatgpt/login	non-media
 POST /api/v2/admin/ai/chatgpt/login/complete	non-media
 GET /api/v2/admin/ai/chatgpt/models	non-media
+GET /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers/check	non-media
+DELETE /api/v2/admin/ai/providers/{id}	non-media
+PATCH /api/v2/admin/ai/providers/{id}	non-media
+GET /api/v2/admin/ai/providers/{id}/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media
@@ -1343,12 +1382,14 @@ GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
+GET /api/v2/admin/catalog/capabilities	non-media
 POST /api/v2/admin/catalog/export	non-media
 POST /api/v2/admin/catalog/export-jobs	non-media
 POST /api/v2/admin/catalog/export-jobs/{id}/publish	non-media
 POST /api/v2/admin/catalog/import	non-media
 POST /api/v2/admin/catalog/import-jobs	non-media
 GET /api/v2/admin/catalog/import-sources	non-media
+GET /api/v2/admin/catalog/items	non-media
 GET /api/v2/admin/catalog/local-import-sources	non-media
 GET /api/v2/admin/catalog/search/status	non-media
 GET /api/v2/admin/collection-groups/{group_id}/collections/order	non-media
@@ -1390,6 +1431,7 @@ PUT /api/v2/admin/dashboard/layout	non-media
 GET /api/v2/admin/devices	non-media
 GET /api/v2/admin/devices/capabilities	non-media
 GET /api/v2/admin/devices/{user_id}/{device_id}	non-media
+DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit	non-media
 GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
@@ -1449,6 +1491,7 @@ GET /api/v2/admin/ips	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
+POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
@@ -1504,6 +1547,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
@@ -1525,6 +1569,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
@@ -1575,6 +1620,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -1637,6 +1687,8 @@ GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
 GET /api/v2/admin/stats	non-media
+GET /api/v2/admin/stats/api-clients	non-media
+GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
 GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
@@ -1747,13 +1799,17 @@ GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
+GET /api/v2/catalog/box-sets	non-media
+GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
+GET /api/v2/catalog/items/{id}/box-set	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
@@ -1809,6 +1865,7 @@ GET /api/v2/compat/connect-info	non-media
 GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
+POST /api/v2/devices/push/apple/retire	non-media
 DELETE /api/v2/devices/{device_id}	non-media
 PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
@@ -1869,6 +1926,7 @@ GET /api/v2/favorites	non-media
 DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
+GET /api/v2/favorites/{item_id}/membership	non-media
 GET /api/v2/history	non-media
 GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
@@ -1959,6 +2017,7 @@ GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
 POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
+POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
@@ -1986,7 +2045,10 @@ POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
+POST /api/v2/playback/bandwidth-probe/results	non-media
 GET /api/v2/playback/capabilities	non-media
+GET /api/v2/playback/connection	non-media
+DELETE /api/v2/playback/connection/learned-limit	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
 GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
@@ -2061,6 +2123,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
@@ -2183,6 +2246,7 @@ PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media
+GET /api/v2/watchlist/{item_id}/membership	non-media
 GET /api/v2/webhook-sync/capabilities	non-media
 GET /api/v2/webhook-sync/connections	non-media
 POST /api/v2/webhook-sync/connections	non-media

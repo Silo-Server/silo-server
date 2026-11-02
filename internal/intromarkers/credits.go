@@ -4,32 +4,29 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 )
 
-// Credits detection bounds, validated against frame-checked episodes and
-// movies. Credits start in the file's tail window: the last TailSeconds, or
-// TailFraction of a shorter file. An end this close to the end of the file is
-// the end of the file.
+// Credits detection bounds. The tail window and length bounds are shared
+// with every other marker source (markers.CreditsLimits); an end this close
+// to the end of the file is the end of the file.
 const (
 	creditsEOFSnapSeconds = 15.0
-	creditsMinimumSeconds = 15.0
+	creditsMinimumSeconds = markers.CreditsMinimumSeconds
 
-	episodeCreditsTailSeconds    = 450.0
-	episodeCreditsTailFraction   = 0.4
-	episodeCreditsMaximumSeconds = 450.0
+	episodeCreditsTailSeconds  = markers.EpisodeCreditsTailSeconds
+	episodeCreditsTailFraction = markers.EpisodeCreditsTailFraction
 	// episodeCreditsVideoEOFSeconds is how far before the end of an episode
 	// credits placed by video alone may end. An earlier text run was a dark
 	// letterboxed scene or a title card inside the story.
 	episodeCreditsVideoEOFSeconds = 120.0
 
-	movieCreditsTailSeconds     = 900.0
-	movieCreditsTailFraction    = 0.25
-	movieCreditsMaximumSeconds  = 900.0
+	movieCreditsTailSeconds     = markers.MovieCreditsTailSeconds
+	movieCreditsTailFraction    = markers.MovieCreditsTailFraction
 	movieCreditsVideoEOFSeconds = 180.0
 )
 
@@ -43,42 +40,21 @@ const (
 	creditsMinimumConfidence = 0.55
 )
 
-// creditsLimits are the tail window and length bounds for one kind of file.
+// creditsLimits are the shared tail window and length bounds for one kind
+// of file, plus the detector's own video placement bound.
 type creditsLimits struct {
-	tailSeconds  float64
-	tailFraction float64
-	minSeconds   float64
-	maxSeconds   float64
+	markers.CreditsLimits
 	// videoEOFSeconds bounds how far before the end of the file credits
 	// placed by video alone may end.
 	videoEOFSeconds float64
 }
 
 func creditsLimitsFor(isMovie bool) creditsLimits {
+	videoEOF := episodeCreditsVideoEOFSeconds
 	if isMovie {
-		return creditsLimits{
-			tailSeconds:     movieCreditsTailSeconds,
-			tailFraction:    movieCreditsTailFraction,
-			minSeconds:      creditsMinimumSeconds,
-			maxSeconds:      movieCreditsMaximumSeconds,
-			videoEOFSeconds: movieCreditsVideoEOFSeconds,
-		}
+		videoEOF = movieCreditsVideoEOFSeconds
 	}
-	return creditsLimits{
-		tailSeconds:     episodeCreditsTailSeconds,
-		tailFraction:    episodeCreditsTailFraction,
-		minSeconds:      creditsMinimumSeconds,
-		maxSeconds:      episodeCreditsMaximumSeconds,
-		videoEOFSeconds: episodeCreditsVideoEOFSeconds,
-	}
-}
-
-// windowStart is where the tail window of a file of duration seconds begins.
-func (l creditsLimits) windowStart(duration float64) float64 {
-	if duration <= 0 {
-		return 0
-	}
-	return duration - math.Min(l.tailSeconds, l.tailFraction*duration)
+	return creditsLimits{CreditsLimits: markers.CreditsLimitsFor(isMovie), videoEOFSeconds: videoEOF}
 }
 
 // tailWindow is the end of an episode that credits detection fingerprints.
@@ -87,7 +63,7 @@ func tailWindow(candidate Candidate) fingerprintWindow {
 	if duration <= 0 {
 		return fingerprintWindow{}
 	}
-	return fingerprintWindow{Start: creditsLimitsFor(false).windowStart(duration), End: duration}
+	return fingerprintWindow{Start: creditsLimitsFor(false).WindowStart(duration), End: duration}
 }
 
 // snapCreditsEnd moves an end within the EOF snap to the end of the file.

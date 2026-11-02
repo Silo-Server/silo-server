@@ -638,6 +638,26 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 	return err
 }
 
+// itemArtworkAssignments keeps an item's artwork slots that an admin pick
+// locked after the writer read the item; see lockedArtworkAssignments.
+var itemArtworkAssignments = func() string {
+	locked := imagesLockedSQL("media_items.locked_fields")
+	slots := [][]string{
+		{"poster_path", "poster_source_path", "poster_thumbhash"},
+		{"backdrop_path", "backdrop_source_path", "backdrop_thumbhash"},
+		{"logo_path", "logo_source_path"},
+		{"banner_path", "banner_source_path", "banner_thumbhash"},
+		{"thumb_path", "thumb_source_path", "thumb_thumbhash"},
+		{"clearart_path", "clearart_source_path"},
+		{"disc_path", "disc_source_path"},
+	}
+	assignments := make([]string, len(slots))
+	for i, slot := range slots {
+		assignments[i] = lockedArtworkAssignments("media_items", locked, slot...)
+	}
+	return strings.Join(assignments, ",\n\t\t\t")
+}()
+
 // writeItem inserts item and, when update is set, overwrites every mutable
 // field of an existing row. It reports whether a row was written. An update
 // that leaves the item matched also clears match_ignored_at, since an
@@ -695,7 +715,10 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			year = EXCLUDED.year,
 			genres = EXCLUDED.genres,
 			content_rating = EXCLUDED.content_rating,
-			runtime = EXCLUDED.runtime,
+			-- Audiobook runtime is maintained from active files. Preserve the
+			-- current value even when a metadata request read an older one.
+			runtime = CASE WHEN media_items.type = 'audiobook'
+				THEN media_items.runtime ELSE EXCLUDED.runtime END,
 			overview = EXCLUDED.overview,
 			tagline = EXCLUDED.tagline,
 			rating_imdb = EXCLUDED.rating_imdb,
@@ -705,14 +728,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			imdb_id = EXCLUDED.imdb_id,
 			tmdb_id = EXCLUDED.tmdb_id,
 			tvdb_id = EXCLUDED.tvdb_id,
-			poster_path = EXCLUDED.poster_path,
-			poster_source_path = EXCLUDED.poster_source_path,
-			poster_thumbhash = EXCLUDED.poster_thumbhash,
-			backdrop_path = EXCLUDED.backdrop_path,
-			backdrop_source_path = EXCLUDED.backdrop_source_path,
-			backdrop_thumbhash = EXCLUDED.backdrop_thumbhash,
-			logo_path = EXCLUDED.logo_path,
-			logo_source_path = EXCLUDED.logo_source_path,
+			` + itemArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			season_count = EXCLUDED.season_count,
@@ -737,16 +753,6 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age = EXCLUDED.content_rating_age,
 			advisory_age = EXCLUDED.advisory_age,
 			advisory_source = EXCLUDED.advisory_source,
-			banner_path = EXCLUDED.banner_path,
-			banner_source_path = EXCLUDED.banner_source_path,
-			banner_thumbhash = EXCLUDED.banner_thumbhash,
-			thumb_path = EXCLUDED.thumb_path,
-			thumb_source_path = EXCLUDED.thumb_source_path,
-			thumb_thumbhash = EXCLUDED.thumb_thumbhash,
-			clearart_path = EXCLUDED.clearart_path,
-			clearart_source_path = EXCLUDED.clearart_source_path,
-			disc_path = EXCLUDED.disc_path,
-			disc_source_path = EXCLUDED.disc_source_path,
 			updated_at = NOW()`
 	}
 
@@ -2281,10 +2287,10 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 	// passing and a disabled library must not slip through. The old JOIN +
 	// NOT(mil.media_folder_id = ANY(...)) form let the passing membership row
 	// satisfy the deny check (audit 2026-05-01 §3.3), so both the FTS search and
-	// the fuzzy fallback that share this helper used it. appendLibraryAccessConditions
-	// emits independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and
-	// needs no JOIN.
-	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
+	// the fuzzy fallback that share this helper used it. The helper emits
+	// independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and needs
+	// no JOIN, and as a listing it leaves out an item in no library.
+	appendListedLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
 
 	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 
@@ -2879,6 +2885,13 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
+	}
+	if upd.Runtime != nil || upd.LockedFields != nil {
+		// Removing the runtime lock restores the file-derived value even
+		// when an unchanged audiobook will be skipped by the next scan.
+		if _, err := tx.Exec(ctx, `SELECT refresh_audiobook_runtime(ARRAY[$1]::text[])`, contentID); err != nil {
+			return fmt.Errorf("refreshing audiobook runtime: %w", err)
+		}
 	}
 	// The UPDATE above locked the item row before its rating sources, the
 	// order every rating source writer follows (see lockRatingSourceItem).

@@ -486,11 +486,38 @@ func TestProviderRecheckUnavailableDB(t *testing.T) {
 			if env.sessionRow(t, sessionID).RevokedAt != nil {
 				t.Fatal("fail-closed revoked the session")
 			}
+			// An open plugin page's launch cookie stops renewing with it.
+			launch, err := env.jwt.GeneratePluginAccessToken(env.user.ID, env.user.Role, sessionID, "profile-1", new(int64(3)), time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			launchClaims, err := env.jwt.ValidateToken(launch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.svc.RenewPluginAccess(t.Context(), launchClaims, 5*time.Minute); !errors.Is(err, ErrProviderUnavailable) {
+				t.Fatalf("fail-closed plugin renewal = %v", err)
+			}
 			// Once the provider answers again the same refresh token works.
 			env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "")
 			env.ageUnavailable(t)
 			if _, err := env.svc.Refresh(t.Context(), pair.RefreshToken); err != nil {
 				t.Fatalf("refresh after recovery = %v", err)
+			}
+			// And the cookie renews for the same session, profile and PIN
+			// revision, ending no later than the session.
+			renewed, err := env.svc.RenewPluginAccess(t.Context(), launchClaims, 5*time.Minute)
+			if err != nil {
+				t.Fatalf("plugin renewal after recovery = %v", err)
+			}
+			got, err := env.jwt.ValidateToken(renewed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TokenType != TokenTypePluginAccess || got.SessionID != sessionID || got.ProfileID != "profile-1" ||
+				got.ProfilePINRevision == nil || *got.ProfilePINRevision != 3 ||
+				got.ExpiresAt.After(env.sessionRow(t, sessionID).ExpiresAt) {
+				t.Fatalf("renewed claims = %+v", got)
 			}
 		})
 	}

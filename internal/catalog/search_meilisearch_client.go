@@ -211,24 +211,58 @@ func (c *meilisearchClient) Health(ctx context.Context) error {
 // Meilisearch redirected to another scheme, host or port.
 var ErrMeilisearchCheckRedirected = errors.New("meilisearch redirected the connection check to another address")
 
+// ErrMeilisearchCheckKeyRejected reports a connection check whose key, or
+// missing key, Meilisearch refused for an authenticated request.
+var ErrMeilisearchCheckKeyRejected = errors.New("meilisearch rejected the API key")
+
 // checkConnection keeps a credentialed administrative probe at its configured
 // scheme, host and port: it follows redirects within them and reports any
 // other as ErrMeilisearchCheckRedirected. Runtime clients and checks without a
 // key retain their redirect policy.
-func (c *meilisearchClient) checkConnection(ctx context.Context) error {
-	if c.apiKey == "" {
-		return c.Health(ctx)
+//
+// /health answers without a key, so the check then makes two authenticated
+// reads. Listing one index needs the indexes.get action the rebuild cleanup
+// uses. Searching an index under indexPrefix that does not exist needs the
+// search action and an index scope covering Silo's indexes; Meilisearch
+// answers it with index_not_found when the key may search there. Only a 404
+// carrying that code counts, so a proxy's bare 404 fails the check. A 401 or 403
+// from either read is reported as ErrMeilisearchCheckKeyRejected with the
+// status code only, not Meilisearch's error text.
+func (c *meilisearchClient) checkConnection(ctx context.Context, indexPrefix string) error {
+	if c.apiKey != "" {
+		c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if !sameCheckAuthority(req.URL, via[0].URL) {
+				return ErrMeilisearchCheckRedirected
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		}
 	}
-	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !sameCheckAuthority(req.URL, via[0].URL) {
-			return ErrMeilisearchCheckRedirected
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
+	if err := c.Health(ctx); err != nil {
+		return err
+	}
+	if err := checkKeyAccepted(c.do(ctx, http.MethodGet, "/indexes?limit=1", nil, nil)); err != nil {
+		return err
+	}
+	probeUID := indexPrefix + "_rebuild_check"
+	err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(probeUID)+"/search", meilisearchSearchRequest{}, nil)
+	var httpErr *meilisearchHTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && strings.EqualFold(strings.TrimSpace(httpErr.Code), "index_not_found") {
 		return nil
 	}
-	return c.Health(ctx)
+	return checkKeyAccepted(err)
+}
+
+// checkKeyAccepted reports a 401 or 403 as ErrMeilisearchCheckKeyRejected and
+// returns any other error unchanged.
+func checkKeyAccepted(err error) error {
+	var httpErr *meilisearchHTTPError
+	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		return fmt.Errorf("%w (HTTP %d)", ErrMeilisearchCheckKeyRejected, httpErr.StatusCode)
+	}
+	return err
 }
 
 // sameCheckAuthority reports whether a redirect keeps the scheme, host and

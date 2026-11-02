@@ -99,6 +99,7 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     manga_volume_count: item.manga_volume_count,
     pending_translation_language: item.pending_translation_language,
     machine_translated_fields: item.machine_translated_fields,
+    ...(item.box_set ? { box_set: item.box_set } : {}),
   };
 }
 

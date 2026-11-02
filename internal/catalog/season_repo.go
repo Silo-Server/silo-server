@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +53,8 @@ func NewSeasonRepository(pool *pgxpool.Pool) *SeasonRepository {
 const seasonColumns = `content_id, series_id, season_number, title, default_metadata_language, overview,
 	air_date, poster_path, poster_source_path, poster_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
-	created_at, updated_at`
+	created_at, updated_at,
+	backdrop_path, backdrop_source_path, backdrop_thumbhash`
 
 // scanSeason scans a single row into a *models.Season.
 func scanSeason(row pgx.Row) (*models.Season, error) {
@@ -73,6 +75,9 @@ func scanSeason(row pgx.Row) (*models.Season, error) {
 		&s.MetadataSource,
 		&s.CreatedAt,
 		&s.UpdatedAt,
+		&s.BackdropPath,
+		&s.BackdropSourcePath,
+		&s.BackdropThumbhash,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -104,6 +109,9 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 			&s.MetadataSource,
 			&s.CreatedAt,
 			&s.UpdatedAt,
+			&s.BackdropPath,
+			&s.BackdropSourcePath,
+			&s.BackdropThumbhash,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning season row: %w", err)
@@ -114,6 +122,95 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 		return nil, fmt.Errorf("iterating season rows: %w", err)
 	}
 	return seasons, nil
+}
+
+// seasonArtworkAssignments keeps a season poster an admin picked after the
+// writer read the season; see lockedArtworkAssignments.
+var seasonArtworkAssignments = lockedArtworkAssignments("seasons", seriesImagesLockedSQL("seasons"),
+	"poster_path", "poster_source_path", "poster_thumbhash")
+
+// writeSeasonBackdrops sets the backdrop of each season marked WriteBackdrop,
+// in the upsert's transaction after the row is written and locked. It writes
+// the slot from the current row rather than the writer's earlier read, so
+// unmarked writers keep whatever is stored, a marked one replaces or clears
+// it, and one marked BackdropFillOnly only fills a backdrop that is still
+// empty. While the series has Images locked, a stored backdrop stays, as
+// lockedArtworkAssignments keeps a poster.
+func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Season) error {
+	var seriesIDs, paths, sources, thumbhashes []string
+	var numbers []int32
+	var fillOnly []bool
+	for _, s := range seasons {
+		if !s.WriteBackdrop {
+			continue
+		}
+		if s.SeasonNumber < math.MinInt32 || s.SeasonNumber > math.MaxInt32 {
+			return fmt.Errorf("writing season backdrops: season number %d is outside PostgreSQL integer range", s.SeasonNumber)
+		}
+		seriesIDs = append(seriesIDs, s.SeriesID)
+		numbers = append(numbers, int32(s.SeasonNumber))
+		paths = append(paths, s.BackdropPath)
+		sources = append(sources, s.BackdropSourcePath)
+		thumbhashes = append(thumbhashes, s.BackdropThumbhash)
+		fillOnly = append(fillOnly, s.BackdropFillOnly)
+	}
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE seasons
+		SET backdrop_path = target.path,
+			backdrop_source_path = target.source_path,
+			backdrop_thumbhash = target.thumbhash,
+			updated_at = NOW()
+		FROM UNNEST($1::text[], $2::int[], $3::text[], $4::text[], $5::text[], $6::bool[])
+			AS target(series_id, season_number, path, source_path, thumbhash, fill_only)
+		WHERE seasons.series_id = target.series_id
+		  AND seasons.season_number = target.season_number
+		  AND (seasons.backdrop_path, seasons.backdrop_source_path, seasons.backdrop_thumbhash)
+			IS DISTINCT FROM (target.path, target.source_path, target.thumbhash)
+		  AND NOT (target.fill_only AND seasons.backdrop_path <> '')
+		  AND NOT (`+seriesImagesLockedSQL("seasons")+` AND seasons.backdrop_path <> '')`,
+		seriesIDs, numbers, paths, sources, thumbhashes, fillOnly)
+	if err != nil {
+		return fmt.Errorf("writing season backdrops: %w", err)
+	}
+	return nil
+}
+
+// ClearBackdropsExcept clears the backdrop of every season of seriesID whose
+// number is not in keep, unless the series has Images locked. Identify uses it
+// for seasons the corrected match no longer names, which may show the
+// previous match's art. It locks the rows first and updates only those, so a
+// pick published meanwhile is either seen with its images lock or waits.
+func (r *SeasonRepository) ClearBackdropsExcept(ctx context.Context, seriesID string, keep []int32) error {
+	if keep == nil {
+		keep = []int32{}
+	}
+	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT content_id FROM seasons
+			WHERE series_id = $1 AND NOT (season_number = ANY($2::int[])) AND backdrop_path <> ''
+			ORDER BY content_id
+			FOR NO KEY UPDATE`, seriesID, keep)
+		if err != nil {
+			return err
+		}
+		contentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(contentIDs) == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE seasons
+			SET backdrop_path = '', backdrop_source_path = '', backdrop_thumbhash = '', updated_at = NOW()
+			WHERE content_id = ANY($1::text[])
+			  AND NOT `+seriesImagesLockedSQL("seasons"), contentIDs)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("clearing season backdrops: %w", err)
+	}
+	return nil
 }
 
 // Upsert inserts a new season or updates all mutable fields if the
@@ -135,31 +232,46 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
-			poster_path = EXCLUDED.poster_path,
-			poster_source_path = EXCLUDED.poster_source_path,
-			poster_thumbhash = EXCLUDED.poster_thumbhash,
+			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id`
+		RETURNING content_id, xmax = 0`
 
 	var storedContentID string
-	err := r.pool.QueryRow(ctx, query,
-		s.ContentID,
-		s.SeriesID,
-		s.SeasonNumber,
-		s.Title,
-		s.DefaultMetadataLanguage,
-		s.Overview,
-		s.AirDate,
-		s.PosterPath,
-		s.PosterSourcePath,
-		s.PosterThumbhash,
-		s.MetadataS3Path,
-		s.MetadataEtag,
-		s.MetadataSource,
-	).Scan(&storedContentID)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT content_id FROM seasons WHERE series_id = $1 AND season_number = $2 FOR NO KEY UPDATE`,
+				s.SeriesID, s.SeasonNumber)
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			if err := tx.QueryRow(ctx, query,
+				s.ContentID,
+				s.SeriesID,
+				s.SeasonNumber,
+				s.Title,
+				s.DefaultMetadataLanguage,
+				s.Overview,
+				s.AirDate,
+				s.PosterPath,
+				s.PosterSourcePath,
+				s.PosterThumbhash,
+				s.MetadataS3Path,
+				s.MetadataEtag,
+				s.MetadataSource,
+			).Scan(&storedContentID, &inserted); err != nil {
+				return err
+			}
+			if err := checkArtworkRowLocked(locked, storedContentID, inserted); err != nil {
+				return err
+			}
+			return writeSeasonBackdrops(ctx, tx, []*models.Season{s})
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("upserting season: %w", err)
 	}
@@ -229,37 +341,54 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
-			poster_path = EXCLUDED.poster_path,
-			poster_source_path = EXCLUDED.poster_source_path,
-			poster_thumbhash = EXCLUDED.poster_thumbhash,
+			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id, season_number`
-
-	rows, err := r.pool.Query(ctx, query,
-		contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
-		airDates, posterPaths, posterSourcePaths, posterThumbs,
-		metaS3Paths, metaEtags, metaSources,
-	)
-	if err != nil {
-		return fmt.Errorf("bulk upserting seasons: %w", err)
-	}
-	defer rows.Close()
+		RETURNING content_id, season_number, xmax = 0`
 
 	// Build a map to write back content IDs by season number.
 	returnedIDs := make(map[int32]string, len(seasons))
-	for rows.Next() {
-		var cid string
-		var sn int32
-		if err := rows.Scan(&cid, &sn); err != nil {
-			return fmt.Errorf("scanning bulk upsert season result: %w", err)
-		}
-		returnedIDs[sn] = cid
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating bulk upsert season results: %w", err)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT seasons.content_id FROM seasons
+			JOIN UNNEST($1::text[], $2::int[]) AS target(series_id, season_number) USING (series_id, season_number)
+			ORDER BY seasons.content_id
+			FOR NO KEY UPDATE OF seasons`, seriesIDs, seasonNums)
+			if err != nil {
+				return err
+			}
+			rows, err := tx.Query(ctx, query,
+				contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
+				airDates, posterPaths, posterSourcePaths, posterThumbs,
+				metaS3Paths, metaEtags, metaSources,
+			)
+			if err != nil {
+				return fmt.Errorf("bulk upserting seasons: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var cid string
+				var sn int32
+				var inserted bool
+				if err := rows.Scan(&cid, &sn, &inserted); err != nil {
+					return fmt.Errorf("scanning bulk upsert season result: %w", err)
+				}
+				if err := checkArtworkRowLocked(locked, cid, inserted); err != nil {
+					return err
+				}
+				returnedIDs[sn] = cid
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterating bulk upsert season results: %w", err)
+			}
+			return writeSeasonBackdrops(ctx, tx, seasons)
+		})
+	})
+	if err != nil {
+		return err
 	}
 
 	for _, s := range seasons {
@@ -397,16 +526,22 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	return nil
 }
 
-func (r *SeasonRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `
+// UpdateArtworkIfSourceMatches stores the cached copy of a season's poster or
+// backdrop, named by imageType, while the row still points at sourcePath.
+func (r *SeasonRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	// The image type names the column family: poster_* or backdrop_*.
+	if imageType != artworkImagePoster && imageType != artworkImageBackdrop {
+		return false, fmt.Errorf("updating season cached artwork: seasons do not hold %q images", imageType)
+	}
+	tag, err := r.pool.Exec(ctx, fmt.Sprintf(`
 		UPDATE seasons
-		SET poster_path = $3,
-			poster_source_path = $2,
-			poster_thumbhash = $4,
+		SET %[1]s_path = $3,
+			%[1]s_source_path = $2,
+			%[1]s_thumbhash = $4,
 			updated_at = NOW()
 		WHERE content_id = $1
-		  AND poster_source_path = $2
-	`, contentID, sourcePath, cachedPath, thumbhash)
+		  AND %[1]s_source_path = $2
+	`, imageType), contentID, sourcePath, cachedPath, thumbhash)
 	if err != nil {
 		return false, fmt.Errorf("updating season cached artwork: %w", err)
 	}

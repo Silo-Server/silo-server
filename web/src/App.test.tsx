@@ -16,7 +16,15 @@ vi.mock("@/hooks/useAuth", async () => {
   return { ...actual, useAuth: () => auth as AuthState };
 });
 
-import { QueryCacheManager } from "@/App";
+const probe = vi.hoisted(() => ({ schedule: vi.fn(), stop: vi.fn() }));
+vi.mock("@/player/bandwidth-probe", () => ({
+  scheduleBandwidthProbe: () => {
+    probe.schedule();
+    return probe.stop;
+  },
+}));
+
+import { BandwidthProbePrewarmer, QueryCacheManager } from "@/App";
 
 function makeUser(id: number): User {
   return {
@@ -87,5 +95,35 @@ describe("QueryCacheManager", () => {
     signIn({ user: makeUser(1), profile: makeProfile("p-2") });
 
     expect(queryClient.getQueryData(key)).toBeUndefined();
+  });
+});
+
+describe("BandwidthProbePrewarmer", () => {
+  beforeEach(() => {
+    probe.schedule.mockReset();
+    probe.stop.mockReset();
+  });
+
+  // The connection reads need a profile, and the test's target follows the
+  // profile's libraries.
+  it("starts the speed schedule once a profile is active, and again for another profile", async () => {
+    const user = makeUser(1);
+    auth = { user, profile: null };
+    const view = render(<BandwidthProbePrewarmer />);
+    await Promise.resolve();
+    expect(probe.schedule).not.toHaveBeenCalled();
+
+    auth = { user, profile: makeProfile("p1") };
+    view.rerender(<BandwidthProbePrewarmer />);
+    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(1));
+
+    auth = { user, profile: makeProfile("p2") };
+    view.rerender(<BandwidthProbePrewarmer />);
+    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(2));
+    expect(probe.stop).toHaveBeenCalledTimes(1);
+
+    auth = { user: null, profile: null };
+    view.rerender(<BandwidthProbePrewarmer />);
+    expect(probe.stop).toHaveBeenCalledTimes(2);
   });
 });

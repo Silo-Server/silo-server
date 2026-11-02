@@ -521,9 +521,12 @@ event:
 ```
 
 Capture `updated_at` when local state changes, and retain both the timestamp and the
-revision when retrying. `status` is `downloading` or `completed`; future timestamps
-are rejected. The response is `200` with the current `DownloadEntry`, whose optional
-`status_event_at` names the latest accepted event for the current revision.
+revision when retrying. `status` is `downloading` or `completed`. The server keeps
+`updated_at` as reported when it is at most two minutes ahead of its own clock, the
+same skew progress sync allows, so device clock drift does not refuse a report; a
+later timestamp returns `400 malformed_request`. The response is `200` with the
+current `DownloadEntry`, whose optional `status_event_at` names the latest accepted
+event for the current revision.
 
 An older or equal event returns the current entry without changing it. A different
 revision returns `409`: reload the registry and reconcile the new bytes instead of
@@ -990,8 +993,8 @@ Notes:
 - `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
   external (`external:{index}`) subtitles; an external subtitle that cannot be
   read has none. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change: a timing correction, or an external file edited
-  on disk. When a refreshed manifest shows a different value than the one
+  delivered bytes can change: a timing correction, an external file edited
+  on disk, or a change in how the server decodes subtitle text to UTF-8. When a refreshed manifest shows a different value than the one
   stored with the cached file, re-fetch that subtitle. An external subtitle's
   `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as
@@ -2026,3 +2029,53 @@ The differences a migrating client has to handle:
 
 Do not fall back to the bridge after an uncertain v2 request. Reconcile the
 registry on v2 and make an explicit new request.
+
+## Download bandwidth accounting
+
+`download.server_bandwidth_mbps` is the aggregate native-download ceiling across
+API instances. `download.user_bandwidth_mbps` is an aggregate per-account ceiling
+shared by all that account's profiles and concurrent downloads; it is a server
+default applied independently to each account, not a nullable account override.
+Both use decimal Mbps (`1 Mbps = 125000 bytes/s`); zero is unlimited. Both ceilings
+apply, so the stricter available budget wins. These are download byte controls,
+separate from playback media bitrate and prepared-file storage capacity.
+
+With Redis configured, every API process and proxy node charges capped
+downloads to shared Redis buckets: one global bucket and one per account,
+debited atomically, each with a burst of `max(rate/4, 32768)` bytes across the
+installation. Without Redis, each process keeps in-process limiters, which is
+exact only for a single API process. A transfer pays for one chunk before
+sending it: about 25 ms of the strictest active rate, between 32 KiB and 1 MiB,
+so a fast cap is not bounded by one Redis round trip per 32 KiB. A charge
+reserves its bytes even when the bucket is short and waits until they are paid
+for, so contending transfers are served in order. A process whose settings are
+not yet refreshed leaves a bucket it sees as unlimited untouched. Over time,
+bytes sent against a bucket average its rate. A chunk is released only when
+both of its buckets have paid for it, so a chunk held back by its account
+bucket can leave together with later ones, and a short interval can exceed
+`rate*T + burst` by the chunks concurrent transfers hold reserved. HTTP and
+socket buffering may also shift the observed arrival times of charged chunks.
+Redis time and retained balances keep API or proxy restarts from granting new
+budget. While either limit is set, newly negotiated routes keep downloads on
+the API egress path rather than proxies; a proxy token issued before a limit
+was set can still reach its proxy, which applies the limits itself. API delivery
+of worker artifacts is charged once at egress.
+
+With Redis, each serving process reads the two bandwidth settings at most every
+5 seconds, so saved edits reach capped transfers within about 5 seconds. Without
+Redis, the download service reloads them at most every 30 seconds when a
+download request arrives. An edit does not
+refill a bucket. A transfer that starts with both limits at zero is served
+without the limiter and stays unlimited; later edits apply to new transfers. A
+failed settings read keeps the last known limits. A failed budget operation is
+retried for up to 10 seconds, sending no bytes meanwhile; after that the
+transfer stops without exposing uncharged bytes. Each settings refresh and
+Redis budget call has a one-second deadline. Clients must handle incomplete
+bodies. Managed downloads retry
+through their existing Range/resume flow after dependency recovery. A stopped
+ephemeral original download marks its row `failed`, which later requests
+reject, so the client starts a new ephemeral download instead.
+
+`download.max_per_period` counts registrations independently for each account
+in the rolling `download.period_duration`; zero is unlimited. It is not a
+server-wide registration quota or a cumulative downloaded-byte quota.

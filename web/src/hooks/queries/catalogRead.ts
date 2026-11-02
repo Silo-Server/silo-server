@@ -17,6 +17,7 @@ import {
   seasonFromV2,
 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
+import { artworkQuery, type ArtworkSurface } from "@/lib/artworkWidths";
 import { catalogKeys } from "./keys";
 
 type ReadOptions = Pick<RequestInit, "signal"> | undefined;
@@ -33,10 +34,11 @@ export async function fetchCatalogItemDetail(
   id: string,
   libraryId?: number,
   options?: ReadOptions,
+  surface: Extract<ArtworkSurface, "detail" | "onDeck"> = "detail",
 ): Promise<ItemDetail> {
   const detail = await v2("GET /api/v2/catalog/items/{id}", {
     path: { id },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...artworkQuery(surface) },
     signal: signalOf(options),
   });
   return catalogItemDetailFromV2(detail);
@@ -60,7 +62,7 @@ export async function fetchCatalogItemEpisodes(
 ): Promise<EpisodesResponse> {
   const episodes = await v2("GET /api/v2/catalog/items/{id}/episodes", {
     path: { id },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...artworkQuery("episodes") },
     signal: signalOf(options),
   });
   return { episodes: episodes.items.map(episodeFromV2) };
@@ -73,7 +75,7 @@ export async function fetchCatalogSeriesSeasons(
 ): Promise<SeasonsResponse> {
   const seasons = await v2("GET /api/v2/catalog/series/{id}/seasons", {
     path: { id: seriesId },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...artworkQuery("seasons") },
     signal: signalOf(options),
   });
   return { seasons: seasons.items.map(seasonFromV2) };
@@ -87,7 +89,7 @@ export async function fetchCatalogSeasonDetail(
 ): Promise<SeasonDetailResponse> {
   const season = await v2("GET /api/v2/catalog/series/{id}/seasons/{num}", {
     path: { id: seriesId, num: seasonNum },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...artworkQuery("detail") },
     signal: signalOf(options),
   });
   return { season: seasonFromV2(season) };
@@ -98,10 +100,11 @@ export async function fetchCatalogSeasonEpisodes(
   seasonNum: number,
   libraryId?: number,
   options?: ReadOptions,
+  surface: Extract<ArtworkSurface, "episodes" | "upNext"> = "episodes",
 ): Promise<EpisodesResponse> {
   const episodes = await v2("GET /api/v2/catalog/series/{id}/seasons/{num}/episodes", {
     path: { id: seriesId, num: seasonNum },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...artworkQuery(surface) },
     signal: signalOf(options),
   });
   return { episodes: episodes.items.map(episodeFromV2) };
