@@ -482,12 +482,9 @@ and a heartbeat every 30 seconds.
 
 The API listener opens only after migrations, so while a server waits, backs
 up, or migrates, its readiness and health endpoints do not answer, which every
-probe reads as not ready. On Kubernetes, give the API pods a startup probe on
-`/api/v1/ready` whose budget (`failureThreshold` times `periodSeconds`) covers
-`SILO_MIGRATION_WAIT` plus the backup and the migrations, so liveness checks
-do not restart a pod that is waiting for another pod's upgrade. Size the
-backup from the previous copy's duration in task history. The image's
-`HEALTHCHECK` allows a 20-minute start period.
+probe reads as not ready: a deployment's start budget has to cover the wait,
+the backup, and the migrations. The image's `HEALTHCHECK` allows a 20-minute
+start period. How to size probes for a deployment belongs in the user manual.
 
 ### Restoring one
 
