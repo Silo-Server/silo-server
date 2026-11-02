@@ -745,6 +745,9 @@ func TestServeSUPWindowOrder(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("no warm after a window from the source")
 				}
+				// The warm still writes the .sup into the test's directory;
+				// it frees its slot once it has finished.
+				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
 			}
 		})
 	}
