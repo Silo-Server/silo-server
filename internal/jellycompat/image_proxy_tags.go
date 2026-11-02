@@ -16,7 +16,7 @@ import (
 func compatImageProxyTagVariantMiddleware(codec *ResourceIDCodec) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet || !isCompatImageProxyClientRequest(r) || isWebSocketUpgrade(r) {
+			if r.Method != http.MethodGet || !isCompatImageProxyClientRequest(r) || isWebSocketUpgrade(r) || isCompatUserObjectPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -26,6 +26,14 @@ func compatImageProxyTagVariantMiddleware(codec *ResourceIDCodec) func(http.Hand
 			rw.finish()
 		})
 	}
+}
+
+// isCompatUserObjectPath reports a route answering UserDto objects: /Users,
+// /Users/Me and /Users/{id}. Their PrimaryImageTag names a user avatar, which
+// the image-proxy rewrite would otherwise point at an item image route.
+func isCompatUserObjectPath(p string) bool {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	return len(parts) <= 2 && strings.EqualFold(parts[0], "Users")
 }
 
 type compatImageProxyTagResponseWriter struct {

@@ -20,7 +20,7 @@ import (
 
 const (
 	profileAvatarPresetPrefix = "preset:"
-	profileAvatarUploadPrefix = "upload:"
+	profileAvatarUploadPrefix = userstore.AvatarUploadPrefix
 	profileAvatarMaxFileSize  = 10 << 20
 )
 
@@ -75,7 +75,7 @@ func isKnownPresetAvatarID(id string) bool {
 }
 
 func isUploadedAvatarRef(ref string) bool {
-	return strings.HasPrefix(strings.TrimSpace(ref), profileAvatarUploadPrefix)
+	return userstore.IsUploadedAvatarRef(ref)
 }
 
 func avatarRefReplacesUpload(currentRef, nextRef string) bool {
@@ -180,10 +180,7 @@ func uploadedAvatarOriginalKey(userID int, profileID string) string {
 }
 
 func uploadedAvatarDisplayKey(originalKey string) string {
-	if strings.HasSuffix(originalKey, "/original.webp") {
-		return strings.TrimSuffix(originalKey, "/original.webp") + "/w256.webp"
-	}
-	return strings.TrimRight(originalKey, "/") + "/w256.webp"
+	return userstore.AvatarDisplayKey(originalKey)
 }
 
 func deleteUploadedAvatarObjects(ctx context.Context, store profileAvatarStore, userID int, profileID string) error {

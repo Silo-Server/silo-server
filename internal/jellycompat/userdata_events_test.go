@@ -117,7 +117,7 @@ func TestUserDataChangedForTranslatesOnlyTheSessionsOwnChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantItem := codec.EncodeStringID(EncodedIDItem, "movie-1")
-	if data.UserID != session.PseudoUserID.String() || len(data.UserDataList) != 1 ||
+	if data.UserID != compatUserID(session.PseudoUserID) || len(data.UserDataList) != 1 ||
 		data.UserDataList[0].ItemID != wantItem || data.UserDataList[0].Played == nil || !*data.UserDataList[0].Played {
 		t.Fatalf("data %+v", data)
 	}
@@ -176,7 +176,7 @@ func TestSocketForwardsUserDataChangedForTheSession(t *testing.T) {
 	if err := json.Unmarshal(msg.Data, &data); err != nil {
 		t.Fatal(err)
 	}
-	if data.UserID != session.PseudoUserID.String() || len(data.UserDataList) != 1 ||
+	if data.UserID != compatUserID(session.PseudoUserID) || len(data.UserDataList) != 1 ||
 		data.UserDataList[0].ItemID != codec.EncodeStringID(EncodedIDItem, "movie-1") {
 		t.Fatalf("data %+v", data)
 	}
