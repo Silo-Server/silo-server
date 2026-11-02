@@ -23,10 +23,17 @@ import (
 // the v1 handlers and the v2 operations share. Each returns the view the v1
 // handler writes verbatim and, on failure, an *APIError.
 
-// HomeSections answers every section of the home page with its items for
+// HomeSections answers every section of the home page that has items for
 // the profile on the context, each row capped at viewer.ItemLimitCap items
 // when it is set.
 func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer) (SectionsView, error) {
+	return h.homeSections(ctx, viewer, false)
+}
+
+// homeSections is HomeSections. With keepEmptyRows, it answers sections with
+// no items as the frozen v1 endpoint always has, leaving out only an
+// off-season seasonal row and one that hiding watched titles emptied.
+func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer, keepEmptyRows bool) (SectionsView, error) {
 	start := time.Now()
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
 	if err != nil {
@@ -47,7 +54,11 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 		withItems = dropEmptyWatchedHomeSections(withItems)
 	}
 	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
+	if keepEmptyRows {
+		withItems = dropEmptySeasonalSections(withItems)
+	} else {
+		withItems = dropEmptySections(withItems)
+	}
 	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates)
 	itemCount := 0
 	for _, section := range withItems {
@@ -94,10 +105,11 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			sections.LogFetchError(ctx, "api", s, fetchErr)
-			// Unlike the aggregate read, which keeps the page up with an
-			// empty row, a failed single section answers an error, so a
-			// client can tell it from a section with nothing to show. A
-			// deleted collection is not a failure and keeps its empty row.
+			// Unlike the aggregate reads, which keep the page up by leaving
+			// the row out (v2) or answering it empty (v1), a failed single
+			// section answers an error, so a client can tell it from a
+			// section with nothing to show. A deleted collection is not a
+			// failure and keeps its empty row.
 			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
 				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}

@@ -27887,7 +27887,7 @@
         "path": "/api/v2/home/sections",
         "operation_id": "listHomeSections"
       },
-      "notes": "Section catalog-home (profile_scoped). Same body as v1 with each card as the shared CatalogItem; image_size is a strict enum answered 422."
+      "notes": "Section catalog-home (profile_scoped). Same body as v1 with each card as the shared CatalogItem, except that rows with no items for the viewer are left out where v1 answers them empty; image_size is a strict enum answered 422."
     },
     {
       "listener": "api",
@@ -30329,7 +30329,7 @@
         "path": "/api/v2/library/{id}/sections",
         "operation_id": "listLibrarySections"
       },
-      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem: progress_updated_at is a UTC ms instant; image_size is a declared enum answered 422; the device header is not read."
+      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem: progress_updated_at is a UTC ms instant; image_size is a declared enum answered 422; the device header is not read. Rows with no items for the viewer are left out where v1 answers them empty."
     },
     {
       "listener": "api",
