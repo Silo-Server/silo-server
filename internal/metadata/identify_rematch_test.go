@@ -16,12 +16,15 @@ func seedWrongMatch(t *testing.T, h *testHarness, contentID string) *fakeProvide
 }
 
 // seedMovieIdentity stores a matched movie with the given TMDB and IMDb IDs
-// (either may be empty) in the item columns and the durable provider-ID rows.
+// (either may be empty) in the item columns and the durable provider-ID rows,
+// and with home release dates the providers in these tests never send.
 func seedMovieIdentity(t *testing.T, h *testHarness, contentID, tmdb, imdb string) *fakeProviderIDRepo {
 	t.Helper()
+	digital, physical := "2007-03-01", "2007-04-01"
 	if err := h.itemRepo.Upsert(context.Background(), &models.MediaItem{
 		ContentID: contentID, Type: "movie", Title: "Wrong Film", Year: 2006, Status: "matched",
 		TmdbID: tmdb, ImdbID: imdb,
+		DigitalReleaseDate: &digital, PhysicalReleaseDate: &physical,
 		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
 	}); err != nil {
 		t.Fatalf("seed item: %v", err)
@@ -52,6 +55,22 @@ func assertIdentityIDs(t *testing.T, h *testHarness, providerRepo *fakeProviderI
 	providerRepo.mu.Unlock()
 	if persisted["tmdb"] != wantTMDB || persisted["imdb"] != wantIMDb {
 		t.Errorf("persisted provider IDs = %#v, want tmdb=%q imdb=%q", persisted, wantTMDB, wantIMDb)
+	}
+}
+
+// assertHomeReleaseDatesKept checks the seeded home release dates: a
+// correction drops the previous match's dates when the new movie has none,
+// and a confirming choice keeps them.
+func assertHomeReleaseDatesKept(t *testing.T, h *testHarness, contentID string, want bool) {
+	t.Helper()
+	item, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	kept := item.DigitalReleaseDate != nil && item.PhysicalReleaseDate != nil
+	cleared := item.DigitalReleaseDate == nil && item.PhysicalReleaseDate == nil
+	if (want && !kept) || (!want && !cleared) {
+		t.Errorf("home release dates digital=%v physical=%v, want kept=%v", item.DigitalReleaseDate, item.PhysicalReleaseDate, want)
 	}
 }
 
@@ -86,6 +105,7 @@ func TestProcess_IdentifyReplacesWrongMatchIDs(t *testing.T) {
 		t.Errorf("identify fetched with the wrong film's imdb id %q", got)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+	assertHomeReleaseDatesKept(t, h, contentID, false)
 }
 
 // Picking the same film by a provider ID the item lacks reads as a correction
@@ -135,6 +155,7 @@ func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
 		t.Fatalf("ProcessWithProviders: %v", err)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
+	assertHomeReleaseDatesKept(t, h, contentID, true)
 }
 
 // An item that only has the wrong film's IMDb ID, identified by a TMDB ID,
@@ -193,6 +214,7 @@ func TestManualRefresh_CorrectedNFOReplacesStoredIDs(t *testing.T) {
 		t.Errorf("manual refresh fetched with the wrong film's imdb id %q", got)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+	assertHomeReleaseDatesKept(t, h, contentID, false)
 }
 
 // Restating the stored TMDB ID while adding a TVDB ID extends the match, so

@@ -41,8 +41,9 @@ const (
 	FieldImages
 	FieldAirSchedule
 	FieldVideos
-	// FieldReleaseDates locks Year, ReleaseDate, and First/LastAirDate so a
-	// refresh (or an NFO at priority 1) cannot overwrite manual corrections.
+	// FieldReleaseDates locks Year, ReleaseDate, the home release dates, and
+	// First/LastAirDate so a refresh (or an NFO at priority 1) cannot
+	// overwrite manual corrections.
 	FieldReleaseDates
 )
 
@@ -78,6 +79,9 @@ type ProcessRequest struct {
 	// durableProviderIDs is the item's stored provider-ID rows as loaded,
 	// before any request IDs are merged with them.
 	durableProviderIDs map[string]string
+	// identityCorrection is set when an Identify, or an NFO on a manual
+	// refresh, corrects the item's stored match (identityChoiceCorrects).
+	identityCorrection bool
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
@@ -337,6 +341,11 @@ type MetadataResult struct {
 	BackdropPath      string
 	BackdropThumbhash string
 	LogoPath          string
+	// DigitalReleaseDate and PhysicalReleaseDate are a movie's earliest
+	// digital and physical (disc) releases in any country, YYYY-MM-DD. The
+	// calendar lists the movie on the earlier of the two.
+	DigitalReleaseDate  string
+	PhysicalReleaseDate string
 	// Series-specific
 	ReleaseDate  string
 	SeasonCount  int

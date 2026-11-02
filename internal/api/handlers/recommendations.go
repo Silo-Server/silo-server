@@ -469,6 +469,15 @@ func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.R
 		writeAPIError(w, err)
 		return
 	}
+	for _, row := range resp.Rows {
+		for i := range row.Items {
+			if event := row.Items[i].UpcomingEvent; event != nil {
+				v1Event := *event
+				v1Event.Badges = v1CalendarBadges(event.Badges)
+				row.Items[i].UpcomingEvent = &v1Event
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

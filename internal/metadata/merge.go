@@ -46,6 +46,8 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	if !isLocked(FieldReleaseDates) {
 		mergeInt(&target.Year, source.Year, mode)
 		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.DigitalReleaseDate, source.DigitalReleaseDate, mode)
+		mergeScalar(&target.PhysicalReleaseDate, source.PhysicalReleaseDate, mode)
 		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	}
@@ -124,6 +126,8 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	if !isLocked(FieldReleaseDates) {
 		mergeInt(&target.Year, source.Year, mode)
 		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.DigitalReleaseDate, source.DigitalReleaseDate, mode)
+		mergeScalar(&target.PhysicalReleaseDate, source.PhysicalReleaseDate, mode)
 		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	}
@@ -313,6 +317,29 @@ func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
 		target.AdvisoryAge = source.AdvisoryAge
 		target.AdvisorySource = source.AdvisorySource
 	}
+}
+
+// refreshHomeReleaseDates gives a stored item the provider chain's current
+// home release dates, whatever the refresh's merge mode. Providers announce
+// them late and revise them, they alone place a movie on the calendar, and only
+// a provider supplies them, so a stored date is never a manual correction a
+// fill-empty refresh must keep. The FieldReleaseDates lock still holds them.
+//
+// A refresh keeps a date the provider stops sending, but a correction of the
+// item's match is a different movie: its dates replace the stored ones even
+// when empty, so the wrong match's release cannot keep the item on the
+// calendar.
+func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField, rematch bool) {
+	if isFieldLocked(locked, FieldReleaseDates) {
+		return
+	}
+	if rematch {
+		stored.DigitalReleaseDate = fresh.DigitalReleaseDate
+		stored.PhysicalReleaseDate = fresh.PhysicalReleaseDate
+		return
+	}
+	mergeScalar(&stored.DigitalReleaseDate, fresh.DigitalReleaseDate, MergeReplaceUnlocked)
+	mergeScalar(&stored.PhysicalReleaseDate, fresh.PhysicalReleaseDate, MergeReplaceUnlocked)
 }
 
 func mergeScalar(target *string, source string, mode MergeMode) {
