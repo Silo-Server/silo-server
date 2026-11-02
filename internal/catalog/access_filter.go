@@ -25,9 +25,8 @@ type AccessFilter struct {
 	// SeriesLibraryCoversEpisodes presents an episode under PresentationLibraryID
 	// when the library holds its series, even if it holds none of the episode's
 	// files, the way the series' season and episode lists already validate. The
-	// native v2 catalog reads and on-view translation request set it; v1,
-	// jellycompat and watch reads leave it off and keep the episode's own
-	// libraries.
+	// native v2 catalog and watch reads and on-view translation request set it;
+	// v1 and jellycompat leave it off and keep the episode's own libraries.
 	SeriesLibraryCoversEpisodes bool
 	PresentationLanguage        string
 	// ProfilePreferredLanguage is the viewer profile's preferred metadata

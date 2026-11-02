@@ -377,9 +377,9 @@ library and picks the library's metadata language as the presentation fallback. 
 season, and the season and episode lists, are members through their series. On these
 native reads an episode is a member when it or its series is in the library: the
 series' lists name every episode under any library that holds the series, so an
-episode with no file in that library still opens from it. The v1 item reads,
-`getWatchState`, and the Jellyfin compatibility surface keep the episode's own
-libraries. The check does not, by default, change which files come back: an item
+episode with no file in that library still opens from it. Native v2
+`getWatchState` accepts the same series membership. The v1 item and watch reads
+and the Jellyfin compatibility surface keep the episode's own libraries. The check does not, by default, change which files come back: an item
 stored in several libraries lists every version the viewer may access, so a "Movies"
 and "Movies 4K" split still shows both files from either library.
 

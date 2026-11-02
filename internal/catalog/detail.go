@@ -1390,6 +1390,17 @@ func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filt
 	return ErrItemNotFound
 }
 
+// validatePresentationEpisodeAccess accepts the series' library for opted-in
+// native reads, matching the series' episode lists. File access is checked
+// separately; this does not grant access to files in another library.
+func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
+	memberIDs := []string{episode.ContentID}
+	if filter.SeriesLibraryCoversEpisodes {
+		memberIDs = append(memberIDs, episode.SeriesID)
+	}
+	return s.validatePresentationItemAccess(ctx, filter, memberIDs...)
+}
+
 func sameMetadataLanguage(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
@@ -1851,17 +1862,7 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	// A read that set SeriesLibraryCoversEpisodes also accepts a library that
-	// holds the episode's series: the series' season and episode lists validate
-	// the series alone and list every episode, so such a library still links to
-	// an episode it has no file for. That episode opens, and a read scoped to the
-	// library lists no versions for it. Other reads keep the episode's own
-	// libraries.
-	memberIDs := []string{episode.ContentID}
-	if filter.SeriesLibraryCoversEpisodes {
-		memberIDs = append(memberIDs, episode.SeriesID)
-	}
-	if err := s.validatePresentationItemAccess(ctx, filter, memberIDs...); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	return &detailTarget{episode: episode}, nil
@@ -3684,7 +3685,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	// Seasons and episodes inherit original_language from the parent series.

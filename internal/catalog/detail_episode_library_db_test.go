@@ -84,8 +84,8 @@ func sortedVersionFileIDs(versions []FileVersion) []int {
 // either library, so a native read (SeriesLibraryCoversEpisodes) opens an
 // episode with a file in only one of them from the other: unscoped it lists
 // every version, scoped it lists none. A library that does not hold the series
-// still answers not found, and reads without the opt-in, including watch
-// reads, keep the episode's own libraries.
+// still answers not found, and reads without the opt-in keep the episode's
+// own libraries. Watch reads opt in without scoping the accessible files.
 func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 	f := newEpisodeLibraryFixture(t)
 	ctx := context.Background()
@@ -142,13 +142,35 @@ func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 		}
 	})
 
-	t.Run("watch reads keep the episode's own libraries", func(t *testing.T) {
-		filter := AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true}
-		if _, err := f.svc.GetWatchDetail(ctx, f.subOnlyEpisode, filter); !errors.Is(err, ErrItemNotFound) {
-			t.Fatalf("GetWatchDetail error = %v, want ErrItemNotFound", err)
-		}
-		if _, err := f.svc.GetWatchDetail(ctx, f.bothEpisode, filter); err != nil {
-			t.Fatalf("GetWatchDetail: %v", err)
-		}
-	})
+	for _, tc := range []struct {
+		name     string
+		episode  string
+		filter   AccessFilter
+		want     []int
+		notFound bool
+	}{
+		{"watch accepts the series library", f.subOnlyEpisode, AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true}, []int{3}, false},
+		{"watch lists all accessible versions", f.bothEpisode, AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true}, []int{1, 2}, false},
+		{"watch hides files outside allowed libraries", f.bothEpisode, AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true, AllowedLibraryIDs: []int{f.dubLib}}, []int{2}, false},
+		{"watch does not grant access to the other library's file", f.subOnlyEpisode, AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true, AllowedLibraryIDs: []int{f.dubLib}}, nil, false},
+		{"watch rejects an unrelated library", f.subOnlyEpisode, AccessFilter{PresentationLibraryID: &f.otherLib, SeriesLibraryCoversEpisodes: true}, nil, true},
+		{"watch rejects an inaccessible series", f.subOnlyEpisode, AccessFilter{PresentationLibraryID: &f.dubLib, SeriesLibraryCoversEpisodes: true, AllowedLibraryIDs: []int{f.otherLib}}, nil, true},
+		{"watch without opt-in keeps episode membership", f.subOnlyEpisode, AccessFilter{PresentationLibraryID: &f.dubLib}, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detail, err := f.svc.GetWatchDetail(ctx, tc.episode, tc.filter)
+			if tc.notFound {
+				if !errors.Is(err, ErrItemNotFound) {
+					t.Fatalf("GetWatchDetail error = %v, want ErrItemNotFound", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetWatchDetail: %v", err)
+			}
+			if got := sortedVersionFileIDs(detail.Versions); !slices.Equal(got, tc.want) {
+				t.Fatalf("watch versions = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
