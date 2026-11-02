@@ -12,12 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
-import {
-  COLLECTION_SOURCE_ORDER,
-  collectionDefaultSortOptions,
-  selectValueToSortConfig,
-  sortConfigToSelectValue,
-} from "@/lib/collectionSortConfig";
+import { COLLECTION_SOURCE_ORDER } from "@/lib/collectionSortConfig";
 import {
   MANUAL_ORDER_LINE,
   NO_LIMIT,
@@ -52,18 +47,25 @@ function directionLabels(field: string): Record<QuerySortOrder, string> {
 }
 
 /** "Title A–Z", "Date Added, newest first": a stored default sort, as the stored-sort line names it. */
-function sortLabel(field: string, order: string | undefined): string {
+function sortLabel(field: string, order: QuerySortOrder): string {
   const name = QUERY_SORT_OPTIONS.find((option) => option.value === field)?.label ?? field;
-  const direction =
-    directionLabels(field)[
-      order === "asc" || order === "desc" ? order : getDefaultQuerySortOrder(field)
-    ];
+  const direction = directionLabels(field)[order];
   return ALPHABETICAL.has(field) ? `${name} ${direction}` : `${name}, ${direction.toLowerCase()}`;
 }
 
-function storedDefaultSort(sortConfig: Record<string, unknown> | undefined) {
+/** A sort_config's field ("" keeps the source order) and direction, the field's default when unset. */
+function storedSort(sortConfig: Record<string, unknown> | undefined) {
   const field = typeof sortConfig?.field === "string" ? sortConfig.field.trim() : "";
-  return field ? sortLabel(field, sortConfig?.order as string | undefined) : null;
+  const order: QuerySortOrder =
+    sortConfig?.order === "asc" || sortConfig?.order === "desc"
+      ? sortConfig.order
+      : getDefaultQuerySortOrder(field);
+  return { field, order };
+}
+
+function storedDefaultSort(sortConfig: Record<string, unknown> | undefined) {
+  const { field, order } = storedSort(sortConfig);
+  return field ? sortLabel(field, order) : null;
 }
 
 /** Commits the typed limit: blank is no limit; anything not a positive whole number keeps the old one. */
@@ -101,7 +103,8 @@ export type OrderBlockProps =
  * The last block of a Contents panel: how the titles are ordered. Manual is a
  * read-only line; Smart picks a sort, its direction and a maximum, and shows a
  * stored default sort (which wins over them) with Clear; a Synced list picks
- * the sort viewers land on and how many of the list's titles it keeps.
+ * the sort viewers land on, its direction, and how many of the list's titles
+ * it keeps.
  */
 export function OrderBlock(props: OrderBlockProps) {
   if (props.mode === "synced") return <SyncedOrder {...props} />;
@@ -259,12 +262,13 @@ function SyncedOrder({
 }: Extract<OrderBlockProps, { mode: "synced" }>) {
   const id = useId();
   const shownRatingSources = useShownRatingSources();
-  const value = sortConfigToSelectValue(sortConfig);
-  const options = collectionDefaultSortOptions(
-    allowPersonalized,
+  const { field, order } = storedSort(sortConfig);
+  const options = getQuerySortOptions({
+    includePersonalized: allowPersonalized,
     shownRatingSources,
-    value.split(":")[0],
-  );
+    keepSortField: field,
+  });
+  const directions = directionLabels(field);
 
   function commitLimit(input: HTMLInputElement) {
     const next = parsedLimit(input.value, limit);
@@ -280,17 +284,47 @@ function SyncedOrder({
       <h3 id={`${id}-heading`} className="text-[14.5px] font-semibold">
         Order
       </h3>
-      <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Select value={value} onValueChange={(next) => onSortChange(selectValueToSortConfig(next))}>
+      <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <Select
+          value={field || COLLECTION_SOURCE_ORDER}
+          onValueChange={(next) =>
+            onSortChange(
+              next === COLLECTION_SOURCE_ORDER
+                ? {}
+                : { field: next, order: getDefaultQuerySortOrder(next) },
+            )
+          }
+        >
           <SelectTrigger aria-label="Default sort" className="h-11 w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={COLLECTION_SOURCE_ORDER}>List order</SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.value === COLLECTION_SOURCE_ORDER ? "List order" : option.label}
+                {option.label}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        {/* The list's own order has one direction: the one its source publishes. */}
+        <Select
+          value={field ? order : COLLECTION_SOURCE_ORDER}
+          disabled={!field}
+          onValueChange={(next) => onSortChange({ field, order: next })}
+        >
+          <SelectTrigger aria-label="Direction" className="h-11 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {field ? (
+              <>
+                <SelectItem value="desc">{directions.desc}</SelectItem>
+                <SelectItem value="asc">{directions.asc}</SelectItem>
+              </>
+            ) : (
+              <SelectItem value={COLLECTION_SOURCE_ORDER}>As listed</SelectItem>
+            )}
           </SelectContent>
         </Select>
         <MaxTitlesInput limit={limit} placeholder="Whole list" onCommit={commitLimit} />
