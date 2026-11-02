@@ -4,8 +4,10 @@ The nodes of one install tell each other about changes over Redis pub/sub:
 settings, plugin and node-pool changes, revoked sessions, finished scans,
 playback notifications, live log rows and websocket events.
 `cache.RedisEventBus` in `internal/cache/redis.go` is the only code that
-publishes or subscribes. Without a Redis URL the bus is a no-op and events stay
-in the process.
+subscribes, and publishes everything except the playback control relay's
+messages, which `cache.PublishEvent` sends with the bus's envelope and channel
+name through the relay's own client. Without a Redis URL the bus is a no-op
+and events stay in the process.
 
 ## Channels and database numbers
 
@@ -64,7 +66,8 @@ server to move to.
   `cache.ObservedEventBus` hands each event its process publishes to an
   observer, with or without Redis. [Plugin event
   delivery](plugin-event-delivery.md) works this way.
-- Publish and subscribe through `RedisEventBus` only. A `PUBLISH` or
+- Publish and subscribe through `RedisEventBus`, or publish with
+  `cache.PublishEvent` when a caller needs its own client. A `PUBLISH` or
   `SUBSCRIBE` sent on a go-redis client directly uses the bare name and reaches
   every install on the server.
 - Database 0 keeps the bare name. Builds from before the scoping use the bare

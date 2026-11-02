@@ -48,9 +48,9 @@ import (
 // Forward reports ControlRelayNoReply unless a reply arrives within
 // controlRelayReplyTimeout: the owner may still have run it, so the caller
 // must not assume it did not. That includes a publish that fails, because
-// Redis may have delivered a PUBLISH whose answer the client never read. An owner that died leaves its claim until the TTL
-// lapses or the player reconnects to a surviving replica, which claims the
-// key afresh.
+// Redis may have delivered a PUBLISH whose answer the client never read. An
+// owner that died leaves its claim until the TTL lapses or the player
+// reconnects to a surviving replica, which claims the key afresh.
 //
 // Without Redis there is no relay (NewControlRelay returns nil) and every
 // request is served locally, which is complete on a single replica.

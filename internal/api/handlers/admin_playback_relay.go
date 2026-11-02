@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -51,6 +52,16 @@ const (
 // errAdminRelayRemote is an unexpected failure on the owning replica; it
 // maps to 500 like any unclassified local error.
 var errAdminRelayRemote = errors.New("playback control failed on the replica holding the session")
+
+// ErrAdminPlaybackCommandNoReply and ErrAdminTerminateNoReply mean the
+// replica holding the session's lane was asked and did not answer in time,
+// so the request may have run there. They are the operation's unavailable
+// error (503), told apart so the answer does not claim that this server has
+// no playback control.
+var (
+	ErrAdminPlaybackCommandNoReply = fmt.Errorf("%w: the replica holding the session did not answer", ErrAdminPlaybackCommandUnavailable)
+	ErrAdminTerminateNoReply       = fmt.Errorf("%w: the replica holding the session did not answer", ErrAdminTerminateUnavailable)
+)
 
 type adminRelayCommandReply struct {
 	View   AdminPlaybackCommandView `json:"view"`
@@ -116,7 +127,7 @@ func (h *AdminPlaybackControlHandler) relayCommand(ctx context.Context, in Admin
 	case playback.ControlRelayServeLocally:
 		return AdminPlaybackCommandView{}, false, nil
 	case playback.ControlRelayNoReply:
-		return AdminPlaybackCommandView{}, true, ErrAdminPlaybackCommandUnavailable
+		return AdminPlaybackCommandView{}, true, ErrAdminPlaybackCommandNoReply
 	}
 	var reply adminRelayCommandReply
 	if json.Unmarshal(body, &reply) != nil {
@@ -140,7 +151,7 @@ func (h *AdminPlaybackControlHandler) relayTerminate(ctx context.Context, in Adm
 		defer cancel()
 		view, err := h.terminateLocal(fallbackCtx, in)
 		if errors.Is(err, playback.ErrSessionNotFound) {
-			return AdminTerminateView{}, true, ErrAdminTerminateUnavailable
+			return AdminTerminateView{}, true, ErrAdminTerminateNoReply
 		}
 		return view, true, err
 	}

@@ -249,13 +249,13 @@ func TestAdminRelayWithoutAReplyIsNotRepeatedBlindly(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := c.other.Command(ctx, sequencedInput("orphan", sequencedCommandA, 1, playback.CommandPause)); !errors.Is(err, ErrAdminPlaybackCommandUnavailable) {
+	if _, err := c.other.Command(ctx, sequencedInput("orphan", sequencedCommandA, 1, playback.CommandPause)); !errors.Is(err, ErrAdminPlaybackCommandNoReply) {
 		t.Fatalf("command without a reply = %v, want unavailable", err)
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := c.other.Terminate(ctx, AdminTerminateInput{SessionID: "orphan", ActorID: 2}); !errors.Is(err, ErrAdminTerminateUnavailable) {
+	if _, err := c.other.Terminate(ctx, AdminTerminateInput{SessionID: "orphan", ActorID: 2}); !errors.Is(err, ErrAdminTerminateNoReply) {
 		t.Fatalf("terminate without a reply on a session already gone = %v, want unavailable", err)
 	}
 }

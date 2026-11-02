@@ -1,7 +1,9 @@
 # Playback control relay
 
-An administrator's pause, resume, stop, message or terminate has to run on the
-API replica that holds the session's realtime control lane. The receiving
+An administrator's pause, resume, stop, message or terminate through the
+`/api/v2` admin session routes has to run on the API replica that holds the
+session's realtime control lane. The frozen `/api/v1` bridge routes are not
+relayed. The receiving
 replica runs it itself only when the relay cannot hand it to another replica
 (see "When the request runs locally") or, for a terminate, when the owner did
 not answer (see "When the owner does not answer"). The lane holder holds
@@ -29,15 +31,18 @@ to the lane holder. The administrator command code in
 - Every request reads the key, including one on a replica that also holds a
   lane: a player that reconnected elsewhere can leave an old lane open here
   until its socket closes. When another replica owns the key, the request is
-  published on `silo:playback:control`, addressed to the owner. The owner checks that it
-  still holds the lane, runs the request through the same code a local request
-  uses, and publishes the reply addressed back. Errors cross the hop as codes
+  published on `silo:playback:control`, addressed to the owner. The owner
+  checks that it still holds the lane, runs the request through the same code
+  a local request uses, and publishes the reply addressed back. Errors cross the hop as codes
   and come back as the same errors, so the HTTP answer does not depend on which
   replica received the request.
-- While the lane stays on one holder, every command for the session runs in
-  that process, so the ledger's applied-once ordering holds no matter which
-  replica received each request. A lane that moves to another replica starts
-  with an empty ledger (see "Limits").
+- While the lane stays on one holder and the ownership read succeeds, every
+  command for the session runs in that process, so the ledger's applied-once
+  ordering holds no matter which replica received each request. A request
+  served locally because the ownership read failed or no claim was found (see
+  "When the request runs locally") is outside that guarantee: it meets the
+  receiving replica's ledger, or no session at all. A lane that moves to
+  another replica starts with an empty ledger (see "Limits").
 
 ## When the request runs locally
 
@@ -59,9 +64,9 @@ reply timeout.
 
 A request that was published and got no reply within 8 seconds may still have
 run on the owner, and so may one whose publish failed, because Redis can
-deliver a `PUBLISH` whose answer the client never read, so the receiving replica does not simply repeat it. The wait
-covers one lane write, which has a 5 second socket write deadline, and the
-session stop that a terminate runs.
+deliver a `PUBLISH` whose answer the client never read. The receiving replica
+therefore does not simply repeat it. The wait covers one lane write, which has
+a 5 second socket write deadline, and the session stop that a terminate runs.
 
 - A command answers `503`. A retry is safe only with the same command id and
   sequence: when it reaches the owner, it gets the recorded receipt back. A new
