@@ -461,8 +461,8 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps := parityDeps(false)
 	deps.Accounts = fakeAccounts{
 		users: map[int]handlers.UserView{
-			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true},
-			2: {ID: 2, Username: "ada", Email: "ada@example.test", Role: "admin", Permissions: []string{"marker_edit", "metadata_curation"}},
+			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true},
+			2: {ID: 2, Username: "ada", Email: "ada@example.test", Role: "admin", PolicyPermissions: []string{"marker_edit", "metadata_curation"}},
 		},
 	}
 	if progress == nil {
@@ -1078,7 +1078,7 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode string) (*han
 	}
 	if r.Status == auth.DeviceLoginStatusApproved {
 		view.Tokens = &handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, DownloadAllowed: true}}
+			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true}}
 		if r.Temporary {
 			view.Temporary = true
 			view.ProfileID = r.profileID
@@ -1220,7 +1220,7 @@ func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) 
 	switch {
 	case in.Username == "laura" && in.Password == "pw":
 		return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 	case in.Username == "off":
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "user_disabled", Message: "User account is disabled"}
 	case in.Username == "newcomer":
@@ -1280,7 +1280,7 @@ func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.Networ
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
@@ -1364,7 +1364,7 @@ func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.Reg
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 401, Code: "setup_complete", Message: "Initial setup has already been completed"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 1, Username: in.Username, Email: in.Email, Role: "admin", Permissions: []string{"marker_edit", "metadata_curation"}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 1, Username: in.Username, Email: in.Email, Role: "admin", PolicyPermissions: []string{}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) SignupEnabled(context.Context) (bool, error) { return f.signupOn, f.err }
@@ -1387,7 +1387,7 @@ func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationI
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "duplicate", Message: "Username or email already taken"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", Permissions: []string{}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) PluginLaunchToken(_ context.Context, claims *auth.Claims, profileID string) (string, error) {

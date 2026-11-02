@@ -201,7 +201,7 @@ func accountFromView(v handlers.UserView) Account {
 		Username:               v.Username,
 		Email:                  v.Email,
 		Role:                   roleOf(v.Role),
-		Permissions:            permissionsOf(v.Permissions),
+		Permissions:            permissionsOf(v.PolicyPermissions),
 		DownloadAllowed:        v.DownloadAllowed,
 		PasswordChangeRequired: v.PasswordChangeRequired,
 	}

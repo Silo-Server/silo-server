@@ -152,6 +152,10 @@ type UserView struct {
 	Impersonation   *ImpersonationView `json:"impersonation,omitempty"`
 	// PasswordChangeRequired is v2-only: the frozen v1 body does not carry it.
 	PasswordChangeRequired bool `json:"-"`
+	// PolicyPermissions is v2-only (Account.permissions): the permissions
+	// after the access-group mask, without the admin role grant that the
+	// frozen v1 Permissions list keeps (v1AccountPermissions).
+	PolicyPermissions []string `json:"-"`
 }
 
 // sessionResponse represents a session in JSON responses.
@@ -670,21 +674,33 @@ func effectiveAccountPolicy(ctx context.Context, user *models.User, groups acces
 	return policy
 }
 
+// v1AccountPermissions keeps the frozen v1 account list: an enabled admin
+// reports every assignable permission from its role, as v1 always has, and
+// every other account reports its policy permissions. No gate reads this list;
+// the role grant itself applies only while an admin acts as administrator.
+func v1AccountPermissions(user *models.User, policyPermissions []string) []string {
+	if user.Enabled && user.Role == models.RoleAdmin {
+		return auth.AssignablePermissions()
+	}
+	return policyPermissions
+}
+
 func buildUserResponse(user *models.User, policy accountPolicy, impersonatorUserID *int, impersonator *models.User) UserView {
 	resp := UserView{
 		ID:              user.ID,
 		Username:        user.Username,
 		Email:           user.Email,
 		Role:            user.Role,
-		Permissions:     policy.Permissions,
 		DownloadAllowed: policy.DownloadAllowed,
 		// An impersonating administrator is not restricted (auth.Service.Refresh).
 		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
+		PolicyPermissions:      policy.Permissions,
 	}
-	if resp.Permissions == nil {
-		// v1 clients iterate permissions; never serialize it as null.
-		resp.Permissions = []string{}
+	if resp.PolicyPermissions == nil {
+		// Clients iterate permissions; never serialize it as null.
+		resp.PolicyPermissions = []string{}
 	}
+	resp.Permissions = v1AccountPermissions(user, resp.PolicyPermissions)
 	if impersonatorUserID != nil {
 		resp.Impersonation = &ImpersonationView{
 			Active:             true,

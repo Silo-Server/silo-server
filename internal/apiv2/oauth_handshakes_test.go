@@ -77,7 +77,7 @@ func newHandshakeRig(t *testing.T) *handshakeRig {
 	})
 	deps := pilotDeps(nil, nil)
 	deps.OAuth = svc
-	deps.Accounts = fakeAccounts{users: map[int]handlers.UserView{1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}}}}
+	deps.Accounts = fakeAccounts{users: map[int]handlers.UserView{1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}}}}
 	rig.h = newTestHandler(t, deps)
 	return rig
 }

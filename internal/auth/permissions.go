@@ -21,6 +21,16 @@ var assignablePermissions = map[Permission]struct{}{
 	PermissionMetadataCuration: {},
 }
 
+// AssignablePermissions lists every assignable permission, sorted.
+func AssignablePermissions() []string {
+	out := make([]string, 0, len(assignablePermissions))
+	for permission := range assignablePermissions {
+		out = append(out, string(permission))
+	}
+	sort.Strings(out)
+	return out
+}
+
 func isAssignablePermission(permission Permission) bool {
 	_, ok := assignablePermissions[permission]
 	return ok

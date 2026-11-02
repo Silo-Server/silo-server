@@ -89,8 +89,8 @@ func TestEffectiveAccountPolicyAppliesGroupPermissionMask(t *testing.T) {
 				t.Fatalf("effectiveAccountPolicy = %+v, want %+v", got, tt.want)
 			}
 			view := buildUserResponse(user, got, nil, nil)
-			if !reflect.DeepEqual(view.Permissions, tt.want.Permissions) {
-				t.Fatalf("UserView.Permissions = %#v, want %#v", view.Permissions, tt.want.Permissions)
+			if !reflect.DeepEqual(view.PolicyPermissions, tt.want.Permissions) {
+				t.Fatalf("UserView.PolicyPermissions = %#v, want %#v", view.PolicyPermissions, tt.want.Permissions)
 			}
 		})
 	}
@@ -149,7 +149,7 @@ func TestHasMaskedMetadataCuration(t *testing.T) {
 
 func TestBuildUserResponseNeverReturnsNilPermissions(t *testing.T) {
 	view := buildUserResponse(&models.User{ID: 1, Role: models.RoleUser}, accountPolicy{}, nil, nil)
-	if view.Permissions == nil {
-		t.Fatal("Permissions = nil, want empty slice so v1 serializes []")
+	if view.Permissions == nil || view.PolicyPermissions == nil {
+		t.Fatal("permissions = nil, want empty slices so neither version serializes null")
 	}
 }

@@ -895,7 +895,10 @@ needs its `X-Profile-Token` because the viewer gate runs before the acting-admin
 admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
 acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
 admin-role `marker_edit` grant follows the same acting-admin rule as the metadata-curation
-bypass (#1911). This is the same critical bridge fix.
+bypass (#1911). This is the same critical bridge fix. The account payload's `permissions` list
+differs by version: v2 `Account.permissions` lists only an admin's explicitly assigned
+permissions, while the frozen v1 account body keeps listing every assignable permission for an
+enabled admin. No gate reads either list.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
