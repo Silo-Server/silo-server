@@ -2514,6 +2514,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		// rules them out, they have no route either way (#3215).
 		uncapped := req
 		uncapped.serverBitrateCapKbps = 0
+		// A tone-map lookup this check is the first to need can fail for a
+		// moment; like the loop above, that is retryable, not "nothing plays".
+		toneMapUnavailable := ""
 		capRemovesRoutes := req.serverBitrateCapKbps > 0 && slices.ContainsFunc(sources, func(capped PlaybackMediaSource) bool {
 			source := h.buildPlaybackSource(routeItemID, playSessionID, capped.Version, profile, uncapped, allow4KTranscode, allowHEVCEncoding)
 			source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, uncapped, allow4KTranscode)
@@ -2528,6 +2531,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					policy, err := h.toneMapPolicyResult(r.Context())
 					if err != nil {
 						// Unknown policy: the encode can't be shown to be possible.
+						if !source.SupportsDirectPlay && !source.SupportsDirectStream {
+							toneMapUnavailable = "Tone-map policy is temporarily unavailable"
+						}
 						source.SupportsTranscoding = false
 					} else {
 						toneMapPolicy, toneMapPolicyLoaded = policy, true
@@ -2538,6 +2544,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 						toneMapCapabilities, toneMapCapabilityErr = h.availableCompatToneMapCapabilities(r.Context(), compatToneMapNegotiationTimeout)
 					}
 					toneMapCapabilitiesLoaded = true
+				}
+				if toneMapPolicyLoaded && toneMapCapabilityErr != nil && !source.SupportsDirectPlay && !source.SupportsDirectStream {
+					resolution := tonemap.ResolveSource(tonemap.MetadataForFile(&models.MediaFile{HDR: source.Version.HDR, VideoTracks: source.Version.VideoTracks}))
+					if resolution.Kind != "" && toneMapCapabilities.PreferredMode(toneMapPolicy, resolution.Kind) == "" {
+						toneMapUnavailable = "Tone-map capability discovery is temporarily unavailable"
+					}
 				}
 				if toneMapPolicyLoaded {
 					source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
@@ -2572,6 +2584,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 		if capRemovesRoutes {
 			writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
+			return
+		}
+		if toneMapUnavailable != "" {
+			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", toneMapUnavailable)
 			return
 		}
 		// Answer as Jellyfin does when nothing can play, so the client shows an
