@@ -3700,7 +3700,9 @@ func compatRegionalLanguageName(code string) string {
 		// which hides both the language and the script.
 		qualifiers := []string{display.English.Scripts().Name(script)}
 		if region, confidence := tag.Region(); confidence == language.Exact {
-			qualifiers = append(qualifiers, display.English.Regions().Name(region))
+			if name := display.English.Regions().Name(region); name != "" {
+				qualifiers = append(qualifiers, name)
+			}
 		}
 		return display.English.Languages().Name(base) + " (" + strings.Join(qualifiers, ", ") + ")"
 	}
