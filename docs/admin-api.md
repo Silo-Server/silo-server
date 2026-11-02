@@ -1370,9 +1370,12 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with source `playback`
-or `legacy` (the default for rows written without a source). Playback from Silo
-and Jellyfin clients both writes `playback` rows. Marking something watched is
+`plays` on both lists counts completed `user_watch_history` rows with source
+`playback` or `legacy` (the default for rows written without a source). Every
+playback stop writes a row, completed only past the watched threshold, so a
+title watched in several sittings is one play and a title abandoned partway is
+none; the time spent in those sittings still counts toward `total_seconds`.
+Playback from Silo and Jellyfin clients both writes `playback` rows. Marking something watched is
 not a play: `manual` rows from Silo clients and `jellycompat` rows from
 Jellyfin clients are all marks, and marking a series writes one row per
 episode, so both are excluded. Episodes are rolled up to their series, so a
@@ -3335,7 +3338,12 @@ failures until restarted or reconfigured), `state` (`stopped`, `starting`, `runn
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
 first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
 server failed, with `last_error` saying why. A later successful launch, an administrator
-restart, an update or a configuration change clears that failure.
+restart, an update or a configuration change clears that failure. A plugin that isn't running
+also reports `failed` when the answering server has to restore its files from the stored
+archive and the archive can't be read (it won't open or extract, or doesn't match the
+installation). That server still lists the installation, without its manifest fields, so it
+can be turned off or uninstalled; a server that still has a good copy of the files is
+unaffected.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
