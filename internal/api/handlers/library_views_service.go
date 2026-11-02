@@ -69,6 +69,24 @@ func capSectionItemLimit(s sections.ResolvedSection, limit int) sections.Resolve
 	return s
 }
 
+// cutCappedSectionItems cuts each fetched row of a capped read back to its
+// effective item limit, as homeSectionRow does for one row. Most fetchers
+// stop at the row's limit already, but an admin curated list returns every
+// configured item, so without the cut a capped aggregate read would answer
+// more cards than item_limit allows. A non-positive limit (an uncapped read,
+// including every /api/v1 read) returns withItems as is.
+func cutCappedSectionItems(withItems []sections.SectionWithItems, limit int) []sections.SectionWithItems {
+	if limit <= 0 {
+		return withItems
+	}
+	for i := range withItems {
+		if rowLimit := effectiveHomeItemLimit(withItems[i].ItemLimit); len(withItems[i].Items) > rowLimit {
+			withItems[i].Items = withItems[i].Items[:rowLimit]
+		}
+	}
+	return withItems
+}
+
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
 	return SectionViewer{Access: requestAccessFilter(r), ImageSize: requestImageSize(r)}
 }
@@ -200,6 +218,7 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	resolved = capSectionItemLimits(resolved, viewer.ItemLimitCap)
 	userID := viewer.Access.UserID
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
+	withItems = cutCappedSectionItems(withItems, viewer.ItemLimitCap)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
 	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
