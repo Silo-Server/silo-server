@@ -30,7 +30,7 @@ import { v2, V2ProblemError, type V2Result } from "./request";
  * replica answers when the replica holding the session's lane did not reply,
  * or no response at all) does not release its identity: when the
  * administrator repeats the same command on the same session under the same
- * signed-in profile, the same identity is sent again, so the server replays
+ * signed-in profile (a profile switch and back is a change), the same identity is sent again, so the server replays
  * the receipt instead of applying the command twice. Any other answer, a
  * different command for the session, or another profile or account allocates
  * a fresh identity.
@@ -168,6 +168,7 @@ export async function sendAdminPlaybackCommand(
     profileContext.serverOrigin,
     profileContext.authContextVersion,
     profileContext.profileId,
+    profileContext.profileTokenGeneration ?? 0,
     request.action,
     request.reason ?? "",
     request.deadlineMs ?? 0,

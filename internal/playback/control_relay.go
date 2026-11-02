@@ -414,21 +414,26 @@ func (r *ControlRelay) refresh(ctx context.Context) {
 	}
 }
 
-// applyQueuedLaneEvents applies the lane events queued when it starts. Events
-// that arrive meanwhile wait for the next batch, so a steady stream of lane
-// changes cannot stall the renewal of every other claim.
+// applyQueuedLaneEvents applies up to one batch of the lane events already
+// queued, concurrently and once per session. applyLaneEvent acts on the
+// lane's current state, so collapsing a session's queued events loses
+// nothing, and no two writes for one session overlap. The rest wait for the
+// next gap, so a reconnect burst costs one round trip per batch rather than
+// one per event, and cannot hold back the renewal of every other claim.
 func (r *ControlRelay) applyQueuedLaneEvents(ctx context.Context) {
-	for range len(r.events) {
-		if ctx.Err() != nil {
-			return
-		}
+	sessionIDs := make(map[string]struct{}, controlRelayRefreshBatch)
+	for range min(len(r.events), controlRelayRefreshBatch) {
 		select {
 		case sessionID := <-r.events:
-			r.applyLaneEvent(ctx, sessionID)
+			sessionIDs[sessionID] = struct{}{}
 		default:
-			return
 		}
 	}
+	var wg sync.WaitGroup
+	for sessionID := range sessionIDs {
+		wg.Go(func() { r.applyLaneEvent(ctx, sessionID) })
+	}
+	wg.Wait()
 }
 
 // reclaim re-asserts this replica's claim for a lane that is still open.

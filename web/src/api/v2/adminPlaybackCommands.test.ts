@@ -151,7 +151,7 @@ it("repeats a command whose outcome is unknown with the same identity, and only 
     detail: "The server holding this playback session did not answer in time.",
   };
   // 503: the replica holding the lane did not answer; 200/202: a receipt.
-  const statuses = [503, 200, 503, 202, 503, 202];
+  const statuses = [503, 200, 503, 202, 503, 202, 503, 202];
   const bodies: Array<{ command_id: string; sequence: number }> = [];
   vi.stubGlobal(
     "fetch",
@@ -185,6 +185,15 @@ it("repeats a command whose outcome is unknown with the same identity, and only 
   setProfileId("someone-else");
   await send(pause);
   expect(bodies[5]!.command_id).not.toBe(bodies[4]!.command_id);
+
+  // Switching away and back installs the profile's proof again: also a change.
+  await send(pause);
+  setProfileId("owner");
+  setProfileToken(null);
+  setProfileId("someone-else");
+  setProfileToken(null);
+  await send(pause);
+  expect(bodies[7]!.command_id).not.toBe(bodies[6]!.command_id);
 });
 
 it("does not reopen a command that another request already settled", async () => {
