@@ -757,7 +757,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", "", false, true)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", "", false, true, false)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -965,7 +965,7 @@ func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) 
 		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
 	}, "series-1", "fr", "series", localizedItemText(&MetadataResult{}, canonical, []MetadataField{FieldOverview}), canonical,
-		nil, MergeFillEmpty, "fr", "", false, true)
+		nil, MergeFillEmpty, "fr", "", false, true, false)
 
 	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
 		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)

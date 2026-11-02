@@ -102,8 +102,10 @@ never change an account password.
 Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
 password policy. New passwords must contain at least 8 Unicode characters and be
 no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
-password. Changing the password does not revoke existing login sessions; users can review and
-revoke those separately through the account sessions API.
+password. By default, changing the password does not revoke existing login sessions; users can
+review and revoke those separately through the account sessions API. The v2 operation can also
+sign the account out everywhere else in the same step; see
+[V2 password management](#v2-password-management).
 
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
@@ -165,6 +167,19 @@ password-policy fields above. It supports ETag revalidation and uses
 and PIN verification, even when the account is an administrator.
 
 `POST /api/v2/account/password` accepts the same password body and returns 204.
+An optional `sign_out_other_sessions` boolean (default `false`) also signs the
+account out everywhere except the calling session, in the transaction that
+replaces the password: its other login sessions, "View as user" sessions it
+opened or that view it, its Audiobookshelf-compatible sessions, its stored
+Jellyfin-compatible sessions, and the device sign-ins it approved that the
+device has not collected yet. This is what a password reset revokes, minus the
+caller's session. API keys survive. After commit, every node drops the
+Jellyfin-compatible sessions it holds in memory, as for account-wide admin
+revocation. `null` is not a value for it (`422 validation_failed`). The
+capability document's `sign_out_other_sessions` is true on servers that accept
+the member; older servers reject it as an unknown member with `422`, so clients
+send it only when the capability says so. v1 `POST /auth/account/password` has
+no such member.
 It spends the dedicated `password_change` rate-limit budget used by v1; exhausted
 requests return `429 rate_limited` with `Retry-After`. Invalid password values
 return `422 validation_failed` naming the member. Disallowed account/profile
@@ -484,6 +499,55 @@ logged. Checks that start before the first failure is noticed, up to a second af
 Redis stops answering, each wait up to a second. A check that fails only because its
 own request ended early does not count as Redis failing. Disabling rate limiting
 disables the account allowance too.
+
+## Session quota
+
+The per-second and per-minute budgets stop bursts, not volume: a client that stays
+just under them can still send hundreds of thousands of requests a day. Each login
+session therefore also spends a token bucket, keyed `session:<session_id>`, that holds
+`ratelimit.session.burst` requests (default 30000) and refills at
+`ratelimit.session.requests_per_hour` (default 10000). The burst must refill from
+empty within a week, so it can be at most 168 times the hourly rate. The admin UI
+labels these **Per sign-in session**.
+
+`ratelimit.session.mode` decides what happens when a bucket is empty:
+
+- `off` counts nothing.
+- `log` (the default) serves the request and logs `sign-in session over its hourly
+  request quota` with the account, session and user agent, once per session every ten
+  minutes.
+- `enforce` refuses the request with the usual 429 and a `Retry-After` for the next
+  token, and logs the same line.
+
+The quota counts native API requests made with a login session's access token. It
+does not count anything under `/api/v1/stream`, `/api/v2/stream`, `/api/v1/playback`
+or `/api/v2/playback`, so a player keeps reporting progress, replanning and stopping
+after its session runs out; the other media transfer routes (downloads, direct
+downloads, theme audio and ebook reads); `GET /api/v2/auth/provider-logout` and `POST /api/v2/auth/logout`, so a
+session that spent its quota can still sign out; API-key requests, which have their own tiers;
+admins; or requests made while impersonating. `ratelimit.QuotaExemptPathPattern`
+defines the exempt routes and must match every route in `internal/api`'s native media
+route list. The Jellyfin-compatible listener has its own sessions and is not counted.
+Buckets share the per-key limiter's backend. Redis keeps one bucket per session for
+every instance, timed by the Redis clock, and shares the window limiter's outage
+pause: while Redis is unavailable each process counts in its own bucket. Settings
+changes keep every bucket's balance; a bucket reads its size and rate on each
+request, and is dropped once even the slowest refill the settings allow would have
+filled it: a week after a drained bucket's last request, seconds after one a client
+barely used.
+
+The defaults come from production traffic. The busiest first-party sessions stayed
+under 20000 requests in any hour and rarely went above 10000, while a polling
+integration ran at about 30000 an hour around the clock. The burst lets a client
+sync a whole library in one sitting; the refill rate caps what it can sustain.
+
+`GET /api/v2/admin/stats/api-clients` lists the sessions with the most requests in a
+window, leaving out what the quota leaves out, with each session's 429 count. The
+hidden `summarize_api_usage` task summarizes the activity log into UTC hours every 15
+minutes and keeps them for 30 days. `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+lists the routes one session called in up to the last 24 hours. Both are admin-only;
+`api_clients` in
+`GET /api/v2/admin/dashboard/capabilities` advertises them.
 
 ## Profile PINs
 
@@ -853,9 +917,12 @@ broadened to `/`. The body is `{"expires_in": 300}`. A credential without a logi
 session, such as an API key, is refused with 403 `permission_denied`; an unknown
 declared profile is 404 and a PIN-locked one without its token is 403
 `profile_verification_required`. Repeating the request reissues an equivalent
-cookie. The bundled web client launches pages under
+cookie. A page request through a cookie past half its lifetime gets a fresh one
+while the login session could still refresh ([plugin content](architecture/plugin-content.md)).
+The bundled web client launches pages under
 `/api/v2/plugin-content/plugins/{installation_id}/`. The v2 launch does not expire
-the separate legacy cookie; that cookie expires within five minutes. Compatibility
+the separate legacy cookie; that cookie expires five minutes after it was last
+issued or renewed. Compatibility
 of the reissued cookie against a served auth-provider plugin is not yet proven
 and is a follow-up.
 

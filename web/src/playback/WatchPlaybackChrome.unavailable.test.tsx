@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError } from "@/api/v2/request";
+import { useWatchDetail } from "@/hooks/queries/items";
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
 import { WatchPlaybackHost, WatchPlaybackProvider } from "./WatchPlaybackChrome";
 import {
@@ -64,7 +65,7 @@ vi.mock("@/player/components/WatchPage", () => ({
 }));
 
 function notFound() {
-  return new V2ProblemError("getWatchDetail", {
+  return new V2ProblemError("getWatchState", {
     type: "https://siloserver.org/docs/api/v2/problems/not_found",
     title: "Not Found",
     status: 404,
@@ -72,7 +73,8 @@ function notFound() {
   } as never);
 }
 
-function renderHost() {
+function renderHost(children?: ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const controllerRef: { current: WatchPlaybackControllerValue | null } = { current: null };
   function ControllerProbe() {
     const controller = useWatchPlaybackController();
@@ -83,30 +85,29 @@ function renderHost() {
   }
 
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/watch/movie-tmdb-99999999"]}>
         <WatchPlaybackProvider>
           <ControllerProbe />
           <WatchPlaybackHost />
+          {children}
         </WatchPlaybackProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return () => controllerRef.current!;
+  return { controller: () => controllerRef.current!, queryClient };
 }
 
-describe("WatchPlaybackHost when the title cannot be loaded", () => {
-  beforeEach(() => {
-    mocks.navigate.mockReset();
-    mocks.watchDetail.mockReset();
-  });
-  afterEach(cleanup);
+beforeEach(() => {
+  mocks.navigate.mockReset();
+  mocks.watchDetail.mockReset();
+});
+afterEach(cleanup);
 
+describe("WatchPlaybackHost when the title cannot be loaded", () => {
   it("replaces the preparing screen with the unavailable screen on a 404", async () => {
     mocks.watchDetail.mockRejectedValue(notFound());
-    const controller = renderHost();
+    const { controller } = renderHost();
 
     act(() =>
       controller().syncRouteRequest(
@@ -130,7 +131,7 @@ describe("WatchPlaybackHost when the title cannot be loaded", () => {
         ? Promise.resolve({ content_id: "movie-ok", title: "The Movie" })
         : Promise.reject(notFound()),
     );
-    const controller = renderHost();
+    const { controller } = renderHost();
 
     act(() =>
       controller().syncRouteRequest(
@@ -147,5 +148,50 @@ describe("WatchPlaybackHost when the title cannot be loaded", () => {
     expect(screen.queryByText("Playback unavailable")).not.toBeInTheDocument();
     expect(await screen.findByTestId("player")).toBeInTheDocument();
     expect(screen.queryByText("Playback unavailable")).not.toBeInTheDocument();
+  });
+});
+
+// Another subscriber to the playing title's detail. The query notifies all its
+// subscribers in one batch, so the render that shows this text is the one in
+// which the host receives the refetch error.
+function RefetchErrorProbe() {
+  const { error } = useWatchDetail("movie-1", undefined, 1);
+  return error ? <p>detail refetch failed</p> : null;
+}
+
+describe("WatchPlaybackHost while the title plays", () => {
+  // Catalog events refetch the playing title's detail. A server restart can fail
+  // that refetch (a reverse proxy answers with a 502 page), and the server answers
+  // 404 once the title is gone or the profile may no longer see it. Neither ends
+  // playback: access to the stream is decided when playback starts.
+  it.each([
+    [
+      "a 502 from a proxy",
+      () => new V2TransportError("getWatchState", 502, "the response body is not JSON"),
+    ],
+    ["a not-found answer", notFound],
+  ])("keeps the same player when a refetch of the detail fails with %s", async (_, failure) => {
+    mocks.watchDetail.mockResolvedValue({ content_id: "movie-1", title: "The Movie" });
+    const { controller, queryClient } = renderHost(<RefetchErrorProbe />);
+
+    act(() =>
+      controller().syncRouteRequest(
+        createWatchRouteRequest({ contentId: "movie-1", libraryId: 1 }),
+      ),
+    );
+    const player = await screen.findByTestId("player");
+
+    mocks.watchDetail.mockRejectedValueOnce(failure());
+    await act(() => queryClient.invalidateQueries({ queryKey: ["items"] }));
+    expect(await screen.findByText("detail refetch failed")).toBeInTheDocument();
+    expect(screen.getByTestId("player")).toBe(player);
+    expect(screen.queryByText("Playback unavailable")).not.toBeInTheDocument();
+
+    // The next refresh that succeeds clears the error without remounting it.
+    await act(() => queryClient.invalidateQueries({ queryKey: ["items"] }));
+    await waitFor(() =>
+      expect(screen.queryByText("detail refetch failed")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("player")).toBe(player);
   });
 });

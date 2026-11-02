@@ -126,6 +126,21 @@ describe("OrderBlock, Synced list", () => {
     };
   }
 
+  it("picks a sort and its direction, and List order clears both", () => {
+    const { onSortChange } = renderSynced({ sortConfig: { field: "release_date", order: "desc" } });
+    choose(screen.getByRole("combobox", { name: "Direction" }), "Oldest first");
+    expect(onSortChange).toHaveBeenLastCalledWith({ field: "release_date", order: "asc" });
+    choose(screen.getByRole("combobox", { name: "Default sort" }), "Title");
+    expect(onSortChange).toHaveBeenLastCalledWith({ field: "title", order: "asc" });
+    choose(screen.getByRole("combobox", { name: "Default sort" }), "List order");
+    expect(onSortChange).toHaveBeenLastCalledWith({});
+  });
+
+  it("leaves Direction off while the list keeps its own order", () => {
+    renderSynced();
+    expect(screen.getByRole("combobox", { name: "Direction" })).toBeDisabled();
+  });
+
   it("keeps max titles above 500 and clears it when blank", () => {
     const { input, onLimitChange } = renderSynced({ limit: 50 });
     fireEvent.change(input, { target: { value: "10000" } });

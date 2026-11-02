@@ -176,7 +176,7 @@ func TestHouseholdManagement_AdminAPIKeyWithoutProfile(t *testing.T) {
 		}
 		return ctx
 	}
-	unverified := func(string) error { return access.ErrProfileUnverified }
+	unverified := func(*userstore.Profile) error { return access.ErrProfileUnverified }
 
 	t.Run("create without a profile", func(t *testing.T) {
 		store := actingAdminHousehold(t, "1234")

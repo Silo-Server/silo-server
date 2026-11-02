@@ -1,10 +1,12 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -280,6 +282,54 @@ func TestHandleItemImageProxyKeepsProviderURLsOffTheLocalNetwork(t *testing.T) {
 			}
 			if tc.wantCode != http.StatusOK && strings.Contains(rec.Body.String(), "local-image") {
 				t.Fatalf("body leaked the local response: %q", rec.Body.String())
+			}
+		})
+	}
+}
+
+// A stored artwork URL can point at any host, so a proxied body is served only
+// as an image, and never in a form a browser would render as a document.
+func TestProxyImageServesOnlyImages(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		declared        string
+		body            []byte
+		wantCode        int
+		wantContentType string
+	}{
+		{name: "declared image", declared: "image/webp", body: []byte("webp-bytes"), wantCode: http.StatusOK, wantContentType: "image/webp"},
+		{name: "image labeled octet-stream", declared: "application/octet-stream", body: avatarPalette[0], wantCode: http.StatusOK, wantContentType: "image/png"},
+		{name: "html", declared: "text/html", body: []byte("<html><script>alert(1)</script></html>"), wantCode: http.StatusBadGateway},
+		{name: "unlabeled html", body: []byte("<html><script>alert(1)</script></html>"), wantCode: http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(tc.body))}
+			if tc.declared != "" {
+				resp.Header.Set("Content-Type", tc.declared)
+			}
+			rec := httptest.NewRecorder()
+			proxyImage(rec, resp)
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, body = %q; want %d", rec.Code, rec.Body.String(), tc.wantCode)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := rec.Header().Get("Content-Security-Policy"); got != "default-src 'none'; sandbox" {
+				t.Fatalf("Content-Security-Policy = %q, want default-src 'none'; sandbox", got)
+			}
+			if tc.wantCode != http.StatusOK {
+				if strings.Contains(rec.Body.String(), "script") {
+					t.Fatalf("body leaked the upstream document: %q", rec.Body.String())
+				}
+				return
+			}
+			if got := rec.Header().Get("Content-Type"); got != tc.wantContentType {
+				t.Fatalf("Content-Type = %q, want %q", got, tc.wantContentType)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), tc.body) {
+				t.Fatalf("body = %q, want the upstream bytes", rec.Body.String())
 			}
 		})
 	}
@@ -754,6 +804,46 @@ func TestHandleItemImagePresignsOnlyRequestedType(t *testing.T) {
 				if !strings.HasPrefix(resolver.paths[i], prefix) {
 					t.Fatalf("presign %d = %q, want prefix %q", i, resolver.paths[i], prefix)
 				}
+			}
+		})
+	}
+}
+
+// A season's backdrop on a cold node (no tag, nothing in the route cache) is
+// the season's own when it has one and the series' otherwise, as season detail
+// serves it.
+func TestHandleItemImageSeasonBackdropPrefersTheSeasonsOwn(t *testing.T) {
+	codec := NewResourceIDCodec()
+	series := &models.MediaItem{ContentID: "series-1", Type: "series", BackdropPath: "tmdb/series/1/backdrop/original.ghi.webp"}
+	routeID := codec.EncodeStringID(EncodedIDSeason, "season-2")
+
+	tests := []struct {
+		name           string
+		seasonBackdrop string
+		wantPrefix     string
+	}{
+		{name: "own backdrop", seasonBackdrop: "tmdb/series/1/season/2/backdrop/original.def.webp", wantPrefix: "tmdb/series/1/season/2/backdrop/"},
+		{name: "no backdrop of its own", wantPrefix: "tmdb/series/1/backdrop/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			season := &models.Season{ContentID: "season-2", SeriesID: "series-1", SeasonNumber: 2, BackdropPath: tt.seasonBackdrop}
+			detailSvc := &catalog.DetailService{}
+			detailSvc.SetImageResolver(&countingImageResolver{})
+			h := &ImagesHandler{
+				codec:      codec,
+				images:     NewImageCache(time.Hour, time.Now),
+				itemRepo:   fakeImageItemRepo{item: series},
+				seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{"season-2": season}},
+				detailSvc:  detailSvc,
+			}
+
+			rec := requestItemImage(h, routeID, "Backdrop", "")
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, body = %s; want 302", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Location"); !strings.HasPrefix(got, "https://cdn.example.test/"+tt.wantPrefix) {
+				t.Fatalf("Location = %q, want the image under %q", got, tt.wantPrefix)
 			}
 		})
 	}

@@ -33,6 +33,8 @@ export interface AdminUserDeviceRow {
 export interface AdminUserProfileActivity {
   id: string;
   name: string;
+  /** Where to fetch the profile's avatar; empty when there is none to fetch. */
+  avatar_url: string;
   last_seen_at: string | null;
 }
 export interface AdminUserWatchSummary {
@@ -233,6 +235,7 @@ function profileActivityOf(value: unknown): AdminUserProfileActivity {
   return {
     id: id(row, "id", what),
     name: text(row, "name", what),
+    avatar_url: optionalText(row, "avatar_url", what),
     last_seen_at: nullableText(row, "last_seen_at", what),
   };
 }

@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 23
+const Revision = 24
 
 // Setting keys, one constant per definition.
 const (
@@ -65,6 +65,10 @@ const (
 	PlaybackPreferredQuality = "playback.preferred_quality"
 	// Show forced subtitles
 	PlaybackShowForcedSubtitles = "playback.show_forced_subtitles"
+	// Show marker confidence
+	PlaybackShowMarkerConfidence = "playback.show_marker_confidence"
+	// Show marker source
+	PlaybackShowMarkerSource = "playback.show_marker_source"
 	// Subtitle appearance
 	PlaybackSubtitleAppearance = "playback.subtitle_appearance"
 	// Preferred subtitle language
@@ -185,6 +189,8 @@ var Remote = []string{
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
 	PlaybackShowForcedSubtitles,
+	PlaybackShowMarkerConfidence,
+	PlaybackShowMarkerSource,
 	PlaybackSubtitleAppearance,
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,

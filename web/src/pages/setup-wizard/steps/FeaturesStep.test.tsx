@@ -41,6 +41,7 @@ const defaultValues: Record<string, string> = {
 
 function mockStep(values: Record<string, string> = {}, dirtyCount = 0, loadState = {}) {
   const formValues = { ...defaultValues, ...values };
+  const persistedValues = { ...formValues };
   const markDone = vi.fn();
   const setSummary = vi.fn();
   const save = vi.fn().mockResolvedValue(undefined);
@@ -55,6 +56,7 @@ function mockStep(values: Record<string, string> = {}, dirtyCount = 0, loadState
     loaded: true,
     ...loadState,
     getValue: (key: string) => formValues[key] ?? "",
+    getPersistedValue: (key: string) => persistedValues[key] ?? "",
     setValue,
     isDirty: () => false,
     dirtyCount,
@@ -130,6 +132,22 @@ describe("FeaturesStep", () => {
 
     expect(setValue).toHaveBeenCalledWith("notifications.apple_push_delivery_enabled", "false");
     expect(setValue).toHaveBeenCalledWith("notifications.android_push_delivery_enabled", "false");
+  });
+
+  it("stages sharing on when no choice is saved", () => {
+    const { setValue } = mockStep();
+    render(<FeaturesStep />);
+
+    expect(setValue).toHaveBeenCalledWith("markers.share_by_default", "true");
+    expect(screen.getByRole("switch", { name: "Share markers with Silo" })).toBeChecked();
+  });
+
+  it("keeps a saved sharing choice", () => {
+    const { setValue } = mockStep({ "markers.share_by_default": "false" });
+    render(<FeaturesStep />);
+
+    expect(setValue).not.toHaveBeenCalledWith("markers.share_by_default", expect.anything());
+    expect(screen.getByRole("switch", { name: "Share markers with Silo" })).not.toBeChecked();
   });
 
   it("blocks completion when settings failed to load", () => {

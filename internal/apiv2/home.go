@@ -86,6 +86,10 @@ type HomeLayoutInput struct {
 	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
 	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
 	IncludeItems int `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards in each included section, exactly as getHomeSectionItems answers it with the same item_limit. The entries in sections keep each section's own item_limit. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
 }
 
@@ -104,7 +108,9 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	RowItemLimitMax     int `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -117,12 +123,17 @@ type HomeCapabilitiesOutput struct {
 
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
+	SectionItemLimitQuery
 	ArtworkQuery
 }
 
 // HomeSectionItemsInput is the getHomeSectionItems query.
 type HomeSectionItemsInput struct {
 	ID string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards: the section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps the section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
 }
 
@@ -430,8 +441,10 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		return &HomeCapabilitiesOutput{Body: HomeCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
 	}
 	return &HomeCapabilitiesOutput{Body: HomeCapabilities{
-		Capability:      Capability{State: StateAvailable},
-		IncludeItemsMax: handlers.MaxHomeLayoutIncludedSections,
+		Capability:          Capability{State: StateAvailable},
+		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
+		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
+		RowItemLimitMax:     handlers.MaxSectionItemLimitCap,
 	}}, nil
 }
 
@@ -443,7 +456,7 @@ func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*H
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.Artwork()), in.IncludeItems)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -465,7 +478,7 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSections(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -485,7 +498,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

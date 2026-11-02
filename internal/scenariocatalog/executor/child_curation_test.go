@@ -113,6 +113,8 @@ func TestRequiredNewChildCuration(t *testing.T) {
 				want[episodeID]["title"] = "Renamed episode"
 				want[episodeID]["runtime"] = float64(52)
 				want[episodeID]["air_date"] = "2024-02-29"
+				// An air-date edit recomputes the series' air dates from its episodes.
+				want[catalogAlpha]["last_air_date_at"] = "2024-02-29"
 				changed = []string{episodeID}
 			case "child_nulls":
 				patch(seasonID, `{"title":null,"overview":null,"air_date":null}`, admin, ok(seasonID, "season", "Synthetic season"))

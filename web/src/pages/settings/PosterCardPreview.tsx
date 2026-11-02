@@ -136,14 +136,10 @@ export function PosterCardPreviewView({
                   </div>
                 ) : null}
               </div>
-              {presentation.caption !== "artwork" ? (
-                <div className="mt-1.5 min-w-0">
-                  <p className="truncate text-xs font-medium">{sample.title}</p>
-                  {presentation.caption === "title_metadata" ? (
-                    <p className="text-muted-foreground truncate text-xs">{sample.meta}</p>
-                  ) : null}
-                </div>
-              ) : null}
+              <div className="mt-1.5 min-w-0">
+                <p className="truncate text-xs font-medium">{sample.title}</p>
+                <p className="text-muted-foreground truncate text-xs">{sample.meta}</p>
+              </div>
             </div>
           );
         })}

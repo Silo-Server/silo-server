@@ -141,18 +141,19 @@ type RequestMediaPage struct {
 
 // DiscoverSection is one discovery row.
 type DiscoverSection struct {
-	Key          string               `json:"key" example:"trending_movies"`
+	Key          string               `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID" example:"trending_movies"`
 	Title        string               `json:"title" example:"Trending Movies"`
 	Page         int                  `json:"page" example:"1"`
 	TotalPages   int                  `json:"total_pages" example:"500"`
 	TotalResults int                  `json:"total_results" example:"10000"`
 	Results      []RequestMediaResult `json:"results" doc:"Empty, never null"`
-	NextPage     int                  `json:"next_page,omitempty" doc:"The page to request next when rating backfill consumed more than one provider page; absent when page+1 applies or there are no more pages"`
+	NextPage     int                  `json:"next_page,omitempty" doc:"The page to request next when filling this page read more than one provider page (for a rating limit, or a row that leaves out titles the library has), since page+1 would repeat titles. After such a read reaches the end it is past total_pages, which means there are no more pages. Absent when page+1 applies or there are no more pages"`
 }
 
 // DiscoverSectionCollection is the listDiscoverSections envelope.
 type DiscoverSectionCollection struct {
 	Collection[DiscoverSection]
+	RowOrder []DiscoverRowRef `json:"row_order" doc:"Every row the page shows, in order. items holds the title rows that have titles; a brand row (type studios, networks or genres) draws the cards of the matching brand list operation. A client skips a type it does not know. Empty, never null"`
 }
 
 // DiscoverBrand is a studio, network, or genre card.
@@ -366,6 +367,7 @@ const (
 	opGetRequestMediaDetail = "getRequestMediaDetail"
 	opListDiscoverSections  = "listDiscoverSections"
 	opGetDiscoverSection    = "getDiscoverSection"
+	opGetDiscoverRow        = "getDiscoverRow"
 	opListDiscoverGenres    = "listDiscoverGenres"
 	opListDiscoverNetworks  = "listDiscoverNetworks"
 	opListDiscoverStudios   = "listDiscoverStudios"
@@ -408,14 +410,19 @@ func registerRequests(reg *Registry) {
 	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequestMediaDetail)
 
 	sections := humaOp(http.MethodGet, Prefix+"/requests/discover", opListDiscoverSections, requestsTag,
-		"List the discovery rows with their first page.")
+		"List the Discover page's rows in the admin's order, with each title row's first page.")
 	sections.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{Operation: sections, Class: ClassProfileScoped, ServiceBacked: true}, reg.listDiscoverSections)
 
 	section := humaOp(http.MethodGet, Prefix+"/requests/discover/{section}", opGetDiscoverSection, requestsTag,
-		"Get one page of a discovery row.")
-	section.Errors = []int{http.StatusConflict}
+		"Get one page of a built-in discovery row; getDiscoverRow serves every row.")
+	section.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, Operation{Operation: section, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverSection)
+
+	row := humaOp(http.MethodGet, Prefix+"/requests/discover/rows/{row_id}", opGetDiscoverRow, requestsTag,
+		"Get one page of a Discover title row, for its see all page.")
+	row.Errors = []int{http.StatusNotFound, http.StatusConflict}
+	Register(reg, Operation{Operation: row, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverRow)
 
 	for _, brand := range []struct{ id, segment, summary string }{
 		{opListDiscoverGenres, "genres", "List the browsable genres."},
@@ -647,41 +654,31 @@ func (reg *Registry) unfollowRequestMedia(ctx context.Context, in *RequestMediaD
 	return nil, nil
 }
 
-// listDiscoverSections is v1 GET /requests/discover.
+// listDiscoverSections is v1 GET /requests/discover, laid out by the admin's
+// Discover layout.
 func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*DiscoverSectionCollectionOutput, error) {
 	svc, viewer, p := reg.requestViewer(ctx)
 	if p != nil {
 		return nil, p
 	}
-	sections, err := svc.DiscoverAll(ctx, viewer)
+	page, err := svc.DiscoverRows(ctx, viewer)
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	items := make([]DiscoverSection, 0, len(sections))
+	items := make([]DiscoverSection, 0, len(page.Sections))
 	var marks []watchlistMark
-	for i := range sections {
-		items = append(items, discoverSectionOf(&sections[i]))
+	for i := range page.Sections {
+		items = append(items, discoverSectionOf(&page.Sections[i]))
 	}
 	for i := range items {
 		marks = append(marks, watchlistMarksOf(items[i].Results)...)
 	}
 	reg.markInWatchlist(ctx, marks)
-	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items)}}, nil
-}
-
-// getDiscoverSection is v1 GET /requests/discover/{section}.
-func (reg *Registry) getDiscoverSection(ctx context.Context, in *DiscoverSectionInput) (*DiscoverSectionOutput, error) {
-	svc, viewer, p := reg.requestViewer(ctx)
-	if p != nil {
-		return nil, p
+	order := make([]DiscoverRowRef, 0, len(page.Order))
+	for _, r := range page.Order {
+		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title})
 	}
-	section, err := svc.Discover(ctx, viewer, in.Section, in.Page)
-	if err != nil {
-		return nil, requestProblem(err)
-	}
-	out := discoverSectionOf(section)
-	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
-	return &DiscoverSectionOutput{Body: out}, nil
+	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items), RowOrder: order}}, nil
 }
 
 // listDiscoverBrands is v1 GET /requests/discover/{genres,networks,studios}.

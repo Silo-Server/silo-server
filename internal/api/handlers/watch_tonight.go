@@ -65,6 +65,9 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 		writeAPIError(w, err)
 		return
 	}
+	for i := range resp.Items {
+		resp.Items[i].sectionItemResponse = resp.Items[i].v1WatchTonightCard()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -268,6 +271,7 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		resp.Items = append(resp.Items, watchTonightItemResponse{
@@ -468,28 +472,9 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 // buildSectionItem constructs a sectionItemResponse from a MediaItem with its
 // resolved artwork (see featuredCardArtwork) and overlay/state lookups.
 func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse, urls sectionItemImageURLs) sectionItemResponse {
-	item := sectionItemResponse{
-		ContentID:              mi.ContentID,
-		Type:                   mi.Type,
-		Title:                  mi.Title,
-		Year:                   mi.Year,
-		Genres:                 mi.Genres,
-		Status:                 mi.Status,
-		RatingIMDB:             mi.RatingIMDB,
-		RatingTMDB:             mi.RatingTMDB,
-		RatingRTCritic:         mi.RatingRTCritic,
-		RatingRTAudience:       mi.RatingRTAudience,
-		OriginalLanguage:       mi.OriginalLanguage,
-		Overview:               mi.Overview,
-		PosterThumbhash:        mi.PosterThumbhash,
-		BackdropThumbhash:      mi.BackdropThumbhash,
-		PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
-		BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
-	}
-	if item.Genres == nil {
-		item.Genres = []string{}
-	}
+	item := sectionItemFromMediaItem(mi)
 	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+	item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

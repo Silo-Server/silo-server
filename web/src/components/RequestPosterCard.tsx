@@ -35,10 +35,6 @@ const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-me
 type DiscoverProps = {
   variant: "discover";
   item: RequestMediaResult;
-  /** Called when the hover Request action is clicked. Omit to suppress the action. */
-  onRequest?: () => void;
-  /** Shows the pending state on the hover Request action. Ignored when onRequest is omitted. */
-  isSubmitting?: boolean;
   /**
    * Called when the hover watchlist action is clicked; it reads
    * item.in_watchlist. Omit to suppress the action.
@@ -81,8 +77,6 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
   return (
     <DiscoverCard
       item={props.item}
-      isSubmitting={props.isSubmitting}
-      onRequest={props.onRequest}
       onToggleWatchlist={props.onToggleWatchlist}
       isWatchlistPending={props.isWatchlistPending}
       fluid={props.fluid}
@@ -92,8 +86,6 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
 
 function DiscoverCard({
   item,
-  isSubmitting,
-  onRequest,
   onToggleWatchlist,
   isWatchlistPending,
   fluid,
@@ -121,15 +113,6 @@ function DiscoverCard({
           <RequestStatusBadge state={state} overlay className={BADGE_CLASS} />
         ) : !requestable ? (
           <RequestReasonBadge reason={item.request.reason} overlay className={BADGE_CLASS} />
-        ) : null
-      }
-      action={
-        requestable && onRequest ? (
-          <RequestAction
-            title={`${item.title} (${[formatMediaType(item.media_type), item.year].filter(Boolean).join(" · ")})`}
-            pending={Boolean(isSubmitting)}
-            onRequest={onRequest}
-          />
         ) : null
       }
       cornerAction={
@@ -213,8 +196,8 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
 
 /**
  * The library poster card for a title outside the library: the same artwork
- * frame, hover reveal, and caption, with a request badge where library cards
- * carry their overlay badges and a Request action where they carry Play.
+ * frame and caption, with a request badge where library cards carry their
+ * overlay badges. Requesting happens on the title's detail page.
  */
 function ExternalTitleCard({
   title,
@@ -226,7 +209,6 @@ function ExternalTitleCard({
   fluid,
   dim,
   badge,
-  action,
   cornerAction,
   children,
 }: {
@@ -240,19 +222,12 @@ function ExternalTitleCard({
   fluid?: boolean;
   dim?: boolean;
   badge?: ReactNode;
-  /** The hover action in the card's centre slot. */
-  action?: ReactNode;
   /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
   cornerAction?: ReactNode;
-  /** Request details below the caption. Shown whatever the caption setting; pass null for none. */
+  /** Request details below the caption; pass null for none. */
   children?: ReactNode;
 }) {
   const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  // Unlike a library card, a TMDB title always names its type and year under
-  // a caption: a movie and a series can share a title, and the viewer is
-  // choosing which one to request.
-  const showMetadata = showCaption;
   const meta = [formatMediaType(mediaType), year].filter(Boolean).join(" · ");
   const label = `${title} (${meta})`;
 
@@ -283,33 +258,26 @@ function ExternalTitleCard({
             {badge}
           </div>
         ) : null}
-        {action}
         {cornerAction ? (
           <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
             {cornerAction}
           </div>
         ) : null}
       </div>
-      {showCaption || children ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          {showCaption ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
-              {title}
-            </ViewTransitionLink>
-          ) : null}
-          {showMetadata ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
-              {meta}
-            </ViewTransitionLink>
-          ) : null}
-          {children}
-        </div>
-      ) : null}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+          {title}
+        </ViewTransitionLink>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
+          {meta}
+        </ViewTransitionLink>
+        {children}
+      </div>
     </div>
   );
 }
 
-/** The centred hover Request action on a TMDB title's poster card. */
+/** The centred hover Request action on a watchlist title's poster card. */
 export function RequestAction({
   title,
   pending,

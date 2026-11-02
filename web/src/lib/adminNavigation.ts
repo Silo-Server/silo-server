@@ -3,6 +3,7 @@ import {
   Bot,
   CalendarClock,
   Captions,
+  Compass,
   Download,
   FileWarning,
   HardDriveDownload,
@@ -146,6 +147,22 @@ const PAGES = {
     keywords: ["requested media", "approvals", "request queue", "decline"],
     icon: Send,
     href: "/admin/requests",
+    // The Discover page editor is its own page below this path.
+    exact: true,
+  },
+  requestDiscover: {
+    label: "Discover Page",
+    description: "The rows on the Requests page's Discover tab: charts, filters, and lists.",
+    keywords: [
+      "discover rows",
+      "request rows",
+      "mdblist",
+      "tmdb list",
+      "trending",
+      "discover filters",
+    ],
+    icon: Compass,
+    href: "/admin/requests/discover",
   },
   scheduledTasks: {
     label: "Scheduled Tasks",
@@ -357,7 +374,11 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
         id: "requests",
         label: "Requests",
         icon: Send,
-        items: [{ ...PAGES.requests, label: "Queue" }, settingsPage("requests", "Settings")],
+        items: [
+          { ...PAGES.requests, label: "Queue" },
+          PAGES.requestDiscover,
+          settingsPage("requests", "Settings"),
+        ],
       },
       {
         id: "users",

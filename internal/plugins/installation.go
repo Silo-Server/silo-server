@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,12 @@ import (
 
 var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
+
+// ErrArchiveUnreadable marks a stored plugin archive that won't open or
+// extract, or doesn't match the installation row it was read for. That plugin
+// can't load from it; other plugins are unaffected.
+var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
+
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
@@ -505,8 +509,7 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		return ErrInstallationNotFound
 	}
 
-	installDir := filepath.Dir(installation.InstallPath)
-	if err := os.RemoveAll(installDir); err != nil {
+	if err := removeInstallationFiles(ctx, installation); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
 	}
 

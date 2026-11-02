@@ -10,7 +10,7 @@ import (
 )
 
 func TestBoundTextConfigSurvivesProviderChangesBetweenBatches(t *testing.T) {
-	current := Config{BaseURL: "https://first.example.test", APIKey: "first-key", ChatModel: "gpt-6.1-sol", ReasoningEffort: "high"}
+	current := Config{BaseURL: "https://first.example.test", APIKey: "first-key", ChatModel: "gpt-6.1-sol", ReasoningEffort: "high", ServiceTier: "priority"}
 	reads := 0
 	client := NewClient(Config{TextConfigSource: func(context.Context) (Config, error) {
 		reads++
@@ -26,7 +26,7 @@ func TestBoundTextConfigSurvivesProviderChangesBetweenBatches(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Model != cfg.ChatModel || body.ReasoningEffort != cfg.ReasoningEffort || r.Header.Get("Authorization") != "Bearer first-key" || r.URL.Host != "first.example.test" {
+		if body.Model != cfg.ChatModel || body.ReasoningEffort != cfg.ReasoningEffort || body.ServiceTier != cfg.ServiceTier || r.Header.Get("Authorization") != "Bearer first-key" || r.URL.Host != "first.example.test" {
 			t.Fatal("job mixed provider snapshots")
 		}
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(chatOK))}, nil

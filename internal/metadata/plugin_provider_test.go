@@ -24,6 +24,7 @@ type fakePluginMetadataClient struct {
 	imagesResponse *pluginv1.GetImagesResponse
 	seasonsResp    *pluginv1.GetSeasonsResponse
 	episodesResp   *pluginv1.GetEpisodesResponse
+	personResp     *pluginv1.GetPersonDetailResponse
 
 	searchReq      *pluginv1.SearchMetadataRequest
 	getMetadataReq *pluginv1.GetMetadataRequest
@@ -58,7 +59,7 @@ func (f *fakePluginMetadataClient) GetImages(_ context.Context, req *pluginv1.Ge
 }
 
 func (f *fakePluginMetadataClient) GetPersonDetail(_ context.Context, _ *pluginv1.GetPersonDetailRequest) (*pluginv1.GetPersonDetailResponse, error) {
-	return nil, nil
+	return f.personResp, nil
 }
 
 func (f *fakePluginMetadataClient) ResolveImageURL(context.Context, *pluginv1.ResolveImageURLRequest) (*pluginv1.ResolveImageURLResponse, error) {
@@ -554,5 +555,109 @@ func TestPersonKindFromStringMapsCreator(t *testing.T) {
 		if got := personKindFromString(value); got != models.PersonKindCreator {
 			t.Errorf("personKindFromString(%q) = %v, want PersonKindCreator", value, got)
 		}
+	}
+}
+
+// TestPluginProvider_DropsLocalArtworkSources checks that a metadata plugin
+// cannot mint a local artwork source: file:// and nfo+http(s):// values are
+// dropped from every artwork field, and ordinary remote URLs are kept.
+func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
+	const remote = "https://img.example.org/poster.jpg"
+	const sidecar = "file:///etc/passwd?v=1-1"
+	const nfoURL = "nfo+https://img.example.org/poster.jpg"
+
+	client := &fakePluginMetadataClient{
+		response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+			ProviderId:   "provider-1",
+			ItemType:     "movie",
+			Title:        "Example",
+			PosterPath:   sidecar,
+			BackdropPath: nfoURL,
+			LogoPath:     remote,
+			People: []*pluginv1.PersonRecord{
+				{Name: "Local", Kind: "actor", PhotoPath: "FILE:///tmp/photo.jpg"},
+				{Name: "Remote", Kind: "actor", PhotoPath: remote},
+			},
+		}},
+		imagesResponse: &pluginv1.GetImagesResponse{Images: []*pluginv1.ImageRecord{
+			{Url: sidecar, Kind: "poster"},
+			{Url: remote, Kind: "poster"},
+			{Url: nfoURL, Kind: "backdrop"},
+		}},
+		seasonsResp: &pluginv1.GetSeasonsResponse{Seasons: []*pluginv1.SeasonRecord{
+			{SeasonNumber: 1, PosterPath: sidecar},
+			{SeasonNumber: 2, PosterPath: remote},
+		}},
+		episodesResp: &pluginv1.GetEpisodesResponse{Episodes: []*pluginv1.EpisodeRecord{
+			{SeasonNumber: 1, EpisodeNumber: 1, StillPath: nfoURL},
+			{SeasonNumber: 1, EpisodeNumber: 2, StillPath: remote},
+		}},
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{
+			{Title: "Local", ImageUrl: sidecar},
+			{Title: "Remote", ImageUrl: remote},
+		}},
+		personResp: &pluginv1.GetPersonDetailResponse{Person: &pluginv1.PersonDetailRecord{Name: "Local", PhotoPath: sidecar}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         "thirdparty",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+	ctx := context.Background()
+	ids := map[string]string{"thirdparty": "provider-1"}
+
+	result, err := provider.GetMetadata(ctx, MetadataRequest{ProviderIDs: ids, ContentType: "movie"})
+	if err != nil {
+		t.Fatalf("GetMetadata() error = %v", err)
+	}
+	if result.PosterPath != "" || result.BackdropPath != "" || result.LogoPath != remote {
+		t.Fatalf("artwork = poster %q, backdrop %q, logo %q; want only the remote logo", result.PosterPath, result.BackdropPath, result.LogoPath)
+	}
+	if len(result.People) != 2 || result.People[0].PhotoPath != "" || result.People[1].PhotoPath != remote {
+		t.Fatalf("people photos = %+v, want local dropped and remote kept", result.People)
+	}
+
+	images, err := provider.GetImages(ctx, ImageRequest{ProviderIDs: ids, ContentType: "movie"})
+	if err != nil {
+		t.Fatalf("GetImages() error = %v", err)
+	}
+	if len(images) != 1 || images[0].URL != remote {
+		t.Fatalf("GetImages() = %+v, want only %q", images, remote)
+	}
+
+	seasons, err := provider.GetSeasons(ctx, SeasonsRequest{ProviderIDs: ids})
+	if err != nil {
+		t.Fatalf("GetSeasons() error = %v", err)
+	}
+	if len(seasons) != 2 || seasons[0].PosterPath != "" || seasons[1].PosterPath != remote {
+		t.Fatalf("season posters = %+v, want local dropped and remote kept", seasons)
+	}
+
+	episodes, err := provider.GetEpisodes(ctx, EpisodesRequest{ProviderIDs: ids, SeasonNumber: 1})
+	if err != nil {
+		t.Fatalf("GetEpisodes() error = %v", err)
+	}
+	if len(episodes) != 2 || episodes[0].StillPath != "" || episodes[1].StillPath != remote {
+		t.Fatalf("episode stills = %+v, want local dropped and remote kept", episodes)
+	}
+
+	results, err := provider.Search(ctx, SearchQuery{Title: "Example", ContentType: "movie"})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) != 2 || results[0].ImageURL != "" || results[1].ImageURL != remote {
+		t.Fatalf("search images = %+v, want local dropped and remote kept", results)
+	}
+
+	person, err := provider.GetPersonDetail(ctx, PersonDetailRequest{ProviderIDs: ids})
+	if err != nil {
+		t.Fatalf("GetPersonDetail() error = %v", err)
+	}
+	if person == nil || person.PhotoPath != "" {
+		t.Fatalf("person detail = %+v, want the local photo dropped", person)
 	}
 }

@@ -163,6 +163,8 @@ function WatchPagePlayer({
   subtitleMode,
   showForcedSubtitles,
   introSkipMode,
+  showMarkerConfidence = false,
+  showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
@@ -690,6 +692,8 @@ function WatchPagePlayer({
       showForcedSubtitles={session.initialSubtitleError ? false : showForcedSubtitles}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      showMarkerConfidence={showMarkerConfidence}
+      showMarkerSource={showMarkerSource}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
       bufferingTitleId={contentId}

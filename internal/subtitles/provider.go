@@ -18,8 +18,9 @@ type Provider interface {
 	// Search queries the provider for subtitles matching the request.
 	Search(ctx context.Context, req SearchRequest) ([]SubtitleResult, error)
 
-	// Download fetches the subtitle file content by provider-specific ID.
-	Download(ctx context.Context, id string) ([]byte, SubtitleFormat, error)
+	// Download fetches the subtitle file content by provider-specific ID. A
+	// season-pack archive yields the entry for target's episode.
+	Download(ctx context.Context, id string, target DownloadTarget) ([]byte, SubtitleFormat, error)
 }
 
 // BlobStore is the object storage the subtitle system needs. Subtitle objects

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // walkVisitor receives the directories of a walk. Both backends record
@@ -47,7 +49,7 @@ type walkVisitor struct {
 // Unreadable directories stay recorded but are not descended into; a
 // canceled ctx aborts the walk.
 func walkTree(ctx context.Context, dir string, v walkVisitor) error {
-	physical, err := filepath.EvalSymlinks(dir)
+	physical, err := fspath.EvalSymlinks(dir)
 	if err != nil {
 		physical = dir
 	}
@@ -63,7 +65,7 @@ func walkTree(ctx context.Context, dir string, v walkVisitor) error {
 		w.skipped.addNetwork(dir)
 		return nil
 	}
-	info, err := os.Lstat(dir)
+	info, err := fspath.Lstat(dir)
 	link := err == nil && info.Mode()&os.ModeSymlink != 0
 	return w.dir(ctx, dir, filepath.Clean(physical), link)
 }
@@ -154,7 +156,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 	if !ok {
 		return nil
 	}
-	entries, err := os.ReadDir(logical)
+	entries, err := fspath.ReadDir(logical)
 	if err != nil {
 		// Unreadable: nothing below it can be recorded. Not a walk failure.
 		return nil //nolint:nilerr // an unreadable directory must not abort the walk.
@@ -184,11 +186,11 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 				w.skipped.addNetwork(childLogical)
 				continue
 			}
-			resolved, err := filepath.EvalSymlinks(childLogical)
+			resolved, err := fspath.EvalSymlinks(childLogical)
 			if err != nil {
 				continue
 			}
-			info, err := os.Stat(resolved)
+			info, err := fspath.Stat(resolved)
 			if err != nil {
 				continue
 			}
@@ -233,22 +235,22 @@ func (w *treeWalk) foundFile(path string) {
 // network mount cannot block the backend's read loop, and the change is
 // reported like a file for a scoped scan instead of being walked.
 func symlinkToDir(path string) bool {
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return false
 	}
 	mounts := unsupportedMountPoints()
-	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	parent, err := fspath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
 		parent = filepath.Dir(path)
 	}
 	if linkOntoUnsupportedMount(mounts, path, parent) {
 		return false
 	}
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := fspath.EvalSymlinks(path)
 	if err != nil || onUnsupportedMount(mounts, resolved) {
 		return false
 	}
-	target, err := os.Stat(resolved)
+	target, err := fspath.Stat(resolved)
 	return err == nil && target.IsDir()
 }

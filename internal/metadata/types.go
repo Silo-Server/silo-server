@@ -528,7 +528,10 @@ type SeasonResult struct {
 	PosterPath       string
 	PosterSourcePath string
 	PosterThumbhash  string
-	Episodes         []EpisodeResult
+	// BackdropPath is the season's landscape art, a provider path. Seasons
+	// take no local backdrop.
+	BackdropPath string
+	Episodes     []EpisodeResult
 
 	// remotePosterPath keeps the best remote poster when a local sidecar
 	// poster won the merge (preferLocalSeasonPoster). Local art belongs to the

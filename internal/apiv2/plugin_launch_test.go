@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ type fakePluginLaunch struct {
 	err     error
 }
 
-func (f *fakePluginLaunch) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+func (f *fakePluginLaunch) PluginLaunchToken(_ context.Context, claims *auth.Claims, profileID string) (string, error) {
 	f.calls++
 	f.claims, f.profile = claims, profileID
 	if f.err != nil {

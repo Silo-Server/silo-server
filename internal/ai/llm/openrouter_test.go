@@ -11,10 +11,11 @@ import (
 func TestTranscribeOpenRouter(t *testing.T) {
 	for _, dedicated := range []bool{false, true} {
 		t.Run(map[bool]string{false: "shared", true: "dedicated"}[dedicated], func(t *testing.T) {
-			cfg := Config{BaseURL: "https://openrouter.ai/api/v1", APIKey: "router-key", ASRModel: "openai/whisper-large-v3"}
+			cfg := Config{BaseURL: "https://openrouter.ai/api/v1", APIKey: "router-key", ASRModel: "openai/whisper-large-v3",
+				ASRBaseURL: "https://openrouter.ai/api/v1", ASRAPIKey: "router-key"}
 			if dedicated {
 				cfg.BaseURL, cfg.APIKey = "https://chat.example.test", "chat-key"
-				cfg.ASRBaseURL, cfg.ASRAPIKey = "https://openrouter.ai/api/v1/", "router-key"
+				cfg.ASRBaseURL = "https://openrouter.ai/api/v1/"
 			}
 			client := NewClient(cfg)
 			calls := 0
@@ -77,7 +78,7 @@ func TestTranscribeRejectsUnusableSegmentsWithoutRetry(t *testing.T) {
 		"zero duration":           `{"segments":[{"start":0,"end":0,"text":"Hello"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			client := NewClient(Config{BaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-large-v3"})
+			client := NewClient(Config{ASRBaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-large-v3"})
 			calls := 0
 			client.asrHTTP.Transport = retryRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls++
@@ -104,7 +105,7 @@ func TestTranscribeOpenRouterPermanentHTTPFailures(t *testing.T) {
 		{http.StatusPaymentRequired, "Insufficient credits"},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
-			client := NewClient(Config{BaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-large-v3"})
+			client := NewClient(Config{ASRBaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-large-v3"})
 			calls := 0
 			client.asrHTTP.Transport = retryRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls++
@@ -119,7 +120,7 @@ func TestTranscribeOpenRouterPermanentHTTPFailures(t *testing.T) {
 }
 
 func TestTranscribeIgnoresEmptyWhisperBoundarySegments(t *testing.T) {
-	client := NewClient(Config{BaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-1"})
+	client := NewClient(Config{ASRBaseURL: "https://openrouter.ai/api/v1", ASRModel: "openai/whisper-1"})
 	client.asrHTTP.Transport = retryRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"text":"Hello","segments":[{"start":0,"end":1,"text":"Hello"},{"start":1,"end":1,"text":""},{"text":" "}],"words":[{"start":0,"end":1,"word":"Hello"}]}`))}, nil
 	})

@@ -56,13 +56,13 @@ func (s *ABSPlaybackSessionStore) GetPlaybackSession(ctx context.Context, id str
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, content_id,
 		       time_listening_seconds, current_position_seconds,
-		       started_at, last_sync_at, closed_at
+		       started_at, last_sync_at, closed_at, media_file_id
 		FROM abs_playback_sessions
 		WHERE id = $1`, id)
 	err := row.Scan(
 		&sess.ID, &uid, &profileID, &sess.ContentID,
 		&sess.TimeListeningSeconds, &sess.CurrentPositionSeconds,
-		&sess.StartedAt, &sess.LastSyncAt, &closedAt,
+		&sess.StartedAt, &sess.LastSyncAt, &closedAt, &sess.MediaFileID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return abs.ABSPlaybackSession{}, abs.ErrNotFound

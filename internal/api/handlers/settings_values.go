@@ -123,6 +123,13 @@ const fieldValues = "values"
 // the request boundary keeps a crafted batch from failing resolution outright.
 const maxEffectiveContentIDs = 200
 
+// maxResponseValueBytes bounds the stored values one v2 settings read returns.
+// v2 answers a repeated key once per mention, and the batch answers every key
+// in every context, so one large stored document (up to the 1 MiB write body)
+// could otherwise be copied 20,000 times into a single buffered response.
+// Real reads, a few KiB of values per context, stay far below it.
+const maxResponseValueBytes = 16 << 20
+
 // maxShortcutMutationRetries bounds contention retries while still making a
 // normal burst of edits effectively wait-free for clients. Each failed CAS
 // means another writer made progress; exhausting this limit is therefore a

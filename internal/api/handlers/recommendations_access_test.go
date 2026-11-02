@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +27,7 @@ type fakeRecsEngine struct {
 	items        []recommendations.ScoredItem
 	similarCalls int
 	becauseCalls int
+	becauseLimit int
 	becauseWith  catalog.AccessFilter
 }
 
@@ -34,8 +36,9 @@ func (f *fakeRecsEngine) SimilarItems(context.Context, int, string, string, int,
 	return f.items, nil
 }
 
-func (f *fakeRecsEngine) BecauseYouWatched(_ context.Context, _ int, _, _ string, _ int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+func (f *fakeRecsEngine) BecauseYouWatched(_ context.Context, _ int, _, _ string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	f.becauseCalls++
+	f.becauseLimit = limit
 	f.becauseWith = filter
 	return f.items, nil
 }
@@ -141,6 +144,23 @@ func TestBecauseWatchedRanksUnderTheViewerScope(t *testing.T) {
 	decodeScoredItems(t, rec)
 	if !slices.Equal(engine.becauseWith.AllowedLibraryIDs, []int{4}) || engine.becauseWith.UserID != 7 || engine.becauseWith.ProfileID != "profile-1" {
 		t.Fatalf("engine filter = %+v, want the request scope", engine.becauseWith)
+	}
+}
+
+// The shared service caps Because You Watched at the row maximum before the
+// engine triples the limit into candidate queries; v1 forwards any positive
+// limit.
+func TestBecauseWatchedCapsTheEngineLimit(t *testing.T) {
+	for _, tc := range []struct{ limit, want int }{{0, 20}, {50, 50}, {51, 50}, {math.MaxInt, 50}} {
+		engine := &fakeRecsEngine{}
+		h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
+		h.accessibleIDs = fakeAccessibleIDs{}
+		if _, err := h.BecauseWatched(t.Context(), 7, "profile-1", "anchor", tc.limit, catalog.AccessFilter{}); err != nil {
+			t.Fatal(err)
+		}
+		if engine.becauseCalls != 1 || engine.becauseLimit != tc.want {
+			t.Fatalf("limit %d: engine calls %d with limit %d; want one with %d", tc.limit, engine.becauseCalls, engine.becauseLimit, tc.want)
+		}
 	}
 }
 

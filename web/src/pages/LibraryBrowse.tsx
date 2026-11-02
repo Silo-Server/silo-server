@@ -37,6 +37,8 @@ import {
 interface LibraryBrowseProps {
   libraryId: number;
   libraryType: string;
+  /** The library groups a TMDB collection's movies into box sets. */
+  boxSetsEnabled?: boolean;
   browseType: LibraryBrowseType;
   queryDefinition: QueryDefinition;
   onBrowseTypeChange: (
@@ -76,7 +78,7 @@ function AudiobookAxisTabs({
     <div
       role="radiogroup"
       aria-label="Browse audiobooks by"
-      className="surface-panel inline-flex items-center gap-1 rounded-full p-1"
+      className="surface-panel inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {AUDIOBOOK_BROWSE_AXES.map((axis) => {
         const isActive = axis === value;
@@ -92,7 +94,7 @@ function AudiobookAxisTabs({
               }
             }}
             className={cn(
-              "rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+              "shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -126,6 +128,7 @@ function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
 export default function LibraryBrowse({
   libraryId,
   libraryType,
+  boxSetsEnabled = false,
   browseType,
   queryDefinition,
   onBrowseTypeChange,
@@ -193,6 +196,7 @@ export default function LibraryBrowse({
     source: "query",
     library_id: libraryId,
     type_override: libraryType === "series" ? browseType : undefined,
+    group: boxSetsEnabled ? "box_set" : undefined,
     query_definition: scopedQueryDefinition,
   };
 
@@ -401,6 +405,8 @@ export default function LibraryBrowse({
           <ItemGrid
             gridRef={gridRef}
             totalItems={gridTotalItems}
+            // The letter index's total is exact.
+            knownItems={showLetterBar ? gridTotalItems : catalogQuery.data?.knownItems}
             pages={pages}
             pageSize={limit}
             libraryId={libraryId}

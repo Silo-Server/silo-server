@@ -1,6 +1,11 @@
-import { getAdminItemImages, applyAdminItemImage } from "@/api/v2/adminImages";
+import {
+  getAdminItemImages,
+  applyAdminItemImage,
+  uploadAdminItemImage,
+  type UploadItemImageType,
+} from "@/api/v2/adminImages";
 import { getAdminItemFiles, splitAdminItem } from "@/api/v2/adminSplit";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import type {
   ApplyItemImageRequest,
@@ -607,6 +612,42 @@ export function useItemImages(contentId: string | undefined, enabled = true) {
 
 type ApplyImageItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "season_number">;
 
+// A validation problem's first field detail says why an image was refused;
+// its summary only says that it was.
+function imageErrorMessage(err: unknown, fallback: string) {
+  if (err instanceof V2ProblemError) return err.problem.errors?.[0]?.detail ?? err.message;
+  return err instanceof Error ? err.message : fallback;
+}
+
+// Refreshes every view that shows the item's artwork, and the series' views
+// for a season or episode.
+async function invalidateAppliedImage(queryClient: QueryClient, item: ApplyImageItem) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: adminKeys.itemImages(item.content_id) }),
+    queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
+    queryClient.invalidateQueries({
+      queryKey: ["catalog", "items", item.content_id, "detail"],
+    }),
+    queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
+    queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
+    queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
+  ]);
+
+  // Cascade for seasons/episodes to parent series.
+  if ((item.type === "season" || item.type === "episode") && item.series_id) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["items", "detail", item.series_id] }),
+      queryClient.invalidateQueries({
+        queryKey: ["catalog", "items", item.series_id, "detail"],
+      }),
+      queryClient.invalidateQueries({ queryKey: episodeKeys.seasons(item.series_id) }),
+      queryClient.invalidateQueries({
+        queryKey: ["catalog", "series", item.series_id, "seasons"],
+      }),
+    ]);
+  }
+}
+
 export function useApplyItemImage() {
   const queryClient = useQueryClient();
 
@@ -621,34 +662,34 @@ export function useApplyItemImage() {
     retry: false,
     onSuccess: async (_, { item }) => {
       toast.success("Image applied successfully");
-
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.itemImages(item.content_id) }),
-        queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
-        queryClient.invalidateQueries({
-          queryKey: ["catalog", "items", item.content_id, "detail"],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
-        queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
-        queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
-      ]);
-
-      // Cascade for seasons/episodes to parent series.
-      if ((item.type === "season" || item.type === "episode") && item.series_id) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["items", "detail", item.series_id] }),
-          queryClient.invalidateQueries({
-            queryKey: ["catalog", "items", item.series_id, "detail"],
-          }),
-          queryClient.invalidateQueries({ queryKey: episodeKeys.seasons(item.series_id) }),
-          queryClient.invalidateQueries({
-            queryKey: ["catalog", "series", item.series_id, "seasons"],
-          }),
-        ]);
-      }
+      await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to apply image");
+      toast.error(imageErrorMessage(err, "Failed to apply image"));
+    },
+  });
+}
+
+export function useUploadItemImage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      item,
+      type,
+      file,
+    }: {
+      item: ApplyImageItem;
+      type: UploadItemImageType;
+      file: File;
+    }) => uploadAdminItemImage(item.content_id, type, file),
+    retry: false,
+    onSuccess: async (_, { item }) => {
+      toast.success("Image uploaded");
+      await invalidateAppliedImage(queryClient, item);
+    },
+    onError: (err) => {
+      toast.error(imageErrorMessage(err, "Failed to upload image"));
     },
   });
 }

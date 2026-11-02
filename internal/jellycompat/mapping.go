@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -984,7 +985,7 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 func mediaSourceName(version catalog.FileVersion) string {
 	name := strings.TrimSpace(version.FileName)
 	if name == "" {
-		name = filepath.Base(version.FilePath)
+		name = fspath.Display(filepath.Base(version.FilePath))
 	}
 	if name == "" {
 		return ""

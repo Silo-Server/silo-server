@@ -44,7 +44,7 @@ type stubLoginSessions struct {
 // Postgres is unreachable.
 const loginStoreDown = "login-store-down"
 
-func (s stubLoginSessions) ActiveSession(_ context.Context, sessionID string) (auth.SessionAuthority, bool, error) {
+func (s stubLoginSessions) ActiveSession(_ context.Context, sessionID string, _ int) (auth.SessionAuthority, bool, error) {
 	if sessionID == loginStoreDown {
 		return auth.SessionAuthority{}, false, errors.New("dial tcp: connection refused")
 	}

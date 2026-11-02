@@ -39,7 +39,7 @@ type fakeSessions struct{ roles map[string]string }
 
 const storeDownSession = "s-store-down"
 
-func (f fakeSessions) ActiveSession(_ context.Context, id string) (auth.SessionAuthority, bool, error) {
+func (f fakeSessions) ActiveSession(_ context.Context, id string, _ int) (auth.SessionAuthority, bool, error) {
 	if id == storeDownSession {
 		return auth.SessionAuthority{}, false, errors.New("checking session validity: dial tcp: connection refused")
 	}

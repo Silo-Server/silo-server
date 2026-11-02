@@ -83,3 +83,73 @@ func TestSectionsSkipItemsInNoLibraryPostgres(t *testing.T) {
 		}
 	}
 }
+
+// A rule row may use a viewer's own state ("Watched is No"). It reads that
+// state for the profile asking, and leaves another profile's history out.
+func TestRuleRowsReadTheViewersWatchStatePostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	resetResolvedListCacheForTest()
+	t.Cleanup(resetResolvedListCacheForTest)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	prefix := "rule-watched-" + uuid.NewString()[:8] + "-"
+	var library, userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix+"lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, '', 'user') RETURNING id`, prefix+"user", prefix+"user@example.test").Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+
+	seen, unseen := prefix+"seen", prefix+"unseen"
+	for _, id := range []string{seen, unseen} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres, rating_imdb) VALUES ($1, 'movie', $1, 'matched', '{Comedy}', 7.5)`, id); err != nil {
+			t.Fatalf("seed item: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+			t.Fatalf("seed membership: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, completed) VALUES ($1, 'viewer', $2, TRUE)`, userID, seen); err != nil {
+		t.Fatalf("seed watch state: %v", err)
+	}
+
+	// The rules from the report: two "or" groups, each with Watched is No.
+	config := []byte(`{"library_ids":[],"match":"any","groups":[
+		{"match":"all","rules":[{"field":"genre","op":"is","value":"Comedy"},{"field":"watched","op":"is","value":false},{"field":"rating_imdb","op":"gte","value":6.5}]},
+		{"match":"all","rules":[{"field":"genre","op":"is","value":"Family"},{"field":"watched","op":"is","value":false},{"field":"rating_imdb","op":"gte","value":6.5}]}],
+		"sort":{"field":"added_at","order":"desc"}}`)
+	row := ResolvedSection{ID: "feel-good", SectionType: SectionCustomFilter, Title: "Feel-Good Comedies", ItemLimit: 50, Config: config}
+	fetcher := NewFetcher(pool)
+
+	for _, tc := range []struct {
+		profile string
+		want    []string
+	}{
+		{profile: "viewer", want: []string{unseen}},
+		{profile: "other", want: []string{seen, unseen}},
+	} {
+		got, err := fetcher.FetchOne(ctx, row, &library, nil, userID, tc.profile, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("FetchOne for profile %s: %v", tc.profile, err)
+		}
+		ids := contentIDs(got.Items)
+		slices.Sort(ids)
+		if !slices.Equal(ids, tc.want) {
+			t.Errorf("profile %s sees %v, want %v", tc.profile, ids, tc.want)
+		}
+	}
+}
