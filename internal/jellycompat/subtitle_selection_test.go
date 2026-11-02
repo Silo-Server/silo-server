@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -431,6 +432,16 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A server cap above the file's bitrate isn't why a sidecar the profile takes
+// only embedded has no route, so the answer is NoCompatibleStream, not the
+// bitrate-limit error: the check without the cap applies subtitle delivery too.
+func TestPlaybackInfoSubtitleRefusalUnderServerCapIsNoCompatibleStream(t *testing.T) {
+	h, item := newSubtitleSelectionHandler(t)
+	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 20_000, MaxRemoteStreamBitrateKbps: 20_000}}
+	rr := servePlaybackInfo(h, item, `{"SubtitleStreamIndex":3,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"Embed"}]}}`)
+	assertNoCompatibleStream(t, h, item, rr.Code, rr.Body.Bytes())
 }
 
 func TestMediaSourceDTOLegacyExternalSubtitleSelectionSurvivesSessionPersistence(t *testing.T) {

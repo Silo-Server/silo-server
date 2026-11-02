@@ -2338,6 +2338,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	unreadableSkipped := false
+	// The bitrate-cap check below finishes each version again without the cap,
+	// with the downloaded subtitles this loop looked up.
+	downloadedByFile := make(map[int][]subtitles.DownloadedSubtitle, len(detail.Versions))
 	for _, version := range detail.Versions {
 		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode, allowHEVCEncoding)
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
@@ -2372,6 +2375,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				)
 			}
 		}
+		downloadedByFile[source.Version.FileID] = downloaded
 		source.DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, source.Version, downloaded, savedSubtitleMode, effectiveCompatAudioStreamIndex(source))
 		var requestedSubtitleIndex *int
 		if index, ok := req.SubtitleStreamIndex.get(); ok {
@@ -2503,8 +2507,50 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	if !slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
 		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
 	}) {
-		capRemovesRoutes := req.serverBitrateCapKbps > 0 &&
-			h.bitrateCapRemovesEveryRoute(r.Context(), routeItemID, playSessionID, sources, profile, req, allow4KTranscode, allowHEVCEncoding)
+		// The server's bitrate cap is to blame only when the versions, built
+		// again without it and put through the same subtitle, tone-map and
+		// HEVC-executor checks as above, have a route. When a lower client or
+		// profile limit, or a profile that takes no encode the server makes,
+		// rules them out, they have no route either way (#3215).
+		uncapped := req
+		uncapped.serverBitrateCapKbps = 0
+		capRemovesRoutes := req.serverBitrateCapKbps > 0 && slices.ContainsFunc(sources, func(capped PlaybackMediaSource) bool {
+			source := h.buildPlaybackSource(routeItemID, playSessionID, capped.Version, profile, uncapped, allow4KTranscode, allowHEVCEncoding)
+			source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, uncapped, allow4KTranscode)
+			source.DefaultSubtitleStreamIndex = capped.DefaultSubtitleStreamIndex
+			source.SelectedSubtitleStreamIndex = capped.SelectedSubtitleStreamIndex
+			source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source) || compatRokuMPEGTS(r.UserAgent(), profile, source) ||
+				source.hlsRemuxInTS && compatHLSCopiesVideo(source) && !source.DVStripToHDR10
+			applyCompatSubtitleDelivery(&source, profile, uncapped.AlwaysBurnInSubtitleWhenTranscoding)
+			applyCompatDownloadedSubtitleDelivery(&source, profile, downloadedByFile[capped.Version.FileID])
+			if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(source.Version) {
+				if !toneMapPolicyLoaded {
+					policy, err := h.toneMapPolicyResult(r.Context())
+					if err != nil {
+						// Unknown policy: the encode can't be shown to be possible.
+						source.SupportsTranscoding = false
+					} else {
+						toneMapPolicy, toneMapPolicyLoaded = policy, true
+					}
+				}
+				if toneMapPolicyLoaded && !toneMapCapabilitiesLoaded {
+					if toneMapPolicy != tonemap.PolicyNone {
+						toneMapCapabilities, toneMapCapabilityErr = h.availableCompatToneMapCapabilities(r.Context(), compatToneMapNegotiationTimeout)
+					}
+					toneMapCapabilitiesLoaded = true
+				}
+				if toneMapPolicyLoaded {
+					source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
+				}
+			}
+			if source.SupportsTranscoding && compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC &&
+				!h.compatHEVCExecutable(r.Context(), source) {
+				source.TargetVideoCodec = compatTargetVideoCodec
+				source.TargetBitrateKbps, source.TargetResolution = source.h264TargetBitrateKbps, source.h264TargetResolution
+				source.SupportsTranscoding = profile.supportsTranscodingOutput(source.Version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+			}
+			return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
+		})
 		message := "No media source supports the requested playback constraints"
 		if capRemovesRoutes {
 			message = "This stream exceeds the server bitrate limit, and no compliant transcoding route is available"
@@ -2656,27 +2702,6 @@ func (h *PlaybackHandler) storeDeviceProfile(r *http.Request, compatToken string
 		}
 	}
 	return h.deviceProfiles.PutForDevice(r.Context(), compatToken, deviceID, profile)
-}
-
-// bitrateCapRemovesEveryRoute reports whether the server's bitrate cap is what
-// leaves sources without a route: built again without it, some version plays.
-// When a lower client or profile limit, or a profile that takes no encode the
-// server makes, rules them out, they have no route either way (#3215).
-func (h *PlaybackHandler) bitrateCapRemovesEveryRoute(
-	ctx context.Context,
-	routeItemID, playSessionID string,
-	sources []PlaybackMediaSource,
-	profile DeviceProfile,
-	req playbackInfoRequest,
-	allow4KTranscode, allowHEVCEncoding bool,
-) bool {
-	uncapped := req
-	uncapped.serverBitrateCapKbps = 0
-	return slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
-		source = h.buildPlaybackSource(routeItemID, playSessionID, source.Version, profile, uncapped, allow4KTranscode, allowHEVCEncoding)
-		source = h.applyCompatDVStrip(ctx, routeItemID, playSessionID, source, profile, uncapped, allow4KTranscode)
-		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
-	})
 }
 
 func (h *PlaybackHandler) buildPlaybackSource(
