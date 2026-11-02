@@ -2775,7 +2775,9 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 // metadata_curation after its access group's permission mask, as the metadata
 // curation gate resolves it. A failed group lookup fails closed.
 func hasMaskedMetadataCuration(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
-	if user == nil || !user.Enabled {
+	// The group mask can only remove permissions, so an account without the
+	// grant skips the group lookup.
+	if user == nil || !user.Enabled || !slices.Contains(user.Permissions, string(auth.PermissionMetadataCuration)) {
 		return false
 	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, groups)

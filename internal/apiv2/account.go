@@ -25,7 +25,7 @@ type Account struct {
 	Username               string         `json:"username" doc:"Login name" example:"alice"`
 	Email                  string         `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
 	Role                   string         `json:"role" enum:"admin,user" doc:"Server-wide role" example:"user"`
-	Permissions            []Permission   `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account" example:"[\"marker_edit\"]"`
+	Permissions            []Permission   `json:"permissions" doc:"Assignable permissions the account holds after its access group's mask; empty for a disabled account. An admin lists only explicitly assigned permissions: its role grants every permission only while it acts as administrator (on the primary profile, or with no profile on a household that does not require one), and clients apply that grant from role and profile" example:"[\"marker_edit\"]"`
 	DownloadAllowed        bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads" example:"true"`
 	PasswordChangeRequired bool           `json:"password_change_required" doc:"Whether the account holds a temporary password. Until changePassword replaces it, the session may only read the account, change the password, and log out; other operations return 403 password_change_required. Refresh the tokens after the change to lift the restriction" example:"false"`
 	Impersonation          *Impersonation `json:"impersonation,omitempty" doc:"Present only while an administrator impersonates this account"`

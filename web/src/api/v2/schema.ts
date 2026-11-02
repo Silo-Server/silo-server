@@ -12850,7 +12850,7 @@ export interface components {
        */
       password_change_required: boolean;
       /**
-       * @description Effective assignable permissions; empty for a disabled account
+       * @description Assignable permissions the account holds after its access group's mask; empty for a disabled account. An admin lists only explicitly assigned permissions: its role grants every permission only while it acts as administrator (on the primary profile, or with no profile on a household that does not require one), and clients apply that grant from role and profile
        * @example [
        *       "marker_edit"
        *     ]
