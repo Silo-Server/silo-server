@@ -15,13 +15,7 @@ func TestAuthConnectionRejectsDuplicateStagedKeys(t *testing.T) {
 		Type: "auth_provider.v1", Id: "oidc", AuthModes: []string{"oauth2"},
 		Metadata: &structpb.Struct{Fields: map[string]*structpb.Value{"connection_test": structpb.NewBoolValue(true)}},
 	}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID: 7, PluginID: pluginManifest.PluginId, Version: pluginManifest.Version,
-			InstallPath: writeInstalledPluginManifest(t, pluginManifest), Enabled: true,
-		}),
-		configs: &fakeServiceConfigStore{},
-	}
+	service := &Service{installations: installedPluginStore(t, 7, pluginManifest), configs: &fakeServiceConfigStore{}}
 	_, err := service.TestAuthProviderConnection(t.Context(), 7, "oidc", []StagedConfig{
 		{Key: "connection", Value: map[string]any{"api_key": "first-draft"}},
 		{Key: " connection ", Value: map[string]any{"api_key": "second-draft"}},

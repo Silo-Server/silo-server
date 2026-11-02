@@ -248,7 +248,12 @@ export function AdminUserPasswordResetDialog({
               onSelect={setMethod}
             >
               <span>Type one now and tell them.</span>
-              <div className={cn("mt-2.5 space-y-2", method !== "password" && "opacity-50")}>
+              <div
+                className={cn(
+                  "mt-2.5 space-y-2",
+                  method !== "password" && "pointer-events-none opacity-50",
+                )}
+              >
                 <label htmlFor={passwordId} className="sr-only">
                   Temporary password
                 </label>

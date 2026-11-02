@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -43,13 +45,22 @@ var ignoredDirNames = map[string]bool{
 // ignoredMovieSupplementalDirNames holds movie-library directory names whose
 // contents are never playable content (noise). Extras-shaped directories
 // (Trailers/, Featurettes/, ...) are NOT in this set: they are walked and
-// classified via extrasDirKinds instead of discarded.
+// classified via extrasDirKinds instead of discarded. Subtitle discovery
+// reads the subtitle folders (subtitleDirLabels) on its own.
 var ignoredMovieSupplementalDirNames = map[string]bool{
 	"sample":    true,
 	"samples":   true,
 	"subs":      true,
 	"subtitles": true,
 }
+
+// extraDirLabel and extrasDirLabel are the normalized names of an Extras/
+// folder, the one extras folder where an episode code can keep a file an
+// episode (see keepsEpisodeToken).
+const (
+	extraDirLabel  = "extra"
+	extrasDirLabel = "extras"
+)
 
 // extrasDirKinds classifies supplemental directory names (normalized via
 // normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
@@ -60,11 +71,11 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // Convention labels can also appear as content-scope folder names ("movies/
 // other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
 // because extrasClassifier only honors a convention-named dir owned by a
-// title folder — one that holds media of its own, which library roots and
-// organizational folders do not.
+// title folder — one that holds media of its own or belongs to a show, which
+// library roots and organizational folders do not.
 var extrasDirKinds = map[string]models.ExtraKind{
-	"extra":             models.ExtraKindOther,
-	"extras":            models.ExtraKindOther,
+	extraDirLabel:       models.ExtraKindOther,
+	extrasDirLabel:      models.ExtraKindOther,
 	"other":             models.ExtraKindOther,
 	"featurette":        models.ExtraKindFeaturette,
 	"featurettes":       models.ExtraKindFeaturette,
@@ -116,11 +127,13 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
-// scannerImageCacher is the slice of imagecache.Cacher the book scanners use.
+// scannerImageCacher is the slice of imagecache.Cacher the book scanners and
+// local extras use.
 // Wired via SetImageCacher; nil-safe when absent.
 type scannerImageCacher interface {
 	audiobookCoverCacher
 	ebookCoverCacher
+	extraStillCacher
 }
 
 type Scanner struct {
@@ -471,7 +484,7 @@ func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[
 }
 
 func canonicalWalkPath(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
 	}
@@ -542,6 +555,7 @@ func walkLogicalTree(
 	ignoreRulesStack []ignoreRules,
 	filePaths *[]string,
 	walkFailures *[]string,
+	sidecars SidecarListing,
 	readDir func(string) ([]os.DirEntry, error),
 ) error {
 	if ctx != nil {
@@ -550,7 +564,7 @@ func walkLogicalTree(
 		}
 	}
 
-	info, err := os.Lstat(physicalPath)
+	info, err := fspath.Lstat(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures, logicalPath)
@@ -558,20 +572,20 @@ func walkLogicalTree(
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(physicalPath)
+		resolved, err := fspath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
-		targetInfo, err := os.Stat(resolved)
+		targetInfo, err := fspath.Stat(resolved)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, readDir)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, sidecars, readDir)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
@@ -615,6 +629,9 @@ func walkLogicalTree(
 		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
+	if sidecars != nil {
+		sidecars.record(logicalPath, entries)
+	}
 
 	childRules, skip := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
 	if skip {
@@ -634,13 +651,13 @@ func walkLogicalTree(
 		}
 
 		if entry.Type()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(physicalChild)
+			resolved, err := fspath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
 				continue
 			}
-			targetInfo, err := os.Stat(resolved)
+			targetInfo, err := fspath.Stat(resolved)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
@@ -651,7 +668,7 @@ func walkLogicalTree(
 				if ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 					return err
 				}
 				continue
@@ -664,7 +681,7 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 				return err
 			}
 			continue
@@ -695,19 +712,35 @@ func walkLogicalTree(
 // matters: a dangling symlink is permanent, and protecting its entire library
 // root would suppress missing-file reconciliation there on every future scan.
 func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, error) {
+	filePaths, walkFailures, _, err := collectLogicalFilePathsAndSidecars(ctx, walkRoots, libraryType, libraryRoots)
+	return filePaths, walkFailures, err
+}
+
+// collectLogicalFilePathsAndSidecars is collectLogicalFilePaths that also
+// returns the local metadata sidecars in every directory a video walk read
+// (nil for other library types).
+func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, SidecarListing, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
 	walkFailures := make([]string, 0)
+	var sidecars SidecarListing
+	if mode == walkModeVideo || mode == walkModeMovie {
+		sidecars = make(SidecarListing)
+	}
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
 		if cleanRoot == "" || cleanRoot == "." {
+			continue
+		}
+		if scopeRootVanished(cleanRoot, libraryRoots) {
+			slog.InfoContext(ctx, "scanner: scope no longer exists under its library root; reconciling it as empty", "component", "scanner", "path", cleanRoot)
 			continue
 		}
 		rules, ignored, err := scanRootIgnoreRules(cleanRoot, libraryRoots)
@@ -719,12 +752,33 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, os.ReadDir); err != nil {
-			return nil, nil, err
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, fspath.ReadDir); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	return filePaths, walkFailures, nil
+	return filePaths, walkFailures, sidecars, nil
+}
+
+// scopeRootVanished reports whether a walk root below a configured library
+// root is confirmed gone while its parent directory is still there: a deleted
+// movie or series folder that a monitor or webhook scan is scoped to. Such a
+// scope is empty, not unreadable, so its cataloged files are reconciled the way
+// a full library scan would. Only ENOENT counts, and the parent must resolve to
+// a directory. A missing parent (a missing library root, or storage that
+// dropped further up), a dangling symlink at or above the scope, and permission
+// or I/O errors stay walk failures. An unreachable or suspect-empty library
+// root keeps its own protection.
+func scopeRootVanished(scope string, libraryRoots []string) bool {
+	root := scopeLibraryRoot(scope, libraryRoots)
+	if root == "" || root == scope {
+		return false
+	}
+	if _, err := os.Lstat(scope); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	parent, err := os.Stat(filepath.Dir(scope))
+	return err == nil && parent.IsDir()
 }
 
 func (s *Scanner) scanPaths(
@@ -766,10 +820,11 @@ func (s *Scanner) scanPaths(
 		Message:      "Discovering media files",
 		CurrentScope: firstScope(reconcileRoots),
 	})
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -873,7 +928,7 @@ func (s *Scanner) scanPaths(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
-	subtitleCache := newExternalSubtitleDirCache()
+	subtitleCache := newExternalSubtitleDirCache(folder.Type)
 
 	for range s.workerCount() {
 		wg.Go(func() {
@@ -967,9 +1022,6 @@ func (s *Scanner) scanPaths(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
 
 	// If the scan was cancelled, return partial results without marking
 	// files as missing or deleting records — that would corrupt state.
@@ -977,7 +1029,7 @@ func (s *Scanner) scanPaths(
 		return result, ctx.Err()
 	}
 
-	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 	result.New += extraStats.New
 	result.Updated += extraStats.Updated
 	result.Unchanged += extraStats.Unchanged
@@ -1312,10 +1364,10 @@ func (s *Scanner) scanFolderByRoots(
 
 	// When EVERY configured root is unreachable this is an outage, not an
 	// intentionally emptied library: skip the empty-root confirm flow (and do
-	// not consume the operator's one-time cleanup allowance), fall through so
-	// pending scopes mark files missing (hiding them), and let the dead_root
-	// warning below explain the state. All deletion paths are protected by
-	// the unreachable-roots exclusions, so nothing is purged.
+	// not consume the operator's one-time cleanup allowance) and let the
+	// dead_root warning below explain the state. The pending scopes still run,
+	// but every root is in the protected set, so their files are neither
+	// marked missing nor deleted.
 	allRootsUnreachable := len(unreachableRoots) > 0 && len(unreachableRoots) == len(configuredRoots)
 	if !seenAnyFiles && totalExisting > 0 && !allRootsUnreachable {
 		var err error
@@ -1682,10 +1734,11 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -1733,7 +1786,7 @@ func (s *Scanner) scanScope(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
-	subtitleCache := newExternalSubtitleDirCache()
+	subtitleCache := newExternalSubtitleDirCache(folder.Type)
 
 	for range s.workerCount() {
 		wg.Go(func() {
@@ -1829,7 +1882,7 @@ func (s *Scanner) scanScope(
 	})
 
 	if ctx.Err() == nil {
-		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 		result.New += extraStats.New
 		result.Updated += extraStats.Updated
 		result.Unchanged += extraStats.Unchanged
@@ -1940,6 +1993,12 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
+	if src.Sidecars != nil {
+		if dst.Sidecars == nil {
+			dst.Sidecars = make(SidecarListing, len(src.Sidecars))
+		}
+		dst.Sidecars.merge(src.Sidecars)
+	}
 }
 
 // markMissingExcludingProtected marks every cataloged file the walk did not
@@ -1974,7 +2033,12 @@ func (s *Scanner) markMissingExcludingProtected(
 		if existing.MissingSince != nil {
 			continue
 		}
-		if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+		if err := s.fileRepo.MarkMissing(ctx, existing.ID, existing.FilePath, now); err != nil {
+			if errors.Is(err, ErrFileNotFound) {
+				// This scan relinked the row to the file's new path, or it
+				// was deleted meanwhile. Either way nothing is missing here.
+				continue
+			}
 			slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
 				"path", existing.FilePath,
 				"error", err,
@@ -2363,13 +2427,13 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
 	`,
 		},
-		{
-			// target_episode selects the episodes in scope; candidate then
-			// re-joins every active file of those episodes so first_seen_at
-			// and the scan-run provenance aggregate over the whole episode,
-			// not just the scanned path.
-			desc: "restoring episode folder memberships",
-			sql: `
+	}
+
+	// target_episode selects the episodes in scope; candidate then re-joins
+	// every active file of those episodes so first_seen_at and the scan-run
+	// provenance aggregate over the whole episode, not just the scanned path.
+	// It returns the parent series of the genuinely new links.
+	restoreEpisodeMembershipsSQL := `
 		WITH target_episode AS (
 			SELECT DISTINCT mf.episode_id, mf.media_folder_id
 			FROM media_files mf
@@ -2402,23 +2466,12 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 			SELECT episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
 			FROM candidate
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
-			RETURNING episode_id, first_seen_at
+			RETURNING episode_id
 		)
-		-- Bump each parent series' latest-episode-added denorm for the
-		-- genuinely new links ("Latest Episodes" sort, issue #202).
-		UPDATE media_items mi
-		SET latest_episode_added_at = GREATEST(mi.latest_episode_added_at, sub.latest_added)
-		FROM (
-			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
-			FROM inserted i
-			JOIN episodes e ON e.content_id = i.episode_id
-			GROUP BY e.series_id
-		) sub
-		WHERE mi.content_id = sub.series_id
-		  AND mi.type = 'series'
-	`,
-		},
-	}
+		SELECT COALESCE(array_agg(DISTINCT e.series_id), ARRAY[]::text[])
+		FROM inserted i
+		JOIN episodes e ON e.content_id = i.episode_id
+	`
 
 	// One transaction: a crash part-way through must not leave a row with some
 	// links cleared and its memberships unrepaired.
@@ -2432,6 +2485,22 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 		if _, err := tx.Exec(ctx, stmt.sql, args...); err != nil {
 			return fmt.Errorf("%s: %w", stmt.desc, err)
 		}
+	}
+	var linkedSeriesIDs []string
+	if err := tx.QueryRow(ctx, restoreEpisodeMembershipsSQL, args...).Scan(&linkedSeriesIDs); err != nil {
+		return fmt.Errorf("restoring episode folder memberships: %w", err)
+	}
+	spannedSeriesIDs, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1"+filePredicate, args...)
+	if err != nil {
+		return err
+	}
+	linkedSeriesIDs = append(linkedSeriesIDs, spannedSeriesIDs...)
+	// New links move the series' membership denorms ("Latest Episodes",
+	// issue #202; "Latest Episode Air Date", issue #2741). Recompute them in
+	// a later statement: one that waited on a concurrent air-date
+	// correction's series lock would still apply the older episode dates.
+	if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, linkedSeriesIDs); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -2635,7 +2704,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			if err != nil {
 				return err
 			}
-			if info, statErr := os.Stat(scanRoot); statErr == nil && info.IsDir() {
+			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
 				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, false); err != nil {
 					return err
 				}
@@ -2697,7 +2766,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
 	// inference and matching entirely.
 	if candidate, isExtra := newWatchExtrasClassifier(folder.Type, folder.Paths).classify(cleanFile); isExtra {
-		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath)
+		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath, nil)
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}
@@ -2754,7 +2823,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
+	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache(folder.Type))
 	if err != nil {
 		return err
 	}
@@ -2797,7 +2866,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := fspath.Stat(filePath); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
@@ -2817,7 +2886,7 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 		return true, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
 	}
 	if file.MissingSince == nil {
-		if err := s.fileRepo.MarkMissing(ctx, file.ID, time.Now().UTC()); err != nil {
+		if err := s.fileRepo.MarkMissing(ctx, file.ID, file.FilePath, time.Now().UTC()); err != nil && !errors.Is(err, ErrFileNotFound) {
 			return true, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
 		}
 	}
@@ -2877,6 +2946,10 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 				return
 			case <-ticker.C:
 				enabled, err := s.folderEnabledState(watchCtx, folderID)
+				if watchCtx.Err() != nil {
+					// The scan finished while the check ran.
+					return
+				}
 				if err != nil {
 					slog.WarnContext(ctx, "scanner: failed to refresh folder state", "component", "scanner", "folder_id", folderID, "error", err)
 					continue
@@ -2955,7 +3028,7 @@ func (s *Scanner) processFile(
 ) (resultAction fileAction, resultWarnings []string, resultErr error) {
 	defer func() { observeFile(resultAction, resultErr) }()
 	// Stat the file.
-	info, err := os.Stat(filePath)
+	info, err := fspath.Stat(filePath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("stat %s: %w", filePath, err)
 	}
@@ -2973,8 +3046,10 @@ func (s *Scanner) processFile(
 		var subErr error
 		externalSubs, subErr = subtitleCache.Detect(filePath)
 		if subErr != nil {
+			// Keep what was found (sidecars beside the video when only a
+			// Subs/ folder failed), but leave the set unchecked so the
+			// failure never reads as a change to the stored sidecars.
 			slog.WarnContext(ctx, "scanner: subtitle detection failed", "component", "scanner", "path", filePath, "error", subErr)
-			externalSubs = nil
 			externalSubsChecked = false
 			return externalSubs
 		}
@@ -3033,7 +3108,8 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
-		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe) {
+		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
+		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe, rejectionStands) {
 			if probeRejected {
 				// Nothing else about the row changes here, so the rejection
 				// is recorded on its own. The repository only marks rows with
@@ -3043,8 +3119,10 @@ func (s *Scanner) processFile(
 				}
 			}
 			// Leave the migrated row's probe_updated_at NULL so a later scan
-			// retries without replacing valid metadata with zero values.
-			if len(updateReasons) > 1 {
+			// retries without replacing valid metadata with zero values. A
+			// standing rejection has no probe_repair reason, so every reason
+			// it has is an identity or subtitle change to write.
+			if rejectionStands || len(updateReasons) > 1 {
 				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
 				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
 				mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
@@ -3091,6 +3169,7 @@ func (s *Scanner) processFile(
 		// Apply probe data if available.
 		if probe != nil {
 			applyProbeData(&mf, probe, probeSource)
+			s.keepStoredHDR10PlusStatus(ctx, existing, &mf)
 		} else if probeRejected {
 			markProbeRejected(&mf)
 		}
@@ -3133,6 +3212,10 @@ func (s *Scanner) processFile(
 	hints := s.gatherHints(filePath)
 	fileHash := hints.FileHash
 
+	if s.relinkMovedFile(ctx, folder, filePath, fileSize, fileModifiedAt, fileHash, assignment, groupAssignment, loadExternalSubs) {
+		return actionUpdated, []string{"moved"}, nil
+	}
+
 	// Try to get probe data.
 	probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
 
@@ -3169,22 +3252,7 @@ func (s *Scanner) processFile(
 		mf.SubtitleTracks = []models.SubtitleTrack{}
 	}
 
-	// Convert external subtitles to model type.
-	modelExternalSubs := make([]models.ExternalSubtitle, len(externalSubs))
-	for i, es := range externalSubs {
-		modelExternalSubs[i] = models.ExternalSubtitle{
-			Path:     es.Path,
-			Language: es.Language,
-			Format:   es.Format,
-			Title:    es.Title,
-			Forced:   es.Forced,
-		}
-	}
-	mf.ExternalSubtitles = modelExternalSubs
-
-	if mf.ExternalSubtitles == nil {
-		mf.ExternalSubtitles = []models.ExternalSubtitle{}
-	}
+	mf.ExternalSubtitles = externalSubtitleModels(externalSubs)
 
 	// Upsert into DB.
 	upserted, upsertErr := s.fileRepo.Upsert(ctx, mf)
@@ -3307,6 +3375,17 @@ func identityOnlyFastPathEligible(existing *scanStateFile, reasons []string) boo
 		existing.FileHash != ""
 }
 
+// scanStateUpdateReasons lists why a scan must write an existing file's row.
+// The file's content counts as changed only when its size or modification
+// time differs from the row's. A replacement with the same size and mtime
+// (a copy tool that preserves mtime, or a filesystem whose coarse timestamps
+// hide the rewrite) keeps the old probe data, markers and trickplay until one
+// of them changes; touching the file is the remedy. That limit is accepted:
+// inode numbers are not stable on SMB, FUSE and mergerfs mounts, so comparing
+// them would re-probe whole libraries after a remount; ctime also changes with
+// permissions and ownership; and hashing even part of each file would read
+// every unchanged file on every scan, which the stable-file skip exists to
+// avoid.
 func scanStateUpdateReasons(
 	existing *scanStateFile,
 	fileSize int64,
@@ -3332,7 +3411,7 @@ func scanStateUpdateReasons(
 	if existing.MissingSince != nil {
 		reasons = append(reasons, "was_missing")
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		reasons = append(reasons, "probe_repair")
 	}
 	if externalSubtitlesChecked {
@@ -3395,7 +3474,7 @@ func hasMissingExternalSubtitlePath(paths []string) bool {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err := fspath.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return true
 		}
 	}
@@ -3425,7 +3504,7 @@ func shouldSkipStableConfirmedScanState(
 	if existing.MissingSince != nil {
 		return false
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		return false
 	}
 	if len(updateReasons) > 0 {
@@ -3512,6 +3591,28 @@ func normalizeFileModifiedAt(ts time.Time) time.Time {
 	return models.NormalizeFileModifiedAt(ts)
 }
 
+// scanStateNeedsProbeRepair reports whether a scan should probe an unchanged
+// file again to fill in playback-critical metadata. ffprobe has already
+// rejected a file marked probe_failed_at that never probed successfully, and
+// the mark only stands while its size and modification time are the ones that
+// were probed, so probing the same bytes again would only fail again. Changed
+// bytes drop the mark and are probed as usual. Playback still probes a marked
+// file when it is played.
+func scanStateNeedsProbeRepair(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time, canRepairProbe bool) bool {
+	if !canRepairProbe || probeRejectionStands(existing, fileSize, fileModifiedAt) {
+		return false
+	}
+	return needsCriticalProbeRepairScanState(existing)
+}
+
+// probeRejectionStands reports that ffprobe rejected the bytes the row still
+// describes: it is marked probe_failed_at, never probed successfully, and its
+// size and modification time match the file on disk.
+func probeRejectionStands(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time) bool {
+	return existing != nil && existing.ProbeFailedAt != nil && existing.ProbeUpdatedAt == nil &&
+		existing.FileSize == fileSize && sameFileModifiedAt(existing.FileModifiedAt, fileModifiedAt)
+}
+
 func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if file == nil {
 		return true
@@ -3562,11 +3663,15 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	return false
 }
 
-func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData) bool {
+// shouldPreserveExistingProbeAfterProbeFailure reports whether a failed probe
+// must leave the row's stored probe metadata alone: the scan was there to
+// repair it, alongside at most identity and subtitle changes. A standing
+// rejection skips the repair reason but is the same case.
+func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData, rejectionStands bool) bool {
 	if probe != nil || len(updateReasons) == 0 {
 		return false
 	}
-	foundRepair := false
+	foundRepair := rejectionStands
 	for _, reason := range updateReasons {
 		switch reason {
 		case "probe_repair":
@@ -3584,7 +3689,7 @@ func externalSubtitleModels(externalSubs []ExternalSubtitleInfo) []models.Extern
 	for i, es := range externalSubs {
 		result[i] = models.ExternalSubtitle{
 			Path: es.Path, Language: es.Language, Format: es.Format,
-			Title: es.Title, Forced: es.Forced,
+			Title: es.Title, Forced: es.Forced, HearingImpaired: es.HearingImpaired,
 		}
 	}
 	return result
@@ -4077,6 +4182,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			BitDepth:            vt.BitDepth,
 			PixelFormat:         vt.PixelFormat,
 			ReferenceFrames:     vt.ReferenceFrames,
+			HDR10PlusUnchecked:  vt.HDR10PlusUnchecked,
 		}
 	}
 	mf.VideoTracks = videoTracks
@@ -4112,6 +4218,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Forced:           st.Forced,
 			Default:          st.Default,
 			HearingImpaired:  st.HearingImpaired,
+			IndexOnly:        st.IndexOnly,
 		}
 	}
 	mf.SubtitleTracks = subtitleTracks
@@ -4168,6 +4275,27 @@ func (s *Scanner) probeFile(ctx context.Context, filePath string) (probe *ProbeD
 		return nil, probeSource, IsProbeRejection(ctx, filePath, err)
 	}
 	return probe, probeSource, false
+}
+
+// keepStoredHDR10PlusStatus keeps the HDR10+ status already recorded for an
+// unchanged file whose first-frame read failed in this rescan, as playback's
+// probe repair does, so a transient failure does not drop a status that was
+// read. The stored row is read only on that failure path.
+func (s *Scanner) keepStoredHDR10PlusStatus(ctx context.Context, existing *scanStateFile, mf *models.MediaFile) {
+	if existing == nil || len(mf.VideoTracks) == 0 || !mf.VideoTracks[0].HDR10PlusUnchecked {
+		return
+	}
+	// A changed file's old status no longer describes it.
+	if existing.FileSize != mf.FileSize || mf.FileModifiedAt == nil || !sameFileModifiedAt(existing.FileModifiedAt, *mf.FileModifiedAt) {
+		return
+	}
+	stored, err := s.fileRepo.GetByID(ctx, existing.ID)
+	if err != nil {
+		slog.DebugContext(ctx, "scanner: could not read the stored HDR10+ status",
+			"component", "scanner", "file_id", existing.ID, "error", err)
+		return
+	}
+	carryCheckedHDR10Plus(stored.VideoTracks, mf.VideoTracks)
 }
 
 // markProbeRejected records on a media file being written that ffprobe

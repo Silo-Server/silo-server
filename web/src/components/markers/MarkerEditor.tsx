@@ -56,7 +56,8 @@ export function MarkerEditor({ itemId, open, onOpenChange }: MarkerEditorProps) 
           <DialogTitle>Edit markers</DialogTitle>
           <DialogDescription>
             Set intro, recap, credits, and preview times. Use m:ss or h:mm:ss; leave both fields
-            empty to remove a marker.
+            empty to remove a marker. Removed markers stay absent through detection and rescans
+            until you set them again.
           </DialogDescription>
         </DialogHeader>
 

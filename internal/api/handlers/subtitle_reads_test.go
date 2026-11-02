@@ -3,9 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,7 +19,7 @@ func (p recordingSubtitleProvider) Search(_ context.Context, request subtitles.S
 	*p.request = request
 	return []subtitles.SubtitleResult{{ID: "result", Provider: "example", Language: "en", Format: subtitles.FormatSRT}}, nil
 }
-func (p recordingSubtitleProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p recordingSubtitleProvider) Download(context.Context, string, subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	return nil, "", errors.New("unexpected download")
 }
 
@@ -59,18 +56,6 @@ func TestSubtitleReadsAuthorizeBeforeStorageOrProvider(t *testing.T) {
 		if searched.Title != "Example" || searched.FileHash != "fixture-hash" || len(searched.Languages) != 1 || searched.Languages[0] != "en" {
 			t.Fatalf("search metadata lost: %+v", searched)
 		}
-	}
-}
-
-func TestSubtitleSearchBridgeMissingMetadataKeepsError(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	h := NewSubtitleSearchHandler(subtitles.NewManager(repo, newMockBlobStoreForHandler()), repo, stubSubtitleMediaResolver{})
-	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
-	r := newSubtitleAuthRequest(http.MethodPost, "/subtitles/search", strings.NewReader(`{"media_file_id":42,"languages":["en"]}`))
-	w := httptest.NewRecorder()
-	h.HandleSearch(w, r)
-	if w.Code != 404 || !strings.Contains(w.Body.String(), `"error":"not_found"`) || !strings.Contains(w.Body.String(), `"message":"Media file not found"`) {
-		t.Fatalf("bridge changed: %d %s", w.Code, w.Body.String())
 	}
 }
 

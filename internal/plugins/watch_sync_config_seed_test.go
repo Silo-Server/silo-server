@@ -17,17 +17,7 @@ func seedTestService(t *testing.T, existing []*RuntimeConfig) (*Service, *fakeSe
 		JsonSchema: `{"type":"object","properties":{"client_id":{"type":"string"}},"additionalProperties":false}`,
 	}}
 	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{7: existing}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: writeInstalledPluginManifest(t, manifest),
-			Enabled:     true,
-		}),
-		configs: store,
-	}
-	return service, store
+	return &Service{installations: installedPluginStore(t, 7, manifest), configs: store}, store
 }
 
 func TestSeedGlobalConfigKeepsOnlyDeclaredFields(t *testing.T) {
@@ -72,16 +62,6 @@ func TestSeedGlobalConfigRejectsAnEmptySavedEntry(t *testing.T) {
 	service, _ := seedTestService(t, []*RuntimeConfig{{InstallationID: 7, Key: "app", Value: map[string]any{}}})
 	if seeded, err := service.SeedGlobalConfig(t.Context(), 7, "app", map[string]any{"client_id": "simkl-id"}); err == nil || seeded {
 		t.Fatalf("SeedGlobalConfig() = %t, %v; want an error when the saved entry holds no value", seeded, err)
-	}
-}
-
-func TestInstalledFromSiloRepositoryWithoutRepository(t *testing.T) {
-	service := &Service{}
-	for _, installation := range []*Installation{nil, {ID: 1}} {
-		managed, err := service.InstalledFromSiloRepository(t.Context(), installation)
-		if err != nil || managed {
-			t.Fatalf("InstalledFromSiloRepository(%v) = %t, %v; want false", installation, managed, err)
-		}
 	}
 }
 

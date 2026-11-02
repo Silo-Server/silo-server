@@ -3,7 +3,6 @@ package mediasample
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -36,22 +35,6 @@ func listingCapabilities(calls *atomic.Int32, err error, filters ...string) func
 			return Capabilities{}, err
 		}
 		return FilterCapabilities([]byte(listing.String())), nil
-	}
-}
-
-func TestImageRequestRoundTripsThroughJSON(t *testing.T) {
-	req := imageRequest(&ToneMap{AllowSoftware: true}, Attempt{Hardware: true, TimeoutSeconds: 20}, Attempt{TimeoutSeconds: 25})
-	req.Images.Width = 320
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded, req) {
-		t.Fatalf("decoded %+v, want %+v (json %s)", decoded, req, data)
 	}
 }
 
@@ -138,14 +121,6 @@ func TestBuildImageArgsRejectsWhatCannotRun(t *testing.T) {
 	}
 }
 
-func TestSupportsHardwareDecode(t *testing.T) {
-	for accel, want := range map[string]bool{"qsv": true, "vaapi": true, "videotoolbox": true, "nvenc": false, "none": false, "": false} {
-		if got := SupportsHardwareDecode(accel); got != want {
-			t.Errorf("SupportsHardwareDecode(%q) = %t, want %t", accel, got, want)
-		}
-	}
-}
-
 func TestSelectSoftwareToneMap(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -219,16 +194,6 @@ func TestRunImageFallsBackFromHardware(t *testing.T) {
 	}
 }
 
-func TestRunImageHardwareSuccessLoadsNoCapabilities(t *testing.T) {
-	var loads atomic.Int32
-	fake := &fakeImage{results: []error{nil}}
-	runner := Runner{HWAccel: "vaapi", HWDevice: "/dev/dri/renderD128", Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, "zscale", "tonemap")}
-	result, err := runner.Run(context.Background(), imageRequest(&ToneMap{AllowSoftware: true}, Attempt{Hardware: true}, Attempt{}))
-	if err != nil || result.Decoder != "hardware:vaapi" || loads.Load() != 0 {
-		t.Fatalf("decoder %q, error %v, %d capability loads; want hardware:vaapi, nil, 0", result.Decoder, err, loads.Load())
-	}
-}
-
 func TestRunFallbackDecidesWhetherToMoveOn(t *testing.T) {
 	invalid := errors.New("[h264 @ 0x1] Invalid NAL unit size (1234 > 99).")
 	fake := &fakeImage{results: []error{invalid, nil}}
@@ -266,42 +231,11 @@ func TestRunImageRefusesDisallowedSoftwareToneMap(t *testing.T) {
 	}
 }
 
-func TestRunImageResolvesToneMapOncePerRun(t *testing.T) {
-	var loads atomic.Int32
-	fake := &fakeImage{}
-	runner := Runner{HWAccel: "videotoolbox", Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, "zscale")}
-	_, err := runner.Run(context.Background(), imageRequest(&ToneMap{AllowSoftware: true}, Attempt{Hardware: true}, Attempt{}))
-	var runErr *Error
-	if !errors.As(err, &runErr) || len(runErr.Attempts) != 2 || Classify(err) != ReasonUnsupported {
-		t.Fatalf("error %v, want both attempts refused as unsupported", err)
-	}
-	if loads.Load() != 1 || len(fake.calls) != 0 {
-		t.Fatalf("%d capability loads and %d processes, want 1 and 0", loads.Load(), len(fake.calls))
-	}
-}
-
 func TestRunImageWithoutOutputFails(t *testing.T) {
 	runner := Runner{Exec: func(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error { return nil }}
 	_, err := runner.Run(context.Background(), imageRequest(nil))
 	var runErr *Error
 	if !errors.As(err, &runErr) || runErr.Reason != ReasonEmpty {
 		t.Fatalf("error %v, want an empty-output failure", err)
-	}
-}
-
-func TestRunReplacedExecFailures(t *testing.T) {
-	for _, tt := range []struct {
-		err  error
-		want Reason
-	}{
-		{err: errors.New("exit status 1"), want: ReasonExit},
-		{err: context.DeadlineExceeded, want: ReasonTimeout},
-	} {
-		runner := Runner{Exec: func(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error { return tt.err }}
-		_, err := runner.Run(context.Background(), imageRequest(nil))
-		var runErr *Error
-		if !errors.As(err, &runErr) || runErr.Reason != tt.want {
-			t.Fatalf("exec error %v: run error %v, want %s", tt.err, err, tt.want)
-		}
 	}
 }

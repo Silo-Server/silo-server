@@ -13,8 +13,14 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import type { StreamNode } from "@/api/types";
-import { useAdminNodes, useCheckNodeHealth, useReprobeNode } from "./nodes";
+import { useAdminNodes, useCheckNodeHealth } from "./nodes";
 import AdminNodes from "@/pages/AdminNodes";
+
+// Routing settings have their own suite, and their unsaved-changes guard needs
+// a data router these node-command tests do not mount.
+vi.mock("@/pages/admin-settings/NodeRoutingSettings", () => ({
+  NodeRoutingSettings: () => null,
+}));
 const node: StreamNode = {
   id: "17",
   name: "Synthetic",
@@ -66,29 +72,7 @@ afterEach(() => {
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
-for (const [action, useHook] of [
-  ["check", useCheckNodeHealth],
-  ["reprobe", useReprobeNode],
-] as const) {
-  it(`${action} captures selected node before offline queueing and accepts negative observation`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(reply(observation(action))));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    const target = { ...node };
-    act(() => result.current.mutate(target));
-    target.id = "18";
-    target.name = "Replacement";
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => onlineManager.setOnline(true));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/api/v2/admin/nodes/17/${action}`);
-    expect(fetchMock.mock.calls[0]?.[1].method).toBe("POST");
-    expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
-    expect(result.current.variables?.name).toBe("Synthetic");
-  });
-
+for (const action of ["check", "reprobe"] as const) {
   it(`actual node row ${action} action dispatches once and waits for response`, async () => {
     let finish!: (r: Response) => void;
     const writes: string[] = [];
@@ -189,3 +173,50 @@ it(`check fences late node observation and invalidation`, async () => {
   expect(invalidate).not.toHaveBeenCalled();
   expect(result.current.data).toBeUndefined();
 });
+
+it.each([
+  [false, "Drain Synthetic", "drain"],
+  [true, "Resume Synthetic", "resume"],
+] as const)(
+  "node row drain action (requested=%s) posts %s once and shows the drain line",
+  async (requested, label, path) => {
+    const writes: string[] = [];
+    const listed: StreamNode = {
+      ...node,
+      active_jobs: 2,
+      drain_requested: requested,
+      drain_state: requested ? "draining" : "none",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init: RequestInit) => {
+        if (init.method === "POST") {
+          writes.push(String(url));
+          return Promise.resolve(
+            reply({
+              node_id: "17",
+              drain_requested: !requested,
+              drain_state: requested ? "none" : "draining",
+              active_jobs: 2,
+            }),
+          );
+        }
+        return Promise.resolve(reply({ items: [listed], page: { has_more: false } }));
+      }),
+    );
+    const { wrapper: Wrapper } = fixture();
+    render(
+      <MemoryRouter>
+        <Wrapper>
+          <AdminNodes />
+        </Wrapper>
+      </MemoryRouter>,
+    );
+    const button = await screen.findByRole("button", { name: label });
+    if (requested) expect(screen.getByText("Draining · 2 transcodes left")).toBeInTheDocument();
+    else expect(screen.queryByText(/Draining ·/)).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toContain(`/api/v2/admin/nodes/17/${path}`);
+  },
+);

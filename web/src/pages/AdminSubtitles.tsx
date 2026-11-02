@@ -5,6 +5,7 @@ import AdminSubtitlesFilters, {
   FILTER_ALL,
 } from "@/components/admin/subtitles/AdminSubtitlesFilters";
 import AdminSubtitlesTable from "@/components/admin/subtitles/AdminSubtitlesTable";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -91,7 +92,7 @@ export default function AdminSubtitles() {
 
   if (subtitlesQuery.isLoading) {
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         <div className="space-y-3">
           <Skeleton className="h-12 w-72 rounded-lg" />
           <Skeleton className="h-5 w-full max-w-xl rounded-lg" />
@@ -106,15 +107,11 @@ export default function AdminSubtitles() {
   }
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Subtitles</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage stored subtitle files across the library — user uploads and provider downloads.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Subtitles"
+        subtitle="Manage stored subtitle files across the library — user uploads and provider downloads."
+      />
 
       <div className="surface-panel-subtle grid gap-4 rounded-2xl px-4 py-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatBlock label="Total stored" value={total} />

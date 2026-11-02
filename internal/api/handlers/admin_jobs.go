@@ -126,13 +126,17 @@ func (h *AdminJobsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := apimw.GetClaims(r.Context())
-	if !canReadAdminJob(claims, job) {
+	actingAdmin, err := apimw.ActingAdmin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+		return
+	}
+	if !canReadAdminJob(apimw.GetClaims(r.Context()), actingAdmin, job) {
 		writeError(w, http.StatusForbidden, "forbidden", "Admin access required")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, adminJobToResponseForClaims(r, job, h.store, claims))
+	writeJSON(w, http.StatusOK, adminJobToResponseFor(r, job, h.store, actingAdmin))
 }
 
 func (h *AdminJobsHandler) HandleCancel(w http.ResponseWriter, r *http.Request) {
@@ -269,19 +273,23 @@ func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArt
 	return resp
 }
 
-func adminJobToResponseForClaims(
+// adminJobToResponseFor renders a job for its reader. Only an acting admin
+// (apimw.ActingAdmin) sees the payloads, errors and artifact URLs; anyone
+// else, a child profile on an admin's account included, gets the sanitized
+// form.
+func adminJobToResponseFor(
 	r *http.Request,
 	job *models.AdminJob,
 	store AdminJobArtifactStore,
-	claims *auth.Claims,
+	actingAdmin bool,
 ) adminJobResponse {
 	response := adminJobToResponse(r, job, store)
-	sanitizeAdminJobResponseForClaims(&response, claims)
+	sanitizeAdminJobResponse(&response, actingAdmin)
 	return response
 }
 
-func sanitizeAdminJobResponseForClaims(response *adminJobResponse, claims *auth.Claims) {
-	if response == nil || (claims != nil && claims.Role == "admin") {
+func sanitizeAdminJobResponse(response *adminJobResponse, actingAdmin bool) {
+	if response == nil || actingAdmin {
 		return
 	}
 	response.RequestPayload = json.RawMessage(`{}`)
@@ -389,11 +397,13 @@ func currentAdminUserID(r *http.Request) int {
 	return claims.UserID
 }
 
-func canReadAdminJob(claims *auth.Claims, job *models.AdminJob) bool {
+// canReadAdminJob reports whether the caller may read job: an acting admin
+// reads any job, anyone else only an item refresh their account started.
+func canReadAdminJob(claims *auth.Claims, actingAdmin bool, job *models.AdminJob) bool {
 	if claims == nil || job == nil {
 		return false
 	}
-	if claims.Role == "admin" {
+	if actingAdmin {
 		return true
 	}
 	return job.JobType == adminjob.JobTypeItemRefresh && job.CreatedByUserID == claims.UserID

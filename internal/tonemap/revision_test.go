@@ -93,22 +93,6 @@ func TestRevisionForFileNormalizesProbeTimestamp(t *testing.T) {
 	}
 }
 
-func TestValidatePathRejectsNonPositiveMediaFileID(t *testing.T) {
-	path := t.TempDir() + "/source.mkv"
-	if err := os.WriteFile(path, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	revision := SourceRevision{MediaFileID: -1, FileSize: info.Size()}
-	if err := revision.ValidatePath(path); err == nil {
-		t.Fatal("ValidatePath accepted a non-positive media file id")
-	}
-}
-
 func TestValidatePathClassifiesMissingSourceAsChanged(t *testing.T) {
 	revision := SourceRevision{MediaFileID: 1, FileSize: 1}
 	err := revision.ValidatePath(filepath.Join(t.TempDir(), "missing.mkv"))

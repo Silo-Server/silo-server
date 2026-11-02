@@ -2,10 +2,12 @@ package taskmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 )
 
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
@@ -187,7 +189,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
 			// For other errors, rearm so the trigger fires again later.
-			if err != ErrTaskAlreadyRunning {
+			if !errors.Is(err, ErrTaskAlreadyRunning) {
 				m.rearmTriggers(w)
 			}
 			continue
@@ -374,6 +376,14 @@ func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 func isManualOnly(task Task) bool {
 	manual, ok := task.(ManualOnlyTask)
 	return ok && manual.ManualOnly()
+}
+
+func startSpread(task Task) time.Duration {
+	spreader, ok := task.(StartSpreader)
+	if !ok {
+		return 0
+	}
+	return spreader.StartSpread()
 }
 
 func servesAnyLibrary(task Task, libraryTypes []string) bool {

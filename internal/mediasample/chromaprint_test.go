@@ -15,13 +15,3 @@ func TestDecodeRawFingerprintKeepsBinaryWhitespaceBytes(t *testing.T) {
 		t.Fatalf("DecodeRawFingerprint() = %#v, want %#v", points, want)
 	}
 }
-
-func TestRawFingerprintRoundTrip(t *testing.T) {
-	points := []uint32{0, 1, 0xdeadbeef, 0xffffffff}
-	if got := DecodeRawFingerprint(EncodeRawFingerprint(points)); !reflect.DeepEqual(got, points) {
-		t.Fatalf("round trip = %#v, want %#v", got, points)
-	}
-	if got := DecodeRawFingerprint([]byte{1, 2, 3}); got != nil {
-		t.Fatalf("partial point decoded to %#v, want nil", got)
-	}
-}

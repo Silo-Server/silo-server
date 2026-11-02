@@ -54,7 +54,7 @@ type HistoryImportSource struct {
 	ID            ID      `json:"id" doc:"Source identifier" example:"1"`
 	Name          string  `json:"name" example:"Family Plex"`
 	SourceType    string  `json:"source_type" doc:"emby, jellyfin, or plex" example:"plex"`
-	BaseURL       string  `json:"base_url,omitempty" doc:"Server address; absent for Plex sources reached through plex.tv" example:"https://emby.example.test"`
+	BaseURL       string  `json:"base_url,omitempty" format:"uri-reference" doc:"Server address; absent for Plex sources reached through plex.tv" example:"https://emby.example.test"`
 	SystemID      string  `json:"system_id,omitempty" doc:"The source server's own identifier when known"`
 	Enabled       bool    `json:"enabled" example:"true"`
 	SortOrder     int     `json:"sort_order" example:"0"`
@@ -176,13 +176,13 @@ type HistoryImportRunCreate struct {
 	SourceID         *ID      `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
 	Username         string   `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
 	Password         string   `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source; empty for an account without one"`
-	JellyfinBaseURL  string   `json:"jellyfin_base_url,omitempty" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
+	JellyfinBaseURL  string   `json:"jellyfin_base_url,omitempty" format:"uri-reference" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
 	JellyfinUsername string   `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
 	JellyfinPassword string   `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
 	PlexSessionID    string   `json:"plex_session_id,omitempty" doc:"Plex: the authenticated session from createPlexPin"`
 	PlexServerID     string   `json:"plex_server_id,omitempty" doc:"Plex: the client identifier of the server chosen from checkPlexPin"`
-	PlexBaseURL      string   `json:"plex_base_url,omitempty" doc:"Plex: a server address when the client holds its own token"`
-	PlexBaseURLs     []string `json:"plex_base_urls,omitempty" maxItems:"31" doc:"Plex: the other addresses plex.tv advertised for the same server, in preference order. Addresses the account may not reach under the local network policy are skipped, and the run races up to max_plex_connections of the rest, counting plex_base_url, keeping the first that answers. plex_base_url stays the preferred one." example:"[\"https://relay.plex.direct:443\"]"`
+	PlexBaseURL      string   `json:"plex_base_url,omitempty" format:"uri-reference" doc:"Plex: a server address when the client holds its own token"`
+	PlexBaseURLs     []string `json:"plex_base_urls,omitempty" maxItems:"31" format:"uri-reference" doc:"Plex: the other addresses plex.tv advertised for the same server, in preference order. Addresses the account may not reach under the local network policy are skipped, and the run races up to max_plex_connections of the rest, counting plex_base_url, keeping the first that answers. plex_base_url stays the preferred one." example:"[\"https://relay.plex.direct:443\"]"`
 	PlexToken        string   `json:"plex_token,omitempty" doc:"Plex: the server access token that goes with plex_base_url"`
 	PlexAccountToken string   `json:"plex_account_token,omitempty" doc:"Plex: the plex.tv account token, for watchlist import alongside a server token"`
 }
@@ -247,7 +247,7 @@ type EmbyConnectSessionOutput struct {
 type PlexPin struct {
 	SessionID string  `json:"session_id" doc:"The session checkPlexPin polls" example:"4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a"`
 	PinCode   string  `json:"pin_code" example:"ABCD"`
-	AuthURL   string  `json:"auth_url" doc:"Where the user signs in" example:"https://app.plex.tv/auth#?code=ABCD"`
+	AuthURL   string  `json:"auth_url" format:"uri" doc:"Where the user signs in" example:"https://app.plex.tv/auth#?code=ABCD"`
 	ExpiresAt Instant `json:"expires_at" example:"2026-01-02T03:19:05.678Z"`
 }
 

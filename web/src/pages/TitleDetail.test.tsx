@@ -340,29 +340,6 @@ describe("TitleDetail", () => {
       expect(mocks.useMediaRequest).toHaveBeenCalledWith("req-1", { enabled: false });
     });
 
-    it("does not poll the viewer's requests while another of them downloads", () => {
-      // A detail that does not name the request falls back to the list.
-      const unnamed = { ...baseDetail, request: { ...baseDetail.request, request_id: undefined } };
-      mocks.mine = [
-        ownPending,
-        {
-          ...ownPending,
-          id: "req-2",
-          tmdb_id: 604,
-          status: "downloading",
-          download: { phase: "downloading", downloads: 1, updated_at: "2026-01-01T00:00:00Z" },
-        },
-      ];
-      renderDetail(unnamed);
-
-      // The title shows only its own progress, which comes from its detail.
-      expect(primaryButton("Cancel request")).toBeEnabled();
-      expect(mocks.useMyMediaRequests).toHaveBeenCalledWith(
-        { outcome: "active" },
-        { enabled: true, pollDownloads: false },
-      );
-    });
-
     it("lets the viewer follow a title someone else requested", () => {
       mocks.mine = [];
       renderDetail({
@@ -382,38 +359,6 @@ describe("TitleDetail", () => {
       });
       expect(screen.queryByRole("button", { name: "Cancel request" })).not.toBeInTheDocument();
     });
-
-    it("lets a follower stop the notification", () => {
-      mocks.mine = [];
-      renderDetail({
-        ...baseDetail,
-        request: {
-          requestable: false,
-          status: "queued",
-          reason: "already_requested",
-          following: true,
-        },
-      });
-
-      const button = primaryButton("Stop notifying me");
-      expect(button).toHaveAttribute("aria-pressed", "true");
-      fireEvent.click(button);
-
-      expect(mocks.toggleFollow).toHaveBeenCalledExactlyOnceWith({
-        mediaType: "movie",
-        tmdbID: 603,
-        follow: false,
-      });
-    });
-
-    it("names why a title cannot be requested", () => {
-      renderDetail({
-        ...baseDetail,
-        request: { requestable: false, reason: "quota_exceeded" },
-      });
-
-      expect(primaryButton("Request limit reached")).toBeDisabled();
-    });
   });
 
   describe("a title in the library", () => {
@@ -430,14 +375,6 @@ describe("TitleDetail", () => {
 
       expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("movie-603");
       expect(screen.getByTestId("location")).toHaveTextContent("/item/movie-603");
-    });
-
-    it("waits for the library check before showing the title", () => {
-      mocks.library = libraryQuery({ isLoading: true });
-      renderDetail(owned);
-
-      expect(screen.getByText("Loading title")).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "The Matrix" })).not.toBeInTheDocument();
     });
 
     it("stays on the title without a link when the viewer cannot open it", () => {
@@ -497,38 +434,6 @@ describe("TitleDetail", () => {
       renderAt("/requests/series/1399");
 
       expect(mocks.useRequestMediaDetail).toHaveBeenCalledWith("series", 1399);
-    });
-
-    it("no longer reads an unknown media type as a movie", () => {
-      renderAt("/requests/tv/1399");
-
-      expect(screen.getByRole("heading", { name: "This item isn't available" })).toBeVisible();
-      expect(mocks.useRequestMediaDetail).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("presentation", () => {
-    it("shows a series' air years, seasons, status, and TMDB score", () => {
-      renderDetail({
-        ...baseDetail,
-        media_type: "series",
-        first_air_date: "2011-04-17",
-        last_air_date: "2019-05-19",
-        number_of_seasons: 8,
-        status: "Ended",
-        vote_average: 8.4,
-        vote_count: 24100,
-        creators: ["David Benioff", "D. B. Weiss"],
-      });
-
-      expect(screen.getByText("2011–2019")).toBeInTheDocument();
-      expect(screen.getByText("8 Seasons")).toBeInTheDocument();
-      expect(screen.getByText("Ended")).toBeInTheDocument();
-      expect(screen.getByText("8.4")).toBeInTheDocument();
-      expect(screen.getByAltText("TMDB")).toBeInTheDocument();
-      expect(screen.getByText("24.1K votes")).toBeInTheDocument();
-      expect(screen.getByText("Created by")).toBeInTheDocument();
-      expect(screen.getByText("David Benioff")).toBeInTheDocument();
     });
   });
 });

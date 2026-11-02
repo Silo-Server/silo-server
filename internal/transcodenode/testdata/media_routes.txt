@@ -4,6 +4,7 @@ POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media
 GET /api/v1/health	non-media
 POST /chapter-thumbnails/extract	non-media
+GET /downloads/artifacts	non-media
 DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
@@ -27,6 +28,7 @@ POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media
 GET /api/v1/health	non-media
 POST /chapter-thumbnails/extract	non-media
+GET /downloads/artifacts	non-media
 DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true

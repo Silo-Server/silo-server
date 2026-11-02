@@ -328,6 +328,7 @@ func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
 // serving a different file, as PlaybackInfo does.
 func TestMediaSourceRouteMissingVersionIsNotFound(t *testing.T) {
 	h, _, _ := newStaticDirectPlayHandler(t)
+	h.downloads = newTestDownloadService(true, true, h.fileResolver.(testCompatFileResolver).file)
 	h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 99: "movie-1"})
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	removed := h.codec.EncodeIntID(EncodedIDMediaSource, 99)
@@ -382,5 +383,50 @@ func TestHandleMediaSegmentsMediaSourceLookupErrors(t *testing.T) {
 	codec.SetMediaSourceOwnerLookup(failingMediaSourceOwners{})
 	if rec := serve(sourceID); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("lookup failure: status = %d, want 500, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Jellyfin Web retries a failed stream with stream copy refused and stops once
+// the stream URL it played names both refusals, so TranscodingUrl must carry
+// each refusal the request made, the way Jellyfin appends them.
+func TestPlaybackInfoTranscodingURLNamesRefusedCopies(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, body string
+		want, absent      []string
+	}{
+		{"copy allowed", "", `{"EnableDirectPlay":false,"SubtitleStreamIndex":-1}`, nil, []string{"allowvideostreamcopy", "allowaudiostreamcopy"}},
+		{"first fallback refuses video copy", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false"}, []string{"allowaudiostreamcopy"}},
+		{"second fallback refuses both", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
+		{"body refuses both", "", `{"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AllowAudioStreamCopy":false,"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, routeID := newSubtitleSelectionHandler(t)
+			req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo"+tc.query, strings.NewReader(tc.body))
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("id", routeID)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
+			rr := httptest.NewRecorder()
+			handler.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			var resp playbackInfoResponseDTO
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil || len(resp.MediaSources) == 0 {
+				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+			}
+			// Jellyfin Web matches the lowercased URL.
+			url := strings.ToLower(resp.MediaSources[0].TranscodingURL)
+			if url == "" {
+				t.Fatalf("no TranscodingUrl: %+v", resp.MediaSources[0])
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(url, want) {
+					t.Fatalf("TranscodingUrl = %q, want %q", url, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(url, absent) {
+					t.Fatalf("TranscodingUrl = %q, want no %q", url, absent)
+				}
+			}
+		})
 	}
 }

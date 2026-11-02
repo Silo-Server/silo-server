@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,18 +27,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function renderWithSidebar(
+  begin: () => boolean,
+  link: ReactNode,
+  initialEntries: string[] = ["/"],
+) {
+  render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
+        {link}
+        <LocationOutput />
+      </SidebarItemNavigationProvider>
+    </MemoryRouter>,
+  );
+}
+
 describe("ViewTransitionLink sidebar navigation", () => {
   it("lets Layout intercept an item navigation with its state intact", () => {
     const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1?libraryId=2" state={{ source: "home" }}>
-            Movie
-          </ViewTransitionLink>
-          <LocationOutput />
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
+    renderWithSidebar(
+      begin,
+      <ViewTransitionLink to="/item/movie-1?libraryId=2" state={{ source: "home" }}>
+        Movie
+      </ViewTransitionLink>,
     );
 
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
@@ -52,14 +64,11 @@ describe("ViewTransitionLink sidebar navigation", () => {
 
   it("honors a caller that prevents navigation", () => {
     const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1" onClick={(event) => event.preventDefault()}>
-            Movie
-          </ViewTransitionLink>
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
+    renderWithSidebar(
+      begin,
+      <ViewTransitionLink to="/item/movie-1" onClick={(event) => event.preventDefault()}>
+        Movie
+      </ViewTransitionLink>,
     );
 
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
@@ -67,18 +76,18 @@ describe("ViewTransitionLink sidebar navigation", () => {
   });
 
   it.each([
-    ["meta", { metaKey: true }],
-    ["control", { ctrlKey: true }],
-    ["shift", { shiftKey: true }],
-    ["alt", { altKey: true }],
-  ])("does not intercept a %s-modified click", (_label, init) => {
+    ["meta-modified click", {}, { metaKey: true }],
+    ["control-modified click", {}, { ctrlKey: true }],
+    ["shift-modified click", {}, { shiftKey: true }],
+    ["middle click", {}, { button: 1 }],
+    ["link that opens a new browsing context", { target: "_blank" }, {}],
+  ])("does not intercept a %s", (_label, linkProps, init) => {
     const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
+    renderWithSidebar(
+      begin,
+      <ViewTransitionLink to="/item/movie-1" {...linkProps}>
+        Movie
+      </ViewTransitionLink>,
     );
     const event = new MouseEvent("click", { bubbles: true, cancelable: true, ...init });
 
@@ -88,52 +97,9 @@ describe("ViewTransitionLink sidebar navigation", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it("does not intercept a middle click", () => {
-    const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
-    );
-    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 1 });
-
-    fireEvent(screen.getByRole("link", { name: "Movie" }), event);
-
-    expect(begin).not.toHaveBeenCalled();
-    expect(event.defaultPrevented).toBe(false);
-  });
-
-  it("does not intercept a link that opens a new browsing context", () => {
-    const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1" target="_blank">
-            Movie
-          </ViewTransitionLink>
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
-    );
-    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
-
-    fireEvent(screen.getByRole("link", { name: "Movie" }), event);
-
-    expect(begin).not.toHaveBeenCalled();
-    expect(event.defaultPrevented).toBe(false);
-  });
-
   it("falls through to router navigation when Layout declines interception", () => {
     const begin = vi.fn(() => false);
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
-          <LocationOutput />
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
-    );
+    renderWithSidebar(begin, <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>);
 
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
 
@@ -153,24 +119,6 @@ describe("ViewTransitionLink sidebar navigation", () => {
 
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
     expect(document.documentElement.dataset.navigationDirection).toBe("forward");
-  });
-
-  it("routes a desktop item boundary through the snapshot-free chokepoint", () => {
-    const matchMedia = vi.fn((query: string) => ({
-      matches: query === "(min-width: 64rem)",
-    }));
-    vi.stubGlobal("matchMedia", matchMedia);
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
-        <LocationOutput />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("link", { name: "Movie" }));
-
-    expect(matchMedia).toHaveBeenCalledWith("(min-width: 64rem)");
-    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
   });
 });
 
@@ -231,14 +179,12 @@ describe("ViewTransitionLink direction", () => {
 
   it("does not offer an `up` link to the sidebar item interception", () => {
     const begin = vi.fn(() => true);
-    render(
-      <MemoryRouter initialEntries={["/item/season"]}>
-        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
-          <ViewTransitionLink to="/item/series" up>
-            Series
-          </ViewTransitionLink>
-        </SidebarItemNavigationProvider>
-      </MemoryRouter>,
+    renderWithSidebar(
+      begin,
+      <ViewTransitionLink to="/item/series" up>
+        Series
+      </ViewTransitionLink>,
+      ["/item/season"],
     );
 
     fireEvent.click(screen.getByRole("link", { name: "Series" }));

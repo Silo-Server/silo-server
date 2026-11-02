@@ -3,10 +3,14 @@ package mdblist
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSearchAttachesAPIKeyAndQuery(t *testing.T) {
@@ -87,4 +91,135 @@ func TestSearchSurfacesUpstreamErrors(t *testing.T) {
 	if _, err := c.Search(context.Background(), "x"); err == nil {
 		t.Fatal("expected unauthorized error, got nil")
 	}
+}
+
+// assertErrorOmitsAPIKey fails when the key appears anywhere errors.Unwrap
+// can reach, not only in the top-level message. It never prints the key.
+func assertErrorOmitsAPIKey(t *testing.T, err error, apiKey string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if msg := e.Error(); strings.Contains(msg, apiKey) {
+			t.Fatalf("error chain leaks the API key: %q", strings.ReplaceAll(msg, apiKey, "[KEY]"))
+		}
+		// What errors.As hands out must be masked too.
+		var urlErr *url.Error
+		if errors.As(e, &urlErr) {
+			for _, text := range []string{urlErr.URL, urlErr.Error(), errorText(urlErr.Err)} {
+				if strings.Contains(text, apiKey) {
+					t.Fatalf("url.Error from errors.As leaks the API key: %q", strings.ReplaceAll(text, apiKey, "[KEY]"))
+				}
+			}
+		}
+		var netErr net.Error
+		if errors.As(e, &netErr) && strings.Contains(netErr.Error(), apiKey) {
+			t.Fatalf("net.Error from errors.As leaks the API key: %q", strings.ReplaceAll(netErr.Error(), apiKey, "[KEY]"))
+		}
+	}
+}
+
+func TestTransportErrorOmitsAPIKey(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	c := NewClient(secretKey, &http.Client{})
+	c.baseURL = "http://127.0.0.1:0"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := c.Search(ctx, "test")
+	assertErrorOmitsAPIKey(t, err, secretKey)
+}
+
+// urlQuotingTransport fails every request with an error that quotes the full
+// request URL, as some transports and proxies do.
+type urlQuotingTransport struct{ cause error }
+
+func (t urlQuotingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("dial %s: %w", req.URL, t.cause)
+}
+
+// urlTimeoutError is a net.Error timeout whose message quotes the request
+// URL, key included, as a transport's own timeout error can.
+type urlTimeoutError struct{ url string }
+
+func (e urlTimeoutError) Error() string { return "read " + e.url + ": i/o timeout" }
+func (urlTimeoutError) Timeout() bool   { return true }
+func (urlTimeoutError) Temporary() bool { return true }
+
+type timeoutTransport struct{}
+
+func (timeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, urlTimeoutError{url: req.URL.String()}
+}
+
+func TestTransportErrorRedactsAPIKeyInWrappedError(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	cause := errors.New("connection refused")
+	c := NewClient(secretKey, &http.Client{Transport: urlQuotingTransport{cause: cause}})
+
+	_, err := c.Search(context.Background(), "test")
+	assertErrorOmitsAPIKey(t, err, secretKey)
+	// The transport quoted the URL in its own text, so the key is masked there.
+	if !strings.Contains(err.Error(), "REDACTED") {
+		t.Fatalf("expected REDACTED in the sanitized error: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("sanitized error no longer matches its cause: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+}
+
+// keyChangingTransport replaces the client's key while the request is in
+// flight, as a settings reload can, then fails with an error that quotes the
+// key the request sent outside any URL.
+type keyChangingTransport struct {
+	client *Client
+	newKey string
+}
+
+func (t keyChangingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.client.SetAPIKey(t.newKey)
+	return nil, fmt.Errorf("proxy rejected apikey %s", req.URL.Query().Get("apikey"))
+}
+
+func TestTransportErrorRedactsTheKeySentAfterASettingsReload(t *testing.T) {
+	sentKey := "super-secret-mdblist-key-12345"
+	for name, newKey := range map[string]string{"replaced": "another-mdblist-key-67890", "cleared": ""} {
+		t.Run(name, func(t *testing.T) {
+			c := NewClient(sentKey, nil)
+			c.http = &http.Client{Transport: keyChangingTransport{client: c, newKey: newKey}}
+
+			_, err := c.Search(context.Background(), "test")
+			assertErrorOmitsAPIKey(t, err, sentKey)
+		})
+	}
+}
+
+func TestTransportErrorKeepsTimeoutClassification(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	c := NewClient(secretKey, &http.Client{Transport: timeoutTransport{}})
+
+	_, err := c.Search(context.Background(), "test")
+	assertErrorOmitsAPIKey(t, err, secretKey)
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("sanitized error lost its timeout classification: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+	// The *url.Error As hands out is masked, and still classifies its cause.
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		t.Fatalf("no *url.Error in %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+	assertErrorOmitsAPIKey(t, urlErr, secretKey)
+	if !urlErr.Timeout() || !urlErr.Temporary() { //nolint:staticcheck // Temporary is what's being preserved.
+		t.Fatalf("masked *url.Error: Timeout %v, Temporary %v; want both", urlErr.Timeout(), urlErr.Temporary()) //nolint:staticcheck // as above.
+	}
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

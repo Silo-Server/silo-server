@@ -42,7 +42,7 @@ func buildEpisodeExactTierSQL(parsed parsedSearchQuery, filter AccessFilter, cur
 		if len(after.Keys) != len(searchFTSTerms()) {
 			return "", nil
 		}
-		for index, want := range [...]float64{1, 1, 0, 0, 0, 0} {
+		for index, want := range [...]float64{1, 2, 0, 0, 0, 0} {
 			if index == 4 {
 				continue
 			}
@@ -60,10 +60,12 @@ func buildEpisodeExactTierSQL(parsed parsedSearchQuery, filter AccessFilter, cur
 		}
 		index := len(args) + 1
 		args = append(args, after.Keys[4].Value, after.Keys[6].Value, after.Keys[7].Value)
-		// Compare the constant prefix score in PostgreSQL's real type, matching
+		// Compare the constant prefix score in PostgreSQL's float8 type, matching
 		// the rank and cursor text representation without a Go approximation.
 		conditions = append(conditions,
-			fmt.Sprintf("ts_rank_cd(setweight(to_tsvector('simple', $%d::text), 'A'), to_tsquery('simple', $2)) = $%d::real", exactIdx, index),
+			fmt.Sprintf("%s = $%d::float8", titlePrefixRankSQL(
+				titleWordsSQL([]string{fmt.Sprintf("$%d::text", exactIdx)}, exactIdx),
+				titleRankSQL(fmt.Sprintf("setweight(to_tsvector('simple', $%d::text), 'A')", exactIdx), titlePrefixQuery)), index),
 			fmt.Sprintf("(LOWER(ece.title), ece.episode_id) > ($%d::text, $%d::text)", index+1, index+2),
 		)
 	}

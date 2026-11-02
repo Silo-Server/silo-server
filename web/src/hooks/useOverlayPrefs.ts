@@ -33,12 +33,20 @@ import {
 /** Card overlay preferences are profile-wide in the contract (no device scope). */
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 
-const OVERLAY_KEYS = [
-  SETTING_KEYS.UI_CARD_OVERLAYS,
-  SETTING_KEYS.UI_CARD_OVERLAYS_ENABLED,
+const BADGE_KEYS = [SETTING_KEYS.UI_CARD_OVERLAYS, SETTING_KEYS.UI_CARD_OVERLAYS_ENABLED] as const;
+const QUICK_ACTION_KEYS = [
   SETTING_KEYS.UI_CARD_QUICK_ACTIONS,
   SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED,
 ] as const;
+const OVERLAY_KEYS = [...BADGE_KEYS, ...QUICK_ACTION_KEYS] as const;
+
+/** The independently resettable halves of the card overlay preferences. */
+export type OverlayPrefsPart = "badges" | "quickActions";
+
+const PART_KEYS: Record<OverlayPrefsPart, readonly SettingKey[]> = {
+  badges: BADGE_KEYS,
+  quickActions: QUICK_ACTION_KEYS,
+};
 
 // Overlay booleans are inherit-with-override, not a policy gate: the server
 // setting is only the default for profiles that have not chosen, and an
@@ -186,21 +194,27 @@ export function useOverlayPrefs() {
     [setProfileValue],
   );
 
-  const resetPrefs = useCallback(async () => {
-    await Promise.all(
-      OVERLAY_KEYS.map(async (key) => {
-        try {
-          await clearValue.mutateAsync({ key, identity: PROFILE_SCOPE });
-        } catch (error) {
-          // A missing scoped value already means this part of the preference
-          // is inheriting from the server default.
-          if (!isSettingValueMissing(error)) throw error;
-        }
-      }),
-    );
-  }, [clearValue]);
+  const resetPrefs = useCallback(
+    async (part: OverlayPrefsPart) => {
+      await Promise.all(
+        PART_KEYS[part].map(async (key) => {
+          try {
+            await clearValue.mutateAsync({ key, identity: PROFILE_SCOPE });
+          } catch (error) {
+            // A missing scoped value already means this part of the preference
+            // is inheriting from the server default.
+            if (!isSettingValueMissing(error)) throw error;
+          }
+        }),
+      );
+    },
+    [clearValue],
+  );
 
-  const hasOverride = OVERLAY_KEYS.some((key) => effective?.[key]?.source === "profile");
+  const overrides = (keys: readonly SettingKey[]) =>
+    keys.some((key) => effective?.[key]?.source === "profile");
+  const hasBadgeOverride = overrides(BADGE_KEYS);
+  const hasQuickActionOverride = overrides(QUICK_ACTION_KEYS);
 
   // While either query is in flight, report null prefs instead of built-in
   // defaults: rendering defaults first would flash badges that vanish (or
@@ -220,7 +234,8 @@ export function useOverlayPrefs() {
     quickActionsEnabled,
     setQuickActionsEnabled,
     resetPrefs,
-    hasOverride,
+    hasBadgeOverride,
+    hasQuickActionOverride,
     isResetting: clearValue.isPending,
     isLoading,
   };

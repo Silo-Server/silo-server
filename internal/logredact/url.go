@@ -3,15 +3,70 @@ package logredact
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 const invalidURLPlaceholder = "[invalid URL]"
 
+// tokenSegment matches a URL path segment holding a compact JWT, as signed
+// stream and download URLs do (/stream/direct/<token>, /downloads/file/<token>).
+// A JWT's header and claims are both JSON objects, so each base64url part
+// starts with "eyJ"; ordinary path segments do not have that shape.
+var tokenSegment = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
+
+// URLMayHoldCredential reports whether raw has a part that can carry a
+// credential: userinfo, a query, a fragment or a signed-token path segment.
+// A URL without one is safe to log as written.
+func URLMayHoldCredential(raw string) bool {
+	if strings.ContainsAny(raw, "@?#") {
+		return true
+	}
+	_, found := redactTokenSegments(raw)
+	return found
+}
+
+// redactTokenSegments replaces every slash-delimited segment of escaped that
+// holds a signed token with Placeholder and reports whether it found one.
+// escaped is an escaped path, or a URL with no query or fragment. Segments are
+// matched unescaped, so percent-encoding a token's characters does not hide it.
+func redactTokenSegments(escaped string) (string, bool) {
+	if !strings.Contains(escaped, "eyJ") && !strings.Contains(escaped, "%") {
+		return escaped, false
+	}
+	segments := strings.Split(escaped, "/")
+	found := false
+	for i, segment := range segments {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			decoded = segment
+		}
+		if tokenSegment.MatchString(decoded) {
+			segments[i] = Placeholder
+			found = true
+		}
+	}
+	return strings.Join(segments, "/"), found
+}
+
+// redactURLPath masks the signed-token segments of u's path in place.
+func redactURLPath(u *url.URL) {
+	escaped, found := redactTokenSegments(u.EscapedPath())
+	if !found {
+		return
+	}
+	// EscapedPath output always unescapes; were it not to, Path would be left
+	// empty and String would drop the path rather than print the token.
+	u.Path, _ = url.PathUnescape(escaped)
+	u.RawPath = escaped
+}
+
 // SanitizeURL returns a diagnostic-safe URL with credential-bearing
-// components removed. Malformed and non-hierarchical URLs fail closed rather
-// than returning any part of the untrusted input.
+// components removed and signed-token path segments masked. Malformed and
+// non-hierarchical URLs fail closed rather than returning any part of the
+// untrusted input.
 func SanitizeURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -22,6 +77,7 @@ func SanitizeURL(raw string) string {
 	parsed.ForceQuery = false
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
+	redactURLPath(parsed)
 	return parsed.String()
 }
 
@@ -74,7 +130,51 @@ func SanitizeURLError(err error) error {
 	default:
 		outer = clone.Error()
 	}
-	return &sanitizedWrapperError{message: outer, cause: &clone}
+	return &sanitizedWrapperError{message: scrubRequestedURLs(outer, err), cause: &clone}
+}
+
+// scrubRequestedURLs replaces the raw URL of every *url.Error in err's tree
+// wherever it still appears in message. errors.As above only finds the first
+// URL error, so a second one under a joined cause, or a wrapper that repeats
+// the requested URL in its own text, would otherwise keep its credentials.
+func scrubRequestedURLs(message string, err error) string {
+	var raws []string
+	collectRequestedURLs(err, &raws, 0)
+	// Longest first, so a URL that prefixes another is not rewritten inside it.
+	sort.SliceStable(raws, func(a, b int) bool { return len(raws[a]) > len(raws[b]) })
+	for _, raw := range raws {
+		// Skipping URLs that cannot hold a credential keeps short or unusual
+		// values from rewriting plain text.
+		if !URLMayHoldCredential(raw) {
+			continue
+		}
+		clean := SanitizeURL(raw)
+		message = strings.ReplaceAll(message, strconv.Quote(raw), strconv.Quote(clean))
+		message = strings.ReplaceAll(message, raw, clean)
+	}
+	return message
+}
+
+func collectRequestedURLs(err error, raws *[]string, depth int) {
+	if err == nil || depth > 64 {
+		return
+	}
+	if urlErr, ok := err.(*url.Error); ok { //nolint:errorlint // walking the tree by hand
+		if urlErr == nil {
+			return
+		}
+		if urlErr.URL != "" {
+			*raws = append(*raws, urlErr.URL)
+		}
+	}
+	switch wrapped := err.(type) { //nolint:errorlint // walking the tree by hand
+	case interface{ Unwrap() []error }:
+		for _, child := range wrapped.Unwrap() {
+			collectRequestedURLs(child, raws, depth+1)
+		}
+	case interface{ Unwrap() error }:
+		collectRequestedURLs(wrapped.Unwrap(), raws, depth+1)
+	}
 }
 
 // sanitizeMultiURLError rebuilds a multi-error's message in place: each
@@ -110,6 +210,7 @@ func sanitizeMultiURLError(original error, components []error) error {
 	if !allPresent {
 		return errors.Join(sanitized...)
 	}
+	outer = scrubRequestedURLs(outer, original)
 	if outer == original.Error() {
 		return original
 	}

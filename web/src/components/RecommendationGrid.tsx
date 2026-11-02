@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import DefaultArtwork from "@/components/DefaultArtwork";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -13,33 +14,33 @@ interface RecommendationGridProps {
   maxItems?: number;
 }
 
-interface RecommendationItemCardProps {
-  itemId: string;
-  showCaption: boolean;
-}
-
-function RecommendationItemCard({ itemId, showCaption }: RecommendationItemCardProps) {
+function RecommendationItemCard({ itemId }: { itemId: string }) {
   const { data: item } = useCatalogItemDetail(itemId);
+  // Keyed by URL so a re-signed poster is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (!item) {
     return <div className="bg-surface aspect-[2/3] animate-pulse rounded-lg" />;
   }
   return (
     <div className="group/card">
       <div className="group/media relative">
-        <ViewTransitionLink to={`/item/${encodeURIComponent(itemId)}`} className="group block">
-          <div className="aspect-[2/3] overflow-hidden rounded-lg">
-            {item.poster_url ? (
+        <ViewTransitionLink
+          to={`/item/${encodeURIComponent(itemId)}`}
+          aria-label={item.title}
+          className="group block"
+        >
+          <div className="relative aspect-[2/3] overflow-hidden rounded-lg">
+            {item.poster_url && failedUrl !== item.poster_url ? (
               <img
                 src={item.poster_url}
                 alt={item.title}
                 loading="lazy"
                 decoding="async"
+                onError={() => setFailedUrl(item.poster_url ?? null)}
                 className="h-full w-full object-cover transition-transform group-hover:scale-105"
               />
             ) : (
-              <div className="bg-surface text-muted-foreground flex h-full items-center justify-center text-xs">
-                {item.title}
-              </div>
+              <DefaultArtwork mediaType={item.type} />
             )}
           </div>
         </ViewTransitionLink>
@@ -51,14 +52,12 @@ function RecommendationItemCard({ itemId, showCaption }: RecommendationItemCardP
           />
         ) : null}
       </div>
-      {showCaption ? (
-        <ViewTransitionLink
-          to={`/item/${encodeURIComponent(itemId)}`}
-          className="mt-1.5 block truncate text-sm font-medium hover:underline"
-        >
-          {item.title}
-        </ViewTransitionLink>
-      ) : null}
+      <ViewTransitionLink
+        to={`/item/${encodeURIComponent(itemId)}`}
+        className="mt-1.5 block truncate text-sm font-medium hover:underline"
+      >
+        {item.title}
+      </ViewTransitionLink>
     </div>
   );
 }
@@ -66,7 +65,7 @@ function RecommendationItemCard({ itemId, showCaption }: RecommendationItemCardP
 interface MoreLikeThisRowProps<T> {
   items: T[];
   itemKey: (item: T) => string;
-  renderItem: (item: T, showCaption: boolean) => ReactNode;
+  renderItem: (item: T) => ReactNode;
   maxItems?: number;
 }
 
@@ -84,13 +83,12 @@ export function MoreLikeThisRow<T>({
   const { cardPresentation } = useUICustomization();
   const itemLimit = Math.max(0, Math.min(maxItems, MAX_MORE_LIKE_THIS_ITEMS));
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
-  const showCaption = cardPresentation.caption !== "artwork";
 
   return (
     <MediaCarousel title="More Like This" edgePadding={false}>
       {items.slice(0, itemLimit).map((item) => (
         <div key={itemKey(item)} className={posterWidthClasses}>
-          {renderItem(item, showCaption)}
+          {renderItem(item)}
         </div>
       ))}
     </MediaCarousel>
@@ -103,9 +101,7 @@ export default function RecommendationGrid({ items, maxItems = 12 }: Recommendat
       items={items}
       maxItems={maxItems}
       itemKey={(item) => item.content_id}
-      renderItem={(item, showCaption) => (
-        <RecommendationItemCard itemId={item.content_id} showCaption={showCaption} />
-      )}
+      renderItem={(item) => <RecommendationItemCard itemId={item.content_id} />}
     />
   );
 }

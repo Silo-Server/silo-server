@@ -19,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type WatchTogetherScopeResolver interface {
@@ -228,6 +230,12 @@ func (c *watchTogetherRoomConn) Close() error {
 	var err error
 	c.closeOnce.Do(func() { close(c.done); err = c.conn.Close() })
 	return err
+}
+
+// LegacyRoomProtocol reports a connection on the frozen /api/v1 room socket,
+// which keeps its narrower host band.
+func (c *watchTogetherRoomConn) LegacyRoomProtocol() bool {
+	return !c.includeMemberStatus
 }
 
 // CloseReplaced uses the socket's single writer and waits for the terminal
@@ -565,8 +573,7 @@ func (h *WatchTogetherHandler) HandleCreateSuggestion(w http.ResponseWriter, r *
 	}
 
 	var req createWatchTogetherSuggestionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeLimitedJSONBody(w, r, watchtogether.MaxSuggestionCreateBodyBytes, &req, false) {
 		return
 	}
 	if req.ContentID == "" || req.Title == "" {
@@ -590,6 +597,8 @@ func (h *WatchTogetherHandler) HandleCreateSuggestion(w http.ResponseWriter, r *
 			writeError(w, http.StatusGone, "gone", "Room is no longer active")
 		case errors.Is(err, watchtogether.ErrInvalidSelection):
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid content type")
+		case errors.Is(err, watchtogether.ErrSuggestionLimitReached):
+			writeError(w, http.StatusConflict, "conflict", "Room has reached its suggestion limit")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create suggestion")
 		}
@@ -887,7 +896,7 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 	_ = realtimeConn.WritePing()
 
 	for {
-		_, data, err := conn.ReadMessage()
+		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
 		}

@@ -16,6 +16,9 @@ type JobRepository interface {
 	// GetActiveJobByIdempotencyKey returns a pending/running job with the given
 	// key, or nil if none exists.
 	GetActiveJobByIdempotencyKey(ctx context.Context, key string) (*Job, error)
+	// GetReusableJobByIdempotencyKey returns the newest completed job with the
+	// given key whose result subtitle is still stored on its file, or nil.
+	GetReusableJobByIdempotencyKey(ctx context.Context, key string) (*Job, error)
 	ListJobsByMediaFile(ctx context.Context, mediaFileID int) ([]Job, error)
 	// CountTranscribeJobsByUserSince counts the user's quota-consuming
 	// transcription jobs (transcribe / transcribe_translate) created at or

@@ -2,7 +2,10 @@ package clientip
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type contextKey string
@@ -14,6 +17,10 @@ const requestHostKey contextKey = "request_host"
 // peerIPKey holds the transport-level peer address exactly as the listener saw
 // it, before Middleware overwrote RemoteAddr with the resolved client IP.
 const peerIPKey contextKey = "peer_addr"
+
+// forwardedClientUnknownKey marks a request whose resolved client IP is a
+// forwarder's own address; see ForwardedClientUnknown.
+const forwardedClientUnknownKey contextKey = "forwarded_client_unknown"
 
 // Middleware returns chi-compatible middleware that resolves the client IP
 // and stores it in the request context. It also overwrites r.RemoteAddr so
@@ -31,12 +38,16 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 			peer := r.RemoteAddr
 			scheme := resolver.requestScheme(r)
 			host := resolver.requestHost(r)
-			ip := resolver.ClientIP(r)
+			resolved, clientUnknown := resolver.resolve(r)
+			ip := normalize(resolved)
 			r.RemoteAddr = ip
 			ctx := context.WithValue(r.Context(), clientIPKey, ip)
 			ctx = context.WithValue(ctx, requestSchemeKey, scheme)
 			ctx = context.WithValue(ctx, requestHostKey, host)
 			ctx = context.WithValue(ctx, peerIPKey, peer)
+			if clientUnknown {
+				ctx = context.WithValue(ctx, forwardedClientUnknownKey, true)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -49,6 +60,17 @@ func FromContext(ctx context.Context) string {
 	return ip
 }
 
+// ForwardedClientUnknown reports whether the request was forwarded for a
+// client the resolver could not identify, so FromContext holds a forwarder's
+// own address. That happens when a peer outside the trusted proxies sends
+// forwarding headers, when a trusted proxy names an untrusted hop that itself
+// forwarded for someone, and when a trusted proxy's headers name no usable
+// address. False when Middleware did not run.
+func ForwardedClientUnknown(ctx context.Context) bool {
+	unknown, _ := ctx.Value(forwardedClientUnknownKey).(bool)
+	return unknown
+}
+
 // PeerFromContext returns the transport peer address (host:port, as the
 // listener reported it) captured before Middleware overwrote RemoteAddr.
 // Returns empty string when the middleware did not run, in which case
@@ -56,6 +78,20 @@ func FromContext(ctx context.Context) string {
 func PeerFromContext(ctx context.Context) string {
 	addr, _ := ctx.Value(peerIPKey).(string)
 	return addr
+}
+
+// PeerIP returns the transport peer's IP, normalized like FromContext, so the
+// two compare equal for a direct connection. It returns "" when Middleware did
+// not run or the peer is not an IP address.
+func PeerIP(ctx context.Context) string {
+	addr := PeerFromContext(ctx)
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	if ip := net.ParseIP(addr); ip != nil {
+		return normalize(ip)
+	}
+	return ""
 }
 
 // SetPeerContext stores a transport peer address in the context. Useful for
@@ -93,4 +129,40 @@ func RequestHost(r *http.Request) string {
 		return host
 	}
 	return r.Host
+}
+
+// RequestOrigin is the origin r arrived on, scheme://host[:port] as
+// SerializeOrigin writes it: the host from RequestHost and the scheme from
+// RequestScheme, so forwarding headers count only from a trusted proxy and
+// only after Middleware ran. Ambiguous proxy scheme metadata names the
+// transport's scheme; a client that compares this origin with the one it
+// configured then sees a mismatch and refuses, never a false match.
+func RequestOrigin(r *http.Request) string {
+	scheme := RequestScheme(r)
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+	}
+	return SerializeOrigin(scheme, RequestHost(r))
+}
+
+// SerializeOrigin is scheme://host[:port] with the scheme and host in lower
+// case, the default port of the scheme left out, IPv6 hosts in brackets, and
+// no path or trailing slash.
+func SerializeOrigin(scheme, host string) string {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	hostURL := url.URL{Host: strings.TrimSpace(host)}
+	name, port := strings.ToLower(hostURL.Hostname()), hostURL.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if strings.Contains(name, ":") {
+		name = "[" + name + "]"
+	}
+	if port != "" {
+		name += ":" + port
+	}
+	return scheme + "://" + name
 }

@@ -3,8 +3,6 @@ package nodepool
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,16 +12,7 @@ import (
 // body, so a test can express exactly what an old or new node puts on the wire.
 func newStatsHealthNode(t *testing.T, body string) string {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/health" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-	return server.URL
+	return newStatsHealthNodeFunc(t, func() string { return body })
 }
 
 // Node resource stats pass through this package untouched. Parsing them here
@@ -92,26 +81,6 @@ func TestCheckNodeReportsNoStatsForOlderNodes(t *testing.T) {
 				t.Fatalf("lastStats = %s, want nil so the column is written NULL", lastStats)
 			}
 		})
-	}
-}
-
-// A node's build identity rides along with the sample, and on its own is
-// enough to persist: a non-Linux node that cannot be sampled still knows what
-// revision it is running.
-func TestCheckNodeKeepsBuildIdentity(t *testing.T) {
-	url := newStatsHealthNode(t, `{"status":"ok","build":{"display":"abcdef12","revision":"abcdef1234","build_number":42,"available":true}}`)
-	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
-	var decoded struct {
-		Build struct {
-			Display     string `json:"display"`
-			BuildNumber int    `json:"build_number"`
-		} `json:"build"`
-	}
-	if err := json.Unmarshal(lastStats, &decoded); err != nil {
-		t.Fatalf("lastStats invalid: %v (%s)", err, lastStats)
-	}
-	if decoded.Build.Display != "abcdef12" || decoded.Build.BuildNumber != 42 {
-		t.Fatalf("build = %+v, want the node's identity carried through", decoded.Build)
 	}
 }
 

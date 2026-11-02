@@ -8,8 +8,9 @@ export function isASSCodec(codec: string | undefined): boolean {
 }
 
 /**
- * Codecs that indicate PGS (Blu-ray bitmap) subtitles. Like all bitmap
- * codecs, PGS is burned into the video server-side when selected.
+ * Codecs that indicate PGS (Blu-ray bitmap) subtitles. Embedded PGS is drawn
+ * client-side from the server's `.sup` sidecar; the other bitmap codecs are
+ * burned into the video server-side when selected.
  */
 const PGS_CODECS = new Set(["pgs", "pgssub", "hdmv_pgs_subtitle"]);
 
@@ -34,6 +35,25 @@ const BITMAP_CODECS = new Set([
 export function isBitmapCodec(codec: string | undefined): boolean {
   if (!codec) return false;
   return BITMAP_CODECS.has(codec.toLowerCase());
+}
+
+/**
+ * Whether selecting the track on the web makes the server burn it into the
+ * video. The web player declares `embedded_bitmap` (client-context-v3.ts), so
+ * the server serves embedded PGS as a `.sup` sidecar that usePGSSubtitles
+ * draws; other bitmap tracks, and any track the server publishes as
+ * `burn_in_only`, need the server. Watch-detail tracks carry no delivery
+ * yet, so the codec and source decide for them.
+ */
+export function subtitleNeedsBurnIn(track: {
+  codec?: string;
+  source?: "external" | "embedded" | "downloaded";
+  burn_in_only?: boolean;
+}): boolean {
+  if (track.burn_in_only === true) return true;
+  if (!isBitmapCodec(track.codec)) return false;
+  const drawnByPlayer = isPGSCodec(track.codec) && (track.source ?? "embedded") === "embedded";
+  return !drawnByPlayer;
 }
 
 /**

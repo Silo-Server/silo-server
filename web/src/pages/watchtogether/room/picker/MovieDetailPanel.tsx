@@ -4,6 +4,8 @@ import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import type { ItemMemberState, MemberWatchState } from "@/api/v2/watchTogetherMemberState";
@@ -205,7 +207,12 @@ export function MovieDetailPanel({
           </div>
         ) : null}
         {item?.tagline ? (
-          <p className="text-muted-foreground text-xs italic">{item.tagline}</p>
+          <p className="text-muted-foreground text-xs italic">
+            {item.tagline}
+            {hasMachineTranslation(item.machine_translated_fields, "tagline") && (
+              <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+            )}
+          </p>
         ) : null}
         {detail.isLoading ? (
           <div className="flex flex-col gap-1.5">
@@ -214,9 +221,14 @@ export function MovieDetailPanel({
             <Skeleton className="h-3 w-2/3 rounded" />
           </div>
         ) : item?.overview ? (
-          <p className="text-muted-foreground line-clamp-5 text-sm leading-relaxed">
-            {item.overview}
-          </p>
+          <div>
+            <p className="text-muted-foreground line-clamp-5 text-sm leading-relaxed">
+              {item.overview}
+            </p>
+            {hasMachineTranslation(item.machine_translated_fields) && (
+              <MachineTranslatedLabel className="mt-1" />
+            )}
+          </div>
         ) : null}
         <MemberWatchList members={members} state={memberState} loading={memberStateLoading} />
       </div>

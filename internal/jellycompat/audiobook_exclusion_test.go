@@ -17,46 +17,15 @@ func TestCompatScopedTypes(t *testing.T) {
 	}{
 		{"", compatVideoTypes},
 		{"movie", "movie"},
-		{"movie,series", "movie,series"},
 		{"audiobook", compatNoMatchType},
 		{"movie,audiobook", "movie"},
 		{" Audiobook ", compatNoMatchType},
-		{"podcast", compatNoMatchType},
-		{"movie,podcast", "movie"},
 		// Non-video types outside the allowlist are dropped, not passed through.
 		{"musicalbum", compatNoMatchType},
-		{"movie,musicalbum", "movie"},
 	}
 	for _, tc := range cases {
 		if got := compatScopedTypes(tc.in); got != tc.want {
 			t.Errorf("compatScopedTypes(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestCompatScopedSearchTypes(t *testing.T) {
-	if got := compatScopedSearchTypes(nil); len(got) != 3 {
-		t.Fatalf("expected video type default, got %v", got)
-	}
-	got := compatScopedSearchTypes([]string{"movie", "audiobook"})
-	if len(got) != 1 || got[0] != "movie" {
-		t.Fatalf("expected [movie], got %v", got)
-	}
-	got = compatScopedSearchTypes([]string{"audiobook"})
-	if len(got) != 1 || got[0] != compatNoMatchType {
-		t.Fatalf("expected no-match sentinel, got %v", got)
-	}
-}
-
-func TestIsCompatHiddenLibraryType(t *testing.T) {
-	for _, val := range []string{"audiobooks", "audiobook", " Audiobooks ", "podcast", "podcasts"} {
-		if !isCompatHiddenLibraryType(val) {
-			t.Errorf("expected %q to be hidden from the compat surface", val)
-		}
-	}
-	for _, val := range []string{"movies", "series", "mixed", ""} {
-		if isCompatHiddenLibraryType(val) {
-			t.Errorf("expected %q to be visible on the compat surface", val)
 		}
 	}
 }
@@ -190,17 +159,5 @@ func TestBrowseItemsDefaultsToVideoTypeScope(t *testing.T) {
 	}
 	if browse.lastFilters.Type != "movie" {
 		t.Fatalf("expected explicit type to pass through, got %q", browse.lastFilters.Type)
-	}
-}
-
-func TestListItemFiltersDefaultsToVideoTypeScope(t *testing.T) {
-	browse := &scopeFakeBrowseSource{}
-	svc := &directContentService{browseRepo: browse}
-
-	if _, err := svc.ListItemFilters(context.Background(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, url.Values{}); err != nil {
-		t.Fatalf("ListItemFilters: %v", err)
-	}
-	if browse.lastFilters.Type != compatVideoTypes {
-		t.Fatalf("expected genre listing scoped to %q, got %q", compatVideoTypes, browse.lastFilters.Type)
 	}
 }

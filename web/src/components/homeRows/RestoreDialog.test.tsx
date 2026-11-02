@@ -8,6 +8,7 @@ type Props = ComponentProps<typeof RestoreDialog>;
 
 function Harness(overrides: Partial<Props>) {
   const [resetProfiles, setResetProfiles] = useState(false);
+  const [restoreAll, setRestoreAll] = useState(false);
   return (
     <RestoreDialog
       open
@@ -16,6 +17,8 @@ function Harness(overrides: Partial<Props>) {
       otherLibraryLabels={["Movies", "TV Shows"]}
       rowCount={9}
       collectionRowTitles={[]}
+      restoreAll={restoreAll}
+      onRestoreAllChange={setRestoreAll}
       resetSupported
       resetProfiles={resetProfiles}
       onResetProfilesChange={setResetProfiles}
@@ -38,39 +41,6 @@ const bullets = () =>
 afterEach(cleanup);
 
 describe("RestoreDialog", () => {
-  it("says what happens to Home, its collection rows and the library pages", () => {
-    render(<Harness collectionRowTitles={["Studio Ghibli", "90s Crowd-Pleasers"]} />);
-    const dialog = screen.getByRole("dialog", { name: "Restore Home to the default rows?" });
-    expect(dialog).toHaveAccessibleDescription("Home goes back to the rows Silo starts with.");
-    expect(bullets()).toEqual([
-      "The 9 rows on Home are replaced by Silo's default rows.",
-      "Rows that show collections, like Studio Ghibli and 90s Crowd-Pleasers, are removed. The collections themselves stay in Collections.",
-      "Library pages (Movies, TV Shows) don't change.",
-    ]);
-    expect(within(dialog).getByText("This can't be undone.")).toBeInTheDocument();
-  });
-
-  it("names a library page and leaves out the collection line when it has no collection rows", () => {
-    render(
-      <Harness
-        page={{ kind: "library", libraryId: 7 }}
-        pageLabel="Movies"
-        otherLibraryLabels={["TV Shows"]}
-        rowCount={1}
-      />,
-    );
-    expect(
-      screen.getByRole("dialog", { name: "Restore the Movies page to the default rows?" }),
-    ).toHaveAccessibleDescription("The Movies page goes back to the rows Silo starts with.");
-    expect(bullets()).toEqual([
-      "The 1 row on the Movies page is replaced by Silo's default rows.",
-      "Home and the other library pages (TV Shows) don't change.",
-    ]);
-    expect(
-      screen.getByRole("switch", { name: "Also reset every profile's Movies page" }),
-    ).toBeInTheDocument();
-  });
-
   it("names one collection row and shortens a long list", () => {
     const { unmount } = render(
       <Harness
@@ -93,21 +63,58 @@ describe("RestoreDialog", () => {
     ]);
   });
 
-  it("explains both settings of the reset-every-profile switch", async () => {
+  it("also restores every library page from Home", async () => {
     render(<Harness />);
-    const toggle = screen.getByRole("switch", { name: "Also reset every profile's Home" });
+    const toggle = screen.getByRole("switch", { name: "Also restore every library page" });
     expect(toggle).toHaveAccessibleDescription(
-      "Profiles keep rows they added. What they hid or renamed on the old rows no longer applies.",
+      "Movies, TV Shows go back to Silo's default rows too.",
     );
     await userEvent.click(toggle);
-    expect(toggle).toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(
-      "Clears what each profile hid, renamed, moved or added on Home.",
+    expect(
+      screen.getByRole("dialog", {
+        name: "Restore Home and every library page to the default rows?",
+      }),
+    ).toHaveAccessibleDescription(
+      "Home and every library page go back to the rows Silo starts with.",
+    );
+    expect(bullets()).toEqual([
+      "The 9 rows on Home are replaced by Silo's default rows.",
+      "Library pages (Movies, TV Shows) also go back to Silo's default rows, and their collection rows are removed.",
+    ]);
+    const reset = screen.getByRole("switch", {
+      name: "Also reset every profile's Home and library pages",
+    });
+    await userEvent.click(reset);
+    expect(reset).toHaveAccessibleDescription(
+      "Clears what each profile hid, renamed, moved or added on Home and every library page.",
     );
   });
 
+  it("also restores the other library pages from a library page, and leaves Home alone", async () => {
+    render(
+      <Harness
+        page={{ kind: "library", libraryId: 7 }}
+        pageLabel="Movies"
+        otherLibraryLabels={["TV Shows"]}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Also restore the other library pages" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Restore every library page to the default rows?" }),
+    ).toHaveAccessibleDescription("Every library page goes back to the rows Silo starts with.");
+    expect(bullets()).toEqual([
+      "The 9 rows on the Movies page are replaced by Silo's default rows.",
+      "The other library pages (TV Shows) also go back to Silo's default rows, and their collection rows are removed. Home doesn't change.",
+    ]);
+    expect(
+      screen.getByRole("switch", { name: "Also reset every profile's library pages" }),
+    ).toBeInTheDocument();
+  });
+
   it("turns the switch off and says why when the server can't reset profiles", () => {
-    render(<Harness resetSupported={false} />);
+    render(<Harness otherLibraryLabels={[]} resetSupported={false} />);
     const toggle = screen.getByRole("switch", { name: "Also reset every profile's Home" });
     expect(toggle).toBeDisabled();
     expect(screen.getByText("Resetting profiles isn't available on this server.")).toBeVisible();

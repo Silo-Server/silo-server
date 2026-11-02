@@ -380,11 +380,13 @@ snapshot behavior, capture/upload, or native/browser acceptance.
 
 `make test-scenario-new-item-curation` runs six **new** scenarios through the real
 router and catalog repository. Seven PATCH requests and twelve full-table
-PostgreSQL snapshots check explicit-null preservation, empty text/array/timezone
-clearing, exact-item title/year/runtime/genre updates, invalid-timezone preflight,
+PostgreSQL snapshots check that an explicit null preserves fields that cannot be
+cleared and clears the air timezone, empty text/array/timezone clearing,
+exact-item title/year/runtime/genre updates, invalid-timezone preflight,
 acting-admin refusal and missing identity. Returned detail must agree with the
-mutation; both unrelated items remain unchanged. Successful edits may touch only
-the target timestamp, including all-null edits. Title normalization is checked.
+mutation; both unrelated items remain unchanged. Besides the fields it sets or
+clears, a successful edit may touch only the target timestamp, including an
+all-null edit. Title normalization is checked.
 
 The fixture reuses the guarded synthetic catalog, cleans its exact IDs before
 each household reseed and refuses existing media before setup. Required DSN,
@@ -416,10 +418,11 @@ races, durable replay, translated output or native/browser acceptance.
 `make test-scenario-new-child-curation` runs four **new** scenarios through the
 real router and catalog repositories. Six PATCH requests and eight PostgreSQL
 snapshots covering all item, season and episode rows check correct child identity,
-parent/sibling preservation, episode runtime/leap-day edits, null preservation and
-acting-admin refusal. The returned child type, content ID, title and series ID
-must agree with the target. Only a successfully edited child's update timestamp
-is exempt from the full-row comparison, including null-only edits.
+parent/sibling preservation, episode runtime/leap-day edits, explicit nulls (title,
+overview and runtime kept, air dates cleared) and acting-admin refusal. The
+returned child type, content ID, title and series ID must agree with the target.
+Besides the fields it sets or clears, only a successfully edited child's update
+timestamp is exempt from the full-row comparison, including null-only edits.
 
 The fixture reuses the catalog occupancy guard. Both child tables require parent
 media-item foreign keys, so existing children cannot evade that guard. Exact child

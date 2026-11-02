@@ -56,24 +56,35 @@ func rebuildInvalidIndexes(ctx context.Context, db *sql.DB, schema string) error
 	quotedSchema := pgx.Identifier{schema}.Sanitize()
 	for _, index := range rebuiltConcurrentIndexes {
 		quotedName := pgx.Identifier{index.name}.Sanitize()
-		qualified := quotedSchema + "." + quotedName
-		var valid bool
-		if err := db.QueryRowContext(ctx,
-			`SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)), false)`,
-			qualified,
-		).Scan(&valid); err != nil {
-			return fmt.Errorf("checking index %s: %w", index.name, err)
+		if err := ensureIndexConcurrently(ctx, db, quotedSchema+"."+quotedName, fmt.Sprintf(
+			"CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s.%s", quotedName, quotedSchema, index.definition)); err != nil {
+			return err
 		}
-		if valid {
-			continue
-		}
-		if _, err := db.ExecContext(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+qualified); err != nil {
-			return fmt.Errorf("dropping invalid index %s: %w", index.name, err)
-		}
-		if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s.%s",
-			quotedName, quotedSchema, index.definition)); err != nil {
-			return fmt.Errorf("rebuilding index %s: %w", index.name, err)
-		}
+	}
+	return nil
+}
+
+// ensureIndexConcurrently runs build, a CREATE INDEX CONCURRENTLY statement
+// for qualifiedName, unless a valid index of that name already exists. An
+// invalid copy an interrupted build left behind is dropped concurrently
+// first. A valid index is never dropped, so a retried migration keeps what an
+// earlier attempt built.
+func ensureIndexConcurrently(ctx context.Context, db *sql.DB, qualifiedName, build string) error {
+	var valid bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)), false)`,
+		qualifiedName,
+	).Scan(&valid); err != nil {
+		return fmt.Errorf("checking index %s: %w", qualifiedName, err)
+	}
+	if valid {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+qualifiedName); err != nil {
+		return fmt.Errorf("dropping invalid index %s: %w", qualifiedName, err)
+	}
+	if _, err := db.ExecContext(ctx, build); err != nil {
+		return fmt.Errorf("building index %s: %w", qualifiedName, err)
 	}
 	return nil
 }

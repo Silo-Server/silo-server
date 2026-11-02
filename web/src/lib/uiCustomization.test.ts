@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CARD_PRESENTATION_PRESETS,
   DEFAULT_CARD_PRESENTATION,
   defaultWebPrimaryMenu,
   menuItemKey,
@@ -16,30 +15,17 @@ import {
 describe("UI customization contract helpers", () => {
   it("falls back when card presentation is incomplete or unknown", () => {
     expect(parseCardPresentation(null)).toEqual(DEFAULT_CARD_PRESENTATION);
-    expect(parseCardPresentation({ poster_size: "large" })).toEqual(DEFAULT_CARD_PRESENTATION);
-    expect(parseCardPresentation({ poster_size: "huge", caption: "artwork" })).toEqual(
+    expect(parseCardPresentation({ caption: "title_metadata" })).toEqual(DEFAULT_CARD_PRESENTATION);
+    expect(parseCardPresentation({ poster_size: "huge", caption: "title_metadata" })).toEqual(
       DEFAULT_CARD_PRESENTATION,
     );
   });
 
-  it("accepts every supported card dimension", () => {
+  it("keeps the poster size and ignores the retired caption", () => {
     expect(parseCardPresentation({ poster_size: "large", caption: "artwork" })).toEqual({
       poster_size: "large",
-      caption: "artwork",
     });
-    expect(parseCardPresentation({ poster_size: "compact", caption: "title" })).toEqual({
-      poster_size: "compact",
-      caption: "title",
-    });
-  });
-
-  it("keeps the named presets aligned with the cross-client contract", () => {
-    expect(CARD_PRESENTATION_PRESETS.map(({ id, value }) => ({ id, value }))).toEqual([
-      { id: "balanced", value: { poster_size: "standard", caption: "title_metadata" } },
-      { id: "compact", value: { poster_size: "compact", caption: "title" } },
-      { id: "cinema", value: { poster_size: "large", caption: "title" } },
-      { id: "artwork", value: { poster_size: "large", caption: "artwork" } },
-    ]);
+    expect(parseCardPresentation({ poster_size: "compact" })).toEqual({ poster_size: "compact" });
   });
 
   it("rejects a custom menu without exactly one home destination", () => {

@@ -16,7 +16,7 @@ import (
 
 // FavoriteListInput is the listFavorites query.
 type FavoriteListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -48,6 +48,39 @@ type FavoriteEntryOutput struct {
 	Body FavoriteEntry
 }
 
+// PersonalListMembership answers whether an item the viewer may see is on
+// one of the acting profile's lists. Unlike getFavorite and
+// getWatchlistEntry, a non-member is a 200 with is_member false, so a client
+// checking ordinary items does not produce a stream of 404s that reverse
+// proxies count as probing.
+type PersonalListMembership struct {
+	ItemID   ID       `json:"item_id" doc:"The catalog item" example:"movie:heat-1995"`
+	IsMember bool     `json:"is_member" doc:"Whether the item is on the list"`
+	AddedAt  *Instant `json:"added_at,omitempty" doc:"When the item joined the list; absent when it is not on it" example:"2026-01-02T03:04:05.000Z"`
+}
+
+// PersonalListMembershipOutput is the getFavoriteMembership and
+// getWatchlistMembership response.
+type PersonalListMembershipOutput struct {
+	Body PersonalListMembership
+}
+
+// PersonalListCapability lets a client discover the membership reads
+// before it relies on them; an older server has neither the reads nor this
+// document.
+type PersonalListCapability struct {
+	Capability
+	MembershipSupported bool `json:"membership_supported" doc:"Whether getFavoriteMembership and getWatchlistMembership answer 200 with is_member for every item the viewer may see"`
+}
+
+// PersonalListCapabilityOutput is the getPersonalListCapability response.
+type PersonalListCapabilityOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         PersonalListCapability
+}
+
 const opListFavorites = "listFavorites"
 
 func registerFavorites(reg *Registry) {
@@ -61,27 +94,32 @@ func registerFavorites(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}", "getFavorite", "favorites",
 		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getFavorite)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}/membership", "getFavoriteMembership", "favorites",
+		"Answer whether the item is one of the acting profile's favorites as is_member, 200 either way; 404 only when the viewer may not see the item.")),
+		reg.getFavoriteMembership)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/personal-lists", "getPersonalListCapability", "favorites",
+		"Discover the favorites and watchlist membership reads.")),
+		reg.getPersonalListCapability)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
-		"Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
+		"Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addFavorite)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
-		"Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
+		"Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.deleteFavorite)
 }
 
 // personalListViewer is the identity a personal-list seam acts as. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func personalListViewer(ctx context.Context, imageSize string) (handlers.PersonalListViewer, *Problem) {
+func personalListViewer(ctx context.Context, art imagesize.Request) (handlers.PersonalListViewer, *Problem) {
 	userID, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.PersonalListViewer{}, p
 	}
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	return handlers.PersonalListViewer{UserID: userID, ProfileID: profileID, Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}, nil
+	return handlers.PersonalListViewer{
+		UserID: userID, ProfileID: profileID, Access: handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize: art.Size, ImageWidths: art.Widths,
+	}, nil
 }
 
 // personalListScope binds a personal list's cursor to the profile and the
@@ -126,7 +164,7 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -177,7 +215,7 @@ func (reg *Registry) getFavorite(ctx context.Context, in *FavoriteItemInput) (*F
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -195,11 +233,46 @@ func (reg *Registry) getFavorite(ctx context.Context, in *FavoriteItemInput) (*F
 	return &FavoriteEntryOutput{Body: FavoriteEntry{ItemID: ID(entry.MediaItemID), AddedAt: added}}, nil
 }
 
+func (reg *Registry) getFavoriteMembership(ctx context.Context, in *FavoriteItemInput) (*PersonalListMembershipOutput, error) {
+	if reg.deps.PersonalLists == nil {
+		return nil, unavailable("favorites")
+	}
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
+	if p != nil {
+		return nil, p
+	}
+	entry, found, err := reg.deps.PersonalLists.GetFavorite(ctx, viewer, string(in.ItemID))
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return personalListMembership(in.ItemID, found, entry.AddedAt)
+}
+
+// personalListMembership renders a membership read: the entry's added_at
+// when the item is on the list, is_member false otherwise.
+func personalListMembership(itemID ID, found bool, addedAt string) (*PersonalListMembershipOutput, error) {
+	out := &PersonalListMembershipOutput{Body: PersonalListMembership{ItemID: itemID, IsMember: found}}
+	if found {
+		added, p := storeInstant(addedAt)
+		if p != nil {
+			return nil, p
+		}
+		out.Body.AddedAt = &added
+	}
+	return out, nil
+}
+
+func (reg *Registry) getPersonalListCapability(_ context.Context, _ *CapabilityInput) (*PersonalListCapabilityOutput, error) {
+	configured := reg.deps.PersonalLists != nil
+	doc := PersonalListCapability{Capability: Capability{State: configuredCapabilityState(configured)}, MembershipSupported: configured}
+	return &PersonalListCapabilityOutput{Body: doc}, nil
+}
+
 func (reg *Registry) addFavorite(ctx context.Context, in *FavoriteItemInput) (*struct{}, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -213,7 +286,7 @@ func (reg *Registry) deleteFavorite(ctx context.Context, in *FavoriteItemInput) 
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}

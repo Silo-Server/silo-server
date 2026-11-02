@@ -8,9 +8,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-
-	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
@@ -28,15 +34,39 @@ func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
 	}
 }
 
+func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer private-test-key" {
+			t.Error("saved text key was not sent")
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"desc = api_key=private-test-key endpoint=https://private.example"}}`))
+	}))
+	defer server.Close()
+	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
+		config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+			ID: "text", Type: config.AIProviderCustom, Name: "Text", BaseURL: server.URL, APIKey: "private-test-key",
+			Capabilities: []config.AICapability{config.AICapabilityChat},
+		}),
+		config.AITextProviderSettingKey: "text",
+		"ai.chat_model":                 "test-model",
+	}}}
+	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+	const want = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
+	if err != nil || result.Success || result.Message != want {
+		t.Fatalf("result = %+v, err = %v; want %q", result, err, want)
+	}
+}
+
 func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 	for _, tc := range []struct {
 		status int
 		want   string
 	}{
-		{http.StatusUnauthorized, "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."},
+		{http.StatusUnauthorized, "Speech-to-text authentication failed. Replace the provider's API key in AI Services."},
 		{http.StatusForbidden, "Speech-to-text access was denied. Check your API key permissions and allowed providers."},
 		{http.StatusPaymentRequired, "Speech-to-text provider requires payment. Check your provider balance and spending limit."},
-		{http.StatusNotFound, "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."},
+		{http.StatusNotFound, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."},
 		{http.StatusBadRequest, "Connection check failed. Verify the submitted settings and provider availability."},
 	} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
@@ -50,9 +80,12 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 			}))
 			defer server.Close()
 			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				"ai.asr_base_url": server.URL,
-				"ai.asr_model":    "test-model",
-				"ai.asr_api_key":  "private-test-key",
+				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+					ID: "speech", Type: config.AIProviderCustom, Name: "Speech", BaseURL: server.URL, APIKey: "private-test-key",
+					Capabilities: []config.AICapability{config.AICapabilitySpeech},
+				}),
+				config.AISpeechProviderSettingKey: "speech",
+				"ai.asr_model":                    "test-model",
 			}}}
 			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_transcription", nil, nil)
 			if err != nil || result.Success || result.Message != tc.want {
@@ -83,6 +116,163 @@ func TestTranscriptionCheckRetryFailureMessages(t *testing.T) {
 	} {
 		if got := transcriptionCheckFailureMessage(fmt.Errorf("wrapped: %w", tc.err)); got != tc.want {
 			t.Errorf("message = %q; want %q", got, tc.want)
+		}
+	}
+}
+
+// This store exercises the real credential service without a provider call.
+type settingsCheckChatGPTStore struct{ *fakeServerSettingsStore }
+
+func (s settingsCheckChatGPTStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = s.values[key]
+	}
+	return values, nil
+}
+
+func (s settingsCheckChatGPTStore) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	value, err := update(s.values[key])
+	if err != nil {
+		return err
+	}
+	s.values[key] = value
+	return nil
+}
+
+func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
+	original := newAdminAISettingsCheckClient
+	t.Cleanup(func() { newAdminAISettingsCheckClient = original })
+	credentials, err := json.Marshal(map[string]any{"active": "a", "accounts": []map[string]any{
+		{"client_id": "a", "subject": "a-user", "access_token": "a-token", "refresh_token": "a-refresh", "expires_at": time.Now().Add(time.Hour)},
+		{"client_id": "b", "subject": "b-user", "access_token": "b-token", "refresh_token": "b-refresh", "expires_at": time.Now().Add(time.Hour)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeServerSettingsStore{values: map[string]string{"ai.auth_mode": llm.AuthModeChatGPT, "ai.chat_model": "gpt-6.1-sol", chatgpt.CredentialsKey: string(credentials)}}
+	service := chatgpt.NewService(settingsCheckChatGPTStore{store})
+	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+		return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
+			if cfg.ChatGPTTokenSource == nil || cfg.ChatGPTTokenRejected == nil || cfg.ChatGPTPlanRejected == nil || cfg.ChatGPTUsageLimited == nil || cfg.ChatGPTUsageVerified == nil {
+				t.Fatal("admin check omitted credential source or rejection callback")
+			}
+			source, err := cfg.ChatGPTTokenSource(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Simulate an account activation completed by another node. Selection
+			// catalog validation is covered by the credential service tests.
+			if err := (settingsCheckChatGPTStore{store}).UpdateValueAtomic(ctx, chatgpt.CredentialsKey, func(raw string) (string, error) {
+				var next map[string]any
+				if err := json.Unmarshal([]byte(raw), &next); err != nil {
+					return "", err
+				}
+				next["active"] = "b"
+				data, err := json.Marshal(next)
+				return string(data), err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if token, err := source(ctx); err != nil || token != "a-token" {
+				t.Fatalf("admin source switched account: %q, %v", token, err)
+			}
+			if err := cfg.ChatGPTTokenRejected(ctx, "a-token", true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source(ctx); !errors.Is(err, chatgpt.ErrSignInRequired) {
+				t.Fatalf("admin source ignored final rejection: %v", err)
+			}
+			nextConfig, err := service.CheckTextConfig(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := nextConfig.ChatGPTTokenSource(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if token, err := next(ctx); err != nil || token != "b-token" {
+				t.Fatalf("admin rejection changed new active account: %q, %v", token, err)
+			}
+			return `{"status":"ok"}`, nil
+		}}
+	}
+	h := &AdminHandler{SettingsRepo: store, ChatGPT: service}
+	if result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil); err != nil || !result.Success {
+		t.Fatalf("admin check=%+v, %v", result, err)
+	}
+	store.values[chatgpt.CredentialsKey] = string(credentials)
+	router := chi.NewRouter()
+	router.Post("/api/v1/admin/settings/check/{kind}", h.HandleCheckSettingsConnection)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/check/ai_chat", strings.NewReader(`{}`)))
+	var legacy connectionCheckResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &legacy); err != nil || recorder.Code != http.StatusOK || !legacy.Success {
+		t.Fatalf("legacy check=%d %s, %v", recorder.Code, recorder.Body.String(), err)
+	}
+}
+
+func TestChatGPTSettingsCheckDeliberatelyRechecksPausedUsage(t *testing.T) {
+	original := newAdminAISettingsCheckClient
+	t.Cleanup(func() { newAdminAISettingsCheckClient = original })
+	for _, legacy := range []bool{false, true} {
+		for _, success := range []bool{false, true} {
+			t.Run(fmt.Sprintf("legacy=%t success=%t", legacy, success), func(t *testing.T) {
+				credentials, err := json.Marshal(map[string]any{"active": "a", "accounts": []map[string]any{
+					{"client_id": "a", "access_token": "a-token", "refresh_token": "a-refresh", "expires_at": time.Now().Add(time.Hour), "usage_limited": true},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := &fakeServerSettingsStore{values: map[string]string{"ai.auth_mode": llm.AuthModeChatGPT, "ai.chat_model": "gpt-6-luna", chatgpt.CredentialsKey: string(credentials)}}
+				service := chatgpt.NewService(settingsCheckChatGPTStore{store})
+				newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+					return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
+						if cfg.ChatGPTUsageLimited == nil || cfg.ChatGPTUsageVerified == nil {
+							t.Fatal("usage callbacks missing")
+						}
+						source, err := cfg.ChatGPTTokenSource(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						token, err := source(ctx)
+						if err != nil || token != "a-token" {
+							t.Fatalf("check cannot bypass usage pause: %q, %v", token, err)
+						}
+						if !success {
+							if err := cfg.ChatGPTUsageLimited(ctx, token); err != nil {
+								t.Fatal(err)
+							}
+							return "", llm.ErrQuotaExhausted
+						}
+						if err := cfg.ChatGPTUsageVerified(ctx, token); err != nil {
+							t.Fatal(err)
+						}
+						return `{"status":"ok"}`, nil
+					}}
+				}
+				h := &AdminHandler{SettingsRepo: store, ChatGPT: service}
+				var result connectionCheckResponse
+				if legacy {
+					router := chi.NewRouter()
+					router.Post("/api/v1/admin/settings/check/{kind}", h.HandleCheckSettingsConnection)
+					recorder := httptest.NewRecorder()
+					router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/check/ai_chat", strings.NewReader(`{}`)))
+					if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil || recorder.Code != http.StatusOK {
+						t.Fatalf("legacy check: %s, %v", recorder.Body.String(), err)
+					}
+				} else {
+					checked, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result.Success = checked.Success
+				}
+				state, err := service.Status(t.Context())
+				if err != nil || result.Success != success || state.Accounts[0].Connected != success || state.Accounts[0].UsageLimited == success {
+					t.Fatalf("check=%+v, state=%+v, err=%v", result, state, err)
+				}
+			})
 		}
 	}
 }

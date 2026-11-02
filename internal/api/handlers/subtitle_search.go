@@ -54,6 +54,8 @@ type MediaFileMetadata struct {
 	IMDbID     string
 	Season     int
 	Episode    int
+	// EpisodeEnd is the last episode a multi-episode file covers, or 0.
+	EpisodeEnd int
 }
 
 // SubtitleSearchHandler handles user-facing subtitle search operations.
@@ -399,10 +401,12 @@ func (h *SubtitleSearchHandler) HandleDelete(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	claims := apimw.GetClaims(r.Context())
-	isAdmin := claims != nil && claims.Role == "admin"
-	isOwner := sub.DownloadedBy != nil && claims != nil && *sub.DownloadedBy == claims.UserID
-	if !isAdmin && !isOwner {
+	allowed, err := mayDeleteSubtitle(r.Context(), sub)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+		return
+	}
+	if !allowed {
 		writeError(w, http.StatusForbidden, "forbidden", "Not authorized to delete this subtitle")
 		return
 	}

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeasonEpisodeGrid from "./SeasonEpisodeGrid";
 
 const capturedMenuProps: Record<string, unknown>[] = [];
+const spoilerPrefs = { hideImages: false, hideOverviews: false };
 
 vi.mock("@/components/MediaItemMenu", () => ({
   default: (props: Record<string, unknown>) => {
@@ -12,8 +13,18 @@ vi.mock("@/components/MediaItemMenu", () => ({
   },
 }));
 
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`}>Play {title}</a>
+  ),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null, quickActionMode: "watched" }),
+}));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -23,9 +34,51 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    spoilerPrefs.hideImages = false;
+    spoilerPrefs.hideOverviews = false;
   });
 
-  it("marks an episode only when none of its files can be read", () => {
+  it("hides the still and overview only for episodes the profile has not started", () => {
+    spoilerPrefs.hideImages = true;
+    spoilerPrefs.hideOverviews = true;
+    const episode = (n: number, userData?: Record<string, unknown>) => ({
+      content_id: `ep-${n}`,
+      season_number: 1,
+      episode_number: n,
+      title: `Episode title ${n}`,
+      overview: `Overview ${n}`,
+      air_date: null,
+      runtime: 42,
+      still_url: `https://img.test/still-${n}.jpg`,
+      still_thumbhash: "",
+      files: [],
+      user_data: userData as never,
+    });
+    render(
+      <MemoryRouter>
+        <SeasonEpisodeGrid
+          isLoading={false}
+          episodes={[
+            episode(1, { played: true }),
+            episode(2, { played: false, is_in_progress: true, position_seconds: 300 }),
+            episode(3, { played: false }),
+            episode(4),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    for (const n of [1, 2]) {
+      expect(screen.getByAltText(`Episode title ${n}`)).not.toHaveClass("blur-xl");
+      expect(screen.getByText(`Overview ${n}`)).toBeInTheDocument();
+    }
+    for (const n of [3, 4]) {
+      expect(screen.getByAltText(`Episode title ${n}`)).toHaveClass("blur-xl");
+      expect(screen.queryByText(`Overview ${n}`)).not.toBeInTheDocument();
+    }
+  });
+
+  it("marks an episode and drops its play button only when none of its files can be read", () => {
     const file = {
       resolution: "",
       codec_video: "",
@@ -57,6 +110,7 @@ describe("SeasonEpisodeGrid", () => {
               { ...file, file_id: 5, resolution: "1080p" },
             ]),
             episode("ep-5", 5, [{ ...file, file_id: 6, resolution: "1080p" }]),
+            episode("ep-6", 6, []),
           ]}
         />
       </MemoryRouter>,
@@ -79,8 +133,14 @@ describe("SeasonEpisodeGrid", () => {
     // Only episode 3 has no readable version; episode 4 still plays its
     // second file.
     expect(screen.getAllByText("Damaged file")).toHaveLength(1);
-    const card = screen.getByText("Episode title 3").closest(".media-card");
+    const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
+
+    // Quick play needs a readable file; an episode without files has nothing
+    // to play either.
+    expect(screen.getAllByRole("link", { name: /^Play / }).map((link) => link.textContent)).toEqual(
+      ["Play Episode title 4", "Play Episode title 5"],
+    );
   });
 });

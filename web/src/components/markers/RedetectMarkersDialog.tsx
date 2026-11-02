@@ -118,7 +118,7 @@ export default function RedetectMarkersDialog({
         <div className="flex items-center justify-end gap-3">
           {anyOff && (
             <Link
-              to="/admin/settings/library"
+              to="/admin/settings/playback"
               className="text-muted-foreground hover:text-foreground mr-auto text-sm underline underline-offset-4 transition-colors"
             >
               Change marker settings

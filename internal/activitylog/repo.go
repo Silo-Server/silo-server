@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,25 +29,13 @@ type IPUserEntry struct {
 	RequestCount int       `json:"request_count"`
 }
 
-type AuditEntry struct {
-	ID                 int64     `json:"id"`
-	Timestamp          time.Time `json:"timestamp"`
-	ClientIP           string    `json:"client_ip"`
-	UserID             *int      `json:"user_id,omitempty"`
-	ImpersonatorUserID *int      `json:"impersonator_user_id,omitempty"`
-	SessionID          string    `json:"session_id,omitempty"`
-	PlaybackSessionID  string    `json:"playback_session_id,omitempty"`
-	RequestID          string    `json:"request_id,omitempty"`
-	NodeID             string    `json:"node_id,omitempty"`
-	Method             string    `json:"method"`
-	Path               string    `json:"path"`
-	PathPattern        string    `json:"path_pattern,omitempty"`
-	StatusCode         int       `json:"status_code"`
-	UserAgent          string    `json:"user_agent,omitempty"`
-	DurationMs         int       `json:"duration_ms"`
-}
+type AuditEntry = auditmutation.Entry
 
 type ListOptions struct {
+	Action            string
+	TargetType        string
+	TargetID          string
+	ActorUserID       *int
 	From              *time.Time
 	To                *time.Time
 	Method            string
@@ -187,6 +177,26 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 		args = append(args, opts.PlaybackSessionID)
 		argIdx++
 	}
+	// Explicit nonempty predicates preserve partial-index eligibility even
+	// when PostgreSQL chooses a generic prepared plan for bound filter values.
+	if opts.Action != "" {
+		conditions = append(conditions, "action <> ''")
+	}
+	if opts.TargetType != "" || opts.TargetID != "" {
+		conditions = append(conditions, "(target_type <> '' OR target_id <> '')")
+	}
+	for _, filter := range []struct{ column, value string }{{"action", opts.Action}, {"target_type", opts.TargetType}, {"target_id", opts.TargetID}} {
+		if filter.value != "" {
+			conditions = append(conditions, fmt.Sprintf("%s = $%d", filter.column, argIdx))
+			args = append(args, filter.value)
+			argIdx++
+		}
+	}
+	if opts.ActorUserID != nil {
+		conditions = append(conditions, fmt.Sprintf("(impersonator_user_id = $%d OR (impersonator_user_id IS NULL AND user_id = $%d))", argIdx, argIdx))
+		args = append(args, *opts.ActorUserID)
+		argIdx++
+	}
 	if opts.Cursor != "" {
 		cursorTs, cursorID, err := decodeCursor(opts.Cursor)
 		if err != nil {
@@ -199,7 +209,7 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''),
-		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)
+		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0), action, target_type, target_id, changes
 		FROM activity_log
 		WHERE %s
 		ORDER BY timestamp DESC, id DESC
@@ -232,6 +242,7 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 			&entry.StatusCode,
 			&entry.UserAgent,
 			&entry.DurationMs,
+			&entry.Action, &entry.TargetType, &entry.TargetID, &entry.Changes,
 		); err != nil {
 			return ListResult{}, fmt.Errorf("scan activity log row: %w", err)
 		}

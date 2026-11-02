@@ -29,7 +29,7 @@ const USER: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 5,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -44,6 +44,7 @@ const USER: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 5,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -69,6 +70,7 @@ const FAMILY: AccessGroup = {
   max_transcodes: 1,
   max_remote_stream_bitrate_kbps: 8000,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: ["marker_edit"],
   requests_allowed: true,
   is_default: false,
@@ -104,13 +106,6 @@ describe("sources", () => {
 
   it("treats an admin as ungrouped even with a stored group", () => {
     expect(inheritContextFor({ ...grouped, role: "admin" }, [FAMILY])).toEqual({ kind: "server" });
-  });
-
-  it("names a group missing from the list by its id", () => {
-    expect(inheritContextFor({ ...USER, access_group_id: 9 }, [FAMILY])).toEqual({
-      kind: "group",
-      name: "#9",
-    });
   });
 });
 

@@ -24,6 +24,9 @@ type ViewerPreferences struct {
 	// NextUpMode is ui.next_up_mode. It rides along so home-section requests
 	// can read it from the resolved scope instead of resolving it again.
 	NextUpMode string
+	// NextUpNewReleasesFirst is ui.next_up_new_releases_first, carried for the
+	// same reason.
+	NextUpNewReleasesFirst bool
 	// Degraded reports that the read failed and the values are the contract
 	// defaults rather than the profile's own.
 	Degraded bool
@@ -34,15 +37,20 @@ type ViewerPreferences struct {
 // without a profile has none and costs no read. A failed read degrades to the
 // contract defaults: hidden libraries are a browsing preference, not an access
 // control.
+//
+// adminDefaults supplies the administrator's server-wide defaults for the keys
+// that declare admin_default (the Next Up keys); nil resolves every default
+// from the contract. Production callers pass the node's shared
+// *config.AdminDefaults so Home, Jellyfin clients and the settings pages agree.
 func ResolveViewerPreferences(
-	ctx context.Context, store userstore.UserStore, profileID string,
+	ctx context.Context, store userstore.UserStore, adminDefaults settingsresolve.ServerSettings, profileID string,
 ) ViewerPreferences {
 	profileID = strings.TrimSpace(profileID)
 	if store == nil || profileID == "" {
 		return ViewerPreferences{}
 	}
 
-	preferences, err := ResolveViewerPreferencesStrict(ctx, store, profileID)
+	preferences, err := ResolveViewerPreferencesStrict(ctx, store, adminDefaults, profileID)
 	if err != nil {
 		slog.WarnContext(ctx, "viewer preference resolution degraded", "component", "access", "profile_id", profileID, "error", err)
 		return ViewerPreferences{Degraded: true}
@@ -57,18 +65,21 @@ type ViewerPreferenceReader interface {
 
 // ResolveViewerPreferencesStrict retains canonical precedence but propagates
 // dependency failures instead of weakening authority through a fallback.
-func ResolveViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceReader, profileID string) (ViewerPreferences, error) {
+func ResolveViewerPreferencesStrict(
+	ctx context.Context, store ViewerPreferenceReader, adminDefaults settingsresolve.ServerSettings, profileID string,
+) (ViewerPreferences, error) {
 	contract, err := settingscontract.Load()
 	if err != nil {
 		return ViewerPreferences{}, err
 	}
-	values, err := settingsresolve.New(contract).Resolve(ctx, store,
+	values, err := settingsresolve.New(contract).WithAdminDefaults(adminDefaults).Resolve(ctx, store,
 		settingsresolve.Context{ProfileID: profileID},
 		[]string{
 			settingskeys.UiDisabledLibraryIds,
 			settingskeys.CatalogMetadataLanguage,
 			settingskeys.CatalogMetadataLanguageOverrides,
 			settingskeys.UiNextUpMode,
+			settingskeys.UiNextUpNewReleasesFirst,
 		}, nil)
 	if err != nil {
 		return ViewerPreferences{}, err
@@ -91,6 +102,8 @@ func ResolveViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceR
 			if json.Unmarshal(value.Value, &mode) == nil {
 				out.NextUpMode = strings.TrimSpace(mode)
 			}
+		case settingskeys.UiNextUpNewReleasesFirst:
+			_ = json.Unmarshal(value.Value, &out.NextUpNewReleasesFirst)
 		}
 	}
 	return out, nil

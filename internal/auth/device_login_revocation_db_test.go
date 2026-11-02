@@ -265,5 +265,5 @@ func approveRevocationDevice(ctx context.Context, devices *DeviceLoginService, s
 	if profileID == "" {
 		return devices.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID)
 	}
-	return devices.ApproveRemotePlayback(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID, profileID)
+	return devices.ApproveForProfile(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID, profileID)
 }

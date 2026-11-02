@@ -1,0 +1,316 @@
+{
+  "themes": [
+    {
+      "key": "valentines",
+      "name": "Valentine's Day",
+      "when": "Feb 7–14",
+      "start": "02-07",
+      "end": "02-14",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "romcoms",
+          "name": "Rom-coms",
+          "title": "Valentine's Rom-Coms",
+          "description": "The best-reviewed romantic comedies.",
+          "list_url": "https://lists.example.test/lists/hdlists/romantic-comedies-rotten-tomatoes-top-rated"
+        },
+        {
+          "key": "favorites",
+          "name": "Valentine's favorites",
+          "title": "Valentine's Favorites",
+          "description": "Popular date-night picks.",
+          "list_url": "https://lists.example.test/lists/linvo/valentines-day-popular-movies"
+        },
+        {
+          "key": "romantic_dramas",
+          "name": "Romantic dramas",
+          "title": "Romantic Dramas",
+          "description": "Sweeping love stories with a few tears.",
+          "list_url": "https://lists.example.test/lists/themtsil/romantic-dramas"
+        },
+        {
+          "key": "love_stories",
+          "name": "Classic love stories",
+          "title": "Classic Love Stories",
+          "description": "Casablanca, Titanic and the other all-time romances.",
+          "list_url": "https://lists.example.test/lists/tob-t/love-story"
+        }
+      ]
+    },
+    {
+      "key": "st_patricks",
+      "name": "St. Patrick's Day",
+      "when": "Mar 15–17",
+      "start": "03-15",
+      "end": "03-17",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "irish_film",
+          "name": "Irish film",
+          "title": "Irish Film",
+          "description": "Films from and about Ireland.",
+          "list_url": "https://lists.example.test/lists/irljidel/irish-interest-movies"
+        },
+        {
+          "key": "irish_tv",
+          "name": "Irish TV",
+          "title": "Irish TV",
+          "description": "Series from and about Ireland.",
+          "list_url": "https://lists.example.test/lists/irljidel/irish-interest-tv-shows"
+        }
+      ]
+    },
+    {
+      "key": "easter",
+      "name": "Easter",
+      "when": "Palm Sunday to Easter Monday",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "family",
+          "name": "Easter movies",
+          "title": "Easter Movies",
+          "description": "Springtime family favorites and Easter classics.",
+          "list_url": "https://lists.example.test/lists/bsm-venger/easter-movies-e78nzwjk7k"
+        },
+        {
+          "key": "faith",
+          "name": "Faith and Easter stories",
+          "title": "Easter Stories",
+          "description": "Biblical epics and stories of faith.",
+          "list_url": "https://lists.example.test/lists/bluejack92/easter-by-antares"
+        }
+      ]
+    },
+    {
+      "key": "summer_blockbuster",
+      "name": "Summer",
+      "when": "June to August",
+      "start": "06-01",
+      "end": "08-31",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "blockbusters",
+          "name": "Blockbusters",
+          "title": "Summer Blockbusters",
+          "description": "The biggest box-office hits.",
+          "list_url": "https://lists.example.test/lists/drovur/box-office-giants"
+        },
+        {
+          "key": "classic_summer",
+          "name": "Classic summer movies",
+          "title": "Classic Summer Movies",
+          "description": "Summer releases that defined the season, from Jaws to Independence Day.",
+          "list_url": "https://lists.example.test/lists/heavymgs/summer-movies"
+        },
+        {
+          "key": "nostalgia",
+          "name": "Summer nostalgia",
+          "title": "Summer Nostalgia",
+          "description": "Long days, summer camp and coming of age.",
+          "list_url": "https://lists.example.test/lists/reachingout/summer-movies"
+        }
+      ]
+    },
+    {
+      "key": "halloween",
+      "name": "Halloween",
+      "when": "October",
+      "start": "10-01",
+      "end": "10-31",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "favorites",
+          "name": "Halloween favorites",
+          "title": "Halloween Favorites",
+          "description": "The best-loved Halloween movies, spooky and scary.",
+          "list_url": "https://lists.example.test/lists/hdlists/halloween-movies-the-best-of-all-time"
+        },
+        {
+          "key": "family",
+          "name": "Family Halloween",
+          "title": "Family Halloween",
+          "description": "Spooky fun for all ages.",
+          "list_url": "https://lists.example.test/lists/purple_smurf/halloween-family2"
+        },
+        {
+          "key": "horror",
+          "name": "Halloween horror",
+          "title": "Halloween Horror",
+          "description": "Slashers, hauntings and horror classics.",
+          "list_url": "https://lists.example.test/lists/swansongfunds/horror-halloween"
+        },
+        {
+          "key": "animated",
+          "name": "Animated Halloween",
+          "title": "Animated Halloween",
+          "description": "Animated spooky favorites.",
+          "list_url": "https://lists.example.test/lists/swansongfunds/halloween-animation"
+        },
+        {
+          "key": "tv",
+          "name": "Halloween TV",
+          "title": "Halloween TV",
+          "description": "Spooky series to binge.",
+          "list_url": "https://lists.example.test/lists/rootednode/halloween-tv"
+        }
+      ]
+    },
+    {
+      "key": "thanksgiving",
+      "name": "Thanksgiving",
+      "when": "Nov 22–30",
+      "start": "11-22",
+      "end": "11-30",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "favorites",
+          "name": "Thanksgiving movies",
+          "title": "Thanksgiving Movies",
+          "description": "Films set around the Thanksgiving table.",
+          "list_url": "https://lists.example.test/lists/bluejack92/thanksgiving-by-antares"
+        },
+        {
+          "key": "feel_good",
+          "name": "Feel-good favorites",
+          "title": "Feel-Good Favorites",
+          "description": "Heartwarming picks for the long weekend.",
+          "list_url": "https://lists.example.test/lists/netthier/thanksgiving-movies"
+        }
+      ]
+    },
+    {
+      "key": "christmas",
+      "name": "Christmas",
+      "when": "December",
+      "start": "12-01",
+      "end": "12-31",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "favorites",
+          "name": "Christmas favorites",
+          "title": "Christmas Favorites",
+          "description": "The most-watched Christmas movies.",
+          "list_url": "https://lists.example.test/lists/jbeasley74/christmas-movies"
+        },
+        {
+          "key": "family",
+          "name": "Family Christmas",
+          "title": "Family Christmas",
+          "description": "Christmas movies for the whole family.",
+          "list_url": "https://lists.example.test/lists/paperarmour/christmas-kids-movies"
+        },
+        {
+          "key": "classics",
+          "name": "Christmas classics",
+          "title": "Christmas Classics",
+          "description": "Golden-age holiday films.",
+          "list_url": "https://lists.example.test/lists/momanch/oldies-christmas-classics"
+        },
+        {
+          "key": "romcoms",
+          "name": "Christmas rom-coms",
+          "title": "Christmas Rom-Coms",
+          "description": "Romantic comedies set at Christmas.",
+          "list_url": "https://lists.example.test/lists/momanch/christmas-romantic-comedies"
+        },
+        {
+          "key": "comedies",
+          "name": "Christmas comedies",
+          "title": "Christmas Comedies",
+          "description": "Holiday laughs.",
+          "list_url": "https://lists.example.test/lists/momanch/christmas-movie-comedies"
+        },
+        {
+          "key": "hallmark",
+          "name": "Hallmark Christmas",
+          "title": "Hallmark Christmas",
+          "description": "Hallmark's original Christmas movies.",
+          "list_url": "https://lists.example.test/lists/vectrexgamer/hallmark-original-christmas-movies"
+        }
+      ]
+    },
+    {
+      "key": "new_year",
+      "name": "New Year's",
+      "when": "Dec 26–Jan 1",
+      "start": "12-26",
+      "end": "01-01",
+      "dates_editable": true,
+      "vibes": [
+        {
+          "key": "favorites",
+          "name": "New Year's movies",
+          "title": "New Year's Movies",
+          "description": "Films that ring in the new year.",
+          "list_url": "https://lists.example.test/lists/netthier/new-year-movies"
+        }
+      ]
+    },
+    {
+      "key": "saturday_morning",
+      "name": "Saturday Morning",
+      "when": "Saturdays before 1pm",
+      "dates_editable": false,
+      "vibes": [
+        {
+          "key": "cartoons",
+          "name": "Saturday morning cartoons",
+          "title": "Saturday Morning Cartoons",
+          "description": "Classic weekend cartoons.",
+          "list_url": "https://lists.example.test/lists/arnx1922/saturday-morning-cartoons-b75bnxjjej"
+        },
+        {
+          "key": "nineties",
+          "name": "90s cartoons",
+          "title": "90s Saturday Mornings",
+          "description": "The cartoons of the 1990s.",
+          "list_url": "https://lists.example.test/lists/smackdaddy17/saturday-morning-cartoons"
+        },
+        {
+          "key": "modern",
+          "name": "Modern cartoons",
+          "title": "Saturday Morning Favorites",
+          "description": "Animated series from Batman to Gravity Falls.",
+          "list_url": "https://lists.example.test/lists/savini-andrew-gmail-com/saturday-morning-all-time"
+        }
+      ]
+    },
+    {
+      "key": "family_movie_night",
+      "name": "Family Movie Night",
+      "when": "Friday and Saturday evenings",
+      "dates_editable": false,
+      "vibes": [
+        {
+          "key": "new",
+          "name": "New and popular",
+          "title": "Family Movie Night",
+          "description": "Recent family hits.",
+          "list_url": "https://lists.example.test/lists/josh_bergeron/sunday-night-family-movies"
+        },
+        {
+          "key": "favorites",
+          "name": "Family favorites",
+          "title": "Family Favorites",
+          "description": "Family films from The Goonies to Coco.",
+          "list_url": "https://lists.example.test/lists/jaredmecham/top-family-movies-1980"
+        },
+        {
+          "key": "live_action",
+          "name": "Live-action family",
+          "title": "Family Movie Night",
+          "description": "Family films without the animation.",
+          "list_url": "https://lists.example.test/lists/paperarmour/family-movies-animation-excluded"
+        }
+      ]
+    }
+  ],
+  "max_custom_holidays": 12
+}

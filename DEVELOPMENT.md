@@ -9,8 +9,8 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Git, Make, and OpenSSL
 - Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and testcontainers)
 - Go 1.26.4+
-- Node.js 22+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
-  `silo compat-web install`, or the admin settings) needs Node.js 24+ for Jellyfin Web 12.x.
+- Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
+  `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
 - PostgreSQL 18 with pgvector
 - Redis
 - FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
@@ -23,8 +23,9 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Local development
 
-Source builds use [docker-compose.yml](docker-compose.yml) only for PostgreSQL
-and Redis; the deploy-oriented stack in the README is separate.
+Source builds use only the PostgreSQL and Redis services of
+[dev/compose.yml](dev/compose.yml); the README's `docker-compose.yml`
+runs the published omnibus image instead.
 
 ```sh
 # Create the local bootstrap configuration
@@ -36,7 +37,7 @@ printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
   'redis://localhost:6379' >> .env
 
 # Start local PostgreSQL and Redis
-docker compose up -d postgres redis
+docker compose -f dev/compose.yml up -d postgres redis
 
 # Install frontend dependencies and create the embedded-frontend test stub
 cd web
@@ -44,6 +45,13 @@ pnpm install --frozen-lockfile
 cd ..
 make embed-stub
 ```
+
+`dev/compose.yml` runs as the `silo-dev` Compose project with named
+volumes, so it does not reuse a development database that the earlier
+`docker compose up -d postgres redis` kept under `SILO_DATA_ROOT/postgres`.
+Stop those containers first (`docker compose down` with the earlier file), since
+they hold ports 5432 and 6379, and restore a `pg_dump` of the old database into
+the new one if you need its data.
 
 Run the backend and frontend in separate terminals, backend first:
 
@@ -142,6 +150,11 @@ that can hold millions of rows. Keep locks on existing tables short:
   before creating a new index: a copy left by an interrupted run is invalid, and
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS` would keep it, so the planner would
   never use the index.
+- When a migration replaces one index with another, a retry must not drop the
+  replacement: goose records the version only after the last statement, so a
+  run that already dropped the old index can run again. Use a Go migration
+  that builds through `ensureIndexConcurrently` in `internal/database`, which
+  drops only an invalid copy (`internal/database/push_attempt_key_migration.go`).
 - Add foreign keys and `CHECK` constraints to existing tables as `NOT VALID`,
   and run `VALIDATE CONSTRAINT` only after that commits: in a later migration,
   or as a separate statement in a `NO TRANSACTION` file. Inside one

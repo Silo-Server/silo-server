@@ -1,7 +1,8 @@
+import type { LucideIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PreviewState } from "@/hooks/queries/homeRows/useRowPreview";
 import { PREVIEW_ITEM_LIMIT } from "@/hooks/queries/homeRows/useRowPreview";
-import { rowKindGroup } from "@/lib/homeRows/catalog";
+import { rowKindGroup, type RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { PosterTile } from "@/components/calm/PosterTile";
 import { GROUP_ICONS, GROUP_TINTS } from "../rowIcons";
@@ -33,6 +34,9 @@ export function RowPreview({
   liveLabel,
   offText,
   countUpTo,
+  rule,
+  icon,
+  group: groupOverride,
 }: {
   title: string;
   sectionType: string;
@@ -45,10 +49,16 @@ export function RowPreview({
    * match and how many of them (up to this) the row shows.
    */
   countUpTo?: number;
+  /** What a ready-made row looks for, said when nothing matches it. */
+  rule?: string;
+  /** The icon and tint for rows that aren't Home row kinds. */
+  icon?: LucideIcon;
+  group?: RowGroup;
 }) {
-  const group = rowKindGroup(sectionType);
-  const Icon = GROUP_ICONS[group];
+  const group = groupOverride ?? rowKindGroup(sectionType);
+  const Icon = icon ?? GROUP_ICONS[group];
   const message = emptyMessage(state, offText);
+  const lookFor = state.status === "ready" && state.items.length === 0 ? rule : undefined;
   return (
     <section
       aria-label={`Preview of ${title || "this row"}`}
@@ -95,9 +105,10 @@ export function RowPreview({
           >
             <Icon className="size-5" />
           </span>
-          <p className="text-muted-foreground text-sm" role="status">
-            {message}
-          </p>
+          <div className="text-muted-foreground text-sm" role="status">
+            <p>{message}</p>
+            {lookFor ? <p className="mt-0.5 text-[13px]">Looks for: {lookFor}</p> : null}
+          </div>
         </div>
       ) : (
         <div className="flex gap-2.5 overflow-hidden">

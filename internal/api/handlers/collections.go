@@ -41,6 +41,10 @@ type CollectionHandler struct {
 	// uploaded or imported poster shows; nil when artwork storage is not
 	// configured.
 	Collages *catalog.PersonalCollectionCollages
+	// MemberCounts counts the members a viewer sees in hand-picked and
+	// imported collections and remembers the counts between reads; nil
+	// counts on every read.
+	MemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 // itemPosterSigner resolves item poster paths to delivery URLs in one batch;
@@ -674,11 +678,8 @@ func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, pat
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
 	}
 	if h.ArtworkResolver == nil {
 		return ""

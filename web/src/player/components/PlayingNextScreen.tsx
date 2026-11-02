@@ -5,10 +5,15 @@ import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
-import { preferredDateLocale } from "@/lib/datetime";
+import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 
 interface PlayingNextScreenProps {
   seriesId?: string;
@@ -49,6 +54,7 @@ export function PlayingNextScreen({
   // Shared with Settings → Playback: both surfaces edit the same profile row,
   // so a choice made here is the one that screen shows and vice versa.
   const { enabled: autoplay, setEnabled: setAutoplay } = useAutoPlayNextSetting();
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
 
   const toggleAutoplay = useCallback(() => {
     void setAutoplay(!autoplay);
@@ -129,9 +135,14 @@ export function PlayingNextScreen({
   const progress = videoEnded && autoplay && nextEpisode ? secondsRemaining / COUNTDOWN_SECONDS : 0;
   const strokeDashoffset = circumference * (1 - progress);
 
+  const nextAirDate = parseCalendarDate(nextEpisode?.airDate);
   const episodeStillUrl = nextEpisode?.stillUrl;
   const episodeThumbhash = nextEpisode?.stillThumbhash;
   const blurPlaceholder = episodeThumbhash ? decodeThumbhash(episodeThumbhash) : undefined;
+  const nextUnwatched = !nextEpisode?.isMovie && isEpisodeUnwatched(nextEpisode?.watchState);
+  const hideStill =
+    spoilerPrefs.hideImages && nextUnwatched && isEpisodeStill(nextEpisode?.stillIsEpisodeStill);
+  const hideOverview = spoilerPrefs.hideOverviews && nextUnwatched;
   const endOfSeriesHeading = seriesTitle ? `You've finished ${seriesTitle}` : "End of playback";
 
   return (
@@ -206,7 +217,7 @@ export function PlayingNextScreen({
                   <img
                     src={episodeStillUrl}
                     alt={nextEpisode.title}
-                    className="h-full w-full object-cover"
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
                     style={
                       blurPlaceholder
                         ? { backgroundImage: `url(${blurPlaceholder})`, backgroundSize: "cover" }
@@ -214,7 +225,11 @@ export function PlayingNextScreen({
                     }
                   />
                 ) : blurPlaceholder ? (
-                  <img src={blurPlaceholder} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={blurPlaceholder}
+                    alt=""
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-white/5 text-sm text-white/30">
                     No Preview
@@ -241,27 +256,32 @@ export function PlayingNextScreen({
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-[11px] text-white/40 sm:text-xs">
-                  {nextEpisode.airDate && (
+                  {nextAirDate && (
                     <span>
-                      {new Date(nextEpisode.airDate).toLocaleDateString(preferredDateLocale(), {
+                      {nextAirDate.toLocaleDateString(preferredDateLocale(), {
                         year: "numeric",
                         month: "long",
                         day: "numeric",
                       })}
                     </span>
                   )}
-                  {nextEpisode.airDate && nextEpisode.runtime > 0 && (
+                  {nextAirDate && nextEpisode.runtime > 0 && (
                     <span className="text-white/20">&bull;</span>
                   )}
                   {nextEpisode.runtime > 0 && (
                     <span>{formatRuntimeMinutes(nextEpisode.runtime)}</span>
                   )}
                 </div>
-                {nextEpisode.overview && (
+                {nextEpisode.overview && !hideOverview && (
                   <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/50 sm:text-sm">
                     {nextEpisode.overview}
                   </p>
                 )}
+                {nextEpisode.overview &&
+                  !hideOverview &&
+                  hasMachineTranslation(nextEpisode.machineTranslatedFields) && (
+                    <MachineTranslatedLabel className="mt-1" />
+                  )}
               </div>
 
               {/* Actions */}

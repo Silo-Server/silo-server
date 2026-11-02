@@ -19,7 +19,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -99,14 +101,31 @@ type Store interface {
 	) ([]userstore.SettingValue, error)
 }
 
+// ServerSettings is the read surface for administrator defaults. It is
+// satisfied by the server settings repositories and by a fake in tests. A key
+// without a value reads as "".
+type ServerSettings interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
 // Resolver resolves against one contract.
 type Resolver struct {
 	contract *settingscontract.Manifest
+	// serverSettings holds administrator defaults for definitions that declare
+	// admin_default. Nil resolves every default from the contract.
+	serverSettings ServerSettings
 }
 
 // New returns a Resolver over the given contract.
 func New(contract *settingscontract.Manifest) *Resolver {
 	return &Resolver{contract: contract}
+}
+
+// WithAdminDefaults returns a Resolver that lets the administrator's defaults
+// stand in for default_value on definitions declaring admin_default. Only
+// those definitions cost a read, and only when one of them is requested.
+func (r *Resolver) WithAdminDefaults(settings ServerSettings) *Resolver {
+	return &Resolver{contract: r.contract, serverSettings: settings}
 }
 
 // Resolve returns the effective value for each requested key.
@@ -143,7 +162,7 @@ func (r *Resolver) Resolve(
 		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
 	}
 
-	return r.rank(known, defs, stored, rc, constraints), nil
+	return r.rank(known, defs, stored, r.adminDefaults(ctx, known, defs), rc, constraints), nil
 }
 
 // ResolveContexts resolves the same keys for several content contexts using
@@ -191,9 +210,10 @@ func (r *Resolver) ResolveContexts(
 		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
 	}
 
+	defaults := r.adminDefaults(ctx, known, defs)
 	out := make([][]Effective, len(contexts))
 	for i, rc := range contexts {
-		out[i] = r.rank(known, defs, stored, rc, constraints)
+		out[i] = r.rank(known, defs, stored, defaults, rc, constraints)
 	}
 	return out, nil
 }
@@ -237,12 +257,13 @@ func (r *Resolver) ResolveProfiles(
 		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
 	}
 
+	defaults := r.adminDefaults(ctx, known, defs)
 	out := make(map[string][]Effective, len(profileIDs))
 	for _, profileID := range profileIDs {
 		if _, seen := out[profileID]; seen {
 			continue
 		}
-		out[profileID] = r.rank(known, defs, stored, Context{ProfileID: profileID}, constraints)
+		out[profileID] = r.rank(known, defs, stored, defaults, Context{ProfileID: profileID}, constraints)
 	}
 	return out, nil
 }
@@ -268,13 +289,56 @@ func (r *Resolver) knownKeys(keys []string) ([]string, map[string]*settingscontr
 	return known, defs
 }
 
+// adminDefaults reads the administrator's defaults for the requested keys that
+// declare admin_default. A failed read or a stored value the definition no
+// longer accepts falls back to default_value: a default is a starting look,
+// and a settings read must not fail over one.
+func (r *Resolver) adminDefaults(
+	ctx context.Context,
+	known []string,
+	defs map[string]*settingscontract.Definition,
+) map[string]json.RawMessage {
+	if r.serverSettings == nil {
+		return nil
+	}
+	var out map[string]json.RawMessage
+	for _, key := range known {
+		def := defs[key]
+		if !def.AdminDefault {
+			continue
+		}
+		value, err := r.serverSettings.Get(ctx, settingscontract.AdminDefaultSettingKey(key))
+		if err != nil {
+			slog.WarnContext(ctx, "using the contract default: reading the administrator default failed",
+				"component", "settingsresolve", "key", key, "error", err)
+			continue
+		}
+		raw := json.RawMessage(strings.TrimSpace(value))
+		if len(raw) == 0 {
+			continue
+		}
+		if err := def.ValueSchema.ValidateValue(raw, settingscontract.ObjectSchemas()); err != nil {
+			slog.WarnContext(ctx, "using the contract default: the administrator default is invalid",
+				"component", "settingsresolve", "key", key, "error", err)
+			continue
+		}
+		if out == nil {
+			out = make(map[string]json.RawMessage, 1)
+		}
+		out[key] = raw
+	}
+	return out
+}
+
 // rank turns one candidate set into one context's effective values. Candidates
 // that belong to another profile are filtered by pickForScope, which is what
-// lets a batched read serve several profiles from the same rows.
+// lets a batched read serve several profiles from the same rows. adminDefaults
+// replaces default_value for the keys it names.
 func (r *Resolver) rank(
 	known []string,
 	defs map[string]*settingscontract.Definition,
 	stored []userstore.SettingValue,
+	adminDefaults map[string]json.RawMessage,
 	rc Context,
 	constraints Constraints,
 ) []Effective {
@@ -285,7 +349,7 @@ func (r *Resolver) rank(
 
 	out := make([]Effective, 0, len(known))
 	for _, key := range known {
-		out = append(out, r.resolveOne(defs[key], byKey[key], rc, constraints))
+		out = append(out, r.resolveOne(defs[key], byKey[key], adminDefaults[key], rc, constraints))
 	}
 	return out
 }
@@ -297,16 +361,23 @@ func nonEmpty(value string) []string {
 	return []string{value}
 }
 
-// resolveOne ranks one key's candidates by its declared resolution order.
+// resolveOne ranks one key's candidates by its declared resolution order. A
+// non-empty adminDefault is the value inherited in place of default_value; it
+// keeps source "default" because the viewer did not choose it.
 func (r *Resolver) resolveOne(
 	def *settingscontract.Definition,
 	candidates []userstore.SettingValue,
+	adminDefault json.RawMessage,
 	rc Context,
 	constraints Constraints,
 ) Effective {
+	inherited := def.DefaultValue
+	if len(adminDefault) > 0 {
+		inherited = adminDefault
+	}
 	eff := Effective{
 		Key:    def.Key,
-		Value:  append(json.RawMessage(nil), def.DefaultValue...),
+		Value:  append(json.RawMessage(nil), inherited...),
 		Source: settingscontract.ScopeDefault,
 		// Definitions can change additively after their introduced_in marker.
 		// The response therefore names the manifest revision that produced the

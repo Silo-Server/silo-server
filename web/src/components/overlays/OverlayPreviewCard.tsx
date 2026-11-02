@@ -32,8 +32,7 @@ const SIZE_CLASSES: Record<NonNullable<OverlayPreviewCardProps["size"]>, string>
   md: "w-[180px]",
 };
 
-// Shared preview component used by both the user-facing card overlays
-// settings page and the admin defaults editor. Renders a 2:3 poster
+// Preview used by the admin defaults editor. Renders a 2:3 poster
 // placeholder with the actual <CardOverlays /> renderer on top of it,
 // fed sample data.
 export function OverlayPreviewCard({

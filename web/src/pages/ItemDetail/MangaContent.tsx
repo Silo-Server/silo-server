@@ -44,6 +44,7 @@ import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -292,6 +293,7 @@ export default function MangaContent({
   return (
     <div>
       <DetailHero
+        overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
         context="Manga"

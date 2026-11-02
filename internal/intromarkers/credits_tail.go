@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,10 +73,16 @@ func (c Candidate) hasVideo() bool { return strings.TrimSpace(c.CodecVideo) != "
 
 func (c Candidate) hasAudio() bool { return strings.TrimSpace(c.CodecAudio) != "" }
 
+// metadataTailDetails are the unusable tail details
+// tailUnusableBeforeSampling decides from probe metadata. Earlier builds
+// stored them; this one decides them on every analysis and never stores
+// them.
+var metadataTailDetails = []string{tailDetailNoVideo, tailDetailUnsupportedCodec}
+
 // metadataTailDetail reports whether an unusable tail's detail came from
 // tailUnusableBeforeSampling rather than from decoding the tail.
 func metadataTailDetail(detail string) bool {
-	return detail == tailDetailNoVideo || detail == tailDetailUnsupportedCodec
+	return slices.Contains(metadataTailDetails, detail)
 }
 
 // tailUnusableBeforeSampling returns why the candidate's tail cannot be
@@ -173,14 +180,14 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 	}
 	req := creditsTailRequest(ctx, candidate, window, fingerprint)
 	runner := e.tailRunner(ctx, &req)
-	result, err := runner.Run(ctx, req)
+	result, err := runAnalysis(ctx, e.config, runner, req)
 	if err != nil && req.Audio != nil && req.Stats != nil && mediasample.Classify(err) == mediasample.ReasonNoStream {
 		// ffmpeg fails the whole run when any output lacks its stream, and
 		// probe metadata can name audio the file cannot give. Run the video
 		// alone: when that succeeds, the audio was missing and the tail has
 		// no silences or fingerprint.
 		req.Audio = nil
-		result, err = runner.Run(ctx, req)
+		result, err = runAnalysis(ctx, e.config, runner, req)
 	}
 	if err != nil {
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)

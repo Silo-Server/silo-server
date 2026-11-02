@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -42,7 +43,8 @@ type speechPlan struct {
 }
 
 // planSpeech picks the audio stream and windows for a file. The stream is
-// the first one in the subtitle's language, else the default, else the first.
+// the first decodable one in the subtitle's language, else the file's default
+// audio track as playback.SelectAudioTrack chooses it.
 func planSpeech(file *models.MediaFile, subtitleLanguage string) (speechPlan, error) {
 	runtime := float64(file.Duration)
 	if runtime <= 0 {
@@ -68,18 +70,17 @@ func planSpeech(file *models.MediaFile, subtitleLanguage string) (speechPlan, er
 
 func audioStreamFor(tracks []models.AudioTrack, language string) int {
 	if want, err := subtitles.NormalizeLanguageCode(language); err == nil && want != "" {
+		anyDecodable := playback.AnyAudioTrackDecodable(tracks, "")
 		for i, t := range tracks {
+			if anyDecodable && !playback.AudioTrackDecodable(tracks, i, "") {
+				continue
+			}
 			if got, err := subtitles.NormalizeLanguageCode(t.Language); err == nil && got == want {
 				return i
 			}
 		}
 	}
-	for i, t := range tracks {
-		if t.Default {
-			return i
-		}
-	}
-	return 0
+	return playback.SelectAudioTrack(tracks, "", nil)
 }
 
 // centerLayouts are channel layouts with a front-center channel.

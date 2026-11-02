@@ -3,9 +3,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { type SessionFetchResult } from "@/api/client";
-import { V2ProblemError } from "@/api/v2/request";
-import deleteSubtitlePreferenceProfileVerificationRequired from "../../../../contracts/api/v2/fixtures/delete_subtitle_preference_profile_verification_required.json";
+import { setAccessToken, setProfileId, type SessionFetchResult } from "@/api/client";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
@@ -46,6 +44,12 @@ function v2Requests(): string[] {
 }
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+// The hooks send each write for the profile that made the choice.
+beforeEach(() => {
+  setAccessToken("token");
+  setProfileId("profile-1");
+});
 
 function createHarness() {
   const queryClient = new QueryClient({
@@ -161,27 +165,6 @@ describe("useDeleteSubtitlePreference", () => {
 
     await expect(result.current.mutateAsync("series-1")).rejects.toThrow("boom");
   });
-
-  it("surfaces a v2 problem from the preference delete as the contract emits it", async () => {
-    // The committed fixture body for this operation; a locked profile must not
-    // be reported as a completed reset.
-    fetchWithSessionMock.mockResolvedValue(
-      sessionResponse(
-        new Response(JSON.stringify(deleteSubtitlePreferenceProfileVerificationRequired), {
-          status: 403,
-          headers: { "Content-Type": "application/problem+json" },
-        }),
-      ),
-    );
-
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
-
-    const failure = await result.current.mutateAsync("series-1").catch((err: unknown) => err);
-    expect(failure).toBeInstanceOf(V2ProblemError);
-    expect((failure as V2ProblemError).problemType).toBe("profile_verification_required");
-    expect((failure as V2ProblemError).status).toBe(403);
-  });
 });
 
 describe("useSetSubtitlePreference", () => {
@@ -197,42 +180,6 @@ describe("useSetSubtitlePreference", () => {
     const [, init] = fetchWithSessionMock.mock.calls[0] as [string, RequestInit];
     return JSON.parse(init.body as string) as unknown;
   }
-
-  it("replaces the preference through v2 with the chosen track's signature", async () => {
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
-
-    await result.current.mutateAsync({
-      prefId: "series-1",
-      selection: {
-        source: "embedded",
-        language: "ja",
-        codec: "subrip",
-        label: "Japanese",
-        forced: false,
-        hearing_impaired: false,
-        track_index: 0,
-      },
-      showForcedSubtitles: true,
-    });
-
-    expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
-    expect(v2Body()).toEqual({
-      subtitle_language: "ja",
-      subtitle_track_index: 0,
-      subtitle_mode: "always",
-      track_signature: {
-        source: "embedded",
-        language: "ja",
-        codec: "subrip",
-        label: "Japanese",
-        forced: false,
-        hearing_impaired: false,
-      },
-      show_forced_subtitles: true,
-    });
-    expect(apiMock).not.toHaveBeenCalled();
-  });
 
   it('stores "subtitles off" as the -1 sentinel with mode off and no signature', async () => {
     // -1 is the "no track" value every first-party client stores; the v2

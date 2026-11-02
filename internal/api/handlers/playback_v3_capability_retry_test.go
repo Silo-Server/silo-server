@@ -74,7 +74,7 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 	var fetches atomic.Int32
 	reprobeStarted := make(chan struct{})
 	releaseReprobe := make(chan struct{})
-	advertised := 136_000
+	advertised := 160_000
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if fetches.Add(1) == 2 {
 			close(reprobeStarted)
@@ -97,7 +97,7 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 		t.Fatalf("lookupRemoteCapabilitiesV3: %v", err)
 	}
 	learned := handler.remoteToneMapProbeTimeoutV3(node.URL)
-	if want := 136 * time.Second; learned != want {
+	if want := 160 * time.Second; learned != want {
 		t.Fatalf("learned budget = %v, want the advertised %v", learned, want)
 	}
 

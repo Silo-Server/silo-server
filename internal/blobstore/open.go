@@ -183,6 +183,14 @@ func openRecorded(ctx context.Context, store Store, settings SettingsStore) (Sto
 	if err != nil {
 		return nil, "", fmt.Errorf("read %s: %w", IdentitySettingKey, err)
 	}
+	if fs, ok := store.(*Filesystem); ok && SameLocalRoot(active, fs.Identity()) {
+		// The recorded root is this directory under another path. Keep the
+		// recorded identity without rewriting the row: trickplay manifests,
+		// delivery scopes, and sweep checkpoints are keyed by it, and an image
+		// that still reaches the directory by the recorded path must keep
+		// opening it.
+		fs.identity = active
+	}
 	if active != "" && active != store.Identity() {
 		if !legacyIdentityMatches(active, store.Identity()) {
 			return nil, "", fmt.Errorf("artwork storage is recorded as %q but configured as %q; use the managed storage transition in Admin settings", active, store.Identity())
@@ -236,6 +244,8 @@ type recordingStore struct {
 	mu       sync.Mutex
 	recorded bool
 }
+
+func (s *recordingStore) unwrapStore() Store { return s.Store }
 
 type recordingDirectStore struct {
 	*recordingStore

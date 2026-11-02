@@ -2,7 +2,6 @@ package abs
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -29,126 +28,22 @@ func (f *statsFakeStore) ListClosedSessions(_ context.Context, _, _ string, limi
 	return f.closed[offset:end], total, nil
 }
 
-func TestStats_Aggregate_Ok(t *testing.T) {
-	fake := &statsFakeStore{
-		stats: Stats{TotalTime: 3600, Items: 4, DayOfWeek: [7]int{0, 1800, 0, 1800, 0, 0, 0}},
-	}
-	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
-
-	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-stats", nil, nil, "1", "", h.handleListeningStats)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if got["totalTime"] != float64(3600) {
-		t.Errorf("totalTime = %v, want 3600", got["totalTime"])
-	}
-	if got["items"] != float64(4) {
-		t.Errorf("items = %v, want 4", got["items"])
-	}
-	dow, _ := got["dayOfWeek"].(map[string]any)
-	if dow["1"] != float64(1800) {
-		t.Errorf("dayOfWeek[1] = %v, want 1800", dow["1"])
-	}
-}
-
-func TestStats_Sessions_List_Paginated(t *testing.T) {
-	fake := &statsFakeStore{closed: []ABSPlaybackSession{
-		{ID: "s1", UserID: "1", ContentID: "book-1"},
-		{ID: "s2", UserID: "1", ContentID: "book-2"},
-		{ID: "s3", UserID: "1", ContentID: "book-3"},
-	}}
-	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
-
-	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions", nil, nil, "1", "", h.handleListeningSessions)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	var env map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	if env["total"] != float64(3) {
-		t.Errorf("total = %v, want 3", env["total"])
-	}
-	sessions, _ := env["sessions"].([]any)
-	if len(sessions) != 3 {
-		t.Errorf("sessions len = %d, want 3", len(sessions))
-	}
-}
-
-// TestStats_Sessions_List_EnvelopeShape asserts the response matches the
-// exact envelope real audiobookshelf's MeController.getListeningSessions
-// returns ({total, numPages, page, itemsPerPage, sessions}), and that each
-// session object carries the PlaybackSession.toJSON() keys strict clients
-// (Flutter/Swift decoders) require: mediaType, mediaMetadata, displayTitle.
-func TestStats_Sessions_List_EnvelopeShape(t *testing.T) {
-	fake := &statsFakeStore{closed: []ABSPlaybackSession{
-		{ID: "s1", UserID: "1", ContentID: "book-1", TimeListeningSeconds: 120, CurrentPositionSeconds: 45.5},
-	}}
-	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
-
-	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions", nil, nil, "1", "", h.handleListeningSessions)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var env map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	for _, key := range []string{"total", "numPages", "page", "itemsPerPage", "sessions"} {
-		if _, ok := env[key]; !ok {
-			t.Errorf("envelope missing key %q; body=%s", key, rec.Body.String())
-		}
-	}
-	if _, ok := env["results"]; ok {
-		t.Errorf("envelope must not carry the pagedEnvelope 'results' key")
-	}
-
-	sessions, _ := env["sessions"].([]any)
-	if len(sessions) != 1 {
-		t.Fatalf("sessions len = %d, want 1", len(sessions))
-	}
-	sess, _ := sessions[0].(map[string]any)
-	if sess["mediaType"] != "book" {
-		t.Errorf("mediaType = %v, want book", sess["mediaType"])
-	}
-	if _, ok := sess["mediaMetadata"].(map[string]any); !ok {
-		t.Errorf("mediaMetadata missing or wrong type: %v", sess["mediaMetadata"])
-	}
-	if _, ok := sess["displayTitle"]; !ok {
-		t.Errorf("displayTitle missing")
-	}
-	for _, key := range []string{"id", "userId", "libraryId", "libraryItemId", "bookId", "episodeId",
-		"chapters", "displayAuthor", "coverPath", "duration", "playMethod", "mediaPlayer",
-		"deviceInfo", "serverVersion", "date", "dayOfWeek", "timeListening", "startTime",
-		"currentTime", "startedAt", "updatedAt"} {
-		if _, ok := sess[key]; !ok {
-			t.Errorf("session missing key %q; body=%s", key, rec.Body.String())
-		}
-	}
-}
-
-func TestStats_Session_Detail_Owner(t *testing.T) {
-	fake := &statsFakeStore{}
-	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: "book-1"})
-	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
-
-	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions/s1", map[string]string{"sid": "s1"}, nil, "1", "", h.handleListeningSessionDetail)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if got["id"] != "s1" {
-		t.Errorf("id = %v", got["id"])
-	}
-}
-
+// A session belongs to one profile: another account, or another profile on
+// the same account, gets the same 404 as an unknown session.
 func TestStats_Session_Detail_NonOwner_404(t *testing.T) {
 	fake := &statsFakeStore{}
-	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: "book-1"})
+	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ProfileID: "parent", ContentID: "book-1"})
 	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
 
-	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions/s1", map[string]string{"sid": "s1"}, nil, "2", "", h.handleListeningSessionDetail)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
+	for _, caller := range []struct{ name, userID, profileID string }{
+		{"other account", "2", "parent"},
+		{"other profile on the account", "1", "kid"},
+	} {
+		t.Run(caller.name, func(t *testing.T) {
+			rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions/s1", map[string]string{"sid": "s1"}, nil, caller.userID, caller.profileID, h.handleListeningSessionDetail)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

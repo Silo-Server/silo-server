@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,23 +46,7 @@ func newWebhookHTTPClient(allowPrivate func() bool) *http.Client {
 // Callers may use a longer total timeout when an upstream service has its own
 // request deadline that must expire before Silo gives up waiting for a response.
 func newNotificationHTTPClient(allowPrivate func() bool, requestTimeout time.Duration) *http.Client {
-	dialer := &net.Dialer{
-		Timeout: 5 * time.Second,
-		Control: func(network, address string, _ syscall.RawConn) error {
-			if allowPrivate != nil && allowPrivate() {
-				return nil
-			}
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return fmt.Errorf("webhook dial: %w", err)
-			}
-			ip := net.ParseIP(host)
-			if ip == nil || !webhookIPAllowed(ip) {
-				return errPrivateDestination
-			}
-			return nil
-		},
-	}
+	dialer := newNotificationDialer(allowPrivate)
 	transport := &http.Transport{
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
@@ -79,6 +64,23 @@ func newNotificationHTTPClient(allowPrivate func() bool, requestTimeout time.Dur
 			}
 			if req.URL.Scheme != schemeHTTPS {
 				return errors.New("redirect to non-https destination")
+			}
+			return nil
+		},
+	}
+}
+
+func newNotificationDialer(allowPrivate func() bool) *net.Dialer {
+	return &net.Dialer{
+		Timeout: 5 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return fmt.Errorf("webhook dial: %w", err)
+			}
+			addr, err := netip.ParseAddr(host)
+			if err != nil || !webhookIPAllowed(addr, allowPrivate != nil && allowPrivate()) {
+				return errPrivateDestination
 			}
 			return nil
 		},

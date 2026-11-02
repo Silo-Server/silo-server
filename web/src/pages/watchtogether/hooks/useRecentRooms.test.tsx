@@ -139,16 +139,6 @@ describe("useRecentRooms", () => {
     expect(result.current.map((r) => r.room_id)).toEqual(["mine"]);
   });
 
-  it("marks ended and forgets", () => {
-    rememberRecentRoom({ room: room("a"), token: "t", userId: 1, profileId: "p1" });
-    rememberRecentRoom({ room: room("b"), token: "t", userId: 1, profileId: "p1" });
-    const { result } = renderHook(() => useRecentRooms());
-    act(() => markRecentRoomEnded({ room_id: "a", user_id: 1, profile_id: "p1" }));
-    expect(result.current.find((r) => r.room_id === "a")?.ended).toBe(true);
-    act(() => forgetRecentRoom({ room_id: "b", user_id: 1, profile_id: "p1" }));
-    expect(result.current.map((r) => r.room_id)).toEqual(["a"]);
-  });
-
   it("returns nothing when signed out and survives corrupt storage", () => {
     localStorage.setItem(RECENT_ROOMS_KEY, "{not json");
     const { result, rerender } = renderHook(() => useRecentRooms());

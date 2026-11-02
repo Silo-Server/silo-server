@@ -181,7 +181,9 @@ func (s *MetadataService) ensureAnchoredIdentityRepairTargetEpisodeLinks(
 	contentID string,
 ) error {
 	if err := s.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
-		queueErr := s.RequestStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
+		// The refresh retries the relink, so it is queued even for parked
+		// episode debt.
+		queueErr := s.queueStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
 		slog.WarnContext(ctx, "metadata: anchored repair episode relink failed", "component", "metadata",
 			"content_id", contentID,
 			"error", err,
@@ -539,6 +541,7 @@ func (s *MetadataService) repairAnchoredIdentityMismatchGroup(
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("committing anchored identity repair: %w", err)
 	}
+	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(moveResult.Reattribution, anchor.TargetContent, moveResult.EpisodePairs)...)
 
 	slog.InfoContext(ctx, "metadata: repaired provider-anchored root ownership",
 		"component", "metadata",

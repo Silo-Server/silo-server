@@ -2,18 +2,14 @@ package catalog
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/sync/singleflight"
 )
 
 // FacetValue is one facet value and the number of titles in the scope that
@@ -175,165 +171,12 @@ func isFacetWordSeparator(r rune) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
-// facetValueCache holds scope value lists in memory, keyed by a hash of
-// the exact SQL and arguments that built them, so every access predicate
-// (libraries, disabled libraries, maturity limits, personal sources) is
-// part of the key and two viewers share a list only when their scope SQL
-// is identical. Entries expire after ttl; the cache evicts least recently
-// used lists once the values it holds exceed budget. Concurrent misses
-// for one key run one load, and at most cap(fills) loads run at once.
-type facetValueCache struct {
-	ttl         time.Duration
-	budget      int
-	loadTimeout time.Duration
-	now         func() time.Time
-	flights     singleflight.Group
-	// fills holds a slot for each list being built.
-	fills chan struct{}
-
-	mu      sync.Mutex
-	entries map[string]*facetCacheItem
-	// lru is the sentinel of a ring of the entries: lru.next is the most
-	// recently used, lru.prev the least.
-	lru  facetCacheItem
-	used int
-}
-
-type facetCacheItem struct {
-	key        string
-	list       *facetValueList
-	expires    time.Time
-	weight     int
-	prev, next *facetCacheItem
-}
+// facetValueCache holds scope value lists for typeahead; see queryCache.
+// A list weighs its value count, so the budget caps values held.
+type facetValueCache = queryCache[*facetValueList]
 
 func newFacetValueCache(ttl time.Duration, budget int) *facetValueCache {
-	c := &facetValueCache{
-		ttl:         ttl,
-		budget:      budget,
-		loadTimeout: facetValueLoadTimeout,
-		now:         time.Now,
-		fills:       make(chan struct{}, facetValueFillLimit),
-		entries:     make(map[string]*facetCacheItem),
-	}
-	c.lru.prev, c.lru.next = &c.lru, &c.lru
-	return c
-}
-
-// maxListValues is the most values one list may hold and still be cached.
-func (c *facetValueCache) maxListValues() int {
-	if c == nil {
-		return facetValueCacheBudget
-	}
-	return c.budget
-}
-
-// get returns the cached list for key, or waits for the one load that
-// builds it for every concurrent caller of the key. The load runs apart
-// from the callers' contexts, bounded by loadTimeout: typeahead clients
-// cancel a request on the next keystroke, and the next keystroke needs the
-// same list. A caller whose context ends stops waiting; a failed load
-// caches nothing and every waiter gets its error.
-func (c *facetValueCache) get(ctx context.Context, key string, load func(context.Context) (*facetValueList, error)) (*facetValueList, error) {
-	if c == nil {
-		return load(ctx)
-	}
-	if l, ok := c.lookup(key); ok {
-		return l, nil
-	}
-	flight := c.flights.DoChan(key, func() (any, error) {
-		return c.fill(context.WithoutCancel(ctx), key, load)
-	})
-	select {
-	case res := <-flight:
-		if res.Err != nil {
-			return nil, res.Err
-		}
-		l, ok := res.Val.(*facetValueList)
-		if !ok {
-			return nil, fmt.Errorf("facet value load returned %T", res.Val)
-		}
-		return l, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-// lookup returns key's list while it is fresh, dropping it once expired.
-func (c *facetValueCache) lookup(key string) (*facetValueList, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	item, ok := c.entries[key]
-	if !ok {
-		return nil, false
-	}
-	if !c.now().Before(item.expires) {
-		c.removeLocked(item)
-		return nil, false
-	}
-	c.unlinkLocked(item)
-	c.pushFrontLocked(item)
-	return item.list, true
-}
-
-// fill builds key's list in a fill slot and caches it when the load
-// succeeds. A panicking load fails the flight instead of the process.
-func (c *facetValueCache) fill(ctx context.Context, key string, load func(context.Context) (*facetValueList, error)) (l *facetValueList, err error) {
-	// A flight that starts just after another one stored the list finds it
-	// here instead of building it again.
-	if l, ok := c.lookup(key); ok {
-		return l, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, c.loadTimeout)
-	defer cancel()
-	select {
-	case c.fills <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	defer func() { <-c.fills }()
-	defer func() {
-		if r := recover(); r != nil {
-			l, err = nil, fmt.Errorf("facet value load panicked: %v", r)
-		}
-	}()
-	if l, err = load(ctx); err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	c.storeLocked(key, l)
-	c.mu.Unlock()
-	return l, nil
-}
-
-func (c *facetValueCache) storeLocked(key string, l *facetValueList) {
-	weight := max(len(l.entries), 1)
-	if weight > c.budget {
-		return
-	}
-	item := &facetCacheItem{key: key, list: l, expires: c.now().Add(c.ttl), weight: weight}
-	c.pushFrontLocked(item)
-	c.entries[key] = item
-	c.used += weight
-	for c.used > c.budget {
-		c.removeLocked(c.lru.prev)
-	}
-}
-
-func (c *facetValueCache) removeLocked(item *facetCacheItem) {
-	c.unlinkLocked(item)
-	delete(c.entries, item.key)
-	c.used -= item.weight
-}
-
-func (c *facetValueCache) unlinkLocked(item *facetCacheItem) {
-	item.prev.next, item.next.prev = item.next, item.prev
-}
-
-func (c *facetValueCache) pushFrontLocked(item *facetCacheItem) {
-	item.prev, item.next = &c.lru, c.lru.next
-	c.lru.next.prev = item
-	c.lru.next = item
+	return newQueryCache(ttl, budget, facetValueFillLimit, facetValueLoadTimeout, func(l *facetValueList) int { return len(l.entries) })
 }
 
 // facetColumn names a media_items column a facet reads, and whether it is a
@@ -341,21 +184,6 @@ func (c *facetValueCache) pushFrontLocked(item *facetCacheItem) {
 type facetColumn struct {
 	name  string
 	array bool
-}
-
-// facetCacheKey hashes the list query and its arguments. Arguments that do
-// not encode to JSON make the scope uncacheable rather than risk two scopes
-// sharing a key.
-func facetCacheKey(query string, args []any) (string, bool) {
-	encoded, err := json.Marshal(args)
-	if err != nil {
-		return "", false
-	}
-	sum := sha256.New()
-	sum.Write([]byte(query))
-	sum.Write([]byte{0})
-	sum.Write(encoded)
-	return string(sum.Sum(nil)), true
 }
 
 // searchColumnFacet answers a typeahead over an array or scalar column
@@ -379,7 +207,10 @@ func searchColumnFacet(
 		return []FacetValue{}, false, nil
 	}
 	values := facetValuesSource(column, fromClause, whereClause, filters.PersonID > 0)
-	maxValues := cache.maxListValues()
+	maxValues := facetValueCacheBudget
+	if cache != nil {
+		maxValues = cache.budget
+	}
 	listQuery := fmt.Sprintf(`SELECT name, n FROM %s LIMIT %d`, values, maxValues+1)
 	load := func(ctx context.Context) (*facetValueList, error) {
 		got, err := scanFacetValues(ctx, pool, listQuery, args)
@@ -393,7 +224,7 @@ func searchColumnFacet(
 	}
 	var l *facetValueList
 	var err error
-	if key, ok := facetCacheKey(listQuery, args); ok {
+	if key, ok := queryCacheKey(listQuery, args); ok {
 		l, err = cache.get(ctx, key, load)
 	} else {
 		l, err = load(ctx)

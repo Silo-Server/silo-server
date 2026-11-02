@@ -236,18 +236,6 @@ func TestLoadCapabilitiesChecksChromaprintRawOutput(t *testing.T) {
 	}
 }
 
-func TestLoadCapabilitiesSkipsChromaprintHelpWithoutTheMuxer(t *testing.T) {
-	f := newFakeListings()
-	f.muxers = "Formats:\n ---\n  E  matroska        Matroska\n"
-	useListings(t, f)
-	if _, err := LoadCapabilities(context.Background(), fakeBinary(t)); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.calls.Load(); got != 3 {
-		t.Fatalf("%d listing commands, want filters, muxers, and the concat check only", got)
-	}
-}
-
 func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	f := newFakeListings()
 	useListings(t, f)

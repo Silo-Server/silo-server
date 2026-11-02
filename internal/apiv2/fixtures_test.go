@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
@@ -445,7 +446,7 @@ func fixtureCases() []fixtureCase {
 		{name: "get_home_layout_ok", operationID: opGetHomeLayout,
 			scenario: "The home page's section layout for the acting profile, without items.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
-			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SectionLayout"},
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
 		{name: "get_home_layout_profile_header_required", operationID: opGetHomeLayout,
 			scenario: "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: bearer(memberToken),
@@ -1752,7 +1753,193 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCollectionRowFixtureCases()...)
 	cases = append(cases, adminCollectionCapabilityFixtureCases()...)
 	cases = append(cases, personalCollectionContainsFixtureCases()...)
-	return append(cases, loginSessionFixtureCases()...)
+	cases = append(cases, loginSessionFixtureCases()...)
+	cases = append(cases, adminDownloadStorageFixtureCases()...)
+	cases = append(cases, homeLayoutItemsFixtureCases()...)
+	cases = append(cases, resumePositionFixtureCases()...)
+	cases = append(cases, catalogLettersFixtureCases()...)
+	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
+	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	cases = append(cases, unmatchedItemIgnoreFixtureCases()...)
+	cases = append(cases, notInterestedFixtureCases()...)
+	cases = append(cases, notificationSeriesFixtureCases()...)
+	cases = append(cases, notificationSeriesMuteFixtureCases()...)
+	cases = append(cases, seasonalThemeFixtureCases()...)
+	cases = append(cases, personalListMembershipFixtureCases()...)
+	cases = append(cases, sectionItemLimitFixtureCases()...)
+	return append(cases, adminCatalogItemsFixtureCases()...)
+}
+
+// sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
+// section reads, which getHomeCapabilities advertises as
+// section_item_limit_max, and of the Home row reads, which it advertises as
+// row_item_limit_max, and a capped Home row read's has_more.
+func sectionItemLimitFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "list_home_sections_item_limit_out_of_range", operationID: opListHomeSections,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_library_sections_item_limit_out_of_range", operationID: "listLibrarySections",
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/library/1/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_section_items_item_limit_out_of_range", operationID: opGetHomeSectionItems,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_layout_item_limit_out_of_range", operationID: opGetHomeLayout,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_section_items_capped_ok", operationID: opGetHomeSectionItems,
+			scenario: "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=1", headers: viewer,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Section"},
+	}
+}
+
+// personalListMembershipFixtureCases covers the favorites and watchlist
+// membership reads, which answer a non-member with 200 rather than 404.
+func personalListMembershipFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_favorite_membership_member", operationID: "getFavoriteMembership",
+			scenario: "The item is one of the profile's favorites: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_member", operationID: "getFavoriteMembership",
+			scenario: "The item is not one of the profile's favorites: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_found", operationID: "getFavoriteMembership",
+			scenario: "An item the viewer may not see is 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:hidden/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_personal_list_capability_ok", operationID: "getPersonalListCapability",
+			scenario: "The personal-list capability document: the favorites and watchlist membership reads are supported.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/personal-lists", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/PersonalListCapability"},
+		{name: "get_watchlist_membership_member", operationID: "getWatchlistMembership",
+			scenario: "The item is on the profile's watchlist: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_watchlist_membership_not_member", operationID: "getWatchlistMembership",
+			scenario: "The item is not on the profile's watchlist: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+	}
+}
+
+// fixtureSeasonalThemes is recipes.SeasonalThemes with every list link moved
+// to a reserved host, so the committed fixture names no real list site. The
+// web editor tests use the resulting fixture as their catalog.
+func fixtureSeasonalThemes() []recipes.SeasonalTheme {
+	themes := make([]recipes.SeasonalTheme, 0, len(recipes.SeasonalThemes))
+	for _, theme := range recipes.SeasonalThemes {
+		vibes := make([]recipes.SeasonalVibe, len(theme.Vibes))
+		for i, vibe := range theme.Vibes {
+			vibe.ListURL = strings.Replace(vibe.ListURL, "https://mdblist.com/", "https://lists.example.test/", 1)
+			vibes[i] = vibe
+		}
+		theme.Vibes = vibes
+		themes = append(themes, theme)
+	}
+	return themes
+}
+
+// seasonalThemeFixtureCases pin the Seasonal Picks holiday catalog.
+func seasonalThemeFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_seasonal_themes_ok", operationID: opListSeasonalThemes,
+			scenario: "The holidays a Seasonal Picks row can follow in calendar order, each with its curated vibes; a holiday that moves or recurs weekly has no start and end, and a weekly one cannot take a row's own dates.",
+			method:   http.MethodGet, path: "/api/v2/sections/seasonal-themes", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SeasonalThemeCatalog"},
+	}
+}
+
+// notInterestedFixtureCases pin the Not interested marks: the paged list, one
+// mark, the refusals, and the capability document.
+func notInterestedFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "list_not_interested_ok", operationID: opListNotInterested,
+			scenario: "The first page of the titles a profile marked Not interested as catalog cards, newest mark first, with an opaque cursor for the next page.",
+			method:   http.MethodGet, path: "/api/v2/not-interested?limit=1", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedCollection"},
+		{name: "get_not_interested_ok", operationID: "getNotInterested",
+			scenario: "The profile marked the title Not interested: the mark with when it was made.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedEntry"},
+		{name: "get_not_interested_not_found", operationID: "getNotInterested",
+			scenario: "The profile has not marked the title.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:nope", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_episode_rejected", operationID: "markNotInterested",
+			scenario: "An episode cannot be marked; the series can.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/episode:x", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_not_found", operationID: "markNotInterested",
+			scenario: "A title the viewer may not see cannot be marked.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/movie:hidden", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "unmark_not_interested_locked_profile", operationID: "unmarkNotInterested",
+			scenario: "A PIN-locked profile without X-Profile-Token.",
+			method:   http.MethodDelete, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_not_interested_capability_ok", operationID: "getNotInterestedCapability",
+			scenario: "Profiles on this server can mark movies and series Not interested.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/not-interested", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/NotInterestedCapability"},
+	}
+}
+
+// resumePositionFixtureCases pin clearing a resume position and the progress
+// capability document that advertises it.
+func resumePositionFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "get_progress_capabilities_ok", operationID: "getProgressCapabilities",
+			scenario: "The progress capability document: clearResumePosition is served.",
+			method:   http.MethodGet, path: "/api/v2/progress/capabilities", headers: owner,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ProgressCapabilities"},
+		{name: "clear_resume_position_ok", operationID: "clearResumePosition",
+			scenario: "Clearing a movie's resume position: 204 with no body; its watched state and history stay.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:heat-1995/position", headers: owner,
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "clear_resume_position_not_leaf", operationID: "clearResumePosition",
+			scenario: "A season or series has no single resume position: a validation failure naming the path parameter.",
+			method:   http.MethodDelete, path: "/api/v2/progress/series:heat/position", headers: owner,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "clear_resume_position_not_found", operationID: "clearResumePosition",
+			scenario: "An item outside the viewer's catalog has no resume position to clear.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:missing/position", headers: owner,
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
+}
+
+// homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
+// first sections, the include_items bound, and the capability document that
+// advertises it and the item_limit bound of the section reads.
+func homeLayoutItemsFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max, listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max, and getHomeSectionItems and getHomeLayout accept item_limit up to row_item_limit_max.",
+			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
+		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
+			scenario: "The home layout with the cards of its first section, artwork presigned at the requested size.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&image_size=medium", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
+		{name: "get_home_layout_include_items_out_of_range", operationID: opGetHomeLayout,
+			scenario: "An include_items above the maximum of 4 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=5", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // personalCollectionContainsFixtureCases pin the collection list marked for
@@ -1898,10 +2085,18 @@ func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.OrderedApplePush = new(fakeOrderedApple)
+	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
 	fixtureProviders.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "https://silo.overlay.example.test"})
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return "https://silo.example.test" }, Providers: fixtureProviders}
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return "https://silo.example.test" },
+		LocalURL:    func() string { return "http://silo.lan.example.test:8080" },
+		Providers:   fixtureProviders,
+		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
+	deps.SeasonalThemes = fixtureSeasonalThemes()
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}
 	deps.DownloadSubscriptionMutations = &fakeSubscriptionMutations{row: syntheticDownloadSubscription()}
@@ -1975,6 +2170,7 @@ func fixtureDeps() Dependencies {
 	deps.HomeSections = home
 	deps.Recipes = home
 	deps.PersonalLists = &fakePersonalLists{favorites: favoriteRows(), watchlist: watchlistRows(), missing: map[string]bool{"movie:hidden": true, "series:hidden": true}}
+	deps.NotInterested = &fakeNotInterested{marks: notInterestedRows(), missing: map[string]bool{"movie:hidden": true}}
 	deps.Ratings = &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}
@@ -1990,6 +2186,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
 	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
 	deps.AdminDownloadPreparationControls = new(fakeAdminDownloadPreparationControls)
+	deps.AdminDownloadStorage = new(fakeAdminDownloadStorage)
+	deps.AdminDownloadDevices = new(fakeAdminDownloadDevices)
+	deps.DownloadPrepareAgain = fakeDownloadPrepareAgain{}
 	deps.AdminDevices = new(fakeAdminDevices)
 	deps.Invitations = fixtureInvitations()
 	deps.PasswordResets = fixturePasswordResets()
@@ -2005,6 +2204,7 @@ func fixtureDeps() Dependencies {
 	deps.NotificationDiscordLinks = new(fakeNotificationDiscordLinks)
 	deps.NotificationRelay = new(fakeNotificationRelay)
 	deps.NotificationChannels = new(fakeNotificationChannels)
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-primary", IsPrimary: true}})
 	deps.NotificationDestinations = new(fakeNotificationDestinations)
 	accounts := fixtureAdminAccounts()
 	accounts.allowImpersonation = true
@@ -2024,6 +2224,7 @@ func fixtureDeps() Dependencies {
 	deps.SubtitleReads = &fakeSubtitleReads{}
 	deps.AdminSubtitleList = &fakeAdminSubtitleList{}
 	deps.AdminPlaybackHistory = &fakeAdminPlaybackHistory{}
+	deps.AdminCatalogItems = &fakeAdminCatalogItems{}
 	deps.AdminSubtitleMetadata = fixtureAdminSubtitleMetadata()
 	deps.AdminSubtitleProviderConfiguration = fixtureAdminProviderConfiguration()
 	deps.SubtitleAICancel = &fakeSubtitleAICancel{}
@@ -2098,6 +2299,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 		} else {
 			r = httptest.NewRequest(c.method, c.path, nil)
+		}
+		// Absolute discovery URLs and origins in published fixtures use a
+		// reserved test host.
+		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" {
+			r.Host = "api.example.test"
 		}
 		for k, v := range c.headers {
 			r.Header.Set(k, v)

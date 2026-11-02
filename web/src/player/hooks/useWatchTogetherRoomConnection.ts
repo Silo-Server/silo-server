@@ -8,6 +8,14 @@ import type { SuggestionCreationDraft } from "@/api/v2/watchTogetherSuggestionCr
 import { V2ProblemError } from "@/api/v2/request";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  addRoomClockSample,
+  roomClockOffsetMs,
+  roomClockPingDelayMs,
+  roomClockSample,
+  roomClockStepped,
+  type RoomClockSample,
+} from "../utils/roomClock";
+import {
   ApiClientError,
   StaleApiRequestContextError,
   captureProfileRequestContext,
@@ -83,7 +91,6 @@ export interface WatchTogetherRoomConnectionResult {
 }
 
 const reconnectDelays = [500, 1_000, 2_000, 5_000];
-const pingIntervalMs = 15_000;
 
 /**
  * Maps a room-fetch failure to a terminal closed reason. Returns null for
@@ -124,6 +131,12 @@ export function useWatchTogetherRoomConnection({
     null,
   );
   const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
+  // Clock samples outlive a reconnect to the same room: the offset does not
+  // change with the socket. Leaving or switching rooms starts over.
+  const clockSamplesRef = useRef<{ roomId: string | null; samples: RoomClockSample[] }>({
+    roomId: null,
+    samples: [],
+  });
   const socketRef = useRef<WebSocket | null>(null);
   // Subscribe to the production AuthProvider so PIN/profile replacement can
   // rebind the socket even when room props remain unchanged.
@@ -194,6 +207,7 @@ export function useWatchTogetherRoomConnection({
 
   useEffect(() => {
     if (!roomId || !roomToken) {
+      clockSamplesRef.current = { roomId: null, samples: [] };
       const resetTimer = window.setTimeout(() => {
         setRoom(null);
         setTransportCommand(null);
@@ -266,6 +280,11 @@ export function useWatchTogetherRoomConnection({
     if (!authority) return;
     if (replacementScopeRef.current === replacementScope) return;
     closedReasonRef.current = null;
+    // Another room's samples say nothing about this one; its first sample
+    // replaces the offset.
+    if (clockSamplesRef.current.roomId !== roomId) {
+      clockSamplesRef.current = { roomId, samples: [] };
+    }
     let disposed = false;
     const active = () =>
       !disposed &&
@@ -274,8 +293,23 @@ export function useWatchTogetherRoomConnection({
     let attempt = 0;
     let reconnectTimer: number | null = null;
     let pingTimer: number | null = null;
+    // Samples taken on the current socket; pings come fast until it has enough.
+    let connectionSamples = 0;
 
-    const sendPing = () => {
+    const stopPings = () => {
+      if (pingTimer !== null) {
+        window.clearTimeout(pingTimer);
+        pingTimer = null;
+      }
+    };
+
+    const schedulePing = () => {
+      stopPings();
+      pingTimer = window.setTimeout(sendPing, roomClockPingDelayMs(connectionSamples));
+    };
+
+    function sendPing() {
+      pingTimer = null;
       const socket = socketRef.current;
       if (!active() || !socket || socket.readyState !== WebSocket.OPEN) {
         return;
@@ -286,6 +320,22 @@ export function useWatchTogetherRoomConnection({
           client_sent_at: new Date().toISOString(),
         }),
       );
+      schedulePing();
+    }
+
+    const recordClockSample = (sample: RoomClockSample) => {
+      const clock = clockSamplesRef.current;
+      const delayBefore = roomClockPingDelayMs(connectionSamples);
+      // After a clock step the estimate starts over, and so does the fast
+      // cadence that builds it.
+      if (roomClockStepped(clock.samples, sample)) connectionSamples = 0;
+      connectionSamples += 1;
+      clock.samples = addRoomClockSample(clock.samples, sample);
+      const offset = roomClockOffsetMs(clock.samples);
+      if (offset !== null) setServerTimeOffsetMs(offset);
+      // A change of cadence moves the waiting ping instead of letting one
+      // more ping run at the old one.
+      if (roomClockPingDelayMs(connectionSamples) !== delayBefore) schedulePing();
     };
 
     const scheduleReconnect = () => {
@@ -333,9 +383,9 @@ export function useWatchTogetherRoomConnection({
           return;
         }
         attempt = 0;
+        connectionSamples = 0;
         setConnectionState("connected");
         sendPing();
-        pingTimer = window.setInterval(sendPing, pingIntervalMs);
       });
 
       socket.addEventListener("message", (event) => {
@@ -390,9 +440,8 @@ export function useWatchTogetherRoomConnection({
                   : "This profile joined the Watch Party on another device.",
             });
             if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-            if (pingTimer !== null) window.clearInterval(pingTimer);
             reconnectTimer = null;
-            pingTimer = null;
+            stopPings();
             socketRef.current = null;
             setTransportCommand(null);
             setConnectionState("disconnected");
@@ -411,18 +460,13 @@ export function useWatchTogetherRoomConnection({
               typeof message.server_received_at === "string" &&
               typeof message.server_sent_at === "string"
             ) {
-              const sentAt = Date.parse(message.client_sent_at);
-              const serverReceivedAt = Date.parse(message.server_received_at);
-              const serverSentAt = Date.parse(message.server_sent_at);
-              const receivedAt = Date.now();
-              if (
-                Number.isFinite(sentAt) &&
-                Number.isFinite(serverReceivedAt) &&
-                Number.isFinite(serverSentAt)
-              ) {
-                const offset = (serverReceivedAt - sentAt + (serverSentAt - receivedAt)) / 2;
-                setServerTimeOffsetMs(offset);
-              }
+              const sample = roomClockSample(
+                Date.parse(message.client_sent_at),
+                Date.parse(message.server_received_at),
+                Date.parse(message.server_sent_at),
+                Date.now(),
+              );
+              if (sample) recordClockSample(sample);
             }
             return;
           case "error": {
@@ -446,10 +490,7 @@ export function useWatchTogetherRoomConnection({
         if (socketRef.current === socket) {
           socketRef.current = null;
         }
-        if (pingTimer !== null) {
-          window.clearInterval(pingTimer);
-          pingTimer = null;
-        }
+        stopPings();
         // A command belongs to the connection that delivered it. Kept, the
         // player would apply it again on reconnect, from a position the room
         // may have left; the server sends a fresh one once the member attaches.
@@ -471,9 +512,7 @@ export function useWatchTogetherRoomConnection({
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
       }
-      if (pingTimer !== null) {
-        window.clearInterval(pingTimer);
-      }
+      stopPings();
       const socket = socketRef.current;
       socketRef.current = null;
       if (

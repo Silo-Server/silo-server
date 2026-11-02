@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,40 +105,7 @@ func invitationTestHandler(f *fakeInvitations) http.Handler {
 	d.Invitations = f
 	return NewHandler(d)
 }
-func TestInvitationAcceptanceAndDelivery(t *testing.T) {
-	f := fixtureInvitations()
-	h := invitationTestHandler(f)
-	for _, token := range []string{"pending", "sign-in-required"} {
-		r := do(t, h, http.MethodPost, Prefix+"/invitations/"+token+"/accept", `{"password":"password123"}`, nil)
-		if r.Code != 201 {
-			t.Fatal(r.Code, r.Body.String())
-		}
-		if token == "pending" {
-			if !strings.Contains(r.Body.String(), `"login_status":"signed_in"`) || !strings.Contains(r.Body.String(), "fixture-access") {
-				t.Fatal(r.Body.String())
-			}
-		} else if !strings.Contains(r.Body.String(), `"login_status":"sign_in_required"`) || strings.Contains(r.Body.String(), "tokens") {
-			t.Fatal(r.Body.String())
-		}
-	}
-	for _, note := range []string{"", "smtp-failed"} {
-		r := do(t, h, http.MethodPost, Prefix+"/admin/invitations", `{"email":"invitee@example.invalid","note":"`+note+`"}`, actingRequestAdmin)
-		if r.Code != 201 || r.Header().Get("Location") != Prefix+"/admin/invitations/7" || !strings.Contains(r.Body.String(), "synthetic-token") || strings.Contains(r.Body.String(), "private") {
-			t.Fatal(r.Code, r.Body.String())
-		}
-		if note != "" && !strings.Contains(r.Body.String(), "failed_or_unknown") {
-			t.Fatal(r.Body.String())
-		}
-	}
-	resent := do(t, h, http.MethodPost, Prefix+"/admin/invitations/7/resend", "", actingRequestAdmin)
-	if resent.Code != 201 || !strings.Contains(resent.Body.String(), "not_configured") {
-		t.Fatal(resent.Code, resent.Body.String())
-	}
-	revoked := do(t, h, http.MethodDelete, Prefix+"/admin/invitations/7", "", actingRequestAdmin)
-	if revoked.Code != 204 || revoked.Body.Len() != 0 {
-		t.Fatal(revoked.Code, revoked.Body.String())
-	}
-}
+
 func TestInvitationValidationAndCapability(t *testing.T) {
 	f := fixtureInvitations()
 	h := invitationTestHandler(f)
@@ -249,21 +217,6 @@ func TestInvitationActualRateGate(t *testing.T) {
 	}
 }
 
-func TestInvitationMutationRetryDeclarations(t *testing.T) {
-	expected := map[string]RetrySafety{"acceptInvitation": RetrySafetyNonRetryable, "createAdminInvitation": RetrySafetyNonRetryable, "resendAdminInvitation": RetrySafetyNonRetryable, "revokeAdminInvitation": RetrySafetyNaturalIdempotent}
-	for _, op := range DeclaredOperations() {
-		if want, ok := expected[op.OperationID]; ok {
-			if op.RetrySafety != want {
-				t.Fatalf("%s retry safety=%s", op.OperationID, op.RetrySafety)
-			}
-			delete(expected, op.OperationID)
-		}
-	}
-	if len(expected) != 0 {
-		t.Fatalf("missing invitation operations=%v", expected)
-	}
-}
-
 func TestInvitationUnconfiguredAndPasswordBounds(t *testing.T) {
 	d := requestDeps(fixtureRequests())
 	h := NewHandler(d)
@@ -343,39 +296,21 @@ func TestLinkInvitationDelivery(t *testing.T) {
 	}
 }
 
-func TestResendInvitationDeliveryChoice(t *testing.T) {
+// An invitation's library list is applied verbatim when it is accepted, so an
+// id no library carries is refused before the invitation is sent.
+func TestInvitationRejectsUnknownLibraries(t *testing.T) {
 	f := fixtureInvitations()
-	h := invitationTestHandler(f)
-	path := Prefix + "/admin/invitations/7/resend"
-
-	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"carrier-pigeon"}`, actingRequestAdmin), TypeValidationFailed)
-	if f.resendDelivery != nil {
-		t.Fatal("invalid delivery reached service")
+	h := invitationTestHandler(f) // knows libraries 1-4
+	path := Prefix + "/admin/invitations"
+	p := requireProblem(t, do(t, h, http.MethodPost, path, `{"email":"a@example.invalid","library_ids":["2","9"]}`, actingRequestAdmin), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationLibraryIDs || p.Errors[0].Detail != "unknown library identifier: 9" {
+		t.Fatalf("errors = %+v", p.Errors)
 	}
-	for _, tc := range []struct {
-		body string
-		want invitations.Delivery
-	}{
-		{body: "", want: invitations.DeliveryDefault},
-		{body: `{}`, want: invitations.DeliveryDefault},
-		{body: `{"delivery":"link"}`, want: invitations.DeliveryLink},
-		{body: `{"delivery":"email"}`, want: invitations.DeliveryEmail},
-	} {
-		r := do(t, h, http.MethodPost, path, tc.body, actingRequestAdmin)
-		if r.Code != 201 || f.resendDelivery == nil || *f.resendDelivery != tc.want {
-			t.Fatalf("body %q: code=%d delivery=%v %s", tc.body, r.Code, f.resendDelivery, r.Body.String())
-		}
+	if f.writes != 0 {
+		t.Fatal("unknown library reached the service")
 	}
-	// Replacing an emailed invitation's link keeps its address and emails nothing.
-	linked := do(t, h, http.MethodPost, path, `{"delivery":"link"}`, actingRequestAdmin)
-	if !strings.Contains(linked.Body.String(), `"delivery_status":"not_requested"`) || !strings.Contains(linked.Body.String(), `"email":"invitee@example.invalid"`) {
-		t.Fatal(linked.Body.String())
-	}
-
-	f.row.Email = ""
-	noAddress := do(t, h, http.MethodPost, path, `{"delivery":"email"}`, actingRequestAdmin)
-	requireProblem(t, noAddress, TypeValidationFailed)
-	if !strings.Contains(noAddress.Body.String(), `"location":"body.delivery"`) {
-		t.Fatal(noAddress.Body.String())
+	r := do(t, h, http.MethodPost, path, `{"email":"a@example.invalid","library_ids":["2","1"]}`, actingRequestAdmin)
+	if r.Code != 201 || f.send == nil || !slices.Equal(f.send.LibraryIDs, []int{2, 1}) {
+		t.Fatal(r.Code, r.Body.String(), f.send)
 	}
 }

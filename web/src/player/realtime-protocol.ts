@@ -23,6 +23,7 @@ export type PlaybackRealtimeAckStatus = "accepted";
 export type PlaybackRealtimeResultStatus = "completed" | "rejected";
 export type PlaybackRealtimeEventName =
   | "chapter_thumbnail_ready"
+  | "marker_thumbnail_ready"
   | "markers_updated"
   | "subtitle_ready"
   | "subtitle_timing_changed"
@@ -67,6 +68,13 @@ export interface PlaybackRealtimeHelloEnvelope {
   capabilities: {
     commands: PlaybackCommandName[];
   };
+}
+
+export interface PlaybackMarkerThumbnailReadyPayload extends PlayerMarkerSegment {
+  session_id: string;
+  file_id: number;
+  thumbnail_url: string;
+  thumbnail_capture_seconds: number;
 }
 
 export interface PlaybackChapterThumbnailReadyPayload {
@@ -217,6 +225,10 @@ export interface PlaybackRealtimeEventEnvelopeBase {
 }
 
 export type PlaybackRealtimeEventEnvelope =
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "marker_thumbnail_ready";
+      payload: PlaybackMarkerThumbnailReadyPayload;
+    })
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "chapter_thumbnail_ready";
       payload: PlaybackChapterThumbnailReadyPayload;
@@ -609,6 +621,14 @@ export function parsePlaybackRealtimeMessage(
           payload: value.payload,
         };
       }
+      if (value.name === "marker_thumbnail_ready" && isMarkerThumbnailReadyPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
       if (value.name === "subtitle_ready" && isSubtitleReadyPayload(value.payload)) {
         return {
           type: "event",
@@ -734,4 +754,23 @@ export function buildPlaybackRealtimeResult(
     status,
     error,
   };
+}
+
+function isMarkerThumbnailReadyPayload(
+  value: unknown,
+): value is PlaybackMarkerThumbnailReadyPayload {
+  return (
+    isRecord(value) &&
+    isMarkerSegment(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    Number.isSafeInteger(value.file_id) &&
+    value.file_id > 0 &&
+    typeof value.thumbnail_url === "string" &&
+    value.thumbnail_url.length > 0 &&
+    typeof value.thumbnail_capture_seconds === "number" &&
+    Number.isFinite(value.thumbnail_capture_seconds) &&
+    value.thumbnail_capture_seconds === value.start_seconds &&
+    (value.thumbnail_thumbhash === undefined || typeof value.thumbnail_thumbhash === "string")
+  );
 }

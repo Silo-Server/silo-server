@@ -1,9 +1,21 @@
-import { memo, useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type MouseEvent,
+} from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { usePageActivity } from "@/hooks/usePageActivity";
+import { HeroOverviewText } from "./HeroOverviewText";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -11,8 +23,14 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
+
+// On-view translation for the visible slide loads after the hero itself, so
+// it stays out of the launch bundle; the plain overview shows meanwhile.
+const HeroOverview = lazy(() => import("./HeroOverview"));
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -38,6 +56,11 @@ interface HeroBannerProps {
    * param so the watch/item routes can scope back to the right library.
    */
   libraryId?: number;
+  /**
+   * Refetches the items while an on-view translation of the shown slide runs,
+   * so the translated description replaces the original in place.
+   */
+  onRefreshItems?: () => void;
 }
 
 /**
@@ -63,18 +86,21 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   isActive,
   keepsMotion,
   shouldLoad,
+  hideImage,
 }: {
   slide: SectionItem;
   index: number;
   isActive: boolean;
   keepsMotion: boolean;
   shouldLoad: boolean;
+  hideImage: boolean;
 }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   // Keep the browser's loaded image visible while a refreshed URL is pending.
   // Distant slides retain their loaded source until they become a neighbor.
   const imageUrl = shouldLoad ? slide.backdrop_url : loadedUrl;
-  const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
+  const thumbhash =
+    !hideImage && slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
 
   return (
     <div
@@ -104,8 +130,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
             animation: keepsMotion
               ? KEN_BURNS_ANIMATIONS[index % KEN_BURNS_ANIMATIONS.length]
               : "none",
-            filter:
-              "brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))",
+            filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))${hideImage ? " blur(24px)" : ""}`,
           }}
           onLoad={() => setLoadedUrl(imageUrl)}
         />
@@ -145,13 +170,32 @@ export default function HeroBanner({
   bleed = false,
   reserveHeaderSpace = false,
   libraryId,
+  onRefreshItems,
 }: HeroBannerProps) {
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
+  const pendingSlideIds = useMemo(
+    () =>
+      new Set(
+        slides
+          .filter((slide) => slide.pending_translation_language)
+          .map((slide) => slide.content_id),
+      ),
+    [slides],
+  );
   const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
     activeIndex: 0,
     outgoingIndex: null as number | null,
   });
   const [paused, setPaused] = useState(false);
+  const { isVisible: pageVisible } = usePageActivity();
+  const sectionRef = useRef<HTMLElement>(null);
+  // Unknown until the observer first reports, so a hero mounted below the
+  // fold preloads nothing; without IntersectionObserver it counts as shown.
+  const [onScreen, setOnScreen] = useState(() => typeof IntersectionObserver === "undefined");
+  // A hero scrolled out of view or in a background tab neither advances nor
+  // downloads the next slide's backdrop.
+  const shown = pageVisible && onScreen;
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
   // changes, or after the user unpauses. Used as part of the progress-rail key
@@ -206,17 +250,37 @@ export default function HeroBanner({
   // t=5s the auto-advance would still fire at t=8 instead of t=13, desyncing
   // with the progress rail that restarts on slide change.
   useEffect(() => {
-    if (slides.length <= 1 || paused) return;
+    if (slides.length <= 1 || paused || !shown) return;
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) return;
     const timer = setInterval(next, 8000);
     return () => clearInterval(timer);
-  }, [next, slides.length, paused, activeIndex]);
+  }, [next, slides.length, paused, shown, activeIndex]);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setOnScreen(entry.isIntersecting);
+    });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [slides.length]);
 
   const current = slides[activeIndex] ?? slides[0];
   useAmbientColor(current?.backdrop_thumbhash);
   if (slides.length === 0) return null;
   if (!current) return null;
+  const overviewShown =
+    Boolean(current.overview) &&
+    !(
+      spoilerPrefs.hideOverviews &&
+      current.type === "episode" &&
+      isEpisodeUnwatched({
+        played: current.user_state?.played,
+        position_seconds: current.position_seconds,
+      })
+    );
 
   const metadata = formatHeroMetadata(current);
 
@@ -250,6 +314,7 @@ export default function HeroBanner({
 
   return (
     <section
+      ref={sectionRef}
       className={cn(
         "home-hero group relative w-full overflow-hidden",
         heightClassName,
@@ -264,19 +329,29 @@ export default function HeroBanner({
         if (!e.currentTarget.contains(e.relatedTarget)) resume();
       }}
     >
-      {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
+      {/* Preload the slide that comes next while the hero is shown; retain
+          loaded backdrops for crossfades. Going back fades in from the
+          thumbhash. */}
       {slides.map((slide, i) => (
         <HeroBackdropSlide
           key={slide.content_id ?? i}
           slide={slide}
+          hideImage={
+            spoilerPrefs.hideImages &&
+            slide.type === "episode" &&
+            isEpisodeStill(slide.backdrop_is_episode_still) &&
+            isEpisodeUnwatched({
+              played: slide.user_state?.played,
+              position_seconds: slide.position_seconds,
+            })
+          }
           index={i}
           isActive={i === activeIndex}
           keepsMotion={i === activeIndex || i === outgoingIndex}
           shouldLoad={
             i === activeIndex ||
             i === outgoingIndex ||
-            i === (activeIndex + 1) % slideCount ||
-            i === (activeIndex - 1 + slideCount) % slideCount
+            (shown && i === (activeIndex + 1) % slideCount)
           }
         />
       ))}
@@ -320,11 +395,21 @@ export default function HeroBanner({
                 )}
               </div>
             )}
-            {current.overview && (
-              <p className="text-foreground/72 mb-7 line-clamp-2 max-w-2xl text-sm leading-7 sm:line-clamp-none sm:text-base">
-                {current.overview}
-              </p>
-            )}
+            <Suspense
+              fallback={
+                overviewShown ? (
+                  <div className="mb-7 max-w-2xl">
+                    <HeroOverviewText overview={current.overview} />
+                  </div>
+                ) : null
+              }
+            >
+              <HeroOverview
+                item={overviewShown ? current : undefined}
+                pendingContentIds={pendingSlideIds}
+                onRefreshItems={onRefreshItems}
+              />
+            </Suspense>
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to={playHref}

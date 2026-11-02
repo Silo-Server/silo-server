@@ -21,6 +21,10 @@ const episodeCatalogSelectBody = `(
 	SELECT
 		e.content_id,
 		e.air_date AS episode_air_date,
+		e.series_id AS episode_series_id,
+		LOWER(COALESCE(NULLIF(BTRIM(si.sort_title), ''), si.title)) AS episode_series_sort_key,
+		e.season_number AS episode_season_number,
+		e.episode_number,
 		'episode'::text AS type,
 		COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text) AS title,
 		COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text) AS sort_title,
@@ -51,6 +55,16 @@ const episodeCatalogSelectBody = `(
 		COALESCE(si.backdrop_thumbhash, '') AS backdrop_thumbhash,
 		COALESCE(si.logo_path, '') AS logo_path,
 		COALESCE(si.logo_source_path, '') AS logo_source_path,
+		''::text AS banner_path,
+		''::text AS banner_source_path,
+		''::text AS banner_thumbhash,
+		''::text AS thumb_path,
+		''::text AS thumb_source_path,
+		''::text AS thumb_thumbhash,
+		''::text AS clearart_path,
+		''::text AS clearart_source_path,
+		''::text AS disc_path,
+		''::text AS disc_source_path,
 		COALESCE(e.metadata_s3_path, '') AS metadata_s3_path,
 		COALESCE(e.metadata_etag, '') AS metadata_etag,
 		NULL::integer AS season_count,
@@ -63,6 +77,7 @@ const episodeCatalogSelectBody = `(
 		NULL::text AS first_air_date,
 		NULL::text AS last_air_date,
 		e.air_date AS last_air_date_at,
+		e.air_date AS latest_available_episode_air_date_at,
 		si.air_time,
 		si.air_timezone,
 		COALESCE(si.show_status, '') AS show_status,
@@ -105,11 +120,14 @@ func isEpisodeCatalogScope(scope string) bool {
 	return scope == "episode"
 }
 
+// mediaItemsBaseRelation is the catalog's default base relation.
+const mediaItemsBaseRelation = "media_items mi"
+
 func catalogBaseRelationForScope(scope string) string {
 	if isEpisodeCatalogScope(scope) {
 		return episodeCatalogBaseRelation
 	}
-	return "media_items mi"
+	return mediaItemsBaseRelation
 }
 
 func episodeCatalogBaseRelationForLibraries(

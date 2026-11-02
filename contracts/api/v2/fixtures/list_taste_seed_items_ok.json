@@ -25,7 +25,8 @@
       "user_state": {
         "played": false,
         "is_favorite": false,
-        "in_watchlist": true
+        "in_watchlist": true,
+        "not_interested": false
       }
     }
   ],

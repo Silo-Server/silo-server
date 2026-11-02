@@ -2,53 +2,58 @@ package nfo
 
 import (
 	"context"
-	"os"
+	"crypto/sha256"
+	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
-
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// Provider reads metadata from NFO sidecar files.
-type Provider struct{}
+// Provider reads metadata from NFO sidecar files. Its caches let the
+// identity-hint, search, and metadata phases of a pass share one directory
+// listing and one parse per file; the provider lives as long as its cached
+// provider chain.
+type Provider struct {
+	parses   boundedCache[[sha256.Size]byte, *parsedNFO]
+	listings boundedCache[dirCacheKey, *dirListing]
+}
 
 func NewProvider() *Provider { return &Provider{} }
 
-func (p *Provider) Slug() string { return "nfo" }
+// providerSlug is the NFO provider's capability id.
+const providerSlug = "nfo"
 
-// RatingSources declares the Rotten Tomatoes scores the provider reads from
-// local .nfo files into the rt_critic and rt_audience rating columns, so an
-// administrator can choose to show them.
+func (p *Provider) Slug() string { return providerSlug }
+
+// RatingSources declares the rating sources beyond IMDb and TMDB the provider
+// reads from local .nfo files: the Rotten Tomatoes scores it stores in the
+// rt_critic and rt_audience rating columns, and the other named ratings Kodi
+// writers carry, so an administrator can choose to show them.
 func (p *Provider) RatingSources() []models.RatingSourceDefinition {
-	return []models.RatingSourceDefinition{
-		{Source: models.RatingSourceRTCritic, Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
-		{Source: models.RatingSourceRTAudience, Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
-	}
+	return slices.Clone(ratingSourceDefinitions)
 }
 func (p *Provider) Name() string       { return "NFO Files" }
 func (p *Provider) ForTypes() []string { return []string{typeMovie, typeSeries} }
 
 // IdentityHints implements metadata.IdentityHintProvider: the external IDs a
-// curated NFO declares (<uniqueid> tmdb/imdb/tvdb) are trusted identity hints
-// that anchor Phase-1 candidate selection. A title-only NFO contributes no
-// hints; its title participates only as a defanged search candidate.
-func (p *Provider) IdentityHints(_ context.Context, query metadata.SearchQuery) map[string]string {
-	parsed := findNFOForQuery(query)
+// curated NFO declares (<uniqueid>, the legacy id forms, an episodeguide, or
+// a provider link) are trusted identity hints that anchor Phase-1 candidate
+// selection. A title-only NFO contributes no hints; its title participates
+// only as a defanged search candidate. An NFO that cannot be read yields no
+// hints; Search and GetMetadata report the read error.
+func (p *Provider) IdentityHints(ctx context.Context, query metadata.SearchQuery) map[string]string {
+	parsed, err := p.findNFOForQuery(ctx, query)
+	if err != nil {
+		slog.WarnContext(ctx, "nfo: cannot read NFO for identity hints", "component", "metadata", "error", err)
+		return nil
+	}
 	if parsed == nil {
 		return nil
 	}
-	hints := make(map[string]string)
-	if parsed.TmdbID != "" {
-		hints["tmdb"] = parsed.TmdbID
-	}
-	if parsed.ImdbID != "" {
-		hints["imdb"] = parsed.ImdbID
-	}
-	if parsed.TvdbID != "" {
-		hints["tvdb"] = parsed.TvdbID
-	}
+	hints := parsed.providerIDs()
 	if len(hints) == 0 {
 		return nil
 	}
@@ -57,20 +62,14 @@ func (p *Provider) IdentityHints(_ context.Context, query metadata.SearchQuery) 
 
 // Search extracts external IDs from NFO for matching.
 func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	parsed := findNFOForQuery(query)
+	parsed, err := p.findNFOForQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
 	if parsed == nil {
-		return nil, nil // missing/unreadable/mismatched NFOs are not fatal
+		return nil, nil // missing/unparseable/mismatched NFOs are not fatal
 	}
-	ids := make(map[string]string)
-	if parsed.TmdbID != "" {
-		ids["tmdb"] = parsed.TmdbID
-	}
-	if parsed.ImdbID != "" {
-		ids["imdb"] = parsed.ImdbID
-	}
-	if parsed.TvdbID != "" {
-		ids["tvdb"] = parsed.TvdbID
-	}
+	ids := parsed.providerIDs()
 	if len(ids) == 0 && parsed.Title == "" {
 		return nil, nil
 	}
@@ -83,83 +82,87 @@ func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]me
 }
 
 // GetMetadata parses full metadata from an NFO file. Like Search, it carries
-// the ContentType guard (enforced inside findNFO): a tvshow.nfo next to a
+// the ContentType guard (enforced inside findItemNFO): a tvshow.nfo next to a
 // movie file must not inject series data into a movie item at top priority.
+// A URL-only NFO names the item but carries no fields, so it returns no
+// metadata. An NFO that exists but cannot be read returns an error wrapping
+// metadata.ErrLocalMetadataUnavailable, never an empty result.
+//
+// An actor's <thumb> comes back in the credit's LocalPhotoSource, resolved
+// to an image source (see artResolver); the metadata service decides whether
+// the person takes it.
 func (p *Provider) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
-	parsed := findNFOForRequest(req)
-	if parsed == nil {
+	mediaFiles, sidecarDirs := requestPaths(req)
+	nfoPath, parsed, err := p.newLookup(ctx).findItemNFO(mediaFiles, sidecarDirs, req.ContentType)
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil || parsed.LinkOnly {
 		return &metadata.MetadataResult{}, nil
 	}
-	result := &metadata.MetadataResult{
-		HasMetadata:   true,
-		Title:         parsed.Title,
-		OriginalTitle: parsed.OriginalTitle,
-		Tagline:       parsed.Tagline,
-		Year:          parsed.Year,
-		Overview:      parsed.Overview,
-		Runtime:       parsed.Runtime,
-		ReleaseDate:   parsed.ReleaseDate,
-		FirstAirDate:  parsed.FirstAirDate,
-		ContentRating: parsed.ContentRating,
-		Genres:        parsed.Genres,
-		Studios:       parsed.Studios,
-		Countries:     parsed.Countries,
-		Keywords:      parsed.Keywords,
+	resolvePeoplePhotos(parsed.People, newArtResolver(newSidecarFinder(ctx), nfoPath, itemFolders(sidecarDirs, mediaFiles)))
+	return &metadata.MetadataResult{
+		HasMetadata:      true,
+		Title:            parsed.Title,
+		OriginalTitle:    parsed.OriginalTitle,
+		SortTitle:        parsed.SortTitle,
+		Tagline:          parsed.Tagline,
+		Year:             parsed.Year,
+		Overview:         parsed.Overview,
+		Runtime:          parsed.Runtime,
+		ReleaseDate:      parsed.ReleaseDate,
+		FirstAirDate:     parsed.FirstAirDate,
+		ContentRating:    parsed.ContentRating,
+		OriginalLanguage: parsed.OriginalLanguage,
+		ShowStatus:       parsed.ShowStatus,
+		Genres:           parsed.Genres,
+		Studios:          parsed.Studios,
+		Networks:         parsed.Networks,
+		Countries:        parsed.Countries,
+		Keywords:         parsed.Keywords,
 		Ratings: metadata.Ratings{
 			IMDB:       parsed.RatingIMDB,
 			TMDB:       parsed.RatingTMDB,
 			RTCritic:   parsed.RatingRTCritic,
 			RTAudience: parsed.RatingRTAudience,
 		},
-		People:      parsed.People,
-		ProviderIDs: make(map[string]string),
-	}
-	if parsed.TmdbID != "" {
-		result.ProviderIDs["tmdb"] = parsed.TmdbID
-	}
-	if parsed.ImdbID != "" {
-		result.ProviderIDs["imdb"] = parsed.ImdbID
-	}
-	if parsed.TvdbID != "" {
-		result.ProviderIDs["tvdb"] = parsed.TvdbID
-	}
-	return result, nil
+		RatingSources: parsed.ratingSources(p.Slug()),
+		People:        parsed.People,
+		Videos:        parsed.Videos,
+		ProviderIDs:   parsed.providerIDs(),
+	}, nil
 }
 
-func findNFOForQuery(query metadata.SearchQuery) *parsedNFO {
-	candidatePaths := candidateSidecarPaths(
+// providerIDs returns the tmdb/imdb/tvdb ids the NFO declares.
+func (p *parsedNFO) providerIDs() map[string]string {
+	ids := make(map[string]string)
+	if p.TmdbID != "" {
+		ids[idKeyTMDB] = p.TmdbID
+	}
+	if p.ImdbID != "" {
+		ids[idKeyIMDB] = p.ImdbID
+	}
+	if p.TvdbID != "" {
+		ids[idKeyTVDB] = p.TvdbID
+	}
+	return ids
+}
+
+func (p *Provider) findNFOForQuery(ctx context.Context, query metadata.SearchQuery) (*parsedNFO, error) {
+	mediaFiles := compactNFOPaths(append([]string{
 		query.FilePath,
 		query.RepresentativeFilePath,
-		query.AllGroupFilePaths,
-		query.PrimarySidecarSearchPaths,
 		query.ProviderIDs["_filepath"],
-	)
-	_, parsed := findNFO(candidatePaths, query.ContentType)
-	return parsed
+	}, query.AllGroupFilePaths...))
+	_, parsed, err := p.newLookup(ctx).findItemNFO(mediaFiles, compactNFOPaths(query.PrimarySidecarSearchPaths), query.ContentType)
+	return parsed, err
 }
 
-func findNFOForRequest(req metadata.MetadataRequest) *parsedNFO {
-	candidatePaths := candidateSidecarPaths(
-		req.FilePath,
-		req.RepresentativeFilePath,
-		req.AllGroupFilePaths,
-		req.PrimarySidecarSearchPaths,
-	)
-	_, parsed := findNFO(candidatePaths, req.ContentType)
-	return parsed
-}
-
-func candidateSidecarPaths(primary string, representative string, groupFiles []string, searchPaths []string, extras ...string) []string {
-	candidates := make([]string, 0, 2+len(groupFiles)+len(searchPaths)+len(extras))
-	for _, path := range []string{primary, representative} {
-		if strings.TrimSpace(path) != "" {
-			candidates = append(candidates, path)
-		}
-	}
-	candidates = append(candidates, groupFiles...)
-	candidates = append(candidates, searchPaths...)
-	candidates = append(candidates, extras...)
-	return compactNFOPaths(candidates)
+// requestPaths returns a metadata request's media files and directory-level
+// sidecar folders.
+func requestPaths(req metadata.MetadataRequest) (mediaFiles, sidecarDirs []string) {
+	mediaFiles = compactNFOPaths(append([]string{req.FilePath, req.RepresentativeFilePath}, req.AllGroupFilePaths...))
+	return mediaFiles, compactNFOPaths(req.PrimarySidecarSearchPaths)
 }
 
 func compactNFOPaths(paths []string) []string {
@@ -177,66 +180,4 @@ func compactNFOPaths(paths []string) []string {
 		out = append(out, clean)
 	}
 	return out
-}
-
-// findNFO locates the best candidate NFO file across media-file and directory
-// search paths. File paths check legacy directory-level sidecars first, then a
-// basename-matched sidecar in the same directory. A candidate that exists but
-// fails to parse, or whose root type mismatches contentType, falls through to
-// the next candidate — a stray movie.nfo in a series root must not shadow
-// tvshow.nfo, and a tvshow.nfo beside a movie file must not inject series
-// data. Returns the winning path and its parsed contents, or ("", nil).
-func findNFO(paths []string, contentType string) (string, *parsedNFO) {
-	candidates := make([]string, 0, len(paths)*3)
-	for _, path := range paths {
-		candidates = append(candidates, nfoCandidatesForPath(path)...)
-	}
-	candidates = compactNFOPaths(candidates)
-	for _, c := range candidates {
-		data, err := os.ReadFile(c)
-		if err != nil {
-			continue
-		}
-		parsed, err := parseNFOData(data)
-		if err != nil {
-			continue
-		}
-		if contentType != "" && parsed.Type != "" && parsed.Type != contentType {
-			continue
-		}
-		return c, parsed
-	}
-	return "", nil
-}
-
-func nfoCandidatesForPath(path string) []string {
-	if path == "" {
-		return nil
-	}
-	info, err := os.Stat(path)
-	if err == nil {
-		if info.IsDir() {
-			return directoryLevelNFOCandidates(path)
-		}
-		return fileLevelNFOCandidates(path)
-	}
-	return append(fileLevelNFOCandidates(path), directoryLevelNFOCandidates(path)...)
-}
-
-func fileLevelNFOCandidates(path string) []string {
-	ext := filepath.Ext(path)
-	dir := filepath.Dir(path)
-	base := strings.TrimSuffix(filepath.Base(path), ext)
-	return []string{
-		filepath.Join(dir, "movie.nfo"),
-		filepath.Join(dir, "tvshow.nfo"),
-		filepath.Join(dir, base+".nfo"),
-	}
-}
-
-func directoryLevelNFOCandidates(path string) []string {
-	return []string{
-		filepath.Join(path, "movie.nfo"),
-		filepath.Join(path, "tvshow.nfo"),
-	}
 }

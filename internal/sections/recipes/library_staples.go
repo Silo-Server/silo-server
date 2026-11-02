@@ -18,6 +18,7 @@ type libStaple struct {
 	descShort   string
 	cacheTTL    time.Duration
 	presets     []GalleryPreset
+	hidden      bool
 }
 
 func (l *libStaple) Type() string   { return l.typ }
@@ -60,6 +61,7 @@ func (l *libStaple) Definition() RecipeDefinition {
 		Type:     l.typ,
 		Category: CategoryLibraryStaples,
 		Presets:  presets,
+		Hidden:   l.hidden,
 	}
 }
 
@@ -94,7 +96,10 @@ func init() {
 			},
 		},
 	})
-	Register(&libStaple{typ: "next_up", displayName: "On Deck", icon: "📺", descShort: "Next episodes ready to watch.", cacheTTL: time.Minute})
+	// next_up stays registered for the Next Up row the server inserts when a
+	// profile's ui.next_up_mode is separate. No surface may add one (see
+	// refusesNewRow in package handlers), so the gallery leaves it out.
+	Register(&libStaple{typ: "next_up", displayName: "Next Up", icon: "📺", descShort: "Next episodes ready to watch.", cacheTTL: time.Minute, hidden: true})
 	Register(&libStaple{typ: "next_in_series", displayName: "Next in Series", icon: "📚", descShort: "The next audiobook in series you've finished.", cacheTTL: time.Minute})
 	Register(&libStaple{typ: "watchlist", displayName: "Watchlist", icon: "🔖", descShort: "Items you've saved to watch.", cacheTTL: time.Minute})
 	Register(&libStaple{typ: "favorites", displayName: "Favorites", icon: "⭐", descShort: "Your favorites.", cacheTTL: time.Minute})

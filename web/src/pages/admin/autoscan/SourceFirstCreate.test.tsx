@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
+import { expect, it, vi } from "vitest";
 import SourcesPanel from "./SourcesPanel";
+import { setupAutoscanAdmin } from "./autoscanTestSession.test-support";
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({
@@ -42,19 +42,7 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-beforeEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
-  setAccessToken("synthetic-admin");
-  setRefreshToken(null);
-  setProfileId("a");
-  setProfileToken("pin-a");
-});
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+setupAutoscanAdmin();
 
 // stubAPI serves the autoscan endpoints the panel reads. With
 // `failSourceReadsAfterCreate`, every sources GET after the create fails.

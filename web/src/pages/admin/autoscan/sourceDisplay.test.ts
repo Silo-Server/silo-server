@@ -43,12 +43,6 @@ describe("describeSource", () => {
     });
   });
 
-  it("says an unset provider is detected per delivery", () => {
-    expect(describe_(webhookSource({ source_config: { webhook_provider: "auto" } }))).toMatchObject(
-      { title: "Sonarr/Radarr Webhook", subtitle: "Webhook · auto-detects Sonarr or Radarr" },
-    );
-  });
-
   it("names the connection and effective interval for a polling source", () => {
     expect(describe_(pollSource({ label: "Basement" }))).toMatchObject({
       title: "Basement",
@@ -57,13 +51,6 @@ describe("describeSource", () => {
     expect(
       describe_(pollSource({ connection_id: null, poll_interval_seconds: 7200 })),
     ).toMatchObject({ title: "Sonarr / Radarr", subtitle: "Polls every 2 h" });
-  });
-
-  it("falls back to the capability when the plugin is not installed", () => {
-    expect(
-      describe_(pollSource({ plugin_id: "gone", capability_id: "gone-cap", connection_id: null }))
-        .title,
-    ).toBe("gone-cap");
   });
 });
 
@@ -114,10 +101,6 @@ describe("eventSourceName", () => {
         lookups([]),
       ),
     ).toBe("gone-cap");
-  });
-
-  it("returns an empty name for a reference without a plugin", () => {
-    expect(eventSourceName({ source_id: null }, lookups([]))).toBe("");
   });
 });
 

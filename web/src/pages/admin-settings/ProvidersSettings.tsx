@@ -47,30 +47,20 @@ import {
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { sortSubtitleProviders } from "@/lib/subtitleProviders";
-import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
-import { SettingField, SettingFieldStatus } from "./SettingField";
-import { useAdminNodes } from "@/hooks/queries/admin/nodes";
-import {
-  SUBTITLE_SYNC_EXECUTION_DEFAULT,
-  hasUsableTranscodeNode,
-  isNodeBackedExecution,
-  subtitleSyncExecutionOptions,
-} from "./playbackSettings.utils";
+import { SettingField } from "./SettingField";
+import { WatchProviderTiles } from "./WatchProviderTiles";
 
 /**
  * MDBList is the only provider on this page whose credential is a server
- * setting; the subtitle providers have their own endpoints. The form also
- * stages the subtitle sync settings, which save through the page's SaveBar.
+ * setting; the subtitle and marker providers have their own endpoints, and
+ * watch providers are configured on their plugin pages. Every tile saves
+ * itself, so the page has no save bar: the form only reports which
+ * secrets are configured and reads the marker detection mode.
  */
-const SUBTITLE_SYNC_KEYS = [
-  "subtitles.auto_sync",
-  "subtitles.sync_execution",
-  "subtitles.sync_node_capacity",
-];
-const KEYS = ["mdblist.api_key", ...SUBTITLE_SYNC_KEYS];
+const KEYS = ["mdblist.api_key"];
 
 // ---------------------------------------------------------------------------
 // Shared tile plumbing
@@ -203,11 +193,17 @@ function SubtitleProviderTile({
   const testProvider = useTestSubtitleProvider();
 
   const canonical = editor?.body ?? config;
-  const enabled = enabledDraft ?? canonical.enabled;
   const providerName = config.provider_name;
   const { name, tagline, monogram, monogramClass } = presentationFor(providerName);
   const usesAccount = providerName === "opensubtitles";
   const configured = usesAccount ? canonical.has_credentials : canonical.has_api_key;
+  const credentialTyped = usesAccount
+    ? username.trim() !== "" && password !== ""
+    : apiKey.trim() !== "";
+  // Typing the first credentials into a provider that has none is connecting
+  // it, so the switch follows unless the admin set it themselves; otherwise
+  // the save lands as "Connected · off" and nothing downloads.
+  const enabled = enabledDraft ?? (!configured && credentialTyped ? true : canonical.enabled);
 
   const draft = usesAccount ? { username, password } : { api_key: apiKey };
   // Tile drafts live outside useSettingsForm, so the navigation guard and
@@ -515,7 +511,7 @@ function MDBListTile({
   return (
     <ProviderTile
       name="MDBList"
-      tagline="Ratings and lists"
+      tagline="Lists"
       monogram="MD"
       monogramClass="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
       state={state}
@@ -530,7 +526,8 @@ function MDBListTile({
       }}
     >
       <p className="text-muted-foreground mb-1 text-xs">
-        A key adds search and browse; list URLs import without one. Get a key at{" "}
+        A key lets collection imports search and browse MDBList lists; pasted list URLs import
+        without one. Get a key at{" "}
         <a
           href="https://mdblist.com/preferences/#api"
           target="_blank"
@@ -606,19 +603,12 @@ export default function ProvidersSettings() {
   }
 
   // Marker tiles can be perfectly set up and still never run: the detection
-  // mode on Library & Metadata decides whether Silo looks online at all. The
-  // key is read, not staged — this page never saves it.
+  // mode on Playback decides whether Silo looks online at all. The key is
+  // read, not staged — this page never saves it.
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkerLookupEnabled = markerMode === "online" || markerMode === "both";
 
   const providers = sortSubtitleProviders(data?.providers ?? []);
-
-  const nodes = useAdminNodes();
-  // Gate node-backed modes only on a node list we actually have, as the
-  // chapter thumbnail setting does.
-  const transcodeNodeAvailable = !nodes.isSuccess || hasUsableTranscodeNode(nodes.data);
-  const syncExecution =
-    form.getValue("subtitles.sync_execution") || SUBTITLE_SYNC_EXECUTION_DEFAULT;
 
   if (form.isLoading || isLoading) {
     return (
@@ -633,8 +623,35 @@ export default function ProvidersSettings() {
   }
 
   return (
-    <div className="flex h-full max-w-5xl flex-col gap-7">
-      <SettingsPageHeader title="Subtitles & Metadata" />
+    <div className="space-y-5">
+      <SettingsPageHeader title="Providers" />
+
+      <FieldGroup label="Watch providers">
+        <div className="py-3.5">
+          <WatchProviderTiles />
+        </div>
+      </FieldGroup>
+
+      {/*
+        The server's MDBList key only powers list search and browse in
+        collection imports; MDBList ratings come from its metadata plugin,
+        configured under Plugins like TMDB and TheTVDB.
+      */}
+      <FieldGroup label="Lists">
+        <div className="py-3.5">
+          <ProviderTileGrid>
+            <MDBListTile
+              sensitiveConfigured={form.sensitiveConfigured}
+              restartKeys={restartKeys}
+              expanded={expandedTile === "mdblist"}
+              onExpand={() => setExpandedTile("mdblist")}
+              onCollapse={() => setExpandedTile(null)}
+              test={tests.mdblist}
+              onTested={(test) => recordTest("mdblist", test)}
+            />
+          </ProviderTileGrid>
+        </div>
+      </FieldGroup>
 
       <FieldGroup label="Subtitle providers">
         <div className="py-3.5">
@@ -659,71 +676,10 @@ export default function ProvidersSettings() {
         </div>
       </FieldGroup>
 
-      <FieldGroup label="Subtitle sync" dirty={SUBTITLE_SYNC_KEYS.some((key) => form.isDirty(key))}>
-        <SettingField
-          label="Sync subtitles automatically"
-          type="toggle"
-          description="Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release."
-          dirty={form.isDirty("subtitles.auto_sync")}
-          value={form.getValue("subtitles.auto_sync") || "true"}
-          onChange={(v) => form.setValue("subtitles.auto_sync", v)}
-          restartRequired={restartKeys.has("subtitles.auto_sync")}
-        />
-        <SettingField
-          label="Where to analyze audio"
-          type="select"
-          description="Sync decodes a few minutes of the file's audio."
-          options={subtitleSyncExecutionOptions(syncExecution, transcodeNodeAvailable)}
-          status={
-            !transcodeNodeAvailable && isNodeBackedExecution(syncExecution) ? (
-              <SettingFieldStatus tone="warn">No transcode nodes are connected</SettingFieldStatus>
-            ) : undefined
-          }
-          dirty={form.isDirty("subtitles.sync_execution")}
-          value={syncExecution}
-          onChange={(v) => form.setValue("subtitles.sync_execution", v)}
-          restartRequired={restartKeys.has("subtitles.sync_execution")}
-        />
-        {isNodeBackedExecution(syncExecution) && (
-          <SettingField
-            label="Concurrent syncs per transcode node"
-            type="number"
-            description="How many subtitles one transcode node syncs at once."
-            dirty={form.isDirty("subtitles.sync_node_capacity")}
-            value={form.getValue("subtitles.sync_node_capacity") || "1"}
-            onChange={(v) => form.setValue("subtitles.sync_node_capacity", v)}
-            restartRequired={restartKeys.has("subtitles.sync_node_capacity")}
-          />
-        )}
-      </FieldGroup>
-
-      <FieldGroup label="Metadata providers">
-        <div className="space-y-3 py-3.5">
-          <ProviderTileGrid>
-            <MDBListTile
-              sensitiveConfigured={form.sensitiveConfigured}
-              restartKeys={restartKeys}
-              expanded={expandedTile === "mdblist"}
-              onExpand={() => setExpandedTile("mdblist")}
-              onCollapse={() => setExpandedTile(null)}
-              test={tests.mdblist}
-              onTested={(test) => recordTest("mdblist", test)}
-            />
-          </ProviderTileGrid>
-          <p className="text-muted-foreground text-xs">
-            TMDB and TheTVDB connect from{" "}
-            <Link to="/admin/plugins" className="underline underline-offset-2">
-              Plugins
-            </Link>
-            .
-          </p>
-        </div>
-      </FieldGroup>
-
       {/*
         Marker providers are the online half of "Marker source". The
-        detection mode itself stays on Library & Metadata; what each provider
-        does — lookup order, whether this server contributes back — is provider
+        detection mode itself stays on Playback; what each provider does —
+        lookup order, whether this server contributes back — is provider
         configuration and belongs beside the other providers.
       */}
       <FieldGroup label="Marker providers">
@@ -737,7 +693,7 @@ export default function ProvidersSettings() {
             Online marker lookup is {onlineMarkerLookupEnabled ? "enabled" : "disabled"}. Change
             this under{" "}
             <Link
-              to="/admin/settings/library"
+              to="/admin/settings/playback"
               className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
             >
               Marker source
@@ -747,12 +703,15 @@ export default function ProvidersSettings() {
         </div>
       </FieldGroup>
 
-      <SaveBar
-        dirtyCount={form.dirtyCount}
-        onSave={form.save}
-        onDiscard={form.discard}
-        isSaving={form.isSaving}
-      />
+      {/* An admin looking for metadata providers on a page called Providers
+          lands here, so say where they are. */}
+      <p className="text-muted-foreground text-xs">
+        Metadata providers, including TMDB, TheTVDB, and MDBList ratings, connect from{" "}
+        <Link to="/admin/plugins" className="underline underline-offset-2">
+          Plugins
+        </Link>
+        .
+      </p>
     </div>
   );
 }

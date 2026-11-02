@@ -119,6 +119,9 @@ type ResolveRequest struct {
 	ProxyEligible          func(*nodepool.Node) bool
 	ProxyExecutionEligible func(*nodepool.Node) bool
 	ExcludedShapeIDs       map[string]struct{}
+	// UnreachableNodes are node URLs the caller found not answering; see
+	// nodepool.RouteRequest.Unreachable.
+	UnreachableNodes map[string]struct{}
 }
 
 type Outcome string
@@ -182,6 +185,7 @@ func Resolve(planner nodepool.RoutePlanner, request ResolveRequest) (Decision, e
 			NeedsProxy:           shape.NeedsProxyNode(),
 			TranscodeEligible:    request.TranscodeEligible,
 			ProxyEligible:        proxyEligible,
+			Unreachable:          request.UnreachableNodes,
 		})
 		if shape.NeedsTranscodeNode() != (plan.TranscodeNode != nil) ||
 			shape.NeedsProxyNode() != (plan.ProxyNode != nil) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -31,12 +32,20 @@ const DefaultLifecyclePollInterval = time.Minute
 // on cache.ChannelAdmin as cache.EventPluginsChanged. The API server calls
 // it; proxy nodes follow with FollowLifecycleChanges. Publishing is
 // best-effort: a failed publish is logged and the followers' poll catches up.
+//
+// The announcement runs before the hooks registered so far, which include
+// slow ones such as the resident reconcile. Until it arrives, another API
+// server stores the events it produces by its old plugin event subscribers.
 func (s *Service) PublishLifecycleChanges(bus cache.EventBus) {
 	if s == nil || bus == nil {
 		return
 	}
 	s.lifecycleBus = bus
-	s.AddLifecycleHook(func(ctx context.Context) { s.publishPluginsChanged(ctx, PluginsChangedEvent{}) })
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(ctx context.Context) {
+		s.publishPluginsChanged(ctx, PluginsChangedEvent{})
+	})
 }
 
 func (s *Service) publishPluginsChanged(ctx context.Context, event PluginsChangedEvent) {

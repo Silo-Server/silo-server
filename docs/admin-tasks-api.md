@@ -36,8 +36,8 @@ its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
-by default: processed search index events, activity log, task history, expired
-login sessions, policy decision log, and notifications. The log steps also
+by default: processed search index events, activity log, task history, autoscan
+events, expired login sessions, policy decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Every server fires
 the same trigger, so a PostgreSQL advisory lock lets one server run the steps;
 the others record a completed run that did nothing. Each step keeps its
@@ -81,6 +81,13 @@ disables both mutation retries and authentication-refresh replay. The inherited
 `max_runtime_ms` setting is stored but is not enforced by the task runner; the
 editor labels that limitation rather than promising a timeout.
 
+A task can spread its scheduled starts so servers sharing a remote service do
+not start together. Each daily or weekly run of such a task starts at a random
+point in a window after its configured time, chosen when the run is scheduled,
+and `next_run_at` reports that time. The window applies to default and edited
+schedules alike and is not part of the stored triggers. `contribute_markers`
+spreads its runs over four hours. Manual runs start at once.
+
 ## History and metrics
 
 `GET /api/v2/admin/tasks/{key}/history` returns persisted executions in an `items`
@@ -105,9 +112,12 @@ The database fetches at most limit plus one rows. Cursors bind the filter,
 account, acting profile, and operation. The web exposes explicit continuation
 and restart controls for job histories.
 
-`GET /api/v2/admin/jobs/{id}` returns a safe typed job projection. Administrators
-may read all retained jobs; other accounts may read only their own item-refresh
-job. Hidden and missing jobs both return 404. Nonterminal responses supply
+`GET /api/v2/admin/jobs/{id}` returns a safe typed job projection. The acting
+admin (an administrator acting through the account's primary profile; see
+[api-contract.md](architecture/api-contract.md)) may read all retained jobs;
+anyone else, including another profile on an administrator's account, may read
+only an item-refresh job their account started. A declared profile is verified
+like on any profile-scoped operation, with `X-Profile-Token` when it has a PIN. Hidden and missing jobs both return 404. Nonterminal responses supply
 `Retry-After: 5`. The projection keeps library identities, typed result counts,
 and authorized catalog artifact links, while excluding raw request documents,
 storage keys, file paths, and internal error text. Artifact links can expire and
@@ -127,11 +137,24 @@ documents for this job type.
 
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for storage-transition jobs. Library refresh cancellation uses its separate
-library-job endpoint above. Cancellation retains completed effects and verified
-storage-copy checkpoints. An accepted cancellation returns `202`; an already
-canceled job returns `200`; a succeeded or failed job returns
-`409 job_not_cancelable`. A queued storage-transition cancellation also releases
-its staged target so a later transition can choose a different destination. The
-administrator task section does not add a generic durable scheduler or change
+for library refresh, storage-transition, and image cache cleanup jobs. A job's
+`cancelable` field is true exactly when it is one of these types and not
+terminal, and every job resource that reports `cancelable: true` accepts the
+cancellation through its own cancel operation. A library refresh can therefore
+be canceled through either `cancelAdminJob` or the library-job endpoint; both
+record the same request. Other job types return `409 job_not_cancelable`.
+Cancellation retains
+completed effects and verified storage-copy checkpoints. An accepted
+cancellation returns `202`; an already canceled job returns `200`; a succeeded
+or failed job returns `409 job_not_cancelable`. A queued storage-transition
+cancellation also releases its staged target so a later transition can choose a
+different destination. A queued image cache cleanup, including one waiting
+between slices, is canceled at once and returns `200`. A running cleanup stops
+at the prefix it is deleting, so the cancel can take partial effect: cached
+images already deleted stay deleted and any not yet deleted remain in storage.
+The canceled job reports the totals it reached in `library_result`:
+`deleted_prefixes` counts fully deleted prefixes and `deleted_s3_objects` counts
+every deleted object, including any from the prefix the cancel interrupted. A
+cleanup canceled before it deleted anything reports zeros. The administrator
+task section does not add a generic durable scheduler or change
 the retention and dispatch guarantees of existing job owners.

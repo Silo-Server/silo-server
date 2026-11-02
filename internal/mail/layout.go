@@ -20,7 +20,7 @@ import (
 // clients, so the stacks lead with the brand font and degrade to common
 // system faces.
 const (
-	EmailFont     = "'Outfit','Avenir Next','Segoe UI',Helvetica,Arial,sans-serif"
+	EmailFont     = "'Plus Jakarta Sans','Avenir Next','Segoe UI',Helvetica,Arial,sans-serif"
 	EmailFontMono = "'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace"
 
 	EmailColorCanvas = "#141417" // page background

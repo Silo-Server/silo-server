@@ -2,13 +2,19 @@ package jellycompat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -24,7 +30,17 @@ var (
 	ErrProfileHasPIN = errors.New("profile is PIN protected")
 	// ErrInvalidPIN indicates the provided PIN did not match.
 	ErrInvalidPIN = errors.New("invalid profile PIN")
+	// ErrQuickConnectNotAuthorized indicates a Quick Connect secret that is
+	// not an approved, uncollected request.
+	ErrQuickConnectNotAuthorized = errors.New("quick connect request is not authorized")
 )
+
+// quickConnectCollector exchanges an approved Quick Connect secret for a
+// login session of the approving account and names the approved profile
+// (auth.DeviceLoginService.CollectQuickConnect).
+type quickConnectCollector interface {
+	CollectQuickConnect(ctx context.Context, secret string, persist auth.QuickConnectPersist) (*auth.DeviceLoginPollResult, error)
+}
 
 // LoginResolver performs username#profile login resolution against Silo.
 type LoginResolver struct {
@@ -37,6 +53,9 @@ type LoginResolver struct {
 	// guesses here count against the same per-profile budget. Nil allows
 	// every attempt.
 	pinAttempts *ratelimit.AttemptLimiter
+	// quickConnect collects approved Quick Connect requests. Nil refuses
+	// every Quick Connect sign-in.
+	quickConnect quickConnectCollector
 }
 
 // NewLoginResolver creates a new login resolver using direct auth service.
@@ -62,6 +81,12 @@ func (r *LoginResolver) WithPINAttempts(l *ratelimit.AttemptLimiter) *LoginResol
 	return r
 }
 
+// WithQuickConnect sets the Quick Connect collector and returns r.
+func (r *LoginResolver) WithQuickConnect(c quickConnectCollector) *LoginResolver {
+	r.quickConnect = c
+	return r
+}
+
 // Resolve authenticates the account and profile, returning a compat session.
 //
 // PIN-protected profiles are supported via the password#pin convention:
@@ -78,10 +103,10 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	}
 
 	// Try auth with full password first, fall back to base#pin split.
-	basePw, pinCandidate := splitPasswordPIN(password)
+	basePw, pinCandidate := auth.SplitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
-	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
+	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP, signInBudgetName(combinedUsername))
 	if err != nil {
 		return nil, mapAuthError(err)
 	}
@@ -120,12 +145,14 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 			return nil, fmt.Errorf("%w: use password#pin format to access PIN-protected profiles", ErrProfileHasPIN)
 		}
 		// A locked profile fails like a wrong PIN: Jellyfin clients have no
-		// lockout response, so only the message says why.
+		// lockout response, so only the message says why. The check waits
+		// for a hashing turn ahead of sign-ins, then reads the PIN hash
+		// current at that moment: the session carries no PIN revision.
 		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
 		if _, ok := r.pinAttempts.Reserve(ctx, attemptKey); !ok {
 			return nil, fmt.Errorf("%w: too many incorrect PINs for profile %s; try again later", ErrInvalidPIN, profile.Name)
 		}
-		valid, verifyErr := store.VerifyPIN(ctx, profile.ID, pinCandidate)
+		valid, verifyErr := checkProfilePIN(ctx, store, profile.ID, pinCandidate)
 		if verifyErr != nil {
 			return nil, fmt.Errorf("verifying profile PIN: %w", verifyErr)
 		}
@@ -135,35 +162,108 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
-	now := r.now()
-	session := Session{
-		Token:                 r.tokenGenerator(),
-		Username:              combinedUsername,
-		AccountUsername:       user.Username,
-		ProfileID:             profile.ID,
-		ProfileName:           profile.Name,
-		PseudoUserID:          PseudoUserID(user.ID, profile.ID),
-		StreamAppUserID:       user.ID,
-		StreamAppAccessToken:  tokenPair.AccessToken,
-		StreamAppRefreshToken: tokenPair.RefreshToken,
-		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
-		CreatedAt:             now,
+	session, err := r.newSession(r.tokenGenerator(), combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	if err != nil {
+		return nil, err
 	}
 	if err := r.sessions.Put(session); err != nil {
 		return nil, err
 	}
-
 	return &session, nil
 }
 
-// splitPasswordPIN splits "password#pin" at the last '#'.
-// Returns ("", "") if there is no '#' or the split would produce empty parts.
-func splitPasswordPIN(password string) (basePw, pin string) {
-	idx := strings.LastIndex(password, "#")
-	if idx <= 0 || idx >= len(password)-1 {
-		return "", ""
+// ResolveQuickConnect exchanges an approved Quick Connect secret for a compat
+// session bound to the profile the approver chose. The approver already
+// verified that profile, so no PIN is asked here. The session is stored in
+// the transaction that consumes the request, under a token derived from the
+// secret, so asking again while the request lives returns the same session,
+// as Jellyfin answers a collected secret until it expires. An app that lost
+// the first answer can still sign in, and no second login session is minted.
+func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) (*Session, error) {
+	if r.quickConnect == nil {
+		return nil, ErrQuickConnectNotAuthorized
 	}
-	return password[:idx], password[idx+1:]
+	token := quickConnectSessionToken(secret)
+	var session *Session
+	result, err := r.quickConnect.CollectQuickConnect(ctx, secret, func(ctx context.Context, tx pgx.Tx, result *auth.DeviceLoginPollResult) error {
+		// Collection loaded the approved profile under the request's lock.
+		newSession, err := r.newSession(token,
+			quickConnectUsername(result.User.Username, result.ProfileName),
+			result.User, result.TokenPair, result.ProfileID, result.ProfileName)
+		if err != nil {
+			return err
+		}
+		stored, err := r.sessions.PutTx(ctx, tx, newSession)
+		if err != nil {
+			return err
+		}
+		session = &stored
+		return nil
+	})
+	if errors.Is(err, auth.ErrDeviceLoginNotFound) {
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	if errors.Is(err, auth.ErrDeviceLoginNoProfile) {
+		return nil, ErrProfileNotFound
+	}
+	if err != nil {
+		return nil, mapAuthError(err)
+	}
+	if session != nil {
+		return session, nil
+	}
+	if result.Status != auth.DeviceLoginStatusConsumed {
+		// Pending, denied, withdrawn or expired.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	existing, err := r.sessions.Lookup(ctx, token)
+	if errors.Is(err, ErrSessionNotFound) {
+		// The app signed out since.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	return existing, err
+}
+
+// quickConnectSessionToken is the compat token of the session a Quick
+// Connect secret buys. It is derived one-way from the secret, so only the
+// app holding the secret can compute it, and the stored token says nothing
+// about the secret.
+func quickConnectSessionToken(secret string) string {
+	sum := sha256.Sum256([]byte("silo-quick-connect-session:" + strings.TrimSpace(secret)))
+	return hex.EncodeToString(sum[:16])
+}
+
+// quickConnectUsername is the name a Quick Connect session reports: the
+// username#profile form password sign-in accepts for the same profile, or the
+// account name alone when the profile carries it.
+func quickConnectUsername(account, profile string) string {
+	if strings.EqualFold(account, profile) {
+		return account
+	}
+	return account + "#" + profile
+}
+
+// newSession builds a compat session for the account's token pair, bound to
+// one profile. The session lives only as long as the pair's login session.
+func (r *LoginResolver) newSession(token, username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) (Session, error) {
+	if tokenPair.SessionID == "" {
+		return Session{}, errors.New("sign-in returned no login session")
+	}
+	now := r.now()
+	return Session{
+		Token:                 token,
+		Username:              username,
+		AccountUsername:       user.Username,
+		ProfileID:             profileID,
+		ProfileName:           profileName,
+		PseudoUserID:          PseudoUserID(user.ID, profileID),
+		StreamAppUserID:       user.ID,
+		StreamAppAccessToken:  tokenPair.AccessToken,
+		StreamAppRefreshToken: tokenPair.RefreshToken,
+		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
+		LoginSessionID:        tokenPair.SessionID,
+		CreatedAt:             now,
+	}, nil
 }
 
 // parseLogin reads username#profile. When no account has the name before
@@ -202,6 +302,20 @@ func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string)
 	return accountUsername, profileName, true, nil
 }
 
+// signInBudgetName is the name whose sign-in budget a Jellyfin sign-in
+// spends: the account part before the last '#' of what was typed. parseLogin
+// may sign in to an account named with the whole text instead, after looking
+// accounts up; keying on the typed text alone keeps the budget from telling a
+// stranger which account exists. Such an account's native sign-ins spend the
+// budget of its whole name.
+func signInBudgetName(combinedUsername string) string {
+	accountUsername, _, _, err := parseProfileLogin(combinedUsername)
+	if err != nil {
+		return strings.TrimSpace(combinedUsername)
+	}
+	return accountUsername
+}
+
 func parseProfileLogin(username string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -222,6 +336,25 @@ func parseProfileLogin(username string) (accountUsername string, profileName str
 		return "", "", false, ErrProfileRequired
 	}
 	return accountUsername, profileName, true, nil
+}
+
+// checkProfilePIN compares pin with the profile's PIN hash as stored when a
+// hashing turn comes (passwordhash.AdmitAhead), so a PIN changed while the
+// check waited is the one compared.
+func checkProfilePIN(ctx context.Context, store userstore.UserStore, profileID, pin string) (bool, error) {
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer permit.Release()
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, err
+	}
+	if profile == nil || profile.PINHash == "" {
+		return false, fmt.Errorf("profile %s has no PIN", profileID)
+	}
+	return permit.Matches([]byte(profile.PINHash), []byte(pin))
 }
 
 func selectProfile(accountUsername, requestedProfile string, hasExplicitProfile bool, profiles []upstreamProfile) (upstreamProfile, error) {
@@ -288,7 +421,8 @@ const (
 )
 
 func mapLoginError(err error) (int, string, string) {
-	if httpErr, ok := err.(*HTTPError); ok {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
 		switch httpErr.StatusCode {
 		case http.StatusUnauthorized:
 			// mapAuthError words every 401: a sign-in policy refusal names
@@ -306,6 +440,9 @@ func mapLoginError(err error) (int, string, string) {
 	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) || errors.Is(err, auth.ErrPasswordChangeRequired) {
 		return http.StatusUnauthorized, loginErrorCode, err.Error()
 	}
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return http.StatusServiceUnavailable, "ServiceUnavailable", "The server is busy; try again in a moment"
+	}
 	return http.StatusInternalServerError, "ServerError", "Unexpected login failure"
 }
 
@@ -318,7 +455,14 @@ func mapAuthError(err error) error {
 		// Kept as the sentinel, like the PIN errors, so the client sees why.
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
+	if _, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+		// Kept as is: the handler answers 429 with its Retry-After.
+		return err
+	}
 	switch {
+	case errors.Is(err, passwordhash.ErrBusy):
+		// Never a wrong password: mapLoginError answers 503.
+		return err
 	case errors.Is(err, auth.ErrProviderUnavailable):
 		return &HTTPError{StatusCode: http.StatusServiceUnavailable, Message: "The sign-in provider is unavailable"}
 	case errors.Is(err, auth.ErrLocalLoginDisabled), errors.Is(err, auth.ErrNotPermitted),

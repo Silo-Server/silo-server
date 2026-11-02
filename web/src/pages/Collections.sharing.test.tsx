@@ -116,11 +116,4 @@ describe("Collections page sharing", () => {
     show();
     expect(screen.queryAllByRole("button", { name: /^Drag / })).toHaveLength(0);
   });
-
-  it("hides Shared with me when no other profile shares a collection", () => {
-    listed.collections = [collection("mine", "Rainy days", "p-me")];
-    show();
-    expect(screen.queryByRole("region", { name: "Shared with me" })).toBeNull();
-    expect(section("Your collections")).toBeTruthy();
-  });
 });

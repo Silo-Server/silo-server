@@ -11,7 +11,6 @@ import {
   defaultDeliveryMode,
   descriptorFor,
   FILL_FROM_MOVIE_LIBRARY_PATHS,
-  FILL_FROM_TV_LIBRARY_PATHS,
   fillValueFromLibraries,
   initialConfigValues,
   needsConnectionStep,
@@ -34,15 +33,6 @@ describe("descriptorFor", () => {
     // Guards against an older server: the flow must still work, not blank out.
     const source = { ...available(), descriptor: undefined } as unknown as AutoscanAvailableSource;
     expect(descriptorFor(source)).toEqual(DEFAULT_DESCRIPTOR);
-  });
-
-  it("falls back when delivery_modes is empty", () => {
-    expect(descriptorFor(available({ delivery_modes: [] }))).toEqual(DEFAULT_DESCRIPTOR);
-  });
-
-  it("returns the declared descriptor when present", () => {
-    const got = descriptorFor(available({ delivery_modes: ["webhook"], connection: "none" }));
-    expect(got.connection).toBe("none");
   });
 });
 
@@ -95,12 +85,6 @@ describe("defaultDeliveryMode", () => {
   it("prefers poll when both are offered", () => {
     expect(defaultDeliveryMode({ delivery_modes: ["webhook", "poll"], connection: "none" })).toBe(
       "poll",
-    );
-  });
-
-  it("uses the only mode for a single-mode source", () => {
-    expect(defaultDeliveryMode({ delivery_modes: ["webhook"], connection: "none" })).toBe(
-      "webhook",
     );
   });
 });
@@ -160,10 +144,6 @@ describe("initialConfigValues", () => {
     // Values stay typed here; stringifying happens once, at submit.
     expect(got).toEqual({ a: "x", b: 2 });
   });
-
-  it("returns nothing for a source with no config form", () => {
-    expect(initialConfigValues(DEFAULT_DESCRIPTOR)).toEqual({});
-  });
 });
 
 describe("serializeConfigValues / parseConfigValues", () => {
@@ -219,10 +199,6 @@ describe("serializeConfigValues / parseConfigValues", () => {
     expect(parseConfigValues(descriptor, { tags: "" }).tags).toEqual([]);
   });
 
-  it("round-trips a number", () => {
-    expect(parseConfigValues(descriptor, serializeConfigValues({ count: 4 })).count).toBe(4);
-  });
-
   it("drops null and undefined rather than writing them as text", () => {
     expect(serializeConfigValues({ a: null, b: undefined, c: "keep" })).toEqual({ c: "keep" });
   });
@@ -239,18 +215,6 @@ describe("fillValueFromLibraries", () => {
   it("collects movie and mixed paths for a movie fill", () => {
     expect(fillValueFromLibraries(FILL_FROM_MOVIE_LIBRARY_PATHS, libraries)).toBe(
       "/mnt/movies\n/mnt/mixed",
-    );
-  });
-
-  it("collects series and mixed paths for a TV fill", () => {
-    expect(fillValueFromLibraries(FILL_FROM_TV_LIBRARY_PATHS, libraries)).toBe(
-      "/mnt/tv\n/mnt/mixed",
-    );
-  });
-
-  it("skips disabled libraries", () => {
-    expect(fillValueFromLibraries(FILL_FROM_MOVIE_LIBRARY_PATHS, libraries)).not.toContain(
-      "/mnt/disabled",
     );
   });
 

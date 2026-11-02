@@ -2,6 +2,9 @@
 
 `GET /api/v2/events/capabilities` describes the shared event subscription
 protocol. It requires an authenticated account; no active profile is required.
+`allowed` is true for a current access-token login session and for an
+administrator's `admin:monitor:read` API key sent with no profile, the callers
+that may mint an events socket ticket.
 When the event service is unavailable, the capability response remains `200` with `state: not_configured` and `allowed: false`.
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
@@ -20,11 +23,22 @@ capability response remains unchanged. Current first-party web, Apple, and
 Android callers do not consume this capability read; Jellyfin has no matching
 native realtime discovery operation.
 
+## Message compression
+
+Every realtime socket (events, playback control, Watch Together, admin logs,
+and the Jellyfin-compatible `/socket`) accepts the `permessage-deflate`
+extension (RFC 7692) when the client offers it, without context takeover in
+either direction. A client that does not offer it receives uncompressed frames.
+A socket's message size limit applies after decompression: a client message
+that inflates past it closes the connection with `1009` (message too big),
+as an oversize uncompressed message does.
+
 ## Session-bound socket handshake
 
 `POST /api/v2/events/ws-ticket` delegates a current access-token login session
-for one connection. API keys and credentials without a bounded access-token
-expiry cannot mint this proof. A profile is optional; when present, its ownership
+for one connection. Credentials without a bounded access-token expiry cannot
+mint this proof, and an API key mints only as described in
+[API-key handshake](#api-key-handshake). A profile is optional; when present, its ownership
 and PIN proof must validate. The ticket is opaque, expires within 30 seconds,
 and binds the account, login session, account role, profile proof and resolved
 access policy. The response includes `ticket`, `expires_in`,
@@ -48,9 +62,16 @@ Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
 Without Redis, tickets are process-local and require affinity to the minting
 node; restarting that node invalidates them. This store is distinct from the
 bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
+The events and admin log stream sockets keep their tickets under one Redis
+prefix, so each ticket names the socket it was minted for and the other socket
+refuses it.
 
 Admission rechecks the current session, enabled account, account role and viewer
-policy/PIN proof. Secondary profiles do not receive administrator channels.
+policy/PIN proof. An admin account receives the administrator channels only while
+it is the acting admin (see [api-contract.md](architecture/api-contract.md)): as
+its primary profile, or with no profile while no profile on the account has a PIN
+or an access limit. Any other profile, and a profile-less session on a household
+that requires a profile, gets the user channels.
 Connections end at access-token expiry or after five minutes, whichever comes
 first. Current session/account/profile policy is rechecked every 15 seconds;
 a failed check closes the connection, with a two-second bound on authority
@@ -66,8 +87,171 @@ The handshake version does not rewrite another domain's event payload.
 Web consumers capture account/profile authority before minting and discard
 connection results and frames after that authority changes.
 
+### API-key handshake
+
+A monitoring tool authenticates with an API key instead of a login session. An
+API key holding the `admin:monitor:read` scope may call
+`POST /api/v2/events/ws-ticket` with no `X-Profile-Id`; any other key, and a
+monitoring key that sends a profile, is refused with `403 permission_denied`.
+The key's account must be an enabled administrator that the acting-admin
+decision admits with no profile (API keys are exempt from the household
+profile requirement, as at the HTTP admin routes). The ticket binds the key, its
+account, its configuration revision and the events socket, and the response
+carries `max_connection_seconds` (14400). The handshake is the same as for a
+login session.
+
+A key connection may subscribe to `sessions` and `catalog` only; the hello
+frame's `available_channels` lists exactly those, and other declared channels
+come back rejected. Jobs and scans carry artifact URLs, request payloads and
+library paths, which the monitoring scope never reads. The admin log stream,
+playback-control, Watch Together and Apple push sockets stay login-only.
+
+The connection ends after four hours. Every 15 seconds it rechecks that the key
+exists with the same owner and revision, still holds `admin:monitor:read`, and
+that its account is enabled, still an administrator, and still admitted by the
+acting-admin decision. Deleting the key or disabling the account closes the
+connection. Editing the key (any change to its scopes, label or rate tier
+advances its revision), demoting the account, or an acting-admin refusal sends
+`access_changed` (see [Access changes](#access-changes)); the tool mints a new
+ticket, which a key that lost the scope or an account that lost the admin role
+cannot do.
+
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
+
+### Personal event recipients
+
+Both event socket versions restrict `user_state` to a positive account ID
+matching the connection and a non-empty profile ID matching its bound profile.
+`user_settings` requires the same account match; a non-empty event profile must
+match the bound profile, while an empty event profile reaches that account's
+connections for account-scoped settings changes. These rules also apply to
+administrator connections. Notifications retain their exact account/profile
+match and require a profile-bound subscription.
+
+One `user_settings` event is addressed to every viewer instead: an
+administrator-default change (`scope: "default"`, see
+[settings-api.md](settings-api.md)) names no account or profile and reaches
+every connection subscribed to `user_settings`, bound or unbound, including a
+remote-playback handoff. Like other settings events it carries the key and
+scope, not the value. The server marks it for every viewer explicitly, so a
+personal event that lacks its account still reaches no one. In a cluster, the
+event reaches every viewer only once all nodes run a server that sets and
+honors that marker.
+
+An unbound socket can still subscribe to `user_state` and `user_settings`, but
+receives only account-scoped and administrator-default settings changes from
+those channels. A `user_state` producer without a profile, including an
+unmanaged download's `download` event, reaches no socket. Settings events name
+the changed key and scope; they do not carry its value. Channel eligibility,
+snapshots and socket authority/lifetime checks are unchanged.
+
+On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
+profile. The handshake's `X-Profile-Id` decides administrator access but binds
+nothing, so a bridge socket opened with that header and no ticket is unbound and
+receives no `user_state`, including its own profile's.
+
+### Catalog item changes
+
+On the `catalog` channel, `catalog.item.changed` reports a change to one item.
+Every subscriber receives `change: "metadata_updated"`. An administrator connected through the v2 handshake
+also receives three changes that describe what the administrator catalog
+listing (`listAdminCatalogItems`, see
+[admin-catalog-api.md](admin-catalog-api.md#catalog-item-listing)) returns:
+
+| `change` | When |
+| --- | --- |
+| `added` | The item gained a membership in `library_id` |
+| `removed` | The item lost its membership in `library_id` |
+| `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), moved or renamed on disk, or changed what the listing shows (size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
+
+```json
+{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
+```
+
+`content_id` names a movie, series or episode. Books, podcasts and their
+episodes produce none of these, except when one is deleted outright and its type
+can no longer be checked; the listing never returns those ids. Changes are per
+library: an item in two
+libraries that leaves one gets `removed` for that library and stays in the
+listing with the other in `library_ids`. A content ID change is `removed` for
+the old ID and `added` for the new one. The events carry ids only. A consumer
+fetches the named items with the listing's `content_ids` filter (up to 200 per
+request) and treats an id the listing no longer returns as gone. Turning a
+library off or on sends no per-item changes; it changes `library_ids` and which
+items the listing returns, so re-list after a `catalog.library.changed`. Metadata
+edits arrive as `metadata_updated`, which names the item but not what changed. A
+few repairs send nothing, such as merging duplicate series, which moves their
+episodes to the surviving series; a mirror that must not drift re-lists
+periodically.
+
+Database triggers record these changes from every code path that writes library
+memberships or files, so a rescan that rewrites rows without changing what they
+show sends nothing. The server merges what is waiting per item and library: an
+add followed by a removal sends nothing, a removal followed by an add sends
+`added` (the re-created membership can have a new `added_at`), and an `added` or
+`removed` absorbs the item's `files_changed`. To leave room in each connection's buffer for
+other channels, the cluster publishes at most 32 of these changes every 100 ms,
+about 320 a second, so a large library's first scan arrives over minutes.
+Delivery is at most once, like every event on this socket. Changes still
+unpublished after a day are dropped. After a reconnect, re-list the whole
+catalog: `added_after` finds only new items, not file changes, metadata edits or
+removals.
+
+The v1 bridge socket does not carry `added`, `removed` or `files_changed`.
+
+### Playback session lifecycle events
+
+The admin-only `sessions` channel carries four events besides `sessions.replaced`:
+`session.started`, `session.paused`, `session.resumed` and `session.stopped`.
+`GET /api/v2/admin/sessions/capabilities` reports `lifecycle_events: true` when the
+server sends them. Each event's `data` is:
+
+- `session_id`, `seq`, `at` (the database clock when the transition was written,
+  UTC milliseconds; it orders nothing, `seq` does) and `state`: `playing`, `paused`
+  or `stopped`.
+- `session` on a started, paused or resumed event: the session's row as
+  `GET /api/v2/admin/sessions` returns it, with `lifecycle_seq` equal to `seq`.
+  Absent when no server has a live row for it.
+- `end_reason` and `history` on `session.stopped`: the history entry the end
+  recorded, as `GET /api/v2/admin/playback-history` returns it. Its figures are the
+  stored ones, so a later history read agrees with the event.
+
+The envelope's `event_id` is `playback-lifecycle:<seq>`.
+
+`seq` comes from one sequence the database advances with each transition, so a
+session's numbers rise in the order its transitions were accepted, whichever API
+server published them; numbers are not contiguous and are only comparable within one
+session. A native v2 session's pause and resume follow the client's progress
+sequence: a progress sample that arrives after a newer one changes nothing.
+Jellyfin, Audiobookshelf and v1 bridge reports carry no sequence and follow arrival
+order. A session starts once and ends once; its id never starts again.
+
+Delivery is at most once and nothing is replayed. A monitor reconciles:
+
+1. On subscribe, and after each `sessions.replaced`, read every page of
+   `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
+   snapshot keep the frozen v1 row shape and at most 200 rows; use them only as a
+   cue to re-read.
+2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
+   the session is live and whether it is paused. A row and an event with equal numbers
+   carry the same state. Position and stream fields are observations: take them from
+   the most recently received record.
+3. A history entry with `end_reason` is final. When it carries `lifecycle_seq`, that
+   number is higher than any its live session had; an entry without one was recorded
+   before lifecycle numbers existed and counts as number 0 for ordering, but is final
+   all the same.
+4. A session missing from a complete list, with no ended history entry yet, is moving
+   between servers or about to be ended by the cluster sweep. Keep it open and read
+   `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every
+   session announced by `session.started` (native or Jellyfin) gets one within its idle
+   grace plus one sweep interval (15 seconds) while an API server runs, longer only
+   while a backlog of more than 100 sessions per server drains
+   ([playback lifecycle](architecture/playback-lifecycle.md)).
+
+Rows and entries without `lifecycle_seq` (sessions that started before the server
+recorded lifecycle transitions) count as number 0. During a rolling deploy, servers
+without this change send no lifecycle events.
 
 ### Access changes
 
@@ -80,8 +264,9 @@ close frame:
 ```
 
 The close code is `4001` with reason `access_changed`. Access has changed when
-the account role, the effective role (an admin account's profile stopped or
-started being the primary profile), or the fingerprint of the resolved viewer
+the account role, the effective role (an admin account's connection stopped or
+started being the acting admin, for example its profile stopped being the
+primary profile or the household gained a PIN), or the fingerprint of the resolved viewer
 scope differs from the ticket's, or the profile is no longer verified. The
 scope covers the visible libraries, content-rating limits, playback-quality and
 bitrate limits, and `access_policy_revision`, which a group move, a permission,
@@ -110,10 +295,22 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The bridge events socket never sends this frame. It picks its channels from the
-access token's role once, at the handshake, so it rechecks the login session on
-the same interval and closes without a frame once the session ends or the
-account's role differs from the token's.
+The bridge events socket never sends this frame. It picks its channels once, at
+the handshake: an admin account gets the administrator channels only while
+it is the acting admin (see
+[api-contract.md](architecture/api-contract.md)), judged on the handshake's
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. That
+profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`
+sent when it was minted, server-side, and the socket re-verifies it. Any
+other profile on the account, such as a child profile, connects with the user
+channels. A rejected ticket (expired, reused, or for another account) leaves the
+connection unbound and judged as acting with no profile, so on a household with
+a PIN-protected or limited profile it also gets the user channels until the
+client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
+without a frame once the session ends, the account's role differs from the
+token's, or a connection holding the administrator channels is no longer the
+acting admin (including when its profile's PIN proof stops verifying after a PIN
+change) or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
@@ -152,10 +349,17 @@ lane only for the same account, profile and installation: it takes the lane
 over and the superseded connection is closed, so its later ack and result
 frames are never routed. Ack and result frames are applied only while the
 receiving registration still owns the lane, through the existing command
-tracker and stop-completion paths. Login authority and session ownership are
+tracker and stop-completion paths. A `completed` result for `pause` or
+`unpause` sets the session's pause state at once, so the administrator session
+views show it without waiting for the player's next progress report. Replaying
+already accepted progress does not undo a confirmation; progress accepted after
+its receipt supersedes a queued confirmation. A completed stop or terminate ends
+session authority before ordered watch-provider finalization. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
 access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
-`result`, event) are unchanged from the bridge socket.
+`result`, event) are unchanged from the bridge socket. A client message larger
+than 64 KiB closes the connection with `1009` (message too big); the bridge
+socket applies the same limit.
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
 `protocol` only when this server serves the handshake. The web player mints
@@ -320,7 +524,7 @@ Receipts survive suggestion and room deletion. Repeating a deleted identity conf
 
 `POST /api/v2/watch-together/rooms/{room_id}/suggestions` (`createWatchTogetherSuggestion`) requires authenticated profile authority, the demo guard and original room proof in `X-Room-Token`. Supply a client-generated UUID `suggestion_id`, required `content_id`, `content_type` (`movie` or `episode`) and `title`, plus optional `subtitle`, `poster_url` and `note`. The receipt migration must be installed before enabling this writer on any v2-serving node.
 
-A successful insertion or identical live replay returns `201` with `suggestion_id`. The original account/profile/room and metadata are bound by the receipt store. Changed or deleted identities return `409` without resurrection; closed room returns `409`, missing room `404`, invalid input `422`, invalid proof `403`, and unavailable service `503`. Current suggestion state is read separately. The service supplies creation time and attempts the existing local suggestion snapshot broadcast only for a new insertion. A failure after commit can leave the broadcast incomplete; retry returns the identity without attempting it again. This is not durable delivery or an outbox.
+A successful insertion or identical live replay returns `201` with `suggestion_id`. The original account/profile/room and metadata are bound by the receipt store. Changed or deleted identities return `409` without resurrection; closed room returns `409`, missing room `404`, invalid input `422`, invalid proof `403`, and unavailable service `503`. A room holds at most 200 suggestions: a new identity in a full room returns `409` and keeps no receipt, while an identical replay still returns `201`. Frozen v1 creation shares the cap (`409`) and the same 32 KiB body limit (`413`). Current suggestion state is read separately. The service supplies creation time and attempts the existing local suggestion snapshot broadcast only for a new insertion. A failure after commit can leave the broadcast incomplete; retry returns the identity without attempting it again. This is not durable delivery or an outbox.
 
 The actual web candidate holds an immutable ID, metadata, room proof and authority. Explicit retry of that unchanged draft reuses them; dismissing or replacing it creates a new identity. Authority replacement refuses the old draft instead of rebinding it. Each submission sends one POST without authentication replay and refreshes the existing suggestion list under the original authority after a matching receipt. Superseded room/run/authority cannot publish the list; superseded candidate cannot be cleared or receive success/error feedback. Drafts are not persisted across page reloads. Room proof expiry is surfaced without automatic renewal or rebasing. V1 creation remains unchanged; native caller inventory and adoption are separate gates.
 
@@ -363,7 +567,7 @@ Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchToget
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
-The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
+The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. On both versions a client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the same disconnect callback. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 
 The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Existing room-proof expiry ends access; it is not automatically renewed or rebound. Native adoption and exact caller inventories remain separate gates. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
 
@@ -421,10 +625,14 @@ host's reported position becomes the room anchor before the room resumes. A
 rebuilt stream that lands on a keyframe or segment boundary short of the
 target therefore resumes from where the host really is instead of holding the
 room until the waiting deadline. Position validation uses the same finite,
-nonnegative range as other playback reports. Buffering pause commands can be
-acknowledged at the member's actual position: they do not require rebuilding an
-otherwise usable stream to reach an unbuffered anchor. Playback correction
-still runs when the room resumes.
+nonnegative range as other playback reports. When a guest stalls, the room
+pauses where it is and that guest alone is sent a seek to the room's position.
+An acknowledgement that names that seek's `command_id` is accepted within five
+seconds of the destination either way, because a rebuilt stream often lands
+short and the client closes the rest by rate once the room plays. When the host
+stalls, or nobody else is watching, the room pauses at the stalled member's
+position, and that pause can be acknowledged where the member is. Playback
+correction still runs when the room resumes.
 
 Readiness is level-triggered on the web player. It evaluates the same guards on
 every media event that can indicate playable media (`canplay`,
@@ -444,6 +652,22 @@ the room snapshot marks its own member `is_ready`. It then stops readiness
 acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
+
+Every `transport_command` carries the room's position at its `execute_at`, and
+the room anchors there too, so a client that runs the command at `execute_at`
+and projects from it at 1x is where the room says it is. A command that arrives
+late is projected forward from `execute_at`.
+
+Outside `waiting`, a `state_report` may carry the `command_id` of the last
+transport command the client applied. The server uses it to tell which reports
+predate a member's latest command: until that command's `execute_at` plus 1.5
+seconds, or for up to 10 seconds while a report names an older command, a report
+is neither corrected nor taken as the host's decision. A report that names the
+latest command ends that window early. Clients that omit the field get the time
+window alone. Reports from a host that has just re-attached are corrected like a
+guest's until one plays as its sync said, within the host band; only then is its
+pause or position a decision for the room. The host band is 10 seconds on the
+v2 socket and 2 seconds on the v1 socket.
 
 A viewer the room stopped waiting for sends `ready` while the room is `playing`
 or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as
@@ -540,3 +764,21 @@ for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
+
+### `marker_thumbnail_ready` (native v2, negotiated)
+
+Only playback attempts that opted into `marker_thumbnails_v1` at start receive
+this event. Its payload contains `session_id`, numeric `file_id`, `kind`,
+`start_seconds`, `end_seconds`, `thumbnail_url`, optional `thumbnail_thumbhash`,
+and `thumbnail_capture_seconds` (equal to marker start). It is sent only after
+durable, snapshot-fenced persistence and protected URL resolution.
+
+Consumers match the active session/file and exact kind/range before merging the
+image; they discard events for other versions or edited occurrences. Failed
+event delivery leaves the canonical v2 watch/marker read available. The existing
+`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+
+Marker thumbnail readiness uses the playback event bus to reach sessions on
+other API replicas. Each serving replica resolves a protected image URL and
+checks the session's negotiated feature before delivery. Subscribers do not
+rebroadcast events; retired image references cannot acquire new URLs.

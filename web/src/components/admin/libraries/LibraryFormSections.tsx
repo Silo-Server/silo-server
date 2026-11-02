@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { LANGUAGES } from "@/player/utils/languageNames";
 
-import { LIBRARY_TYPES } from "./libraryTypes";
+import { BOX_SET_MIN_MOVIE_OPTIONS, LIBRARY_TYPES } from "./libraryTypes";
 import {
   REALTIME_MONITORING_SETTINGS_PATH,
   realtimeMonitoringNeedsAttention,
@@ -39,6 +39,7 @@ import {
 } from "./realtimeMonitoring";
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
+import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
 function SettingCard({
   htmlFor,
@@ -334,6 +335,86 @@ function ProviderLevelSection({
   );
 }
 
+// The offered sizes, plus a saved size outside them so it stays selected.
+function boxSetMinMovieOptions(current: number): number[] {
+  return [...new Set<number>([...BOX_SET_MIN_MOVIE_OPTIONS, current])].sort((a, b) => a - b);
+}
+
+export function BoxSetFields({ form }: { form: LibraryFormController }) {
+  return (
+    <div className="border-border bg-surface rounded-xl border p-3.5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label htmlFor="box-sets-enabled">Box sets</Label>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            Group movies that TMDB lists in the same collection, such as the Harry Potter films,
+            into one box set in this library. Your files and watch history stay as they are.
+          </p>
+        </div>
+        <Switch
+          id="box-sets-enabled"
+          checked={form.boxSetsEnabled}
+          onCheckedChange={form.setBoxSetsEnabled}
+        />
+      </div>
+      {form.boxSetsEnabled && (
+        <div className="border-border mt-3 space-y-3 border-t pt-3">
+          <div className="space-y-1.5">
+            <Label id="box-set-min-movies-label">Minimum movies in a box set</Label>
+            <div
+              role="radiogroup"
+              aria-labelledby="box-set-min-movies-label"
+              className="border-border inline-flex gap-0.5 rounded-full border p-0.5"
+            >
+              {boxSetMinMovieOptions(form.boxSetMinMovies).map((count) => {
+                const selected = form.boxSetMinMovies === count;
+                return (
+                  <button
+                    key={count}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => form.setBoxSetMinMovies(count)}
+                    className={cn(
+                      "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                      selected
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {count}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              A box set needs at least this many of its movies in this library. With fewer, the
+              movies show on their own.
+            </p>
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="box-sets-in-search">Show box sets in search</Label>
+              <p className="text-muted-foreground text-xs">
+                List a matching box set first in search results, with its movies after it.
+              </p>
+            </div>
+            <Switch
+              id="box-sets-in-search"
+              checked={form.boxSetsInSearch}
+              onCheckedChange={form.setBoxSetsInSearch}
+            />
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Box sets appear once Silo has looked up your movies&apos; collections, which runs in the
+            background after you save.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MetadataFields({ form }: { form: LibraryFormController }) {
   return (
     <div className="space-y-5">
@@ -370,6 +451,8 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
+      {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
+      {form.settingSupport.boxSets && <BoxSetFields form={form} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
           <Label>Trailer &amp; extras types</Label>
@@ -412,8 +495,8 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>
           <p className="text-muted-foreground mb-3 text-xs">
-            Providers are asked in order from top to bottom. Uncheck a provider to skip it for that
-            level.
+            Local metadata always comes first. Remote providers are asked in order from top to
+            bottom and fill in what is still missing. Uncheck a provider to skip it for that level.
           </p>
           {form.chainLoading ? (
             <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
@@ -421,15 +504,39 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
               Loading providers…
             </div>
           ) : form.hasMetadataProviders ? (
-            form.contentLevels.map((level) => (
-              <ProviderLevelSection
-                key={level}
-                level={level}
-                items={form.activeLevelChains[level] ?? []}
-                onReorder={(newItems) => form.reorderLevel(level, newItems)}
-                onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
-              />
-            ))
+            <>
+              {form.hasLocalMetadata && (
+                <div className="mb-3">
+                  <SettingCard
+                    htmlFor="local-metadata-switch"
+                    title="Local metadata (NFO + artwork)"
+                    description="Reads .nfo files and artwork saved next to your media. Runs first at every level, so its values win over remote providers; fields you lock while editing an item win over both."
+                  >
+                    <Switch
+                      id="local-metadata-switch"
+                      checked={form.localMetadataEnabled}
+                      onCheckedChange={form.toggleLocalMetadata}
+                    />
+                  </SettingCard>
+                </div>
+              )}
+              {form.hasRemoteProviders ? (
+                form.contentLevels.map((level) => (
+                  <ProviderLevelSection
+                    key={level}
+                    level={level}
+                    items={form.remoteLevelChains[level] ?? []}
+                    onReorder={(newItems) => form.reorderLevel(level, newItems)}
+                    onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
+                  />
+                ))
+              ) : (
+                <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
+                  No remote metadata provider plugins are installed. Install one under Admin →
+                  Plugins to fetch artwork and descriptions.
+                </p>
+              )}
+            </>
           ) : (
             <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
               No metadata provider plugins are installed. Install one under Admin → Plugins to fetch
@@ -458,11 +565,12 @@ export function AdvancedFields({
         <SettingCard
           htmlFor="chapter-thumbnails-switch"
           title="Generate chapter thumbnails"
-          description="Stores chapter preview images in the configured public asset S3 bucket. Chapter markers and chapter menus still work without thumbnails."
+          description="Stores chapter preview images in artwork storage (local disk or S3). Chapter markers and chapter menus still work without thumbnails."
           footer={
             !chapterThumbnailsSupported ? (
               <p className="text-warning text-xs">
-                Public asset S3 storage is required before this can be enabled.
+                Artwork storage must be available before this can be enabled. Check it in Storage
+                &amp; Database settings.
               </p>
             ) : null
           }

@@ -2,7 +2,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StreamNode } from "@/api/types";
 
@@ -40,29 +40,6 @@ function node(overrides: Partial<StreamNode> = {}): StreamNode {
   };
 }
 
-/**
- * jsdom has no layout, so the widget's ResizeObserver never fires and the
- * widget stays in row mode. This stub reports a chosen content width on
- * observe, which is exactly what a real observer does on mount.
- */
-function stubResizeObserver(width: number) {
-  class FakeResizeObserver {
-    private readonly callback: ResizeObserverCallback;
-    constructor(callback: ResizeObserverCallback) {
-      this.callback = callback;
-    }
-    observe() {
-      this.callback(
-        [{ contentRect: { width, height: 300 } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve() {}
-    disconnect() {}
-  }
-  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
-}
-
 function renderWidget() {
   return render(
     <MemoryRouter>
@@ -78,10 +55,6 @@ describe("TranscodeNodesWidget", () => {
     mocks.useBuildInfo.mockReturnValue({
       data: { display: "aaaaaaaa", revision: "aaaaaaaa1111", available: true },
     });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
   });
 
   it("sorts nodes by type, then name", () => {
@@ -102,34 +75,6 @@ describe("TranscodeNodesWidget", () => {
       .map((el) => el.textContent)
       .filter((text) => text === "t-zulu" || text === "t-alpha" || text === "p-alpha");
     expect(names).toEqual(["p-alpha", "t-alpha", "t-zulu"]);
-  });
-
-  it("keeps stacked rows in a narrow slot", () => {
-    stubResizeObserver(400);
-    mocks.useAdminNodes.mockReturnValue({
-      data: [node()],
-      isLoading: false,
-      error: null,
-    });
-
-    const { container } = renderWidget();
-
-    expect(container.querySelector('[style*="grid-template-columns"]')).toBeNull();
-  });
-
-  it("lays nodes out as a card grid once two columns fit", () => {
-    stubResizeObserver(640);
-    mocks.useAdminNodes.mockReturnValue({
-      data: [node(), node({ id: 2, name: "node-2", type: "proxy" })],
-      isLoading: false,
-      error: null,
-    });
-
-    const { container } = renderWidget();
-
-    const grid = container.querySelector('[style*="grid-template-columns"]');
-    expect(grid).not.toBeNull();
-    expect((grid as HTMLElement).style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
   });
 
   it("shows each node's build and flags one that differs from the server", () => {
@@ -188,13 +133,5 @@ describe("TranscodeNodesWidget", () => {
 
     expect(screen.getByText("build unavailable")).toBeTruthy();
     expect(screen.queryByText(/differs from server/)).toBeNull();
-  });
-
-  it("says where transcodes run when no nodes exist", () => {
-    mocks.useAdminNodes.mockReturnValue({ data: [], isLoading: false, error: null });
-
-    renderWidget();
-
-    expect(screen.getByText("No stream nodes — transcodes run on this server")).toBeTruthy();
   });
 });

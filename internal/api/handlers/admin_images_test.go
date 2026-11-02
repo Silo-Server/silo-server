@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -82,16 +83,33 @@ func (f *imageServiceFake) ApplyItemImage(context.Context, metadata.ApplyItemIma
 	return nil, nil
 }
 
+func (f *imageServiceFake) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType, language string, folderID int, _ string) ([]metadata.RemoteImage, map[string]string, error) {
+	return f.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+}
+
+func (f *imageServiceFake) LocalImagePreview(context.Context, string, string) (string, error) {
+	return "", errors.New("no local images")
+}
+
+func (f *imageServiceFake) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	return nil, errors.New("no local images")
+}
+
+func (f *imageServiceFake) ApplyUploadedItemImage(context.Context, metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
+	return nil, errors.New("no uploads")
+}
+
 func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 	tests := []struct {
-		name          string
-		contentID     string
-		seasonNumber  int
-		language      string
-		currentPoster string
+		name            string
+		contentID       string
+		seasonNumber    int
+		language        string
+		currentPoster   string
+		currentBackdrop string
 	}{
-		{name: "numbered season", contentID: "season-2", seasonNumber: 2, language: "fr", currentPoster: "cache://season-2.jpg"},
-		{name: "specials", contentID: "season-0", seasonNumber: 0, language: "", currentPoster: ""},
+		{name: "numbered season", contentID: "season-2", seasonNumber: 2, language: "fr", currentPoster: "cache://season-2.jpg", currentBackdrop: "cache://season-2-backdrop.jpg"},
+		{name: "specials", contentID: "season-0", seasonNumber: 0, language: "", currentPoster: "", currentBackdrop: ""},
 	}
 
 	for _, tt := range tests {
@@ -110,12 +128,14 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 					TvdbID:                  "456",
 					DefaultMetadataLanguage: tt.language,
 					PosterPath:              "cache://show-poster.jpg",
+					BackdropPath:            "cache://show-backdrop.jpg",
 				}},
 				imageSeasonLookupFake{tt.contentID: {
 					ContentID:    tt.contentID,
 					SeriesID:     seriesID,
 					SeasonNumber: tt.seasonNumber,
 					PosterPath:   tt.currentPoster,
+					BackdropPath: tt.currentBackdrop,
 				}},
 				imageEpisodeLookupFake{},
 				imageFolderLookupFake{folderID: 9},
@@ -157,6 +177,9 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 			}
 			if response.Current.PosterURL != tt.currentPoster {
 				t.Fatalf("current poster = %q, want season poster %q", response.Current.PosterURL, tt.currentPoster)
+			}
+			if response.Current.BackdropURL != tt.currentBackdrop {
+				t.Fatalf("current backdrop = %q, want season backdrop %q", response.Current.BackdropURL, tt.currentBackdrop)
 			}
 		})
 	}

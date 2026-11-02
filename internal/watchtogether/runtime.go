@@ -29,6 +29,9 @@ type roomRuntime struct {
 	Command           *TransportCommand        `json:"command,omitempty"`
 	Members           map[string]runtimeMember `json:"members"`
 	BufferingWaitAt   time.Time                `json:"buffering_wait_at,omitzero"`
+	// PausedBeforePending is liveRoom.pausedBeforePending, so a node that
+	// adopts the room reads a pending command's requester state correctly.
+	PausedBeforePending bool `json:"paused_before_pending,omitempty"`
 }
 
 type runtimeMember struct {
@@ -207,7 +210,7 @@ func withRoomOperation[T any](ctx context.Context, s *Service, roomID string, fn
 func (s *Service) runtimeLocked(live *liveRoom) roomRuntime {
 	runtime := roomRuntime{
 		SelectionRevision: live.room.SelectionRevision, Command: live.command, BufferingWaitAt: live.bufferingWaitAt,
-		Members: make(map[string]runtimeMember, len(live.members)),
+		PausedBeforePending: live.pausedBeforePending, Members: make(map[string]runtimeMember, len(live.members)),
 	}
 	for key, m := range live.members {
 		runtime.Members[key] = runtimeMember{
@@ -231,6 +234,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 	live.room = room
 	live.command = state.Command
 	live.bufferingWaitAt = state.BufferingWaitAt
+	live.pausedBeforePending = state.PausedBeforePending
 	if selectionChanged {
 		live.command = nil
 		live.bufferingWaitAt = time.Time{}
@@ -252,6 +256,8 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 			if m.connection != nil {
 				m.remoteConnected = false
 				m.lastPingMS = old.lastPingMS
+				m.driftStrikes, m.settleUntil, m.lastSentCommandID = old.driftStrikes, old.settleUntil, old.lastSentCommandID
+				m.lastSentPaused, m.lastSentAt, m.bestDrift, m.correctedFrom = old.lastSentPaused, old.lastSentAt, old.bestDrift, old.correctedFrom
 				if m.leaseUntil.Sub(now) <= connectionLease-leaseRefreshInterval {
 					m.leaseUntil = now.Add(connectionLease)
 				}
@@ -360,9 +366,13 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		force := s.skipUnreadyMembersLocked(live, s.now())
 		snapshots, commands := s.maybeResumeFromWaitingLocked(ctx, live, force)
 		state := s.runtimeLocked(live)
+		// Snapshots show neither leases, latency, nor the commands a member
+		// was sent, so changes to them alone send nobody a snapshot.
 		for key, member := range state.Members {
 			member.LeaseUntil = time.Time{}
 			member.LastPingMS = 0
+			member.CorrectionCommand = nil
+			member.WaitingCommand = nil
 			state.Members[key] = member
 		}
 		fingerprint, _ := json.Marshal(struct {
@@ -378,7 +388,9 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 				if member.connection == nil || member.sessionID == "" || member.lastCommandID == command.CommandID {
 					continue
 				}
-				commands = append(commands, s.targetedCommandDispatchesLocked(live, member.sessionID, *command)...)
+				// A stalled member's own seek for this wait, not the room's
+				// pause, which would let it ready up where it stalled.
+				commands = append(commands, s.targetedCommandDispatchesLocked(live, member.sessionID, *s.waitingCommandForLocked(live, member.sessionID))...)
 				member.lastCommandID = command.CommandID
 			}
 		}

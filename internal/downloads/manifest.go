@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,13 +61,13 @@ type OfflineChapter struct {
 // delivered bytes can change, such as a timing correction, so an offline
 // client knows to fetch the asset again.
 type OfflineSubtitle struct {
-	Language        string `json:"language"`
+	Language        string `json:"language" doc:"Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value"`
 	Title           string `json:"title,omitempty"`
 	Format          string `json:"format"`
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
-	FetchURL        string `json:"fetch_url"`
+	FetchURL        string `json:"fetch_url" format:"uri-reference"`
 	FileSize        int64  `json:"file_size,omitempty"`
 	Revision        string `json:"revision,omitempty"`
 }
@@ -76,7 +76,7 @@ type OfflineSubtitle struct {
 type OfflineAudioTrack struct {
 	Index      int    `json:"index"`
 	Title      string `json:"title,omitempty"`
-	Language   string `json:"language,omitempty"`
+	Language   string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 	Codec      string `json:"codec,omitempty"`
 	Layout     string `json:"layout,omitempty"`
 	Channels   int    `json:"channels,omitempty"`
@@ -369,15 +369,22 @@ func applyArtifactParams(m *OfflineManifest, a *Artifact, file *models.MediaFile
 
 // applyPreparedAudioTracks describes a multi-track prepared file from the
 // audio inventory frozen when it became ready, falling back to the current
-// source probe for an artifact that is not ready yet. Output positions equal
-// the prepared source's positions, so the viewer's catalog selection stays
-// valid unless the source has since changed at that position.
+// source probe for an artifact that is not ready yet. The viewer's catalog
+// selection is a source position; it is carried to the output position the
+// prepared plan gave that track, and stays valid unless the source has since
+// changed at that position.
 func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.MediaFile) {
+	// A nil inventory was never frozen; an empty one froze a prepared file
+	// with no audio and must not be rebuilt from a later probe.
 	tracks := a.PreparedAudioTracks
-	if len(tracks) == 0 {
+	if tracks == nil {
 		tracks = preparedAudioTracks(file, a)
 	}
 	if len(tracks) == 0 {
+		if file != nil || a.PreparedAudioTracks != nil {
+			// No source track was decodable, so the prepared file has no audio.
+			m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio = nil, nil, ""
+		}
 		return
 	}
 	m.AudioTracks = tracks
@@ -389,31 +396,42 @@ func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.Medi
 		}
 	}
 	m.CodecAudio = tracks[fileDefault].Codec
-	if selected := m.SelectedAudioTrackIndex; selected != nil && *selected >= 0 && *selected < len(tracks) &&
-		file != nil && *selected < len(file.AudioTracks) && file.AudioTracks[*selected].Language == tracks[*selected].Language {
-		return
+	if selected := m.SelectedAudioTrackIndex; selected != nil && file != nil && *selected >= 0 && *selected < len(file.AudioTracks) {
+		// The frozen inventory records no source positions, so the current
+		// plan supplies them. A plan of a different length means the source
+		// was re-probed into another layout and cannot be mapped.
+		plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
+		output := slices.IndexFunc(plan.Audio, func(track playback.PreparedAudioTrack) bool { return track.SourceIndex == *selected })
+		if output >= 0 && len(plan.Audio) == len(tracks) && file.AudioTracks[*selected].Language == tracks[output].Language {
+			m.SelectedAudioTrackIndex = &output
+			return
+		}
 	}
 	m.SelectedAudioTrackIndex = &fileDefault
 }
 
 // preparedAudioTracks describes the audio streams a multi-track prepared file
-// built from file contains: every source track in source order, with encoded
-// tracks reporting the AAC output layout.
+// built from file contains, in output order, with encoded tracks reporting the
+// AAC output layout.
 func preparedAudioTracks(file *models.MediaFile, a *Artifact) []OfflineAudioTrack {
 	if file == nil || a == nil || a.TrackRecipeVersion == "" {
 		return nil
 	}
 	plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
-	tracks := toOfflineAudioTracks(file.AudioTracks)
+	source := toOfflineAudioTracks(file.AudioTracks)
+	tracks := make([]OfflineAudioTrack, 0, len(plan.Audio))
 	channels, bitrateKbps := playback.ResolveAACOutputV3(0, 0)
-	for i, track := range plan.Audio {
-		tracks[i].Default = track.Default
-		if track.Codec == playback.PreparedAudioAAC {
-			tracks[i].Codec = playback.PreparedAudioAAC
-			tracks[i].Channels = channels
-			tracks[i].Layout = preparedAudioLayoutStereo
-			tracks[i].Bitrate = bitrateKbps
+	for i, planned := range plan.Audio {
+		track := source[planned.SourceIndex]
+		track.Index = i
+		track.Default = planned.Default
+		if planned.Codec == playback.PreparedAudioAAC {
+			track.Codec = playback.PreparedAudioAAC
+			track.Channels = channels
+			track.Layout = preparedAudioLayoutStereo
+			track.Bitrate = bitrateKbps
 		}
+		tracks = append(tracks, track)
 	}
 	return tracks
 }
@@ -435,7 +453,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 			var size int64
 			var revision string
 			if data, err := playback.LoadExternalSubtitleRaw(ext.Path); err == nil {
-				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), data)
+				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), ext.Language, data)
 				if timingErr != nil {
 					slog.WarnContext(ctx, "download sidecar timing lookup failed", "file_id", file.ID, "error", timingErr)
 				} else {
@@ -481,7 +499,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 					HearingImpaired: sub.HearingImpaired,
 					External:        false,
 					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("downloaded:%d", sub.ID)),
-					Revision:        strconv.FormatInt(sub.Revision, 10),
+					Revision:        subtitles.DeliveryRevision(&sub),
 				})
 			}
 		}

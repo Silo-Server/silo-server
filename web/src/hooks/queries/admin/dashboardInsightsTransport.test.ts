@@ -4,6 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import { useAdminTimeseries, useAdminDownloadsStats } from "./dashboardInsights";
+import { useAdminServerStatus } from "./settings";
 function wrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) =>
@@ -48,7 +49,10 @@ it("reads download account IDs as strings through the v2 session boundary", asyn
     "X-Profile-Token": "pin-a",
   });
 });
-it("discards statistics decoded after a profile switch", async () => {
+it.each([
+  { name: "statistics", useRead: useAdminTimeseries, body: { points: [] } },
+  { name: "server status", useRead: useAdminServerStatus, body: {} },
+])("discards $name decoded after a profile switch", async ({ useRead, body }) => {
   let finish!: (value: string) => void;
   let start!: () => void;
   const reading = new Promise<void>((resolve) => {
@@ -62,11 +66,11 @@ it("discards statistics decoded after a profile switch", async () => {
     });
   });
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
-  const { result } = renderHook(() => useAdminTimeseries(), { wrapper: wrapper() });
+  const { result } = renderHook(() => useRead(), { wrapper: wrapper() });
   await reading;
   await act(async () => {
     setProfileId("profile-b");
-    finish(JSON.stringify({ points: [] }));
+    finish(JSON.stringify(body));
   });
   await waitFor(() => expect(result.current.isError).toBe(true));
   expect(result.current.data).toBeUndefined();

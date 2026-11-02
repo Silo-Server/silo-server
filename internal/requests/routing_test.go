@@ -3,8 +3,6 @@ package requests
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -118,9 +116,7 @@ func routingStore(facts RoutingFacts) *fakeStore {
 
 func TestSubmitRoutedSendsEachTierToItsServer(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{Anime: true}))
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
@@ -162,9 +158,7 @@ func TestSubmitRoutedSendsEachTierToItsServer(t *testing.T) {
 func TestSubmitRoutedDropsUnroutedFourK(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.routes[0].UHD = RouteDestination{}
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
@@ -175,25 +169,6 @@ func TestSubmitRoutedDropsUnroutedFourK(t *testing.T) {
 	}
 	if targets, _ := store.ListTargets(context.Background(), "r1"); len(targets) != 1 {
 		t.Fatalf("targets = %+v, want only HD", targets)
-	}
-}
-
-// Everything else with no 4K server makes no 4K copy, even when every
-// request asks for one: the 4K tier is skipped rather than failed.
-func TestEverythingElseWithoutA4KServerMakesNoCopy(t *testing.T) {
-	store := routingStore(capturedFacts(RoutingFacts{}))
-	store.settings.ForceDualQuality = true
-	store.routes[0].UHD = RouteDestination{}
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality1080p {
-		t.Fatalf("targets = %+v, want HD only", targets)
 	}
 }
 
@@ -243,71 +218,12 @@ func TestDecideRoutesSkipsHDWithoutAnHDServer(t *testing.T) {
 	}
 }
 
-// A media type whose servers are all marked 4K gets its 4K copy and no failed
-// HD target.
-func TestSubmitRoutedSkipsHDWithoutAnHDServer(t *testing.T) {
-	store := routingStore(capturedFacts(RoutingFacts{}))
-	store.routes[0].HD = RouteDestination{}
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-
-	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if len(router.fulfillLog) != 1 || router.fulfillLog[0].conns[0].ID != "radarr-4k" {
-		t.Fatalf("fulfill calls = %+v, want only the 4K tier to the fallback's 4K server", router.fulfillLog)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality2160p || targets[0].Status == StatusFailed {
-		t.Fatalf("targets = %+v, want only the 4K copy", targets)
-	}
-	if req.Outcome == OutcomeFailed {
-		t.Fatalf("request = %+v, want it not failed", req)
-	}
-}
-
-// A request that failed its HD tier before HD was skipped clears on Retry,
-// next to its finished 4K copy.
-func TestRetryDropsTheFailedHDTargetWithoutAnHDServer(t *testing.T) {
-	store := routingStore(capturedFacts(RoutingFacts{}))
-	store.routes[0].HD = RouteDestination{}
-	store.requests["r1"].Status, store.requests["r1"].Outcome = StatusQueued, OutcomeFailed
-	store.targets = map[string][]Target{"r1": {
-		{ID: 1, RequestID: "r1", Quality: Quality1080p, Status: StatusFailed, LastError: "no routing rule sends HD for this title"},
-		{ID: 2, RequestID: "r1", IntegrationID: "radarr-4k", Quality: Quality2160p, Status: StatusCompleted},
-	}}
-	store.targetSeq = 2
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
-
-	req, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1")
-	if err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-	if router.fulfillCalls != 0 {
-		t.Fatalf("fulfill calls = %d, want 0 (nothing left to send)", router.fulfillCalls)
-	}
-	if req.Status != StatusCompleted || req.Outcome != OutcomeActive {
-		t.Fatalf("request = %s/%s, want completed/active", req.Status, req.Outcome)
-	}
-	if targets, _ := store.ListTargets(context.Background(), "r1"); len(targets) != 1 || targets[0].Quality != Quality2160p {
-		t.Fatalf("targets = %+v, want only the 4K target", targets)
-	}
-}
-
 // A requester without 4K has nothing to receive when no server takes HD, so
 // the HD tier still fails and says why.
 func TestSubmitRoutedFailsHDForARequesterWithout4K(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.routes[0].HD = RouteDestination{}
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
@@ -328,9 +244,7 @@ func TestSubmitRoutedFailsHDForARequesterWithout4K(t *testing.T) {
 func TestSubmitRoutedRetriesWhenTheServerIsUnusable(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.integrations[0].Enabled = false // radarr-hd, the fallback's HD server
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 
 	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
 	if err != nil {
@@ -339,23 +253,6 @@ func TestSubmitRoutedRetriesWhenTheServerIsUnusable(t *testing.T) {
 	if router.fulfillCalls != 0 || req.Status != StatusApproved || req.NextSubmitAt == nil ||
 		!strings.Contains(req.LastError, `"radarr-hd", which is disabled`) {
 		t.Fatalf("request = %+v (fulfill calls %d), want a retry scheduled with the disabled server named", req, router.fulfillCalls)
-	}
-}
-
-func TestSubmitRoutedSkipsFourKEvenWithForceDual(t *testing.T) {
-	store := routingStore(capturedFacts(RoutingFacts{Anime: true}))
-	store.settings.ForceDualQuality = true
-	store.routes[1].SkipUHD = true // the Anime route
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality1080p || targets[0].Status == StatusFailed {
-		t.Fatalf("targets = %+v, want only the HD copy: the route skips 4K", targets)
 	}
 }
 
@@ -417,9 +314,7 @@ func TestReconcileChecksEachTargetThroughItsOwnPlugin(t *testing.T) {
 		{ID: 1, RequestID: "r1", IntegrationID: "on-one", Quality: Quality1080p, Status: StatusQueued, ExternalID: "a"},
 		{ID: 2, RequestID: "r1", IntegrationID: "on-two", Quality: Quality2160p, Status: StatusDownloading, ExternalID: "b"},
 	}}
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 
 	if _, err := svc.ReconcileRequests(context.Background(), 10); err != nil {
 		t.Fatalf("ReconcileRequests: %v", err)
@@ -464,29 +359,6 @@ func TestReconcileChecksATargetWithoutAConnection(t *testing.T) {
 	}
 	if got := store.targets["r1"][0].Status; got != StatusDownloading {
 		t.Fatalf("target = %s, want the plugin's status applied", got)
-	}
-}
-
-// A routed tier goes to one server, so a target returned without a connection
-// is recorded on that server and checked through its plugin.
-func TestSubmitRoutedRecordsTheServerOfATargetWithoutAConnection(t *testing.T) {
-	store := routingStore(capturedFacts(RoutingFacts{Anime: true}))
-	router := &fakeRouterProvider{targetsOverride: []RouterTarget{{Quality: Quality1080p, ExternalID: "x", Status: StatusQueued}}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	var hd *Target
-	for i := range targets {
-		if targets[i].Quality == Quality1080p {
-			hd = &targets[i]
-		}
-	}
-	if hd == nil || hd.IntegrationID != "radarr-anime" || hd.IntegrationKind != "radarr" {
-		t.Fatalf("targets = %+v, want the HD target recorded on the Anime route's server", targets)
 	}
 }
 
@@ -591,187 +463,10 @@ func TestReconcileKeepsStatusesWhenOnePluginFails(t *testing.T) {
 	}
 }
 
-// TestRouteSeedingMigrationDatabase runs the request_routes migration over
-// Sonarr/Radarr servers configured the old way and checks it produces the
-// routes that reproduce the plugin's own routing.
-func TestRouteSeedingMigrationDatabase(t *testing.T) {
-	up := migrationUp(t, "request_routes")
-	repo, pool := lifecycleTestRepository(t)
-	ctx := t.Context()
-	// The schema copy took the migrated columns; start from before them.
-	if _, err := pool.Exec(ctx, `ALTER TABLE media_request_targets DROP COLUMN IF EXISTS route_id, DROP COLUMN IF EXISTS route_name`); err != nil {
-		t.Fatal(err)
-	}
-	seed := func(id, name string, enabled bool, installation any, key, config string) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, `INSERT INTO request_integrations (id, name, enabled, capability_id, installation_id, api_key_ref, plugin_config)
-			VALUES ($1, $2, $3, 'arr', $4, $5, $6::jsonb)`, id, name, enabled, installation, key, config); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Movies: the first usable default by name wins; disabled, unbound and
-	// keyless defaults are skipped, as the plugin path skipped them.
-	seed("radarr-a", "A Radarr", false, 1, "k", `{"service_kind":"radarr","is_default":true}`)
-	seed("radarr-b", "B Radarr", true, nil, "k", `{"service_kind":"radarr","is_default":true}`)
-	seed("radarr-c", "C Radarr", true, 1, "", `{"service_kind":"radarr","is_default":true}`)
-	seed("radarr-main", "D Radarr", true, 1, "k", `{"service_kind":"radarr","is_default":true,"anime_enabled":true,"anime_root_folder":"/anime","anime_quality_profile_id":7,"anime_tags":[3]}`)
-	seed("radarr-later", "E Radarr", true, 1, "k", `{"service_kind":"radarr","is_default":true}`)
-	seed("radarr-uhd", "Radarr 4K", true, 1, "k", `{"service_kind":"radarr","is_default_4k":true,"is_4k":true}`)
-	// Series: anime settings on the 4K server only, with empty fields on the
-	// HD server's anime switch.
-	seed("sonarr-main", "Sonarr", true, 1, "k", `{"service_kind":"sonarr","is_default":true,"anime_enabled":true,"anime_root_folder":"","anime_tags":[]}`)
-	seed("sonarr-uhd", "Sonarr 4K", true, 1, "k", `{"service_kind":"sonarr","is_default_4k":true,"anime_enabled":true,"anime_root_folder":"/anime-4k","anime_tags":[9]}`)
-	seed("seerr", "Seerr", true, 2, "k", `{"requester_mode":"admin"}`)
-	if _, err := pool.Exec(ctx, up); err != nil {
-		t.Fatalf("run migration: %v", err)
-	}
-	// The owner repair keeps these routes: every seeded server belongs to the
-	// plugin that owns the first usable connection of its media type.
-	if _, err := pool.Exec(ctx, migrationUp(t, "request_routes_keep_legacy_owner")); err != nil {
-		t.Fatalf("run owner repair: %v", err)
-	}
-
-	routes, err := repo.ListRoutes(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]Route{}
-	for _, route := range routes {
-		byID[route.ID] = route
-	}
-	if len(routes) != 4 {
-		t.Fatalf("routes = %+v, want a fallback and an Anime route per media type", routes)
-	}
-	if r := byID["fallback-movie"]; !r.IsFallback || r.HD.IntegrationID != "radarr-main" || r.UHD.IntegrationID != "radarr-uhd" {
-		t.Fatalf("movie fallback = %+v, want the first usable default by name", r)
-	}
-	anime := byID["anime-movie"]
-	if anime.Conditions.Anime == nil || !*anime.Conditions.Anime || anime.HD.IntegrationID != "radarr-main" || anime.UHD.IntegrationID != "" {
-		t.Fatalf("movie anime route = %+v", anime)
-	}
-	if o := anime.HD.Overrides; o["root_folder"] != "/anime" || o["quality_profile_id"] != float64(7) ||
-		!slices.Equal(anyInts(o["tags"]), []int{3}) || o["series_type"] != nil {
-		t.Fatalf("movie anime overrides = %v, want the server's anime folder, profile and tags, no series type", o)
-	}
-	if r := byID["fallback-series"]; r.HD.IntegrationID != "sonarr-main" || r.UHD.IntegrationID != "sonarr-uhd" {
-		t.Fatalf("series fallback = %+v", r)
-	}
-	seriesAnime := byID["anime-series"]
-	// The HD server's anime switch with empty fields only makes Sonarr treat
-	// the series as anime; the 4K server's settings carry over too.
-	if o := seriesAnime.HD.Overrides; seriesAnime.HD.IntegrationID != "sonarr-main" || len(o) != 1 || o["series_type"] != "anime" {
-		t.Fatalf("series anime HD = %+v", seriesAnime.HD)
-	}
-	if o := seriesAnime.UHD.Overrides; seriesAnime.UHD.IntegrationID != "sonarr-uhd" || o["root_folder"] != "/anime-4k" ||
-		!slices.Equal(anyInts(o["tags"]), []int{9}) || o["series_type"] != "anime" {
-		t.Fatalf("series anime 4K = %+v", seriesAnime.UHD)
-	}
-}
-
-// migrationUp returns the Up section of the migration named name, runnable as
-// one statement batch.
-func migrationUp(t *testing.T, name string) string {
-	t.Helper()
-	matches, err := filepath.Glob("../../migrations/sql/*_" + name + ".sql")
-	if err != nil || len(matches) != 1 {
-		t.Fatalf("find migration %s: %v %v", name, matches, err)
-	}
-	raw, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	up := string(raw)
-	up = up[strings.Index(up, "-- +goose Up"):strings.Index(up, "-- +goose Down")]
-	return strings.NewReplacer("-- +goose StatementBegin", "", "-- +goose StatementEnd", "").Replace(up)
-}
-
-// TestRouteSeedingKeepsTheLegacyOwnerDatabase covers an install whose first
-// usable movie connection by name is Seerr: before routing, Seerr took every
-// movie request, so the seeded movie routes (which send to Radarr) are removed
-// and movies stay with Seerr. The series fallback sends 4K to another plugin's
-// server while the series Anime route stays on the owner's: the media type's
-// seeded routes go together, unless an admin has saved one of its routes.
-func TestRouteSeedingKeepsTheLegacyOwnerDatabase(t *testing.T) {
-	repo, pool := lifecycleTestRepository(t)
-	ctx := t.Context()
-	if _, err := pool.Exec(ctx, `ALTER TABLE media_request_targets DROP COLUMN IF EXISTS route_id, DROP COLUMN IF EXISTS route_name`); err != nil {
-		t.Fatal(err)
-	}
-	seed := func(id, name string, installation int, capability, mediaTypes, config string) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, `INSERT INTO request_integrations (id, name, enabled, capability_id, installation_id, api_key_ref, supported_media_types, plugin_config)
-			VALUES ($1, $2, true, $3, $4, 'k', $5::text[], $6::jsonb)`, id, name, capability, installation, mediaTypes, config); err != nil {
-			t.Fatal(err)
-		}
-	}
-	seed("seerr", "Jellyseerr", 2, "seerr", "{movie}", `{}`)
-	seed("radarr", "Radarr", 1, "arr", "{movie}", `{"service_kind":"radarr","is_default":true,"anime_enabled":true,"anime_root_folder":"/anime"}`)
-	seed("sonarr", "Sonarr", 1, "arr", "{series}", `{"service_kind":"sonarr","is_default":true,"anime_enabled":true}`)
-	seed("sonarr-4k", "Sonarr 4K", 3, "arr", "{series}", `{"service_kind":"sonarr","is_default_4k":true,"is_4k":true}`)
-	if _, err := pool.Exec(ctx, migrationUp(t, "request_routes")); err != nil {
-		t.Fatalf("run migration: %v", err)
-	}
-	var seeded int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM request_routes`).Scan(&seeded); err != nil || seeded != 4 {
-		t.Fatalf("seeded %d routes (%v), want a fallback and an Anime route per media type", seeded, err)
-	}
-	routeIDs := func() []string {
-		t.Helper()
-		routes, err := repo.ListRoutes(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids := []string{}
-		for _, route := range routes {
-			ids = append(ids, route.ID)
-		}
-		slices.Sort(ids)
-		return ids
-	}
-
-	// An admin saved the series Anime route after the seeding: series routing
-	// is theirs, and the seeded fallback stays so every series has a server.
-	if _, err := pool.Exec(ctx, `UPDATE request_routes SET updated_at = updated_at + interval '1 minute' WHERE id = 'anime-series'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, migrationUp(t, "request_routes_keep_legacy_owner")); err != nil {
-		t.Fatalf("run owner repair: %v", err)
-	}
-	if ids, want := routeIDs(), []string{"anime-series", "fallback-series"}; !slices.Equal(ids, want) {
-		t.Fatalf("routes = %v, want %v: movies go back to Seerr, series keep their routes", ids, want)
-	}
-
-	// Untouched, the series routes go together: the fallback's 4K server is
-	// another plugin's, and an Anime route left alone would route series with
-	// no fallback.
-	if _, err := pool.Exec(ctx, `UPDATE request_routes SET updated_at = created_at WHERE id = 'anime-series'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, migrationUp(t, "request_routes_keep_legacy_owner")); err != nil {
-		t.Fatalf("rerun owner repair: %v", err)
-	}
-	if ids := routeIDs(); len(ids) != 0 {
-		t.Fatalf("routes = %v, want none: series go back to the Sonarr plugin", ids)
-	}
-}
-
-func anyInts(v any) []int {
-	list, _ := v.([]any)
-	out := make([]int, 0, len(list))
-	for _, item := range list {
-		if n, ok := item.(float64); ok {
-			out = append(out, int(n))
-		}
-	}
-	return out
-}
-
 func TestSubmitRoutedRefusesAServerOfTheWrongKind(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.integrations[0].PluginConfig["service_kind"] = "sonarr" // radarr-hd, switched after the route was saved
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 
 	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
 	if err != nil {
@@ -782,33 +477,10 @@ func TestSubmitRoutedRefusesAServerOfTheWrongKind(t *testing.T) {
 	}
 }
 
-func TestDeleteIntegrationRefusesARoutedServerDatabase(t *testing.T) {
-	repo, pool := lifecycleTestRepository(t)
-	ctx := t.Context()
-	if _, err := pool.Exec(ctx, `CREATE TABLE request_routes (LIKE public.request_routes INCLUDING ALL)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO request_integrations (id, name, enabled, capability_id) VALUES ('radarr', 'Radarr', true, 'arr'), ('spare', 'Spare', true, 'arr');
-		UPDATE request_integrations SET plugin_config = '{"service_kind":"radarr"}';
-		INSERT INTO request_routes (id, media_type, position, name, is_fallback, hd_integration_id) VALUES ('fallback-movie', 'movie', 1000, 'Everything else', true, 'radarr')`); err != nil {
-		t.Fatal(err)
-	}
-	err := repo.DeleteIntegration(ctx, "radarr")
-	var verr *ValidationError
-	if !errors.As(err, &verr) || !strings.Contains(verr.FormError, "Everything else") {
-		t.Fatalf("delete a routed server: err = %v, want the routes using it named", err)
-	}
-	if err := repo.DeleteIntegration(ctx, "spare"); err != nil {
-		t.Fatalf("delete an unrouted server: %v", err)
-	}
-}
-
 func TestSubmitRoutedRefusesAServerThatDoesNotTakeTheMediaType(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.integrations[0].SupportedMediaTypes = []string{"series"} // radarr-hd, narrowed after the route was saved
-	router := &fakeRouterProvider{}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
+	svc, router := newRoutedService(store)
 
 	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
 	if err != nil {

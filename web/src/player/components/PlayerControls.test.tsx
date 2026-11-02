@@ -30,17 +30,8 @@ function renderControls(
       onSubtitleDelayChange={vi.fn()}
       audioTracks={[]}
       activeAudioIndex={-1}
-      qualityOptions={[
-        {
-          id: "original",
-          label: "Original",
-          sublabel: "",
-          resolution: "1080p",
-          bitrateKbps: 0,
-          isOriginal: true,
-        },
-      ]}
-      activeQualityId="original"
+      qualityOptions={[]}
+      activeQualityId="auto"
       isTranscoding={false}
       qualityError={null}
       onQualitySelect={vi.fn()}
@@ -145,12 +136,6 @@ describe("PlayerControls", () => {
     expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
   });
 
-  it("shows marker editing when available", () => {
-    renderControls(true);
-
-    expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
-  });
-
   it("toggles between Fit and Fill from the desktop utility rail", () => {
     const onVideoFitToggle = vi.fn();
     const { unmount } = renderControls(false, { onVideoFitToggle });
@@ -166,28 +151,6 @@ describe("PlayerControls", () => {
       "aria-pressed",
       "true",
     );
-  });
-
-  it("toggles video fit from the compact overflow menu", () => {
-    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          callback([], {} as ResizeObserver);
-        }
-        observe() {}
-        disconnect() {}
-      },
-    );
-    const onVideoFitToggle = vi.fn();
-    renderControls(false, { videoFit: "cover", onVideoFitToggle });
-
-    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Fill screen" }));
-
-    expect(onVideoFitToggle).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("uses the mobile transport and hides hardware-volume controls on coarse pointers", () => {

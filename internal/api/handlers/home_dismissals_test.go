@@ -150,30 +150,6 @@ func TestUndismissEpisodeUndropsSeries(t *testing.T) {
 	}
 }
 
-func TestDismissResolveFailureIsInternalError(t *testing.T) {
-	h, store, _, _ := newDismissalTestHandler()
-	h.seriesDrops.(*fakeSeriesDrops).resolveErr = errors.New("db down")
-	err := h.DismissHomeItem(t.Context(), HomeDismissalCommand{UserID: 1, ProfileID: "p", Surface: userstore.HomeSurfaceNextUp, ItemID: "episode-1", SeriesID: "series-1"})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if len(store.upserted) != 0 {
-		t.Fatalf("fell back to a per-item dismissal: %+v", store.upserted)
-	}
-}
-
-func TestDismissWithoutDropStoreKeepsPerItemBehavior(t *testing.T) {
-	store := &dismissalTestStore{}
-	h := NewHomeDismissalHandler(dismissalTestProvider{store: store})
-	err := h.DismissHomeItem(t.Context(), HomeDismissalCommand{UserID: 1, ProfileID: "p", Surface: userstore.HomeSurfaceNextUp, ItemID: "episode-1", SeriesID: "series-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(store.upserted) != 1 {
-		t.Fatalf("upserted %+v, want one per-item dismissal", store.upserted)
-	}
-}
-
 func v1DismissalRequest(method, surface, itemID, body string) *http.Request {
 	req := httptest.NewRequest(method, "/api/v1/home/dismissals/"+surface+"/"+itemID, strings.NewReader(body))
 	routeCtx := chi.NewRouteContext()

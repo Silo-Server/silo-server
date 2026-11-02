@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,22 +10,50 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-// compareVersions compares two dot-separated version strings numerically.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-// Non-numeric segments fall back to lexicographic comparison.
+// compareVersions orders two plugin versions, returning -1 if a < b, 0 if
+// a == b, and 1 if a > b. Versions are Semantic Versioning strings with an
+// optional leading "v": a pre-release sorts below its release and build
+// metadata is ignored. Manifests are not validated, so a version that is not
+// valid semver sorts below every valid one, which lets a catalog release
+// replace a hand-installed build with a free-form version. Two invalid
+// versions compare dot segment by dot segment (see compareVersionSegments).
 func compareVersions(a, b string) int {
+	semA, semB := semverString(a), semverString(b)
+	validA, validB := semver.IsValid(semA), semver.IsValid(semB)
+	switch {
+	case validA && validB:
+		return semver.Compare(semA, semB)
+	case validA:
+		return 1
+	case validB:
+		return -1
+	}
+	return compareVersionSegments(a, b)
+}
+
+// semverString adds the "v" prefix golang.org/x/mod/semver requires.
+func semverString(version string) string {
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
+// compareVersionSegments orders two versions dot segment by dot segment. A
+// missing segment sorts first, then integers by value, then other text
+// lexicographically. Ranking the kinds before comparing keeps the order
+// transitive, which the catalog sort needs.
+func compareVersionSegments(a, b string) int {
 	partsA := strings.Split(a, ".")
 	partsB := strings.Split(b, ".")
 
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
-
-	for i := 0; i < maxLen; i++ {
+	for i := 0; i < max(len(partsA), len(partsB)); i++ {
 		var segA, segB string
 		if i < len(partsA) {
 			segA = partsA[i]
@@ -32,27 +61,39 @@ func compareVersions(a, b string) int {
 		if i < len(partsB) {
 			segB = partsB[i]
 		}
-
-		numA, errA := strconv.Atoi(segA)
-		numB, errB := strconv.Atoi(segB)
-
-		if errA == nil && errB == nil {
-			if numA < numB {
-				return -1
-			}
-			if numA > numB {
-				return 1
-			}
-		} else {
-			if segA < segB {
-				return -1
-			}
-			if segA > segB {
-				return 1
-			}
+		if c := compareVersionSegment(segA, segB); c != 0 {
+			return c
 		}
 	}
 	return 0
+}
+
+func compareVersionSegment(a, b string) int {
+	rankA, numA := versionSegmentRank(a)
+	rankB, numB := versionSegmentRank(b)
+	if c := cmp.Compare(rankA, rankB); c != 0 {
+		return c
+	}
+	if rankA == segmentNumeric {
+		return cmp.Compare(numA, numB)
+	}
+	return strings.Compare(a, b)
+}
+
+const (
+	segmentMissing = iota
+	segmentNumeric
+	segmentText
+)
+
+func versionSegmentRank(segment string) (rank, value int) {
+	if segment == "" {
+		return segmentMissing, 0
+	}
+	if n, err := strconv.Atoi(segment); err == nil {
+		return segmentNumeric, n
+	}
+	return segmentText, 0
 }
 
 const pluginIDTMDB = "silo.tmdb"
@@ -165,7 +206,8 @@ func (s *AutoUpdateService) SetRequiredPlugins(required func(context.Context) ([
 }
 
 // Check runs a plugin update pass. It can be used by startup, scheduled tasks,
-// and manual admin actions.
+// and manual admin actions. Each per-plugin failure is logged and recorded in
+// the summary; only failures that stop the whole pass are returned.
 func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (AutoUpdateSummary, error) {
 	var summary AutoUpdateSummary
 
@@ -219,7 +261,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		}
 		outcome, err := s.handleExistingPlugin(ctx, existing, entry)
 		if err != nil {
-			summary.recordFailure("process plugin update %s: %v", existing.PluginID, err)
+			summary.recordFailuref("process plugin update %s: %v", existing.PluginID, err)
 			continue
 		}
 		switch outcome {
@@ -242,7 +284,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 			}
 			installedDefault, err := s.handleNewPlugin(ctx, pluginID, entry)
 			if err != nil {
-				summary.recordFailure("auto-install default plugin %s: %v", pluginID, err)
+				summary.recordFailuref("auto-install default plugin %s: %v", pluginID, err)
 			} else if installedDefault {
 				summary.DefaultPluginsInstalled++
 			}
@@ -258,6 +300,10 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 	// re-extracted, newer archive.
 	if summary.DefaultPluginsInstalled > 0 || summary.UpdatesApplied > 0 || summary.UpdatesAvailable > 0 {
 		s.notifyChanged(ctx)
+	}
+
+	for _, failure := range summary.Failures {
+		s.logger.WarnContext(ctx, "plugin auto-update operation failed", "error", failure)
 	}
 
 	return summary, nil
@@ -278,16 +324,11 @@ func (s *AutoUpdateService) notifyChanged(ctx context.Context) {
 // installed plugins according to their update policy. All errors are logged
 // rather than returned so that startup is never blocked.
 func (s *AutoUpdateService) Run(ctx context.Context) error {
-	summary, err := s.Check(ctx, AutoUpdateOptions{
+	if _, err := s.Check(ctx, AutoUpdateOptions{
 		SeedDefaultRepository: true,
 		AutoInstallDefaults:   true,
-	})
-	if err != nil {
+	}); err != nil {
 		s.logger.WarnContext(ctx, "failed to run plugin auto-update", "error", err)
-		return nil
-	}
-	for _, failure := range summary.Failures {
-		s.logger.WarnContext(ctx, "plugin auto-update operation failed", "error", failure)
 	}
 	return nil
 }
@@ -348,7 +389,7 @@ func (s *AutoUpdateService) pluginsToAutoInstall(ctx context.Context, opts AutoU
 	}
 	required, err := s.requiredPlugins(ctx)
 	if err != nil {
-		summary.recordFailure("list required plugins: %v", err)
+		summary.recordFailuref("list required plugins: %v", err)
 		return pluginIDs
 	}
 	for _, pluginID := range required {
@@ -422,18 +463,10 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 		Version:      newVersion,
 	})
 	if err == nil {
-		repositoryID := target.RepositoryID
 		if target.LegacyArchive {
-			_, err = s.installer.ReplaceRemote(ctx, existing, InstallArchiveRequest{
-				ArchiveURL:   target.ArchiveURL,
-				RepositoryID: &repositoryID,
-			})
+			_, err = s.installer.ReplaceRemote(ctx, existing, target.ArchiveRequest())
 		} else {
-			_, err = s.installer.ReplaceBinary(ctx, existing, InstallBinaryRequest{
-				BinaryURL:    target.ArchiveURL,
-				Checksum:     target.Checksum,
-				RepositoryID: &repositoryID,
-			})
+			_, err = s.installer.ReplaceBinary(ctx, existing, target.BinaryRequest())
 		}
 	}
 	if err != nil {
@@ -516,19 +549,11 @@ func (s *AutoUpdateService) installResolvedCatalogTarget(ctx context.Context, ta
 		return nil, fmt.Errorf("catalog install target is required")
 	}
 
-	repositoryID := target.RepositoryID
 	if target.LegacyArchive {
-		return s.installer.InstallRemote(ctx, InstallArchiveRequest{
-			ArchiveURL:   target.ArchiveURL,
-			RepositoryID: &repositoryID,
-		})
+		return s.installer.InstallRemote(ctx, target.ArchiveRequest())
 	}
 
-	return s.installer.InstallBinary(ctx, InstallBinaryRequest{
-		BinaryURL:    target.ArchiveURL,
-		Checksum:     target.Checksum,
-		RepositoryID: &repositoryID,
-	})
+	return s.installer.InstallBinary(ctx, target.BinaryRequest())
 }
 
 type autoUpdateOutcome int
@@ -539,7 +564,11 @@ const (
 	autoUpdateOutcomeNotified
 )
 
-func (s *AutoUpdateSummary) recordFailure(format string, args ...any) {
+// recordFailuref masks credential assignments and URL userinfo before storing
+// the message: failures reach the server log, the task's result data, and the
+// task error shown to admins, and their text can carry repository or plugin
+// diagnostics.
+func (s *AutoUpdateSummary) recordFailuref(format string, args ...any) {
 	s.FailedOperations++
-	s.Failures = append(s.Failures, fmt.Sprintf(format, args...))
+	s.Failures = append(s.Failures, logredact.SanitizeText(fmt.Sprintf(format, args...)))
 }

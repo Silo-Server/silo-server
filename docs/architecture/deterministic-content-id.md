@@ -203,6 +203,30 @@ catalog-driven column enumeration so the two stay in lockstep;
 `ON UPDATE CASCADE` only fires when a `content_id` actually changes (at this
 promotion and at a corrected-match re-anchor), so there is no steady-state cost.
 
+### Merging onto the owner of a provider ID
+
+A match can merge an item into another item that already holds one of its
+provider IDs (`findExistingByProviderIDs`): a provisional item at its match, a
+new item's dedup, and a provider-ID unique conflict at persist all do, and a
+scanned file links to the matched item that holds one of its folder's tagged
+IDs. Sharing an ID is not enough. The two items must also agree on the first ID
+both carry, in the order the item type's content ID anchors
+(`identityProviderIDsContradict`, `contentid.AnchorPrecedence`): TMDB, IMDb,
+then TVDB for a movie; TVDB, TMDB, then IMDb for a series. Provider cross-ID
+mappings are community-edited and sometimes list one TVDB or IMDb ID on two
+neighboring titles, and merging on such an ID folded a folder tagged
+`[tmdb-125249]` into `movie-tmdb-43506` (issue #2263).
+
+When the items disagree and the item that already holds the shared ID is
+matched, it keeps the ID, and the other item is persisted without it
+(`recoverProviderIDConflict` logs `left a provider ID with the other title that
+holds it`). A holder that is not yet matched gives up its provider IDs instead,
+as for any provisional owner. When the tag lookup refuses an item, the file
+links to the matched item at the tags' own content ID if there is one, and
+gets a new provisional item otherwise. The anchoring ID decides first, so a movie whose TVDB mapping
+changed since it first matched still merges on its TMDB ID, and a series whose
+TMDB mapping changed still merges on its TVDB ID.
+
 ### Re-anchor on a corrected match
 
 An item matched to the wrong title sits on that title's id, for example
@@ -210,7 +234,10 @@ An item matched to the wrong title sits on that title's id, for example
 the real `73244` show would merge into it when it is scanned in. So the same
 gate re-anchors a provider-anchored item when its identity is corrected: an
 Identify whose choice rejects the provider ID the item is anchored on
-(`identityChoiceCorrects`), or a manual refresh after an NFO `<uniqueid>` fix.
+(`identityChoiceCorrects`), a manual refresh after an NFO `<uniqueid>` fix, or
+an initial match whose NFO IDs replaced the folder-tag IDs the scanner
+anchored the skeleton on (the NFO's IDs must resolve first; see
+[local NFO metadata](local-nfo-metadata.md#identity-hint-first-never-candidate-first)).
 An Identify that confirms or extends the match, or only replaces an anchor
 already recorded as stale (no other title can claim a dead ID), keeps the id,
 as does every scheduled refresh.

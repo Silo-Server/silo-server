@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
@@ -51,11 +52,12 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil || !contentid.IsLocal(from) {
 		return from, nil
 	}
-	return s.reanchorContentID(ctx, from, ids, itemType)
+	return s.reanchorContentID(ctx, from, ids, itemType, markIdentity)
 }
 
 // reanchorContentID moves `from` to the provider-anchored content_id derived
@@ -66,12 +68,18 @@ func (s *MetadataService) canonicalizeLocalContentID(
 // <uniqueid> in an NFO, whose item was anchored to the wrong provider id). Both
 // must hold the provider-dedup lock so the target id cannot be claimed
 // underneath us. When ids do not derive a provider-anchored id, or it equals
-// `from`, this is a no-op.
+// `from`, this is a no-op. With markIdentity (an Identify), a merge onto the
+// row already at the target records the admin's choice on it in the merge's
+// transaction: that row holds the chosen provider IDs, so the mark commits
+// with them even if the identity write that follows fails. A rename moves only
+// the content id, leaving the old provider IDs until that identity write, so
+// the mark waits for it.
 func (s *MetadataService) reanchorContentID(
 	ctx context.Context,
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil {
 		return from, nil
@@ -99,7 +107,7 @@ func (s *MetadataService) reanchorContentID(
 		// local item, so the source row may be 'matched'; we still consolidate it
 		// onto the canonical target rather than orphaning a duplicate. Safe under
 		// the provider-dedup lock the caller holds.
-		if err := s.rebindItemToExistingItem(ctx, from, target, true); err != nil {
+		if err := s.rebindItemOnto(ctx, from, target, true, markIdentity); err != nil {
 			return "", fmt.Errorf("merging local item %s into %s: %w", from, target, err)
 		}
 		return target, nil
@@ -126,11 +134,19 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	if s.dbPool == nil {
 		return fmt.Errorf("rename content id requires database pool")
 	}
-	tx, err := s.dbPool.Begin(ctx)
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin content_id rename transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// The rename cascades into the item's files.
+	if err := catalog.LockMetadataCurationFiles(ctx, tx, from); err != nil {
+		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, from); err != nil {
+		return err
+	}
 
 	sources, targets := []string{from}, []string{to}
 	if withSeriesChildren {
@@ -149,6 +165,13 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 		sources = append(sources, childSources...)
 		targets = append(targets, childTargets...)
 	}
+	// The rename drops a source cutoff row that collides with a leftover one
+	// on the new id, and the source's history moves either way, so merge the
+	// cutoffs first or an unmarked play would count as watched again.
+	mergedCutoffs, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, sources, targets)
+	if err != nil {
+		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
+	}
 	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, targets); err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
 	}
@@ -157,6 +180,10 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit content_id rename transaction: %w", err)
+	}
+	// A raised cutoff can stop the new id's earlier plays counting as watched.
+	if mergedCutoffs > 0 {
+		MarkRecommendationsStale(ctx, s.recsStaler, targets...)
 	}
 	return nil
 }

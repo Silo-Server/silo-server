@@ -252,7 +252,7 @@ function Step({
       <div className="flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="border-border bg-muted/40 text-muted-foreground grid size-[22px] shrink-0 place-items-center rounded-full border text-[11.5px] font-semibold"
+          className="border-border bg-muted/40 text-muted-foreground grid size-[22px] shrink-0 place-items-center rounded-full border text-xs font-semibold"
         >
           {number}
         </span>
@@ -976,7 +976,7 @@ export function SignInProviderSlot({
               <span className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold">{choice.title}</span>
                 {choice.state ? (
-                  <span className="text-muted-foreground border-border inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]">
+                  <span className="text-muted-foreground border-border inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
                     <StateDot tone={choice.state.tone} />
                     {choice.state.word}
                   </span>

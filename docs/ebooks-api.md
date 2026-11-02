@@ -78,6 +78,11 @@ starts the conversion: it advertises EPUB without a Content-Length, while GET
 produces the authoritative representation. A failed conversion returns the raw
 original with the conversion-failed header and no-store caching. Cached converted
 EPUB responses retain their conversion-key ETag and revalidation policy.
+The conversion cache directory must be private to Silo's user: when it is a
+symlink, belongs to another user, or is writable by its group or other users,
+conversion stays off. Cache reads, writes, and evictions go only through the
+directory Silo checked at startup, and the reader serves the file the cache
+opened rather than reopening it by name.
 
 The web reader loads these bytes through the v2 session boundary using its
 captured profile authority. The existing 512 MiB Content-Length check remains;

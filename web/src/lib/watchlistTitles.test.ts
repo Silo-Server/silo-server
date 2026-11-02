@@ -3,14 +3,10 @@
 import { describe, expect, it } from "vitest";
 import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
 import {
-  WATCHLIST_NOT_IN_LIBRARY_TAB,
   WATCHLIST_TITLE_RANK,
-  parseWatchlistTab,
   showWatchlistAutoRequestControl,
   sortWatchlistTitlesSoonestFirst,
   watchlistTitleNeedsAttention,
-  watchlistTitlesAvailable,
-  watchlistTitlesHint,
   watchlistTitleStatus,
 } from "./watchlistTitles";
 
@@ -72,16 +68,6 @@ describe("watchlistTitleStatus", () => {
     expect(status.badge).toBe("Awaiting approval");
     expect(status.caption).toBe("Awaiting approval");
     expect(status.rank).toBe(WATCHLIST_TITLE_RANK.awaitingApproval);
-  });
-
-  it("says an approved request is waiting for a download", () => {
-    const status = watchlistTitleStatus(
-      title({ request: { requestable: false, status: "approved" } }),
-      NOW,
-    );
-    expect(status.badge).toBe("Approved");
-    expect(status.badgeIcon).toBe("hourglass");
-    expect(status.caption).toBe("Approved · waiting for a download");
   });
 
   it("offers a request only when the title is requestable", () => {
@@ -152,40 +138,6 @@ describe("sortWatchlistTitlesSoonestFirst", () => {
       title({ tmdb_id: 2, added_at: "2026-09-20T00:00:00Z" }),
     ];
     expect(sortWatchlistTitlesSoonestFirst(titles, NOW).map((t) => t.tmdb_id)).toEqual([2, 1]);
-  });
-});
-
-describe("parseWatchlistTab", () => {
-  it("reads only the not-in-library value as the titles tab", () => {
-    expect(parseWatchlistTab(WATCHLIST_NOT_IN_LIBRARY_TAB)).toBe("not-in-library");
-    expect(parseWatchlistTab(null)).toBe("library");
-    expect(parseWatchlistTab("anything")).toBe("library");
-  });
-});
-
-describe("watchlistTitlesHint", () => {
-  it("drops the requested sentence when watchlist requests are off", () => {
-    expect(watchlistTitlesHint(true)).toBe(
-      "These titles aren't in the library yet, so they can't be played. They've been requested for you. When one arrives, it moves to In your library and you get a notification.",
-    );
-    expect(watchlistTitlesHint(false)).toBe(
-      "These titles aren't in the library yet, so they can't be played. When one arrives, it moves to In your library.",
-    );
-  });
-});
-
-describe("watchlistTitlesAvailable", () => {
-  it("needs both requests and watchlist titles on", () => {
-    expect(
-      watchlistTitlesAvailable({ requests_enabled: true, watchlist_titles_supported: true }),
-    ).toBe(true);
-    expect(
-      watchlistTitlesAvailable({ requests_enabled: false, watchlist_titles_supported: true }),
-    ).toBe(false);
-    expect(
-      watchlistTitlesAvailable({ requests_enabled: true, watchlist_titles_supported: false }),
-    ).toBe(false);
-    expect(watchlistTitlesAvailable(undefined)).toBe(false);
   });
 });
 

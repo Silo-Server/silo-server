@@ -52,12 +52,16 @@ function overlayLength(pixels: number, mode: ScalingMode, legacyVariable: string
   return `${Number(((pixels / POSTER_REFERENCE_WIDTH) * 100).toFixed(6))}cqi`;
 }
 
+// Every poster card asks on every render, so the answer is cached. It is keyed
+// to the `CSS` object so a replaced global (as in tests) is asked again.
+let containerQueryUnitsSupport: { css: typeof CSS; supported: boolean } | null = null;
+
 function supportsContainerQueryUnits(): boolean {
-  return (
-    typeof CSS !== "undefined" &&
-    typeof CSS.supports === "function" &&
-    CSS.supports("width", "1cqi")
-  );
+  if (typeof CSS === "undefined" || typeof CSS.supports !== "function") return false;
+  if (containerQueryUnitsSupport?.css !== CSS) {
+    containerQueryUnitsSupport = { css: CSS, supported: CSS.supports("width", "1cqi") };
+  }
+  return containerQueryUnitsSupport.supported;
 }
 
 function setLegacyLength(element: HTMLElement, variable: string, pixels: number, scale: number) {

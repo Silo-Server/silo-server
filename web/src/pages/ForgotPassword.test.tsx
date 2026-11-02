@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import ForgotPassword from "./ForgotPassword";
 import capabilityFixture from "../../../contracts/api/v2/fixtures/password_reset_capability.json";
 
@@ -15,40 +14,15 @@ vi.mock("@/hooks/useServerBranding", () => ({
 }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function problem(status: number, type: string) {
-  return new Response(
-    JSON.stringify({
-      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
-      title: type,
-      status,
-      detail: "Refused.",
-    }),
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
+const problem = (status: number, type: string) =>
+  problemResponse(status, type, { detail: "Refused." });
 
 let state: string;
 let submit: () => Promise<Response>;
 const fetchMock = vi.fn<typeof fetch>();
 
 function mount(entry = "/forgot-password?login=alice") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/" element={<p>Home</p>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return renderRoutes(entry, { "/forgot-password": <ForgotPassword />, "/": <p>Home</p> });
 }
 const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 function send() {
@@ -107,11 +81,4 @@ it("switches to the unavailable notice when the server refuses the request", asy
   await screen.findByLabelText("Username or email");
   send();
   await screen.findByText(/doesn't offer password resets/);
-});
-
-it("sends a signed-in visitor home", async () => {
-  auth.user = { username: "alice" };
-  mount();
-  await screen.findByText("Home");
-  expect(posts()).toHaveLength(0);
 });

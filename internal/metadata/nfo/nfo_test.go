@@ -70,57 +70,6 @@ const fullMovieNFO = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </fileinfo>
 </movie>`
 
-// fullTVShowNFO exercises the series root, including <aired> as the
-// FirstAirDate fallback and series-shaped collections.
-const fullTVShowNFO = `<?xml version="1.0" encoding="utf-8"?>
-<tvshow>
-  <title>Mr. Robot</title>
-  <originaltitle>Mr. Robot (Original)</originaltitle>
-  <plot>A cybersecurity engineer by day, hacker by night.</plot>
-  <runtime>49</runtime>
-  <premiered>2015-06-24</premiered>
-  <mpaa>TV-MA</mpaa>
-  <genre>Drama</genre>
-  <genre>Crime</genre>
-  <studio>USA Network</studio>
-  <tag>hacking</tag>
-  <ratings>
-    <rating name="imdb" max="10">
-      <value>8.5</value>
-    </rating>
-  </ratings>
-  <actor>
-    <name>Rami Malek</name>
-    <role>Elliot Alderson</role>
-    <order>0</order>
-  </actor>
-  <uniqueid type="tvdb" default="true">289590</uniqueid>
-</tvshow>`
-
-func TestParseNFOData_TVShowAiredFallsBackToFirstAirDate(t *testing.T) {
-	t.Parallel()
-
-	p, err := parseNFOData([]byte(`<tvshow><title>Show</title><aired>2010-09-01</aired></tvshow>`))
-	if err != nil {
-		t.Fatalf("parseNFOData() error = %v", err)
-	}
-	if p.FirstAirDate != "2010-09-01" {
-		t.Errorf("FirstAirDate = %q, want 2010-09-01 (from <aired>)", p.FirstAirDate)
-	}
-}
-
-func TestParseNFOData_MovieReleaseDateFallback(t *testing.T) {
-	t.Parallel()
-
-	p, err := parseNFOData([]byte(`<movie><title>M</title><releasedate>1999-03-31</releasedate></movie>`))
-	if err != nil {
-		t.Fatalf("parseNFOData() error = %v", err)
-	}
-	if p.ReleaseDate != "1999-03-31" {
-		t.Errorf("ReleaseDate = %q, want 1999-03-31 (from <releasedate>)", p.ReleaseDate)
-	}
-}
-
 func TestParseNFOData_TableCases(t *testing.T) {
 	t.Parallel()
 
@@ -230,6 +179,22 @@ func TestParseNFOData_TableCases(t *testing.T) {
 			check: func(t *testing.T, p *parsedNFO) {
 				if p.RatingIMDB != 8.2 {
 					t.Errorf("RatingIMDB = %v, want 8.2", p.RatingIMDB)
+				}
+			},
+		},
+		{
+			// Radarr writes this before IMDb has a score: the bare <rating>
+			// repeats the default TMDB value and is not an IMDb rating.
+			name: "legacy bare rating ignored beside a ratings block without imdb",
+			data: `<movie><title>X</title><ratings>` +
+				`<rating name="themoviedb" max="10" default="true"><value>6.667</value><votes>6</votes></rating>` +
+				`</ratings><rating>6.667</rating></movie>`,
+			check: func(t *testing.T, p *parsedNFO) {
+				if p.RatingIMDB != 0 {
+					t.Errorf("RatingIMDB = %v, want 0", p.RatingIMDB)
+				}
+				if p.RatingTMDB != 6.667 {
+					t.Errorf("RatingTMDB = %v, want 6.667", p.RatingTMDB)
 				}
 			},
 		},

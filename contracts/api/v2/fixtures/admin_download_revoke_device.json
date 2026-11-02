@@ -1,0 +1,9 @@
+{
+  "revoked": 2,
+  "bytes": 4200000000,
+  "paused_monitors": 1,
+  "download_ids": [
+    "dl-1",
+    "dl-2"
+  ]
+}

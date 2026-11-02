@@ -1,13 +1,23 @@
 package ai
 
+import (
+	"context"
+
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
+)
+
 // Config holds the runtime configuration for the subtitle AI features. The
 // shared endpoint connection (base URL, keys) lives in the llm.Client this
 // package is wired with; this struct carries the feature toggles plus the
 // model names used for job provenance and idempotency.
 type Config struct {
-	// Configured reports that the shared AI endpoint has a base URL; without
-	// one, no feature is available regardless of toggles.
+	// TextConfigSource reads live text settings and connection state before enqueue.
+	TextConfigSource func(context.Context) (llm.Config, error)
+	// Configured reports that a text provider is chosen; without one,
+	// translation is unavailable regardless of toggles.
 	Configured bool
+	// SpeechConfigured reports that a speech-to-text provider is chosen.
+	SpeechConfigured bool
 	// TranslateEnabled gates on-demand subtitle translation.
 	TranslateEnabled bool
 	// TranscribeEnabled gates Whisper ASR generation (transcribe /
@@ -29,10 +39,10 @@ type Config struct {
 
 // TranslateReady reports whether subtitle translation can currently run.
 func (c Config) TranslateReady() bool {
-	return c.Configured && c.TranslateEnabled && c.ChatModel != ""
+	return (c.Configured || c.TextConfigSource != nil) && c.TranslateEnabled && c.ChatModel != ""
 }
 
 // TranscribeReady reports whether ASR subtitle generation can currently run.
 func (c Config) TranscribeReady() bool {
-	return c.Configured && c.TranscribeEnabled && c.ASRModel != ""
+	return c.SpeechConfigured && c.TranscribeEnabled && c.ASRModel != ""
 }

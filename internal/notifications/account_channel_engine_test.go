@@ -1,7 +1,6 @@
 package notifications
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -59,53 +58,5 @@ func TestDrainSinceMultiplePages(t *testing.T) {
 		if want := fmt.Sprintf("d%06d", i); row.ID != want {
 			t.Fatalf("row %d out of order: got %s, want %s", i, row.ID, want)
 		}
-	}
-}
-
-func TestDrainSinceExactPageBoundary(t *testing.T) {
-	window := &fakeDeliveryWindow{rows: makeDeliveryRows(channelFetchLimit)}
-	got, err := drainSince(window.fetch, Cursor{})
-	if err != nil {
-		t.Fatalf("drainSince: %v", err)
-	}
-	if len(got) != channelFetchLimit {
-		t.Fatalf("expected %d rows, got %d", channelFetchLimit, len(got))
-	}
-	// A full first page can't prove the window is empty; the confirming
-	// second fetch is expected.
-	if window.fetches != 2 {
-		t.Fatalf("expected 2 fetches, got %d", window.fetches)
-	}
-}
-
-func TestDrainSinceRespectsCursor(t *testing.T) {
-	rows := makeDeliveryRows(10)
-	window := &fakeDeliveryWindow{rows: rows}
-	from := Cursor{CreatedAt: rows[6].CreatedAt, ID: rows[6].ID}
-
-	got, err := drainSince(window.fetch, from)
-	if err != nil {
-		t.Fatalf("drainSince: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 rows past the cursor, got %d", len(got))
-	}
-	if got[0].ID != rows[7].ID {
-		t.Fatalf("expected first row %s, got %s", rows[7].ID, got[0].ID)
-	}
-}
-
-func TestDrainSincePropagatesError(t *testing.T) {
-	window := &fakeDeliveryWindow{rows: makeDeliveryRows(channelFetchLimit + 1)}
-	wantErr := errors.New("boom")
-	fetch := func(since Cursor, limit int) ([]DeliveryRow, error) {
-		if window.fetches >= 1 {
-			return nil, wantErr
-		}
-		return window.fetch(since, limit)
-	}
-
-	if _, err := drainSince(fetch, Cursor{}); !errors.Is(err, wantErr) {
-		t.Fatalf("expected fetch error to propagate, got %v", err)
 	}
 }

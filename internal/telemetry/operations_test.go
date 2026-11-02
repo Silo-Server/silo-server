@@ -71,11 +71,3 @@ func TestDependencySpanRedactsErrors(t *testing.T) {
 		}
 	}
 }
-
-func BenchmarkDependencyObservation(b *testing.B) {
-	ctx := context.Background()
-	for b.Loop() {
-		_, finish := StartDependency(ctx, "postgres", "application", "select")
-		finish(nil)
-	}
-}

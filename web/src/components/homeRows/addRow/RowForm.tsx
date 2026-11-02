@@ -4,9 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PreviewState } from "@/hooks/queries/homeRows/useRowPreview";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
-import type { RecipeCatalogResponse } from "@/lib/recipes";
+import { findMatchingPreset, type RecipeCatalogResponse } from "@/lib/recipes";
 import { ruleSortSummary } from "@/lib/homeRows/describe";
 import {
+  findRecipe,
   savedTitle,
   withCollection,
   withRules,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/homeRows/rowDraft";
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import type { LibraryPage, RowCollections } from "@/lib/homeRows/types";
-import { kindLocked, variantFamily } from "@/lib/homeRows/variants";
+import { variantFamily } from "@/lib/homeRows/variants";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 import { CollectionPicker } from "./CollectionPicker";
 import { CuratedTitlesEditor } from "./CuratedTitlesEditor";
@@ -81,7 +82,6 @@ function KindControl({
         value={choices.value}
         onPageIds={choices.onPageIds}
         pageLabel={choices.pageLabel}
-        locked={kindLocked(draft.config)}
         onPick={(option) => onChange(withCollection(draft, option, choices.current?.title))}
       />
     );
@@ -138,7 +138,7 @@ export function RowForm({
   previewOffText: string;
   /** Edit row only. */
   shows?: ShowsLine;
-  /** No variant control: legacy Trakt rows and Continue Reading rows. */
+  /** No variant control: Continue Reading rows. */
   variantLocked: boolean;
   libraries: ParamLibrary[];
   onLibraryPage: boolean;
@@ -172,6 +172,18 @@ export function RowForm({
     onLibraryPage,
   };
   const fallbackTitle = collectionChoices.current?.title;
+  const def = findRecipe(catalog, draft.sectionType);
+  // Collection, rule and Editor's Picks rows show their own control instead.
+  // A preset describes the row only while the row sets nothing beyond the
+  // preset's params; a custom rating floor would make its text wrong.
+  const matched =
+    def && !CONTROL_KINDS.has(draft.sectionType)
+      ? findMatchingPreset(def, draft.config)
+      : undefined;
+  const preset =
+    matched && Object.keys(draft.config).every((key) => key in matched.default_params)
+      ? matched
+      : undefined;
   let nameHelp: string | null = null;
   if (draft.sectionType === "collection" && draft.titleFollowsVariant) {
     nameHelp = "Starts as the collection's name.";
@@ -186,11 +198,13 @@ export function RowForm({
       liveLabel={liveLabel}
       offText={previewOffText}
       countUpTo={rules ? draft.itemLimit : undefined}
+      rule={preset?.description_short}
     />
   );
   const showsLine = shows ? <ShowsSummary sectionType={draft.sectionType} {...shows} /> : null;
   return (
-    <div className="grid gap-5">
+    // minmax(0,1fr): a truncated line or a wide control can't widen the form past a phone screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       {CONTROL_KINDS.has(draft.sectionType) ? (
         <>
           {showsLine}
@@ -204,7 +218,12 @@ export function RowForm({
         </>
       )}
       {family ? (
-        <VariantChoice sectionType={draft.sectionType} config={draft.config} onChange={onVariant} />
+        <VariantChoice
+          sectionType={draft.sectionType}
+          config={draft.config}
+          presets={def?.presets}
+          onChange={onVariant}
+        />
       ) : null}
       <ParamFields {...fieldProps} slot="primary" />
       <div className="grid gap-2">

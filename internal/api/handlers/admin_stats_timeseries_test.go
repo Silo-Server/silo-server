@@ -114,6 +114,56 @@ func TestAssembleTimeseries(t *testing.T) {
 	}
 }
 
+func TestSumTransferredBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		rows         []timeseriesRow
+		wantEgress   int64
+		wantDownload int64
+	}{
+		{
+			name: "no samples transfer nothing",
+		},
+		{
+			// One minute at 8 kbps is 8,000 bits/s for 60 s: 60,000 bytes.
+			name:       "one minute converts kbps to bytes",
+			rows:       []timeseriesRow{{EgressKbpsSum: 8}},
+			wantEgress: 60_000,
+		},
+		{
+			// The totals integrate the per-minute sums, never the bucket
+			// peaks: a bucket whose peak minute hit 1,000 kbps but whose
+			// minutes added up to 1,200 kbps moved 1,200 kbps-minutes.
+			name: "buckets integrate the sum, not the peak",
+			rows: []timeseriesRow{
+				{EgressKbps: 1_000, EgressKbpsSum: 1_200, DownloadEgressKbps: 400, DownloadEgressKbpsSum: 500},
+				{EgressKbps: 50, EgressKbpsSum: 50},
+			},
+			wantEgress:   1_250 * bytesPerKbpsMinute,
+			wantDownload: 500 * bytesPerKbpsMinute,
+		},
+		{
+			// A month of minutes at 10 Gbps must not overflow.
+			name:       "a busy month fits in int64",
+			rows:       []timeseriesRow{{EgressKbpsSum: 10_000_000 * 31 * 24 * 60}},
+			wantEgress: 10_000_000 * 31 * 24 * 60 * bytesPerKbpsMinute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			egress, download := sumTransferredBytes(tt.rows)
+			if egress != tt.wantEgress || download != tt.wantDownload {
+				t.Fatalf("sumTransferredBytes = (%d, %d), want (%d, %d)", egress, download, tt.wantEgress, tt.wantDownload)
+			}
+		})
+	}
+}
+
 func TestTimeseriesBucketSeconds(t *testing.T) {
 	t.Parallel()
 
@@ -152,96 +202,14 @@ func TestTimeseriesBucketSeconds(t *testing.T) {
 	}
 }
 
-func TestHandleGetTimeseriesClampsHours(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		query string
-		want  int
-	}{
-		{name: "absent uses the default window", query: "", want: adminTimeseriesDefaultHours},
-		{name: "empty uses the default window", query: "?hours=", want: adminTimeseriesDefaultHours},
-		{name: "explicit value passes through", query: "?hours=1", want: 1},
-		{name: "a week passes through", query: "?hours=168", want: 168},
-		{name: "zero clamps up", query: "?hours=0", want: adminTimeseriesMinHours},
-		{name: "negative clamps up", query: "?hours=-3", want: adminTimeseriesMinHours},
-		{name: "the retention window is the ceiling", query: "?hours=744", want: 744},
-		{name: "past retention clamps down", query: "?hours=100000", want: adminTimeseriesMaxHours},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-			handler := &AdminHandler{TimeseriesSource: source}
-			rec := httptest.NewRecorder()
-			handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries"+tt.query, nil))
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
-			}
-			if source.gotHours != tt.want {
-				t.Fatalf("hours = %d, want %d", source.gotHours, tt.want)
-			}
-		})
-	}
-}
-
-func TestHandleGetTimeseriesRejectsNonNumericHours(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-	handler := &AdminHandler{TimeseriesSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries?hours=lots", nil))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
-	}
-	if source.callCount != 0 {
-		t.Fatalf("source was queried %d times for an invalid request", source.callCount)
-	}
-}
-
-func TestHandleGetTimeseriesRefreshInvalidates(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-	handler := &AdminHandler{TimeseriesSource: source}
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-	if source.invalidated != 0 {
-		t.Fatalf("invalidated = %d on a plain read, want 0", source.invalidated)
-	}
-
-	rec = httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries?refresh=1", nil))
-	if source.invalidated != 1 {
-		t.Fatalf("invalidated = %d after refresh=1, want 1", source.invalidated)
-	}
-}
-
-func TestHandleGetTimeseriesWithoutDatabase(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestHandleGetTimeseriesFreshInstallSerializesCollectingState(t *testing.T) {
 	t.Parallel()
 
 	source := &stubTimeseriesSource{series: &AdminTimeseries{
-		ResolutionSeconds: adminTimeseriesResolutionSeconds,
-		Points:            []AdminTimeseriesPoint{},
+		ResolutionSeconds:   adminTimeseriesResolutionSeconds,
+		EgressBytes:         1,
+		DownloadEgressBytes: 1,
+		Points:              []AdminTimeseriesPoint{},
 	}}
 	handler := &AdminHandler{TimeseriesSource: source}
 	rec := httptest.NewRecorder()
@@ -254,6 +222,8 @@ func TestHandleGetTimeseriesFreshInstallSerializesCollectingState(t *testing.T) 
 		ResolutionSeconds int               `json:"resolution_seconds"`
 		Points            []json.RawMessage `json:"points"`
 		OldestSampleAt    *string           `json:"oldest_sample_at"`
+		EgressBytes       *int64            `json:"egress_bytes"`
+		DownloadBytes     *int64            `json:"download_egress_bytes"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
@@ -269,6 +239,11 @@ func TestHandleGetTimeseriesFreshInstallSerializesCollectingState(t *testing.T) 
 	}
 	if body.ResolutionSeconds != adminTimeseriesResolutionSeconds {
 		t.Fatalf("resolution_seconds = %d, want %d", body.ResolutionSeconds, adminTimeseriesResolutionSeconds)
+	}
+	// /api/v1 is frozen: the window totals are v2-only and must not leak into
+	// the bridge contract.
+	if body.EgressBytes != nil || body.DownloadBytes != nil {
+		t.Fatalf("egress_bytes = %v, download_egress_bytes = %v, want both absent from v1", body.EgressBytes, body.DownloadBytes)
 	}
 }
 

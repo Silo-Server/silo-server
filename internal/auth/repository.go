@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -32,10 +35,15 @@ func IsDuplicate(err error) bool {
 }
 
 // CheckPassword verifies a plaintext password against the user's bcrypt hash.
-// This is a standalone function, not a repository method.
-func CheckPassword(user *models.User, password string) bool {
-	err := comparePasswordHash([]byte(user.PasswordHash), []byte(password))
-	return err == nil
+// This is a standalone function, not a repository method. The error is
+// passwordhash.ErrBusy when the server was too busy to check: the password
+// is then neither right nor wrong.
+func CheckPassword(ctx context.Context, user *models.User, password string) (bool, error) {
+	err := comparePasswordHash(ctx, []byte(user.PasswordHash), []byte(password))
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return false, err
+	}
+	return err == nil, nil
 }
 
 // UserRepository provides CRUD operations for the users table.
@@ -149,7 +157,7 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), passwordHashCost)
+	hash, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
@@ -174,7 +182,7 @@ func createUser(ctx context.Context, db interface {
 	cols := []string{
 		"email", "username", "password_hash", "local_password_login_enabled", "password_change_required", "role", "permissions",
 		"library_ids", "max_playback_quality", "max_streams", "max_transcodes", "max_remote_stream_bitrate_kbps", "max_local_stream_bitrate_kbps",
-		"transcode_allowed", "audio_transcode_allowed", "download_allowed", "download_transcode_allowed",
+		"transcode_allowed", "audio_transcode_allowed", "max_profiles", "download_allowed", "download_transcode_allowed",
 		"requests_allowed",
 	}
 	args := []any{
@@ -193,16 +201,12 @@ func createUser(ctx context.Context, db interface {
 		input.MaxLocalStreamBitrateKbps,
 		input.TranscodeAllowed,
 		input.AudioTranscodeAllowed,
+		input.MaxProfiles,
 		input.DownloadAllowed,
 		input.DownloadTranscodeAllowed,
 		input.RequestsAllowed,
 	}
 
-	// Optional columns: nil means use DB default.
-	if input.MaxProfiles != nil {
-		cols = append(cols, "max_profiles")
-		args = append(args, *input.MaxProfiles)
-	}
 	accessGroupID := input.AccessGroupID
 	if input.Role == models.RoleAdmin {
 		accessGroupID = nil
@@ -213,9 +217,9 @@ func createUser(ctx context.Context, db interface {
 	}
 
 	// Build placeholders: $1, $2, ..., $N
-	placeholders := make([]string, len(args))
+	placeholders := make([]string, 0, len(args)+1)
 	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
 	}
 	// Admins stay ungrouped: scope/action decisions are role-blind, so the
 	// default group's ceilings would cap the server owner (mirrors the
@@ -344,21 +348,42 @@ func accessGroupSetClause(input models.UpdateUserInput, argIndex int) (setClause
 // It runs in its own transaction, so a promotion and the credential cleanup
 // it implies commit together.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
+	passwordHash, err := hashUpdatePassword(ctx, &input)
+	if err != nil {
+		return err
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := updateUser(ctx, tx, id, input); err != nil {
+	if err := updateUser(ctx, tx, id, input, passwordHash); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
+// hashUpdatePassword hashes the new password an update sets before the
+// caller opens its transaction, so the transaction never waits for a hashing
+// turn while it holds locks; nil when the update sets none.
+func hashUpdatePassword(ctx context.Context, input *models.UpdateUserInput) (*string, error) {
+	if input == nil || input.Password == nil {
+		return nil, nil
+	}
+	hash, err := passwordhash.Generate(ctx, []byte(*input.Password), passwordHashCost)
+	if err != nil {
+		return nil, fmt.Errorf("hashing password: %w", err)
+	}
+	hashed := string(hash)
+	return &hashed, nil
+}
+
+// updateUser writes input's fields. passwordHash is input.Password prepared by
+// hashUpdatePassword before the transaction; input.Password itself is not read.
 func updateUser(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, id int, input models.UpdateUserInput) error {
+}, id int, input models.UpdateUserInput, passwordHash *string) error {
 	currentRole, err := updateCurrentRole(ctx, db, id, input)
 	if err != nil {
 		return err
@@ -374,15 +399,6 @@ func updateUser(ctx context.Context, db interface {
 	if input.Username != nil {
 		normalized := NormalizeUsername(*input.Username)
 		username = &normalized
-	}
-	var passwordHash *string
-	if input.Password != nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), passwordHashCost)
-		if err != nil {
-			return fmt.Errorf("hashing password: %w", err)
-		}
-		hashed := string(hash)
-		passwordHash = &hashed
 	}
 	var permissions []string
 	if input.Permissions != nil {
@@ -418,7 +434,7 @@ func updateUser(ctx context.Context, db interface {
 		{column: "max_local_stream_bitrate_kbps", set: input.MaxLocalStreamBitrateKbps.Set, value: input.MaxLocalStreamBitrateKbps.Value},
 		{column: "transcode_allowed", set: input.TranscodeAllowed.Set, value: input.TranscodeAllowed.Value},
 		{column: "audio_transcode_allowed", set: input.AudioTranscodeAllowed.Set, value: input.AudioTranscodeAllowed.Value},
-		{column: "max_profiles", set: input.MaxProfiles != nil, value: input.MaxProfiles},
+		{column: "max_profiles", set: input.MaxProfiles.Set, value: input.MaxProfiles.Value},
 		{column: "download_allowed", set: input.DownloadAllowed.Set, value: input.DownloadAllowed.Value},
 		{column: "download_transcode_allowed", set: input.DownloadTranscodeAllowed.Set, value: input.DownloadTranscodeAllowed.Value},
 		{column: "requests_allowed", set: input.RequestsAllowed.Set, value: input.RequestsAllowed.Value},
@@ -585,11 +601,30 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 // lift the restriction; they are revoked in the same transaction, keeping
 // only keepSessionID, the session that chose the new password.
 func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
-	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, &keepSessionID)
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE auth_sessions SET revoked_at = NOW()
+			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, keepSessionID); err != nil {
+			return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		}
+		return nil
+	})
 }
 
-func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
+// ReplacePasswordSigningOutOthers is CompareAndSwapPassword that also signs
+// the account out everywhere except keepSessionID, the session that chose
+// the new password, in the same transaction (RevokeOtherSignInsInTransaction).
+// The caller runs the OnUserSessionsRevoked hook after it returns.
+func (r *UserRepository) ReplacePasswordSigningOutOthers(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		return RevokeOtherSignInsInTransaction(ctx, tx, id, keepSessionID)
+	})
+}
+
+// compareAndSwapPassword runs alsoInTx, when set, in the transaction that
+// replaced the hash.
+func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, alsoInTx func(pgx.Tx) error) error {
+	hash, err := passwordhash.Generate(ctx, []byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
@@ -599,6 +634,11 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("begin password update: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	// The account is one of the audit row's accounts; an impersonator is
+	// locked with it in id order rather than after the account's update.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		SET password_hash = $1, password_change_required = false, updated_at = NOW()
@@ -607,16 +647,20 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
-		if keepSessionID != nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE auth_sessions SET revoked_at = NOW()
-				WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, *keepSessionID); err != nil {
-				return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		if alsoInTx != nil {
+			if err := alsoInTx(tx); err != nil {
+				return err
 			}
+		}
+		audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser,
+			strconv.Itoa(id), http.StatusNoContent, auditmutation.SecretChanged(auditmutation.FieldPassword))
+		if err != nil {
+			return err
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit password update: %w", err)
 		}
+		auditmutation.CommitMutation(ctx, audit)
 		return nil
 	}
 

@@ -25,6 +25,20 @@ func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
 }
 
+// TestSQLiteProgressHints runs the version hints sync conformance test against
+// the SQLite backend; the Postgres backend runs it in internal/userstore/pgstore.
+func TestSQLiteProgressHints(t *testing.T) {
+	storetest.RunProgressHints(t, newConformanceStore)
+}
+
+// TestSQLiteUnmarkKeepsHistory runs the mark-unwatched conformance test
+// against the SQLite backend; the Postgres backend runs it in
+// internal/userstore/pgstore.
+func TestSQLiteUnmarkKeepsHistory(t *testing.T) {
+	storetest.RunUnmarkKeepsHistory(t, newConformanceStore)
+	storetest.RunPlayFinishedAfterUnmark(t, newConformanceStore)
+}
+
 // TestSQLiteMarkWatchedBatch runs the batch mark-watched conformance test
 // (series/season mark-watched) against the real SQLite backend. The Postgres
 // backend runs the same suite in internal/userstore/pgstore, which is what
@@ -64,6 +78,8 @@ func TestSQLiteProgressPage(t *testing.T) {
 // text comparison of added_at to the RFC 3339 form AddFavoriteAt writes.
 func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
+	storetest.RunPersonalListMembership(t, newConformanceStore)
+	storetest.RunNotInterested(t, newConformanceStore)
 }
 
 func TestSQLiteHistoryEntryOnce(t *testing.T) {
@@ -96,4 +112,12 @@ func TestSQLiteCollectionSharing(t *testing.T) {
 // in internal/userstore/pgstore.
 func TestSQLiteProfilePINRevision(t *testing.T) {
 	storetest.RunProfilePINRevision(t, newConformanceStore)
+}
+
+func TestSQLiteProfilePINRevisionTransactions(t *testing.T) {
+	storetest.RunProfilePINRevisionTransactions(t, newConformanceStore)
+}
+
+func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
+	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore, false)
 }

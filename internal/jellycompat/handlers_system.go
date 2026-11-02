@@ -2,8 +2,12 @@ package jellycompat
 
 import (
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
 type publicSystemInfoResponse struct {
@@ -27,11 +31,25 @@ type brandingConfigurationResponse struct {
 	SplashscreenEnabled bool   `json:"SplashscreenEnabled"`
 }
 
+// encodingConfigurationResponse is the part of Jellyfin's EncodingOptions that
+// clients read to set up subtitles. Jellyfin Web reads EnableFallbackFont
+// before it starts its ASS/SSA renderer; Silo serves no fallback fonts. The
+// Kodi add-on indexes EnableSubtitleExtraction before offering embedded text
+// subtitles, which Silo extracts and serves as External.
+type encodingConfigurationResponse struct {
+	EnableFallbackFont       bool `json:"EnableFallbackFont"`
+	EnableSubtitleExtraction bool `json:"EnableSubtitleExtraction"`
+}
+
 type endpointInfoResponse struct {
 	IsLocal     bool   `json:"IsLocal"`
 	IsInNetwork bool   `json:"IsInNetwork"`
 	Address     string `json:"Address,omitempty"`
 }
+
+// compatProductName is the product name Jellyfin reports in system info and
+// answers to Ping with.
+const compatProductName = "Jellyfin Server"
 
 // SystemHandler serves Jellyfin setup/system endpoints.
 type SystemHandler struct {
@@ -66,23 +84,41 @@ func (h *SystemHandler) HandleBrandingConfiguration(w http.ResponseWriter, r *ht
 	})
 }
 
-// HandleQuickConnectEnabled serves GET /QuickConnect/Enabled.
-func (h *SystemHandler) HandleQuickConnectEnabled(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, false)
+// HandleNamedConfiguration serves GET /System/Configuration/{key}. Jellyfin Web
+// waits on the "encoding" key before drawing ASS/SSA subtitles and draws nothing
+// if the request fails. Like Jellyfin, keys match case-insensitively and an
+// unknown key is 404.
+func (h *SystemHandler) HandleNamedConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !strings.EqualFold(chi.URLParam(r, "key"), "encoding") {
+		writeError(w, http.StatusNotFound, "NotFound", "Configuration not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, encodingConfigurationResponse{EnableSubtitleExtraction: true})
 }
 
-// HandleEndpoint serves GET /System/Endpoint.
+// HandleEndpoint serves GET /System/Endpoint. Jellyfin Web keys its saved max
+// bitrate by IsInNetwork, so the answer uses the playback location classifier.
 func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
+	inNetwork := !streamlocation.IsRemote(r.Context())
 	writeJSON(w, http.StatusOK, endpointInfoResponse{
-		IsLocal:     true,
-		IsInNetwork: true,
+		IsLocal:     inNetwork,
+		IsInNetwork: inNetwork,
 		Address:     h.cfg().JellyfinCompat.PublicURL,
 	})
 }
 
-// HandlePing serves GET /System/Ping.
-func (h *SystemHandler) HandlePing(w http.ResponseWriter, r *http.Request) {
+// HandleBrandingCSS serves GET /Branding/Css and /Branding/Css.css. Jellyfin
+// returns its admin's custom CSS for Jellyfin Web here. Silo's custom CSS
+// targets its own web client, so this is always empty, as on a stock server.
+func (h *SystemHandler) HandleBrandingCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+}
+
+// HandlePing serves GET and POST /System/Ping, and HEAD for reachability
+// probes. Like Jellyfin, it answers with the product name as a JSON string.
+func (h *SystemHandler) HandlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, compatProductName)
 }
 
 func (h *SystemHandler) systemInfo() publicSystemInfoResponse {
@@ -90,7 +126,7 @@ func (h *SystemHandler) systemInfo() publicSystemInfoResponse {
 		LocalAddress:           h.cfg().JellyfinCompat.PublicURL,
 		ServerName:             h.cfg().JellyfinCompat.ServerName,
 		Version:                h.cfg().JellyfinCompat.EmulatedServerVersion,
-		ProductName:            "Jellyfin Server",
+		ProductName:            compatProductName,
 		ID:                     h.cfg().JellyfinCompat.ServerID,
 		StartupWizardCompleted: true,
 	}

@@ -149,17 +149,6 @@ export const coreDryRunWithHeroes = result({
   ],
 });
 
-/** A dry run after the Core pack was added to Movies: every eligible list is there. */
-export const coreDryRunAllThere = result({
-  skipped: [
-    { ...entry("tmdb_trending_movies_week", 1, "already_exists"), collection_id: "c1" },
-    { ...entry("tmdb_popular_movies", 1, "already_exists"), collection_id: "c2" },
-    { ...entry("tmdb_top_rated_movies", 1, "already_exists"), collection_id: "c9" },
-    entry("tmdb_trending_tv_week", 1, "ineligible_library"),
-    entry("tmdb_popular_tv", 1, "ineligible_library"),
-  ],
-});
-
 /** The finished apply job for the Core pack on Movies and TV Shows. */
 export const coreApplied = result({
   dry_run: false,

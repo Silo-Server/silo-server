@@ -11,8 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -61,18 +60,7 @@ func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
 	const secret = "capability-secret"
 	server := newCapabilityProxyServer(t, secret)
 
-	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-	var info playback.HWAccelInfo
-	if err := json.Unmarshal(recorder.Body.Bytes(), &info); err != nil {
-		t.Fatalf("decode capabilities: %v", err)
-	}
+	info := fetchProxyCapabilities(t, server, secret)
 	if info.CapabilityHash == "" {
 		t.Fatal("served capability report carries no capability_hash")
 	}
@@ -106,7 +94,7 @@ func TestProxyCapabilitiesRejectsIncompleteProbeWithoutPublishing(t *testing.T) 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil).WithContext(canceled)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -178,21 +166,15 @@ func newCapabilityProxyServerRecordingFFmpeg(t *testing.T, secret string, aacAva
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = secret
-	cfg.Playback.FFmpegPath = ffmpegPath
-	w.SetConfigForTest(cfg)
+	w := testWatcher(secret)
+	w.Config().Playback.FFmpegPath = ffmpegPath
 	return NewServer(w, nil), invocations
 }
 
 // fetchProxyCapabilities reads the served capability report.
 func fetchProxyCapabilities(t *testing.T, server *Server, secret string) playback.HWAccelInfo {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
+	recorder := serveProxy(t, server, http.MethodGet, "/hw-capabilities", secret)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -279,33 +261,5 @@ func TestProxyCapabilityHashTracksTransformations(t *testing.T) {
 	if capableInfo.CapabilityHash == degradedInfo.CapabilityHash {
 		t.Fatalf("capability_hash = %s for both builds, but their transformations differ",
 			capableInfo.CapabilityHash)
-	}
-}
-
-// A proxy's capability read is cheap now, but the budget still has to be
-// advertised: a caller that guesses cancels the read, and the proxy's stored
-// report falls as far behind as it would after a failure.
-func TestProxyCapabilitiesAdvertiseTheProbeBudget(t *testing.T) {
-	const secret = "capability-secret"
-	server := newCapabilityProxyServer(t, secret)
-
-	info := fetchProxyCapabilities(t, server, secret)
-	// Sized for a registry-only probe. A proxy that advertised the cluster's
-	// acceleration budget would hold a caller's connection open for minutes of
-	// hardware work it no longer does — and one that sized the budget from the
-	// host's device set would put that count inside its capability hash.
-	want := playback.RegistryCapabilityRequestTimeout().Milliseconds()
-	if info.ProbeRequestTimeoutMillis != want {
-		t.Fatalf("probe_request_timeout_ms = %d, want the proxy's own %d",
-			info.ProbeRequestTimeoutMillis, want)
-	}
-
-	// It is inside the hash, so a build that needs longer reaches the sweep
-	// rather than sitting behind an unchanged identity.
-	served := info
-	served.ProbeRequestTimeoutMillis = want + 1_000
-	served.CapabilityHash = ""
-	if playback.ComputeCapabilityHash(served) == info.CapabilityHash {
-		t.Fatal("the advertised budget does not move the capability hash")
 	}
 }

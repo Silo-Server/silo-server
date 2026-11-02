@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,7 +18,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
+
+const setupMediaTypeJSON = "application/json"
 
 // AuthHandler handles authentication-related HTTP endpoints.
 type AuthHandler struct {
@@ -32,7 +36,7 @@ type AuthHandler struct {
 
 type accountPasswordService interface {
 	PasswordChangeAvailable(ctx context.Context, userID int) (bool, error)
-	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -185,8 +189,7 @@ type authProviderResponse struct {
 // HandleLogin handles POST /auth/login.
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
@@ -229,11 +232,17 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 	}
 	pair, user, err := h.service.LoginWithProvider(ctx, in.Provider, in.Username, in.Password, in.DeviceName, in.IP)
 	if err != nil {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			return TokenPairView{}, signInThrottledError(throttled)
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
 		}
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
@@ -276,6 +285,9 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		case errors.Is(err, auth.ErrUserDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
 		}
@@ -287,6 +299,15 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		ExpiresIn:    pair.ExpiresIn,
 		User:         buildUserResponse(pair.User, effectiveAccountPolicy(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
+}
+
+// signInThrottledError is the 429 for a name that has used its sign-in
+// attempt budget: rate_limited on v1, as for a locked profile PIN, and the
+// rate_limited problem on v2. Both send Retry-After.
+func signInThrottledError(err *auth.SignInThrottledError) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many failed sign-ins for this name. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(err.RetryAfter)
+	return e
 }
 
 // externalSignInError maps the refusals of the local-password policy and of
@@ -370,9 +391,16 @@ func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) 
 
 // HandleSetup handles POST /auth/setup.
 func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
+	// A browser cannot send JSON cross-origin without a CORS preflight.
+	// Do not decode safelisted form or text bodies as setup credentials.
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != setupMediaTypeJSON {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Initial setup requires application/json")
+		return
+	}
+
 	var req setupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
@@ -427,8 +455,7 @@ func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Requ
 // HandleRefresh handles POST /auth/refresh.
 func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
@@ -453,7 +480,7 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 	}
 
 	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
+	token, err := h.PluginLaunchToken(r.Context(), claims, apimw.GetProfileID(r.Context()))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -582,8 +609,7 @@ func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request)
 // HandleSignup handles POST /auth/signup.
 func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	var req signupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 

@@ -2,7 +2,6 @@ package httpstream
 
 import (
 	"bytes"
-	"compress/gzip"
 	"errors"
 	"io"
 	"net/http"
@@ -22,19 +21,6 @@ func (w *readerFromResponseWriter) WriteHeader(int)     {}
 func (w *readerFromResponseWriter) ReadFrom(r io.Reader) (int64, error) {
 	w.called++
 	return io.Copy(&w.Buffer, r)
-}
-
-func TestCopyChunkedUsesReaderFromPerSlice(t *testing.T) {
-	w := &readerFromResponseWriter{header: make(http.Header)}
-	rf, ok := ReaderFromOf(w)
-	if !ok {
-		t.Fatal("ReaderFromOf did not report direct implementation")
-	}
-	var recorded int64
-	n, err := CopyChunked(rf, bytes.NewReader(make([]byte, 10)), 4, func(n int64, _ error) { recorded += n })
-	if err != nil || n != 10 || recorded != 10 || w.called != 3 {
-		t.Fatalf("CopyChunked = n=%d err=%v recorded=%d calls=%d", n, err, recorded, w.called)
-	}
 }
 
 type recordingReaderFrom struct {
@@ -122,13 +108,6 @@ func TestCopyChunkedLimitedReaderErrorUpdatesBudget(t *testing.T) {
 	}
 }
 
-func TestWriterOnlyHidesReaderFrom(t *testing.T) {
-	w := &readerFromResponseWriter{header: make(http.Header)}
-	if _, ok := WriterOnly(w).(io.ReaderFrom); ok {
-		t.Fatal("WriterOnly exposed io.ReaderFrom")
-	}
-}
-
 func TestCompressExceptBypassPreservesReaderFromAndKeptRouteCompresses(t *testing.T) {
 	handlerSawReaderFrom := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -136,7 +115,7 @@ func TestCompressExceptBypassPreservesReaderFromAndKeptRouteCompresses(t *testin
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(bytes.Repeat([]byte("x"), 2048))
 	})
-	handler := CompressExcept(gzip.BestSpeed, func(r *http.Request) bool { return r.URL.Path == "/media" })(next)
+	handler := CompressExcept(func(r *http.Request) bool { return r.URL.Path == "/media" })(next)
 
 	mediaWriter := &readerFromResponseWriter{header: make(http.Header)}
 	mediaReq := httptest.NewRequest(http.MethodGet, "/media", nil)

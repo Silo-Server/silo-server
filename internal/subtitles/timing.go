@@ -186,9 +186,8 @@ func retimeCueRange(t Timing, start, end, unit time.Duration) (time.Duration, ti
 // writeTimingLine writes line with only its start and end timestamp tokens
 // replaced, preserving surrounding whitespace, the arrow, and cue settings.
 func writeTimingLine(out *bytes.Buffer, line rawLine, start, end string) {
-	text := line.text
-	arrow := bytes.Index(text, []byte("-->"))
-	left := text[:arrow]
+	// Callers pass the cue line that holds the arrow.
+	left, right, _ := bytes.Cut(line.text, []byte("-->"))
 	s0 := len(left) - len(bytes.TrimLeftFunc(left, unicode.IsSpace))
 	s1 := len(bytes.TrimRightFunc(left, unicode.IsSpace))
 	out.Write(left[:s0])
@@ -196,7 +195,6 @@ func writeTimingLine(out *bytes.Buffer, line rawLine, start, end string) {
 	out.Write(left[s1:])
 	out.WriteString("-->")
 
-	right := text[arrow+3:]
 	e0 := len(right) - len(bytes.TrimLeftFunc(right, unicode.IsSpace))
 	e1 := len(right)
 	if sp := bytes.IndexAny(right[e0:], " \t"); sp >= 0 {
@@ -344,6 +342,11 @@ func assEventBody(line []byte) (body []byte, displayed, ok bool) {
 // comma-terminated fields of body and the offset just past the n-th comma, or
 // nil when body has fewer than n commas. Later commas (in Text) are not split.
 func assFieldSpans(body []byte, n int) ([][2]int, int) {
+	// n comes from the file's Format line; check the line has enough commas
+	// before allocating so a huge Format cannot cost an n-sized slice per event.
+	if bytes.Count(body, []byte{','}) < n {
+		return nil, 0
+	}
 	spans := make([][2]int, 0, n)
 	pos := 0
 	for len(spans) < n {

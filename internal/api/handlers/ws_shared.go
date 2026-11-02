@@ -16,10 +16,24 @@ const (
 	wsPingInterval = 20 * time.Second
 	wsPongTimeout  = 10 * time.Second
 	wsWriteTimeout = 5 * time.Second
+
+	// wsMaxClientMessageBytes bounds one inbound message on every socket that
+	// configureWebSocket sets up. Clients send only small JSON control frames
+	// (playback hello/ack/result, watch-together reports, events subscribe),
+	// each a few hundred bytes; the limit stops a client from making the
+	// server buffer an arbitrarily large message before it is parsed. Gorilla
+	// counts every fragment of a message, and an oversize message fails the
+	// read and closes the connection with 1009 (message too big).
+	wsMaxClientMessageBytes = 64 * 1024
 )
 
+// Every upgrader negotiates permessage-deflate when the client offers it, as
+// browsers and OkHttp do. Gorilla supports only no context takeover, so each
+// message is compressed on its own at gorilla's default level 1. Each socket
+// reads through wsconn, which bounds a message's size after decompression.
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: checkWebSocketOrigin,
+	CheckOrigin:       checkWebSocketOrigin,
+	EnableCompression: true,
 }
 
 // wsOverlayOrigins feeds the shared v1 upgrader the overlay origins connected
@@ -71,6 +85,7 @@ func configureWebSocket(conn *websocket.Conn) {
 		return
 	}
 
+	conn.SetReadLimit(wsMaxClientMessageBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))

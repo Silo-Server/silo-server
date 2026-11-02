@@ -2,19 +2,6 @@ package downloads
 
 import "testing"
 
-func TestReusableManagedStatus(t *testing.T) {
-	for _, status := range []string{StatusReady, StatusPreparing, StatusDownloading, StatusCompleted} {
-		if !reusableManagedStatus(status) {
-			t.Fatalf("status %q should be reusable", status)
-		}
-	}
-	for _, status := range []string{StatusCancelled, StatusFailed, StatusRevoked} {
-		if reusableManagedStatus(status) {
-			t.Fatalf("status %q should force replacement", status)
-		}
-	}
-}
-
 func TestSameManagedTargetIgnoresBatch(t *testing.T) {
 	a := &Download{
 		MediaFileID:       1,

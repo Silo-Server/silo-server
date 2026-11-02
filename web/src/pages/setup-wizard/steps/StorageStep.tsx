@@ -341,7 +341,7 @@ export function StorageStep() {
       busy={busy}
       disabled={holdSubmit}
       onSkip={skip}
-      footnote="Storage, Redis, and database settings are in Admin › Settings › Storage & Database."
+      footnote="Storage settings are in Admin › Server › Storage; Redis and database settings are in Admin › Server › General."
     >
       {locationStatusUnavailable ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
@@ -369,7 +369,7 @@ export function StorageStep() {
             locationStatusUnavailable
               ? "Storage lock status is unavailable. Reload before changing the backend."
               : artworkLocked
-                ? "Locked: files have already been stored on this backend. Change it from Admin › Settings › Storage & Database, which moves them."
+                ? "Locked: files have already been stored on this backend. Change it from Admin › Server › Storage, which moves them."
                 : "Where Silo keeps artwork, subtitles, and other library assets."
           }
           onChange={(value) => {
@@ -391,7 +391,7 @@ export function StorageStep() {
         />
         <SettingFieldRow
           label="Keep provider artwork"
-          description="Copies posters and backdrops into your artwork storage."
+          description="Copies posters and backdrops into your artwork storage, including artwork stored next to your media. When off, clients load artwork straight from the providers."
         >
           <Switch
             checked={form.getValue("metadata.cache_images") !== "false"}
@@ -463,8 +463,8 @@ export function StorageStep() {
             locationStatusUnavailable={locationStatusUnavailable}
             lockedDescription={
               usesS3
-                ? "Locked: files are stored here. Change it from Admin › Settings › Storage & Database, which moves them."
-                : "Locked: files are stored on local disk, and adding a public bucket would switch Automatic storage to S3. Change it from Admin › Settings › Storage & Database, which moves them."
+                ? "Locked: files are stored here. Change it from Admin › Server › Storage, which moves them."
+                : "Locked: files are stored on local disk, and adding a public bucket would switch Automatic storage to S3. Change it from Admin › Server › Storage, which moves them."
             }
           />
         </Backend>
@@ -482,7 +482,7 @@ export function StorageStep() {
             disabled={busy}
             locationLocked={locationStatusUnavailable || privateLocked}
             locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription="Locked: Silo records a configured private bucket at startup, even when empty. Stored library assets also lock this location. Change it from Admin › Settings › Storage & Database."
+            lockedDescription="Locked: Silo records a configured private bucket at startup, even when empty. Stored library assets also lock this location. Change it from Admin › Server › Storage."
           />
         </Backend>
       </StepSection>

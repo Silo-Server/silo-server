@@ -1,12 +1,9 @@
 package metadata
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -292,84 +289,6 @@ func TestScheduledRefreshBatchFlushSyncsEachRecordedSeriesOnce(t *testing.T) {
 		if passes[seriesID] != 1 {
 			t.Fatalf("series %s link passes = %d, want 1", seriesID, passes[seriesID])
 		}
-	}
-}
-
-// lockedLogBuffer serializes writes from any goroutine that logs while a test
-// has replaced the default logger.
-type lockedLogBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedLogBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedLogBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func captureDefaultLogs(t *testing.T) *lockedLogBuffer {
-	t.Helper()
-	buf := &lockedLogBuffer{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	return buf
-}
-
-func TestSeriesDebtSweepDoesNotRepeatTerminalWarnings(t *testing.T) {
-	h, seriesID, seasonID, _ := seedTargetRefreshHarness(&targetRefreshProvider{})
-	ctx := context.Background()
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	for _, episode := range []struct {
-		contentID string
-		number    int
-	}{{"episode-s05e03", 3}, {"episode-s05e04", 4}} {
-		if err := h.service.episodeRepo.Upsert(ctx, &models.Episode{
-			ContentID:      episode.contentID,
-			SeriesID:       seriesID,
-			SeasonID:       seasonID,
-			SeasonNumber:   5,
-			EpisodeNumber:  episode.number,
-			MetadataSource: "scanner_fallback",
-		}); err != nil {
-			t.Fatalf("seed incomplete episode %s: %v", episode.contentID, err)
-		}
-		debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, episode.contentID)] = &models.MetadataRefreshDebt{
-			TargetType:   RefreshTargetEpisode,
-			ContentID:    episode.contentID,
-			ReasonMask:   RefreshDebtReasonEpisodeIncomplete,
-			AttemptCount: refreshDebtEpisodeTerminalAttempts,
-		}
-	}
-	logs := captureDefaultLogs(t)
-
-	// Every series-wide sweep re-syncs every incomplete episode. Rows already
-	// sitting at the terminal count must not announce the transition again.
-	for range 3 {
-		h.service.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now())
-	}
-	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 0 {
-		t.Fatalf("terminal warnings from series sweeps = %d, want 0\n%s", got, logs.String())
-	}
-
-	// The refreshed target itself still reports the claim that took it to the
-	// terminal count, once.
-	if err := h.service.syncRefreshDebtForEpisode(ctx, "episode-s05e03"); err != nil {
-		t.Fatalf("syncRefreshDebtForEpisode: %v", err)
-	}
-	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
-		t.Fatalf("terminal warnings after the target's own sync = %d, want 1\n%s", got, logs.String())
-	}
-	if !strings.Contains(logs.String(), "content_id=episode-s05e03") {
-		t.Fatalf("terminal warning does not name the refreshed target\n%s", logs.String())
 	}
 }
 

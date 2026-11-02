@@ -5,7 +5,7 @@ import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getLanguageName } from "@/player/utils/languageNames";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
 import DetailPopover from "./DetailPopover";
@@ -119,7 +119,7 @@ function AudioTracksPopover({
           />
         )}
         {tracks.map((track, index) => {
-          const codec = track.codec ? mapAudioLabel(track.codec) : "";
+          const codec = audioTrackLabel(track);
           const channels = formatChannels(track.channels);
           const language = getLanguageName(track.language ?? "");
           const fallbackTitle = audioTitle(track);

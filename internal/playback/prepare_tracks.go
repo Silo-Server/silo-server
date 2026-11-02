@@ -24,6 +24,10 @@ const (
 	audioCodecMP3       = "mp3"
 	audioCodecAC3       = "ac3"
 	audioCodecEAC3      = "eac3"
+	audioCodecTrueHD    = "truehd"
+	audioCodecFLAC      = "flac"
+	audioCodecALAC      = "alac"
+	audioCodecDTS       = "dts"
 	subtitleCodecTextV3 = "text"
 )
 
@@ -70,13 +74,15 @@ func PreparedTracksAvailable(file *models.MediaFile) bool {
 }
 
 // PlanPreparedTracks derives the stream layout of a prepared download from the
-// probed source. Every audio track is kept in source order. With a "copy"
+// probed source. Every audio track FFmpeg can decode (AudioTrackDecodable) is
+// kept in source order; any other track would fail the whole encode, so it is
+// left out and later tracks move up one output position. With a "copy"
 // audio target a track is copied when the MP4 muxer accepts its codec and it
 // either shares the primary track's codec (which client negotiation verified)
 // or is universally decodable, otherwise it is encoded to AAC; an "aac" target
 // encodes every track. audioTrackIndex
-// marks the default track, falling back to the source default and then the
-// first track. Embedded plain-text subtitles become mov_text. ASS/SSA keep
+// marks the default track, falling back to SelectAudioTrack's file default.
+// Embedded plain-text subtitles become mov_text. ASS/SSA keep
 // their styling, typesetting, and overlapping events only as sidecars, and
 // bitmap subtitles cannot be stored in MP4, so both are left to sidecar
 // delivery (PreparedSubtitleSidecarFormat).
@@ -90,8 +96,11 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 	if primaryCodec == "" && len(file.AudioTracks) > 0 {
 		primaryCodec = normalizeCodecV3(file.AudioTracks[0].Codec)
 	}
-	defaultIndex := preparedDefaultAudioIndex(file.AudioTracks, audioTrackIndex)
+	defaultIndex := preparedDefaultAudioIndex(file, audioTrackIndex)
 	for i, track := range file.AudioTracks {
+		if !AudioTrackDecodable(file.AudioTracks, i, file.CodecAudio) {
+			continue
+		}
 		codec := PreparedAudioAAC
 		if copyAudio && preparedAudioCopyable(track.Codec, primaryCodec) {
 			codec = PreparedAudioCopy
@@ -110,7 +119,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 		})
 	}
 	for i, track := range file.SubtitleTracks {
-		if track.External || !PreparedSubtitleEmbeddable(track.Codec) {
+		// The prepared encode maps each track from the source, which FFmpeg
+		// can't demux for an index-only track.
+		if track.External || track.IndexOnly || !PreparedSubtitleEmbeddable(track.Codec) {
 			continue
 		}
 		plan.Subtitles = append(plan.Subtitles, PreparedSubtitleTrack{
@@ -134,16 +145,11 @@ func (p *PreparedTracks) allAudioCopied() bool {
 	return true
 }
 
-func preparedDefaultAudioIndex(tracks []models.AudioTrack, requested int) int {
-	if requested >= 0 && requested < len(tracks) {
+func preparedDefaultAudioIndex(file *models.MediaFile, requested int) int {
+	if requested >= 0 && requested < len(file.AudioTracks) && AudioTrackDecodable(file.AudioTracks, requested, file.CodecAudio) {
 		return requested
 	}
-	for i, track := range tracks {
-		if track.Default {
-			return i
-		}
-	}
-	return 0
+	return SelectAudioTrack(file.AudioTracks, "", nil)
 }
 
 // preparedMP4AudioCodecs lists audio codecs FFmpeg's MP4 muxer stores without

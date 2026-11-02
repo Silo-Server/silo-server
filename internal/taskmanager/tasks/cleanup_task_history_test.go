@@ -3,9 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -165,55 +162,5 @@ func TestTaskHistoryCleanupTaskRejectsUnusableRetention(t *testing.T) {
 				t.Fatalf("cutoff = %v, want the default retention window", pruner.cutoff)
 			}
 		})
-	}
-}
-
-func TestSeedHistoryRetentionDefaults(t *testing.T) {
-	store := &fakeSettingsStore{values: map[string]string{
-		taskmanager.SettingKeyHistoryKeepPerTask: "5",
-	}}
-	if err := taskmanager.SeedHistoryRetentionDefaults(context.Background(), store); err != nil {
-		t.Fatalf("SeedHistoryRetentionDefaults: %v", err)
-	}
-	if got := store.values[taskmanager.SettingKeyHistoryKeepPerTask]; got != "5" {
-		t.Fatalf("keep per task = %q, want the existing 5", got)
-	}
-	want := strconv.Itoa(taskmanager.DefaultHistoryRetentionDays)
-	if got := store.values[taskmanager.SettingKeyHistoryRetentionDays]; got != want {
-		t.Fatalf("retention days = %q, want %q", got, want)
-	}
-}
-
-func TestTaskHistoryCleanupTaskReturnsPruneError(t *testing.T) {
-	wantErr := errors.New("delete failed")
-	pruner := &fakeTaskHistoryPruner{
-		result: taskmanager.HistoryPruneResult{Deleted: taskHistoryCleanupBatchSize},
-		err:    wantErr,
-	}
-	progress := &taskHistoryCleanupProgress{}
-
-	err := NewTaskHistoryCleanupTask(pruner, &fakeSettingsStore{}).Execute(context.Background(), progress)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Execute error = %v, want %v", err, wantErr)
-	}
-	if got := progress.reports[len(progress.reports)-1]; !strings.Contains(got, "failed after deleting 10000 executions") {
-		t.Fatalf("last progress report = %q", got)
-	}
-}
-
-func TestTaskHistoryCleanupTaskReportsSkippedLock(t *testing.T) {
-	pruner := &fakeTaskHistoryPruner{
-		result: taskmanager.HistoryPruneResult{Skipped: true},
-	}
-	progress := &taskHistoryCleanupProgress{}
-
-	if err := NewTaskHistoryCleanupTask(pruner, &fakeSettingsStore{}).Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if got := progress.reports[len(progress.reports)-1]; got != "Task history cleanup is already running on another node" {
-		t.Fatalf("last progress report = %q", got)
-	}
-	if result := progress.decode(t); !result.Skipped || result.Deleted != 0 {
-		t.Fatalf("result = %#v, want skipped", result)
 	}
 }

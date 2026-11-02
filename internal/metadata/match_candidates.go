@@ -27,7 +27,7 @@ type MatchCandidate struct {
 	Title           string            `json:"title"`
 	OriginalTitle   string            `json:"original_title,omitempty"`
 	TitleAliases    []TitleAlias      `json:"aliases,omitempty"`
-	TitleLanguage   string            `json:"title_language,omitempty"`
+	TitleLanguage   string            `json:"title_language,omitempty" doc:"Language of the title as the provider reports it, usually ISO 639-1"`
 	TitleIsFallback bool              `json:"title_is_fallback,omitempty"`
 	MatchedTitle    string            `json:"matched_title,omitempty"`
 	MatchScore      float64           `json:"match_score,omitempty"`
@@ -35,7 +35,7 @@ type MatchCandidate struct {
 	Year            int               `json:"year"`
 	ContentType     string            `json:"content_type"`
 	ProviderIDs     map[string]string `json:"provider_ids"`
-	ImageURL        string            `json:"image_url,omitempty"`
+	ImageURL        string            `json:"image_url,omitempty" doc:"Image for the candidate as the metadata plugin returned it; not validated as a URI"`
 	Overview        string            `json:"overview,omitempty"`
 	Sources         []string          `json:"sources"`
 	AgreementHints  []string          `json:"agreement_hints"`
@@ -137,7 +137,7 @@ func sanitizeProviderIDValue(key, value string) (string, bool) {
 		}
 	case "imdb":
 		value = strings.ToLower(value)
-		if !isValidIMDbProviderID(value) {
+		if !providerid.IsIMDbID(value) {
 			return "", false
 		}
 	}
@@ -153,15 +153,6 @@ func sanitizedMatchHintProviderIDs(hints *MatchHints) *MatchHints {
 	sanitized.TvdbID, _ = sanitizeProviderIDValue("tvdb", hints.TvdbID)
 	sanitized.ImdbID, _ = sanitizeProviderIDValue("imdb", hints.ImdbID)
 	return &sanitized
-}
-
-func isValidIMDbProviderID(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if !strings.HasPrefix(value, "tt") {
-		return false
-	}
-	digits := strings.TrimPrefix(value, "tt")
-	return len(digits) >= 7 && len(digits) <= 10 && providerid.IsPositiveDecimal(digits)
 }
 
 const (

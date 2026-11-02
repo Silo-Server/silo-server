@@ -2,7 +2,6 @@ package userdb
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -35,14 +34,7 @@ CREATE TABLE user_setting_values (
 );`
 
 func TestMigrateToV18AddsClientFamilyAndSeedsShortcuts(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("initial InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	// Replace only the canonical values table with its released v17 shape. On a
 	// real open, InitSchema sees exactly this table before runMigrations.

@@ -22,6 +22,13 @@ func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID 
 	if err != nil {
 		return nil, err
 	}
+	if after == nil && deviceID != "" {
+		// A registry read is the device syncing: it is how a revoked copy
+		// reaches the device, and what makes "last seen" mean something.
+		if err := s.repo.TouchDeviceSeen(ctx, userID, profileID, deviceID); err != nil {
+			slog.WarnContext(ctx, "recording device sync failed", "component", "downloads", "error", err)
+		}
+	}
 	if err := s.repo.attachPreparations(ctx, rows); err != nil {
 		// Progress is decoration; the registry is still correct without it.
 		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "error", err)

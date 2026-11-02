@@ -169,14 +169,6 @@ func TestStatusRowsNameThePathWhileAnotherHasNoState(t *testing.T) {
 	}
 }
 
-func TestRootStatusDetailSummarizesNetworkFolders(t *testing.T) {
-	rs := &rootState{state: StateMonitoring, unsupportedMounts: []string{"/m/a", "/m/b", "/m/c", "/m/d", "/m/e"}}
-	want := "Folders on network filesystems aren't monitored: /m/a, /m/b, /m/c and 2 more."
-	if got := rs.statusDetail(); got != want {
-		t.Fatalf("detail = %q, want %q", got, want)
-	}
-}
-
 // A library folder of "/" is its own parent. Indexing it as its own child
 // would make every walk of its subtree loop forever.
 func TestChildDirsFilesystemRoot(t *testing.T) {

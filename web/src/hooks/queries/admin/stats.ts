@@ -10,7 +10,7 @@ import type { AdminStats } from "@/api/types";
 import { adminKeys } from "../keys";
 
 import { listAdminPlaybackSessions } from "@/api/v2/adminSessions";
-import { captureAdminUserAuthority } from "@/api/v2/adminUsers";
+import { captureAdminAuthority } from "@/api/v2/adminAuthority";
 
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
 
@@ -54,7 +54,7 @@ export function useAdminSessions() {
   const context = captureProfileRequestContext();
   return useQuery({
     queryKey: adminSessionsKey(context),
-    queryFn: () => listAdminPlaybackSessions(context ?? captureAdminUserAuthority()),
+    queryFn: () => listAdminPlaybackSessions(context ?? captureAdminAuthority()),
     enabled: context !== null,
     staleTime: ADMIN_STALE_TIME,
   });

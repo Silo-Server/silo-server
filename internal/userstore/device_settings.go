@@ -17,8 +17,10 @@ type DevicePosition struct {
 type DevicePageOptions struct {
 	// Empty ProfileID selects the household; the application must authorize it.
 	ProfileID string
-	Limit     int
-	After     *DevicePosition
+	// DeviceID, when set, narrows the page to that device's rows.
+	DeviceID string
+	Limit    int
+	After    *DevicePosition
 }
 
 func (o DevicePageOptions) Validate() error {
@@ -33,6 +35,9 @@ func (o DevicePageOptions) Validate() error {
 
 type DeviceSettingsEntry struct {
 	DeviceEntry
+	// CustomName is the name the profile chose for the device; empty when it
+	// chose none. DeviceName stays the name the client reports.
+	CustomName   string
 	ProfileName  string
 	ChangedCount int
 }
@@ -43,4 +48,9 @@ type DeviceSettingsEntry struct {
 type DeviceSettingsStore interface {
 	ListDeviceSettingsPage(context.Context, DevicePageOptions) ([]DeviceSettingsEntry, error)
 	RemoveDeviceSettings(context.Context, string, string, bool) ([]string, error)
+	// RenameDevice sets the custom name of one profile's registry row for a
+	// device; an empty name clears it. It returns ErrDeviceNotFound when the
+	// profile has no registry row for the device. Registration never writes
+	// the custom name, so it survives the device being seen again.
+	RenameDevice(ctx context.Context, profileID, deviceID, name string) error
 }

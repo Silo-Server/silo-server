@@ -9,8 +9,8 @@ import (
 
 // hardwareAttempts is the attempt plan of a tail pass on accel: hardware
 // first and software after a hardware failure when accel decodes in
-// hardware, and one software attempt otherwise. Like every analysis run,
-// neither has a timeout of its own.
+// hardware, and one software attempt otherwise. runAnalysis gives each its
+// deadline.
 func hardwareAttempts(accel string) []mediasample.Attempt {
 	if !mediasample.SupportsHardwareDecode(accel) {
 		return nil

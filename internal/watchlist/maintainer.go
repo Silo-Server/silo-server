@@ -29,8 +29,7 @@ type listEventDispatcher interface {
 // maintainerStore is the narrow slice of the user store the maintainer needs.
 type maintainerStore interface {
 	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
-	InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
-	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 }
 
 // Maintainer removes a fully-watched movie from a profile's watchlist when its
@@ -113,14 +112,8 @@ func (m *Maintainer) process(ctx context.Context, userID int, profileID string, 
 }
 
 func (m *Maintainer) removeFromWatchlist(ctx context.Context, store maintainerStore, userID int, profileID string, item *models.MediaItem) error {
-	in, err := store.InWatchlist(ctx, profileID, item.ContentID)
-	if err != nil {
-		return err
-	}
-	if !in {
-		return nil
-	}
-	if err := store.RemoveFromWatchlist(ctx, profileID, item.ContentID); err != nil {
+	removed, err := store.RemoveFromWatchlist(ctx, profileID, item.ContentID)
+	if err != nil || !removed {
 		return err
 	}
 	m.dispatchRemoval(ctx, userID, profileID, item)

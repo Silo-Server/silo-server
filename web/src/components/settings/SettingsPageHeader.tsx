@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/page/PageHeader";
+import { SettingsPageDescriptionContext } from "@/components/settings/settingsPageDescription";
 import "@/styles/admin-settings.css";
 
 export interface SettingsPageHeaderProps {
@@ -10,15 +11,10 @@ export interface SettingsPageHeaderProps {
   className?: string;
 }
 
-/**
- * The heading every admin settings page opens with: the page's name and
- * nothing else.
- */
+/** The heading every admin settings page opens with: the shared `PageHeader`. */
 export function SettingsPageHeader({ title, actions, className }: SettingsPageHeaderProps) {
+  const description = useContext(SettingsPageDescriptionContext);
   return (
-    <header className={cn("flex min-w-0 flex-wrap items-start justify-between gap-3", className)}>
-      <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.03em]">{title}</h1>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-    </header>
+    <PageHeader title={title} subtitle={description} actions={actions} className={className} />
   );
 }

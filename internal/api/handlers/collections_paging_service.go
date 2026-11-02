@@ -26,7 +26,8 @@ type LibraryCollectionPageView struct {
 }
 
 func collectionPageError(err error) error {
-	if errors.Is(err, userstore.ErrCollectionChanged) {
+	// A query cursor issued under an older sort order needs the same restart.
+	if errors.Is(err, userstore.ErrCollectionChanged) || errors.Is(err, catalog.ErrCatalogCursorChanged) {
 		return apiError(http.StatusConflict, "collection_changed", "The collection changed; restart from the first page")
 	}
 	if errors.Is(err, userstore.ErrCollectionNotFound) || errors.Is(err, catalog.ErrLibraryCollectionNotFound) {

@@ -1,55 +1,59 @@
 /**
- * The autoscan panel's URL contract, in one place so the page and the legacy
- * `/admin/autoscan` redirect cannot drift apart about which values mean what.
- */
-
-export const AUTOSCAN_TABS = ["sources", "activity"] as const;
-export type AutoscanTab = (typeof AUTOSCAN_TABS)[number];
-
-/**
- * Connections and settings used to be peer tabs, which read as "set these up
- * first" — most operators never needed either. They now live in an Advanced
- * section on the Sources view, so their old deep links land on Sources with
- * that section already open rather than 404-ing into a missing tab.
- */
-const LEGACY_ADVANCED_TABS = new Set(["connections", "settings"]);
-
-export function normalizeTab(value: string | null): AutoscanTab {
-  return AUTOSCAN_TABS.includes(value as AutoscanTab) ? (value as AutoscanTab) : "sources";
-}
-
-export function isLegacyAdvancedTab(value: string | null): boolean {
-  return value !== null && LEGACY_ADVANCED_TABS.has(value);
-}
-
-/** Every value the panel still reacts to, current or legacy. */
-function isKnownAutoscanView(value: string): boolean {
-  return AUTOSCAN_TABS.includes(value as AutoscanTab) || LEGACY_ADVANCED_TABS.has(value);
-}
-
-/**
- * Where `/admin/autoscan` sends an old link. Autoscan is a tab on Libraries
- * now, so `tab` names that tab and the panel's own Sources/Activity selection
- * moves to `view`. A bookmarked `?tab=activity` therefore has to be translated
- * rather than dropped, or every old deep link silently lands on Sources.
+ * Where Autoscan's pages live, and where links from its earlier layouts land,
+ * in one place so the pages and the redirects cannot drift apart.
  *
- * "sources" stays implicit — it is what an absent `view` already means, and the
- * panel drops the param when you select it.
+ * Autoscan is its own sidebar topic: Activity, Sources, and Settings are
+ * separate pages. Before that it was a tab on Libraries
+ * (`/admin/libraries?tab=autoscan&view=…`), and before that one page with
+ * `?tab=` selecting Sources, Activity, Connections, or Settings.
  */
-export function buildLegacyAutoscanRedirectTarget(search: string): string {
-  const legacy = new URLSearchParams(search);
-  const legacyView = legacy.get("tab") ?? legacy.get("view");
-  legacy.delete("tab");
-  legacy.delete("view");
 
-  const target = new URLSearchParams({ tab: "autoscan" });
-  if (legacyView && legacyView !== "sources" && isKnownAutoscanView(legacyView)) {
-    target.set("view", legacyView);
-  }
-  // Anything else on the old URL is none of this redirect's business; carry it.
-  for (const [key, value] of legacy) {
-    target.append(key, value);
-  }
+export const AUTOSCAN_SOURCES_HREF = "/admin/autoscan";
+export const AUTOSCAN_ACTIVITY_HREF = "/admin/autoscan/activity";
+export const AUTOSCAN_SETTINGS_HREF = "/admin/settings/autoscan";
 
-  return `/admin/libraries?${target.toString()}`;
+/** Old view names that now live on the Settings page. */
+const SETTINGS_VIEWS = new Set(["connections", "settings"]);
+
+function pageForView(view: string | null): string {
+  if (view === "activity") return AUTOSCAN_ACTIVITY_HREF;
+  if (view !== null && SETTINGS_VIEWS.has(view)) return AUTOSCAN_SETTINGS_HREF;
+  return AUTOSCAN_SOURCES_HREF;
+}
+
+/**
+ * Builds the page URL for an old view, carrying any other query parameters.
+ * The Settings page takes none, so they are dropped there.
+ */
+function target(view: string | null, rest: URLSearchParams): string {
+  const page = pageForView(view);
+  const query = page === AUTOSCAN_SETTINGS_HREF ? "" : rest.toString();
+  return query ? `${page}?${query}` : page;
+}
+
+/**
+ * Where `/admin/autoscan?tab=…` (or `?view=…`, which the one-page layout also
+ * accepted) belongs now, or null when the URL names neither and is already
+ * the Sources page.
+ */
+export function legacyAutoscanPageTarget(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const view = params.get("tab") ?? params.get("view");
+  if (view === null) return null;
+  params.delete("tab");
+  params.delete("view");
+  return target(view, params);
+}
+
+/**
+ * Where `/admin/libraries?tab=autoscan&view=…` belongs now, or null when the
+ * Libraries URL does not name the old Autoscan tab.
+ */
+export function legacyLibrariesAutoscanTarget(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (params.get("tab") !== "autoscan") return null;
+  const view = params.get("view");
+  params.delete("tab");
+  params.delete("view");
+  return target(view, params);
 }

@@ -3,11 +3,16 @@
     {
       "id": "profile-1",
       "name": "Parent",
+      "avatar": "preset:avatar-3",
+      "avatar_url": "/profile-avatars/avatar-3.svg",
+      "avatar_source": "preset",
       "last_seen_at": "2026-01-02T03:04:05.678Z"
     },
     {
       "id": "profile-2",
       "name": "Guest",
+      "avatar": "",
+      "avatar_source": "none",
       "last_seen_at": null
     }
   ],

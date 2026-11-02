@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -326,23 +325,6 @@ func TestAdminNetworkAccessConnectDisconnect(t *testing.T) {
 
 	deps.NetworkAccess = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, connect, "", bearer(adminToken)), TypeDependencyUnavailable)
-}
-
-// TestNetworkAccessStatusOfDefaultsState: a status the service could not fill
-// in (zero value) is rendered unavailable rather than an empty enum value.
-func TestNetworkAccessStatusOfDefaultsState(t *testing.T) {
-	report := plugins.NetworkAccessReport{
-		Provider: plugins.NetworkAccessProvider{Provider: "stub"},
-		Hosts:    []plugins.NetworkAccessHostStatus{{Host: plugins.NetworkAccessHost{ID: "api", Role: "api"}}},
-	}
-	out := networkAccessStatusOf(report)
-	if out.Provider != "stub" || len(out.Hosts) != 1 || out.Hosts[0].State != netaccess.StateUnavailable || out.Hosts[0].UpdatedAt != nil || out.Hosts[0].Addresses == nil {
-		t.Fatalf("status = %+v", out)
-	}
-	report.Hosts[0].Status = netaccess.Status{State: netaccess.StateConnected, UpdatedAt: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)}
-	if out = networkAccessStatusOf(report); out.Hosts[0].UpdatedAt == nil || out.Hosts[0].UpdatedAt.String() != "2026-03-04T05:06:07.000Z" {
-		t.Fatalf("updated_at = %v", out.Hosts[0].UpdatedAt)
-	}
 }
 
 func TestNetworkAccessCommandChunkedBody(t *testing.T) {

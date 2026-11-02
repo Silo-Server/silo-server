@@ -59,7 +59,7 @@ export interface SyncedDraft {
   /** The MDBList and TMDB list links, as typed. */
   mdblistLink: string;
   tmdbListLink: string;
-  /** Blank takes the whole list (up to 500). */
+  /** Blank takes the whole list. */
   limit?: number;
   /** Server: a cron expression. Personal: a schedule name. "" = no scheduled sync. */
   schedule: string;
@@ -105,6 +105,14 @@ export function franchiseIdOf(typed: string): number | null {
   if (!/^\d+$/.test(trimmed)) return null;
   const id = Number(trimmed);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/** "mdblist.com/lists/u/top": a list link as the source card shows it. */
+export function shownLink(link: string) {
+  return link
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/json$/, "");
 }
 
 /**
@@ -348,7 +356,6 @@ export function savedListMediaKind(list: ListDraft): ListMediaKind {
     case "tmdb_franchise":
       return "movie";
     case "tmdb_discover":
-    case "trakt":
       return media === "movie" || media === "tv" ? media : "mixed";
     default:
       return "mixed";

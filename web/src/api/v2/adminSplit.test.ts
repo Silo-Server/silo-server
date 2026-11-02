@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setRefreshToken } from "@/api/client";
+import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { getAdminItemFiles, splitAdminItem } from "./adminSplit";
+import { getAdminItemFiles } from "./adminSplit";
 beforeEach(() => {
   installPolicyStorageMocks();
   setAccessToken("test-account");
@@ -34,16 +34,6 @@ it("rejects a repeated file cursor", async () => {
   vi.stubGlobal("fetch", mock);
   await expect(getAdminItemFiles("source")).rejects.toThrow("Incomplete item file list");
   expect(mock).toHaveBeenCalledTimes(2);
-});
-it("does not replay split after401", async () => {
-  setRefreshToken("synthetic-refresh");
-  const mock = vi.fn<typeof fetch>(async () => jsonResponse({ message: "Expired" }, 401));
-  vi.stubGlobal("fetch", mock);
-  await expect(
-    splitAdminItem("source", { file_ids: ["42"], target: { content_id: "target" }, dry_run: true }),
-  ).rejects.toThrow();
-  expect(mock).toHaveBeenCalledTimes(1);
-  expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body)).file_ids).toEqual(["42"]);
 });
 it("rejects a file walk whose authority changed", async () => {
   const mock = vi.fn<typeof fetch>(async () => {

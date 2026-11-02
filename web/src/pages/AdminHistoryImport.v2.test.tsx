@@ -185,6 +185,8 @@ describe("admin history import editors", () => {
   it.each([
     ["Delete server", "DELETE /api/v2/admin/history-import-sources/{id}", "Delete"],
     ["Remove mapping", "DELETE /api/v2/admin/history-imports/mappings/{id}", "Remove"],
+    // Clearing the token confirms inside the Set API key dialog.
+    ["Set API key", "DELETE /api/v2/admin/history-imports/sources/{id}/token", "Remove"],
   ])("keeps %s confirmation after412", async (title, operation, button) => {
     vi.mocked(v2).mockImplementation((op, options) =>
       op === operation ? Promise.reject(stale()) : baseline(op, options),
@@ -284,24 +286,59 @@ describe("admin history import editors", () => {
       .mock.calls.filter(([op]) => op === "GET /api/v2/admin/history-imports/runs");
     expect(calls[1]![1]).toMatchObject({ query: { limit: 50, cursor: "older" } });
   });
-  it("keeps the token-clear confirmation open on412", async () => {
-    vi.mocked(v2).mockImplementation((op, options) =>
-      op === "DELETE /api/v2/admin/history-imports/sources/{id}/token"
-        ? Promise.reject(stale())
-        : baseline(op, options),
-    );
+  it("offers a lookback on Jellyfin sources and sends it only when chosen", async () => {
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+    const jellyfin = { ...source, source_type: "jellyfin" };
+    const run = { id: "run", user_id: "1", status: "queued", terminal: false, cancelable: true };
+    vi.mocked(v2).mockImplementation((op, options) => {
+      if (op === "GET /api/v2/admin/history-imports/capabilities")
+        return reply(options, {
+          available: true,
+          guarded_configuration: true,
+          durable_runs: true,
+          max_bulk_mappings: 200,
+          played_lookback: true,
+          max_lookback_hours: 8760,
+        });
+      if (op === "GET /api/v2/admin/history-import-sources")
+        return reply(options, { items: [jellyfin], page: { has_more: false } });
+      if (op === "GET /api/v2/admin/history-import-sources/{id}") return reply(options, jellyfin);
+      if (op === "POST /api/v2/admin/history-imports/sources/{id}/bulk-run")
+        return reply(options, { accepted: 0, active: 0, failed: 0, outcomes: [] });
+      if (op === "POST /api/v2/admin/history-imports/mappings/{id}/run")
+        return Promise.resolve(run) as never;
+      return baseline(op, options);
+    });
     mount();
-    fireEvent.click(await screen.findByTitle("Set API key"));
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-    await screen.findByRole("alert");
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(
-      vi
-        .mocked(v2)
-        .mock.calls.filter(
-          ([op]) => op === "DELETE /api/v2/admin/history-imports/sources/{id}/token",
-        ),
-    ).toHaveLength(1);
+    const lookback = await screen.findByRole("combobox", { name: "Plays to import" });
+    expect(lookback.textContent).toContain("Full history");
+    fireEvent.click(screen.getByTitle("Run import"));
+    fireEvent.pointerDown(lookback, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(screen.getByRole("option", { name: "Last 72 hours" }));
+    fireEvent.click(screen.getByText("Import all"));
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(v2)
+          .mock.calls.find(
+            ([op]) => op === "POST /api/v2/admin/history-imports/sources/{id}/bulk-run",
+          ),
+      ).toBeTruthy(),
+    );
+    const calls = vi.mocked(v2).mock.calls;
+    const single = calls.find(
+      ([op]) => op === "POST /api/v2/admin/history-imports/mappings/{id}/run",
+    );
+    const bulk = calls.find(
+      ([op]) => op === "POST /api/v2/admin/history-imports/sources/{id}/bulk-run",
+    );
+    expect((single![1] as { body?: unknown }).body).toBeUndefined();
+    expect((bulk![1] as { body?: unknown }).body).toEqual({ lookback_hours: 72 });
   });
   it("requires legacy source reconfiguration before imports", async () => {
     vi.mocked(v2).mockImplementation((op, options) =>

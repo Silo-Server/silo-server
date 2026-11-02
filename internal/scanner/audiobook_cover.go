@@ -7,11 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const maxAudiobookSidecarCoverSize = 8 * 1024 * 1024
@@ -63,7 +63,7 @@ func ExtractAndUploadAudiobookCover(
 	if ffmpegPath == "" || cacher == nil || audioFilePath == "" || contentID == "" {
 		return "", ""
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := fspath.CommandContext(ctx, ffmpegPath,
 		"-loglevel", "error",
 		"-i", audioFilePath,
 		"-an", "-map", "0:v?", "-c:v", "mjpeg",
@@ -129,7 +129,7 @@ func findSidecarAudiobookCover(dir string) ([]byte, string, error) {
 	if dir == "" {
 		return nil, "", nil
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := fspath.ReadDir(dir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -168,7 +168,7 @@ func isRegularDirEntry(entry os.DirEntry) bool {
 }
 
 func readSidecarAudiobookCover(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := fspath.Open(path)
 	if err != nil {
 		return nil, err
 	}

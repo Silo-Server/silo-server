@@ -2,6 +2,7 @@ import type {
   AdminDownloadPreparation,
   AdminDownloadPreparationAction,
   AdminDownloadPreparationActionResult,
+  AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 import { formatChannels, formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 
@@ -14,6 +15,13 @@ export const PREPARATION_STATES: readonly PreparationState[] = [
   "paused",
   "failed",
 ];
+
+/** Jobs still to finish: running, queued and retrying. Paused and failed jobs wait on an admin. */
+export function activePreparationCount(
+  counts: AdminDownloadPreparationList["counts"] | undefined,
+): number {
+  return counts ? counts.running + counts.queued + counts.retrying : 0;
+}
 
 export interface PreparationStateMeta {
   label: string;

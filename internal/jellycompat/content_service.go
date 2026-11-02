@@ -15,8 +15,9 @@ type ContentService interface {
 	// content IDs. The returned map is keyed by content ID; ids that cannot be
 	// resolved to a detail (excluded media type, access-filtered, not found) are
 	// absent so callers fall back to list-level rendering, exactly as they do on
-	// a per-item GetItemDetail error.
-	GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error)
+	// a per-item GetItemDetail error. An implementation may leave out detail
+	// members that opts says the caller does not read.
+	GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, opts detailBatchOptions) (map[string]*upstreamItemDetail, error)
 	ListSeasons(ctx context.Context, session *Session, seriesID string, libraryID *int) ([]upstreamSeason, error)
 	GetSeason(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) (*upstreamSeason, error)
 	ListEpisodes(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) ([]upstreamEpisode, error)
@@ -58,10 +59,25 @@ type UserDataService interface {
 	// episodes superseded by a later-completed episode in the same series.
 	// It mirrors the first-party sections fetcher so both surfaces agree.
 	FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error)
+	// ListResumableProgress returns the in-progress entries among
+	// mediaItemIDs, newest first, with the write times FilterResumeProgress
+	// matches dismissals against, as ListProgress("in_progress") does.
+	ListResumableProgress(ctx context.Context, session *Session, mediaItemIDs []string) ([]upstreamProgress, error)
 	ListProgressByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]*upstreamProgress, error)
 	GetProgress(ctx context.Context, session *Session, contentID string) (*upstreamProgress, error)
 	MarkPlayed(ctx context.Context, session *Session, contentID string) error
 	MarkPlayedBatch(ctx context.Context, session *Session, contentIDs []string) error
 	MarkUnplayed(ctx context.Context, session *Session, contentID string) error
 	MarkUnplayedBatch(ctx context.Context, session *Session, contentIDs []string) error
+}
+
+// detailBatchOptions says which parts of a batched item detail the caller
+// reads.
+type detailBatchOptions struct {
+	// Fields is the request's Fields (nil means all); the caller maps the
+	// details with them.
+	Fields map[string]bool
+	// SubtitleDefaults asks for each movie's effective subtitle defaults,
+	// which populateDetailSubtitles reads to pick DefaultSubtitleStreamIndex.
+	SubtitleDefaults bool
 }

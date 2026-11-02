@@ -1,11 +1,13 @@
 import { type ReactNode } from "react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 
 import "./detailLayout.css";
 import DetailOverview from "./components/DetailOverview";
 import DetailTitle from "./DetailTitle";
+import MachineTranslatedLabel from "./components/MachineTranslatedLabel";
 
 interface DetailHeroProps {
   title: string;
@@ -31,6 +33,13 @@ interface DetailHeroProps {
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
+  /** Labels the overview as machine-translated by AI. */
+  overviewMachineTranslated?: boolean;
+  /** Marks the tagline as machine-translated by AI. */
+  taglineMachineTranslated?: boolean;
+  /** Spoiler protection: keep the overview behind a reveal button. */
+  overviewHidden?: boolean;
+  onRevealOverview?: () => void;
   actions?: ReactNode;
   aside?: ReactNode;
   studioLabel?: string;
@@ -38,6 +47,11 @@ interface DetailHeroProps {
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
   variant?: "full" | "compact" | "episode" | "series" | "season";
+  /**
+   * Shortens the full hero so the first row of the content below it starts
+   * inside the viewport, for pages whose hero leads into a grid of titles.
+   */
+  shortHero?: boolean;
   topNav?: ReactNode;
 }
 
@@ -58,6 +72,10 @@ export default function DetailHero({
   overview,
   overviewTranslating = false,
   onTranslateOverview,
+  overviewMachineTranslated = false,
+  taglineMachineTranslated = false,
+  overviewHidden = false,
+  onRevealOverview,
   actions,
   aside,
   studioLabel,
@@ -65,6 +83,7 @@ export default function DetailHero({
   scoreRow,
   crewLine,
   variant = "full",
+  shortHero = false,
   topNav,
 }: DetailHeroProps) {
   const {
@@ -89,6 +108,10 @@ export default function DetailHero({
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
   const isViewportBounded = variant === "episode" || variant === "series" || variant === "season";
+  // Below lg a viewport-bounded hero hides its poster (detailLayout.css), so
+  // it is not rendered there and its image is never downloaded.
+  const wideViewport = useMediaQuery("(min-width: 64rem)", true);
+  const showPoster = !hidePoster && (!isViewportBounded || wideViewport);
 
   const posterSizeClass = (() => {
     switch (posterOrientation) {
@@ -124,9 +147,12 @@ export default function DetailHero({
       data-viewport-bounded={isViewportBounded || undefined}
     >
       {topNav}
+      {/* The artwork stops 1px short of the bottom edge, which the fade below
+          covers solidly anyway. At a fractional hero height the edge pixel is
+          only partly covered by the fade, and the artwork bled through as a line. */}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-x-0 top-0 bottom-px"
           style={{
             ...(backdropPlaceholder
               ? {
@@ -166,7 +192,9 @@ export default function DetailHero({
               // taller than the hero would otherwise overflow out the top, under
               // the floating back button.
               "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
-            : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
+            : shortHero
+              ? "min-h-[50dvh] pt-24 lg:min-h-[54dvh]"
+              : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >
         <div
@@ -175,10 +203,10 @@ export default function DetailHero({
           }`}
         >
           <div
-            className={`detail-hero-primary-content flex flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
+            className={`detail-hero-primary-content flex min-w-0 flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
           >
             {/* Poster */}
-            {!hidePoster && (
+            {showPoster && (
               <div
                 className={`media-card-image border-border/20 relative border shadow-[var(--shadow-md)] ${posterSizeClass}`}
               >
@@ -286,6 +314,9 @@ export default function DetailHero({
                     }`}
                   >
                     {tagline || subtitle}
+                    {tagline && taglineMachineTranslated && (
+                      <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+                    )}
                   </div>
                 )}
 
@@ -301,6 +332,9 @@ export default function DetailHero({
                     clamp={isViewportBounded}
                     translating={overviewTranslating}
                     onTranslate={onTranslateOverview}
+                    machineTranslated={overviewMachineTranslated}
+                    hidden={overviewHidden}
+                    onReveal={onRevealOverview}
                   />
                 )}
 

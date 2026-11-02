@@ -54,10 +54,27 @@ export async function getAdminDevice(
   requireAdminUserAuthority(context);
   return {
     ...deviceOf(row),
+    ...(row.connections ? { connections: row.connections } : {}),
     settings: row.settings.map((s) => ({
       ...s,
       user_id: userID(s.user_id),
       updated_at: s.updated_at ?? "",
     })),
   };
+}
+export async function resetAdminDeviceLearnedLimit(
+  user: number,
+  device: string,
+  connectionId: string,
+  context: ProfileRequestContextSnapshot,
+): Promise<void> {
+  requireAdminUserAuthority(context);
+  await v2(
+    "DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit",
+    {
+      profileContext: context,
+      path: { user_id: String(user), device_id: device, connection_id: connectionId },
+    },
+  );
+  requireAdminUserAuthority(context);
 }

@@ -47,8 +47,30 @@ function collectionLine(titles: string[]): string | null {
   return `Rows that show collections, like ${listTitles(titles)}, are removed. The collections themselves stay in Collections.`;
 }
 
-function otherPagesLine(page: PageRef, otherLibraryLabels: string[]): string | null {
+/** Every page the restore changes, for use inside a sentence. */
+function targetName(page: PageRef, label: string, restoreAll: boolean): string {
+  if (!restoreAll) return pageName(page, label);
+  return page.kind === "home" ? "Home and every library page" : "every library page";
+}
+
+/** The profile pages the reset clears: "Home", "Movies page", "library pages"… */
+function profilePagesName(page: PageRef, label: string, restoreAll: boolean): string {
+  if (restoreAll) return page.kind === "home" ? "Home and library pages" : "library pages";
+  return page.kind === "home" ? "Home" : `${label} page`;
+}
+
+function otherPagesLine(
+  page: PageRef,
+  otherLibraryLabels: string[],
+  restoreAll: boolean,
+): string | null {
   const others = otherLibraryLabels.join(", ");
+  if (restoreAll) {
+    const restored = `also go back to Silo's default rows, and their collection rows are removed.`;
+    return page.kind === "home"
+      ? `Library pages (${others}) ${restored}`
+      : `The other library pages (${others}) ${restored} Home doesn't change.`;
+  }
   if (page.kind === "home")
     return otherLibraryLabels.length > 0 ? `Library pages (${others}) don't change.` : null;
   return otherLibraryLabels.length > 0
@@ -56,11 +78,52 @@ function otherPagesLine(page: PageRef, otherLibraryLabels: string[]): string | n
     : "Home doesn't change.";
 }
 
+function OptionRow({
+  id,
+  label,
+  help,
+  note,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  help: string;
+  note?: string;
+  checked: boolean;
+  disabled: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="border-border flex items-center justify-between gap-4 rounded-[14px] border px-4 py-3.5">
+      <div className="min-w-0">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        <p id={`${id}-help`} className="text-muted-foreground mt-1 text-[13px]">
+          {help}
+        </p>
+        {note ? <p className="text-muted-foreground mt-1 text-[13px]">{note}</p> : null}
+      </div>
+      <Switch
+        id={id}
+        aria-describedby={`${id}-help`}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+      />
+    </div>
+  );
+}
+
 /**
- * Confirms putting back Silo's default rows on one page. It says what goes,
- * that collections stay, which pages are untouched, and what the optional
- * reset of every profile clears. The page version was read when it opened; a
- * 412 keeps the dialog and asks for an explicit reload.
+ * Confirms putting back Silo's default rows on one page, and optionally on the
+ * other library pages too. It says what goes, that collections stay, which
+ * pages are untouched, and what the optional reset of every profile clears.
+ * This page's version was read when it opened; a 412 keeps the dialog and asks
+ * for an explicit reload. The other library pages are restored over the version
+ * they have when the restore reaches them.
  */
 export function RestoreDialog({
   open,
@@ -69,6 +132,8 @@ export function RestoreDialog({
   otherLibraryLabels,
   rowCount,
   collectionRowTitles,
+  restoreAll,
+  onRestoreAllChange,
   resetSupported,
   resetProfiles,
   onResetProfilesChange,
@@ -88,6 +153,9 @@ export function RestoreDialog({
   rowCount: number;
   /** Titles of the page's collection rows. */
   collectionRowTitles: string[];
+  /** Also restore every library page in `otherLibraryLabels`. */
+  restoreAll: boolean;
+  onRestoreAllChange: (restoreAll: boolean) => void;
   resetSupported: boolean;
   resetProfiles: boolean;
   onResetProfilesChange: (reset: boolean) => void;
@@ -100,19 +168,23 @@ export function RestoreDialog({
 }) {
   const id = useId();
   const name = pageName(page, pageLabel);
+  const all = restoreAll && otherLibraryLabels.length > 0;
+  const target = targetName(page, pageLabel, all);
   const bullets: Array<[LucideIcon, string | null]> = [
     [Rows3, rowsLine(rowCount, name)],
     [Trash2, collectionLine(collectionRowTitles)],
-    [Library, otherPagesLine(page, otherLibraryLabels)],
+    [Library, otherPagesLine(page, otherLibraryLabels, all)],
   ];
   const reset = resetSupported && resetProfiles;
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent className="gap-5 sm:max-w-[640px]">
-        <DialogHeader>
-          <DialogTitle>Restore {name} to the default rows?</DialogTitle>
+        {/* Keeps the title clear of the close button. */}
+        <DialogHeader className="px-6 sm:pr-6 sm:pl-0">
+          <DialogTitle>Restore {target} to the default rows?</DialogTitle>
           <DialogDescription>
-            {capitalize(name)} goes back to the rows Silo starts with.
+            {capitalize(target)} {all && page.kind === "home" ? "go" : "goes"} back to the rows Silo
+            starts with.
           </DialogDescription>
         </DialogHeader>
         <ul
@@ -128,30 +200,33 @@ export function RestoreDialog({
             ) : null,
           )}
         </ul>
-        <div className="border-border flex items-center justify-between gap-4 rounded-[14px] border px-4 py-3.5">
-          <div className="min-w-0">
-            <Label htmlFor={`${id}-reset`} className="text-sm font-medium">
-              Also reset every profile&apos;s {page.kind === "home" ? "Home" : `${pageLabel} page`}
-            </Label>
-            <p id={`${id}-reset-help`} className="text-muted-foreground mt-1 text-[13px]">
-              {reset
-                ? `Clears what each profile hid, renamed, moved or added on ${name}.`
-                : "Profiles keep rows they added. What they hid or renamed on the old rows no longer applies."}
-            </p>
-            {resetSupported ? null : (
-              <p className="text-muted-foreground mt-1 text-[13px]">
-                Resetting profiles isn&apos;t available on this server.
-              </p>
-            )}
-          </div>
-          <Switch
-            id={`${id}-reset`}
-            aria-describedby={`${id}-reset-help`}
-            checked={reset}
-            disabled={!resetSupported || busy}
-            onCheckedChange={(checked) => onResetProfilesChange(checked === true)}
+        {otherLibraryLabels.length > 0 ? (
+          <OptionRow
+            id={`${id}-all`}
+            label={
+              page.kind === "home"
+                ? "Also restore every library page"
+                : "Also restore the other library pages"
+            }
+            help={`${otherLibraryLabels.join(", ")} go back to Silo's default rows too.`}
+            checked={all}
+            disabled={busy}
+            onCheckedChange={onRestoreAllChange}
           />
-        </div>
+        ) : null}
+        <OptionRow
+          id={`${id}-reset`}
+          label={`Also reset every profile's ${profilePagesName(page, pageLabel, all)}`}
+          help={
+            reset
+              ? `Clears what each profile hid, renamed, moved or added on ${target}.`
+              : "Profiles keep rows they added. What they hid or renamed on the old rows no longer applies."
+          }
+          note={resetSupported ? undefined : "Resetting profiles isn't available on this server."}
+          checked={reset}
+          disabled={!resetSupported || busy}
+          onCheckedChange={onResetProfilesChange}
+        />
         {conflict ? (
           <div
             role="alert"

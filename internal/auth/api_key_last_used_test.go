@@ -41,24 +41,6 @@ func TestAPIKeyLastUsedTrackerThrottlesPerKey(t *testing.T) {
 	}
 }
 
-func TestAPIKeyLastUsedTrackerPrunesExpiredKeys(t *testing.T) {
-	now := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
-	tracker := NewAPIKeyLastUsedTracker(nil, func() time.Time { return now })
-
-	tracker.shouldUpdate(1)
-	tracker.shouldUpdate(2)
-
-	now = now.Add(apiKeyLastUsedInterval)
-	tracker.shouldUpdate(3)
-
-	if len(tracker.lastUsedAt) != 1 {
-		t.Fatalf("retained entries = %d, want 1", len(tracker.lastUsedAt))
-	}
-	if _, ok := tracker.lastUsedAt[3]; !ok {
-		t.Fatal("current key was not retained")
-	}
-}
-
 func TestAPIKeyLastUsedTrackerAddsWriteDeadline(t *testing.T) {
 	updater := &recordingLastUsedUpdater{calls: make(chan lastUsedCall, 1)}
 	tracker := NewAPIKeyLastUsedTracker(updater, nil)

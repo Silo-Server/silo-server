@@ -71,13 +71,17 @@ var (
 	ErrPeriodLimitReached     = errors.New("download period limit reached")
 	ErrDownloadNotActive      = errors.New("download is not in an active state")
 	ErrStatusConflict         = errors.New("download status transition conflict")
-	ErrTranscodeDisabled      = errors.New("download transcode is disabled")
-	ErrInvalidQuality         = errors.New("invalid download quality")
-	ErrProfileRequired        = errors.New("managed download requires a profile")
-	ErrInvalidStatus          = errors.New("invalid download status transition")
-	ErrManifestUnavailable    = errors.New("offline manifest is not available")
-	ErrInvalidSubtitleRef     = errors.New("invalid subtitle reference")
-	ErrAssetNotFound          = errors.New("download asset not found")
+	// ErrPreparedFileExpired means a finished download's prepared file was
+	// cleaned up from the server. The device keeps its copy; fetching the
+	// file again needs PrepareAgain first.
+	ErrPreparedFileExpired = errors.New("prepared file expired")
+	ErrTranscodeDisabled   = errors.New("download transcode is disabled")
+	ErrInvalidQuality      = errors.New("invalid download quality")
+	ErrProfileRequired     = errors.New("managed download requires a profile")
+	ErrInvalidStatus       = errors.New("invalid download status transition")
+	ErrManifestUnavailable = errors.New("offline manifest is not available")
+	ErrInvalidSubtitleRef  = errors.New("invalid subtitle reference")
+	ErrAssetNotFound       = errors.New("download asset not found")
 	// ErrAssetUnavailable means the store behind an offline asset failed or
 	// could not be reached. The asset may exist; the client should retry.
 	ErrAssetUnavailable  = errors.New("download asset is temporarily unavailable")

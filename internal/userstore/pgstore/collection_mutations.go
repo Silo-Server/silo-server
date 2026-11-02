@@ -25,6 +25,19 @@ func collectionMutationTxOptions(expected *int64) pgx.TxOptions {
 // The checks take no counter locks before a target row is mutated. PostgreSQL
 // SSI prevents a version read from validating a concurrent committed mutation,
 // while existing row->revision trigger ordering remains intact for old writers.
+// lockCollectionRow locks a collection's row for the rest of tx. Writes that
+// change both a collection and its items take it before the items: item
+// triggers advance the collection's revision row, and every writer locks the
+// collection row before the revision row (UpdateCollection by updating it
+// first, a profile delete by locking the collections it touches), so taking
+// them the other way round can deadlock.
+func (s *PostgresUserStore) lockCollectionRow(ctx context.Context, tx pgx.Tx, id string) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND id = $2 FOR UPDATE`, s.userID, id); err != nil {
+		return fmt.Errorf("locking collection %s: %w", id, err)
+	}
+	return nil
+}
+
 func (s *PostgresUserStore) checkCollectionRevision(ctx context.Context, tx pgx.Tx, id string, expected *int64) error {
 	if expected == nil {
 		return nil

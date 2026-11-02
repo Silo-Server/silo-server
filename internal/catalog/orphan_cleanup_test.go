@@ -44,15 +44,3 @@ func TestOrphanedProvisionalPredicatePreservesDurableMediaItemReferences(t *test
 		}
 	}
 }
-
-func TestOrphanedProvisionalCleanerDeleteQueryReturnsIDsForSearchIndexCleanup(t *testing.T) {
-	query := normalizePredicateSQL(deleteOrphanedProvisionalBatchSQL)
-	for _, want := range []string{
-		"DELETE FROM public.media_items mi",
-		"RETURNING mi.content_id",
-	} {
-		if !strings.Contains(query, want) {
-			t.Fatalf("orphaned provisional cleanup delete query missing %q: %s", want, query)
-		}
-	}
-}

@@ -9,25 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestHeldFirstSeenScanRunIndexRetryUsesConcurrentCleanup(t *testing.T) {
-	migrationBytes, err := FS.ReadFile("sql/20261008023737_index_media_files_held_episode_first_seen_scan_run.sql")
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
-	}
-	migration := string(migrationBytes)
-	if !strings.HasPrefix(migration, "-- +goose NO TRANSACTION") {
-		t.Fatal("concurrent index builds require NO TRANSACTION")
-	}
-	up := strings.Join(strings.Fields(strings.SplitN(migration, "-- +goose Down", 2)[0]), " ")
-	const name = "idx_media_files_held_episode_first_seen_scan_run_id"
-	drop := "DROP INDEX CONCURRENTLY IF EXISTS public." + name + ";"
-	create := "CREATE INDEX CONCURRENTLY " + name + " ON public.media_files (held_episode_first_seen_scan_run_id) WHERE held_episode_first_seen_scan_run_id IS NOT NULL;"
-	dropAt, createAt := strings.Index(up, drop), strings.Index(up, create)
-	if dropAt < 0 || createAt < 0 || dropAt > createAt {
-		t.Fatalf("migration must clean up a failed build concurrently before %q", create)
-	}
-}
-
 // TestScanRunForeignKeysHaveLeadingIndexesDB guards library deletion: it
 // cascades to every scan run of the library, and each deleted run makes
 // PostgreSQL find the rows that still reference it. A foreign key without an

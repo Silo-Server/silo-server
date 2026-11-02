@@ -31,7 +31,7 @@ type HistoryCard struct {
 
 // HistoryListInput is the listHistory query.
 type HistoryListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -104,7 +104,7 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 		// The cards are access-filtered, so the cursor dies with the viewer
 		// policy it was minted under.
 		Security:   strconv.Itoa(userID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
-		Filter:     in.ImageSize,
+		Filter:     in.ImageSize + in.widthsCursorFilter(),
 		Sort:       "-watched_at,-id",
 		Tiebreaker: "id",
 	}
@@ -132,7 +132,7 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
-	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.ImageSize), entries)
+	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.Artwork()), entries)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

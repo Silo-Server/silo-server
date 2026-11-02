@@ -10,11 +10,11 @@ interface OverlayPreviewVariantToggleProps {
 }
 
 /**
- * Pill pair that picks which sample data <OverlayPreviewCard /> renders. Shared
- * by the user Card Overlays page and the admin defaults editor so both can
- * preview show-only overlays (network, show status) and the request status of
- * a watchlist title the library doesn't have yet while editing. The choice
- * is local view state on both surfaces and is deliberately never persisted.
+ * Pill pair that picks which sample data <OverlayPreviewCard /> renders in the
+ * admin defaults editor, so it can preview show-only overlays (network, show
+ * status) and the request status of a watchlist title the library doesn't
+ * have yet while editing. The choice is local view state and is deliberately
+ * never persisted.
  */
 export function OverlayPreviewVariantToggle({
   value,

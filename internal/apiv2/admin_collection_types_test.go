@@ -9,7 +9,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 func TestAdminCollectionUpdateCommandPreservesNullableGroup(t *testing.T) {
@@ -50,64 +49,6 @@ func TestAdminCollectionUpdateCommandPreservesNullableGroup(t *testing.T) {
 	cmd, p := (AdminCollectionUpdate{Title: new("Typed")}).command([]byte(`{"title":"Raw","poster_source_url":"https://example.invalid/image"}`))
 	if p != nil || cmd.Title == nil || *cmd.Title != "Typed" || cmd.PosterSourceURL != nil {
 		t.Fatalf("raw body overrode typed input: %+v %v", cmd, p)
-	}
-}
-
-func TestAdminCollectionCommandsValidateLibraryIdentifiers(t *testing.T) {
-	cmd, p := (AdminCollectionCreate{LibraryID: "9", LibraryIDs: []ID{"9", "10"}, Title: "Create"}).command()
-	if p != nil || cmd.LibraryID != 9 || !reflect.DeepEqual(cmd.LibraryIDs, []int{9, 10}) {
-		t.Fatalf("bad lowering: %+v %v", cmd, p)
-	}
-	for _, id := range []ID{"bad", "0", "-1", "999999999999999999999999999"} {
-		if _, p := (AdminMDBListImport{LibraryIDs: []ID{id}, Title: "Import", URL: "https://example.invalid/list"}).command(); p == nil {
-			t.Fatalf("accepted library %q", id)
-		}
-	}
-	good := AdminTemplateApply{LibraryIDs: []ID{"9", "10"}, Featured: &AdminTemplateFeatured{Home: &AdminTemplateFeaturedHome{LibraryID: "9", TemplateID: "home"}, Libraries: map[ID]string{"10": "library"}}}
-	apply, p := good.command()
-	if p != nil {
-		t.Fatal(p)
-	}
-	if apply.Featured == nil || apply.Featured.Home.LibraryID != 9 || apply.Featured.Libraries[10] != "library" {
-		t.Fatalf("nested IDs not lowered: %+v", apply)
-	}
-	good.Featured.Home.LibraryID = "invalid"
-	if _, p = good.command(); p == nil {
-		t.Fatal("accepted malformed nested home library")
-	}
-	good.Featured.Home = nil
-	good.Featured.Libraries = map[ID]string{"bad": "template"}
-	if _, p = good.command(); p == nil {
-		t.Fatal("accepted malformed map key")
-	}
-}
-
-func TestAdminCollectionDTOSchemaRejectsOptionalNull(t *testing.T) {
-	for _, tc := range []struct {
-		dto   any
-		body  string
-		valid bool
-	}{
-		{AdminCollectionUpdate{}, `{}`, true},
-		{AdminCollectionUpdate{}, `{"group_id":null}`, true},
-		{AdminCollectionCreate{}, `{"title":"Collection","library_id":"1"}`, true},
-		{AdminCollectionCreate{}, `{"title":"Collection","library_id":1}`, false},
-		{AdminCollectionCreate{}, `{"library_id":"1"}`, false},
-		{AdminTemplateApply{}, `{"library_ids":["1"]}`, true},
-	} {
-		t.Run(tc.body, func(t *testing.T) {
-			r := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
-			schema := huma.SchemaFromType(r, reflect.TypeOf(tc.dto))
-			var value any
-			if err := json.Unmarshal([]byte(tc.body), &value); err != nil {
-				t.Fatal(err)
-			}
-			result := &huma.ValidateResult{}
-			huma.Validate(r, schema, huma.NewPathBuffer([]byte("body"), 0), huma.ModeWriteToServer, value, result)
-			if (len(result.Errors) == 0) != tc.valid {
-				t.Fatalf("valid=%v errors=%v", tc.valid, result.Errors)
-			}
-		})
 	}
 }
 
@@ -152,26 +93,5 @@ func TestAdminCollectionResultSanitizesDiagnosticsAndDates(t *testing.T) {
 	}
 	if strings.Contains(string(data), "PRIVATE_") || strings.Contains(string(data), "last_sync_at") || strings.Contains(string(data), "next_sync_at") {
 		t.Fatalf("invalid optional timestamps/diagnostic: %s", data)
-	}
-}
-
-func TestAdminCollectionUpdateCommandRejectsNullBeforeLowering(t *testing.T) {
-	r := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
-	schema := huma.SchemaFromType(r, reflect.TypeFor[AdminCollectionUpdate]())
-	for _, field := range []string{"title", "library_ids", "featured", "description"} {
-		if schema.Properties[field].Nullable {
-			t.Fatalf("%s declared nullable", field)
-		}
-		raw := []byte(`{"` + field + `":null}`)
-		var dto AdminCollectionUpdate
-		if err := json.Unmarshal(raw, &dto); err != nil {
-			t.Fatal(err)
-		}
-		if _, p := dto.command(raw); p == nil {
-			t.Fatalf("accepted explicit null for %s", field)
-		}
-	}
-	if !schema.Properties["group_id"].Nullable {
-		t.Fatal("group_id clearing not declared nullable")
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // parsedPodcastShow is what parsePodcastShow returns. The scanner write
@@ -78,7 +80,7 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 }
 
 func listPodcastShowAudioFiles(folderPath string, inheritedRules []ignoreRules) ([]string, error) {
-	entries, err := os.ReadDir(folderPath)
+	entries, err := fspath.ReadDir(folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Renamed or deleted between the scan walk and this read; treat

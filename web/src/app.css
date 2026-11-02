@@ -378,6 +378,28 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   animation: var(--duration-sidebar-collapse) var(--ease-sidebar-collapse) both nav-slide-in;
 }
 
+/* Entering or leaving personal settings swaps what the app's sidebar column
+   holds (useSidebarSwap). The column's background and border never move; only
+   its contents slide in, from the side the reader is heading toward.
+   `backwards` rather than `both`: once it ends the entrance lets go of
+   transform, which the app sidebar's own collapse motion drives on some of
+   these same children.                                                       */
+@keyframes sidebar-entrance {
+  from {
+    opacity: 0;
+    transform: translateX(var(--sidebar-entrance-shift));
+  }
+}
+[data-sidebar-entrance="forward"] {
+  --sidebar-entrance-shift: 16px;
+}
+[data-sidebar-entrance="back"] {
+  --sidebar-entrance-shift: -16px;
+}
+[data-sidebar-entrance] > * {
+  animation: var(--duration-normal) var(--ease-out) backwards sidebar-entrance;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* The directional selectors carry their own specificity — (0,1,2) against the
      bare pseudo-elements' (0,0,1) — so they have to be suppressed by name here
@@ -433,10 +455,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 /* ================================================================
    § 3  THEME DEFINITIONS
    ================================================================
-   Silo ships one base theme, Cinema Dark, which sets ALL semantic
+   Silo ships one theme, Cinema Dark, which sets ALL semantic
    tokens. It is activated by the static data-theme attribute on
-   <html> (index.html); the admin's token overrides and custom CSS
-   layer on top of it (contexts/CustomThemeProvider.tsx).
+   <html> (index.html).
 
    Token naming conventions:
      --background       Page background (darkest main surface)
@@ -497,8 +518,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      atmosphere where media artwork is the star.                    */
   [data-theme="midnight-cinema"] {
     --radius: 0.75rem;
-    --font-body: "Outfit", sans-serif;
-    --font-display: "Outfit", sans-serif;
+    --font-body: "Plus Jakarta Sans", sans-serif;
+    --font-display: "Plus Jakarta Sans", sans-serif;
 
     /* Surfaces: near-black with subtle cool undertone */
     --contrast-boost: #ffffff;
@@ -517,9 +538,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #232328;
     --secondary-foreground: #d0d0d6;
     --muted: #1c1c20;
-    /* Lightened from #6e6e78 (~3.4:1) to meet WCAG AA: ~6.3:1 on --background,
-       ~5.3:1 even on the lightest chip surface (#232328). */
-    --muted-foreground-base: #9696a0;
+    /* Lightened from #6e6e78 (~3.4:1), then from #9696a0 (~6.3:1) for small
+       secondary text: ~7.4:1 on --background (WCAG AAA) and ~5.9:1 on the
+       raised panel surface (#28282e). */
+    --muted-foreground-base: #a4a4ae;
     --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 
@@ -608,8 +630,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
   /* Every token here pushes toward --contrast-boost, never toward white
      directly. Hard-coded white raises contrast on a dark page and destroys it
-     on a light one, which admin CSS can still produce; mixing toward the boost
-     keeps high contrast readable either way. */
+     on a light one; mixing toward the boost keeps high contrast readable
+     either way. The brand accent restores this --ring after its own
+     (contexts/BrandingProvider.tsx). */
   html[data-high-contrast="true"] {
     --foreground: var(--contrast-boost);
     --ring: var(--contrast-boost);
@@ -1517,6 +1540,49 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transform: scale(1.06);
   }
 
+  /* Default artwork for a poster, cover or still with no image (DefaultArtwork):
+     a faint glow with a small type mark in the centre. The glows are sized from
+     the box's longer side, so a poster and a still get the same glow, only
+     cropped. Keep in step with the Apple and Android clients. Without container
+     units only the base colour and a 24px mark show. */
+  .default-artwork {
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #16171c;
+  }
+  .default-artwork::before {
+    --side: max(100cqw, 100cqh);
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(
+        circle calc(var(--side) * 0.5) at 70% 30%,
+        rgb(245 11 79 / 0.112),
+        rgb(245 11 79 / 0)
+      ),
+      radial-gradient(
+        circle calc(var(--side) * 0.6) at 100% 100%,
+        rgb(253 116 3 / 0.144),
+        rgb(253 116 3 / 0)
+      ),
+      radial-gradient(
+        circle calc(var(--side) * 0.75) at 0% 0%,
+        rgb(0 52 251 / 0.176),
+        rgb(0 52 251 / 0)
+      );
+  }
+  /* Positioned after ::before in tree order, so it paints above the glow. */
+  .default-artwork-mark {
+    position: relative;
+    width: clamp(14px, 24cqw, 40px);
+    height: clamp(14px, 24cqw, 40px);
+    color: #fff;
+    opacity: 0.13;
+  }
+
   /* ── Episode Row ─────────────────────────────────────────── */
   /* Horizontal episode list item with hover highlight.
      Usage: <div class="episode-row">
@@ -2106,17 +2172,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 1.75rem;
   }
 
-  .admin-shell {
-    width: 100%;
-    min-width: 0;
-    max-width: 1560px;
-    margin-inline: auto;
-  }
-
-  /* AdminLayout owns the outer gutter. Older admin pages still use page-shell
-     for their max-width, so remove its second horizontal gutter when nested. */
+  /* .admin-shell marks AdminLayout's PageFrame, which sets the width. Shared
+     components that also render in the app (the collection editor) carry
+     page-shell, so drop its own gutter, cap, and centering here. */
   .admin-shell > .page-shell,
   .admin-shell > .page-shell-wide {
+    max-width: none;
+    margin-inline: 0;
     padding-inline: 0;
   }
 
@@ -2515,8 +2577,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       padding-inline: 0;
     }
 
-    .player-controls[data-compact="true"][data-touch="false"] .player-quality-trigger > span {
+    .player-controls[data-compact="true"][data-touch="false"]
+      .player-quality-trigger
+      > .player-quality-label {
       display: none;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"]
+      .player-quality-trigger
+      > .player-speed-badge {
+      position: absolute;
     }
   }
 
@@ -2549,5 +2619,26 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     border-radius: 0.75rem;
     background: rgb(12 12 12 / 0.98);
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* A settings section: no surface of its own, a hairline above it. Outside any
+   layer on purpose, so it also wins over a page's `space-y-*` margin and every
+   section is spaced the same on every page. A section nested in another keeps
+   to its parent's rule. */
+.settings-section {
+  margin-block: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  padding-block: 1.5rem;
+}
+
+.settings-section .settings-section {
+  border-top: 0;
+  padding-block: 0.75rem 0;
+}
+
+@media (min-width: 64rem) {
+  .settings-section {
+    padding-block: 1.75rem;
   }
 }

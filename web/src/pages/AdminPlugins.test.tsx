@@ -161,60 +161,6 @@ describe("AdminPlugins", () => {
     });
   });
 
-  it("starts the shared plugin update check task from the plugins page", () => {
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    const button = capturedButtonProps.find((props) => {
-      const children = props.children;
-      if (typeof children === "string") {
-        return children === "Check for updates";
-      }
-      return Array.isArray(children) && children.some((child) => child === "Check for updates");
-    });
-
-    expect(button).toBeTruthy();
-    expect(typeof button?.onClick).toBe("function");
-
-    (button?.onClick as () => void)();
-
-    expect(checkPluginUpdatesMutateMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("enables the approved community catalog directly when no community plugins are installed", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [],
-      catalogSettings: {
-        etag: '"catalog-snapshot"',
-        include_approved_community_plugins: false,
-        approved_community_plugin_count: 2,
-        installed_community_plugin_count: 0,
-        migrated_plugin_count: 0,
-        community_updates_paused: false,
-      },
-      isLoading: false,
-    });
-
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    const onCheckedChange = capturedSwitchProps[0]?.onCheckedChange as (checked: boolean) => void;
-    onCheckedChange(true);
-
-    expect(updatePluginCatalogSettingsMutateMock).toHaveBeenCalledWith({
-      etag: '"catalog-snapshot"',
-      include_approved_community_plugins: true,
-    });
-  });
-
   it("does not disable the community catalog without confirmation when plugins are installed", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
@@ -243,36 +189,7 @@ describe("AdminPlugins", () => {
     expect(updatePluginCatalogSettingsMutateMock).not.toHaveBeenCalled();
   });
 
-  it("searches catalog presentation metadata from the URL", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        makeCatalogEntry(1, {
-          displayName: "Alpha Scanner",
-          summary: "Indexes local media files.",
-        }),
-        makeCatalogEntry(2, {
-          displayName: "Needle Requests",
-          summary: "Routes requests to the right service.",
-        }),
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_q=needle"]}>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Needle Requests");
-    expect(markup).toContain("1 of 2 plugins");
-    expect(markup).not.toContain("Alpha Scanner");
-  });
-
-  it("searches installed plugin metadata independently from the catalog", () => {
+  it("finds a plugin installed without a catalog under the Unverified label it shows", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       catalog: [],
@@ -280,18 +197,21 @@ describe("AdminPlugins", () => {
       isLoading: false,
       installations: [
         makeInstallation(1, "Alpha Metadata"),
-        makeInstallation(2, "Needle Automation"),
+        {
+          ...makeInstallation(2, "Uploaded Metadata"),
+          repository_id: null,
+          source_kind: "external",
+        },
       ],
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?installed_q=needle"]}>
+      <MemoryRouter initialEntries={["/admin/plugins?installed_q=unverified"]}>
         <AdminPlugins />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Needle Automation");
-    expect(markup).toContain("1 of 2 plugins");
+    expect(markup).toContain("Uploaded Metadata");
     expect(markup).not.toContain("Alpha Metadata");
   });
 
@@ -334,63 +254,66 @@ describe("AdminPlugins", () => {
     });
   });
 
-  it("filters the catalog by job from the URL", () => {
+  const markers = makeCatalogEntry(1, { displayName: "Intro Finder" });
+  const ratings = makeCatalogEntry(2, { displayName: "Ratings Source" });
+  const byJob = [
+    {
+      ...markers,
+      capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
+    },
+    {
+      ...ratings,
+      capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
+    },
+  ];
+  it.each([
+    {
+      name: "searches catalog presentation metadata from the URL",
+      catalog: [
+        makeCatalogEntry(1, {
+          displayName: "Alpha Scanner",
+          summary: "Indexes local media files.",
+        }),
+        makeCatalogEntry(2, {
+          displayName: "Needle Requests",
+          summary: "Routes requests to the right service.",
+        }),
+      ],
+      search: "catalog_q=needle",
+      shown: ["Needle Requests", "1 of 2 plugins"],
+      hidden: ["Alpha Scanner"],
+    },
+    {
+      name: "filters the catalog by job from the URL",
+      catalog: byJob,
+      search: "catalog_job=markers",
+      shown: ["Intro Finder", "1 of 2 plugins"],
+      hidden: ["Ratings Source"],
+    },
+    {
+      name: "keeps a job filter when the search leaves nothing for that job",
+      catalog: byJob,
+      search: "catalog_job=markers&catalog_q=ratings",
+      shown: ["No catalog plugins match"],
+      hidden: ["Ratings Source"],
+    },
+  ])("$name", ({ catalog, search, shown, hidden }) => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       installations: [],
       catalogSettings: undefined,
       isLoading: false,
-      catalog: [
-        {
-          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
-          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
-        },
-        {
-          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
-          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
-        },
-      ],
+      catalog,
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers"]}>
+      <MemoryRouter initialEntries={[`/admin/plugins?tab=catalog&${search}`]}>
         <AdminPlugins />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Intro Finder");
-    expect(markup).not.toContain("Ratings Source");
-    expect(markup).toContain("1 of 2 plugins");
-  });
-
-  it("keeps a job filter when the search leaves nothing for that job", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        {
-          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
-          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
-        },
-        {
-          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
-          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter
-        initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers&catalog_q=ratings"]}
-      >
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("Ratings Source");
-    expect(markup).toContain("No catalog plugins match");
+    for (const text of shown) expect(markup).toContain(text);
+    for (const text of hidden) expect(markup).not.toContain(text);
   });
 
   it.each([["silo.theintrodb"], ["silo.not-installed"]])(

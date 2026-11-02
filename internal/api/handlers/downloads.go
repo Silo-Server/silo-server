@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -559,8 +560,19 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 	// instead of truncating the body at 120 s.
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+		if errors.Is(err, downloads.ErrResponseCommitted) {
+			// Headers and part of the file already went out, so an error body
+			// would corrupt the media response. Abort it instead, as the v2
+			// stream writer requires. A client that left has canceled the
+			// request; any other failure, such as a short read from storage,
+			// is the server's.
+			if r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "direct download failed after the response started",
+					"component", "downloads", "file_id", fileID, "error", err)
+			}
+			panic(http.ErrAbortHandler)
+		}
 		h.writeDownloadError(w, err)
-		return
 	}
 }
 
@@ -734,7 +746,8 @@ func (h *DownloadHandler) proxyCanServe(ctx context.Context, cacheKey, probeURL 
 	resp, err := client.Do(req)
 	reachable := false
 	if err != nil {
-		slog.DebugContext(ctx, "download proxy preflight failed; serving locally", "component", "api", "error", err)
+		// The probe URL carries the signed download token in its path.
+		slog.DebugContext(ctx, "download proxy preflight failed; serving locally", "component", "api", "error", logredact.SanitizeURLError(err))
 	} else {
 		_ = resp.Body.Close()
 		reachable = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
@@ -883,6 +896,8 @@ func (h *DownloadHandler) writeAssetError(w http.ResponseWriter, asset, id strin
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 	case errors.Is(err, downloads.ErrManifestUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Offline assets are not configured")
+	case errors.Is(err, playback.ErrSubtitleReadsBusy):
+		writeSubtitleReadsBusy(w)
 	case errors.Is(err, downloads.ErrFeatureDisabled), errors.Is(err, downloads.ErrDownloadNotAllowed):
 		writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
 	default:

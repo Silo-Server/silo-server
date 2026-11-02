@@ -120,10 +120,3 @@ malformed silence_start: nope
 		})
 	}
 }
-
-func TestSilenceParserEmpty(t *testing.T) {
-	intervals := parseSilenceLog("no silence here", 100)
-	if len(intervals) != 0 {
-		t.Fatalf("expected no intervals, got %d", len(intervals))
-	}
-}

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,5 +80,29 @@ func TestValidateDeviceLoginDecisionTerminalStates(t *testing.T) {
 		if err := validateDeviceLoginDecision(record); !errors.Is(err, tt.want) {
 			t.Fatalf("status %q error = %v, want %v", tt.status, err, tt.want)
 		}
+	}
+}
+
+// TestQuickConnectCodeIsTheSecretsCode: a Quick Connect code is fixed by its
+// secret, so the app can be told it again on every poll, and it is always
+// six digits without a leading zero.
+func TestQuickConnectCodeIsTheSecretsCode(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		secret, err := randomQuickConnectSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := QuickConnectCode(secret)
+		if len(code) != 6 || code[0] == '0' || strings.Trim(code, "0123456789") != "" {
+			t.Fatalf("code %q for %q is not six digits without a leading zero", code, secret)
+		}
+		if again := QuickConnectCode(" " + secret + " "); again != code {
+			t.Fatalf("code changed with surrounding space: %q, %q", code, again)
+		}
+		seen[code] = true
+	}
+	if len(seen) < 190 {
+		t.Fatalf("200 secrets gave only %d distinct codes", len(seen))
 	}
 }

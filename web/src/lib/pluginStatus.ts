@@ -1,6 +1,6 @@
 import type { PluginInstallation, PluginPresentation } from "@/api/types";
 import { missingRequiredConfig } from "@/lib/pluginConfigReady";
-import { pluginDisplayName } from "@/lib/pluginPresentation";
+import { pendingUpdateVersion, pluginDisplayName } from "@/lib/pluginPresentation";
 import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
 
 export interface PluginStatus {
@@ -25,7 +25,7 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
   if (!installation.enabled) {
     return { ...indicator, textClass: "text-muted-foreground", attention: false, rank: 4 };
   }
-  if (installation.runtime.resident && installation.runtime.state === "failed") {
+  if (installation.runtime.state === "failed") {
     return { ...indicator, textClass: "text-destructive", attention: true, rank: 0 };
   }
   if (installation.runtime.resident && installation.runtime.state === "backoff") {
@@ -59,7 +59,7 @@ export function matchesInstalledFilter(
     case "attention":
       return pluginStatus(installation).attention;
     case "update":
-      return Boolean(installation.available_version);
+      return Boolean(pendingUpdateVersion(installation));
     case "off":
       return !installation.enabled;
     default:

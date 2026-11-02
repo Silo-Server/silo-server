@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { v2Problem } from "@/api/v2/problems.test-support";
+import { v2 } from "@/api/v2/request";
 import ActivateDevice from "./ActivateDevice";
+import { renderRoutes } from "./authPage.test-support";
 
 const auth = vi.hoisted(() => ({
   user: null as null | { username: string },
+  profile: null as null | { id: string },
   isImpersonating: false,
   logout: vi.fn(),
   logoutOfSiloOnly: vi.fn(),
@@ -21,6 +24,25 @@ vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null 
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
   v2: vi.fn(),
+}));
+const profiles = vi.hoisted(() => ({
+  list: [] as Array<{ id: string; name: string; has_pin: boolean }>,
+  verify: vi.fn(),
+}));
+vi.mock("@/hooks/queries/profiles", () => ({
+  useProfiles: () => ({ data: profiles.list, isLoading: false, isError: false, refetch: vi.fn() }),
+  verifyProfilePIN: (...args: unknown[]) => profiles.verify(...args),
+}));
+vi.mock("@/api/client", async (original) => ({
+  ...(await original<typeof import("@/api/client")>()),
+  captureProfileRequestContext: () => null,
+  captureProfileRequestContextAs: (profileId: string, profileToken: string | null) => ({
+    accessToken: "acc",
+    authContextVersion: 1,
+    serverOrigin: "",
+    profileId,
+    profileToken,
+  }),
 }));
 
 const pending = {
@@ -40,42 +62,28 @@ const pending = {
 let lookups: Array<Record<string, unknown>>;
 const decisions: Array<{ op: string; body: unknown }> = [];
 
-function notFound() {
-  return new V2ProblemError("getDeviceLogin", {
-    type: "https://siloserver.org/docs/api/v2/problems/not_found",
-    title: "Not found",
-    status: 404,
-    detail: "Device login request not found",
-    instance: "urn:silo:request:1",
-  } as never);
-}
-
 function Where() {
   const location = useLocation();
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
 
 function mount(entry: string) {
-  return render(
-    <MemoryRouter initialEntries={[entry]}>
-      <Routes>
-        <Route
-          path="/activate"
-          element={
-            <>
-              <ActivateDevice />
-              <Where />
-            </>
-          }
-        />
-        <Route path="/login" element={<Where />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  return renderRoutes(entry, {
+    "/activate": (
+      <>
+        <ActivateDevice />
+        <Where />
+      </>
+    ),
+    "/login": <Where />,
+  });
 }
 
 beforeEach(() => {
   auth.user = { username: "laura" };
+  auth.profile = null;
+  profiles.list = [];
+  profiles.verify.mockReset();
   auth.isImpersonating = false;
   auth.logout.mockReset();
   auth.logoutOfSiloOnly.mockReset();
@@ -99,7 +107,7 @@ afterEach(() => {
 
 it("takes the TV's code as grouped digits and looks it up", async () => {
   mount("/activate");
-  const input = screen.getByLabelText("Enter the code on your TV");
+  const input = screen.getByLabelText("Enter the code on your TV or app");
   expect(input.getAttribute("inputmode")).toBe("numeric");
   fireEvent.change(input, { target: { value: "48217730" } });
   expect((input as HTMLInputElement).value).toBe("4821 7730");
@@ -183,7 +191,7 @@ it.each(["success", "failure"])(
     await screen.findByText("Sign in Living room TV?");
     fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
     fireEvent.click(screen.getByRole("button", { name: "Enter another code" }));
-    const input = await screen.findByLabelText("Enter the code on your TV");
+    const input = await screen.findByLabelText("Enter the code on your TV or app");
     fireEvent.change(input, { target: { value: "91536204" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await screen.findByText("Sign in Bedroom TV?");
@@ -288,12 +296,11 @@ it("explains the server refusing an impersonation session instead of offering a 
   vi.mocked(v2).mockImplementation(((op: string) => {
     if (op === "GET /api/v2/auth/device") return Promise.resolve(pending);
     return Promise.reject(
-      new V2ProblemError("approveDeviceLogin", {
-        type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
-        title: "Permission denied",
-        status: 403,
-        detail: "Approving or denying a device needs a signed-in session.",
-      } as never),
+      v2Problem(
+        403,
+        "permission_denied",
+        "Approving or denying a device needs a signed-in session.",
+      ),
     );
   }) as never);
   mount("/activate?code=48217730");
@@ -318,19 +325,283 @@ it("switches account without losing the code or ending the provider's session", 
   );
 });
 
-it("explains codes it can't act on", async () => {
-  lookups = [notFound()] as never;
-  mount("/activate?code=11112222");
-  await screen.findByText("We couldn't find that code. Check the code on your TV.");
+const quickConnect = {
+  ...pending,
+  user_code: "482177",
+  device_name: "Firefox",
+  device_platform: "Jellyfin Web",
+  client_purpose: "jellyfin_quick_connect",
+};
 
-  cleanup();
-  lookups = [{ ...pending, status: "canceled" }];
-  mount("/activate?code=48217730");
-  await screen.findByText("This TV stopped waiting. Start again on the TV.");
-  expect(screen.queryByText("Check that your TV shows")).toBeNull();
+function recordQuickConnectDecisions() {
+  const calls: Array<{ op: string; body: unknown; profileContext?: unknown }> = [];
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((
+    op: string,
+    options?: { body?: unknown; profileContext?: unknown },
+  ) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount++;
+      return Promise.resolve(quickConnect);
+    }
+    calls.push({ op, body: options?.body, profileContext: options?.profileContext });
+    return Promise.resolve({ status: "approved" });
+  }) as never);
+  return { calls, lookups: () => lookupCount };
+}
 
-  cleanup();
-  lookups = [{ ...pending, status: "expired", user_code: "" }];
-  mount("/activate?code=48217730");
-  await screen.findByText("This code expired. Your TV is showing a new one; scan it again.");
+it("asks a signed-out person to sign in before looking up a Quick Connect code", async () => {
+  auth.user = null;
+  mount("/activate");
+  const input = screen.getByLabelText("Enter the code on your TV or app");
+  fireEvent.change(input, { target: { value: "482177" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByText(/to approve code 482177 from your Jellyfin app/);
+  expect(screen.getByRole("link", { name: "Sign in to approve" }).getAttribute("href")).toBe(
+    "/login?redirect=%2Factivate%3Fcode%3D482177",
+  );
+  const quickCalls = vi
+    .mocked(v2)
+    .mock.calls.filter(([, options]) => JSON.stringify(options) === '{"query":{"code":"482177"}}');
+  expect(quickCalls).toEqual([]);
 });
+
+it("approves a Quick Connect request for the chosen profile with its PIN", async () => {
+  profiles.list = [
+    { id: "p-laura", name: "Laura", has_pin: false },
+    { id: "p-kids", name: "Kids", has_pin: true },
+  ];
+  auth.profile = { id: "p-laura" };
+  profiles.verify.mockResolvedValue({ valid: true, profile_token: "kids-token" });
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  expect(screen.getByText("Check that your app shows")).toBeTruthy();
+  expect(screen.getByText("482177")).toBeTruthy();
+  expect(screen.queryByText(/Older TV apps show/)).toBeNull();
+  expect(screen.getByText("Only approve a device that's in front of you right now.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Kids/ }));
+  const pin = await screen.findByLabelText("Kids PIN");
+  expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  fireEvent.change(pin, { target: { value: "1234" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  await screen.findByText("Done. Firefox is signing in as Kids.");
+  expect(profiles.verify).toHaveBeenCalledWith("p-kids", "1234");
+  expect(recorded.calls).toEqual([
+    {
+      op: "POST /api/v2/auth/device/approve-handoff",
+      body: { code: "482177" },
+      profileContext: expect.objectContaining({ profileId: "p-kids", profileToken: "kids-token" }),
+    },
+  ]);
+  // Every Quick Connect lookup spends the account's budget: no watching.
+  expect(recorded.lookups()).toBe(1);
+});
+
+it("approves a Quick Connect request for an unlocked profile without a PIN", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  expect(screen.queryByLabelText(/PIN/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("Done. Firefox is signing in as Laura.");
+  expect(profiles.verify).not.toHaveBeenCalled();
+  expect(recorded.calls[0]?.profileContext).toEqual(
+    expect.objectContaining({ profileId: "p-laura", profileToken: null }),
+  );
+});
+
+it("keeps a Quick Connect request pending when the PIN is wrong", async () => {
+  profiles.list = [{ id: "p-kids", name: "Kids", has_pin: true }];
+  profiles.verify.mockResolvedValue({ valid: false });
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("That PIN isn't right.");
+  expect(recorded.calls).toEqual([]);
+});
+
+it("says when an account has tried too many Quick Connect codes", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      v2Problem(429, "rate_limited", "Too many Quick Connect codes tried. Try again later.", {
+        retryAfterSeconds: 900,
+      }),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("You've tried too many codes. Try again in 15 minutes.");
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+it("declines a Quick Connect request without looking it up again", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This sign-in was declined.");
+  expect(recorded.calls.map((c) => c.op)).toEqual(["POST /api/v2/auth/device/deny"]);
+  expect(recorded.lookups()).toBe(1);
+});
+
+it("explains that an admin viewing as someone can't look up a Quick Connect code", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      v2Problem(
+        403,
+        "permission_denied",
+        "Only the account's own signed-in session can look up a Quick Connect code.",
+      ),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText(/Stop viewing as laura to approve a TV/);
+});
+
+it("reloads a Quick Connect request that moved on before it was declined", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount++;
+      return Promise.resolve(
+        lookupCount === 1 ? quickConnect : { ...quickConnect, status: "expired" },
+      );
+    }
+    return Promise.reject(
+      v2Problem(410, "device_login_expired", "Device login request has expired."),
+    );
+  }) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This code expired. Start Quick Connect again in the app.");
+  expect(lookupCount).toBe(2);
+});
+it("reports an approval the server refuses while the request stays pending", async () => {
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") return Promise.resolve(pending);
+    return Promise.reject(
+      v2Problem(409, "conflict", "Device login purpose does not match this approval route"),
+    );
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
+  expect(screen.getByRole("button", { name: "Sign in TV" }).hasAttribute("disabled")).toBe(false);
+});
+
+it("shows no error when a refused approval's request has moved on", async () => {
+  lookups = [pending, { ...pending, status: "canceled" }];
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      return Promise.resolve(lookups.length > 1 ? lookups.shift() : lookups[0]);
+    }
+    return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  await screen.findByText("This TV stopped waiting. Start again on the TV.");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("reports a refused approval when the reload after it fails", async () => {
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount += 1;
+      return lookupCount === 1 ? Promise.resolve(pending) : Promise.reject(new Error("offline"));
+    }
+    return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  // Without the reload there is no way to tell whether the request moved on.
+  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
+  expect(lookupCount).toBe(2);
+  expect(screen.getByText("Sign in Living room TV?")).toBeTruthy();
+});
+
+const remotePlayback = { ...pending, client_purpose: "remote_playback", temporary: true };
+
+it("sends a remote-playback request back to the app and can decline it", async () => {
+  lookups = [remotePlayback, { ...remotePlayback, status: "denied" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(
+    screen.getByText(/This request comes from the Silo app that sent playback to this TV/),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  expect(screen.queryByText(/Anyone using this TV can pick from your profiles/)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This request was declined.");
+  expect(decisions).toEqual([{ op: "POST /api/v2/auth/device/deny", body: { code: "48217730" } }]);
+});
+
+it("follows a pending remote-playback request until the app approves it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  lookups = [remotePlayback, { ...remotePlayback, status: "approved" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  await screen.findByText("This request was approved in the Silo app.");
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+});
+
+it("keeps a decline when a slower watch lookup answers after it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let answerWatch = () => {};
+  const watch = new Promise((resolve) => {
+    answerWatch = () => resolve({ ...remotePlayback, status: "approved" });
+  });
+  const answers: Array<unknown> = [remotePlayback, watch, { ...remotePlayback, status: "denied" }];
+  vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
+    if (op === "GET /api/v2/auth/device") return Promise.resolve(answers.shift());
+    decisions.push({ op, body: options?.body });
+    return Promise.resolve({ status: "denied" });
+  }) as never);
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  // The watch lookup goes out and is still unanswered when Not now is clicked.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This request was declined.");
+  await act(async () => answerWatch());
+  expect(screen.getByText("This request was declined.")).toBeTruthy();
+  expect(screen.queryByText("This request was approved in the Silo app.")).toBeNull();
+});
+
+it("doesn't send a phone to sign in, here or in the app, for a remote-playback request", async () => {
+  auth.user = null;
+  lookups = [{ ...remotePlayback, server_id: "3f2a9d5e-6b1c" }];
+  // The apps' device link opens their TV sign-in, which can't approve a handoff.
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+  );
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+});
+
+it.each(["approved", "consumed"])(
+  "says a remote-playback request the app %s was approved there, not that a TV signed in",
+  async (status) => {
+    lookups = [{ ...remotePlayback, status }];
+    mount("/activate?code=48217730");
+    await screen.findByText("This request was approved in the Silo app.");
+    expect(screen.queryByText(/signed in|finishing sign-in/)).toBeNull();
+  },
+);

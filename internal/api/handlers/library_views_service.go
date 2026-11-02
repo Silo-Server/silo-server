@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -26,6 +25,48 @@ import (
 type SectionViewer struct {
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
+	// ItemLimitCap lowers every row's item limit to at most this many items
+	// on the aggregate section reads (HomeSections, LibrarySections) and on
+	// the Home row reads (HomeSectionItems, HomeLayoutWithItems' included
+	// rows). Zero leaves each row at its own limit; only the native v2 API
+	// sets it, at most MaxSectionItemLimitCap.
+	ItemLimitCap int
+}
+
+// Artwork is the viewer's artwork preference.
+func (v SectionViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
+}
+
+// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 section reads
+// accept, advertised by getHomeCapabilities.
+const MaxSectionItemLimitCap = 100
+
+// capSectionItemLimits returns resolved with each row's effective item limit
+// lowered to at most limit, so the fetch, the hide-watched widening, and the
+// diversity pass all work from the capped size. A row already at or under
+// limit keeps its configured value, and a non-positive limit returns resolved
+// as is. resolved may be shared, so a capped copy is returned.
+func capSectionItemLimits(resolved []sections.ResolvedSection, limit int) []sections.ResolvedSection {
+	if limit <= 0 {
+		return resolved
+	}
+	out := slices.Clone(resolved)
+	for i := range out {
+		out[i] = capSectionItemLimit(out[i], limit)
+	}
+	return out
+}
+
+// capSectionItemLimit is capSectionItemLimits for one row.
+func capSectionItemLimit(s sections.ResolvedSection, limit int) sections.ResolvedSection {
+	if limit > 0 && effectiveHomeItemLimit(s.ItemLimit) > limit {
+		s.ItemLimit = limit
+	}
+	return s
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
@@ -74,12 +115,8 @@ type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 // HomeLayout answers the home page's section layout for the profile on the
 // context.
 func (h *SectionHandler) HomeLayout(ctx context.Context) (SectionLayoutView, error) {
-	resolved, _, _, _, err := h.loadResolvedHomeSections(ctx)
-	if err != nil {
-		return SectionLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
-	}
-	resolved = h.maybeInjectNextUp(ctx, resolved, apimw.GetUserID(ctx))
-	return sectionLayoutOf(resolved), nil
+	view, err := h.HomeLayoutWithItems(ctx, SectionViewer{}, 0)
+	return view.Layout, err
 }
 
 // requireViewableLibrary is the gate every profile-scoped section read
@@ -150,7 +187,8 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 	return resp
 }
 
-// LibrarySections answers every section of the library with its items.
+// LibrarySections answers every section of the library with its items, each
+// row capped at viewer.ItemLimitCap items when it is set.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionsView{}, err
@@ -159,15 +197,24 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	resolved = capSectionItemLimits(resolved, viewer.ItemLimitCap)
 	userID := viewer.Access.UserID
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.ImageSize), nil
+	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
 }
 
-// LibrarySectionItems answers one section of the library with its items.
+// LibrarySectionItems answers one section of the library with its items, or
+// an error when its items cannot be fetched.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
+	return h.librarySectionItems(ctx, libraryID, sectionID, viewer, false)
+}
+
+// librarySectionItems is LibrarySectionItems. With emptyOnFetchError, a
+// section whose items cannot be fetched answers with no items, as the frozen
+// v1 endpoint always has.
+func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer, emptyOnFetchError bool) (SectionView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionView{}, err
 	}
@@ -183,12 +230,14 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			sections.LogFetchError(ctx, "api", s, fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
+			// As on Home, a failed single section answers an error rather
+			// than an empty row; a deleted collection keeps its empty row.
+			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
+				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}
+			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.ImageSize)
+		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork())
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,
@@ -256,7 +305,7 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 			WantsCollage:                 strings.TrimSpace(c.PosterPath) == "",
 		})
 	}
-	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+	reads := ownerScopedCollectionReads(ctx, h.Executor, memberCountsForRead(ctx, h.PersonalMemberCounts), h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	out := collections[:0]
 	for _, c := range collections {
 		if reads.unavailable[c.ID] {
@@ -284,7 +333,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if err != nil {
 		return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	adminCollections = h.withViewerPosters(ctx, adminCollections, AccessFilterFromContext(ctx, ""))
+	access := AccessFilterFromContext(ctx, "")
+	adminCollections = catalog.CollectionsShownToViewer(adminCollections, h.viewerCollectionCounts(ctx, adminCollections, access))
+	adminCollections = h.withViewerPosters(ctx, adminCollections, access)
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
 		Collections: h.libraryCollectionResponsesOf(ctx, adminCollections),

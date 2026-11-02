@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import type { PluginInstallation } from "@/api/types";
 import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
+import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { Switch } from "@/components/ui/switch";
 import {
   signInBindingMutationKey,
@@ -36,7 +37,9 @@ const GRANT_EXAMPLE = `"grants": [
  * account creation apply at once, like the provider slot's switch. Who may
  * sign in, and with which role, is the tailnet policy's (the plugin's "Who
  * can sign in" setting and siloserver.org/cap/silo grants); see
- * docs/architecture/external-sign-in.md#network-identity.
+ * docs/architecture/external-sign-in.md#network-identity. The two switches
+ * stay in view; how grants, roles and shared devices work is reference reading
+ * behind a disclosure.
  */
 export function NetworkSignInSection({
   installations,
@@ -127,39 +130,45 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
           }
         />
       </SettingFieldRow>
-      <div className="text-muted-foreground space-y-2 py-3.5 text-xs leading-relaxed">
-        <p>
-          Anyone whose device can reach this server over {label} can sign in, including people you
-          share the server with; tagged devices can&apos;t. To limit it, set the plugin&apos;s
-          &ldquo;Who can sign in&rdquo; to people granted{" "}
-          <code className="font-mono">siloserver.org/cap/silo</code>. {label} sign-in never matches
-          an existing account by email: its owner connects {label} from their own Sign-in settings.
-        </p>
-        <p>
-          Roles come from grants in your tailnet policy: a{" "}
-          <code className="font-mono">siloserver.org/cap/silo</code> grant with{" "}
-          <code className="font-mono">{`{"role":"admin"}`}</code> makes someone a Silo admin, and{" "}
-          <code className="font-mono">{`{"role":"user"}`}</code> a regular user. Anyone who can edit
-          the tailnet policy can make themselves a Silo admin. Without a grant, a person&apos;s role
-          is left as it is, so removing someone&apos;s admin grant doesn&apos;t demote them: grant
-          them <code className="font-mono">{`{"role":"user"}`}</code> instead. Policy changes apply
-          at the next sign-in or access re-check. An account that also signs in through your main
-          sign-in provider takes its role from that provider.
-        </p>
-        <pre className="bg-muted overflow-x-auto rounded-md p-3 font-mono">{GRANT_EXAMPLE}</pre>
-        <p>
-          Everyone using a shared TV signs in as whoever signed that TV in to {label}, with their
-          role, so sign shared TVs in as someone without an admin grant; profiles keep their
-          watching apart. Tag any device that relays other people&apos;s traffic to this server,
-          such as a reverse proxy, or everyone behind it signs in as its owner.{" "}
-          <Link
-            to={pluginPagePath(installation.plugin_id)}
-            className="text-foreground underline underline-offset-4"
-          >
-            {label} plugin settings
-          </Link>
-        </p>
-      </div>
+      <AdvancedSection
+        id={`sign-in.network.${installation.plugin_id}`}
+        title="How roles and sharing work"
+      >
+        <div className="settings-field-note text-muted-foreground space-y-2 py-3.5 text-xs leading-relaxed">
+          <p>
+            Anyone whose device can reach this server over {label} can sign in, including people you
+            share the server with; tagged devices can&apos;t. To limit it, set the plugin&apos;s
+            &ldquo;Who can sign in&rdquo; to people granted{" "}
+            <code className="font-mono">siloserver.org/cap/silo</code>. {label} sign-in never
+            matches an existing account by email: its owner connects {label} from their own Sign-in
+            settings.
+          </p>
+          <p>
+            Roles come from grants in your tailnet policy: a{" "}
+            <code className="font-mono">siloserver.org/cap/silo</code> grant with{" "}
+            <code className="font-mono">{`{"role":"admin"}`}</code> makes someone a Silo admin, and{" "}
+            <code className="font-mono">{`{"role":"user"}`}</code> a regular user. Anyone who can
+            edit the tailnet policy can make themselves a Silo admin. Without a grant, a
+            person&apos;s role is left as it is, so removing someone&apos;s admin grant doesn&apos;t
+            demote them: grant them <code className="font-mono">{`{"role":"user"}`}</code> instead.
+            Policy changes apply at the next sign-in or access re-check. An account that also signs
+            in through your main sign-in provider takes its role from that provider.
+          </p>
+          <pre className="bg-muted overflow-x-auto rounded-md p-3 font-mono">{GRANT_EXAMPLE}</pre>
+          <p>
+            Everyone using a shared TV signs in as whoever signed that TV in to {label}, with their
+            role, so sign shared TVs in as someone without an admin grant; profiles keep their
+            watching apart. Tag any device that relays other people&apos;s traffic to this server,
+            such as a reverse proxy, or everyone behind it signs in as its owner.{" "}
+            <Link
+              to={pluginPagePath(installation.plugin_id)}
+              className="text-foreground underline underline-offset-4"
+            >
+              {label} plugin settings
+            </Link>
+          </p>
+        </div>
+      </AdvancedSection>
     </div>
   );
 }

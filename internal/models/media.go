@@ -27,6 +27,12 @@ type MediaFolder struct {
 	// TrickplayEnabled generates seek-bar previews for the library's video
 	// files (internal/trickplay). Off by default.
 	TrickplayEnabled bool
+	// BoxSetsEnabled browses the movies TMDB lists in one collection as a
+	// single box set card once at least BoxSetMinMovies of them are in the
+	// library. BoxSetsInSearch also lists matching box sets in search.
+	BoxSetsEnabled  bool
+	BoxSetMinMovies int
+	BoxSetsInSearch bool
 	// RealtimeMonitoring is the library's real-time monitoring switch. It
 	// takes effect only while the server-wide scanner.realtime_monitoring
 	// setting is on and the library is enabled.
@@ -79,6 +85,7 @@ type MediaFile struct {
 	SubtitleTracks               []SubtitleTrack    // JSONB
 	ExternalSubtitles            []ExternalSubtitle // JSONB
 	Chapters                     []MediaChapter     // JSONB; nil means not yet probed for chapters
+	MarkerThumbnails             []MarkerThumbnail  `json:"-"`
 	ChapterThumbnailRetryAfter   *time.Time
 	ChapterThumbnailFailureCount int
 	ChapterThumbnailLastError    string
@@ -142,6 +149,9 @@ type MediaFile struct {
 	FirstSeenScanRunID   string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+
+	// Non-nil only for an ephemeral on-demand overlay; fences canonical edits.
+	MarkerThumbnailBaseSegments []MarkerSegment `json:"-"`
 }
 
 // MediaChapter represents a single media chapter derived from embedded file metadata.
@@ -435,6 +445,12 @@ type VideoTrack struct {
 	// safety scan cannot establish that video stream-copy is safe. It is
 	// runtime-only so transient scan failures are retried on a later request.
 	VideoCopyUnsafe bool `json:"-"`
+	// HDR10PlusUnchecked records that the track's HDR10+ status was never
+	// read from a decoded frame: it was probed before frame-level detection,
+	// by playback's quick repair, or when the frame read failed transiently.
+	// MarshalJSON writes hdr10_plus only for checked tracks, so a stored PQ
+	// track without the key is checked by the HDR10+ backfill task.
+	HDR10PlusUnchecked bool `json:"-"`
 }
 
 // UnmarshalJSON preserves raw-key presence so rolling older scanners cannot
@@ -453,14 +469,28 @@ func (v *VideoTrack) UnmarshalJSON(data []byte) error {
 	current := raw["dv_config_present"] != nil && raw["dv_bl_compat_id_present"] != nil
 	*v = VideoTrack(decoded)
 	v.DVProvenanceCurrent = &current
+	v.HDR10PlusUnchecked = raw["hdr10_plus"] == nil
 	return nil
+}
+
+// MarshalJSON writes hdr10_plus, false included, for a track whose HDR10+
+// status was checked, and leaves it out of an unchecked one.
+func (v VideoTrack) MarshalJSON() ([]byte, error) {
+	type videoTrackAlias VideoTrack
+	if v.HDR10PlusUnchecked {
+		return json.Marshal(videoTrackAlias(v))
+	}
+	return json.Marshal(struct {
+		videoTrackAlias
+		HDR10Plus bool `json:"hdr10_plus"`
+	}{videoTrackAlias(v), v.HDR10Plus})
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.
 type AudioTrack struct {
 	Title         string `json:"title,omitempty"`
 	EmbeddedTitle string `json:"embedded_title,omitempty"`
-	Language      string `json:"language,omitempty"`
+	Language      string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 	Codec         string `json:"codec,omitempty"`
 	Profile       string `json:"profile,omitempty"`
 	Layout        string `json:"layout,omitempty"`
@@ -485,6 +515,11 @@ type SubtitleTrack struct {
 	HearingImpaired  bool   `json:"hearing_impaired"`
 	External         bool   `json:"external"`
 	FileName         string `json:"file_name,omitempty"`
+	// IndexOnly marks an embedded track FFmpeg can't demux from the source,
+	// such as a Matroska S_TEXT/WEBVTT track, which the server reads through
+	// the container's index instead (embeddedsub). No route that demuxes the
+	// source with FFmpeg, on the server or in a client, can carry it.
+	IndexOnly bool `json:"index_only,omitempty"`
 }
 
 // ExternalSubtitle represents a sidecar subtitle file stored as JSONB.
@@ -590,6 +625,11 @@ type ItemPerson struct {
 	Kind      PersonKind
 	Character string
 	SortOrder int
+	// LocalPhotoSource is a photo the item's local metadata (an NFO actor
+	// <thumb>) names for the person: a file:// sidecar or an http(s) URL. It
+	// travels through the metadata pipeline only; the person's photo takes it
+	// when the person has no cached photo (see metadata.applyLocalPersonPhotos).
+	LocalPhotoSource string
 }
 
 // AudiobookSeriesMembership captures a book's membership in an audiobook
@@ -707,6 +747,61 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// MachineTranslatedFields is transient presentation metadata set by
+	// localization: the fields ("overview", "tagline") whose localized text
+	// came from AI translation rather than a provider or a person.
+	MachineTranslatedFields []string `json:"-"`
+	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
+	// set by the query that picks an episode card's artwork: true when the
+	// path is the episode's own still, false for season or series artwork, nil
+	// when no such query loaded the item. They travel with the paths so a
+	// cached item never pairs old artwork with newer provenance. json:"-"
+	// because some frozen v1 responses serialize MediaItem directly.
+	PosterIsEpisodeStill   *bool `json:"-"`
+	BackdropIsEpisodeStill *bool `json:"-"`
+	// ParentArtwork is transient presentation metadata on an episode card:
+	// its season's and series' own artwork, as raw paths before sizing or
+	// signing, set by the query that loads the card. nil when no such query
+	// loaded the item. json:"-" for the same frozen v1 responses.
+	ParentArtwork *EpisodeParentArtwork `json:"-"`
+	// Banner, thumb (landscape), clear art and disc art follow the poster,
+	// backdrop and logo slots. Clear art and disc art are cut-outs and, like
+	// the logo, carry no thumbhash. json:"-" for the same frozen v1 responses.
+	BannerPath         string `json:"-"`
+	BannerSourcePath   string `json:"-"`
+	BannerThumbhash    string `json:"-"`
+	ThumbPath          string `json:"-"`
+	ThumbSourcePath    string `json:"-"`
+	ThumbThumbhash     string `json:"-"`
+	ClearArtPath       string `json:"-"`
+	ClearArtSourcePath string `json:"-"`
+	DiscPath           string `json:"-"`
+	DiscSourcePath     string `json:"-"`
+}
+
+// EpisodeParentArtwork is an episode's season poster and its series' poster
+// and backdrop, so an episode card can draw a hero from series artwork rather
+// than the episode still. Section cards also carry the season backdrop, which
+// v2 Continue Watching and Next Up cards show before the series backdrop.
+type EpisodeParentArtwork struct {
+	SeriesPosterPath        string
+	SeriesPosterThumbhash   string
+	SeriesBackdropPath      string
+	SeriesBackdropThumbhash string
+	SeasonPosterPath        string
+	SeasonPosterThumbhash   string
+	SeasonBackdropPath      string
+	SeasonBackdropThumbhash string
+}
+
+// ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops
+// row. Ordinal 1 is the second backdrop the item shows.
+type ItemBackdrop struct {
+	ID         int64
+	Ordinal    int
+	Path       string
+	SourcePath string
+	Thumbhash  string
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.
@@ -735,6 +830,20 @@ type Season struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
+	// BackdropPath is the season's landscape art, from a metadata provider or
+	// an admin pick. Like the poster, the series' Images lock keeps a pick.
+	BackdropPath       string
+	BackdropSourcePath string
+	BackdropThumbhash  string
+	// WriteBackdrop is transient: a season upsert writes the three backdrop
+	// columns only when it is set, replacing or clearing the stored backdrop.
+	// Otherwise the stored backdrop stays, whatever the backdrop fields hold.
+	WriteBackdrop bool `json:"-"`
+	// BackdropFillOnly, with WriteBackdrop, writes only while the stored
+	// backdrop is still empty when the upsert holds the row.
+	BackdropFillOnly bool `json:"-"`
 }
 
 // Episode represents a row in the episodes table.
@@ -762,6 +871,12 @@ type Episode struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage is transient presentation metadata set by
+	// batch localization: the viewer's language this episode's description is
+	// missing, so an episode list can start on-view translation.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.
@@ -800,8 +915,8 @@ type EpisodeLibrary struct {
 
 // Localization field provenance values. Precedence when writing:
 // manual beats provider beats ai — a provider refresh may overwrite an AI
-// translation but never a manual edit, and AI never overwrites either
-// (except provider, when the admin explicitly forces a re-translation).
+// translation but never a manual edit, and AI never overwrites either, not
+// even when the admin forces a re-translation.
 const (
 	LocalizationSourceProvider = "provider"
 	LocalizationSourceAI       = "ai"

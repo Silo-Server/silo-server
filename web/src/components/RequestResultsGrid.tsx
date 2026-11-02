@@ -2,16 +2,15 @@ import type { RequestMediaResult } from "@/api/types";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
-import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
+import { LoadMoreOnScroll } from "@/components/LoadMoreOnScroll";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { cardGridClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 
 /**
- * TMDB titles on the library's poster grid, each with the hover Request
- * and watchlist actions. Used by the Discover, studio/network/genre, and search "Request to
+ * TMDB titles on the library's poster grid, each with the hover watchlist
+ * action. Used by the Discover, studio/network/genre, and search "Request to
  * add" grids.
  */
 export default function RequestResultsGrid({
@@ -29,7 +28,6 @@ export default function RequestResultsGrid({
   className?: string;
 }) {
   const { cardPresentation } = useUICustomization();
-  const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
   return (
     <div className={cn(cardGridClasses(cardPresentation.poster_size), className)}>
@@ -38,8 +36,6 @@ export default function RequestResultsGrid({
           key={`${item.media_type}-${item.tmdb_id}`}
           variant="discover"
           item={item}
-          isSubmitting={isSubmitting(item)}
-          onRequest={() => submit(item)}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
           fluid
@@ -91,30 +87,14 @@ export function RequestResultsLoadMore({
   isError: boolean;
   onLoadMore: () => void;
 }) {
-  const sentinelRef = useIntersectionObserver({
-    onIntersect: onLoadMore,
-    enabled: hasNextPage && !isFetchingNextPage && !isError,
-  });
-  if (!hasNextPage) return null;
-  if (isFetchingNextPage) return null;
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-6 text-center">
-        <p className="text-muted-foreground text-sm">Couldn&rsquo;t load more titles.</p>
-        <Button variant="outline" size="sm" onClick={onLoadMore}>
-          Try again
-        </Button>
-      </div>
-    );
-  }
   return (
-    <div ref={sentinelRef} className="flex justify-center py-4">
-      {typeof IntersectionObserver === "undefined" ? (
-        <Button variant="outline" size="sm" onClick={onLoadMore}>
-          Load more
-        </Button>
-      ) : null}
-    </div>
+    <LoadMoreOnScroll
+      hasNextPage={hasNextPage}
+      isFetchingNextPage={isFetchingNextPage}
+      isError={isError}
+      onLoadMore={onLoadMore}
+      errorMessage="Couldn’t load more titles."
+    />
   );
 }
 

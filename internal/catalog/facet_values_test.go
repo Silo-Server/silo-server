@@ -131,14 +131,14 @@ func staticLoad(l *facetValueList, calls *atomic.Int32) func(context.Context) (*
 
 func TestFacetValueCacheKeySeparatesScopes(t *testing.T) {
 	query := "SELECT name, n FROM x WHERE mi.media_folder_id = ANY($1)"
-	a, okA := facetCacheKey(query, []any{[]int{1}})
-	b, okB := facetCacheKey(query, []any{[]int{2}})
-	a2, _ := facetCacheKey(query, []any{[]int{1}})
-	other, _ := facetCacheKey(query+" AND TRUE", []any{[]int{1}})
+	a, okA := queryCacheKey(query, []any{[]int{1}})
+	b, okB := queryCacheKey(query, []any{[]int{2}})
+	a2, _ := queryCacheKey(query, []any{[]int{1}})
+	other, _ := queryCacheKey(query+" AND TRUE", []any{[]int{1}})
 	if !okA || !okB || a == b || a != a2 || a == other {
 		t.Fatalf("keys: a=%x b=%x a2=%x other=%x", a, b, a2, other)
 	}
-	if _, ok := facetCacheKey(query, []any{make(chan int)}); ok {
+	if _, ok := queryCacheKey(query, []any{make(chan int)}); ok {
 		t.Fatal("an argument that cannot be encoded must make the scope uncacheable")
 	}
 
@@ -465,38 +465,4 @@ func TestSearchFacetAnswersMatchesAndValues(t *testing.T) {
 	if len(facets.searches) != 0 {
 		t.Fatalf("empty q reached the fetcher: %v", facets.searches)
 	}
-}
-
-// A history facet search without a snapshot must build the same scope
-// arguments on every keystroke, or its cached list is never reused.
-func TestSearchFacetHistoryScopeIsStableAcrossCalls(t *testing.T) {
-	resolver := &CatalogResolver{browseRepo: &BrowseRepository{}}
-	req := CatalogRequest{Source: CatalogSourceHistory}
-	access := AccessFilter{UserID: 7, ProfileID: "p1"}
-	keystrokes := func() (*columnRecordingFetcher, bool) {
-		facets := &columnRecordingFetcher{}
-		resolver.facets = facets
-		for _, q := range []string{"d", "dr"} {
-			if _, err := resolver.SearchFacet(t.Context(), req, access, "genre", q, 10); err != nil {
-				t.Fatal(err)
-			}
-		}
-		a, _ := facetCacheKey(facets.filters[0].contentSourceSQL, facets.filters[0].contentSourceArgs)
-		b, _ := facetCacheKey(facets.filters[1].contentSourceSQL, facets.filters[1].contentSourceArgs)
-		return facets, a == b
-	}
-	// Two keystrokes can straddle a minute boundary; three tries in a row
-	// cannot.
-	for range 3 {
-		facets, same := keystrokes()
-		if !same {
-			continue
-		}
-		snapshot, ok := facets.filters[0].contentSourceArgs[2].(time.Time)
-		if !ok || snapshot.Before(time.Now()) {
-			t.Fatalf("default snapshot = %v, want a time that covers now", facets.filters[0].contentSourceArgs[2])
-		}
-		return
-	}
-	t.Fatal("history scope arguments differ between keystrokes")
 }

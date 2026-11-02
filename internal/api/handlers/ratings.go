@@ -29,11 +29,10 @@ type LocalRatingEventDispatcher interface {
 
 // RatingsHandler handles user rating operations.
 type RatingsHandler struct {
-	ratingsRepo             ratingsRepository
-	itemRepo                personalDataItemRepository
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	ratingDispatcher        LocalRatingEventDispatcher
+	ratingsRepo      ratingsRepository
+	itemRepo         personalDataItemRepository
+	signalsNotifier  SignalsChangedNotifier
+	ratingDispatcher LocalRatingEventDispatcher
 }
 
 // NewRatingsHandler creates a new RatingsHandler.
@@ -41,24 +40,16 @@ func NewRatingsHandler(ratingsRepo ratingsRepository, itemRepo personalDataItemR
 	return &RatingsHandler{ratingsRepo: ratingsRepo, itemRepo: itemRepo}
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *RatingsHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *RatingsHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *RatingsHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 // SetLocalRatingEventDispatcher configures where rating changes are sent for
 // watch-provider sync.
 func (h *RatingsHandler) SetLocalRatingEventDispatcher(dispatcher LocalRatingEventDispatcher) {
 	h.ratingDispatcher = dispatcher
-}
-
-func (h *RatingsHandler) markStale(ctx context.Context, userID int, profileID string) {
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
 }
 
 func (h *RatingsHandler) dispatchRatingChange(ctx context.Context, userID int, profileID, itemID string) {
@@ -135,7 +126,7 @@ func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, i
 	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, rating); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set rating")
 	}
-	h.markStale(ctx, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }
@@ -165,7 +156,7 @@ func (h *RatingsHandler) DeleteRating(ctx context.Context, userID int, profileID
 	if err := h.ratingsRepo.Delete(ctx, userID, profileID, itemID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete rating")
 	}
-	h.markStale(ctx, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }

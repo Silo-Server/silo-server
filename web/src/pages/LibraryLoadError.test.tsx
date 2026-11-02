@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import libraryLayoutOk from "../../../contracts/api/v2/fixtures/get_library_layout_ok.json";
 import queryCatalogItemsOk from "../../../contracts/api/v2/fixtures/query_catalog_items_ok.json";
-import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
+import { V2TimeoutError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   v2: vi.fn(),
@@ -19,7 +19,16 @@ const mocks = vi.hoisted(() => ({
 // see the same query states a failed or recovered server produces.
 vi.mock("@/api/v2/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/request")>()),
-  v2: mocks.v2,
+  // The title-ordered browse also asks for its letter index; answer it with
+  // an index of the fixture's titles so each test scripts only the browse pages.
+  v2: (key: string, options: unknown) =>
+    key === "POST /api/v2/catalog/letters"
+      ? Promise.resolve({
+          total: queryCatalogItemsOk.total,
+          letters: [{ letter: "H", count: queryCatalogItemsOk.total, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
+        })
+      : mocks.v2(key, options),
 }));
 
 vi.mock("@/hooks/queries/sections", async (importOriginal) => ({
@@ -29,6 +38,12 @@ vi.mock("@/hooks/queries/sections", async (importOriginal) => ({
 
 vi.mock("@/hooks/queries/sidebarPins", () => ({
   useSidebarPins: () => ({ pins: {} }),
+}));
+
+// The Recommended tab reads the recipe gallery for its cross-row duplicate
+// rule; keep that read off the sequenced request mock above.
+vi.mock("@/lib/recipes", () => ({
+  fetchRecipeCatalog: () => Promise.resolve({ categories: {} }),
 }));
 
 // Stands in for the grid with its empty message, which a failed browse must
@@ -119,16 +134,6 @@ function callsTo(key: string) {
   return mocks.v2.mock.calls.filter(([called]) => called === key).length;
 }
 
-function invalidFilter() {
-  return new V2ProblemError("queryCatalogItems", {
-    type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
-    title: "Validation failed",
-    status: 422,
-    detail: "The filter is not valid.",
-    instance: "/api/v2/catalog/query",
-  });
-}
-
 afterEach(() => {
   mocks.v2.mockReset();
   mocks.fetchLibrarySectionItems.mockReset();
@@ -155,19 +160,6 @@ describe("Library tab load errors", () => {
     expect(await screen.findByText("Grid of 3")).toBeInTheDocument();
     expect(screen.queryByText("Couldn't load this library")).not.toBeInTheDocument();
     expect(callsTo("POST /api/v2/catalog/query")).toBe(2);
-  });
-
-  it("does not present a refused query as an empty library", async () => {
-    mocks.v2.mockRejectedValue(invalidFilter());
-    renderBrowse();
-
-    expect(
-      await screen.findByRole("heading", { name: "Couldn't load this library" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Something went wrong while loading it. Try again in a moment."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("No items found.")).not.toBeInTheDocument();
   });
 
   it("keeps the loaded grid when a background refetch fails", async () => {

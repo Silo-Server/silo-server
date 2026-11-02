@@ -52,7 +52,7 @@ func TestParentUserDataResponsesRollUpChildren(t *testing.T) {
 				if err := store.SetProgressAt(t.Context(), session.ProfileID, "episode-1", 0, 100, true, time.Now()); err != nil {
 					t.Fatal(err)
 				}
-				if err := store.AddFavorite(t.Context(), session.ProfileID, kind); err != nil {
+				if _, err := store.AddFavorite(t.Context(), session.ProfileID, kind); err != nil {
 					t.Fatal(err)
 				}
 				run := func(handler http.HandlerFunc, body string, played bool, unplayed int, favorite bool) {
@@ -85,15 +85,11 @@ func TestParentUserDataResponsesRollUpChildren(t *testing.T) {
 				}
 				run(h.HandleGetUserData, "", false, partial, true)
 				run(h.HandleGetUserDataLegacy, "", false, partial, true)
-				for _, pair := range [][2]http.HandlerFunc{{h.HandleMarkPlayed, h.HandleMarkUnplayed}, {h.HandleMarkPlayedLegacy, h.HandleMarkUnplayedLegacy}} {
-					run(pair[0], "", !empty, 0, true)
-					run(h.HandleGetUserData, "", !empty, 0, true)
-					run(pair[1], "", false, total, true)
-				}
-				for _, update := range []http.HandlerFunc{h.HandleUpdateUserData, h.HandleUpdateUserDataLegacy} {
-					run(update, `{"PlayCount":1,"IsFavorite":true}`, !empty, 0, true)
-					run(update, `{"Played":false,"IsFavorite":false}`, false, total, false)
-				}
+				run(h.HandleMarkPlayed, "", !empty, 0, true)
+				run(h.HandleGetUserData, "", !empty, 0, true)
+				run(h.HandleMarkUnplayed, "", false, total, true)
+				run(h.HandleUpdateUserData, `{"PlayCount":1,"IsFavorite":true}`, !empty, 0, true)
+				run(h.HandleUpdateUserData, `{"Played":false,"IsFavorite":false}`, false, total, false)
 				run(h.HandleAddFavorite, "", false, total, true)
 				run(h.HandleRemoveFavorite, "", false, total, false)
 				if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "other", Name: "Other"}); err != nil {

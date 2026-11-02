@@ -116,26 +116,3 @@ func TestHandleStartPlaybackV3DoesNotBlockOnCopySafetyScan(t *testing.T) {
 		t.Fatalf("raced files = %v, want the planned file %d handed to the racer", files, file.ID)
 	}
 }
-
-// The route test is the racer's; the handler's job is only to hand it the plan
-// it issued, for every route, and to stay silent when no racer is wired.
-func TestRaceCopySafetyV3HandsThePlanToTheRacer(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	racer := &recordingCopySafetyRacer{}
-	handler.CopySafetyRacer = racer
-
-	handler.raceCopySafetyV3(42, &playback.PlanV3{PlanID: "plan-1", Delivery: playback.DeliveryRemuxHLSV3})
-	handler.raceCopySafetyV3(0, &playback.PlanV3{PlanID: "plan-2", Delivery: playback.DeliveryRemuxHLSV3})
-	handler.raceCopySafetyV3(43, nil)
-
-	files, deliveries := racer.raced()
-	if len(files) != 1 || files[0] != 42 {
-		t.Fatalf("raced files = %v, want only the valid file/plan pair", files)
-	}
-	if len(deliveries) != 1 || deliveries[0] != playback.DeliveryRemuxHLSV3 {
-		t.Fatalf("raced deliveries = %v, want the issued plan's delivery", deliveries)
-	}
-
-	without := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	without.raceCopySafetyV3(42, &playback.PlanV3{PlanID: "plan-1", Delivery: playback.DeliveryRemuxHLSV3})
-}

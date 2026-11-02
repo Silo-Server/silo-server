@@ -15,7 +15,7 @@ import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
   type VersionSubtitleInventoryRow,
@@ -142,7 +142,7 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
   }
 
   const language = getLanguageName(track.language ?? "") || "Unknown";
-  const codec = track.codec ? mapAudioLabel(track.codec) : "";
+  const codec = audioTrackLabel(track);
   const channels = formatChannels(track.channels);
   return [language, codec, channels].filter(Boolean).join(" · ");
 }
@@ -247,7 +247,6 @@ export function resolveAutoSubtitleSelection(options: {
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
   audioLanguage?: string | null;
-  profileLanguage?: string | null;
 }): PrePlaySubtitleCandidate | null {
   const {
     candidates,
@@ -256,7 +255,6 @@ export function resolveAutoSubtitleSelection(options: {
     subtitleMode,
     showForcedSubtitles = true,
     audioLanguage,
-    profileLanguage,
   } = options;
 
   if (candidates.length === 0) {
@@ -280,7 +278,6 @@ export function resolveAutoSubtitleSelection(options: {
     preferredLanguage: preferredSubtitleLanguage ?? null,
     preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
     audioLanguage: audioLanguage ?? null,
-    profileLanguage: profileLanguage ?? null,
     showForcedSubtitles,
   });
 

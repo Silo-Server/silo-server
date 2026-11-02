@@ -19,6 +19,7 @@ import {
 } from "@/api/v2/adminApiKeys";
 import { isCapturedProfileAuthorityActive } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -126,23 +127,21 @@ function ApiKeyManager() {
     }
   }
   return (
-    <div className="page-shell flex flex-col gap-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="flex flex-col gap-3">
-          <h1 className="page-title">API Keys</h1>
-          <p className="page-subtitle">
-            Create and manage credentials for integrations and automation.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!capability.data?.available}
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus data-icon="inline-start" />
-          Create Key
-        </Button>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="API Keys"
+        subtitle="Create and manage credentials for integrations and automation."
+        actions={
+          <Button
+            size="sm"
+            disabled={!capability.data?.available}
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus data-icon="inline-start" />
+            Create Key
+          </Button>
+        }
+      />
       {capability.isPending ? (
         <p role="status">Checking API key management…</p>
       ) : capability.isError ? (

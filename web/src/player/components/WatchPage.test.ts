@@ -98,10 +98,14 @@ function playbackSession(
     connectionStatus: "connected",
     connectionErrorTitle: null,
     connectionError: null,
+    browserEngine: null,
+    nativeOriginalSupport: { containers: [], videoCodecs: [], audioCodecs: [] },
     switchVersion: vi.fn(),
+    versionPinned: vi.fn(() => false),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
+    setKeptEstimate: vi.fn(),
     recoverFromFailure: vi.fn(),
     recoverConnection: vi.fn(),
     retryConnection: vi.fn(),
@@ -534,4 +538,48 @@ it("bounds sheet error refreshes and lets a changed file refresh independently",
   refresh();
   expect(trickplayRefetchMock).toHaveBeenCalledTimes(3);
   clock.mockRestore();
+});
+
+it("merges marker images only into the active session's matching occurrence", () => {
+  playbackSessionMock.mockReturnValue(playbackSession());
+  const props = {
+    ...watchPageProps,
+    versions: [
+      {
+        ...version,
+        marker_segments: [{ kind: "intro" as const, start_seconds: 6, end_seconds: 9 }],
+      },
+    ],
+  };
+  const view = render(createElement(WatchPage, props));
+  const event = {
+    type: "event",
+    session_id: "session-1",
+    name: "marker_thumbnail_ready",
+    payload: {
+      session_id: "session-1",
+      file_id: 7,
+      kind: "intro",
+      start_seconds: 6,
+      end_seconds: 9,
+      thumbnail_url: "/yellow.webp",
+      thumbnail_capture_seconds: 6,
+    },
+  };
+  const receive = (message: unknown) =>
+    act(() => videoPlayerMock.mock.calls.at(-1)?.[0].onRealtimeEvent(message));
+  receive({ ...event, payload: { ...event.payload, end_seconds: 10 } });
+  expect(videoPlayerMock.mock.calls.at(-1)?.[0].markerSegments[0].thumbnail_url).toBeUndefined();
+  playbackSessionMock.mockReturnValue(playbackSession({ sessionId: "session-2" }));
+  view.rerender(createElement(WatchPage, props));
+  receive(event);
+  expect(videoPlayerMock.mock.calls.at(-1)?.[0].markerSegments[0].thumbnail_url).toBeUndefined();
+  receive({
+    ...event,
+    session_id: "session-2",
+    payload: { ...event.payload, session_id: "session-2" },
+  });
+  expect(videoPlayerMock.mock.calls.at(-1)?.[0].markerSegments[0].thumbnail_url).toBe(
+    "/yellow.webp",
+  );
 });

@@ -118,7 +118,12 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 			if ctx.Err() != nil {
 				return nil, warnings, ctx.Err()
 			}
-			warnings = append(warnings, fmt.Sprintf("failed to fetch watched %s from section %q: %v", kind.noun, section.Title, err))
+			// A source over the size limits fails the run rather than
+			// importing without the section.
+			if errors.Is(err, ErrUpstreamResponseTooLarge) {
+				return nil, warnings, err
+			}
+			warnings = append(warnings, fmt.Sprintf(warnPlexSectionUnavailable, "watched", kind.noun, section.Title, err))
 		}
 		allItems = append(allItems, watched...)
 		inProgress, err := p.client.FetchInProgressItems(ctx, p.baseURL, p.token, section.Key, kind.mediaType)
@@ -126,7 +131,10 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 			if ctx.Err() != nil {
 				return nil, warnings, ctx.Err()
 			}
-			warnings = append(warnings, fmt.Sprintf("failed to fetch in-progress %s from section %q: %v", kind.noun, section.Title, err))
+			if errors.Is(err, ErrUpstreamResponseTooLarge) {
+				return nil, warnings, err
+			}
+			warnings = append(warnings, fmt.Sprintf(warnPlexSectionUnavailable, "in-progress", kind.noun, section.Title, err))
 		}
 		allItems = append(allItems, inProgress...)
 	}
@@ -165,8 +173,11 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	// watch-history import still completes (issue #245).
 	if p.accountToken != "" {
 		items, watchlistWarnings, err := p.client.FetchWatchlist(ctx, p.accountToken)
+		if errors.Is(err, ErrUpstreamResponseTooLarge) {
+			return nil, warnings, err
+		}
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: %v", err))
+			warnings = append(warnings, warnPlexWatchlistUnavailablePrefix+err.Error())
 		} else {
 			warnings = append(warnings, watchlistWarnings...)
 			for _, item := range items {

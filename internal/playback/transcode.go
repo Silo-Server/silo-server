@@ -19,17 +19,23 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"github.com/google/uuid"
 )
 
 func init() {
 	// Register .m4s so http.ServeFile sets the correct Content-Type for
 	// fMP4 HLS segments. Go's default MIME database does not include it.
 	_ = mime.AddExtensionType(".m4s", "video/mp4")
+	// Pin .ts for MPEG-TS HLS segments: the system database Go reads first
+	// (shared-mime-info, as in the server image) lists .ts as Qt Linguist
+	// text before video/mp2t.
+	_ = mime.AddExtensionType(".ts", mimeVideoMPEGTS)
 }
 
 // TranscodeOpts holds configuration for an HLS transcode session.
@@ -49,10 +55,22 @@ type TranscodeOpts struct {
 	SourceVideoBitDepth  int
 	VideoBitstreamFilter string // validated copy-mode BSF: DV7ToHDR10BitstreamFilter
 	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
+	// VideoRange is the HLS VIDEO-RANGE a copy remux's subtitle rendition
+	// variant names (CopyHLSVideoRange): "", PQ, or HLG.
+	VideoRange string
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
-	SeekSeconds     float64
+	// KeyframePlaylist serves a copy-video stream that starts at the
+	// beginning as one complete VOD playlist planned from the source's
+	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
+	// durable because a reconstructed session must keep serving the playlist
+	// the player already has.
+	KeyframePlaylist bool
+	// Reconstructed marks a session rebuilt from its recipe after its server
+	// or node lost it. It isn't durable: each rebuild sets it.
+	Reconstructed bool
+	SeekSeconds   float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
 	// FFmpeg performs exactly one demuxer seek; this origin keeps response and
@@ -122,11 +140,32 @@ type TranscodeOpts struct {
 	// filter_complex pipeline; text codecs use the libass subtitles filter.
 	// Empty preserves the legacy text path for callers minted before the field.
 	SubtitleCodec string
+	// SubtitleRendition emits the selected embedded text track
+	// (SubtitleTrackIndex, never burned in) from this same ffmpeg process as
+	// the WebVTT subtitle rendition of its HLS playlist, for a transcode or
+	// an HLS copy remux. See subtitle_rendition.go.
+	SubtitleRendition bool
+	// SubtitleRenditionTracks, with SubtitleRendition, lists every embedded
+	// text track as a rendition of its own, read on demand through the
+	// source's index instead of by this ffmpeg process; SubtitleTrackIndex then
+	// only names the selected one. See subtitle_rendition_tracks.go.
+	SubtitleRenditionTracks []SubtitleRenditionTrack
+	// SubtitleRenditionSource is the source version the on-demand renditions
+	// were planned from; segments are read from that version only.
+	SubtitleRenditionSource SubtitleRenditionSource
+	// MediaFileID is the catalog file InputPath is, or 0 when unknown. On-demand
+	// subtitle renditions find the file's kept tracks by it.
+	MediaFileID int
+	// subtitleCueFile is the per-generation cue file the rendition output
+	// writes. Process-local: every start and restart derives its own.
+	subtitleCueFile string
 	// PreparedTracks selects the multi-track stream layout of a prepared
 	// download (PrepareFile only). Nil keeps the legacy single-audio,
 	// subtitle-free layout that older artifacts were encoded with.
 	PreparedTracks  *PreparedTracks
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
+	// RequireAudioTrack rejects sources missing the negotiated audio ordinal.
+	RequireAudioTrack bool
 	// SourceAudioChannels is the selected source stream's channel count. Zero
 	// means unknown and deliberately disables stereo downmix gain: boosting an
 	// already-stereo stream would change its authored level.
@@ -147,6 +186,12 @@ type TranscodeOpts struct {
 	NodeType        string
 	ExecutionMode   string
 	FFmpegLogSink   FFmpegLogSink
+
+	// HLSVariableSubstitution is the client's hls_variable_substitution_v1
+	// delivery feature: FFmpeg's real playlist carries a credential-sized
+	// query once through EXT-X-DEFINE instead of on every segment URI. It
+	// changes playlist text only, never media bytes.
+	HLSVariableSubstitution bool
 	// PrepareProgressSink receives PrepareFile's live encode progress. Like
 	// the log sink it is process-local and never frozen into a recipe.
 	PrepareProgressSink PrepareProgressSink
@@ -255,6 +300,24 @@ type TranscodeSession struct {
 	// reacquires this same device rather than re-running selection, so a restart
 	// keeps its GPU affinity and stays visible in per-device reporting.
 	hwWorkloadDevice string
+	// copyPlan is the planned segment list served instead of FFmpeg's
+	// playlist, or nil. It is fixed when the session starts.
+	copyPlan *copySegmentPlan
+	// subtitleSpans lists each generation's subtitle rendition cue file,
+	// oldest first, including those an earlier session recorded in the same
+	// output directory. Guarded by mu.
+	subtitleSpans []subtitleCueSpan
+	// subtitleCueBase is added to segmentGeneration to number cue files, so
+	// a session rebuilt on an output directory never reuses a recorded name.
+	subtitleCueBase uint64
+	// subtitleRecordMu serializes writes of the span record.
+	subtitleRecordMu sync.Mutex
+	// outputRemoved is set once shutdown removes the output directory, so a
+	// late span record write cannot recreate files in it. Guarded by mu.
+	outputRemoved bool
+	// subtitleOriginMu serializes observations of a span's origin, so
+	// concurrent subtitle requests share one ffprobe run.
+	subtitleOriginMu sync.Mutex
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -276,7 +339,6 @@ func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
 type SegmentProgress struct {
 	ProducedHead    int
-	ProducedCount   int
 	LastProducedAt  time.Time
 	ManifestModTime time.Time
 	// GenerationStartedAt is when the ffmpeg process that currently owns the
@@ -302,6 +364,9 @@ type SegmentRecoveryDecision struct {
 	Progress         SegmentProgress
 }
 
+// segmentReasonRestarting is the recovery reason while a restart is in flight.
+const segmentReasonRestarting = "transcode_restarting"
+
 // defaultSegmentDuration is the segment length when not specified. Short
 // segments (2s) allow the player to start quickly while still maintaining
 // efficient HTTP delivery. This matches the approach used by Plex.
@@ -317,16 +382,6 @@ const DefaultSegmentDuration = defaultSegmentDuration
 // count. At the default two-second duration this preserves the historical
 // 100,000-second limit; shorter fragments reach the same bound sooner.
 const maxSyntheticManifestSegments = 50_000
-
-// Large synthetic playlists used to repeat the full access and reconstruction
-// query on every segment URI. For a feature-length title that turns a small
-// index into several megabytes of duplicate JWT text, delaying both transfer
-// and hls.js parsing. HLS variable substitution keeps the query once while
-// preserving the exact resolved segment URLs. Keep small playlists on the
-// simpler legacy form; below this byte threshold the saving is immaterial.
-const minManifestQuerySubstitutionSavings = 64 * 1024
-
-const manifestQueryVariable = "silo_query"
 
 // remountStartOffsetSeconds is a positive, effectively-zero HLS start offset.
 // Media3 suppresses live-edge position projection for EVENT playlists only
@@ -358,6 +413,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		opts.VideoSampleEntry != "" && !strings.EqualFold(opts.TargetCodecVideo, "copy") &&
 			(opts.VideoSampleEntry != VideoSampleEntryHVC1 || !strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC)) {
 		return nil, fmt.Errorf("unsupported video sample-entry recipe")
+	}
+	if !validCopyHLSVideoRange(opts) {
+		return nil, errors.New("unsupported HLS video range")
 	}
 	if opts.CopyVideoMPEGTS && !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return nil, fmt.Errorf("copy-video MPEG-TS requires video copy")
@@ -408,11 +466,29 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
+	copyPlan := resolveCopyPlan(ctx, opts)
+	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
+		// Rebuilding without the plan would serve FFmpeg's playlist to a
+		// player that may hold the planned one; a later request rebuilds.
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
+	}
+	if copyPlan != nil {
+		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+	}
 
 	// The synchronous source guard above is bounded by the caller's startup
 	// context. Once it succeeds, keep the established behavior where the
 	// transcode process outlives a disconnected manifest request.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// Read before ffmpeg starts, while the playlist on disk is still the
+	// earlier session's.
+	var subtitleSpans []subtitleCueSpan
+	var subtitleCueBase uint64
+	if subtitleRenditionActive(opts) {
+		subtitleSpans, subtitleCueBase = loadSubtitleSpans(opts, copyPlan)
+		opts.subtitleCueFile = subtitleCueFileName(subtitleCueBase)
+	}
 	s := &TranscodeSession{
 		cancel:               cancel,
 		opts:                 opts,
@@ -426,6 +502,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		lastPruneHighWater:   opts.StartSegmentNumber - 1,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
+		copyPlan:             copyPlan,
+		subtitleSpans:        subtitleSpans,
+		subtitleCueBase:      subtitleCueBase,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -437,7 +516,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -463,6 +542,8 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	s.stdinPipe = stdinPipe
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
+	s.startSubtitleSpanLocked(opts)
+	s.saveSubtitleSpans()
 	s.logFFmpegEvent(ctx, "ffmpeg process started", "")
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
@@ -628,13 +709,15 @@ func validateToneMapOpts(opts TranscodeOpts) error {
 		}
 	case tonemap.ModeHardware:
 		switch opts.HWAccel {
-		case transcodeHWQSV, transcodeHWVAAPI:
-			expected := tonemap.HardwareFilterVAAPI
-			if opts.HWAccel == transcodeHWQSV {
-				expected = tonemap.HardwareFilterOpenCL
+		case transcodeHWQSV:
+			if opts.ToneMapFilter != tonemap.HardwareFilterOpenCL {
+				return fmt.Errorf("unsupported qsv tone-map filter %q", opts.ToneMapFilter)
 			}
-			if opts.ToneMapFilter != expected {
-				return fmt.Errorf("unsupported %s tone-map filter %q", opts.HWAccel, opts.ToneMapFilter)
+		case transcodeHWVAAPI:
+			// The probe picks tonemap_opencl on Intel GPUs, whose own VAAPI
+			// tone mapper gives wrong colors, and tonemap_vaapi elsewhere.
+			if opts.ToneMapFilter != tonemap.HardwareFilterVAAPI && opts.ToneMapFilter != tonemap.HardwareFilterOpenCL {
+				return fmt.Errorf("unsupported vaapi tone-map filter %q", opts.ToneMapFilter)
 			}
 		case transcodeHWNVENC:
 			if opts.ToneMapFilter != tonemap.HardwareFilterCUDA {
@@ -649,6 +732,9 @@ func validateToneMapOpts(opts TranscodeOpts) error {
 		}
 	default:
 		return fmt.Errorf("unsupported tone-map mode %q", opts.ToneMapMode)
+	}
+	if opts.ToneMapSourceKind == tonemap.SourceDolbyVision && !tonemap.FilterAppliesDolbyVision(opts.ToneMapFilter) {
+		return fmt.Errorf("tone-map filter %q cannot apply a Dolby Vision RPU", opts.ToneMapFilter)
 	}
 	return nil
 }
@@ -891,6 +977,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		args = append(args, "-start_number", fmt.Sprintf("%d", opts.StartSegmentNumber))
 	}
 	args = append(args, manifestPath)
+	args = appendSubtitleRenditionOutputArgs(args, opts)
 
 	return args
 }
@@ -971,7 +1058,11 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-map", "0:v:0")
 	}
 	if audioTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
+		audioMap := fmt.Sprintf("0:a:%d", audioTrackIndex)
+		if !opts.RequireAudioTrack {
+			audioMap += "?"
+		}
+		args = append(args, "-map", audioMap)
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}
@@ -1096,6 +1187,9 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			vaapiDevice = "/dev/dri/renderD128" // last-resort fallback
 		}
 		args = append(args, tonemap.VAAPIInitDeviceArgs(vaapiHWDeviceAlias, vaapiDevice)...)
+		if opts.ToneMapMode == tonemap.ModeHardware {
+			args = append(args, tonemap.VAAPIOpenCLInitArgs(vaapiHWDeviceAlias, opts.ToneMapFilter, opts.ToneMapSourceKind)...)
+		}
 		args = append(args, "-filter_hw_device", vaapiHWDeviceAlias)
 		if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
@@ -1416,8 +1510,13 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 	case tonemap.ModeHardware:
 		switch opts.HWAccel {
 		case transcodeHWQSV:
-			return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + "," + qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
+			height, _ := scaleTargetHeight(opts.TargetResolution)
+			return softwareToneMapUploadFilter(opts) + tonemap.IntelFilter(opts.ToneMapSourceKind, height) + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWVAAPI:
+			if vaapiOpenCLToneMap(opts) {
+				height, _ := scaleTargetHeight(opts.TargetResolution)
+				return softwareToneMapUploadFilter(opts) + tonemap.IntelFilter(opts.ToneMapSourceKind, height) + "," + tonemap.HDRMetadataRemovalFilter()
+			}
 			return softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "," + vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWNVENC:
 			if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
@@ -1427,7 +1526,7 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 				}
 				return filter + ",format=nv12,hwupload_cuda"
 			}
-			return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + "," + nvencScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
+			return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + "," + nvencScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWVideoToolbox:
 			return videoToolboxToneMapCPUFilter(opts) + "," + tonemap.HDRMetadataRemovalFilter()
 		}
@@ -1454,14 +1553,18 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 	}
 	switch opts.HWAccel {
 	case transcodeHWQSV:
-		return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload,hwmap=derive_device=qsv:mode=read+write,format=qsv," + tonemap.HDRMetadataRemovalFilter()
+		return softwareToneMapUploadFilter(opts) + tonemap.IntelFilter(opts.ToneMapSourceKind, 0) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload,hwmap=derive_device=qsv:mode=read+write,format=qsv," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWVAAPI:
-		return softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload," + tonemap.HDRMetadataRemovalFilter()
+		filter := tonemap.VAAPIFilter(opts.ToneMapSourceKind)
+		if vaapiOpenCLToneMap(opts) {
+			filter = tonemap.IntelFilter(opts.ToneMapSourceKind, 0)
+		}
+		return softwareToneMapUploadFilter(opts) + filter + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWNVENC:
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
 			return nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "," + cpuTail + ",format=nv12,hwupload_cuda"
 		}
-		return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter()
+		return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWVideoToolbox:
 		return videoToolboxToneMapCPUFilter(opts) + "," + subFilter + "," + tonemap.HDRMetadataRemovalFilter()
 	default:
@@ -1486,18 +1589,26 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 
 	switch opts.HWAccel {
 	case transcodeHWQSV:
-		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + "[vmain];" +
-			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
-			qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.IntelFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+				subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
+				qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		} else {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + openCLBitmapSubtitleGraph(opts, subInput)
+		}
 	case transcodeHWVAAPI:
-		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "[vmain];" +
-			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
-			vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		if vaapiOpenCLToneMap(opts) {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + openCLBitmapSubtitleGraph(opts, subInput)
+		} else {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "[vmain];" +
+				subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
+				vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		}
 	case transcodeHWNVENC:
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
 			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
 		} else {
-			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + ",hwdownload,format=nv12[vmain];[vmain]" +
+			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
 				subInput + "overlay=eof_action=pass"
 		}
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
@@ -1514,15 +1625,44 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 	return append(args, "-filter_complex", graph)
 }
 
+// openCLBitmapSubtitleGraph composites a bitmap subtitle onto an HDR frame
+// while it is still on the OpenCL device after tone mapping, then scales it
+// there, for QSV and for VAAPI on an Intel GPU. overlay_vaapi reading the
+// tone-mapped surface corrupts frames the same way a scale_vaapi does (see
+// tonemap.IntelFilter). The subtitle goes on at the source resolution before
+// the scale, as with overlay_vaapi, and its RGB frames are converted with the
+// BT.709 matrix of the tone-mapped frame.
+//
+// scale_opencl, overlay_opencl's eof_action and YUVA overlays, and a shared
+// OpenCL device for both hwupload and hwmap come from Jellyfin FFmpeg, which
+// the OpenCL tone-map path already requires for tonemap_opencl's bt2390 curve.
+// The probe's listing gate checks that both filters exist.
+func openCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
+	scale := ""
+	if height, ok := scaleTargetHeight(opts.TargetResolution); ok {
+		scale = fmt.Sprintf("scale_opencl=w=-2:h=%d,", height)
+	}
+	tail := tonemap.IntelOpenCLReturnFilter()
+	if opts.HWAccel == transcodeHWQSV {
+		tail += "," + tonemap.QSVInteropFilter()
+	}
+	return tonemap.IntelOpenCLToneMapFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+		subInput + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass," + scale +
+		tail + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+}
+
+// vaapiOpenCLToneMap reports whether a VAAPI recipe tone maps on OpenCL, as
+// the probe selects on Intel GPUs.
+func vaapiOpenCLToneMap(opts TranscodeOpts) bool {
+	return opts.HWAccel == transcodeHWVAAPI && tonemap.OpenCLToneMaps(opts.ToneMapFilter, opts.ToneMapSourceKind)
+}
+
 // softwareToneMapUploadFilter moves CPU-decoded frames onto the configured
 // Intel or VAAPI device before invoking the selected hardware tone-map graph.
 func softwareToneMapUploadFilter(opts TranscodeOpts) string {
 	if opts.SoftwareVideoDecode && (opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI) {
-		format := "nv12"
-		if !tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			format = "p010le"
-		}
-		return "format=" + format + ",hwupload,"
+		return tonemap.SoftwareUploadFilter(opts.ToneMapSourceKind)
 	}
 	return ""
 }
@@ -1950,14 +2090,15 @@ func prepareSubtitleFilterInput(opts *TranscodeOpts) error {
 	}
 
 	aliasPath := filepath.Join(opts.OutputDir, subtitleFilterAliasName)
-	target, err := os.Readlink(aliasPath)
+	// InputPath is fspath-encoded; the link must point at the real file name.
+	target, err := fspath.Readlink(aliasPath)
 	switch {
 	case err == nil:
 		if target != opts.InputPath {
 			return fmt.Errorf("prepare subtitle filter input: alias targets unexpected source")
 		}
 	case errors.Is(err, os.ErrNotExist):
-		if err := os.Symlink(opts.InputPath, aliasPath); err != nil {
+		if err := os.Symlink(fspath.Decode(opts.InputPath), aliasPath); err != nil {
 			return fmt.Errorf("prepare subtitle filter input: %w", err)
 		}
 	default:
@@ -2018,10 +2159,11 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
-	data, info, err := readManifestFile(manifestPath)
-	if err == nil && currentGeneration && s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest) {
-		data, err = nil, os.ErrNotExist
+	var inherited os.FileInfo
+	if currentGeneration {
+		inherited = s.inheritedManifest
 	}
+	data, err := readManifestFile(manifestPath, inherited)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if !s.running {
@@ -2031,9 +2173,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 				if s.waitErr != nil {
 					stderr := truncateStderr(s.stderr.String())
 					if stderr != "" {
-						return nil, fmt.Errorf("%w: %v (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr)
+						return nil, fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr)
 					}
-					return nil, fmt.Errorf("%w: %v", ErrTranscodeFailed, s.waitErr)
+					return nil, fmt.Errorf("%w: %w", ErrTranscodeFailed, s.waitErr)
 				}
 				return nil, ErrTranscodeFailed
 			}
@@ -2074,25 +2216,26 @@ func statManifest(outputDir string) os.FileInfo {
 	return info
 }
 
-// readManifestFile reads a playlist and describes the same open file. FFmpeg
-// replaces the playlist by rename, so a separate Stat by path could describe a
-// newer file than the bytes returned and let an inherited playlist pass as
-// current.
-func readManifestFile(path string) ([]byte, os.FileInfo, error) {
+// readManifestFile reads a playlist. When the open file is still inherited,
+// it reports os.ErrNotExist without reading the old playlist, which a startup
+// wait would otherwise read in full on every check. The comparison uses the
+// open file: FFmpeg replaces the playlist by rename, so a separate Stat by path
+// could describe a newer file than the bytes returned and let an inherited
+// playlist pass as current.
+func readManifestFile(path string, inherited os.FileInfo) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, nil, err
+	if inherited != nil && sameManifestFile(info, inherited) {
+		return nil, os.ErrNotExist
 	}
-	return data, info, nil
+	return io.ReadAll(f)
 }
 
 // sameManifestFile reports whether current is still the inherited playlist.
@@ -2103,6 +2246,14 @@ func sameManifestFile(current, inherited os.FileInfo) bool {
 		current.Size() == inherited.Size() &&
 		current.ModTime().Equal(inherited.ModTime())
 }
+
+// outputPollInterval is the pause between checks while a request waits for
+// FFmpeg output. FFmpeg tells the server nothing when it renames a finished
+// segment into place or rewrites the playlist, so a finished file can go
+// unnoticed for up to one interval. Every transcoded startup and seek waits on
+// output at least once. A check opens or stats one file, or reads the playlist
+// and stats its startup segments, so a short interval costs little.
+const outputPollInterval = 10 * time.Millisecond
 
 // WaitForManifest polls until the manifest is ready for playback or the timeout
 // expires. It keeps the initial request open long enough for FFmpeg to write
@@ -2139,7 +2290,7 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 		if err == nil {
 			return manifest, nil
 		}
-		if err != nil && err != ErrManifestNotReady {
+		if !errors.Is(err, ErrManifestNotReady) {
 			return nil, err
 		}
 
@@ -2148,20 +2299,47 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 			return nil, ctx.Err()
 		case <-deadline:
 			return nil, s.manifestTimeoutError(timeout)
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
 
 // BuildPlaybackManifest returns the manifest we should expose to clients.
 //
-// Copy-video sessions always expose FFmpeg's real manifest so the playlist
-// timing matches the variable-length fragments FFmpeg actually writes and the
-// seekable window reflects what FFmpeg has produced so far. Encoded transcodes
+// Copy-video sessions expose their keyframe plan or FFmpeg's real manifest, so
+// the playlist timing matches the variable-length fragments FFmpeg actually
+// writes and, without a plan, the seekable window reflects what FFmpeg has
+// produced so far. Encoded transcodes
 // use the synthetic full VOD manifest only while its segment count is bounded;
 // longer media uses FFmpeg's real sliding playlist.
+//
+// A session with a subtitle rendition answers its multivariant playlist, or
+// the media playlist rawQuery selects (see buildSubtitleRenditionPlaylist).
+//
+// A rawQuery longer than maxManifestQueryBytes is ErrManifestQueryTooLong.
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildPlaybackManifest(segPrefix, rawQuery)
+}
+
+// buildPlaybackManifest is BuildPlaybackManifest for a query manifestQuery
+// has already accepted.
+func (s *TranscodeSession) buildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	if s.HasSubtitleRendition() {
+		return s.buildSubtitleRenditionPlaylist(segPrefix, rawQuery)
+	}
+	return s.buildVideoPlaylist(segPrefix, rawQuery)
+}
+
+// buildVideoPlaylist is the session's video media playlist.
+func (s *TranscodeSession) buildVideoPlaylist(segPrefix, rawQuery string) ([]byte, error) {
 	opts := s.Opts()
+	if s.copyPlan != nil {
+		return s.copyPlan.manifest(opts, segPrefix, rawQuery), nil
+	}
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		// Copy-video, unknown-duration, or oversized sessions must use FFmpeg's
@@ -2171,6 +2349,9 @@ func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]
 			return nil, err
 		}
 		manifest = stabilizeCopyHLSRemountTimeline(manifest, opts)
+		if opts.HLSVariableSubstitution {
+			return RewriteManifestPathsWithSubstitution(manifest, segPrefix, rawQuery)
+		}
 		return RewriteManifestPaths(manifest, segPrefix, rawQuery)
 	}
 
@@ -2242,13 +2423,22 @@ const SourceTimelineQueryParam = "source_timeline"
 // first produced segment retains its source-time position. Synthetic manifests
 // already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
+	if s.copyPlan != nil {
+		// A planned playlist starts at the source's beginning and doesn't
+		// depend on FFmpeg's progress or restarts.
+		return s.buildPlaybackManifest(segPrefix, rawQuery)
+	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
 	s.mu.Unlock()
 	if restarting {
 		return nil, ErrManifestNotReady
 	}
-	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
+	manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -2260,7 +2450,12 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 
 	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
 	if rawQuery != "" {
-		gapURI += "?" + rawQuery
+		// Gap URIs take the query form the real segment URIs got.
+		gapQuery := rawQuery
+		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
+			gapQuery = reference
+		}
+		gapURI += "?" + gapQuery
 	}
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
 		timeline, err := parseManifestTimeline(manifest)
@@ -2697,19 +2892,21 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 
-	for _, entry := range timeline.entries {
-		segmentPath := filepath.Join(s.outputDir, segmentFilename(entry.number, opts))
-		info, err := os.Stat(segmentPath)
+	// FFmpeg numbers segments in order, renames each finished segment into
+	// place (-hls_flags temp_file) before rewriting the playlist to list it,
+	// and lists only its own segments because append_list is not set. The last
+	// listed segment still on disk is therefore both the highest and the most
+	// recently written, so the walk stops there instead of statting every
+	// entry of a playlist that can list 50,000 segments.
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		number := timeline.entries[i].number
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(number, opts)))
 		if err != nil || info.Size() <= 0 {
 			continue
 		}
-		progress.ProducedCount++
-		if entry.number > progress.ProducedHead {
-			progress.ProducedHead = entry.number
-		}
-		if info.ModTime().After(progress.LastProducedAt) {
-			progress.LastProducedAt = info.ModTime()
-		}
+		progress.ProducedHead = max(progress.ProducedHead, number)
+		progress.LastProducedAt = info.ModTime()
+		break
 	}
 
 	return progress
@@ -2724,6 +2921,9 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		RestartOnTimeout: true,
 		Progress:         progress,
 	}
+	if s.copyPlan != nil {
+		return s.plannedSegmentRecoveryDecision(segNum, decision)
+	}
 
 	switch {
 	// Restarting must be checked before Running: the restart window runs
@@ -2735,7 +2935,7 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
-		decision.Reason = "transcode_restarting"
+		decision.Reason = segmentReasonRestarting
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
 	case segNum < progress.StartSegmentNumber:
@@ -2773,6 +2973,26 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 // segPrefix is prepended to each segment filename (e.g. "segment/") and
 // rawQuery is appended as a query string (e.g. auth tokens).
 func (s *TranscodeSession) GenerateFullManifest(segPrefix, rawQuery string) []byte {
+	segExt := hlsSegmentExtension(s.Opts())
+	return s.generateSyntheticPlaylist(segPrefix, rawQuery, "seg_", segExt, segExt == ".m4s")
+}
+
+// syntheticSegmentCount is the number of fixed-duration segments the
+// synthetic playlist lists for the media.
+func syntheticSegmentCount(totalDuration float64, segmentDuration int) int {
+	if segmentDuration <= 0 {
+		segmentDuration = defaultSegmentDuration
+	}
+	if totalDuration <= 0 {
+		totalDuration = float64(segmentDuration) // fallback: single segment
+	}
+	return max(1, int(math.Ceil(totalDuration/float64(segmentDuration))))
+}
+
+// generateSyntheticPlaylist lists every fixed-duration segment of the media
+// under namePrefix%05d+ext. The video playlist and the subtitle rendition
+// playlist share it, so both carry exactly the same segment timeline.
+func (s *TranscodeSession) generateSyntheticPlaylist(segPrefix, rawQuery, namePrefix, segExt string, initMap bool) []byte {
 	opts := s.Opts()
 	totalDur := opts.TotalDuration
 	segDur := opts.SegmentDuration
@@ -2782,17 +3002,12 @@ func (s *TranscodeSession) GenerateFullManifest(segPrefix, rawQuery string) []by
 	if totalDur <= 0 {
 		totalDur = float64(segDur) // fallback: single segment
 	}
-
-	segCount := int(math.Ceil(totalDur / float64(segDur)))
-	if segCount < 1 {
-		segCount = 1
-	}
+	segCount := syntheticSegmentCount(totalDur, segDur)
 
 	queryDefinition, suffix, queryVersion := syntheticManifestQuery(segCount, rawQuery)
 
-	segExt := hlsSegmentExtension(opts)
 	hlsVersion := 3
-	if segExt == ".m4s" {
+	if initMap {
 		hlsVersion = 7
 	}
 	if queryVersion > hlsVersion {
@@ -2807,7 +3022,7 @@ func (s *TranscodeSession) GenerateFullManifest(segPrefix, rawQuery string) []by
 	buf.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	buf.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
 
-	if segExt == ".m4s" {
+	if initMap {
 		buf.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"%sinit.mp4%s\"\n", segPrefix, suffix))
 	}
 
@@ -2821,25 +3036,11 @@ func (s *TranscodeSession) GenerateFullManifest(segPrefix, rawQuery string) []by
 			}
 		}
 		buf.WriteString(fmt.Sprintf("#EXTINF:%.6f,\n", dur))
-		buf.WriteString(fmt.Sprintf("%sseg_%05d%s%s\n", segPrefix, i, segExt, suffix))
+		fmt.Fprintf(&buf, "%s%s%05d%s%s\n", segPrefix, namePrefix, i, segExt, suffix)
 	}
 
 	buf.WriteString("#EXT-X-ENDLIST\n")
 	return buf.Bytes()
-}
-
-func syntheticManifestQuery(segmentCount int, rawQuery string) (definition, suffix string, minVersion int) {
-	if rawQuery == "" {
-		return "", "", 0
-	}
-	legacySuffix := "?" + rawQuery
-	variableSuffix := "?{$" + manifestQueryVariable + "}"
-	savingsPerSegment := len(legacySuffix) - len(variableSuffix)
-	if savingsPerSegment <= 0 || int64(segmentCount)*int64(savingsPerSegment) < minManifestQuerySubstitutionSavings || strings.ContainsAny(rawQuery, "\"\r\n") {
-		return "", legacySuffix, 0
-	}
-	definition = fmt.Sprintf("#EXT-X-DEFINE:NAME=\"%s\",VALUE=\"%s\"\n", manifestQueryVariable, rawQuery)
-	return definition, variableSuffix, 8
 }
 
 // GetSegment returns the file path of a named segment if it exists.
@@ -2881,15 +3082,32 @@ func (l *SegmentLease) Close() error {
 
 // OpenSegment opens a completed segment for serving and captures its FFmpeg
 // generation atomically with the open.
+//
+// name must be a single file name inside the output directory. The open goes
+// through os.Root, so a symlink in the directory cannot lead outside it: the
+// subtitle filter alias points at the source media and must never be served as
+// a segment.
 func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
+	if !servableSegmentName(name) {
+		return nil, ErrSegmentNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.restarting != nil {
 		return nil, ErrSegmentNotFound
 	}
 
-	clean := filepath.Base(name)
-	segment, err := os.Open(filepath.Join(s.outputDir, clean))
+	root, err := os.OpenRoot(s.outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrSegmentNotFound
+		}
+		return nil, fmt.Errorf("open segment directory: %w", err)
+	}
+	// Files opened through a Root hold their own descriptor and stay valid
+	// after the Root closes.
+	defer func() { _ = root.Close() }()
+	segment, err := root.Open(name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrSegmentNotFound
@@ -2901,7 +3119,7 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		_ = segment.Close()
 		return nil, fmt.Errorf("stat segment: %w", err)
 	}
-	if info.Size() <= 0 {
+	if !info.Mode().IsRegular() || info.Size() <= 0 {
 		_ = segment.Close()
 		return nil, ErrSegmentNotFound
 	}
@@ -2914,6 +3132,14 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		Generation:      s.segmentGeneration,
 		GenerationToken: s.segmentGenerationTokenLocked(),
 	}, nil
+}
+
+// servableSegmentName reports whether name is a plain file name the segment
+// route may open: local, a single path element, and not the subtitle filter
+// alias.
+func servableSegmentName(name string) bool {
+	return filepath.IsLocal(name) && filepath.Base(name) == name && name != "." &&
+		name != subtitleFilterAliasName
 }
 
 // Close terminates the ffmpeg process and removes the temporary output directory.
@@ -2946,6 +3172,12 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 		<-s.done
 	}
 
+	if removeOutput {
+		// A span record write still in flight (an origin probe can outlive
+		// the request) must finish before the directory goes away.
+		s.subtitleRecordMu.Lock()
+		defer s.subtitleRecordMu.Unlock()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -2955,6 +3187,7 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 
 	// Clean up temporary directory.
 	if removeOutput && s.outputDir != "" {
+		s.outputRemoved = true
 		if err := os.RemoveAll(s.outputDir); err != nil {
 			return fmt.Errorf("remove output dir: %w", err)
 		}
@@ -3000,6 +3233,14 @@ func (s *TranscodeSession) SetAudioTrackIndex(index int) {
 	s.opts.AudioTrackIndex = index
 }
 
+// SetRequireAudioTrack updates whether ffmpeg must fail rather than drop the
+// selected audio track. Must be called before Restart() to take effect.
+func (s *TranscodeSession) SetRequireAudioTrack(required bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.RequireAudioTrack = required
+}
+
 // SetSourceAudioChannels updates the selected source track's channel count in
 // the session's opts. Must be called before Restart() so the rebuilt ffmpeg
 // command applies (or removes) the stereo-downmix loudness filter.
@@ -3024,7 +3265,7 @@ func (s *TranscodeSession) cleanStaleSegments(startSegment int) {
 			os.Remove(filepath.Join(s.outputDir, name))
 			continue
 		}
-		if name == "init.mp4" {
+		if name == hlsInitSegmentName {
 			continue
 		}
 		segNum, parseErr := ParseSegmentNumber(name)
@@ -3112,6 +3353,13 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	// A request can wait on the lifecycle lock behind another restart, and a
+	// player that seeks again abandons it. Restarting for it would move FFmpeg
+	// to a position nobody wants and delay the restart the player now waits
+	// on. Once started, a restart runs to completion (see restart).
+	if err := ctx.Err(); err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
@@ -3193,6 +3441,15 @@ func (s *TranscodeSession) restart(
 	if done != nil {
 		<-done
 	}
+	s.closeSubtitleSpan()
+
+	// A planned stream's segments only match its playlist when FFmpeg cuts
+	// them from the beginning, so it always restarts there. The requested
+	// segment stays the throttler's target, so FFmpeg runs on to reach it.
+	requestedSegment := startSegment
+	if s.copyPlan != nil {
+		seekSeconds, startSegment, streamOriginSeconds, copySeekAnchorResolved = 0, 0, 0, true
+	}
 
 	s.mu.Lock()
 	s.running = false
@@ -3232,6 +3489,11 @@ func (s *TranscodeSession) restart(
 		opts.CopySeekAnchorResolved = copySeekAnchorResolved
 	}
 	opts.FastStart = false // seek-restarts use veryfast for better quality
+	if subtitleRenditionActive(opts) {
+		s.mu.Lock()
+		opts.subtitleCueFile = subtitleCueFileName(s.subtitleCueBase + s.segmentGeneration)
+		s.mu.Unlock()
+	}
 
 	// Old segments are only reusable when this generation emits the same recipe
 	// as the previous one; otherwise they, and the manifest describing them,
@@ -3253,7 +3515,7 @@ func (s *TranscodeSession) restart(
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -3304,13 +3566,15 @@ func (s *TranscodeSession) restart(
 	s.running = true
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
-	s.lastRequestedSegment = startSegment
+	s.lastRequestedSegment = requestedSegment
 	s.lastCompletedSegment = startSegment - 1
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
+	s.startSubtitleSpanLocked(opts)
 	s.done = make(chan struct{})
 	hook := s.restartHook
 	s.mu.Unlock()
+	s.saveSubtitleSpans()
 	close(flight.done)
 
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
@@ -3350,13 +3614,13 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 			select {
 			case <-deadline:
 				return "", ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
 
 		if !running && waitErr != nil {
-			return "", fmt.Errorf("%w: %v", ErrTranscodeFailed, waitErr)
+			return "", fmt.Errorf("%w: %w", ErrTranscodeFailed, waitErr)
 		}
 		// If ffmpeg finished cleanly but the segment doesn't exist,
 		// it won't appear later — fail fast.
@@ -3367,7 +3631,7 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 		select {
 		case <-deadline:
 			return "", ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -3376,6 +3640,13 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 // closes the stat-to-open race for HTTP serving while preserving the same
 // restart and ffmpeg-exit error contract.
 func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration) (*SegmentLease, error) {
+	return s.WaitForOpenSegmentContext(context.Background(), name, timeout)
+}
+
+// WaitForOpenSegmentContext is WaitForOpenSegment that also returns ctx.Err()
+// as soon as ctx ends, so a request the client abandoned stops polling. It
+// does not stop FFmpeg.
+func (s *TranscodeSession) WaitForOpenSegmentContext(ctx context.Context, name string, timeout time.Duration) (*SegmentLease, error) {
 	deadline := time.After(timeout)
 	for {
 		segment, err := s.OpenSegment(name)
@@ -3394,9 +3665,11 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 
 		if restarting {
 			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			case <-deadline:
 				return nil, ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
@@ -3408,9 +3681,11 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 		}
 
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-deadline:
 			return nil, ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -3420,16 +3695,36 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 // string. This ensures the HLS player's segment requests match server routes
 // and preserve any auth or cache-busting parameters from the manifest URL.
 func RewriteManifestPaths(manifest []byte, segPrefix, rawQuery string) ([]byte, error) {
+	return rewriteManifestPaths(manifest, segPrefix, rawQuery, false)
+}
+
+// RewriteManifestPathsWithSubstitution is RewriteManifestPaths for a session
+// whose client negotiated hls_variable_substitution_v1: a credential-sized
+// query (see minRewrittenURISavings) is carried once through variable
+// substitution.
+func RewriteManifestPathsWithSubstitution(manifest []byte, segPrefix, rawQuery string) ([]byte, error) {
+	return rewriteManifestPaths(manifest, segPrefix, rawQuery, true)
+}
+
+func rewriteManifestPaths(manifest []byte, segPrefix, rawQuery string, substitute bool) ([]byte, error) {
 	if err := validateManifestHeader(manifest); err != nil {
 		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	var suffix string
+	lines := bytes.Split(manifest, []byte("\n"))
+	var suffix, definition string
 	if rawQuery != "" {
 		suffix = "?" + rawQuery
 	}
+	// Never define a variable beside the input's own definitions.
+	if substitute && rawQuery != "" && !bytes.Contains(manifest, []byte("#EXT-X-DEFINE:")) {
+		var reference string
+		definition, reference = manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings)
+		if definition != "" {
+			suffix = "?" + reference
+		}
+	}
 
-	lines := bytes.Split(manifest, []byte("\n"))
 	for i, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
@@ -3453,6 +3748,9 @@ func RewriteManifestPaths(manifest []byte, segPrefix, rawQuery string) ([]byte, 
 
 		// Segment filename line.
 		lines[i] = []byte(segPrefix + string(trimmed) + suffix)
+	}
+	if definition != "" {
+		lines = insertManifestDefinition(lines, definition)
 	}
 	return bytes.Join(lines, []byte("\n")), nil
 }
@@ -3481,10 +3779,10 @@ func rewriteMapURI(line []byte, segPrefix, suffix string) ([]byte, error) {
 }
 
 // AppendManifestQueryParam appends a single "key=value" query parameter to every
-// segment and #EXT-X-MAP init URI in an HLS media playlist, preserving any query
-// the URI already carries (using "?" or "&" as appropriate). The value is
-// appended verbatim — callers must supply a URL-safe value (a signed stream token
-// is base64url and safe). A manifest without a valid #EXTM3U header is returned
+// segment, variant, #EXT-X-MAP init, and #EXT-X-MEDIA rendition URI in an HLS
+// playlist, preserving any query the URI already carries (using "?" or "&" as
+// appropriate). The value is appended verbatim — callers must supply a URL-safe
+// value (a signed stream token is base64url and safe). A manifest without a valid #EXTM3U header is returned
 // unchanged so a non-manifest body is never corrupted.
 //
 // It exists for the API proxy boundary: a transcode node builds its manifest from
@@ -3494,17 +3792,42 @@ func rewriteMapURI(line []byte, segPrefix, suffix string) ([]byte, error) {
 // restart cannot reconstruct the session. Re-injecting the client-facing token
 // here keeps reconstruction working without ever exposing it to the node.
 func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
+	return appendManifestQueryParam(manifest, key, value, false)
+}
+
+// AppendManifestQueryParamWithSubstitution is AppendManifestQueryParam for a
+// session whose client negotiated hls_variable_substitution_v1: in a media
+// playlist the value is carried once through variable substitution (a
+// "silo_<key>" EXT-X-DEFINE) under the same rule as
+// RewriteManifestPathsWithSubstitution. A multivariant playlist keeps the
+// literal value.
+func AppendManifestQueryParamWithSubstitution(manifest []byte, key, value string) []byte {
+	return appendManifestQueryParam(manifest, key, value, true)
+}
+
+func appendManifestQueryParam(manifest []byte, key, value string, substitute bool) []byte {
 	if key == "" || validateManifestHeader(manifest) != nil {
 		return manifest
 	}
 	param := key + "=" + value
 	lines := bytes.Split(manifest, []byte("\n"))
+	var definition string
+	name := manifestParamVariablePrefix + key
+	if substitute && isManifestVariableName(name) && isMediaPlaylist(lines) && !bytes.Contains(manifest, []byte(`NAME="`+name+`"`)) {
+		var reference string
+		definition, reference = manifestVariable(name, value, minRewrittenURISavings)
+		if definition != "" {
+			param = key + "=" + reference
+		}
+	}
 	for i, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
 			continue
 		}
-		if bytes.HasPrefix(trimmed, []byte("#EXT-X-MAP:")) {
+		// A multivariant playlist's subtitle rendition carries its playlist
+		// URI as an attribute, exactly like an init segment.
+		if bytes.HasPrefix(trimmed, []byte("#EXT-X-MAP:")) || bytes.HasPrefix(trimmed, []byte("#EXT-X-MEDIA:")) {
 			lines[i] = appendMapURIQueryParam(trimmed, param)
 			continue
 		}
@@ -3512,6 +3835,9 @@ func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
 			continue
 		}
 		lines[i] = appendURIQueryParam(trimmed, param)
+	}
+	if definition != "" {
+		lines = insertManifestDefinition(lines, definition)
 	}
 	return bytes.Join(lines, []byte("\n"))
 }
@@ -3568,9 +3894,9 @@ func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 
 	switch {
 	case waitErr != nil && stderr != "":
-		return fmt.Errorf("%w after %s: ffmpeg exited: %v (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr)
+		return fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr)
 	case waitErr != nil:
-		return fmt.Errorf("%w after %s: ffmpeg exited: %v", ErrManifestNotReady, timeout, waitErr)
+		return fmt.Errorf("%w after %s: ffmpeg exited: %w", ErrManifestNotReady, timeout, waitErr)
 	case running:
 		return fmt.Errorf("%w after %s: ffmpeg still running", ErrManifestNotReady, timeout)
 	default:
@@ -3683,6 +4009,10 @@ type SegmentRecoveryTarget struct {
 // ResolveSegmentRecoveryTarget preserves the existing manifest's
 // URI-to-source-time mapping across a missing-segment restart.
 func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	if s.copyPlan != nil {
+		// restart regenerates a planned stream from the beginning.
+		return SegmentRecoveryTarget{StartSegmentNumber: segNum, CopySeekAnchorResolved: true}, true, nil
+	}
 	seekSeconds, ok, err := s.RestartSeekTarget(segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
@@ -3961,7 +4291,8 @@ func formatWaitError(err error) string {
 	if err == nil {
 		return ""
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 			return fmt.Sprintf("exit_code=%d: %v", status.ExitStatus(), err)
 		}

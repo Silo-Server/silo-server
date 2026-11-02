@@ -359,3 +359,33 @@ func padCommandSuffix(i int) string {
 	}
 	return string(out)
 }
+
+// A pause the player never confirms ends the session, and the attempt is
+// recorded as ended by an administrator so the player exits when it next
+// reports progress instead of renewing.
+func TestUnconfirmedPauseEndsTheAttemptAsAdministratorStop(t *testing.T) {
+	control, sessionMgr, hub, session := newAdminPlaybackControlTestHandler(t)
+	if err := control.playback.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: "attempt-" + session.ID, SessionID: session.ID, UserID: session.UserID, ProfileID: session.ProfileID,
+		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sequencedLane(t, control, hub, session)
+	view, err := control.Command(t.Context(), sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandPause))
+	if err != nil || view.Delivery != AdminPlaybackDeliveryDispatched {
+		t.Fatalf("pause = %+v, %v", view, err)
+	}
+	waitForPlaybackSessionMissing(t, sessionMgr, session.ID)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		record, err := control.playback.PlanStoreV3.GetAttempt(t.Context(), session.ID)
+		if err == nil && attemptEndedByAdmin(record) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("attempt not ended by administrator: %+v, %v", record, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

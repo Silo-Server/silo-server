@@ -33,6 +33,23 @@ func TestPrimaryLanguage(t *testing.T) {
 	}
 }
 
+func TestRegisteredTag(t *testing.T) {
+	cases := map[string]string{
+		"": "", "en": "en", "EN": "en", "eng": "en", "ger": "de", "hi": "hi", "hr": "hr",
+		"Arabic": "ar", "english": "en", "pt-BR": "pt-BR", "pt_BR": "pt-BR", "zh-Hant": "zh-Hant",
+		"yue": "yue", "fil": "fil", "tl": "fil", "iw": "he",
+		// Shaped like a language code but not registered.
+		"ai": "", "cc": "", "xx": "", "pb": "", "x-private": "",
+		// Not shaped like a language code at all.
+		"forced": "", "commentary": "", "zzzz": "",
+	}
+	for in, want := range cases {
+		if got := RegisteredTag(in); got != want {
+			t.Errorf("RegisteredTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestISO6392(t *testing.T) {
 	for in, want := range map[string]string{"en": "eng", "eng": "eng", "pt-BR": "por", "zh-Hant": "zho", "fr": "fra", "fil": "fil", "": "", "und": "", "x-private": "", "unknown": ""} {
 		if got := ISO6392(in); got != want {

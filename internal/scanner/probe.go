@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -63,12 +63,76 @@ type ffprobeChapter struct {
 type ffprobeSideData = mediaprobe.SideData
 type ffprobeDisp = mediaprobe.Disposition
 
+// probeLimits bounds ProbeFile's ffprobe runs. Reading a file's format,
+// streams, and chapters touches its header and index, which takes seconds
+// even on network storage, so a probe still running after two minutes is
+// stalled on its storage. The packet scan reads the whole file, so it gets
+// the longer of packetsMinimum and the time to read the file at
+// packetsBytesPerSecond: 30 minutes reads a 4 GB file at 2.2 MB/s, and
+// 10 MB/s is about the rate a 4K remux plays at.
+type probeLimits struct {
+	probe                 time.Duration
+	packetsMinimum        time.Duration
+	packetsBytesPerSecond float64
+	// waitDelay bounds how long a killed ffprobe's output may stay open,
+	// which a child it started, as a wrapper script does, can hold.
+	waitDelay time.Duration
+}
+
+var defaultProbeLimits = probeLimits{
+	probe:                 2 * time.Minute,
+	packetsMinimum:        30 * time.Minute,
+	packetsBytesPerSecond: 10_000_000,
+	waitDelay:             5 * time.Second,
+}
+
+// packetScan is the deadline of a packet scan of a file of size bytes, or of
+// unknown size when size is not positive.
+func (l probeLimits) packetScan(size int64) time.Duration {
+	read := time.Duration(float64(max(size, 0)) / l.packetsBytesPerSecond * float64(time.Second))
+	return max(l.packetsMinimum, read.Round(time.Second))
+}
+
+// errProbeTimeout reports an ffprobe run killed at its deadline. It wraps
+// neither the process's exit error nor context.DeadlineExceeded:
+// IsProbeRejection must not take the kill for ffprobe refusing the file,
+// and scan loops take a context error for the end of the whole scan.
+var errProbeTimeout = errors.New("ffprobe timed out")
+
+// probeTimedOut reports whether runCtx, made from ctx with an ffprobe run's
+// deadline, expired while ctx was still live: the run was killed at its own
+// deadline, not canceled by the caller.
+func probeTimedOut(ctx, runCtx context.Context) bool {
+	return ctx.Err() == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded)
+}
+
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
+// A PQ primary video also has its first frame read for HDR10+ metadata.
+// A run that does not finish within its deadline is killed and fails with a
+// timeout, which IsProbeRejection does not count against the file.
 func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
+	return probeFileWithin(ctx, ffprobePath, filePath, defaultProbeLimits)
+}
+
+// probeFileStreamsOnly is ProbeFile without the first-frame read. Playback's
+// probe repair runs under a short budget and does not need HDR10+ status (an
+// unchecked HDR10+ file plays as HDR10), so it leaves the track unchecked for
+// the next library scan.
+func probeFileStreamsOnly(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
+	return probeMediaFile(ctx, ffprobePath, filePath, defaultProbeLimits, false)
+}
+
+func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {
+	return probeMediaFile(ctx, ffprobePath, filePath, limits, true)
+}
+
+func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, limits probeLimits, readFrameSideData bool) (*ProbeData, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	cmd := fspath.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
@@ -76,10 +140,14 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 		"-show_chapters",
 		filePath,
 	)
+	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
 	if err != nil {
+		if probeTimedOut(ctx, probeCtx) {
+			return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+		}
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}
 
@@ -87,16 +155,31 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	if err := json.Unmarshal(output, &raw); err != nil {
 		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
 	}
+	if readFrameSideData {
+		if err := applyPrimaryVideoFrameSideData(ctx, ffprobePath, filePath, raw.Streams); err != nil {
+			return nil, err
+		}
+	}
 
 	probe := convertProbeData(&raw)
+	applyMatroskaSubtitleTrackIDs(ctx, filePath, probe)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
 			// A failed or empty packet scan must not discard the codec and
 			// track metadata that already parsed successfully: callers persist
 			// the partial probe, and the repair layer retries rows whose
 			// duration is still unknown.
-			if duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate); packetErr == nil && duration > 0 {
+			size, _ := strconv.ParseInt(raw.Format.Size, 10, 64)
+			duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate, limits.packetScan(size), limits.waitDelay)
+			if packetErr == nil && duration > 0 {
 				probe.Duration = duration
+			}
+			if errors.Is(packetErr, errProbeTimeout) {
+				slog.WarnContext(ctx, "scanner: ffprobe packet scan timed out; the duration stays unknown until a later probe",
+					"component", "scanner",
+					"path", filePath,
+					"error", packetErr,
+				)
 			}
 		}
 	}
@@ -120,13 +203,19 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 // the failure without depending on ffprobe's wording. Either one finding an
 // access problem logs it and answers false. A canceled or timed-out probe, a
 // process killed by a signal, a missing binary, or unparseable output is not a
-// rejection either.
+// rejection either, and neither is an exit status of 126 or 127, which
+// means ffprobe never got as far as opening the file.
 func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	// ffprobe refuses input with exit status 1; 126 and 127 come from the
+	// shell or the dynamic loader when ffprobe itself cannot start.
+	if code := exitErr.ExitCode(); code <= 0 || code == 126 || code == 127 {
 		return false
 	}
 	accessErr := probeStderrAccessFailure(exitErr.Stderr)
@@ -248,7 +337,7 @@ const probeInputReadableBytes = 64 << 10
 // headers and indexes (an MP4 moov atom written last) live. An empty file is
 // readable: its emptiness is a content problem.
 func probeInputReadable(filePath string) error {
-	f, err := os.Open(filePath)
+	f, err := fspath.Open(filePath)
 	if err != nil {
 		return err
 	}
@@ -316,6 +405,12 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				continue
 			}
 			normalized := mediaprobe.NormalizeVideoTrack(s)
+			if len(pd.VideoTracks) > 0 {
+				// Only the primary stream's frame is read, and only its HDR10+
+				// status is used, so a later stream is never left for a
+				// backfill that would not read it either.
+				normalized.HDR10PlusUnchecked = false
+			}
 			track := VideoTrackInfo{
 				Title:               normalized.Title,
 				Codec:               normalized.Codec,
@@ -347,6 +442,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				BitDepth:            normalized.BitDepth,
 				PixelFormat:         normalized.PixelFormat,
 				ReferenceFrames:     normalized.ReferenceFrames,
+				HDR10PlusUnchecked:  normalized.HDR10PlusUnchecked,
 			}
 			pd.VideoTracks = append(pd.VideoTracks, track)
 			if pd.CodecVideo == "" {
@@ -393,9 +489,36 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	}
 
 	pd.Chapters = normalizeChapters(raw.Chapters, pd.Duration)
-	pd.FormatTags = normalizeFormatTags(raw.Format.Tags)
+	pd.FormatTags = formatTags(raw)
 
 	return pd
+}
+
+// formatTags returns the file-level tags. Ogg (Vorbis, Opus) stores its
+// Vorbis comments per stream, so ffprobe reports a book's title, artist and
+// narrator on the audio stream and leaves format.tags empty; there the first
+// audio stream fills the keys format.tags lacks. Other containers' stream
+// tags (language, handler_name) describe the track, not the file.
+func formatTags(raw *ffprobeOutput) map[string]string {
+	tags := normalizeFormatTags(raw.Format.Tags)
+	if detectContainer(raw.Format.FormatName) != containerOgg {
+		return tags
+	}
+	for _, s := range raw.Streams {
+		if s.CodecType != "audio" {
+			continue
+		}
+		for k, v := range normalizeFormatTags(s.Tags) {
+			if _, ok := tags[k]; !ok {
+				if tags == nil {
+					tags = make(map[string]string, len(s.Tags))
+				}
+				tags[k] = v
+			}
+		}
+		break
+	}
+	return tags
 }
 
 const (
@@ -635,6 +758,116 @@ func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 	return "", false
 }
 
+// frameSideDataProbeTimeout bounds the one-frame decode that reads HDR10+
+// metadata. A 4K HEVC frame decodes in well under a second; the margin covers
+// slow network storage.
+const frameSideDataProbeTimeout = 30 * time.Second
+
+// applyPrimaryVideoFrameSideData reads the first decoded frame of the primary
+// video stream when that stream is PQ, and records the frame's side data on
+// the stream so normalization can see HDR10+ metadata. Only the primary
+// stream is checked because it is the one playback and the badges describe.
+//
+// A failed frame read is not fatal: the file keeps its stream-level facts,
+// plays and labels as HDR10, and stays unchecked, so the HDR10+ backfill reads
+// it again. A failure is never stored as "not HDR10+", because a misbehaving
+// ffprobe would otherwise mark every file that way. A canceled or expired
+// caller context is returned, so a half-finished probe is not stored.
+func applyPrimaryVideoFrameSideData(ctx context.Context, ffprobePath, filePath string, streams []ffprobeStream) error {
+	for i := range streams {
+		if !mediaprobe.IsPrimaryVideoStream(streams[i]) {
+			continue
+		}
+		if !mediaprobe.NeedsFrameSideData(streams[i]) {
+			return nil
+		}
+		sideData, err := probeVideoFrameSideData(ctx, ffprobePath, filePath, strconv.Itoa(streams[i].Index))
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			slog.WarnContext(ctx, "scanner: could not read the first video frame to check for HDR10+; the HDR10+ backfill will read it again",
+				"component", "scanner",
+				"path", filePath,
+				"error", err,
+			)
+			return nil
+		}
+		streams[i].FrameSideDataList = sideData
+		streams[i].FrameSideDataRead = true
+		return nil
+	}
+	return nil
+}
+
+var (
+	// errFrameSideDataTimeout reports a first-frame read that did not finish
+	// within frameSideDataProbeTimeout.
+	errFrameSideDataTimeout = errors.New("first video frame read timed out")
+	// errNoFrameDecoded reports an ffprobe run that returned no frame, as for
+	// a stream whose first packet does not decode on its own.
+	errNoFrameDecoded = errors.New("ffprobe returned no decoded video frame")
+)
+
+// probeVideoFrameSideData decodes the first frame of the stream that
+// streamSpecifier selects and returns the side data FFmpeg attached to it.
+//
+// One packet normally decodes to the first frame. A stream whose first packet
+// does not decode on its own, such as one that starts mid-GOP, is read again
+// over frameSideDataFallbackPackets before it counts as having no frame.
+func probeVideoFrameSideData(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error) {
+	sideData, err := probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
+	if errors.Is(err, errNoFrameDecoded) {
+		return probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
+	}
+	return sideData, err
+}
+
+// frameSideDataFallbackPackets is the second read's packet budget: about a
+// second of video, enough to reach a keyframe in common GOP layouts.
+const frameSideDataFallbackPackets = 24
+
+func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
+	defer cancel()
+	cmd := fspath.CommandContext(probeCtx, ffprobePath,
+		"-v", "error",
+		"-read_intervals", "%+#"+strconv.Itoa(packets),
+		"-select_streams", streamSpecifier,
+		"-show_frames",
+		"-show_entries", "frame=media_type:frame_side_data=side_data_type",
+		"-print_format", "json",
+		filePath,
+	)
+	// As for the other ffprobe runs: a wrapper's child dies with it, and a
+	// child that still holds stdout cannot keep the read open past its deadline.
+	cmd.WaitDelay = defaultProbeLimits.waitDelay
+	output, err := cmd.Output()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
+	if err != nil {
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			return nil, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
+		}
+		return nil, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
+	}
+	var payload struct {
+		Frames []struct {
+			SideDataList []ffprobeSideData `json:"side_data_list"`
+		} `json:"frames"`
+	}
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return nil, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, err)
+	}
+	if len(payload.Frames) == 0 {
+		return nil, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
+	}
+	var sideData []ffprobeSideData
+	for _, frame := range payload.Frames {
+		sideData = append(sideData, frame.SideDataList...)
+	}
+	return sideData, nil
+}
+
 // probeVideoPacketDuration derives a duration for files whose duration
 // metadata is unusable by scanning video packet timestamps. It intentionally
 // demuxes the whole file: the timestamps being repaired are the same ones
@@ -645,26 +878,40 @@ func probeVideoPacketDuration(
 	ffprobePath string,
 	filePath string,
 	frameRate string,
+	timeout time.Duration,
+	waitDelay time.Duration,
 ) (int, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	packetCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := fspath.CommandContext(packetCtx, ffprobePath,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",
 		"-of", "csv=p=0",
 		filePath,
 	)
+	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, fmt.Errorf("opening ffprobe packet output: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		processmetrics.Record(processmetrics.Probe, nil, err, ctx.Err())
+		processmetrics.Record(processmetrics.Probe, nil, err, packetCtx.Err())
 		return 0, fmt.Errorf("starting ffprobe packet scan: %w", err)
 	}
 
+	// WaitDelay does not reach a pipe read before Wait, so the deadline
+	// closes it too, for a child that outlives the killed ffprobe.
+	stopClose := context.AfterFunc(packetCtx, func() { _ = stdout.Close() })
 	duration := estimateVideoPacketDuration(stdout, frameRate)
+	stopClose()
 	waitErr := cmd.Wait()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, ctx.Err())
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, packetCtx.Err())
+	// A deadline that closed the pipe may have cut the read short, so its
+	// estimate is not trusted even when ffprobe itself exited cleanly.
+	if probeTimedOut(ctx, packetCtx) {
+		return 0, fmt.Errorf("%w: packet scan of %s did not finish within %s", errProbeTimeout, filePath, timeout)
+	}
 	if err := waitErr; err != nil {
 		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
 	}
@@ -848,7 +1095,7 @@ func normalizeChapters(raw []ffprobeChapter, durationSeconds int) []ChapterInfo 
 			Title:        title,
 			StartSeconds: chapter.start,
 			EndSeconds:   end,
-			Source:       "embedded",
+			Source:       chapterSourceEmbedded,
 		})
 	}
 
@@ -948,6 +1195,7 @@ func containerForFile(formatName, filePath string) string {
 const (
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
+	containerOgg    = "ogg"
 )
 
 // detectContainer maps ffprobe format names to common container names.
@@ -959,7 +1207,7 @@ func detectContainer(formatName string) string {
 		p = strings.TrimSpace(p)
 		switch p {
 		case "matroska", "webm":
-			return "mkv"
+			return containerMKV
 		case "mov", "mp4", "m4a":
 			return "mp4"
 		case "avi":
@@ -969,7 +1217,7 @@ func detectContainer(formatName string) string {
 		case "flv":
 			return "flv"
 		case "ogg":
-			return "ogg"
+			return containerOgg
 		case "wmv", "asf":
 			return "wmv"
 		}

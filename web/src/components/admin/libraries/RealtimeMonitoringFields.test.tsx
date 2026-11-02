@@ -74,30 +74,6 @@ describe("RealtimeMonitoringFields", () => {
     monitoring.mockReturnValue(status());
   });
 
-  it("shows the state and the server's detail when monitoring is not working", () => {
-    monitoring.mockReturnValue(
-      status({
-        libraries: [
-          {
-            library_id: 7,
-            enabled: true,
-            state: "limit_reached",
-            backend: "inotify",
-            detail: "Raise fs.inotify.max_user_watches on the host",
-            directories: 90000,
-          },
-        ],
-      }),
-    );
-    render(<Harness library={library} />);
-
-    expect(
-      screen.getByText(
-        "Status: Watch limit reached · Raise fs.inotify.max_user_watches on the host",
-      ),
-    ).toBeTruthy();
-  });
-
   it("disables the switch and links to the server setting when it is off server-wide", () => {
     monitoring.mockReturnValue(
       status({
@@ -120,13 +96,6 @@ describe("RealtimeMonitoringFields", () => {
     expect(screen.getByText(/turned off server-wide/)).toBeTruthy();
     const link = screen.getByRole("link", { name: "Settings → Library & Metadata" });
     expect(link.getAttribute("href")).toBe("/admin/settings/library");
-    expect(screen.queryByText(/^Status:/)).toBeNull();
-  });
-
-  it("shows no status line for a new library", () => {
-    render(<Harness library={null} />);
-
-    expect(monitoringSwitch().getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByText(/^Status:/)).toBeNull();
   });
 

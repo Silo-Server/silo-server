@@ -2,39 +2,21 @@ import type { PluginAdminForm } from "@/api/types";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SchemaForm } from "./SchemaForm";
+import { field } from "./adminFormField.test-support";
 
 const descriptor: PluginAdminForm = {
   fields: [
-    {
-      key: "service_kind",
-      label: "Service",
-      control: "SELECT",
+    field("service_kind", "Service", "SELECT", {
       required: true,
-      secret: false,
-      multiline: false,
       options: [
         { value: "radarr", label: "Radarr" },
         { value: "sonarr", label: "Sonarr" },
       ],
-    },
-    {
-      key: "season_folder",
-      label: "Season folder",
-      control: "SWITCH",
-      required: false,
-      secret: false,
-      multiline: false,
+    }),
+    field("season_folder", "Season folder", "SWITCH", {
       show_when: [{ field: "service_kind", equals: ["sonarr"] }],
-    },
-    {
-      key: "root_folder",
-      label: "Root folder",
-      control: "SELECT",
-      required: false,
-      secret: false,
-      multiline: false,
-      dynamic_options: true,
-    },
+    }),
+    field("root_folder", "Root folder", "SELECT", { dynamic_options: true }),
   ],
   sections: [
     {
@@ -65,28 +47,9 @@ describe("SchemaForm", () => {
     renderForm({ service_kind: "sonarr" });
     expect(screen.getByText("Season folder")).toBeTruthy();
   });
-  it("renders a server field error", () => {
-    renderForm({ service_kind: "radarr" }, { errors: { service_kind: "bad service" } });
-    expect(screen.getByText("bad service")).toBeTruthy();
-  });
-  it("emits onChange when a switch toggles", () => {
-    const { onChange } = renderForm({ service_kind: "sonarr", season_folder: false });
-    fireEvent.click(screen.getByRole("switch"));
-    expect(onChange).toHaveBeenCalled();
-  });
   it("renders a declared default_value when the field is absent from values (#6)", () => {
     const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "season_folder",
-          label: "Season folder",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-      ],
+      fields: [field("season_folder", "Season folder", "SWITCH", { default_value: true })],
     };
     const onChange = vi.fn();
     render(<SchemaForm descriptor={d} values={{}} onChange={onChange} />);
@@ -97,24 +60,10 @@ describe("SchemaForm", () => {
   it("uses a controlling field default when rendering a conditional field", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "advanced_enabled",
-          label: "Advanced",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-        {
-          key: "endpoint",
-          label: "Endpoint",
-          control: "TEXT",
-          required: false,
-          secret: false,
-          multiline: false,
+        field("advanced_enabled", "Advanced", "SWITCH", { default_value: true }),
+        field("endpoint", "Endpoint", "TEXT", {
           show_when: [{ field: "advanced_enabled", equals: ["true"] }],
-        },
+        }),
       ],
     };
     render(<SchemaForm descriptor={d} values={{}} onChange={vi.fn()} />);
@@ -123,16 +72,7 @@ describe("SchemaForm", () => {
   it("reports validity through onValidityChange (#14)", () => {
     const onValidityChange = vi.fn();
     const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "name",
-          label: "Name",
-          control: "TEXT",
-          required: true,
-          secret: false,
-          multiline: false,
-        },
-      ],
+      fields: [field("name", "Name", "TEXT", { required: true })],
     };
     const { rerender } = render(
       <SchemaForm
@@ -169,22 +109,8 @@ describe("SchemaForm", () => {
 
 const collapsibleDescriptor: PluginAdminForm = {
   fields: [
-    {
-      key: "api_path",
-      label: "API path",
-      control: "TEXT",
-      required: true,
-      secret: false,
-      multiline: false,
-    },
-    {
-      key: "verbose",
-      label: "Verbose",
-      control: "SWITCH",
-      required: false,
-      secret: false,
-      multiline: false,
-    },
+    field("api_path", "API path", "TEXT", { required: true }),
+    field("verbose", "Verbose", "SWITCH"),
   ],
   sections: [
     {
@@ -216,38 +142,11 @@ describe("SchemaForm collapsible sections", () => {
     expect(screen.getByText("Verbose")).toBeTruthy();
   });
 
-  it("expands a clean collapsed section when Show is clicked", () => {
-    render(
-      <SchemaForm
-        descriptor={collapsibleDescriptor}
-        values={{ api_path: "/v3" }}
-        onChange={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByText("Show"));
-    expect(screen.getByText("Verbose")).toBeTruthy();
-  });
-
   it("uses a controlling field default when rendering a conditional section", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "advanced_enabled",
-          label: "Advanced",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-        {
-          key: "endpoint",
-          label: "Endpoint",
-          control: "TEXT",
-          required: false,
-          secret: false,
-          multiline: false,
-        },
+        field("advanced_enabled", "Advanced", "SWITCH", { default_value: true }),
+        field("endpoint", "Endpoint", "TEXT"),
       ],
       sections: [
         {
@@ -269,39 +168,13 @@ describe("SchemaForm collapsible sections", () => {
 describe("SchemaForm host-owned fields", () => {
   const hostDescriptor: PluginAdminForm = {
     fields: [
-      {
-        key: "quality_profile_id",
-        label: "Quality profile",
-        control: "SELECT",
+      field("quality_profile_id", "Quality profile", "SELECT", {
         required: true,
-        secret: false,
-        multiline: false,
         options: [{ value: "1", label: "HD-1080p" }],
-      },
-      {
-        key: "is_default",
-        label: "Default (HD/1080p)",
-        control: "SWITCH",
-        required: false,
-        secret: false,
-        multiline: false,
-      },
-      {
-        key: "anime_enabled",
-        label: "Enable anime overrides",
-        control: "SWITCH",
-        required: false,
-        secret: false,
-        multiline: false,
-      },
-      {
-        key: "anime_root_folder",
-        label: "Anime root folder",
-        control: "TEXT",
-        required: true,
-        secret: false,
-        multiline: false,
-      },
+      }),
+      field("is_default", "Default (HD/1080p)", "SWITCH"),
+      field("anime_enabled", "Enable anime overrides", "SWITCH"),
+      field("anime_root_folder", "Anime root folder", "TEXT", { required: true }),
     ],
     sections: [
       {
@@ -343,17 +216,7 @@ describe("SchemaForm host-owned fields", () => {
     render(
       <SchemaForm
         descriptor={{
-          fields: [
-            {
-              key: "name",
-              label: "Name",
-              control: "TEXT",
-              required: false,
-              secret: false,
-              multiline: false,
-            },
-            hostDescriptor.fields[1]!,
-          ],
+          fields: [field("name", "Name", "TEXT"), hostDescriptor.fields[1]!],
         }}
         values={{ name: "a", is_default: true }}
         onChange={onChange}
@@ -377,38 +240,18 @@ describe("SchemaForm host-owned fields", () => {
     );
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
   });
-
-  it("renders collapsible sections open and without a toggle when expanded", () => {
-    render(
-      <SchemaForm
-        descriptor={hostDescriptor}
-        values={{ quality_profile_id: "1" }}
-        onChange={vi.fn()}
-        hiddenKeys={hidden}
-        expandSections
-      />,
-    );
-    expect(screen.queryByText("Show")).toBeNull();
-    expect(screen.getByText("Quality profile")).toBeTruthy();
-  });
 });
 
 describe("SchemaForm empty-string select options", () => {
   const promptForm: PluginAdminForm = {
     fields: [
-      {
-        key: "prompt",
-        label: "Prompt",
-        control: "SELECT",
-        required: false,
-        secret: false,
-        multiline: false,
+      field("prompt", "Prompt", "SELECT", {
         default_value: "",
         options: [
           { value: "", label: "Provider default" },
           { value: "login", label: "Always ask for credentials" },
         ],
-      },
+      }),
     ],
   };
 

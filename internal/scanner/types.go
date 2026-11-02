@@ -40,6 +40,9 @@ type ScanResult struct {
 	// the operator confirms cleanup or the files return.
 	SuspectEmptyRoots []string
 	RootObservations  []RootObservation
+	// Sidecars lists the local metadata sidecars (.nfo, artwork) in every
+	// directory a video scan read. It is nil for other library types.
+	Sidecars SidecarListing
 }
 
 // FileHints contains the OSHash gathered during scanning.
@@ -96,6 +99,9 @@ type VideoTrackInfo struct {
 	BitDepth            int
 	PixelFormat         string
 	ReferenceFrames     int
+	// HDR10PlusUnchecked marks a PQ track whose first frame was not read;
+	// see models.VideoTrack.HDR10PlusUnchecked.
+	HDR10PlusUnchecked bool
 }
 
 // AudioTrackInfo describes a probed audio track.
@@ -125,15 +131,18 @@ type SubtitleTrackInfo struct {
 	Forced           bool
 	Default          bool
 	HearingImpaired  bool
+	// IndexOnly is models.SubtitleTrack.IndexOnly.
+	IndexOnly bool
 }
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.
 type ExternalSubtitleInfo struct {
-	Path     string
-	Language string
-	Format   string // srt, vtt, ass, ssa, sub
-	Title    string
-	Forced   bool
+	Path            string
+	Language        string
+	Format          string // srt, vtt, ass, ssa, sub
+	Title           string
+	Forced          bool
+	HearingImpaired bool
 }
 
 // ChapterInfo describes an embedded chapter extracted from ffprobe.
@@ -191,11 +200,19 @@ type SegmentProvenance struct {
 	Provider   *string
 	Confidence *float64
 	Algorithm  string
+	// Absent writes a tombstone for the segment: this provenance without
+	// bounds, saying the file has none of the kind.
+	Absent bool
 }
 
-// HasAnySegment reports whether the update supplies ranges or refreshes a
-// provider whose withdrawn ranges may need removal.
+// HasAnySegment reports whether the update supplies ranges or absent answers,
+// or refreshes a provider whose withdrawn ranges may need removal.
 func (u MarkerUpdate) HasAnySegment() bool {
+	for _, provenance := range []*SegmentProvenance{u.IntroProvenance, u.CreditsProvenance, u.RecapProvenance, u.PreviewProvenance} {
+		if provenance != nil && provenance.Absent {
+			return true
+		}
+	}
 	return len(u.Segments) > 0 || len(u.RefreshedProviders) > 0 || u.IntroStart != nil || u.IntroEnd != nil ||
 		u.CreditsStart != nil || u.CreditsEnd != nil ||
 		u.RecapStart != nil || u.RecapEnd != nil ||
@@ -220,10 +237,11 @@ func MarkerUpdateFromPayload(p markers.MarkerUpdatePayload) MarkerUpdate {
 		{p.Recap, &u.RecapProvenance}, {p.Preview, &u.PreviewProvenance},
 	} {
 		u.Segments = append(u.Segments, segment.payload.Ranges...)
-		if segment.payload.Present() {
+		if segment.payload.Present() || segment.payload.Absent() {
 			*segment.target = &SegmentProvenance{
 				Source: segment.payload.Source, Provider: segment.payload.Provider,
 				Confidence: segment.payload.Confidence, Algorithm: segment.payload.Algorithm,
+				Absent: segment.payload.Absent(),
 			}
 		}
 	}

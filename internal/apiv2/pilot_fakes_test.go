@@ -32,6 +32,8 @@ type fakeAccounts struct {
 	wizardErr       error
 	users           map[int]handlers.UserView
 	err             error
+	// signOuts records each accepted ChangePassword's signOutOtherSessions.
+	signOuts *[]bool
 }
 
 func (f fakeAccounts) NeedsSetup(context.Context) (bool, error) { return f.needsSetup, f.err }
@@ -77,6 +79,7 @@ func (f fakeAccounts) AccountPasswordCapability(_ context.Context, claims *auth.
 	return handlers.AccountPasswordCapabilityView{
 		Configured: true, ChangePassword: passwordChangeAllowed(claims, profileID) && f.users[claims.UserID].Username != "off",
 		RequiresCurrentPassword: true, MinimumPasswordLength: auth.MinimumPasswordLength, MaximumPasswordBytes: auth.MaximumPasswordBytes,
+		SignOutOtherSessions: true,
 	}, nil
 }
 
@@ -92,7 +95,7 @@ func (f fakeAccounts) AuthorizePasswordChange(_ context.Context, claims *auth.Cl
 
 // ChangePassword answers the way the real seam does: "pw" is every account's
 // current password (as in Login), the limits are the auth package's.
-func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string) error {
+func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string, signOutOtherSessions bool) error {
 	switch {
 	case f.err != nil:
 		return f.err
@@ -104,6 +107,9 @@ func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current,
 		return &handlers.APIError{Status: 400, Code: "password_too_long", Message: "Password must be at most 72 bytes", Field: "new_password"}
 	case next == "oauth-only":
 		return &handlers.APIError{Status: 409, Code: "password_login_disabled", Message: "This account does not use local password sign-in"}
+	}
+	if f.signOuts != nil {
+		*f.signOuts = append(*f.signOuts, signOutOtherSessions)
 	}
 	return nil
 }
@@ -237,7 +243,7 @@ func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCrea
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -252,7 +258,7 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -263,12 +269,12 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 // canManageHouseholdAs it runs the command's verifier for a PIN-locked
 // primary profile and answers an unverified one with the 403
 // profile_management the real service returns.
-func (f *fakeProfiles) manage(activeProfileID string, verify func(string) error) error {
+func (f *fakeProfiles) manage(activeProfileID string, verify func(*userstore.Profile) error) error {
 	if f.err != nil {
 		return f.err
 	}
 	if f.lockedPrimary != "" && activeProfileID == f.lockedPrimary {
-		if err := verify(f.lockedPrimary); err != nil {
+		if err := verify(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -481,10 +487,10 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{
 		{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, Enabled: true,
 			MaxStreams: &two, DownloadAllowed: &yes, MaxProfiles: 5, AccessGroupID: &groupID,
-			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, TranscodeAllowed: true, Permissions: []string{}},
+			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, MaxProfiles: 5, TranscodeAllowed: true, Permissions: []string{}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime(), LastActiveAt: &last},
 		{ID: 2, Username: "ada", Role: "admin", Permissions: []string{"marker_edit"}, Enabled: true, LibraryIDs: []int{}, MaxProfiles: 5,
-			EffectivePolicy: handlers.EffectivePolicyView{Permissions: []string{"marker_edit", "metadata_curation"}},
+			EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5, Permissions: []string{"marker_edit", "metadata_curation"}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	deps.SettingsContract, deps.Settings, deps.PluginSettings, deps.SettingValues = settingsFakes()
@@ -688,7 +694,7 @@ func (f *fakeSettingValuesSeam) identity(req handlers.SettingIdentityRequest) (h
 			if req.ProfileID != "p-other" {
 				return handlers.SettingValueView{}, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 			}
-			if err := req.VerifyProfile(v.ProfileID); err != nil {
+			if err := req.VerifyProfile(&userstore.Profile{ID: v.ProfileID}); err != nil {
 				return handlers.SettingValueView{}, settingAPIError(403, "forbidden", "", "Profile verification required")
 			}
 			v.ProfileID = req.ProfileID
@@ -848,7 +854,7 @@ func (f *fakeSettingValuesSeam) effective(q handlers.EffectiveSettingsQuery, key
 		if q.ProfileID != "p-other" {
 			return nil, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 		}
-		if err := q.VerifyProfile(profileID); err != nil {
+		if err := q.VerifyProfile(&userstore.Profile{ID: profileID}); err != nil {
 			return nil, settingAPIError(403, "forbidden", "", "Profile verification required")
 		}
 		profileID = q.ProfileID
@@ -1036,6 +1042,10 @@ func (f fakeDevices) find(in auth.DeviceLoginLookupInput) (*fakeDeviceRequest, e
 		return r, nil
 	}
 	if r := f.requests[in.UserCode]; r != nil && in.UserCode != "" {
+		// As the service: a Quick Connect code is found only for an account.
+		if r.Purpose == auth.DeviceLoginPurposeQuickConnect && in.AccountID == 0 {
+			return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+		}
 		return r, nil
 	}
 	return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
@@ -1117,7 +1127,7 @@ func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLo
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Authentication required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose == auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeLogin {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1128,7 +1138,7 @@ func (f fakeDevices) ApproveDeviceHandoff(_ context.Context, in auth.DeviceLogin
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 403, Code: "profile_required", Message: "An active verified profile is required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote && r.Purpose != auth.DeviceLoginPurposeQuickConnect {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1157,6 +1167,7 @@ func fixtureDevices() fakeDevices {
 		"dev-approved": approved,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,
+		"482177":       {Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeQuickConnect, ExpiresAt: exp},
 		"br-expired":   {Status: "expired", Purpose: auth.DeviceLoginPurposeLogin},
 		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
@@ -1379,7 +1390,7 @@ func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationI
 		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", Permissions: []string{}, DownloadAllowed: true}}, nil
 }
 
-func (f *fakeSessionService) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+func (f *fakeSessionService) PluginLaunchToken(_ context.Context, claims *auth.Claims, profileID string) (string, error) {
 	if claims == nil || claims.SessionID == "" {
 		return "", &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Invalid or missing authentication token"}
 	}

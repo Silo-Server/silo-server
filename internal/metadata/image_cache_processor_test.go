@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,12 @@ type targetImageCacheJobs struct {
 	runningResults []bool
 	runningCalls   int
 	alwaysRunning  bool
+	// deferredElsewhere answers targetHasDeferredLocalJobs.
+	deferredElsewhere bool
+}
+
+func (f *targetImageCacheJobs) targetHasDeferredLocalJobs(context.Context, string) (bool, error) {
+	return f.deferredElsewhere, nil
 }
 
 func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
@@ -49,7 +56,7 @@ func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, ta
 	return jobs, nil
 }
 
-func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+func (f *targetImageCacheJobs) targetHasRunningJobs(context.Context, string) (bool, error) {
 	running := f.alwaysRunning
 	if f.runningCalls < len(f.runningResults) {
 		running = f.runningResults[f.runningCalls]
@@ -301,18 +308,7 @@ func (f *fakePersonPhotoUpdater) UpdatePhotoIfSourceMatches(_ context.Context, p
 }
 
 func TestImageCacheProcessorUpdatesEpisodeOnSuccess(t *testing.T) {
-	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
-		ID:                1,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}}}
+	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{testEpisodeStillJob(1, 1, "tvdb://banners/episode.jpg", true)}}
 	cacher := &fakeImageCacher{result: &CacheImageResult{
 		BasePath:  "tvdb/series/1/seasons/1/episodes/1/still",
 		Ext:       ".webp",
@@ -340,54 +336,8 @@ func TestImageCacheProcessorUpdatesEpisodeOnSuccess(t *testing.T) {
 	}
 }
 
-func TestImageCacheProcessorUpdatesItemArtworkOnSuccess(t *testing.T) {
-	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
-		ID:                20,
-		TargetType:        ImageCacheTargetItem,
-		TargetContentID:   "series-1",
-		SourcePath:        "tmdb://poster/series.jpg",
-		ProviderID:        "tmdb",
-		ProviderContentID: "1396",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageBackdrop,
-	}}}
-	cacher := &fakeImageCacher{result: &CacheImageResult{
-		BasePath:  "tmdb/series/1396/backdrop",
-		Ext:       ".webp",
-		Thumbhash: "thumb",
-	}}
-	resolver := &fakeImageResolver{url: "https://image.tmdb.org/t/p/original/backdrop.jpg"}
-	items := &fakeItemArtworkUpdater{updated: true}
-
-	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{
-		Items: items,
-	})
-	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
-	}
-	if stats.Succeeded != 1 {
-		t.Fatalf("Succeeded = %d, want 1", stats.Succeeded)
-	}
-	if items.imageType != ImageCacheImageBackdrop {
-		t.Fatalf("imageType = %q, want backdrop", items.imageType)
-	}
-	if items.cachedPath != "tmdb/series/1396/backdrop/original.webp" {
-		t.Fatalf("cachedPath = %q", items.cachedPath)
-	}
-}
-
 func TestImageCacheProcessorCachesOnlyManuallyRefreshedTargetImmediately(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                23,
-		TargetType:        ImageCacheTargetItem,
-		TargetContentID:   "series-1",
-		SourcePath:        "tmdb://poster/series.jpg",
-		ProviderID:        "tmdb",
-		ProviderContentID: "1396",
-		ContentType:       "series",
-		ImageType:         ImageCacheImagePoster,
-	}
+	job := testSeriesPosterJob(23, "tmdb://poster/series.jpg")
 	jobs := &targetImageCacheJobs{
 		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
 	}
@@ -424,16 +374,7 @@ func TestImageCacheProcessorCachesOnlyManuallyRefreshedTargetImmediately(t *test
 }
 
 func TestImageCacheProcessorReportsImmediateTargetFailure(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                24,
-		TargetType:        ImageCacheTargetItem,
-		TargetContentID:   "series-1",
-		SourcePath:        "tmdb://poster/series.jpg",
-		ProviderID:        "tmdb",
-		ProviderContentID: "1396",
-		ContentType:       "series",
-		ImageType:         ImageCacheImagePoster,
-	}
+	job := testSeriesPosterJob(24, "tmdb://poster/series.jpg")
 	jobs := &targetImageCacheJobs{
 		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
 	}
@@ -454,16 +395,7 @@ func TestImageCacheProcessorReportsImmediateTargetFailure(t *testing.T) {
 }
 
 func TestImageCacheProcessorRetriesTargetAfterConcurrentWorkerFinishes(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                25,
-		TargetType:        ImageCacheTargetItem,
-		TargetContentID:   "series-1",
-		SourcePath:        "tmdb://poster/series.jpg",
-		ProviderID:        "tmdb",
-		ProviderContentID: "1396",
-		ContentType:       "series",
-		ImageType:         ImageCacheImagePoster,
-	}
+	job := testSeriesPosterJob(25, "tmdb://poster/series.jpg")
 	jobs := &targetImageCacheJobs{
 		targetClaims:   [][]*models.MetadataImageCacheJob{nil, {job}, nil},
 		runningResults: []bool{true, false},
@@ -590,18 +522,7 @@ func TestImageCacheProcessorUpdatesPersonProfileOnSuccess(t *testing.T) {
 }
 
 func TestImageCacheProcessorMarksSkippedWhenSourceNoLongerMatches(t *testing.T) {
-	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
-		ID:                2,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}}}
+	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{testEpisodeStillJob(2, 1, "tvdb://banners/episode.jpg", true)}}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
 	resolver := &fakeImageResolver{url: "https://artworks.thetvdb.com/banners/episode.jpg"}
 	episodes := &fakeEpisodeStillUpdater{updated: false}
@@ -619,49 +540,8 @@ func TestImageCacheProcessorMarksSkippedWhenSourceNoLongerMatches(t *testing.T) 
 	}
 }
 
-func TestImageCacheProcessorMarksFailureOnCacheError(t *testing.T) {
-	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
-		ID:                3,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}}}
-	cacher := &fakeImageCacher{err: errors.New("cache failed")}
-	resolver := &fakeImageResolver{url: "https://artworks.thetvdb.com/banners/episode.jpg"}
-	episodes := &fakeEpisodeStillUpdater{updated: false}
-
-	processor := NewImageCacheProcessor(jobs, cacher, resolver, nil, episodes)
-	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
-	}
-	if stats.Failed != 1 {
-		t.Fatalf("Failed = %d, want 1", stats.Failed)
-	}
-	if jobs.failedID != 3 {
-		t.Fatalf("failedID = %d, want 3", jobs.failedID)
-	}
-}
-
 func TestImageCacheProcessorMarksFailureOnEmptyCacheResult(t *testing.T) {
-	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
-		ID:                4,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}}}
+	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{testEpisodeStillJob(4, 1, "tvdb://banners/episode.jpg", true)}}
 	cacher := &fakeImageCacher{result: &CacheImageResult{}}
 	resolver := &fakeImageResolver{url: "https://artworks.thetvdb.com/banners/episode.jpg"}
 	episodes := &fakeEpisodeStillUpdater{updated: true}
@@ -682,32 +562,8 @@ func TestImageCacheProcessorMarksFailureOnEmptyCacheResult(t *testing.T) {
 	}
 }
 
-func TestImageCacheProcessorDeletesOldSucceededJobsWithoutClaimedJobs(t *testing.T) {
-	jobs := &fakeImageCacheJobs{deletedCount: 7}
-	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, nil, nil, nil)
-
-	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
-	}
-	if stats.DeletedSucceeded != 7 {
-		t.Fatalf("DeletedSucceeded = %d, want 7", stats.DeletedSucceeded)
-	}
-}
-
 func TestImageCacheProcessorDrainUntilIdleNeverDiscoversCatalog(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                9,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode-1.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}
+	job := testEpisodeStillJob(9, 1, "tvdb://banners/episode-1.jpg", true)
 	jobs := &loopingImageCacheJobs{
 		// A discovery call would enqueue more work; drain mode must never ask.
 		enqueueResults: []int{1000},
@@ -737,30 +593,8 @@ func TestImageCacheProcessorDrainUntilIdleNeverDiscoversCatalog(t *testing.T) {
 }
 
 func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T) {
-	job1 := &models.MetadataImageCacheJob{
-		ID:                10,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode-1.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(1),
-	}
-	job2 := &models.MetadataImageCacheJob{
-		ID:                11,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-2",
-		SourcePath:        "tvdb://banners/episode-2.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-		SeasonNumber:      intPointer(1),
-		EpisodeNumber:     intPointer(2),
-	}
+	job1 := testEpisodeStillJob(10, 1, "tvdb://banners/episode-1.jpg", true)
+	job2 := testEpisodeStillJob(11, 2, "tvdb://banners/episode-2.jpg", true)
 	// Discovery now runs only when the queue drains, not on every batch: drain
 	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, finish
 	// the sweep, then confirm from the beginning that the catalog is idle.
@@ -833,41 +667,8 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	}
 }
 
-func TestImageCacheProcessorManualBackfillAlwaysDiscovers(t *testing.T) {
-	jobs := &loopingImageCacheJobs{
-		enqueueResults: []int{0, 0},
-		claimedResults: [][]*models.MetadataImageCacheJob{
-			{},
-			{},
-		},
-	}
-	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
-	for i := 0; i < 2; i++ {
-		if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); err != nil {
-			t.Fatalf("RunUntilIdle() call %d error = %v", i+1, err)
-		}
-	}
-	if jobs.enqueueCalls != 2 {
-		t.Fatalf("discovery calls = %d, want one for each explicit backfill", jobs.enqueueCalls)
-	}
-	for call, cursor := range jobs.enqueueCursors {
-		if cursor != (imageCacheDiscoveryCursor{}) {
-			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
-		}
-	}
-}
-
 func TestImageCacheProcessorDiscoveryWrapsForConcurrentUpdates(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                42,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-2",
-		SourcePath:        "tvdb://banners/episode-2.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-	}
+	job := testEpisodeStillJob(42, 2, "tvdb://banners/episode-2.jpg", false)
 	jobs := &loopingImageCacheJobs{
 		enqueuePages: []imageCacheDiscoveryPage{
 			// A candidate races with enqueue while the first sweep is in progress.
@@ -977,16 +778,7 @@ func TestImageCacheProcessorManualBackfillFailsClosedWhenDisabled(t *testing.T) 
 }
 
 func TestImageCacheProcessorManualBackfillStopsDiscoveryWhenDisabledMidRun(t *testing.T) {
-	job := &models.MetadataImageCacheJob{
-		ID:                91,
-		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
-		SourcePath:        "tvdb://banners/episode-1.jpg",
-		ProviderID:        "tvdb",
-		ProviderContentID: "1",
-		ContentType:       "series",
-		ImageType:         ImageCacheImageStill,
-	}
+	job := testEpisodeStillJob(91, 1, "tvdb://banners/episode-1.jpg", false)
 	jobs := &loopingImageCacheJobs{claimedResults: [][]*models.MetadataImageCacheJob{{job}}}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
 	processor := NewImageCacheProcessor(jobs, cacher, &fakeImageResolver{url: "https://artworks.thetvdb.com/episode.jpg"}, nil, &fakeEpisodeStillUpdater{updated: true})
@@ -1003,16 +795,7 @@ func TestImageCacheProcessorManualBackfillStopsDiscoveryWhenDisabledMidRun(t *te
 func TestImageCacheProcessorRequeuesClaimedTailWhenDisabled(t *testing.T) {
 	jobs := &fakeImageCacheJobs{}
 	for i := int64(1); i <= 4; i++ {
-		jobs.claimed = append(jobs.claimed, &models.MetadataImageCacheJob{
-			ID:                i,
-			TargetType:        ImageCacheTargetEpisode,
-			TargetContentID:   "episode-tvdb-1-1-1",
-			SourcePath:        "tvdb://banners/episode-1.jpg",
-			ProviderID:        "tvdb",
-			ProviderContentID: "1",
-			ContentType:       "series",
-			ImageType:         ImageCacheImageStill,
-		})
+		jobs.claimed = append(jobs.claimed, testEpisodeStillJob(i, 1, "tvdb://banners/episode-1.jpg", false))
 	}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
 	processor := NewImageCacheProcessor(jobs, cacher, &fakeImageResolver{url: "https://artworks.thetvdb.com/episode.jpg"}, nil, &fakeEpisodeStillUpdater{updated: true})
@@ -1101,16 +884,7 @@ func TestImageCacheProcessorSkipsWhenTargetSourceChanged(t *testing.T) {
 	// A stale job whose target no longer references its source must not upload.
 	changed := "tmdb://poster/new.jpg"
 	jobs := &fakeImageCacheJobs{
-		claimed: []*models.MetadataImageCacheJob{{
-			ID:                40,
-			TargetType:        ImageCacheTargetItem,
-			TargetContentID:   "series-1",
-			SourcePath:        "tmdb://poster/old.jpg",
-			ProviderID:        "tmdb",
-			ProviderContentID: "1396",
-			ContentType:       "series",
-			ImageType:         ImageCacheImagePoster,
-		}},
+		claimed:       []*models.MetadataImageCacheJob{testSeriesPosterJob(40, "tmdb://poster/old.jpg")},
 		currentSource: &changed,
 	}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tmdb/series/1396/poster", Ext: ".webp"}}
@@ -1133,6 +907,39 @@ func TestImageCacheProcessorSkipsWhenTargetSourceChanged(t *testing.T) {
 	}
 	if jobs.succeededID != 40 {
 		t.Fatalf("succeededID = %d, want 40", jobs.succeededID)
+	}
+}
+
+// testEpisodeStillJob returns a TVDB still job for episode 1x<episode> of
+// series 1, read from source; numbered sets its season and episode numbers.
+func testEpisodeStillJob(id int64, episode int, source string, numbered bool) *models.MetadataImageCacheJob {
+	job := &models.MetadataImageCacheJob{
+		ID:                id,
+		TargetType:        ImageCacheTargetEpisode,
+		TargetContentID:   fmt.Sprintf("episode-tvdb-1-1-%d", episode),
+		SourcePath:        source,
+		ProviderID:        "tvdb",
+		ProviderContentID: "1",
+		ContentType:       "series",
+		ImageType:         ImageCacheImageStill,
+	}
+	if numbered {
+		job.SeasonNumber, job.EpisodeNumber = intPointer(1), intPointer(episode)
+	}
+	return job
+}
+
+// testSeriesPosterJob returns a TMDB poster job for series-1, read from source.
+func testSeriesPosterJob(id int64, source string) *models.MetadataImageCacheJob {
+	return &models.MetadataImageCacheJob{
+		ID:                id,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        source,
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
 	}
 }
 

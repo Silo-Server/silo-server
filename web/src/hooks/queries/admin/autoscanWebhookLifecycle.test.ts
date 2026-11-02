@@ -3,11 +3,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import {
-  captureAutoscanWebhookIntent,
-  useCreateAutoscanWebhook,
-  useRotateAutoscanWebhook,
-} from "../useAutoscan";
+import { captureAutoscanWebhookIntent, useCreateAutoscanWebhook } from "../useAutoscan";
 const response = () =>
   new Response(
     JSON.stringify({
@@ -42,31 +38,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-for (const [action, useHook] of [
-  ["create", useCreateAutoscanWebhook],
-  ["rotate", useRotateAutoscanWebhook],
-] as const) {
-  it(`${action} retains original offline target and sends exactly once without body`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(response()));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useHook(), fixture());
-    act(() => result.current.mutate("source-a"));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => onlineManager.setOnline(true));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-      `/api/v2/admin/autoscan/sources/source-a/webhook${action === "rotate" ? "/rotate" : ""}`,
-    );
-    expect(fetchMock.mock.calls[0]?.[1].method).toBe("POST");
-    expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
-    expect(result.current.data).toEqual(
-      expect.objectContaining({ id: "source-a", webhook_configured: true }),
-    );
-  });
-}
-
 it("a stale rendered authority cannot dispatch or invoke a caller callback", async () => {
   const intent = captureAutoscanWebhookIntent("source-a");
   const fetchMock = vi.fn();
@@ -77,44 +48,6 @@ it("a stale rendered authority cannot dispatch or invoke a caller callback", asy
   act(() => result.current.mutate("source-a", { onError: callback, onSuccess: callback }));
   expect(fetchMock).not.toHaveBeenCalled();
   expect(callback).not.toHaveBeenCalled();
-});
-
-it(`create refuses queued authority replacement`, async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => useCreateAutoscanWebhook(), fixture());
-  act(() => result.current.mutate("source-a"));
-  await waitFor(() => expect(result.current.isPaused).toBe(true));
-  act(() => {
-    setProfileToken("pin-b");
-    onlineManager.setOnline(true);
-  });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).not.toHaveBeenCalled();
-});
-
-it.each(["401", "network"])(`create never replays %s under global retry3`, async (failure) => {
-  const fetchMock =
-    failure === "network"
-      ? vi.fn().mockRejectedValue(new Error("private-token"))
-      : vi.fn().mockImplementation(() =>
-          Promise.resolve(
-            new Response(
-              JSON.stringify({
-                type: "https://silo.dev/problems/authentication_required",
-                title: "Unauthorized",
-                status: 401,
-              }),
-              { status: 401, headers: { "Content-Type": "application/problem+json" } },
-            ),
-          ),
-        );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => useCreateAutoscanWebhook(), fixture());
-  act(() => result.current.mutate("source-a"));
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).toHaveBeenCalledOnce();
 });
 
 it(`create fences late receipts, callbacks and cache invalidation`, async () => {

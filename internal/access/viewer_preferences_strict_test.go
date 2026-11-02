@@ -15,7 +15,7 @@ func (s failedViewerPreferences) ListSettingValuesForResolution(context.Context,
 }
 func TestViewerPreferencesStrictDoesNotDegrade(t *testing.T) {
 	failure := errors.New("synthetic read failure")
-	if _, err := ResolveViewerPreferencesStrict(t.Context(), failedViewerPreferences{failure}, "profile"); !errors.Is(err, failure) {
+	if _, err := ResolveViewerPreferencesStrict(t.Context(), failedViewerPreferences{failure}, nil, "profile"); !errors.Is(err, failure) {
 		t.Fatalf("strict reader swallowed error: %v", err)
 	}
 }

@@ -113,10 +113,15 @@ func TestRequiredNewChildCuration(t *testing.T) {
 				want[episodeID]["title"] = "Renamed episode"
 				want[episodeID]["runtime"] = float64(52)
 				want[episodeID]["air_date"] = "2024-02-29"
+				// An air-date edit recomputes the series' air dates from its episodes.
+				want[catalogAlpha]["last_air_date_at"] = "2024-02-29"
 				changed = []string{episodeID}
 			case "child_nulls":
 				patch(seasonID, `{"title":null,"overview":null,"air_date":null}`, admin, ok(seasonID, "season", "Synthetic season"))
 				patch(episodeID, `{"title":null,"runtime":null,"air_date":null}`, admin, ok(episodeID, "episode", "Synthetic episode"))
+				// Null leaves title, overview and runtime alone and clears the air dates.
+				want[seasonID]["air_date"] = nil
+				want[episodeID]["air_date"] = nil
 				changed = []string{seasonID, episodeID}
 			case "child_permissions":
 				patch(seasonID, `{"title":"Must not persist"}`, scenariocatalog.Principal{Class: "primary_profile"}, catalogProblem(403, "permission_denied"))

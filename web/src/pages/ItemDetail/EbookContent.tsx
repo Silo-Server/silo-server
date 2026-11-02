@@ -22,6 +22,7 @@ import ScoreRow from "./components/ScoreRow";
 import { getWatchedActionLabel } from "./watchedState";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 function authorNames(item: ItemDetail): string[] {
   const extensionAuthors = (item.ebook?.authors ?? [])
@@ -112,6 +113,7 @@ export default function EbookContent({
   return (
     <div>
       <DetailHero
+        overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
         context="Ebook"

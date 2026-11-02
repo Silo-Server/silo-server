@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isOwnCollection, ownerName, partitionPersonalCollections } from "./personalOwnership";
+import { isOwnCollection, partitionPersonalCollections } from "./personalOwnership";
 
 const profiles = [
   { id: "p-kid", name: "Kid" },
@@ -17,11 +17,6 @@ describe("personal collection ownership", () => {
     expect(isOwnCollection(collection("a", "p-me"), "p-me")).toBe(true);
     expect(isOwnCollection(collection("a", "p-parent"), "p-me")).toBe(false);
     expect(isOwnCollection(collection("a", "p-me"), null)).toBe(false);
-  });
-
-  it("names an owner from the login's profile list", () => {
-    expect(ownerName(profiles, "p-parent")).toBe("Parent");
-    expect(ownerName(profiles, "p-gone")).toBe("Another profile");
   });
 
   it("splits own collections from shared ones, grouped by owner in profile-list order", () => {
@@ -41,15 +36,5 @@ describe("personal collection ownership", () => {
       // An owner missing from the profile list goes last.
       [{ id: "p-gone", name: "Another profile" }, ["gone-1"]],
     ]);
-  });
-
-  it("has nothing shared when every collection is the profile's own", () => {
-    const { own, shared } = partitionPersonalCollections(
-      [collection("mine", "p-me")],
-      "p-me",
-      profiles,
-    );
-    expect(own).toHaveLength(1);
-    expect(shared).toEqual([]);
   });
 });

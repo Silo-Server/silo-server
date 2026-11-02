@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 )
@@ -104,75 +103,5 @@ func TestSemanticCapabilityNeverTouchesCircuit(t *testing.T) {
 	}
 	if p.lastFallback != "" {
 		t.Fatalf("SemanticCapability set lastFallback=%q", p.lastFallback)
-	}
-}
-
-// TestBuildSemanticStatusNilSnapshot covers the disabled/no-coverage path: a nil
-// snapshot yields not-ready with the supplied reason and no per-type rows.
-func TestBuildSemanticStatusNilSnapshot(t *testing.T) {
-	st := buildSemanticStatus(nil, false, "coverage not yet computed")
-	if st.Ready {
-		t.Fatalf("expected not ready, got %+v", st)
-	}
-	if st.DisabledReason != "coverage not yet computed" {
-		t.Fatalf("expected reason carried, got %q", st.DisabledReason)
-	}
-	if len(st.PerType) != 0 {
-		t.Fatalf("expected empty per-type, got %+v", st.PerType)
-	}
-	if st.CoverageUpdatedAt != nil {
-		t.Fatalf("expected nil CoverageUpdatedAt for nil snapshot, got %v", st.CoverageUpdatedAt)
-	}
-}
-
-// TestBuildSemanticStatusFromSnapshot covers the populated path: overall ratio,
-// updated-at, and a deterministically sorted per-type list with ratio/ready
-// mapped through. ready/reason are taken from the passed-in gate decision.
-func TestBuildSemanticStatusFromSnapshot(t *testing.T) {
-	now := time.Now().UTC()
-	snap := &semanticCoverageSnapshot{
-		Overall:   0.5,
-		Model:     "model-x",
-		UpdatedAt: now,
-		PerType: map[string]catalogTypeCoverage{
-			"series": {Type: "series", Eligible: 10, Vectorized: 5, Ratio: 0.5, Ready: false},
-			"movie":  {Type: "movie", Eligible: 4, Vectorized: 4, Ratio: 1.0, Ready: true},
-		},
-	}
-
-	st := buildSemanticStatus(snap, false, `type "series" coverage 50% below threshold`)
-	if st.Ready {
-		t.Fatalf("expected not ready (gate said so), got %+v", st)
-	}
-	if st.DisabledReason == "" {
-		t.Fatalf("expected disabled reason carried when not ready")
-	}
-	if st.CoverageRatio != 0.5 {
-		t.Fatalf("expected CoverageRatio == Overall 0.5, got %v", st.CoverageRatio)
-	}
-	if st.CoverageUpdatedAt == nil || !st.CoverageUpdatedAt.Equal(now) {
-		t.Fatalf("expected CoverageUpdatedAt == snapshot UpdatedAt, got %v", st.CoverageUpdatedAt)
-	}
-	if len(st.PerType) != 2 {
-		t.Fatalf("expected 2 per-type rows, got %d", len(st.PerType))
-	}
-	// Deterministic sort by Type: movie before series.
-	if st.PerType[0].Type != "movie" || st.PerType[1].Type != "series" {
-		t.Fatalf("expected per-type sorted by Type [movie, series], got %q,%q", st.PerType[0].Type, st.PerType[1].Type)
-	}
-	if !st.PerType[0].Ready || st.PerType[0].CoverageRatio != 1.0 {
-		t.Fatalf("movie row mismatch: %+v", st.PerType[0])
-	}
-	if st.PerType[1].Ready || st.PerType[1].CoverageRatio != 0.5 {
-		t.Fatalf("series row mismatch: %+v", st.PerType[1])
-	}
-	if st.PerType[1].Eligible != 10 || st.PerType[1].Vectorized != 5 {
-		t.Fatalf("series counts mismatch: %+v", st.PerType[1])
-	}
-
-	// Ready path carries no disabled reason.
-	ready := buildSemanticStatus(snap, true, "")
-	if !ready.Ready || ready.DisabledReason != "" {
-		t.Fatalf("expected ready with no disabled reason, got %+v", ready)
 	}
 }

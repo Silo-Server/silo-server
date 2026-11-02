@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"regexp"
 	"slices"
@@ -41,7 +42,8 @@ type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSy
 type WatchSyncPluginConfigReady func(context.Context, int) (bool, error)
 
 type PluginCredentialRepository interface {
-	UpsertConnection(context.Context, Connection) (Connection, error)
+	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
+	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 }
 
 type PluginProviderOptions struct {
@@ -183,10 +185,12 @@ func (p *PluginProvider) ExportBatchSize() int {
 
 func (p *PluginProvider) Capabilities() Capabilities {
 	return Capabilities{
-		ImportWatched:          p.descriptor.GetImportWatched(),
-		ImportProgress:         p.descriptor.GetImportProgress(),
-		ExportWatched:          p.descriptor.GetExportWatched(),
-		ExportUnwatched:        p.descriptor.GetExportUnwatched(),
+		ImportWatched:  p.descriptor.GetImportWatched(),
+		ImportProgress: p.descriptor.GetImportProgress(),
+		ExportWatched:  p.descriptor.GetExportWatched(),
+		// Mark unwatched keeps watch history, so Silo sends a provider no
+		// history removals whatever its descriptor offers.
+		ExportUnwatched:        false,
 		ImportFavorites:        p.descriptor.GetImportFavorites(),
 		ExportFavorites:        p.descriptor.GetExportFavorites(),
 		RemoveFavorites:        p.descriptor.GetRemoveFavorites(),
@@ -235,8 +239,9 @@ func (p *PluginProvider) ConnectWithAPIKeyConfig(
 		return TokenSet{}, ProviderAccount{}, watchSyncRPCError()
 	}
 	faultSecrets := append([]string{apiKey}, connectionSecrets...)
+	faultSecrets = append(faultSecrets, providerConfigSecretStrings(config)...)
 	if err := watchSyncFaultError(p.Key(), response.GetFault(), faultSecrets...); err != nil {
-		return TokenSet{}, ProviderAccount{}, err
+		return TokenSet{}, ProviderAccount{}, connectFaultError(err)
 	}
 	tokens, err := tokenSetFromProto(response.GetCredentials())
 	if err != nil {
@@ -466,6 +471,10 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	if len(events) == 0 {
 		return result, nil
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return result, err
+	}
 	authContext, err := p.authenticatedContext(ctx, conn)
 	if err != nil {
 		return result, err
@@ -526,6 +535,11 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	return result, rateLimited
 }
 
+// stopsEndedSessions marks plugins: a plugin may mirror live sessions, and
+// the plugin contract has no other signal that one ended. The service
+// exempts the first-party plugins that replaced Silo's built-ins.
+func (p *PluginProvider) stopsEndedSessions() {}
+
 func (p *PluginProvider) Start(ctx context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
 	return p.applyScrobble(ctx, conn, event, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START)
 }
@@ -582,10 +596,32 @@ func (p *PluginProvider) authenticatedContext(ctx context.Context, conn Connecti
 		return nil, err
 	}
 	return &pluginv1.WatchSyncAuthenticatedContext{
-		CapabilityId:   p.capabilityID,
-		ProviderConfig: config,
-		Credentials:    credentialsFromConnection(conn),
+		CapabilityId:       p.capabilityID,
+		ProviderConfig:     config,
+		Credentials:        credentialsFromConnection(conn),
+		ConnectionSettings: encodedConnectionSettings(p.ConnectionSettings(), conn.ConnectionSettings),
 	}, nil
+}
+
+// ConnectionSettings returns the connection settings the plugin declares that
+// this server can show and store. A setting of a type the server does not
+// know is skipped, and the plugin uses its default for it.
+func (p *PluginProvider) ConnectionSettings() []ConnectionSetting {
+	var settings []ConnectionSetting
+	for _, declared := range p.descriptor.GetConnectionSettings() {
+		switch declared.GetType() {
+		case pluginv1.WatchSyncConnectionSettingType_WATCH_SYNC_CONNECTION_SETTING_TYPE_BOOLEAN:
+			defaultValue, _ := declared.GetDefaultValue().AsInterface().(bool)
+			settings = append(settings, ConnectionSetting{
+				Key:         declared.GetKey(),
+				Label:       declared.GetLabel(),
+				Description: declared.GetDescription(),
+				Type:        ConnectionSettingTypeBoolean,
+				Default:     defaultValue,
+			})
+		}
+	}
+	return settings
 }
 
 // authenticatedContextSecrets lists every secret an RPC carried to the
@@ -598,8 +634,22 @@ func authenticatedContextSecrets(authContext *pluginv1.WatchSyncAuthenticatedCon
 	for _, value := range credentials.GetSecretAttributes() {
 		secrets = append(secrets, value)
 	}
-	for _, value := range authContext.GetProviderConfig().GetSecretValues() {
+	return append(secrets, providerConfigSecretStrings(authContext.GetProviderConfig())...)
+}
+
+// providerConfigSecretStrings lists a provider config's secret values and,
+// for a value holding an encoded JSON object or array, every scalar inside
+// it: a field holding an object is stored encoded, and a plugin can quote one
+// of its members.
+func providerConfigSecretStrings(config *pluginv1.WatchSyncProviderConfig) []string {
+	var secrets []string
+	for _, value := range config.GetSecretValues() {
 		secrets = append(secrets, value)
+		trimmed := strings.TrimSpace(value)
+		var decoded any
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && json.Unmarshal([]byte(trimmed), &decoded) == nil {
+			secrets = append(secrets, connectionConfigSecretStrings(decoded)...)
+		}
 	}
 	return secrets
 }
@@ -647,7 +697,10 @@ func (p *PluginProvider) connectionConfig(values ConnectionConfigValues) (*plugi
 		value, exists := values[schema.GetKey()]
 		if !exists {
 			if schema.GetRequired() {
-				return nil, nil, fmt.Errorf("watch sync connection config %q is required", schema.GetKey())
+				return nil, nil, sanitizedConnectionConfigError(
+					fmt.Errorf("watch sync connection config %q is required", schema.GetKey()),
+					secrets,
+				)
 			}
 			continue
 		}
@@ -727,11 +780,23 @@ func connectionConfigSecrets(schemas []*pluginv1.ConfigSchema, values Connection
 }
 
 func sanitizedConnectionConfigError(err error, secrets []string) error {
-	return errors.New(sanitizeWatchSyncMessage(
+	return InvalidConnectionInputError{Message: sanitizeWatchSyncMessage(
 		err.Error(),
 		"watch sync connection config is invalid",
 		secrets...,
-	))
+	)}
+}
+
+// connectFaultError classifies a plugin's fault answer to a connect. The
+// profile supplied the API key and connection config, so INVALID_REQUEST and
+// PERMANENT mean that input can't work and the plugin's safe message says why.
+func connectFaultError(err error) error {
+	var fault watchSyncProviderFaultError
+	if errors.As(err, &fault) && (fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_REQUEST ||
+		fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT) {
+		return InvalidConnectionInputError{Message: fault.message}
+	}
+	return err
 }
 
 func connectionConfigSecretStrings(value any) []string {
@@ -1116,6 +1181,28 @@ func mergeWatchSyncProviderConfig(base, connection *pluginv1.WatchSyncProviderCo
 	return merged
 }
 
+// latestCredentials starts a plugin call from the credentials stored for
+// conn. A sync flow hands every call the connection it loaded at the start,
+// so after one call rotates the credentials, a later one would otherwise send
+// the old ones, and its own rotation could not be saved over the new ones.
+func (p *PluginProvider) latestCredentials(ctx context.Context, conn Connection) (Connection, error) {
+	if p.repository == nil || conn.ID == "" {
+		return conn, nil
+	}
+	stored, ok, err := p.repository.GetConnectionByID(ctx, conn.ID)
+	if err != nil {
+		return Connection{}, retryableProviderError{message: "watch sync plugin credentials could not be read"}
+	}
+	if !ok {
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the sync", cause: ErrConnectionNotFound}
+	}
+	if stored.ProviderAccountID != conn.ProviderAccountID {
+		// Reconnected to another account: its credentials aren't this call's.
+		return conn, nil
+	}
+	return connectionWithTokens(conn, storedTokens(stored)), nil
+}
+
 func (p *PluginProvider) persistUpdatedCredentials(
 	ctx context.Context,
 	conn Connection,
@@ -1128,12 +1215,28 @@ func (p *PluginProvider) persistUpdatedCredentials(
 	if err != nil {
 		return Connection{}, err
 	}
-	conn = connectionWithTokens(conn, tokens)
-	persisted, err := p.repository.UpsertConnection(ctx, conn)
-	if err != nil {
+	updated := connectionWithTokens(conn, tokens)
+	if conn.ID == "" {
+		// Nothing is saved yet, so there is nothing to update.
+		return updated, nil
+	}
+	// Compare and set against the credentials this call started with: a
+	// disconnect, reconnect or token refresh made meanwhile is not undone.
+	persisted, err := p.repository.UpdateConnectionTokens(ctx, conn, updated)
+	switch {
+	case err == nil:
+		return persisted, nil
+	case errors.Is(err, ErrStaleConnection):
+		// The stored credentials changed during the call and win; this call
+		// finishes with the ones the plugin just handed back.
+		slog.WarnContext(ctx, "watch sync plugin rotated credentials that changed meanwhile; keeping the stored ones",
+			"component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID)
+		return updated, nil
+	case errors.Is(err, ErrConnectionNotFound):
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the plugin call", cause: ErrConnectionNotFound}
+	default:
 		return Connection{}, retryableProviderError{message: "watch sync plugin credential update could not be persisted"}
 	}
-	return persisted, nil
 }
 
 func watchEventFromLocalPlay(play LocalPlay, origin pluginv1.WatchSyncOrigin) *pluginv1.WatchSyncEvent {
@@ -1172,8 +1275,8 @@ func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOpe
 		CompletionPercent: completion,
 		Completed:         event.Completed,
 		ProviderItemKey:   event.ProviderItemKey,
-		Media: mediaFromIdentity(event.MediaItemID, event.Kind, "", 0,
-			event.IMDbID, event.TMDBID, event.TVDBID, "", 0,
+		Media: mediaFromIdentity(event.MediaItemID, event.Kind, event.Title, event.Year,
+			event.IMDbID, event.TMDBID, event.TVDBID, event.SeriesTitle, event.SeriesYear,
 			event.SeriesIMDbID, event.SeriesTMDBID, event.SeriesTVDBID, event.SeasonNumber, event.EpisodeNumber),
 	}
 }

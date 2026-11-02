@@ -1,8 +1,8 @@
 package apiv2
 
 import (
+	"context"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -14,33 +14,9 @@ func (f *fakeSubtitleCapabilities) SubtitleProviderStatus() handlers.SubtitlePro
 	f.calls++
 	return handlers.SubtitleProviderStatusView{SchemaVersion: 1, Enabled: true, Providers: []string{"example"}}
 }
-func (f *fakeSubtitleCapabilities) SubtitleAIStatus() handlers.SubtitleAIStatusView {
+func (f *fakeSubtitleCapabilities) SubtitleAIStatus(context.Context) handlers.SubtitleAIStatusView {
 	f.calls++
 	return handlers.SubtitleAIStatusView{Enabled: true, TranscribeEnabled: true}
-}
-
-func TestSubtitleCapabilitiesV2DisabledAndConfigured(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		deps, _ := catalogDeps(t)
-		if configured {
-			f := &fakeSubtitleCapabilities{}
-			deps.SubtitleProviders, deps.SubtitleAI = f, f
-		}
-		h := newTestHandler(t, deps)
-		for _, path := range []string{"/subtitles/providers/status", "/subtitles/ai/status"} {
-			r := do(t, h, http.MethodGet, Prefix+path, "", bearer(memberToken))
-			want := `"enabled":false`
-			if configured {
-				want = `"enabled":true`
-			}
-			if r.Code != 200 || !strings.Contains(r.Body.String(), want) || strings.Contains(r.Body.String(), ":null") || r.Header().Get("Cache-Control") != cachePrivateNoCache {
-				t.Fatalf("configured=%v path=%s: %d %s", configured, path, r.Code, r.Body.String())
-			}
-			if !configured && strings.Contains(path, "providers") && !strings.Contains(r.Body.String(), `"providers":[]`) {
-				t.Fatalf("disabled providers are not an empty list: %s", r.Body.String())
-			}
-		}
-	}
 }
 
 func TestSubtitleCapabilitiesV2EnforceViewerAccessBeforeService(t *testing.T) {

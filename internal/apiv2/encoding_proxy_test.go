@@ -19,7 +19,7 @@ import (
 // the origin itself did not compress. Clients must receive a usable validator
 // for their subsequent If-Match write, not silently discard the settings read.
 func TestValidatorSurvivesTransformingProxy(t *testing.T) {
-	origin := httptest.NewServer(httpstream.CompressWithExclusions(5, nil, IdentityEncoded)(
+	origin := httptest.NewServer(httpstream.CompressWithExclusions(nil, IdentityEncoded)(
 		NewHandler(Dependencies{testRegister: registerProbes})))
 	t.Cleanup(origin.Close)
 	target, err := url.Parse(origin.URL)

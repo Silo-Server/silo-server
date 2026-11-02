@@ -6,13 +6,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
 const (
-	webhookProblemMedia        = "application/problem+json"
-	webhookDeliveryLimit int64 = 10 << 20
-	webhookPathParameter       = "path"
-	webhookProblemSchema       = "#/components/schemas/Problem"
+	webhookProblemMedia  = "application/problem+json"
+	webhookDeliveryLimit = webhooksync.MaxWebhookDeliveryBytes
+	webhookPathParameter = "path"
+	webhookProblemSchema = "#/components/schemas/Problem"
 )
 
 // WebhookReceiverService owns secret validation, provider parsing and delivery logging.

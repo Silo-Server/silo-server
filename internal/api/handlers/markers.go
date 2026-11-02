@@ -17,6 +17,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -34,7 +35,6 @@ type MarkerFileResolver interface {
 // ManualMarkerWriter persists/clears manual markers.
 type ManualMarkerWriter interface {
 	UpsertMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate) (bool, error)
-	ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error)
 	UpsertAndClearMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate, clearSegments []string) (bool, error)
 }
 
@@ -60,12 +60,15 @@ type MarkerAuditLister interface {
 // (see maybeContribute) so corrected markers reach enabled providers.
 type MarkersHandler struct {
 	Files            MarkerFileResolver
+	Libraries        libraryLookup
 	Writer           ManualMarkerWriter
 	Contributor      MarkerContributor
 	Contributions    MarkerContributionLister
 	AuditHistory     MarkerAuditLister
 	Notifier         PlaybackMarkerUpdateNotifier
 	MarkerPopulation MarkerPopulationService
+	MarkerImageURLs  artworkurl.Resolver
+	ThumbnailQueuer  catalog.ChapterThumbnailQueuer
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -85,8 +88,6 @@ func NewMarkersHandler(files MarkerFileResolver, writer ManualMarkerWriter, cont
 }
 
 var manualMarkerConfidence = 1.0
-
-const manualMarkerAlgorithm = "manual:v1"
 
 // markerContributeTimeout bounds the detached contribution run kicked off after
 // a manual save so a slow or rate-limited provider can't leak goroutines.
@@ -109,13 +110,25 @@ type segmentMarker struct {
 	DetectedAt *time.Time `json:"detected_at"`
 }
 
+// MarshalJSON writes the frozen /api/v1 shape, which reports a withheld manual
+// marker (markers.ManualWithheldAlgorithm) as "manual:v1". /api/v2 copies the
+// fields into its own types and reports the stored algorithm.
+func (m segmentMarker) MarshalJSON() ([]byte, error) {
+	type v1SegmentMarker segmentMarker
+	if m.Algorithm != nil && *m.Algorithm == markers.ManualWithheldAlgorithm {
+		m.Algorithm = new(markers.ManualAlgorithm)
+	}
+	return json.Marshal(v1SegmentMarker(m))
+}
+
 type fileMarkersResponse struct {
-	FileID         int                    `json:"file_id"`
-	Intro          segmentMarker          `json:"intro"`
-	Credits        segmentMarker          `json:"credits"`
-	Recap          segmentMarker          `json:"recap"`
-	Preview        segmentMarker          `json:"preview"`
-	MarkerSegments []models.MarkerSegment `json:"-"`
+	FileID         int                            `json:"file_id"`
+	Intro          segmentMarker                  `json:"intro"`
+	Credits        segmentMarker                  `json:"credits"`
+	Recap          segmentMarker                  `json:"recap"`
+	Preview        segmentMarker                  `json:"preview"`
+	MarkerSegments []models.MarkerSegment         `json:"-"`
+	MarkerPreviews []catalog.VersionMarkerPreview `json:"-"`
 }
 
 type contributionOutcomeResponse struct {
@@ -397,7 +410,21 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown marker segment")
 		return
 	}
-	if _, err := h.Writer.ClearMarkers(h.auditContext(r), file.ID, []string{segment}); err != nil {
+	if err := h.ensureMarkerEditable(r.Context(), file); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check marker library")
+		}
+		return
+	}
+	// The clear goes to providers that accept absent submissions, as one
+	// through applyManualMarkers does, unless it repeats a provider's answer.
+	clears := []string{segment}
+	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: markers.ManualAlgorithm}
+	h.withholdKeptProviderMarkers(r.Context(), file, &update, clears)
+	if _, err := h.Writer.UpsertAndClearMarkers(h.auditContext(r), file.ID, update, clears); err != nil {
 		h.logger.ErrorContext(r.Context(), "markers: clear segment failed", "file_id", file.ID, "segment", segment, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear marker")
 		return
@@ -408,6 +435,7 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal_error", "Marker cleared but failed to reload")
 		return
 	}
+	h.maybeContribute(refreshed, clears)
 	writeJSON(w, http.StatusOK, fileMarkers(refreshed))
 }
 
@@ -567,11 +595,14 @@ func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*mode
 }
 
 // maybeContribute fires a best-effort, detached contribution run for the
-// segments just set by a manual save. ContributeFile self-gates on each
-// provider's contribute_enabled flag, only submits scanner/manual-sourced
-// segments, and is idempotent — so this is a no-op when contribution is off or
-// the marker was already submitted. It runs in the background so the save
-// responds immediately and is never blocked by provider rate limits.
+// segments just set or cleared by a manual save. ContributeFile self-gates on
+// each provider's contribute_enabled flag, only submits scanner/manual-sourced
+// segments, never one the save withheld, sends a clear only to providers that
+// accept absent submissions, and is idempotent — so this is a no-op when
+// contribution is off or the marker was already submitted. It runs in the
+// background so the save responds immediately and is never blocked by
+// provider rate limits. It tries each provider once; at a provider that
+// supports amend, the daily task sends a correction this run did not.
 func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string) {
 	if h == nil || h.Contributor == nil || file == nil || len(segments) == 0 {
 		return

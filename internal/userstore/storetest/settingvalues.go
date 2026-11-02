@@ -19,6 +19,7 @@ import (
 // tests against both the PostgreSQL and per-user SQLite backends.
 func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("DeviceSettings", func(t *testing.T) { RunDeviceSettings(t, newStore) })
+	t.Run("DeviceRename", func(t *testing.T) { RunDeviceRename(t, newStore) })
 	t.Run("ExplicitValuesPerScope", func(t *testing.T) {
 		testSettingValueScopes(t, newStore)
 	})

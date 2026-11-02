@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
@@ -28,6 +30,9 @@ type PreferenceSettingsSnapshotter interface {
 // a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
 // can commit the legacy row and every canonical row as one unit.
 type PreferenceSettingsWriter interface {
+	// CheckProfilePINRevision compares the acting profile's revision and
+	// serializes PIN writes until this transaction ends. Missing rows fail.
+	CheckProfilePINRevision(ctx context.Context, id string, revision int64) (bool, error)
 	CreateProfile(ctx context.Context, profile Profile) error
 	ListSettings(ctx context.Context) ([]SettingEntry, error)
 	// ListProfileIDs reads the current household membership inside the same
@@ -65,6 +70,25 @@ type PreferenceSettingsTransactioner interface {
 	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
 }
 
+// AuditedProfileWriter is implemented by a PreferenceSettingsWriter that runs
+// in the server's PostgreSQL transaction. A domain audit row recorded through
+// AuditTx commits or rolls back with the profile write, and GetProfile reads
+// the profile inside that transaction. The SQLite backend has no such
+// transaction, so its profile writes record no domain audit rows.
+type AuditedProfileWriter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
+	AuditTx() pgx.Tx
+	GetProfile(ctx context.Context, id string) (*Profile, error)
+}
+
+// AuditedProfileDeleter deletes a profile like UserStore.DeleteProfile and
+// runs audit in the same PostgreSQL transaction, after the delete and before
+// the commit; an audit error rolls the delete back. audit receives the
+// profile as the transaction locked and deleted it, so a concurrent update
+// that committed first is reflected.
+type AuditedProfileDeleter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
+	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) error
+}
+
 // UserStore defines the interface for per-user data storage.
 // Both SQLite and Postgres backends implement this interface.
 type UserStore interface {
@@ -74,7 +98,6 @@ type UserStore interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	DeleteProfile(ctx context.Context, id string) error
-	VerifyPIN(ctx context.Context, profileID, pin string) (bool, error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error
@@ -86,6 +109,12 @@ type UserStore interface {
 	MarkProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
+	// ClearResumePosition sets a visible resume position to 0 and reports
+	// whether there was one. It keeps the watched latch, the duration and
+	// watch history, never inserts a row, and stamps updated_at and event_at
+	// no earlier than at, so delta sync carries the change and an older
+	// provider resume point loses to it.
+	ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error)
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
 	// ListProgressPage is the keyset form of ListProgress: the same status
@@ -131,16 +160,26 @@ type UserStore interface {
 	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
+	// RemoveHistoryItems removes the items' plays from history ("Remove from
+	// history"): it deletes the plays dated at or before removedAt, or before
+	// the newest play when that is later, hides any that arrive later with
+	// such a date, and clears the items' watched state and progress.
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
+	// ClearWatchedState marks the items unwatched: it deletes their progress
+	// and stops their plays dated at or before clearedAt, or before the
+	// newest play when that is later, from counting as watched or being
+	// imported again. The plays stay in history.
+	ClearWatchedState(ctx context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error
 	DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source WatchHistorySource) error
 	ListHomeDismissals(ctx context.Context, profileID, surface string) ([]HomeItemDismissal, error)
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error
 	DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error
 
-	// Favorites & Watchlist
-	AddFavorite(ctx context.Context, profileID, mediaItemID string) error
+	// Favorites & Watchlist. Each add and remove reports whether it changed
+	// a row: false for an item already on the list or already absent.
+	AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	// ListFavoritesPage is the keyset form of ListFavorites: ordered by
 	// (added_at DESC, media_item_id DESC), returning at most limit rows
@@ -151,9 +190,9 @@ type UserStore interface {
 	// GetFavorite answers the profile's favorite entry for the item, nil when
 	// the item is not a favorite.
 	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
-	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
 	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
 	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
@@ -173,6 +212,19 @@ type UserStore interface {
 	// removed outright on completion, while fully-watched series are only
 	// hidden from display so they reappear when new episodes are added.
 	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
+
+	// Not interested. A mark keeps a movie or series out of the profile's
+	// recommendations and counts against similar titles there; it leaves
+	// every other surface alone. Mark and unmark report whether they changed
+	// a row.
+	MarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	UnmarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetNotInterested answers the profile's mark on the item, nil when the
+	// item is not marked.
+	GetNotInterested(ctx context.Context, profileID, mediaItemID string) (*NotInterestedEntry, error)
+	// ListNotInterestedPage pages the profile's marks like ListFavoritesPage.
+	ListNotInterestedPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]NotInterestedEntry, error)
+	ListNotInterestedByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)

@@ -1,7 +1,11 @@
 package subtitles
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +139,7 @@ func (m *mockBlobStore) Delete(_ context.Context, key string) error {
 
 type stubProvider struct {
 	name string
+	data []byte
 }
 
 func (s stubProvider) Name() string { return s.name }
@@ -143,40 +148,57 @@ func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, 
 	return nil, nil
 }
 
-func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
-	return nil, FormatSRT, nil
+func (s stubProvider) Download(context.Context, string, DownloadTarget) ([]byte, SubtitleFormat, error) {
+	return s.data, FormatSRT, nil
 }
 
-func TestManagerProviderNames(t *testing.T) {
+type failingSearchProvider struct{ stubProvider }
+
+func (failingSearchProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, error) {
+	return nil, errors.New("rpc error: code = Unauthenticated desc = api_key=synthetic-secret upstream detail")
+}
+
+func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
 	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
-
-	names := manager.ProviderNames()
-	if names == nil {
-		t.Fatal("ProviderNames() = nil, want non-nil empty slice")
+	manager.RegisterProvider(failingSearchProvider{stubProvider{name: "example"}})
+	resp, err := manager.SearchBridge(t.Context(), SearchRequest{Title: "Example"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(names) != 0 {
-		t.Fatalf("ProviderNames() = %v, want empty", names)
+	if len(resp.Warnings) != 1 || resp.Warnings[0] != "example: search failed" {
+		t.Fatalf("warnings = %q", resp.Warnings)
+	}
+	if !strings.Contains(logs.String(), "upstream detail") || strings.Contains(logs.String(), "synthetic-secret") {
+		t.Fatalf("provider failure log = %q", logs.String())
+	}
+}
+
+func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {
+	repo := newMockSubtitleRepo()
+	blobs := newMockBlobStore()
+	manager := NewManager(repo, blobs)
+	manager.RegisterProvider(stubProvider{name: "big", data: make([]byte, MaxUploadSize+1)})
+	manager.RegisterProvider(stubProvider{name: "ok", data: []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")})
+
+	_, err := manager.Download(context.Background(), DownloadRequest{MediaFileID: 7, ProviderName: "big", SubtitleID: "1", Language: "en"})
+	if !errors.Is(err, ErrSubtitleTooLarge) {
+		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
+	}
+	if repo.inserts != 0 || len(blobs.keys) != 0 {
+		t.Fatalf("oversized download stored %d rows and %d blobs, want none", repo.inserts, len(blobs.keys))
 	}
 
-	manager.RegisterProvider(stubProvider{name: "subdl"})
-	manager.RegisterProvider(stubProvider{name: "opensubtitles"})
-	manager.RegisterProvider(stubProvider{name: "subsource"})
-
-	want := []string{"opensubtitles", "subdl", "subsource"}
-	names = manager.ProviderNames()
-	if len(names) != len(want) {
-		t.Fatalf("ProviderNames() = %v, want %v", names, want)
+	sub, err := manager.Download(context.Background(), DownloadRequest{MediaFileID: 7, ProviderName: "ok", SubtitleID: "2", Language: "en"})
+	if err != nil {
+		t.Fatalf("Download() error = %v", err)
 	}
-	for i, name := range want {
-		if names[i] != name {
-			t.Fatalf("ProviderNames() = %v, want %v (sorted)", names, want)
-		}
-	}
-
-	manager.RemoveProvider("subdl")
-	names = manager.ProviderNames()
-	if len(names) != 2 || names[0] != "opensubtitles" || names[1] != "subsource" {
-		t.Fatalf("ProviderNames() after removal = %v, want [opensubtitles subsource]", names)
+	if sub.Provider != "ok" || sub.Format != FormatSRT {
+		t.Fatalf("stored provider=%q format=%q, want ok srt", sub.Provider, sub.Format)
 	}
 }
 
@@ -244,6 +266,25 @@ func TestManagerUploadRejectsOversizedFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for oversized file")
+	}
+}
+
+func TestManagerUploadRejectsUTF16FileThatGrowsPastLimit(t *testing.T) {
+	repo := newMockSubtitleRepo()
+	manager := NewManager(repo, newMockBlobStore())
+	// 2 bytes per character in UTF-16, 3 bytes once stored as UTF-8.
+	data := utf16LEWithBOM(strings.Repeat("\u5b57", (MaxUploadSize-2)/2))
+	_, err := manager.Upload(context.Background(), UploadRequest{
+		MediaFileID: 1,
+		Language:    "zh",
+		Filename:    "big.srt",
+		Data:        data,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("Upload() error = %v, want size limit error", err)
+	}
+	if len(repo.byKey) != 0 {
+		t.Fatalf("stored %d subtitles, want none", len(repo.byKey))
 	}
 }
 

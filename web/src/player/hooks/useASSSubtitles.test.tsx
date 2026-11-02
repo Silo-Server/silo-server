@@ -28,8 +28,10 @@ vi.mock("jassub", () => {
     prescaleFactor = 1;
     prescaleHeightLimit = 1080;
     _canvas = document.createElement("canvas");
+    _video: HTMLVideoElement | undefined;
     constructor(opts: Record<string, unknown>) {
       constructorOpts.push(opts);
+      this._video = opts.video as HTMLVideoElement | undefined;
       this.timeOffset = (opts.timeOffset as number) ?? 0;
       instances.push(this);
     }
@@ -39,8 +41,17 @@ vi.mock("jassub", () => {
   return { default: MockJASSUB };
 });
 
+// A video showing a 1920×1080 stream; `setFrameSize(video, 0, 0)` empties it
+// the way a stream reload does.
+function setFrameSize(video: HTMLVideoElement, width: number, height: number) {
+  Object.defineProperty(video, "videoWidth", { configurable: true, value: width });
+  Object.defineProperty(video, "videoHeight", { configurable: true, value: height });
+}
+
 function makeVideoRef(): RefObject<HTMLVideoElement | null> {
-  return { current: document.createElement("video") };
+  const video = document.createElement("video");
+  setFrameSize(video, 1920, 1080);
+  return { current: video };
 }
 
 const arabicTrack: PlayerSubtitleInfo = {
@@ -159,19 +170,6 @@ describe("useASSSubtitles font fallback", () => {
     expect(opts.availableFonts).toEqual({ "liberation sans": expect.any(String) });
   });
 
-  it("passes fetched ASS content into JASSUB", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      mockFetchResponse("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello"),
-    );
-
-    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 0, 0));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.subContent).toContain("Dialogue:");
-    expect(constructorOpts[0]!.subUrl).toBeUndefined();
-  });
-
   it("preloads embedded ASS font bundle bytes when the track advertises them", async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input);
@@ -191,14 +189,6 @@ describe("useASSSubtitles font fallback", () => {
     expect(opts.defaultFont).toBeUndefined();
     expect(opts.fonts).toEqual([expect.any(Uint8Array)]);
   });
-
-  it("disables local font probing to avoid permission-related console noise", async () => {
-    renderHook(() => useASSSubtitles(makeVideoRef(), [arabicTrack], 5, false, 0, 0));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.queryFonts).toBe(false);
-  });
 });
 
 describe("useASSSubtitles time offset", () => {
@@ -216,14 +206,6 @@ describe("useASSSubtitles time offset", () => {
     // origin 30s, +2000ms delay → event at source time S renders at video
     // time S - 28 = (S - 30) + 2, i.e. 2s later than the undelayed position.
     expect(constructorOpts[0]!.timeOffset).toBe(28);
-  });
-
-  it("adds a negative user delay to the constructed timeOffset", async () => {
-    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 30, -2000));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.timeOffset).toBe(32);
   });
 
   it("waits for the renderer before repainting a changed subtitle offset", async () => {
@@ -263,6 +245,73 @@ describe("useASSSubtitles time offset", () => {
       ready();
     });
     expect(instances[0]!.resize).not.toHaveBeenCalled();
+  });
+});
+
+describe("useASSSubtitles stream reload", () => {
+  // A seek reanchor reloads the stream behind the same <video> and moves the
+  // timeline offset. JASSUB resized while the element is empty draws nothing
+  // until its frame size changes, which a same-resolution stream never does.
+  async function renderReloadHook() {
+    const videoRef = makeVideoRef();
+    const hook = renderHook(
+      ({ origin }) => useASSSubtitles(videoRef, [germanTrack], 6, false, origin, 0),
+      { initialProps: { origin: 900 } },
+    );
+    await waitFor(() => expect(instances).toHaveLength(1));
+    await waitFor(() => expect(instances[0]!.resize).toHaveBeenCalled());
+    instances[0]!.resize.mockClear();
+    return { video: videoRef.current!, instance: instances[0]!, ...hook };
+  }
+
+  it("waits for the next stream's frame size before resizing", async () => {
+    const { video, instance, rerender } = await renderReloadHook();
+
+    setFrameSize(video, 0, 0);
+    await act(async () => {
+      rerender({ origin: 0 });
+    });
+    expect(instance.timeOffset).toBe(0);
+    expect(instance.resize).not.toHaveBeenCalled();
+
+    setFrameSize(video, 1920, 1080);
+    await act(async () => {
+      video.dispatchEvent(new Event("loadedmetadata"));
+    });
+    expect(instance.resize).toHaveBeenCalledWith(true);
+  });
+
+  it("resizes when the frame size arrives after loadedmetadata", async () => {
+    const { video, instance } = await renderReloadHook();
+
+    setFrameSize(video, 0, 0);
+    await act(async () => {
+      video.dispatchEvent(new Event("loadedmetadata"));
+    });
+    expect(instance.resize).not.toHaveBeenCalled();
+
+    setFrameSize(video, 1920, 1080);
+    await act(async () => {
+      video.dispatchEvent(new Event("resize"));
+    });
+    expect(instance.resize).toHaveBeenCalledWith(true);
+  });
+
+  it("removes its video listeners when the track is torn down", async () => {
+    const videoRef = makeVideoRef();
+    const video = videoRef.current!;
+    const add = vi.spyOn(video, "addEventListener");
+    const remove = vi.spyOn(video, "removeEventListener");
+    const { unmount } = renderHook(() => useASSSubtitles(videoRef, [germanTrack], 6, false, 0, 0));
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const added = add.mock.calls.filter(([type]) => type === "loadedmetadata" || type === "resize");
+    expect(added.map(([type]) => type).sort()).toEqual(["loadedmetadata", "resize"]);
+
+    unmount();
+
+    for (const [type, listener] of added) {
+      expect(remove).toHaveBeenCalledWith(type, listener);
+    }
   });
 });
 

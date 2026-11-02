@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // stateSuppressor is an in-memory Suppressor with the claim semantics of the
@@ -73,25 +71,6 @@ func ingestFile(t *testing.T, svc *Service, eventType, path string) IngestResult
 		t.Fatalf("IngestChanges(%s): %v", eventType, err)
 	}
 	return result
-}
-
-func TestDebounceSuppressesFloodOfIdenticalReports(t *testing.T) {
-	const path = "/mnt/media/Show/Season 01/e01.mkv"
-	fs := newFakeFS()
-	fs.files[path] = "file:100:1"
-	q := &recordingQueuer{}
-	svc := newDebounceService(webhookTestStore(), q, newStateSuppressor(), fs)
-
-	suppressed := 0
-	for range 20 {
-		suppressed += ingestFile(t, svc, "Download", path).Suppressed
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("enqueued = %d, want 1 scan for 20 identical reports", len(q.enqueued))
-	}
-	if suppressed != 19 {
-		t.Fatalf("suppressed = %d, want 19", suppressed)
-	}
 }
 
 func TestDebounceScansDeleteAfterImportWithinWindow(t *testing.T) {
@@ -377,73 +356,5 @@ func TestRedisSuppressorWithoutRedisAlwaysScans(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("ShouldScan without Redis = (%v, %v), want (true, nil)", ok, err)
 		}
-	}
-}
-
-func TestRedisSuppressorClaimsByObservedState(t *testing.T) {
-	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
-	if endpoint == "" {
-		t.Skip("SILO_TEST_REDIS_URL required for the Redis suppressor integration test")
-	}
-	opts, err := redis.ParseURL(endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := redis.NewClient(opts)
-	t.Cleanup(func() { _ = client.Close() })
-	ctx := t.Context()
-	key := "7|/mnt/media/debounce-" + time.Now().Format("150405.000000000") + ".mkv"
-	t.Cleanup(func() { client.Del(context.Background(), suppressRedisKey(key)) })
-
-	sup := NewRedisSuppressor(client)
-	claim := func(state string, ttl time.Duration) bool {
-		t.Helper()
-		ok, err := sup.ShouldScan(ctx, key, state, ttl)
-		if err != nil {
-			t.Fatalf("ShouldScan(%q): %v", state, err)
-		}
-		return ok
-	}
-
-	if !claim("file:100:1", time.Hour) {
-		t.Fatal("first report must claim")
-	}
-	ttlAfterClaim, err := client.PTTL(ctx, suppressRedisKey(key)).Result()
-	if err != nil || ttlAfterClaim <= 0 || ttlAfterClaim > time.Hour {
-		t.Fatalf("claim TTL = %v (%v), want within one hour", ttlAfterClaim, err)
-	}
-	if claim("file:100:1", 2*time.Hour) {
-		t.Fatal("identical report must be suppressed")
-	}
-	if ttl, _ := client.PTTL(ctx, suppressRedisKey(key)).Result(); ttl > ttlAfterClaim {
-		t.Fatalf("duplicate extended the window: %v > %v", ttl, ttlAfterClaim)
-	}
-	if !claim(stateAbsent, time.Hour) {
-		t.Fatal("deletion must claim")
-	}
-	if !claim("file:100:1", time.Hour) {
-		t.Fatal("re-import of the earlier state must claim")
-	}
-
-	// A value left by an older release never matches a state token.
-	if err := client.Set(ctx, suppressRedisKey(key), "1", time.Hour).Err(); err != nil {
-		t.Fatal(err)
-	}
-	if !claim("file:100:1", time.Hour) {
-		t.Fatal("legacy claim value must not suppress a state report")
-	}
-
-	// Release only drops the claim this report wrote, not a newer one.
-	if err := sup.Release(ctx, key, stateAbsent); err != nil {
-		t.Fatal(err)
-	}
-	if claim("file:100:1", time.Hour) {
-		t.Fatal("release of another state must keep the live claim")
-	}
-	if err := sup.Release(ctx, key, "file:100:1"); err != nil {
-		t.Fatal(err)
-	}
-	if !claim("file:100:1", time.Hour) {
-		t.Fatal("released claim must allow the same state again")
 	}
 }

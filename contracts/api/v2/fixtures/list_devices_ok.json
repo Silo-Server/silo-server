@@ -2,7 +2,8 @@
   "items": [
     {
       "device_id": "d-1",
-      "device_name": "",
+      "device_name": "Apple TV",
+      "custom_name": "Living Room",
       "device_platform": "",
       "last_seen_at": "2026-01-02T03:04:05.123Z",
       "profile_id": "p-owner",

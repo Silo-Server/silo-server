@@ -239,15 +239,16 @@ func normalizeDurableProviderIDs(providerIDs map[string]string) []models.MediaIt
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		leftRank, leftOK := preferredProviderIDOrder[strings.ToLower(entries[i].Provider)]
-		rightRank, rightOK := preferredProviderIDOrder[strings.ToLower(entries[j].Provider)]
+		left, right := strings.ToLower(entries[i].Provider), strings.ToLower(entries[j].Provider)
+		leftRank, leftOK := preferredProviderIDOrder[left]
+		rightRank, rightOK := preferredProviderIDOrder[right]
 		switch {
 		case leftOK && rightOK && leftRank != rightRank:
 			return leftRank < rightRank
 		case leftOK != rightOK:
 			return leftOK
-		case strings.ToLower(entries[i].Provider) != strings.ToLower(entries[j].Provider):
-			return strings.ToLower(entries[i].Provider) < strings.ToLower(entries[j].Provider)
+		case left != right:
+			return left < right
 		default:
 			return entries[i].ProviderID < entries[j].ProviderID
 		}

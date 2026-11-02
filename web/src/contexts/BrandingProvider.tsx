@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
 import { themeKeys } from "@/hooks/queries/keys";
+import { accentDeclarations } from "@/lib/accentColor";
 import { setAppDocumentTitle } from "@/lib/documentTitle";
 
 const DEFAULT_SERVER_NAME = "Silo";
@@ -33,6 +34,8 @@ export interface BrandingContextValue {
   loginBgUrl: string | null;
   /** Whether the running server has an active object-store client for assets. */
   storageAvailable: boolean;
+  /** The server's branding has arrived; until then every field is a default. */
+  loaded: boolean;
 }
 
 const DEFAULT_BRANDING: BrandingContextValue = {
@@ -44,6 +47,7 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   faviconUrl: null,
   loginBgUrl: null,
   storageAvailable: false,
+  loaded: false,
 };
 
 // A non-null default means useBranding() is safe to call anywhere (e.g. in
@@ -60,6 +64,7 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     faviconUrl: data?.favicon_url || null,
     loginBgUrl: data?.login_bg_url || null,
     storageAvailable: data?.storage_available ?? false,
+    loaded: data !== undefined,
   };
 }
 
@@ -75,10 +80,40 @@ function applyFavicon(url: string | null) {
   link.href = url ?? "/favicon.ico";
 }
 
+const ACCENT_STYLE_ID = "silo-accent";
+
+/**
+ * Paints the accent over Cinema Dark. It is an unlayered :root rule appended
+ * to <head>, so it wins over the theme's layered tokens. That would also beat
+ * high contrast's boosted focus ring, so a second unlayered rule restores it:
+ * a dark accent must not hide keyboard focus for someone who asked for high
+ * contrast.
+ */
+function applyAccent(hex: string | null) {
+  if (typeof document === "undefined") return;
+  const declarations = hex ? accentDeclarations(hex) : null;
+  const css = declarations
+    ? `:root {\n${Object.entries(declarations)
+        .map(([token, value]) => `  --${token}: ${value};`)
+        .join("\n")}\n}\nhtml[data-high-contrast="true"] {\n  --ring: var(--contrast-boost);\n}`
+    : "";
+  let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
+  if (!css) {
+    style?.remove();
+    return;
+  }
+  if (!style) {
+    style = document.createElement("style");
+    style.id = ACCENT_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+}
+
 /**
  * BrandingProvider fetches server branding (public endpoint, available before
- * login) and exposes it via context. It owns the document-title and favicon
- * side effects so they run exactly once, fixing the tab title and applying the
+ * login) and exposes it via context. It owns the document-title, favicon, and
+ * accent side effects so they run exactly once, fixing the tab title and applying the
  * custom favicon in dev (where the server does not template index.html).
  */
 export function BrandingProvider({ children }: { children: ReactNode }) {
@@ -101,6 +136,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyFavicon(value.faviconUrl);
   }, [value.faviconUrl]);
+
+  useEffect(() => {
+    applyAccent(value.accentColor);
+  }, [value.accentColor]);
 
   return <BrandingContext value={value}>{children}</BrandingContext>;
 }

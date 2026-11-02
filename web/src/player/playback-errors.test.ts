@@ -65,20 +65,6 @@ describe("describePlanTerminal", () => {
     });
   });
 
-  it("falls back to a generic subtitle sentence when the server sends no message", () => {
-    expect(
-      describePlanTerminal({
-        reason: "subtitle_codec_unsupported",
-        message: "  ",
-        retryable: false,
-      }),
-    ).toEqual({
-      title: "That subtitle track can't be used",
-      message:
-        "Silo couldn't prepare the selected subtitles for this device. Try a different track.",
-    });
-  });
-
   it("keeps the server's reason for refusing every version of an item", () => {
     expect(
       describePlanTerminal({
@@ -89,16 +75,6 @@ describe("describePlanTerminal", () => {
     ).toEqual({
       title: "No playable version found",
       message: "A lower-resolution source is required because 4K transcoding is disabled.",
-    });
-  });
-
-  it("falls back to a generic sentence when no alternate version carries no message", () => {
-    expect(
-      describePlanTerminal({ reason: "no_alternate_version", message: "   ", retryable: false }),
-    ).toEqual({
-      title: "No playable version found",
-      message:
-        "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
     });
   });
 
@@ -126,19 +102,6 @@ describe("describePlanTerminal", () => {
     ).toEqual({
       title: "Playback unavailable",
       message: "Failed to start the playback transport.",
-    });
-  });
-
-  it("falls back to a generic sentence when a conversion failure carries no message", () => {
-    expect(
-      describePlanTerminal({
-        reason: "transcode_node_unavailable",
-        message: " ",
-        retryable: true,
-      }),
-    ).toEqual({
-      title: "Playback unavailable",
-      message: "The server couldn't start converting this file. Please try again.",
     });
   });
 

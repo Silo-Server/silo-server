@@ -87,7 +87,9 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	// requires burning into the video instead of copying the HDR10 base layer.
 	allowHEVCEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode, allowHEVCEncoding)
-	if !stripped.HLSRemux {
+	// The strip is packaged as fMP4, which a copy the client accepts only as
+	// MPEG-TS rules out.
+	if !stripped.HLSRemux || stripped.hlsRemuxInTS {
 		return source
 	}
 	// A surround-to-stereo AAC remux also needs audio_to_aac v2 on the same
@@ -172,10 +174,10 @@ func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool
 		return false
 	}
 	for _, nodeURL := range enumerator.TranscodeNodeURLs() {
-		// The URL list includes unhealthy nodes; only a node route selection
-		// could pick right now makes the strip executable.
+		// The URL list includes unhealthy and draining nodes; only a node route
+		// selection could pick right now makes the strip executable.
 		node, ok := lookup.TranscodeNodeByURL(nodeURL)
-		if !ok || !node.Enabled || !node.Healthy {
+		if !ok || !node.TakesNewWork() {
 			continue
 		}
 		if info, ok := compatNodeReport(node); ok && compatSupportsDVStrip(info.Transformations) &&

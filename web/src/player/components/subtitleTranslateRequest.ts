@@ -28,6 +28,8 @@ interface BuildSubtitleTranslateRequestInput {
   audioTracks?: PlayerAudioTrack[];
   audioIndex: number;
   targetLang: string;
+  /** False when the server cannot translate: audio jobs stay in the spoken language. */
+  translateTranscript?: boolean;
   sessionId?: string;
   startPosition: number;
 }
@@ -49,13 +51,15 @@ export function buildSubtitleTranslateRequest(
   if (input.mode === "audio") {
     const audio = input.audioTracks?.[input.audioIndex];
     const sourceLanguage = normalizeLanguageCode(audio?.language);
-    const sameLanguage = sourceLanguage !== "" && sourceLanguage === targetLanguage;
+    const plain =
+      input.translateTranscript === false ||
+      (sourceLanguage !== "" && sourceLanguage === targetLanguage);
     return {
       media_file_id: input.mediaFileId,
-      kind: sameLanguage ? "transcribe" : "transcribe_translate",
+      kind: plain ? "transcribe" : "transcribe_translate",
       source_index: input.audioIndex,
       source_language: sourceLanguage,
-      target_language: sameLanguage ? "" : targetLanguage,
+      target_language: plain ? "" : targetLanguage,
       session_id: input.sessionId ?? "",
       start_position: input.startPosition,
     };

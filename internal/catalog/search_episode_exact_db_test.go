@@ -75,13 +75,16 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 		CASE WHEN i<=30 THEN $3 WHEN i<=60 THEN $4 WHEN i=61 THEN 'Limited' ELSE 'Limited Adventure' END,
 		'','2024-01-01' FROM generate_series(1,90)i`, prefix, series, collisionOther, collisionTarget)
 	exec(`INSERT INTO episode_libraries(episode_id,media_folder_id) SELECT content_id,$2 FROM episodes WHERE series_id=$1 AND season_number=2`, series, library)
+	exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,overview,air_date)
+		SELECT $1||'-short-'||lpad(i::text,4,'0'),$2,3,i,'Ice','','2024-01-01' FROM generate_series(1,60)i`, prefix, series)
+	exec(`INSERT INTO episode_libraries(episode_id,media_folder_id) SELECT content_id,$2 FROM episodes WHERE series_id=$1 AND season_number=3`, series, library)
 	exec(`ANALYZE episode_catalog_entries; ANALYZE episodes; ANALYZE media_items; ANALYZE media_item_libraries`)
 	repo := NewItemRepository(pool)
 	filter := AccessFilter{AllowedLibraryIDs: []int{library}}
 	parsed := parseSearchQuery("Star")
 	options := &searchCursorSQL{}
 	fullSQL, _, args := repo.buildMixedSearchCursorSQL(parsed, []string{"episode"}, 2000, 0, filter, false, options)
-	rows, err := pool.Query(ctx, fullSQL, args...)
+	rows, err := pool.Query(ctx, fullSQL, args...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +123,21 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 	}
 	if !slices.Equal(got, contentIDsFromMediaItems(baseline)) || fastPages == 0 {
 		t.Fatalf("tier traversal=%d baseline=%d fast pages=%d", len(got), len(baseline), fastPages)
+	}
+	// A word under four characters has no prefix query; its continuation keys
+	// must still match the tier's constant scores.
+	after = nil
+	for page := range 3 {
+		tracer.exact.Store(0)
+		tracer.general.Store(0)
+		result, err := repo.SearchCursorPage(ctx, "Ice", []string{"episode"}, 17, after, filter, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Items) != 17 || tracer.exact.Load() != 1 || tracer.general.Load() != 0 {
+			t.Fatalf("short title page %d: items=%d exact=%d general=%d", page, len(result.Items), tracer.exact.Load(), tracer.general.Load())
+		}
+		after = result.Next
 	}
 	for _, tc := range []struct {
 		name, query    string
@@ -220,7 +238,11 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 	broadSQL, _, broadArgs := repo.buildMixedSearchCursorSQL(parseSearchQuery("Parentspill"), []string{"episode"}, 21, 0, filter, false, &searchCursorSQL{})
 	// Inspect the unchanged scored relation and page limit independently of
 	// hydration; disabling nested loops is only for the parent join spill.
-	broadSQL = broadSQL[:strings.Index(broadSQL, ", page AS (")] +
+	broadScored, _, ok := strings.Cut(broadSQL, ", page AS (")
+	if !ok {
+		t.Fatalf("broad search SQL has no page CTE:\n%s", broadSQL)
+	}
+	broadSQL = broadScored +
 		fmt.Sprintf(" SELECT content_id FROM scored WHERE $1::text IS NOT NULL ORDER BY %s LIMIT $%d", mixedSearchOrder(""), len(broadArgs))
 	if err := broadTx.QueryRow(ctx, "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON,TIMING OFF) "+broadSQL, broadArgs...).Scan(&plan); err != nil {
 		t.Fatal(err)

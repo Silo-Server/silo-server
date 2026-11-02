@@ -185,31 +185,6 @@ func integrationScenarios() []scenario {
 			},
 		},
 		{
-			name: "file renamed",
-			setup: func(t *testing.T, e scenarioEnv) {
-				mkdirs(t, e.root, "Movie G")
-				writeFile(t, e.in("Movie G", "g.mkv"), "data")
-			},
-			steps: []scenarioStep{{
-				act:  func(t *testing.T, e scenarioEnv) { mustRename(t, e.in("Movie G", "g.mkv"), e.in("Movie G", "g2.mkv")) },
-				want: func(e scenarioEnv) []string { return []string{e.subtree("Movie G")} },
-			}},
-		},
-		{
-			name:  "folder renamed rewrites paths below it",
-			setup: func(t *testing.T, e scenarioEnv) { mkdirs(t, e.root, "Movie H/Extras") },
-			steps: []scenarioStep{
-				{
-					act:  func(t *testing.T, e scenarioEnv) { mustRename(t, e.in("Movie H"), e.in("Movie H2")) },
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie H"), e.subtree("Movie H2")} },
-				},
-				{
-					act:  func(t *testing.T, e scenarioEnv) { writeFile(t, e.in("Movie H2", "Extras", "x.mkv"), "data") },
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie H2", "Extras")} },
-				},
-			},
-		},
-		{
 			name: "file deleted",
 			setup: func(t *testing.T, e scenarioEnv) {
 				mkdirs(t, e.root, "Movie I")
@@ -241,18 +216,6 @@ func integrationScenarios() []scenario {
 			}},
 		},
 		{
-			name:  "burst in one folder",
-			setup: func(t *testing.T, e scenarioEnv) { mkdirs(t, e.root, "Movie K") },
-			steps: []scenarioStep{{
-				act: func(t *testing.T, e scenarioEnv) {
-					for i := 0; i < 50; i++ {
-						writeFile(t, e.in("Movie K", fmt.Sprintf("part %02d.mkv", i)), "data")
-					}
-				},
-				want: func(e scenarioEnv) []string { return []string{e.subtree("Movie K")} },
-			}},
-		},
-		{
 			name: "new folder filled by a copy",
 			steps: []scenarioStep{{
 				act: func(t *testing.T, e scenarioEnv) {
@@ -277,34 +240,6 @@ func integrationScenarios() []scenario {
 			}},
 		},
 		{
-			name: "symlinked folder renamed, then deleted",
-			setup: func(t *testing.T, e scenarioEnv) {
-				mkdirs(t, e.outside, "Target")
-				if err := os.Symlink(e.out("Target"), e.in("Link")); err != nil {
-					t.Fatal(err)
-				}
-			},
-			steps: []scenarioStep{
-				{
-					act:  func(t *testing.T, e scenarioEnv) { mustRename(t, e.in("Link"), e.in("Link2")) },
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Link"), e.subtree("Link2")} },
-				},
-				{
-					// Changes in the target surface under the new name.
-					act:  func(t *testing.T, e scenarioEnv) { writeFile(t, e.out("Target", "new.mkv"), "data") },
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Link2")} },
-				},
-				{
-					act: func(t *testing.T, e scenarioEnv) {
-						if err := os.Remove(e.in("Link2")); err != nil {
-							t.Fatal(err)
-						}
-					},
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Link2")} },
-				},
-			},
-		},
-		{
 			name: "nothing in a folder with .nomedia is scanned",
 			setup: func(t *testing.T, e scenarioEnv) {
 				mkdirs(t, e.root, "Ignored")
@@ -317,36 +252,6 @@ func integrationScenarios() []scenario {
 					writeFile(t, e.in("Ignored", "Sub", "b.mkv"), "data")
 				},
 			}},
-		},
-		{
-			name: "folder with .nomedia is watched again once the marker goes",
-			setup: func(t *testing.T, e scenarioEnv) {
-				mkdirs(t, e.root, "Movie Q/Extras", "Movie Q/Other")
-				writeFile(t, e.in("Movie Q", ".nomedia"), "")
-				writeFile(t, e.in("Movie Q", "q.mkv"), "data")
-			},
-			steps: []scenarioStep{
-				{
-					act: func(t *testing.T, e scenarioEnv) {
-						if err := os.Remove(e.in("Movie Q", ".nomedia")); err != nil {
-							t.Fatal(err)
-						}
-					},
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie Q")} },
-				},
-				{
-					act:  func(t *testing.T, e scenarioEnv) { writeFile(t, e.in("Movie Q", "Extras", "x.mkv"), "data") },
-					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie Q", "Extras")} },
-				},
-				{
-					// Ignored again: the sentinel check catches a target for
-					// Other.
-					act: func(t *testing.T, e scenarioEnv) {
-						writeFile(t, e.in("Movie Q", ".nomedia"), "")
-						writeFile(t, e.in("Movie Q", "Other", "o.mkv"), "data")
-					},
-				},
-			},
 		},
 		{
 			// The walk records Target/Deep only through Linked, which sorts

@@ -172,7 +172,9 @@ func (s *Service) settleUnansweredDownload(ctx context.Context, t Target) error 
 
 // targetReportsProgress reports whether the router capability that
 // checkTargetStatuses would ask about a target declares
-// reports_download_progress. A target it would skip reports none.
+// reports_download_progress. A target it would skip reports none. An error
+// reading a declaration is returned, so the refresh pass keeps the target's
+// progress until it goes stale.
 func (s *Service) targetReportsProgress(ctx context.Context, fc *fulfillContext, mediaType MediaType, t Target) (bool, error) {
 	var installationID int
 	var capabilityID string
@@ -184,8 +186,9 @@ func (s *Service) targetReportsProgress(ctx context.Context, fc *fulfillContext,
 		installationID, capabilityID = id, capability
 	} else {
 		in := integrationByID(fc, t.IntegrationID)
-		if !statusCheckable(in) {
-			return false, nil
+		checkable, err := s.statusCheckable(ctx, fc, in)
+		if err != nil || !checkable {
+			return false, err
 		}
 		installationID, capabilityID = *in.InstallationID, in.CapabilityID
 	}

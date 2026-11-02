@@ -16,6 +16,17 @@ export interface WatchProviderSummary {
   display_name: string;
   capabilities: WatchProviderCapabilities;
   connection_config_schema?: PluginConfigSchema[];
+  connection_settings?: WatchProviderConnectionSetting[];
+}
+
+/** A setting a provider declares for each connection, such as whether Simkl logs rewatches. */
+export interface WatchProviderConnectionSetting {
+  key: string;
+  label: string;
+  description?: string;
+  /** Only "boolean" today; a client skips a type it does not know. */
+  type: string;
+  default_value: unknown;
 }
 
 export const WatchProviderAuthMethod = {
@@ -66,6 +77,8 @@ export interface WatchProviderConnection {
   import_ratings_enabled: boolean;
   export_ratings_enabled: boolean;
   sync_dropped_enabled: boolean;
+  /** Values of the provider's connection_settings, defaults included. Present once connected. */
+  connection_settings?: Record<string, unknown>;
   credentials_configured: boolean;
   connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
@@ -143,7 +156,10 @@ export type UpdateWatchProviderConnection = Partial<
     | "export_ratings_enabled"
     | "sync_dropped_enabled"
   >
->;
+> & {
+  /** Values to change, keyed by setting key; settings left out keep their value. */
+  connection_settings?: Record<string, boolean>;
+};
 
 export async function fetchWatchProviders() {
   const result = await v2("GET /api/v2/watch-providers");

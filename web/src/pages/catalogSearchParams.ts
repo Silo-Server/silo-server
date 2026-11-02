@@ -30,6 +30,10 @@ export interface CatalogSearchState {
   // it the client default sort is a placeholder and a query-source request
   // leaves ordering to the server (relevance for text search).
   explicit_sort?: boolean;
+  // "box_set" asks the server to browse a library's TMDB collections as box
+  // set cards. The server applies it only to a library with box sets on and
+  // no search text, so the client never regroups pages itself.
+  group?: "box_set";
   query_definition: QueryDefinition;
 }
 
@@ -39,14 +43,6 @@ export interface SectionCatalogDestination {
   libraryId?: number;
   title?: string;
 }
-
-const SECTION_BROWSE_SUPPORT_TYPES = new Set([
-  "collection",
-  "custom_filter",
-  "genre",
-  "random",
-  "recently_added",
-]);
 
 interface GroupBuilder {
   match?: "all" | "any";
@@ -363,10 +359,6 @@ export function buildLegacyBrowseCatalogHref(searchParams: URLSearchParams): str
     sectionId,
     title: readString(searchParams.get("title")),
   });
-}
-
-export function isSectionBrowseSupported(sectionType: string): boolean {
-  return SECTION_BROWSE_SUPPORT_TYPES.has(sectionType);
 }
 
 export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearchParams {

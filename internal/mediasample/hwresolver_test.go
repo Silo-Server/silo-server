@@ -72,10 +72,3 @@ func TestHardwareResolverRetriesAFailedAutoDetection(t *testing.T) {
 	generation++
 	backend("qsv", 4)
 }
-
-func TestHardwareResolverReportsEachBackendsFirstFailure(t *testing.T) {
-	h := NewHardwareResolver("auto", "")
-	if !h.FirstFailure("vaapi") || h.FirstFailure("vaapi") || !h.FirstFailure("qsv") {
-		t.Fatal("want one first failure per accelerator")
-	}
-}

@@ -893,23 +893,6 @@ func (r *Repository) ListActiveRunsForUser(ctx context.Context, userID int) ([]R
 	return scanRunsWithMappingID(rows)
 }
 
-func (r *Repository) GetProgress(ctx context.Context, userID int, profileID, mediaItemID string) (*localProgressRow, error) {
-	var row localProgressRow
-	err := r.pool.QueryRow(ctx, `
-		SELECT updated_at
-		FROM user_watch_progress
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		userID, profileID, mediaItemID,
-	).Scan(&row.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting watch progress: %w", err)
-	}
-	return &row, nil
-}
-
 func (r *Repository) UpsertImportedProgress(
 	ctx context.Context,
 	userID int,
@@ -1213,17 +1196,18 @@ func scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	return finalizeRunScan(&run, warningsJSON, unmatchedJSON)
 }
 
-// scanRunWithMappingID scans a run row that includes the mapping_id column.
-func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
+// scanRunWithMappingID reads the shared run columns, then any extra columns a
+// query selects after them into extra.
+func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }, extra ...any) (*Run, error) {
 	var run Run
 	var warningsJSON []byte
 	var unmatchedJSON []byte
-	if err := scanner.Scan(
+	if err := scanner.Scan(append([]any{
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
 		&run.MappingID,
 		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.FavoritesImported, &run.Skipped,
 		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt, &run.CancelRequested,
-	); err != nil {
+	}, extra...)...); err != nil {
 		return nil, err
 	}
 	return finalizeRunScan(&run, warningsJSON, unmatchedJSON)

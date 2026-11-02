@@ -77,21 +77,23 @@ type AdminRequestRouteConditions struct {
 	Anime             *bool    `json:"anime,omitempty" doc:"Match anime (true) or not (false): Japanese animation, and titles TMDB tags anime or an AniDB-based list names"`
 	GenreIDs          []int    `json:"genre_ids,omitempty" doc:"TMDB genre IDs"`
 	KeywordIDs        []int    `json:"keyword_ids,omitempty" doc:"TMDB keyword IDs"`
-	OriginalLanguages []string `json:"original_languages,omitempty" doc:"ISO 639-1 codes of the original language" example:"[\"ja\"]"`
-	OriginCountries   []string `json:"origin_countries,omitempty" doc:"ISO 3166-1 country codes" example:"[\"JP\"]"`
+	OriginalLanguages []string `json:"original_languages,omitempty" pattern:"^[a-z]{2,3}$" doc:"TMDB original-language codes: lowercase ISO 639-1 (TMDB also uses cn and xx)" example:"[\"ja\"]"`
+	OriginCountries   []string `json:"origin_countries,omitempty" pattern:"^[A-Z]{2}$" doc:"Upper-case ISO 3166-1 alpha-2 country codes (TMDB origin_country)" example:"[\"JP\"]"`
 	YearFrom          int      `json:"year_from,omitempty" doc:"First release (or first-air) year, inclusive" example:"1980"`
 	YearTo            int      `json:"year_to,omitempty" doc:"Last release (or first-air) year, inclusive" example:"1989"`
 	NetworkIDs        []int    `json:"network_ids,omitempty" doc:"TMDB network IDs (series)"`
 	CompanyIDs        []int    `json:"company_ids,omitempty" doc:"TMDB production company IDs (movies)"`
 	RequesterUserIDs  []int    `json:"requester_user_ids,omitempty" doc:"Accounts whose requests the route applies to"`
+	SeriesStatuses    []string `json:"series_statuses,omitempty" enum:"returning,in_production,upcoming,ended,cancelled" doc:"Series only: the series' status when the request was made, or, for a request made before Silo captured status, the first time it is routed while a rule checks status (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them"` //nolint:misspell // the catalog's show_status spelling
 
 	ExcludeGenreIDs          []int    `json:"exclude_genre_ids,omitempty" doc:"Match titles with none of these TMDB genre IDs"`
 	ExcludeKeywordIDs        []int    `json:"exclude_keyword_ids,omitempty" doc:"Match titles with none of these TMDB keyword IDs"`
-	ExcludeOriginalLanguages []string `json:"exclude_original_languages,omitempty" doc:"Match titles whose original language is none of these ISO 639-1 codes" example:"[\"en\"]"`
-	ExcludeOriginCountries   []string `json:"exclude_origin_countries,omitempty" doc:"Match titles from none of these ISO 3166-1 countries"`
+	ExcludeOriginalLanguages []string `json:"exclude_original_languages,omitempty" pattern:"^[a-z]{2,3}$" doc:"Match titles whose original language is none of these TMDB codes (lowercase ISO 639-1; TMDB also uses cn and xx)" example:"[\"en\"]"`
+	ExcludeOriginCountries   []string `json:"exclude_origin_countries,omitempty" pattern:"^[A-Z]{2}$" doc:"Match titles from none of these upper-case ISO 3166-1 alpha-2 countries"`
 	ExcludeNetworkIDs        []int    `json:"exclude_network_ids,omitempty" doc:"Match series on none of these TMDB networks"`
 	ExcludeCompanyIDs        []int    `json:"exclude_company_ids,omitempty" doc:"Match movies from none of these TMDB companies"`
 	ExcludeRequesterUserIDs  []int    `json:"exclude_requester_user_ids,omitempty" doc:"Match requests from none of these accounts"`
+	ExcludeSeriesStatuses    []string `json:"exclude_series_statuses,omitempty" enum:"returning,in_production,upcoming,ended,cancelled" doc:"Series only: match series whose status is none of these; a series with no TMDB status matches"` //nolint:misspell // the catalog's show_status spelling
 	MaxContentRating         string   `json:"max_content_rating,omitempty" doc:"Match titles whose rating is at most this one, by minimum age: the US rating, or the title's own country's when it has none; a title with neither does not match" example:"PG"`
 }
 
@@ -174,13 +176,14 @@ type AdminRequestRoutePreviewInput struct {
 type AdminRequestRouteFacts struct {
 	GenreIDs         []int    `json:"genre_ids"`
 	KeywordIDs       []int    `json:"keyword_ids"`
-	OriginalLanguage string   `json:"original_language,omitempty"`
-	OriginCountries  []string `json:"origin_countries"`
+	OriginalLanguage string   `json:"original_language,omitempty" doc:"The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx)"`
+	OriginCountries  []string `json:"origin_countries" doc:"The title's TMDB origin countries, ISO 3166-1 alpha-2"`
 	Year             int      `json:"year,omitempty"`
 	NetworkIDs       []int    `json:"network_ids"`
 	CompanyIDs       []int    `json:"company_ids"`
 	Anime            bool     `json:"anime" doc:"Japanese animation, or a title TMDB tags anime or an AniDB-based list names"`
 	ContentRating    string   `json:"content_rating,omitempty" doc:"The title's US rating, or its own country's prefixed with the country code (JP:PG12) when it has none; absent when TMDB has neither" example:"TV-14"`
+	SeriesStatus     string   `json:"series_status,omitempty" doc:"A series' status as series_statuses names it (returning, in_production, upcoming, ended, cancelled), or a newer TMDB status in lower case; absent for a movie or a series with no TMDB status" example:"ended"` //nolint:misspell // the catalog's show_status spelling
 }
 
 // AdminRequestRoutePreviewRule is what one route did in a preview.
@@ -492,6 +495,9 @@ func (reg *Registry) previewAdminRequestRoute(ctx context.Context, in *AdminRequ
 	}
 	if f.ContentRating != nil {
 		out.Body.Facts.ContentRating = *f.ContentRating
+	}
+	if f.SeriesStatus != nil {
+		out.Body.Facts.SeriesStatus = *f.SeriesStatus
 	}
 	out.Body.Rules = make([]AdminRequestRoutePreviewRule, 0, len(preview.Rules))
 	for _, rule := range preview.Rules {

@@ -23,7 +23,6 @@ type AdminCollectionExtrasService interface {
 	ImportAdminMDBList(context.Context, handlers.AdminCollectionImportMDBList) (handlers.AdminCollectionImportResult, error)
 	ImportAdminTMDB(context.Context, handlers.AdminCollectionImportTMDB) (handlers.AdminCollectionImportResult, error)
 	ImportAdminTMDBList(context.Context, handlers.AdminCollectionImportTMDBList) (handlers.AdminCollectionImportResult, error)
-	ImportAdminTrakt(context.Context, handlers.AdminCollectionImportTrakt) (handlers.AdminCollectionImportResult, error)
 	ListAdminCollectionTemplates(context.Context) ([]templates.BundleWithTemplates, error)
 	AdminCollectionTemplateCatalog(context.Context) templates.Catalog
 	ApplyAdminCollectionTemplate(context.Context, string, handlers.AdminCollectionTemplateApply) (handlers.AdminCollectionTemplateResult, error)
@@ -54,7 +53,7 @@ type AdminCollectionImageInput struct {
 }
 type AdminCollectionArtworkForm struct {
 	Image     huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp" required:"false"`
-	SourceURL string        `form:"source_url" required:"false"`
+	SourceURL string        `form:"source_url" format:"uri-reference" required:"false"`
 }
 type AdminCollectionArtworkInput struct {
 	ID      ID `path:"id"`
@@ -75,10 +74,6 @@ type AdminTMDBInput struct {
 }
 type AdminTMDBListInput struct {
 	Body    AdminTMDBListImport
-	RawBody []byte
-}
-type AdminTraktInput struct {
-	Body    AdminTraktImport
 	RawBody []byte
 }
 type AdminCollectionImportOutput struct {
@@ -130,7 +125,7 @@ type AdminCollectionPreviewItem struct {
 	ContentID ID     `json:"content_id"`
 	Title     string `json:"title"`
 	Type      string `json:"type"`
-	PosterURL string `json:"poster_url,omitempty"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
 }
 type AdminCollectionPreviewOutput struct {
 	Body struct {
@@ -147,11 +142,11 @@ func (reg *Registry) adminCollectionExtras() (AdminCollectionExtrasService, *Pro
 	return s, nil
 }
 func registerAdminCollectionExtras(reg *Registry) {
-	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/{id}/items", "getAdminCollectionItems", "Page manual membership with durable signed continuation.", false), reg.getAdminCollectionItems)
-	add := adminCollectionOperation(http.MethodPut, "/admin/collections/{id}/items/{item_id}", "addAdminCollectionItem", "Add a catalog item if absent; existing positions are preserved.", false)
+	Register(reg, manualMembershipOperation(http.MethodGet, "/admin/collections/{id}/items", "getAdminCollectionItems", "Page manual membership with durable signed continuation.", false), reg.getAdminCollectionItems)
+	add := manualMembershipOperation(http.MethodPut, "/admin/collections/{id}/items/{item_id}", "addAdminCollectionItem", "Add a catalog item if absent; existing positions are preserved.", false)
 	add.DefaultStatus = http.StatusNoContent
 	Register(reg, add, reg.addAdminCollectionItem)
-	Register(reg, adminCollectionOperation(http.MethodDelete, "/admin/collections/{id}/items/{item_id}", "removeAdminCollectionItem", "Remove a manual membership.", false), reg.removeAdminCollectionItem)
+	Register(reg, manualMembershipOperation(http.MethodDelete, "/admin/collections/{id}/items/{item_id}", "removeAdminCollectionItem", "Remove a manual membership.", false), reg.removeAdminCollectionItem)
 	Register(reg, adminCollectionOperation(http.MethodDelete, "/admin/collections/{id}/image", "deleteAdminCollectionImage", "Clear poster or backdrop artwork.", false), reg.deleteAdminCollectionImage)
 	poster := adminCollectionOperation(http.MethodPut, "/admin/collections/{id}/poster", "uploadAdminCollectionPoster", "Upload bounded poster artwork or download its source after definition save.", false)
 	poster.MaxBodyBytes = maxPosterBytes + posterFormOverhead
@@ -176,9 +171,6 @@ func registerAdminCollectionExtras(reg *Registry) {
 	tmdbList := adminCollectionOperation(http.MethodPost, "/admin/collections/import/tmdb-list", "importAdminTMDBList", "Import a public TMDB list as a collection.", false)
 	tmdbList.DefaultStatus = http.StatusCreated
 	Register(reg, tmdbList, reg.importAdminTMDBList)
-	trakt := adminCollectionOperation(http.MethodPost, "/admin/collections/import/trakt", "importAdminTrakt", "Import a Trakt collection.", false)
-	trakt.DefaultStatus = http.StatusCreated
-	Register(reg, trakt, reg.importAdminTrakt)
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/templates", "listAdminCollectionTemplates", "List the collection templates with an mdblist, tmdb or tmdb_list source.", false), func(ctx context.Context, _ *struct{}) (*AdminTemplateCatalogOutput, error) {
 		s, p := reg.adminCollectionExtras()
 		if p != nil {
@@ -380,25 +372,6 @@ func (reg *Registry) importAdminTMDBList(ctx context.Context, in *AdminTMDBListI
 		return nil, p
 	}
 	v, e := s.ImportAdminTMDBList(ctx, cmd)
-	if e != nil {
-		return nil, adminCollectionError(e)
-	}
-	return adminImportOutput(v), nil
-}
-func (reg *Registry) importAdminTrakt(ctx context.Context, in *AdminTraktInput) (*AdminCollectionImportOutput, error) {
-
-	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
-		return nil, p
-	}
-	s, p := reg.adminCollectionExtras()
-	if p != nil {
-		return nil, p
-	}
-	cmd, p := in.Body.command()
-	if p != nil {
-		return nil, p
-	}
-	v, e := s.ImportAdminTrakt(ctx, cmd)
 	if e != nil {
 		return nil, adminCollectionError(e)
 	}

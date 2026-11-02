@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListVideo } from "lucide-react";
 import type { PlayerChapter } from "../types";
-import { formatTime } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
+import { PreviewImage } from "./PreviewImage";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface ChaptersMenuProps {
@@ -134,28 +135,13 @@ export function ChaptersMenu({
                 setOpen(false);
               }}
             >
-              {chapter.thumbnail_url ? (
-                <img
-                  src={chapter.thumbnail_url}
-                  alt={chapter.title}
-                  className="h-12 w-20 shrink-0 rounded object-cover"
-                />
-              ) : (
-                <div className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-white/[0.06]">
-                  <svg
-                    className="h-4 w-4 text-white/20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                    <path d="m7 2 0 20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5" />
-                  </svg>
-                </div>
-              )}
+              <PreviewImage
+                src={chapter.thumbnail_url}
+                alt={chapter.title}
+                className="h-12 w-20 shrink-0 rounded object-cover"
+                placeholderClassName="flex items-center justify-center bg-white/[0.06]"
+                iconClassName="h-4 w-4 text-white/20"
+              />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm">{chapter.title}</span>
                 <span className="text-xs text-white/45">{formatTime(chapter.start_seconds)}</span>

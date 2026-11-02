@@ -8,8 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -17,9 +19,9 @@ const jellycompatSessionColumns = `token, username, account_username, profile_id
 
 // errSessionUnreadable marks a compat session row that was read but whose
 // bridged tokens could not be decrypted (a changed encryption key, damaged
-// ciphertext). Retrying cannot fix it, so lookups treat the session as gone
-// and the client signs in again.
-var errSessionUnreadable = errors.New("compat session cannot be decrypted")
+// ciphertext) or name no login session. Retrying cannot fix it, so lookups
+// treat the session as gone and the client signs in again.
+var errSessionUnreadable = errors.New("compat session cannot be read")
 
 // SessionRepository persists compat sessions in PostgreSQL.
 type SessionRepository struct {
@@ -69,6 +71,13 @@ func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 	if session.StreamAppRefreshToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token)); err != nil {
 		return nil, fmt.Errorf("%w: decrypt streamapp refresh token: %w", errSessionUnreadable, err)
 	}
+	// The login session is not a column: the bridged refresh token names
+	// it, and refreshing keeps it, so rows stored before the compat session
+	// tracked it are covered too. Without it the session cannot be checked,
+	// so it fails closed.
+	if session.LoginSessionID, err = auth.StoredRefreshTokenSessionID(session.StreamAppRefreshToken); err != nil {
+		return nil, fmt.Errorf("%w: read login session: %w", errSessionUnreadable, err)
+	}
 	return &session, nil
 }
 
@@ -88,6 +97,19 @@ func (r *SessionRepository) encryptTokens(session Session) (accessToken, refresh
 
 // Upsert inserts or updates a compat session.
 func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
+	return r.upsert(ctx, r.pool, session)
+}
+
+// UpsertTx is Upsert inside tx.
+func (r *SessionRepository) UpsertTx(ctx context.Context, tx pgx.Tx, session Session) error {
+	return r.upsert(ctx, tx, session)
+}
+
+type sessionExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func (r *SessionRepository) upsert(ctx context.Context, db sessionExecer, session Session) error {
 	if session.Token == "" {
 		session.Token = uuid.NewString()
 	}
@@ -97,7 +119,7 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		return err
 	}
 
-	_, err = r.pool.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO jellycompat_sessions (
 			token, username, account_username, profile_id, profile_name, pseudo_user_id,
 			streamapp_user_id, streamapp_access_token, streamapp_refresh_token,

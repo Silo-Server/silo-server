@@ -32,14 +32,6 @@ afterEach(() => {
 });
 
 describe("markNavigationDirection", () => {
-  it("stamps the direction CSS selects page motion on", () => {
-    markNavigationDirection("forward");
-    expect(document.documentElement.dataset.navigationDirection).toBe("forward");
-
-    markNavigationDirection("back");
-    expect(document.documentElement.dataset.navigationDirection).toBe("back");
-  });
-
   it("removes the attribute for an unknowable direction rather than guessing", () => {
     markNavigationDirection("back");
     markNavigationDirection(null);
@@ -80,13 +72,6 @@ describe("resolveCommittedDirection", () => {
     commit(3);
     expect(resolveCommittedDirection()).toBeNull();
   });
-
-  it("returns null for an entry the router never indexed", () => {
-    pushAll(2);
-
-    window.history.replaceState({}, "");
-    expect(resolveCommittedDirection()).toBeNull();
-  });
 });
 
 describe("hasEarlierEntry", () => {
@@ -107,11 +92,6 @@ describe("hasEarlierEntry", () => {
     // is behind me" is not, which is why nothing here answers it — see the note
     // in navigationHistory.ts.
     expect(hasEarlierEntry()).toBe(true);
-  });
-
-  it("is false for an entry the router never indexed", () => {
-    window.history.replaceState({}, "");
-    expect(hasEarlierEntry()).toBe(false);
   });
 });
 

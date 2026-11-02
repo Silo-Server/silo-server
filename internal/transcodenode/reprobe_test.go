@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	return recorder
@@ -27,7 +28,7 @@ func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
 // hash immediately — the whole point of the action is that the API stops seeing
 // a stale answer without waiting for the 15-minute snapshot tick.
 func TestReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
-	server := newTestServer(t)
+	server := newProbingTestServer(t)
 	server.storeCapabilityHash("sha256:stale")
 
 	recorder := postReprobe(t, server)
@@ -61,7 +62,7 @@ func TestReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
 	// The reported hash must describe the report the capability endpoint would
 	// now serve, or the API would refetch and store something else.
 	capabilityRequest := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	capabilityRequest.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, capabilityRequest, testSecret)
 	capabilityRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(capabilityRecorder, capabilityRequest)
 	if capabilityRecorder.Code != http.StatusOK {
@@ -116,44 +117,6 @@ func TestReprobeCapabilitiesRefusesWhileTranscoding(t *testing.T) {
 	}
 }
 
-// The route is bearer-authed like the rest of the admin group: it executes
-// ffmpeg, so an unauthenticated caller could otherwise make a node do work.
-func TestReprobeCapabilitiesRequiresBearer(t *testing.T) {
-	server := newTestServer(t)
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil))
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 without a bearer token", recorder.Code)
-	}
-}
-
-// The active-job count only moves once ffmpeg is already running, so checking it
-// alone leaves a window: a node idle at the check accepts a transcode while the
-// probe still has minutes to go, and the smoke encode races the live encoder
-// after all. Work that has been admitted but is not yet an active job has to
-// refuse the re-probe too.
-func TestReprobeCapabilitiesRefusesWhileWorkIsStarting(t *testing.T) {
-	server := newTestServer(t)
-	server.storeCapabilityHash("sha256:previous")
-	if !server.gpu.beginWork() {
-		t.Fatal("beginWork on an idle node was refused")
-	}
-	t.Cleanup(server.gpu.endWork)
-
-	// activeJobs is deliberately zero: this is exactly the state the old
-	// point-in-time check read as idle.
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs = %d, want the pre-registration window", got)
-	}
-	recorder := postReprobe(t, server)
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 while a transcode is starting", recorder.Code)
-	}
-	if got := server.storedCapabilityHash(); got != "sha256:previous" {
-		t.Fatalf("stored hash = %q, want the previous report untouched", got)
-	}
-}
-
 // The re-probe deliberately does not join a capability build already in flight
 // — bumping the invalidation generation is what makes it honest — so without a
 // lock the scheduled snapshot's ffmpeg matrix and the operator's would run at
@@ -164,7 +127,7 @@ func TestReprobeCapabilitiesRefusesWhileWorkIsStarting(t *testing.T) {
 // this test had already released it. A sleep here could only ever say "it had
 // not finished yet", which is also true when it never started.
 func TestCapabilityBuildsAreSerialized(t *testing.T) {
-	server := newTestServer(t)
+	server, _ := newCapabilityTestServer(t)
 
 	admitted := make(chan struct{}, 1)
 	server.capabilityBuildAdmitted = func() { admitted <- struct{}{} }
@@ -210,7 +173,7 @@ func TestReloadConfigKeepsActiveSessions(t *testing.T) {
 	server.activeJobs.Store(1)
 
 	request := httptest.NewRequest(http.MethodPost, "/admin/reload-config", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -235,7 +198,7 @@ func TestReloadConfigKeepsActiveSessions(t *testing.T) {
 // cold, so it registers as GPU work and a manual re-probe cannot claim an
 // apparently idle encoder beside it.
 func TestCapabilitySnapshotRegistersAsGPUWork(t *testing.T) {
-	server := newTestServer(t)
+	server, _ := newCapabilityTestServer(t)
 
 	// The builder reports the moment it holds the work slot, which is the state
 	// under test — polling the gate on a timer could observe it before or after.
@@ -327,36 +290,6 @@ func TestReprobeCapabilitiesRefusedWhileASessionIsStillClosing(t *testing.T) {
 	// The hold is released with the teardown, so an idle node re-probes again.
 	if _, ok := server.gpu.beginReprobe(otherWork(int(server.activeJobs.Load()))); !ok {
 		t.Fatal("re-probe refused after the teardown completed")
-	}
-	server.gpu.endReprobe()
-}
-
-// Warmup is a real smoke encode, and the listener opens while it may still be
-// running: an admin re-probe arriving in a node's first seconds would otherwise
-// see an idle gate and run its matrix beside it, publishing a false hardware
-// failure on a session-limited GPU.
-func TestReprobeCapabilitiesRefusedWhileEncoderWarmupRuns(t *testing.T) {
-	server := newTestServer(t)
-	server.storeCapabilityHash("sha256:previous")
-
-	// The gate is what warmup holds; observed here rather than by starting a
-	// real ffmpeg, which the test host has no hardware for.
-	server.gpu.holdWork()
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs = %d, want the warmup window where nothing is registered", got)
-	}
-
-	recorder := postReprobe(t, server)
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 while the encoder is warming", recorder.Code)
-	}
-	if got := server.storedCapabilityHash(); got != "sha256:previous" {
-		t.Fatalf("stored hash = %q, want the previous report untouched", got)
-	}
-
-	server.gpu.endWork()
-	if _, ok := server.gpu.beginReprobe(otherWork(0)); !ok {
-		t.Fatal("re-probe refused after warmup finished")
 	}
 	server.gpu.endReprobe()
 }

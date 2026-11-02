@@ -1,12 +1,15 @@
 package naming
 
 import (
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 var (
@@ -44,7 +47,10 @@ type episodeToken struct {
 // evidence. Unlabeled numbers need either a containing season directory or an
 // explicitly declared series library. They never classify files in mixed or
 // movie libraries by themselves.
-func parseEpisodeToken(name string, directories []string, allowNumericSeason bool, allowUnseasoned ...bool) (episodeToken, bool) {
+// rootRelative reports that directories start directly in a configured library
+// folder, so the first one may be the show itself.
+func parseEpisodeToken(name string, directories []string, rootRelative, allowNumericSeason bool, allowUnseasoned ...bool) (episodeToken, bool) {
+	bracketWeighed := false
 	for _, pattern := range []*regexp.Regexp{labeledEpisodeRe, xEpisodeRe} {
 		for _, match := range pattern.FindAllStringSubmatchIndex(name, -1) {
 			season, _ := strconv.Atoi(name[match[2]:match[3]])
@@ -53,11 +59,39 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 			}
 			// A bare aspect ratio (Movie.Name.16x9) is a coordinate only in a
 			// season folder or a series library.
-			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(directories, allowNumericSeason, allowUnseasoned...) {
+			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(name, directories, rootRelative, allowNumericSeason, allowUnseasoned...) {
 				continue
 			}
-			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
-			return finishEpisodeToken(name, token), true
+			open, closed, bracketed := 0, 0, false
+			if pattern == xEpisodeRe {
+				open, closed, bracketed = bracketedCoordinate(name, match[2], match[5])
+			}
+			if bracketed {
+				// Only the first bracketed code is weighed: a later one has the
+				// same earlier text before it. Weighing each would re-parse
+				// every prefix once per bracket in the name.
+				if bracketWeighed {
+					continue
+				}
+				bracketWeighed = true
+				// A bracketed code after an episode number belongs to the
+				// episode title: Show - 03 - Title (2x14). A number that is the
+				// show folder's title is not one: 24/Season 1/24 [1x02].
+				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 && !namesShowFolder(name[:open], name, directories, rootRelative, allowNumericSeason) {
+					continue
+				}
+			}
+			// The brackets of Show ( 1x02 ) - Title belong to the coordinate,
+			// not to the show or episode title around it.
+			start := match[0]
+			if bracketed {
+				start = open
+			}
+			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: start, end: match[5]})
+			if bracketed {
+				token.end = closed
+			}
+			return token, true
 		}
 	}
 
@@ -74,13 +108,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		if exactExtra || pluralExtra {
 			return episodeToken{}, false
 		}
-		if len(directories) > 1 {
-			showDirectory = directories[len(directories)-2]
-		}
-		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason)
-		if !hasSeason {
-			showDirectory = parent
-		}
+		season, hasSeason, showDirectory = folderSeason(name, directories, rootRelative, allowNumericSeason)
 	}
 	unseasoned := len(allowUnseasoned) > 0 && allowUnseasoned[0]
 	if !hasSeason && !unseasoned {
@@ -185,7 +213,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 
 // hasSeriesContext reports whether a file sits in a season folder or a
 // declared series library.
-func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseasoned ...bool) bool {
+func hasSeriesContext(name string, directories []string, rootRelative, allowNumericSeason bool, allowUnseasoned ...bool) bool {
 	if len(allowUnseasoned) > 0 && allowUnseasoned[0] {
 		return true
 	}
@@ -196,7 +224,9 @@ func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseas
 	if len(directories) > 1 {
 		showDirectory = directories[len(directories)-2]
 	}
-	_, ok := seasonDirectoryNumber(directories[len(directories)-1], showDirectory, allowNumericSeason)
+	parent := directories[len(directories)-1]
+	topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
+	_, ok := seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
 	return ok
 }
 
@@ -272,6 +302,32 @@ func completesShowTitle(prefix, showDirectory string) bool {
 	return title != "" && normalizeInferComparable(prefix) == title
 }
 
+// folderSeason reads the season a file's folder names, and finds its show
+// folder: the folder itself, or the one above a season folder.
+func folderSeason(name string, directories []string, rootRelative, allowNumericSeason bool) (season int, ok bool, showDirectory string) {
+	if len(directories) == 0 {
+		return 0, false, ""
+	}
+	parent := strings.TrimSpace(directories[len(directories)-1])
+	if len(directories) > 1 {
+		showDirectory = directories[len(directories)-2]
+	}
+	topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
+	season, ok = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
+	if !ok {
+		showDirectory = parent
+	}
+	return season, ok, showDirectory
+}
+
+// namesShowFolder reports a prefix that is only the title of the file's show
+// folder, as "24 " is in 24/Season 1/24 [1x02]. A season folder is not the
+// show's: "03 " in Show/03/03 (2x14) is an episode number.
+func namesShowFolder(prefix, name string, directories []string, rootRelative, allowNumericSeason bool) bool {
+	_, _, showDirectory := folderSeason(name, directories, rootRelative, allowNumericSeason)
+	return completesShowTitle(prefix, showDirectory)
+}
+
 func startsWithShowTitle(name, showDirectory string) bool {
 	title := showFolderTitle(showDirectory)
 	comparable := normalizeInferComparable(name)
@@ -293,13 +349,28 @@ func technicalMetadataStart(name string) int {
 // hasExplicitEpisodeToken reports a labeled coordinate such as S01E01 or 1x01.
 // Without series context, unlabeled numbers are not episode evidence.
 func hasExplicitEpisodeToken(name string) bool {
-	_, ok := parseEpisodeToken(name, nil, false)
+	_, ok := parseEpisodeToken(name, nil, false, false)
 	return ok
 }
 
 func insideReleaseTag(name string, index int) bool {
 	prefix := name[:index]
 	return strings.LastIndex(prefix, "[") > strings.LastIndex(prefix, "]") || strings.LastIndex(prefix, "(") > strings.LastIndex(prefix, ")")
+}
+
+// bracketedCoordinate reports a bracket or parenthesis that holds only the
+// text from start to end, as in [1x02] or ( 1x02 ). open is the index of its
+// opening character and closed the index after its closing one.
+func bracketedCoordinate(name string, start, end int) (open, closed int, ok bool) {
+	before := strings.TrimRight(name[:start], " ")
+	after := strings.TrimLeft(name[end:], " ")
+	if before == "" || after == "" {
+		return 0, 0, false
+	}
+	if opening, closing := before[len(before)-1], after[0]; (opening == '[' && closing == ']') || (opening == '(' && closing == ')') {
+		return len(before) - 1, len(name) - len(after) + 1, true
+	}
+	return 0, 0, false
 }
 
 func validXEpisodeCoordinate(name string, match []int) bool {
@@ -310,8 +381,18 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	episode := name[match[4]:match[5]]
 	number, _ := strconv.Atoi(episode)
 	// Release tags and aspect ratios before release details describe the
-	// video: [16x9 1080p], Movie.4x3.DVDRip.
-	if insideReleaseTag(name, start) {
+	// video: [16x9 1080p], Movie.4x3.DVDRip. A tag holding only a coordinate
+	// with a two-digit episode labels the episode ([1x02], (1x02)); a shorter
+	// one is more often a ratio or part of a title ([2x1], (4x4)). Aspect
+	// ratios stay rejected ([16x10]), as does a tag inside another one
+	// ([WEB-DL (1x02)]), and the picture size checks below still apply
+	// ([1920x1080]).
+	open, closed, bracketed := bracketedCoordinate(name, start, match[5])
+	if bracketed {
+		if len(episode) < 2 || aspectRatioRe.MatchString(strings.ToLower(name[start:match[5]])) || insideReleaseTag(name, open) {
+			return false
+		}
+	} else if insideReleaseTag(name, start) {
 		return false
 	}
 	if aspectRatioRe.MatchString(name[start:match[5]]) {
@@ -332,8 +413,13 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		return false
 	}
 	// A leading NxM followed by a release year is a title: 10x10 (2018),
-	// 4x4.2019, 10x10 - 2018.
-	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
+	// 4x4.2019, 10x10 - 2018, [10x10] (2018). After a bracketed code the year
+	// has to come next: [1x02] - Arrival (2018) is an episode.
+	title, rest := strings.Trim(name[:start], " ._-"), name[match[5]:]
+	if bracketed {
+		title, rest = strings.Trim(name[:start], " ._-[("), name[closed:]
+	}
+	if year := titleYearAfterRe.FindStringIndex(rest); title == "" && year != nil && (!bracketed || strings.Trim(rest[:year[0]], " ._-") == "") {
 		return false
 	}
 	season, _ := strconv.Atoi(name[start:match[3]])
@@ -537,17 +623,38 @@ func parseEpisodeNumber(digits string) int {
 
 // EpisodeTitleSuffix returns the text following a recognized episode token.
 // Release-tag cleanup belongs to the caller that uses this title as evidence.
+// The root is found on the encoded path; the names are parsed as display text
+// (see fspath.Display), as ParseFilename parses them.
 func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
-	base := filepath.Base(filePath)
-	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	stem := displayStem(filePath)
 	libraryRoot := deepestContainingLibraryRoot(filePath, libraryRoots)
 	directories := directorySegmentsWithinRoot(filePath, libraryRoot)
+	for i, directory := range directories {
+		directories[i] = fspath.Display(directory)
+	}
 	allowNumericSeason := libraryRoot == "" || len(directories) > 1
-	token, ok := parseEpisodeToken(stem, directories, allowNumericSeason, true)
+	token, ok := parseEpisodeToken(stem, directories, libraryRoot != "", allowNumericSeason, true)
 	if !ok || token.episode == 0 {
 		return ""
 	}
 	return strings.TrimLeft(stem[token.end:], " ._-")
+}
+
+// AirDateTitleSuffix returns the text following the air date of a by-date
+// episode name. Release-tag cleanup belongs to the caller, as with
+// EpisodeTitleSuffix.
+func AirDateTitleSuffix(filePath string) string {
+	stem := displayStem(filePath)
+	match := airDateRe.FindStringSubmatchIndex(stem)
+	if match == nil {
+		return ""
+	}
+	return strings.TrimLeft(stem[match[7]:], " ._-")
+}
+
+func displayStem(filePath string) string {
+	base := fspath.Display(filepath.Base(filePath))
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 func compactEpisodeMatch(name string) []int {
@@ -571,4 +678,24 @@ func parseCompactEpisode(name string, match []int, season int, hasSeason bool) e
 	}
 	episode := parseEpisodeNumber(name[match[2]+1 : match[3]])
 	return finishEpisodeToken(name, episodeToken{season: compactSeason, seasonKnown: true, compact: true, episode: episode, start: match[0], end: match[3]})
+}
+
+// ExplicitEpisodeCoordinates reads the season and episode range a name labels
+// explicitly, as in S01E05, 1x05, or S01E01E02. Bare numbers such as
+// "Room.104" or "24" are not read as episodes. end equals start for a single
+// episode. Only the base name is read.
+func ExplicitEpisodeCoordinates(name string) (season, start, end int, ok bool) {
+	name = path.Base(filepath.ToSlash(name))
+	if !hasExplicitEpisodeToken(strings.TrimSuffix(name, path.Ext(name))) {
+		return 0, 0, 0, false
+	}
+	hints := ParseFilename(name, seriesContentType)
+	if !hints.SeasonKnown || hints.EpisodeNum == 0 {
+		return 0, 0, 0, false
+	}
+	start, end = hints.EpisodeNum, hints.EpisodeNum
+	if variant := ParseVariantHints(name, seriesContentType); variant.MultiEpisodeStart == start && variant.MultiEpisodeEnd > start {
+		end = variant.MultiEpisodeEnd
+	}
+	return hints.SeasonNum, start, end, true
 }

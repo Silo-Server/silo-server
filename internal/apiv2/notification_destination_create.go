@@ -19,7 +19,7 @@ type NotificationDestinationCreateService interface {
 type NotificationWebhookCreateInput struct {
 	Body struct {
 		Name                   string  `json:"name" minLength:"1"`
-		URL                    string  `json:"url" minLength:"1"`
+		URL                    string  `json:"url" format:"uri" minLength:"1"`
 		Type                   *string `json:"type,omitempty" enum:"discord,generic"`
 		NotifyFavorites        *bool   `json:"notify_favorites,omitempty"`
 		NotifyWatchlist        *bool   `json:"notify_watchlist,omitempty"`
@@ -31,7 +31,7 @@ type NotificationWebhookCreateInput struct {
 type NotificationServerChannelCreateInput struct {
 	Body struct {
 		Name                   string  `json:"name" minLength:"1"`
-		URL                    string  `json:"url" minLength:"1"`
+		URL                    string  `json:"url" format:"uri" minLength:"1"`
 		Type                   *string `json:"type,omitempty" enum:"discord,generic"`
 		Enabled                *bool   `json:"enabled,omitempty"`
 		NotifyNewMovies        *bool   `json:"notify_new_movies,omitempty"`

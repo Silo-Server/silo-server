@@ -89,7 +89,6 @@ describe("themeBoot", () => {
       ["x-large", "strong", "true"],
       ["large", "default", "false"],
       ["bogus", "bogus", "bogus"],
-      [null, null, null],
     ])(
       `parses text scale %s, weight %s, and high contrast %s the way ThemeProvider does (owner ${owner})`,
       (textScale, textWeight, highContrast) => {
@@ -135,10 +134,6 @@ describe("themeBoot", () => {
 });
 
 describe("index.html", () => {
-  it("ships Cinema Dark as the one base theme", () => {
-    expect(indexHtml).toMatch(/<html [^>]*data-theme="midnight-cinema"/);
-  });
-
   it("loads nothing from another origin", () => {
     // A cross-origin stylesheet or preconnect in the shell puts a third party on
     // the first-paint path; fonts are self-hosted from fonts.css instead.

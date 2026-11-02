@@ -3,6 +3,7 @@ import { setAccessToken, setProfileId } from "@/api/client";
 import { captureAdminUserAuthority } from "./adminUsers";
 import { listAdminPlaybackSessions } from "./adminSessions";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 beforeEach(() => {
   installPolicyStorageMocks();
   setAccessToken("admin");
@@ -69,16 +70,7 @@ it("rejects numeric IDs that would lose identity precision", async () => {
   );
 });
 it("discards the completed page after a profile switch", async () => {
-  let finish!: (r: Response) => void;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve;
-        }),
-    ),
-  );
+  const { finish } = stubPendingFetch();
   const result = listAdminPlaybackSessions(captureAdminUserAuthority());
   setProfileId("other");
   finish(jsonResponse({ items: [row], page: { has_more: false } }));

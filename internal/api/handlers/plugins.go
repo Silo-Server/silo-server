@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -200,7 +204,8 @@ type PluginInstallationView struct {
 
 // PluginRuntimeView is one installation's process state. Resident marks a
 // plugin the supervisor keeps running (network access providers); State is
-// the supervisor's machine for those and running/stopped for lazily started
+// the supervisor's machine for those and running, stopped, or failed (the
+// last launch on this host failed, LastError says why) for lazily started
 // plugins.
 type PluginRuntimeView struct {
 	Resident      bool
@@ -247,6 +252,11 @@ type PluginCapabilityView struct {
 	// admin view derives the binding's sign-in URLs from them; the frozen
 	// v1 projection does not carry them.
 	AuthModes []string `json:"-"`
+	// RequestRouter is a request_router.v1 capability's descriptor, nil when
+	// the manifest declares none. The v2 admin view reads which connection
+	// fields the plugin can do without from it; the frozen v1 projection does
+	// not carry it.
+	RequestRouter *pluginv1.RequestRouterDescriptor `json:"-"`
 }
 
 type PluginRouteView struct {
@@ -637,8 +647,12 @@ func (h *PluginHandler) HandleCancelChunkedUpload(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) (*plugins.InstallResult, error) {
-	zipUpload, err := isZipUploadFile(path)
+// installUploadedPlugin installs the upload in file. A zip archive is
+// installed from path, which names the same file, because the archive
+// installer reads by path; a bare binary is read from file itself, so the
+// binary that gets executed is the one that was uploaded.
+func (h *PluginHandler) installUploadedPlugin(ctx context.Context, file *os.File, path string) (*plugins.InstallResult, error) {
+	zipUpload, err := isZipUploadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -648,7 +662,7 @@ func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) 
 		})
 	}
 
-	uploadData, err := os.ReadFile(path)
+	uploadData, err := io.ReadAll(io.NewSectionReader(file, 0, math.MaxInt64))
 	if err != nil {
 		return nil, fmt.Errorf("read uploaded plugin binary: %w", err)
 	}
@@ -694,16 +708,10 @@ func isZipUpload(data []byte) bool {
 		bytes.Equal(data[:4], []byte("PK\x07\x08"))
 }
 
-func isZipUploadFile(path string) (bool, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return false, fmt.Errorf("open uploaded plugin file: %w", err)
-	}
-	defer file.Close()
-
+func isZipUploadFile(file io.ReaderAt) (bool, error) {
 	var header [4]byte
-	n, err := io.ReadFull(file, header[:])
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	n, err := file.ReadAt(header[:], 0)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read uploaded plugin header: %w", err)
 	}
 	return isZipUpload(header[:n]), nil
@@ -1161,6 +1169,12 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			continue
 		}
 		manifest, err := plugins.LoadManifestFile(plugins.InstalledManifestPath(installation.InstallPath))
+		if errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+			// A row admitted before the identity check never loads; it has
+			// no settings to offer and must not hide the other plugins.
+			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1369,6 +1383,17 @@ func (h *PluginHandler) buildInstallationResponse(
 	)
 }
 
+// installationSource reports where an installation came from and whether its
+// update checks are paused. Silo checks a repository only while it is enabled
+// and refuses installs from a disabled one, so a recorded update can't be
+// applied until the repository is enabled again.
+func installationSource(repository *plugins.Repository) (sourceKind, repositoryName string, updatesPaused bool) {
+	if repository == nil {
+		return plugins.RepositorySourceExternal, "", false
+	}
+	return repository.SourceKind, repository.DisplayName, !repository.Enabled
+}
+
 func (h *PluginHandler) buildInstallationResponseWithBindings(
 	ctx context.Context,
 	installation *plugins.Installation,
@@ -1380,7 +1405,9 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) {
+		// A row admitted before the identity check never loads; list it
+		// without its manifest so the admin can still uninstall it.
+		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
 			return PluginInstallationView{}, err
 		}
 	}
@@ -1400,18 +1427,12 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		routes             []PluginRouteView
 		assets             []PluginAssetView
 		metadata           map[string]any
-		sourceKind         = plugins.RepositorySourceExternal
-		repositoryName     string
-		updatesPaused      bool
 	)
+	var repository *plugins.Repository
 	if installation.RepositoryID != nil {
-		repository := repositoriesByID[*installation.RepositoryID]
-		if repository != nil {
-			sourceKind = repository.SourceKind
-			repositoryName = repository.DisplayName
-			updatesPaused = repository.SourceKind == plugins.RepositorySourceApprovedCommunity && !repository.Enabled
-		}
+		repository = repositoriesByID[*installation.RepositoryID]
 	}
+	sourceKind, repositoryName, updatesPaused := installationSource(repository)
 	if manifest != nil {
 		globalConfigSchema = configSchemasToJSON(manifest.GetGlobalConfigSchema())
 		userConfigSchema = configSchemasToJSON(manifest.GetUserConfigSchema())
@@ -1426,7 +1447,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}
 	var runtime *PluginRuntimeView
 	if h.service != nil {
-		state := h.service.RuntimeState(installation.ID)
+		state := h.service.RuntimeStateOf(installation)
 		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
 		// Before the supervisor arms (boot) the capability says what will be
 		// resident. Once armed, its entries are the truth: an enabled
@@ -1549,6 +1570,7 @@ func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCa
 			ConfigSchema:  configSchemasToJSON(descriptor.GetConfigSchema()),
 			Metadata:      structToMap(descriptor.GetMetadata()),
 			AuthModes:     append([]string(nil), descriptor.GetAuthModes()...),
+			RequestRouter: descriptor.GetRequestRouter(),
 		})
 	}
 	return response
@@ -1704,7 +1726,8 @@ func (h *PluginHandler) loadInstallationCapabilities(
 	manifest *pluginv1.PluginManifest,
 ) ([]PluginCapabilityView, error) {
 	if manifest != nil {
-		return capabilitiesToJSON(manifest.GetCapabilities()), nil
+		views := capabilitiesToJSON(manifest.GetCapabilities())
+		return views, h.useStoredRequestRouters(ctx, installation, views)
 	}
 
 	records, err := h.installations.ListCapabilities(ctx, installation.ID)
@@ -1721,6 +1744,44 @@ func (h *PluginHandler) loadInstallationCapabilities(
 		response = append(response, capabilitiesToJSON([]*pluginv1.CapabilityDescriptor{descriptor})...)
 	}
 	return response, nil
+}
+
+// useStoredRequestRouters gives each request_router.v1 capability the
+// descriptor stored when the plugin was installed, which is what the requests
+// service reads. The installed manifest can declare flags that a host built on
+// an older SDK dropped when it stored the capability, and the admin form must
+// not offer a server setup that routing then refuses.
+func (h *PluginHandler) useStoredRequestRouters(ctx context.Context, installation *plugins.Installation, views []PluginCapabilityView) error {
+	if !slices.ContainsFunc(views, func(v PluginCapabilityView) bool { return v.Type == sdkcapability.RequestRouter }) {
+		return nil
+	}
+	records, err := h.installations.ListCapabilities(ctx, installation.ID)
+	if err != nil {
+		return err
+	}
+	return applyStoredRequestRouters(views, records)
+}
+
+// applyStoredRequestRouters sets each request_router.v1 view's descriptor to
+// the stored record's with the same ID, or none when no record has one.
+func applyStoredRequestRouters(views []PluginCapabilityView, records []*plugins.Capability) error {
+	stored := map[string]*pluginv1.RequestRouterDescriptor{}
+	for _, record := range records {
+		if record == nil || record.Type != sdkcapability.RequestRouter {
+			continue
+		}
+		descriptor, err := plugins.DecodeCapability(record)
+		if err != nil {
+			return err
+		}
+		stored[record.ID] = descriptor.GetRequestRouter()
+	}
+	for i := range views {
+		if views[i].Type == sdkcapability.RequestRouter {
+			views[i].RequestRouter = stored[views[i].ID]
+		}
+	}
+	return nil
 }
 
 func loadPluginManifest(installation *plugins.Installation) (*pluginv1.PluginManifest, error) {

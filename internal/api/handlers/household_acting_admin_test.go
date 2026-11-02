@@ -36,11 +36,11 @@ func actingAdminHousehold(t *testing.T, primaryPIN string) userstore.UserStore {
 		t.Fatalf("limit kid: %v", err)
 	}
 	pin := "4321"
-	if err := store.UpdateProfile(ctx, "alex", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	if err := store.UpdateProfile(ctx, "alex", userstore.UpdateProfileInput{PINHash: storedPIN(t, pin)}); err != nil {
 		t.Fatalf("lock alex: %v", err)
 	}
 	if primaryPIN != "" {
-		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: &primaryPIN}); err != nil {
+		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PINHash: storedPIN(t, primaryPIN)}); err != nil {
 			t.Fatalf("lock primary: %v", err)
 		}
 	}
@@ -49,7 +49,7 @@ func actingAdminHousehold(t *testing.T, primaryPIN string) userstore.UserStore {
 
 func actingAdminProfileHandler(store userstore.UserStore) *ProfileHandler {
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleAdmin, MaxProfiles: 10}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleAdmin, MaxProfiles: new(10)}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
 	return handler
 }
@@ -176,7 +176,7 @@ func TestHouseholdManagement_AdminAPIKeyWithoutProfile(t *testing.T) {
 		}
 		return ctx
 	}
-	unverified := func(string) error { return access.ErrProfileUnverified }
+	unverified := func(*userstore.Profile) error { return access.ErrProfileUnverified }
 
 	t.Run("create without a profile", func(t *testing.T) {
 		store := actingAdminHousehold(t, "1234")

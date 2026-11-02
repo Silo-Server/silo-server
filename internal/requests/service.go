@@ -13,15 +13,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	"golang.org/x/sync/errgroup"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
 type TMDBClient interface {
 	SearchMedia(ctx context.Context, mediaType, query string, page int) (*tmdb.MediaPage, error)
-	DiscoverSection(ctx context.Context, section string, page int) (*tmdb.MediaPage, error)
+	ChartPage(ctx context.Context, params tmdb.ChartParams, page int) (*tmdb.MediaPage, error)
 	GetMediaDetail(ctx context.Context, mediaType string, id int) (*tmdb.MediaDetail, error)
 	DiscoverPage(ctx context.Context, mediaType string, params tmdb.DiscoverParams, page int) (*tmdb.MediaPage, error)
 }
@@ -90,6 +92,8 @@ type Service struct {
 	lifecycle         LifecycleNotifier
 	watchlistPref     WatchlistPreference
 	titleObserver     TitleObserver
+	discoverSnapshots DiscoverSnapshots
+	discoverRefresher DiscoverListRefresher
 	Now               func() time.Time
 }
 
@@ -101,10 +105,11 @@ type DiscoverySection struct {
 	TotalResults int           `json:"total_results"`
 	Results      []MediaResult `json:"results"`
 	// NextPage is the cursor to request for the following page, needed when
-	// rating-filter backfill consumes more than one TMDB page per request
-	// (page+1 would repeat consumed pages). 0 when there are no more pages.
-	// Additive v1 field; absent (0) also when the viewer is unrestricted and
-	// plain page+1 semantics apply.
+	// backfill (a rating ceiling, or a row hiding titles the library has)
+	// consumes more than one source page per request (page+1 would repeat
+	// consumed pages). 0 when there are no more pages; on the v2 layout, past
+	// TotalPages instead after a multi-page read reached the end. Additive v1
+	// field; absent (0) also when plain page+1 semantics apply.
 	NextPage int `json:"next_page,omitempty"`
 }
 
@@ -234,94 +239,39 @@ func (s *Service) hydrateCertifications(ctx context.Context, raw *tmdb.MediaPage
 	return out, nil
 }
 
-// Section backfill: fail-closed filtering hides most of a TMDB section page
-// for a restricted profile (typically 15+ of 20, since unrated titles are
-// dropped), which renders as a nearly empty carousel. To compensate, a
-// restricted viewer's section page consumes consecutive TMDB pages, starting
-// at the requested page, until a page's worth of titles survives filtering or
-// the per-request budget (sectionBackfillMaxPagesPerRequest) is spent.
+// Row backfill: fail-closed filtering hides most of a TMDB page for a
+// restricted profile (typically 15+ of 20, since unrated titles are
+// dropped), which renders as a nearly empty carousel; a row that hides titles
+// the library has thins out the same way. To compensate, such a row page
+// consumes consecutive source pages, starting at the requested page, until
+// enough titles survive or the per-request page budget is spent (see
+// fillRowPage).
 //
-// Pagination stays honest through two properties: `page` keeps plain TMDB
-// cursor semantics (same as for unrestricted viewers), and the response's
-// next_page reports the cursor after the last TMDB page actually consumed.
-// Every survivor from a consumed page is returned — nothing is trimmed and no
-// consumed page is partially dropped — so resuming at next_page never skips
-// or repeats an allowed title. The budget also bounds the cold-cache cost: a
-// permissive ceiling (R/TV-MA) fills from one TMDB page and stops immediately,
+// Pagination stays honest through two properties: `page` keeps the source's
+// own cursor semantics (same as for unrestricted viewers), and the response's
+// next_page reports the cursor after the last source page actually consumed.
+// Every survivor from a consumed page is returned and no consumed page is
+// partially dropped, so resuming at next_page never skips or repeats an
+// allowed title. The one exception is the Discover page itself: a row there
+// shows at most its limit, and a row it trims loses its cursor (its see all
+// page starts again at page 1). The budget also bounds the cold-cache cost: a
+// permissive ceiling (R/TV-MA) fills from one page and stops immediately,
 // while a strict ceiling spends at most the budget per request.
 const (
-	// Per-request TMDB page budgets. A single-section request can afford a
-	// deeper scan than the six-section DiscoverAll aggregate: on a cold
-	// certification cache each consumed page costs up to 20 cert lookups
-	// against the client's rate limiter, so DiscoverAll's worst case is
-	// 6 sections x sectionBackfillBudgetAggregate pages x 20. Keeping the
-	// aggregate budget small bounds the first-paint latency for a restricted
-	// profile; the per-section endpoint (carousel "load more") gets the
-	// deeper budget. Steady state is unaffected — certifications are cached
-	// for 7 days, shared across all profiles.
+	// Per-request source page budgets. A single row's page (its see all
+	// page) can afford a deeper scan than the Discover page, which renders
+	// every row at once: on a cold certification cache each consumed page
+	// costs up to 20 cert lookups against the client's rate limiter. A
+	// Discover page row reads ceil(limit/20) pages, plus one when it filters
+	// (see firstRowPage), so its worst case is rows x that x 20 lookups;
+	// /api/v1's six rows read sectionBackfillBudgetAggregate pages each.
+	// Steady state is unaffected: certifications are cached for 7 days,
+	// shared across all profiles.
 	sectionBackfillBudgetSingle    = 5
 	sectionBackfillBudgetAggregate = 2
-	sectionResultsPerPage          = 20
+	sectionResultsPerPage          = discoverrows.PageSize
 	sectionBackfillMaxPage         = 500 // TMDB hard-caps page at 500
 )
-
-func (s *Service) backfillSectionPage(ctx context.Context, section string, page, pageBudget int, ceiling string) (result *tmdb.MediaPage, nextPage int, err error) {
-	if page <= 0 {
-		page = 1
-	}
-	if pageBudget <= 0 {
-		pageBudget = 1
-	}
-
-	out := &tmdb.MediaPage{Page: page}
-	var results []tmdb.MediaResult
-	// Trending/popular orderings shift between fetches, so consecutive TMDB
-	// pages can overlap; dedupe within the request.
-	seen := map[certKey]bool{}
-	totalPages := page // until TMDB tells us the real count, assume the current page exists
-	consumed := 0
-	for next := page; consumed < pageBudget && next <= totalPages && next <= sectionBackfillMaxPage; next++ {
-		// Enough survived — stop before spending another TMDB page. Titles on
-		// unconsumed pages are not lost: next_page points at the first page
-		// this request did not consume.
-		if len(results) >= sectionResultsPerPage {
-			break
-		}
-		raw, err := s.tmdb.DiscoverSection(ctx, section, next)
-		if err != nil {
-			return nil, 0, err
-		}
-		if raw == nil {
-			break
-		}
-		consumed++
-		nextPage = next + 1
-		if raw.TotalPages > 0 {
-			totalPages = raw.TotalPages
-			out.TotalResults = raw.TotalResults
-		}
-		filtered, err := s.filterPageByCeiling(ctx, raw, ceiling)
-		if err != nil {
-			return nil, 0, err
-		}
-		for _, item := range filtered.Results {
-			key := certKey{mediaType: MediaType(item.MediaType), id: item.ID}
-			if !seen[key] {
-				seen[key] = true
-				results = append(results, item)
-			}
-		}
-	}
-	out.Results = results
-	// TotalPages/TotalResults stay TMDB's unfiltered counts — page keeps TMDB
-	// cursor semantics, and the filtered totals are unknowable without a full
-	// scan. next_page is the honest resume cursor.
-	out.TotalPages = totalPages
-	if nextPage > totalPages || nextPage > sectionBackfillMaxPage {
-		nextPage = 0 // exhausted
-	}
-	return out, nextPage, nil
-}
 
 // ensureCreateAllowedByCeiling rejects request submissions for titles above
 // the viewer's rating ceiling. List filtering alone is cosmetic — the create
@@ -475,13 +425,17 @@ func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error
 // installation routing isn't supported yet: it picks the first eligible
 // connection's installation and includes ONLY connections belonging to it, so a
 // second installation's resolved plaintext credentials are never handed to the
-// first plugin. A connection whose api key cannot be resolved (or resolves empty)
-// is skipped rather than aborting the whole request — a sibling healthy
-// connection can still fulfill it, and an unauthenticated request is never sent.
+// first plugin. A connection without the api key its plugin needs (see
+// missingAPIKey) is skipped rather than aborting the whole request — a sibling
+// healthy connection can still fulfill it, and an unauthenticated request is
+// never sent to a plugin that needs a key. So is one whose plugin's
+// declaration cannot be read; that error is returned only when no connection
+// is left.
 func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillContext, mediaType MediaType) ([]ResolvedRouterConnection, int, string, error) {
 	var conns []ResolvedRouterConnection
 	installationID, capabilityID := 0, ""
 	chosen := false
+	var readErr error
 	for _, in := range fc.integrations {
 		if !eligibleRouterConnection(in, mediaType) {
 			continue
@@ -492,9 +446,13 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		if chosen && (*in.InstallationID != installationID || in.CapabilityID != capabilityID) {
 			continue
 		}
-		// in.APIKeyRef was decrypted by the repo on read; empty means unconfigured.
-		apiKey := strings.TrimSpace(in.APIKeyRef)
-		if apiKey == "" {
+		missing, err := s.missingAPIKey(ctx, fc, in)
+		if err != nil {
+			slog.WarnContext(ctx, "requests: skipping router connection whose plugin's api key declaration cannot be read", "component", "requests", "connection_id", in.ID, "err", err)
+			readErr = err
+			continue
+		}
+		if missing {
 			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "component", "requests", "connection_id", in.ID)
 			continue
 		}
@@ -503,9 +461,33 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		if !chosen {
 			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
 		}
-		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
+		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: strings.TrimSpace(in.APIKeyRef), Config: in.PluginConfig})
+	}
+	if len(conns) == 0 && readErr != nil {
+		return nil, 0, "", readErr
 	}
 	return conns, installationID, capabilityID, nil
+}
+
+// missingAPIKey reports whether a connection has no API key although its
+// router capability needs one. in.APIKeyRef was decrypted by the repo on
+// read, and empty means none was saved. A capability that declares
+// api_key_optional takes connections without a key; its declaration is read
+// only for a connection without one, so a connection with a key never
+// depends on it. When the declaration cannot be read, the key counts as
+// missing and the error is returned.
+func (s *Service) missingAPIKey(ctx context.Context, fc *fulfillContext, in Integration) (bool, error) {
+	if strings.TrimSpace(in.APIKeyRef) != "" {
+		return false, nil
+	}
+	if in.InstallationID == nil || in.CapabilityID == "" {
+		return true, nil
+	}
+	features, err := s.routerFeatures(ctx, fc, *in.InstallationID, in.CapabilityID)
+	if err != nil {
+		return true, err
+	}
+	return !features.APIKeyOptional, nil
 }
 
 // Reasons a configured router connection cannot take a submission, recorded in
@@ -517,7 +499,7 @@ const (
 
 // unusableRouterMessage explains why no configured connection could take a
 // submission, for the request's last_error.
-func unusableRouterMessage(fc *fulfillContext, mediaType MediaType) string {
+func (s *Service) unusableRouterMessage(ctx context.Context, fc *fulfillContext, mediaType MediaType) string {
 	for _, in := range fc.integrations {
 		if !in.Enabled || in.CapabilityID == "" || !integrationSupportsMediaType(in, mediaType) {
 			continue
@@ -527,7 +509,7 @@ func unusableRouterMessage(fc *fulfillContext, mediaType MediaType) string {
 			// plugin install and were never re-bound.
 			return msgRouterUnbound
 		}
-		if strings.TrimSpace(in.APIKeyRef) == "" {
+		if missing, _ := s.missingAPIKey(ctx, fc, in); missing {
 			return msgRouterNoKey
 		}
 	}
@@ -568,11 +550,14 @@ func routerConfiguredFor(fc *fulfillContext, mediaType MediaType) bool {
 }
 
 // skippedRouterConnection reports whether resolveRouterConnections leaves out
-// a connection that would otherwise serve the media type, because its API key
-// is missing.
-func skippedRouterConnection(fc *fulfillContext, mediaType MediaType) bool {
+// a connection that would otherwise serve the media type, because it has no
+// API key and its plugin needs one.
+func (s *Service) skippedRouterConnection(ctx context.Context, fc *fulfillContext, mediaType MediaType) bool {
 	for _, in := range fc.integrations {
-		if eligibleRouterConnection(in, mediaType) && strings.TrimSpace(in.APIKeyRef) == "" {
+		if !eligibleRouterConnection(in, mediaType) {
+			continue
+		}
+		if missing, _ := s.missingAPIKey(ctx, fc, in); missing {
 			return true
 		}
 	}
@@ -608,89 +593,6 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 		return nil, err
 	}
 	return s.enrichPage(ctx, viewer, raw)
-}
-
-func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle, ceiling)
-}
-
-// discover renders one section for an already-resolved ceiling. Callers own
-// the ceiling lookup so a DiscoverAll fan-out resolves the viewer scope once,
-// not once per section per page.
-func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int, ceiling string) (*DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	section = strings.TrimSpace(section)
-	if _, ok := discoverySectionTitles[section]; !ok {
-		return nil, fmt.Errorf("%w: invalid discovery section", ErrInvalidInput)
-	}
-	var raw *tmdb.MediaPage
-	var err error
-	var nextPage int
-	if ceiling != "" {
-		raw, nextPage, err = s.backfillSectionPage(ctx, section, page, backfillBudget, ceiling)
-	} else {
-		raw, err = s.tmdb.DiscoverSection(ctx, section, page)
-	}
-	if err != nil {
-		return nil, err
-	}
-	enriched, err := s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
-	if err != nil {
-		return nil, err
-	}
-	return &DiscoverySection{
-		Key:          section,
-		Title:        discoverySectionTitles[section],
-		Page:         enriched.Page,
-		TotalPages:   enriched.TotalPages,
-		TotalResults: enriched.TotalResults,
-		Results:      enriched.Results,
-		NextPage:     nextPage,
-	}, nil
-}
-
-func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, fmt.Errorf("request service is not configured")
-	}
-	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	sections := make([]DiscoverySection, len(discoverySectionOrder))
-	group, gctx := errgroup.WithContext(ctx)
-	group.SetLimit(externalIDHydrationConcurrency)
-	for i, key := range discoverySectionOrder {
-		i, key := i, key
-		group.Go(func() error {
-			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate, ceiling)
-			if err != nil {
-				return err
-			}
-			sections[i] = *section
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, err
-	}
-	return sections, nil
 }
 
 // GetDetail fetches a TMDB detail payload and overlays the same availability /
@@ -1527,7 +1429,8 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
 	// so we would otherwise validate against an empty credential. Mirror
 	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
-	// saved (already-decrypted) api key (and BaseURL/PluginConfig if also blank).
+	// saved (already-decrypted) api key (and PluginConfig if also blank). The
+	// base URL is validated as sent, since that is what the save stores.
 	// Nil-safe — a brand-new id has no stored row, so just proceed with what the
 	// body carries.
 	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
@@ -1539,13 +1442,12 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			// Don't pair a stored API key with a caller-changed base URL: require the
 			// key to be re-entered when the server URL changes (defense against
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
-			if strings.TrimSpace(in.BaseURL) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
-				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
+			// A cleared URL is a change too, since the save stores it blank. A
+			// server saved without a key has none to protect.
+			if strings.TrimSpace(stored.APIKeyRef) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
+				return &ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyReentry}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
-			if strings.TrimSpace(in.BaseURL) == "" {
-				in.BaseURL = stored.BaseURL
-			}
 			if in.PluginConfig == nil {
 				in.PluginConfig = stored.PluginConfig
 			}
@@ -1636,17 +1538,19 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 		if stored != nil {
 			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
-			if submittedBaseURL == "" {
-				integration.BaseURL = stored.BaseURL
-			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
-				integration.APIKeyRef = stored.APIKeyRef
-			}
 			if strings.TrimSpace(integration.CapabilityID) == "" {
 				integration.CapabilityID = stored.CapabilityID
 			}
 			if integration.InstallationID == nil {
 				integration.InstallationID = stored.InstallationID
+			}
+			if submittedBaseURL == "" && (!integration.BaseURLCleared || s.blankURLMeansSaved(ctx, integration)) {
+				integration.BaseURL = stored.BaseURL
+			}
+			// The saved key goes only to the address it was saved for, so a
+			// changed or cleared address is probed without it.
+			if strings.TrimSpace(integration.APIKeyRef) == "" && sameIntegrationBaseURL(integration.BaseURL, stored.BaseURL) {
+				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if integration.PluginConfig == nil {
 				integration.PluginConfig = stored.PluginConfig
@@ -1654,17 +1558,20 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 	}
 
-	// Without a key the plugin could only fail; say so on the key field. The
-	// address is passed as given: the v2 adapter normalizes it first, and the
-	// frozen v1 route keeps sending what the client submitted.
-	apiKey := strings.TrimSpace(integration.APIKeyRef)
-	if apiKey == "" {
+	// Without a key a plugin that needs one could only fail; say so on the key
+	// field. The address is passed as given: the v2 adapter normalizes it
+	// first, and the frozen v1 route keeps sending what the client submitted.
+	missing, err := s.missingAPIKey(ctx, &fulfillContext{}, integration)
+	if err != nil {
+		return nil, err
+	}
+	if missing {
 		return nil, probeValidation(&ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyMissing}})
 	}
 	if s.router == nil || integration.InstallationID == nil {
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
-	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
+	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: strings.TrimSpace(integration.APIKeyRef), Config: integration.PluginConfig}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
 		return nil, classifyIntegrationError(err, integration.CapabilityID)
@@ -2265,7 +2172,7 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 		// but none is usable. That is an admin-fixable setup problem, so it is
 		// returned as a submission error: the request keeps its approval and
 		// retries with backoff, and goes through once the connection is fixed.
-		return nil, errors.New(unusableRouterMessage(fc, req.MediaType))
+		return nil, errors.New(s.unusableRouterMessage(ctx, fc, req.MediaType))
 	}
 	if missingSeasons {
 		// missingSeasonsDeliverable checked every series connection; this
@@ -2282,7 +2189,7 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 	if !fc.settings.ForceDualQuality {
 		allowed = filterUnconfiguredOptionalQualities(allowed, conns)
 	}
-	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved && !skippedRouterConnection(fc, req.MediaType))
+	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved && !s.skippedRouterConnection(ctx, fc, req.MediaType))
 	if done != nil || err != nil {
 		return done, err
 	}
@@ -2336,7 +2243,7 @@ func (s *Service) submitRouted(ctx context.Context, req Request, actor Viewer, f
 			failures[q] = unroutedMessage(routes, req.MediaType, q)
 			continue
 		}
-		conn, installationID, capabilityID, err := routedConnection(fc, decision, req.MediaType, q)
+		conn, installationID, capabilityID, err := s.routedConnection(ctx, fc, decision, req.MediaType, q)
 		if err != nil {
 			if len(targets) == 0 {
 				// The chosen server is gone, disabled or not set up: an
@@ -2449,29 +2356,11 @@ func (s *Service) routingRatingOf(ctx context.Context, req Request) (string, err
 // they were captured, or while TMDB was unreachable, and stores them. Routing
 // without them could send a title to the wrong server, so a TMDB failure is a
 // submission error and the submission retries. A request captured before its
-// rating was is given one, only when an enabled route checks ratings.
+// rating (or, for a series, its status) was is given one, only when an
+// enabled route checks it.
 func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes []Route) error {
 	if req.RoutingFacts.Captured() {
-		// A title TMDB had not rated yet (unreleased) is asked again a day
-		// later, so a rating route can still match it once it is rated.
-		stored := req.RoutingFacts.ContentRating
-		known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
-		if known || !routesCheckRating(routes, req.MediaType) {
-			return nil
-		}
-		rating, err := s.routingRatingOf(ctx, *req)
-		if err != nil {
-			return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
-		}
-		facts := req.RoutingFacts
-		now := s.now()
-		facts.ContentRating, facts.CapturedAt = &rating, &now
-		updated, err := s.store.SetRoutingFacts(ctx, req.ID, facts)
-		if err != nil {
-			return err
-		}
-		req.RoutingFacts = updated.RoutingFacts
-		return nil
+		return s.recheckCapturedFacts(ctx, req, routes)
 	}
 	detail := s.requestDetail(ctx, req.MediaType, req.TMDBID)
 	if detail == nil {
@@ -2493,6 +2382,72 @@ func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes [
 		return err
 	}
 	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	// Another API server may have stored its capture first, without what
+	// this one reads (a server not yet upgraded has no series status).
+	return s.recheckCapturedFacts(ctx, req, routes)
+}
+
+// recheckCapturedFacts gives captured facts what an enabled route needs and
+// they lack: a rating TMDB had not given yet, or a series' status.
+func (s *Service) recheckCapturedFacts(ctx context.Context, req *Request, routes []Route) error {
+	if err := s.recheckRoutingRating(ctx, req, routes); err != nil {
+		return err
+	}
+	return s.ensureSeriesStatus(ctx, req, routes)
+}
+
+// recheckRoutingRating reads a captured request's rating again when it has
+// none and an enabled route checks ratings: a title TMDB had not rated yet
+// (unreleased) is asked again a day later, so a rating route can still match
+// it once it is rated. Only the rating and its capture time are written, so
+// the read never replaces a fact another API server stored meanwhile.
+func (s *Service) recheckRoutingRating(ctx context.Context, req *Request, routes []Route) error {
+	stored := req.RoutingFacts.ContentRating
+	known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
+	if known || !routesCheckRating(routes, req.MediaType) {
+		return nil
+	}
+	rating, err := s.routingRatingOf(ctx, *req)
+	if err != nil {
+		return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
+	}
+	now := s.now()
+	updated, err := s.store.UpdateRoutingFacts(ctx, req.ID, RoutingFacts{ContentRating: &rating, CapturedAt: &now})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
+	return nil
+}
+
+// ensureSeriesStatus gives a series captured before status was one, only
+// when an enabled route checks status. It is read once, like the facts
+// captured with the request: a status TMDB has none for is not asked again,
+// and the capture time is left alone, since it times the rating's recheck.
+// A series TMDB no longer lists has no status, rather than a request that
+// can never be sent. The first status any API server stores wins, so every
+// server routes the request on the same one.
+func (s *Service) ensureSeriesStatus(ctx context.Context, req *Request, routes []Route) error {
+	if req.RoutingFacts.SeriesStatus != nil || !routesCheckSeriesStatus(routes, req.MediaType) {
+		return nil
+	}
+	if s.tmdb == nil {
+		return errors.New("could not read the series' status from TMDB to route it")
+	}
+	var status *string
+	switch detail, err := s.tmdb.GetMediaDetail(ctx, tmdbMediaType(req.MediaType), req.TMDBID); {
+	case errors.Is(err, tmdb.ErrNotFound):
+		status = new("")
+	case err != nil || detail == nil:
+		return fmt.Errorf("could not read the series' status from TMDB to route it: %w", err)
+	default:
+		status = seriesStatusOf(detail)
+	}
+	updated, err := s.store.FillRoutingFacts(ctx, req.ID, RoutingFacts{SeriesStatus: status})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
 	return nil
 }
 
@@ -2672,18 +2627,18 @@ func routerQualityConfigured(q Quality, conns []ResolvedRouterConnection) bool {
 		if hasRouterQualityKey(conn.Config) {
 			usesTieredDefaults = true
 		}
-		if q == Quality2160p && boolConfig(conn.Config, "is_default_4k") {
+		if q == Quality2160p && (boolConfig(conn.Config, configIsDefault4K) || boolConfig(conn.Config, configSupports4K)) {
 			return true
 		}
 	}
-	// Generic request_router implementations may not expose arr-style HD/4K
-	// default flags. In that case, preserve the host's requested qualities and
-	// let the plugin decide what it can fulfill.
+	// Generic request_router implementations may not expose an HD/4K flag
+	// (arr-style defaults or Seerr's 4K switch). In that case, preserve the
+	// host's requested qualities and let the plugin decide what it can fulfill.
 	return !usesTieredDefaults
 }
 
 func hasRouterQualityKey(config map[string]any) bool {
-	for _, key := range []string{"is_default", "is_default_4k", "is_4k"} {
+	for _, key := range []string{configIsDefault, configIsDefault4K, configIs4K, configSupports4K} {
 		if _, ok := config[key]; ok {
 			return true
 		}
@@ -2719,7 +2674,7 @@ func (s *Service) markSubmissionFailed(ctx context.Context, claimed Request, act
 			// lease and another claim holds the request now.
 			return s.store.GetRequest(ctx, claimed.ID)
 		}
-		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err)
+		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err) //nolint:errorlint // callers classify the submission error; the mark-failed error is only reported
 	}
 	return failed, nil
 }
@@ -2980,6 +2935,7 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	}
 	groups := map[owner]*group{}
 	var order []owner
+	var errs []error
 	groupFor := func(key owner) *group {
 		g := groups[key]
 		if g == nil {
@@ -3013,7 +2969,11 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 			continue
 		}
 		in := integrationByID(fc, t.IntegrationID)
-		if !statusCheckable(in) {
+		checkable, err := s.statusCheckable(ctx, fc, in)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if !checkable {
 			continue
 		}
 		g := groupFor(owner{*in.InstallationID, in.CapabilityID})
@@ -3023,7 +2983,6 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	// One plugin being down must not hide the statuses another reported, so
 	// every group is asked and the errors are returned alongside them.
 	var out []RouterTargetStatus
-	var errs []error
 	for _, key := range order {
 		g := groups[key]
 		statuses, err := s.router.CheckStatus(ctx, key.installationID, key.capabilityID, req, g.refs, g.conns)
@@ -3068,9 +3027,14 @@ func soleRefConnection(refs []RouterTargetRef) string {
 
 // statusCheckable reports whether a target's server can be asked for the
 // target's status: it still exists, is enabled, is bound to a router
-// capability, and has an API key.
-func statusCheckable(in *Integration) bool {
-	return in != nil && in.Enabled && in.InstallationID != nil && in.CapabilityID != "" && strings.TrimSpace(in.APIKeyRef) != ""
+// capability, and has an API key unless its plugin needs none. The error is
+// from reading that declaration; the server is not asked then.
+func (s *Service) statusCheckable(ctx context.Context, fc *fulfillContext, in *Integration) (bool, error) {
+	if in == nil || !in.Enabled || in.InstallationID == nil || in.CapabilityID == "" {
+		return false, nil
+	}
+	missing, err := s.missingAPIKey(ctx, fc, *in)
+	return !missing && err == nil, err
 }
 
 func integrationByID(fc *fulfillContext, id string) *Integration {
@@ -3331,22 +3295,4 @@ func availabilityValue(available bool) Availability {
 		return AvailabilityAvailable
 	}
 	return AvailabilityMissing
-}
-
-var discoverySectionOrder = []string{
-	"trending_movies",
-	"trending_series",
-	"popular_movies",
-	"popular_series",
-	"upcoming_movies",
-	"on_air_series",
-}
-
-var discoverySectionTitles = map[string]string{
-	"trending_movies": "Trending Movies",
-	"trending_series": "Trending Series",
-	"popular_movies":  "Popular Movies",
-	"popular_series":  "Popular Series",
-	"upcoming_movies": "Upcoming Movies",
-	"on_air_series":   "On Air Series",
 }

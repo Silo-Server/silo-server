@@ -205,6 +205,9 @@ type Published struct {
 	SheetBytes    []int
 	Decoder       string
 	Filled        int
+	// Refined counts the cells a repair read again (see
+	// mediasample.SheetFrames); it is logged, not stored.
+	Refined int
 }
 
 // Publish makes the claim's uploaded revision of fileID the one served, and
@@ -255,7 +258,7 @@ const (
 	Unusable
 	// Released returns the file to the queue after a delay without counting
 	// a failure: the cause was this server's, such as a shutdown or no
-	// transcode node to run on.
+	// transcode node able to run the work.
 	Released
 )
 

@@ -58,10 +58,11 @@
  * Self-contained notices own their complete rounded border and opt out too;
  * overriding only their bottom edge visibly breaks the lower corners.
  */
-.settings-field-list > *:not(.settings-field-row):not(.settings-field-note) {
+.settings-field-list > *:not(.settings-field-row):not(.settings-field-note):not(:last-child) {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
-.settings-field-list > *:last-child {
-  border-bottom: 0;
+/* Provider rows divide like settings rows; an open row keeps its rule. */
+.provider-list > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }

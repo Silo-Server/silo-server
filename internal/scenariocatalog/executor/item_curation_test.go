@@ -39,7 +39,7 @@ func TestRequiredNewItemCuration(t *testing.T) {
 	defer func() { fixture.cleanup(t, e); e.Reseed(); e.guardScratchDatabase() }()
 	var results []Result
 	requests, effects := 0, 0
-	for _, id := range []string{"null_preserves", "empty_clears", "exact_item", "invalid_preflight", "acting_admin_gate", "missing_identity"} {
+	for _, id := range []string{"explicit_nulls", "empty_clears", "exact_item", "invalid_preflight", "acting_admin_gate", "missing_identity"} {
 		fixture.cleanup(t, e)
 		e.Reseed()
 		fixture.seed(t, e)
@@ -87,12 +87,16 @@ func TestRequiredNewItemCuration(t *testing.T) {
 			}
 			changed := false
 			switch id {
-			case "null_preserves":
-				patch(catalogAlpha, `{"title":null,"overview":null,"genres":null,"year":null,"runtime":null,"air_timezone":null}`, admin, ok(catalogAssertion("/title", "equals", "Alpha"), catalogAssertion("/overview", "equals", "Synthetic overview"), catalogAssertion("/genres", "equals", []string{"Drama"}), catalogAssertion("/year", "equals", 2001)))
-				changed = true // Successful all-null edits still touch updated_at.
+			case "explicit_nulls":
+				// Null preserves a field that cannot be cleared and clears a nullable one.
+				patch(catalogAlpha, `{"title":null,"overview":null,"genres":null,"year":null,"runtime":null,"air_timezone":null}`, admin, ok(catalogAssertion("/title", "equals", "Alpha"), catalogAssertion("/overview", "equals", "Synthetic overview"), catalogAssertion("/genres", "equals", []string{"Drama"}), catalogAssertion("/year", "equals", 2001), catalogAssertion("/air_timezone", "absent", nil)))
+				want[catalogAlpha]["air_timezone"] = nil
+				changed = true
 			case "empty_clears":
 				patch(catalogAlpha, `{"overview":"","genres":[],"air_timezone":""}`, admin, ok(catalogAssertion("/overview", "absent", nil), catalogAssertion("/genres", "equals", []string{}), catalogAssertion("/air_timezone", "absent", nil)))
 				want[catalogAlpha]["overview"] = ""
+				// The search document follows the overview it is built from.
+				want[catalogAlpha]["search_overview_vector"] = ""
 				want[catalogAlpha]["genres"] = []any{}
 				want[catalogAlpha]["air_timezone"] = nil
 				changed = true
@@ -100,6 +104,8 @@ func TestRequiredNewItemCuration(t *testing.T) {
 				patch(catalogAlpha, `{"title":"Synthetic renamed item","year":2024,"runtime":95,"genres":["Comedy","Drama"]}`, admin, ok(catalogAssertion("/title", "equals", "Synthetic renamed item"), catalogAssertion("/year", "equals", 2024), catalogAssertion("/runtime", "equals", 95), catalogAssertion("/genres", "equals", []string{"Comedy", "Drama"})))
 				want[catalogAlpha]["title"] = "Synthetic renamed item"
 				want[catalogAlpha]["title_normalized"] = "synthetic renamed item"
+				// The new title is indexed with weight A; the sort title keeps weight B.
+				want[catalogAlpha]["search_title_vector"] = "'alpha':4B 'item':3A 'renamed':2A 'synthetic':1A"
 				want[catalogAlpha]["year"] = float64(2024)
 				want[catalogAlpha]["runtime"] = float64(95)
 				want[catalogAlpha]["genres"] = []any{"Comedy", "Drama"}

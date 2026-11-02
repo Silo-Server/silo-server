@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 
-import type { MarkerProviderConfig, MarkerUserStats, PluginInstallation } from "@/api/types";
+import type {
+  MarkerProviderConfig,
+  MarkerProviderUpdateRequest,
+  MarkerUserStats,
+  PluginInstallation,
+} from "@/api/types";
 import {
   ProviderPanelActions,
   ProviderTile,
@@ -10,6 +15,7 @@ import {
   resolveProviderTileState,
   type ProviderTestState,
 } from "@/components/settings/ProviderTile";
+import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +28,7 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 
@@ -39,6 +46,21 @@ function markerTileID(provider: string): string {
 
 function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+/**
+ * A saved 0–1 confidence edited as a percentage. An unchanged percentage
+ * keeps the saved value exact: multiplying and dividing a custom confidence
+ * can otherwise introduce floating-point drift.
+ */
+function useConfidencePercent(saved: number) {
+  const savedPercent = CONFIDENCE_PERCENT_FORMAT.format(saved).replace("%", "");
+  const [input, setInput] = useState(savedPercent);
+  const trimmed = input.trim();
+  const percent = Number(trimmed);
+  const valid = trimmed !== "" && Number.isFinite(percent) && percent >= 0 && percent <= 100;
+  const value = percent === Number(savedPercent) ? saved : percent / 100;
+  return { input, setInput, valid, value, edited: value !== saved };
 }
 
 /** What the last connection test said, kept per provider while the page is open. */
@@ -126,6 +148,7 @@ export function MarkerProviderTiles({
               provider.provider,
               provider.fetch_enabled,
               provider.fetch_priority,
+              provider.fetch_min_confidence,
               provider.contribute_enabled,
               provider.contribute_auto_local,
               provider.contribute_min_confidence,
@@ -167,31 +190,16 @@ function MarkerProviderTile({
   const displayName = provider.display_name || provider.provider;
   const slug = provider.provider.replace(/[^a-zA-Z0-9_-]/g, "-");
   const minConfidenceID = `marker-min-confidence-${slug}`;
+  const fetchMinConfidenceID = `marker-fetch-min-confidence-${slug}`;
   const priorityID = `marker-priority-${slug}`;
   const [fetchEnabled, setFetchEnabled] = useState(provider.fetch_enabled);
   const [fetchPriority, setFetchPriority] = useState(String(provider.fetch_priority));
   const [contributeEnabled, setContributeEnabled] = useState(provider.contribute_enabled);
   const [autoLocal, setAutoLocal] = useState(provider.contribute_auto_local);
-  const savedMinConfidence = provider.contribute_min_confidence ?? 0.95;
-  const savedConfidencePercent = CONFIDENCE_PERCENT_FORMAT.format(savedMinConfidence).replace(
-    "%",
-    "",
-  );
-  const [minConfidence, setMinConfidence] = useState(savedConfidencePercent);
-
-  const confidenceInput = minConfidence.trim();
-  const confidencePercent = Number(confidenceInput);
-  const confidenceValid =
-    confidenceInput !== "" &&
-    Number.isFinite(confidencePercent) &&
-    confidencePercent >= 0 &&
-    confidencePercent <= 100;
-  // Keep the saved value exact when the percentage is unchanged. Multiplying
-  // and dividing a custom confidence can otherwise introduce floating-point drift.
-  const parsedMinConfidence =
-    confidencePercent === Number(savedConfidencePercent)
-      ? savedMinConfidence
-      : confidencePercent / 100;
+  const minConfidence = useConfidencePercent(provider.contribute_min_confidence ?? 0.95);
+  const fetchMinConfidence = useConfidencePercent(provider.fetch_min_confidence ?? 0);
+  const confidenceValid = minConfidence.valid && fetchMinConfidence.valid;
+  const confidenceEdited = minConfidence.edited || fetchMinConfidence.edited;
   const fetchPriorityInput = fetchPriority.trim();
   const parsedFetchPriority = Number(fetchPriorityInput);
   const priorityValid =
@@ -202,7 +210,7 @@ function MarkerProviderTile({
     provider.contribute_enabled !== contributeEnabled ||
     provider.contribute_auto_local !== autoLocal ||
     !confidenceValid ||
-    savedMinConfidence !== parsedMinConfidence;
+    confidenceEdited;
   // The tile's draft lives outside useSettingsForm, so the navigation guard
   // and the reload prompt only see it if the tile reports it itself.
   useReportUnsavedChanges(dirty);
@@ -217,16 +225,22 @@ function MarkerProviderTile({
       return;
     }
 
-    updateProvider.mutate({
-      provider: provider.provider,
-      patch: {
-        fetch_enabled: fetchEnabled,
-        fetch_priority: parsedFetchPriority,
-        contribute_enabled: contributeEnabled,
-        contribute_auto_local: contributeEnabled && autoLocal,
-        contribute_min_confidence: parsedMinConfidence,
-      },
-    });
+    // Send only what the admin changed. The server keeps its stored value for
+    // every other field, so a stale copy of the sharing switches on this page
+    // cannot undo a sharing opt-out saved elsewhere.
+    const patch: MarkerProviderUpdateRequest = {};
+    if (fetchEnabled !== provider.fetch_enabled) patch.fetch_enabled = fetchEnabled;
+    if (parsedFetchPriority !== provider.fetch_priority) patch.fetch_priority = parsedFetchPriority;
+    if (fetchMinConfidence.edited) patch.fetch_min_confidence = fetchMinConfidence.value;
+    if (contributeEnabled !== provider.contribute_enabled) {
+      patch.contribute_enabled = contributeEnabled;
+    }
+    const nextAutoLocal = contributeEnabled && autoLocal;
+    if (nextAutoLocal !== provider.contribute_auto_local) {
+      patch.contribute_auto_local = nextAutoLocal;
+    }
+    if (minConfidence.edited) patch.contribute_min_confidence = minConfidence.value;
+    updateProvider.mutate({ provider: provider.provider, patch });
   }
 
   function validate() {
@@ -314,25 +328,10 @@ function MarkerProviderTile({
         value={fetchEnabled ? "true" : "false"}
         onChange={(value) => setFetchEnabled(value === "true")}
       />
-      <SettingFieldRow
-        label="Provider priority"
-        htmlFor={priorityID}
-        description="If providers return markers for the same section, prefer the provider with the lower number."
-      >
-        <Input
-          id={priorityID}
-          type="number"
-          value={fetchPriority}
-          step={1}
-          onChange={(event) => setFetchPriority(event.target.value)}
-          className={SETTINGS_NUMBER_WIDTH}
-          aria-invalid={!priorityValid}
-        />
-      </SettingFieldRow>
       <SettingField
         label="Allow sharing with this provider"
         type="toggle"
-        value={contributeEnabled ? "true" : "false"}
+        value={provider.is_submitter && contributeEnabled ? "true" : "false"}
         onChange={(value) => {
           const next = value === "true";
           setContributeEnabled(next);
@@ -340,40 +339,89 @@ function MarkerProviderTile({
         }}
         disabled={!provider.is_submitter}
         description={
-          !provider.is_submitter ? "This provider does not accept shared markers." : undefined
+          !provider.is_submitter
+            ? "This provider does not accept shared markers."
+            : provider.default_contribute_enabled
+              ? MARKER_SHARING_DISCLOSURE
+              : undefined
         }
       />
       <div className="border-border ml-3 border-l pl-4">
         <SettingField
-          label="Automatically share detected intros"
+          label="Automatically share detected intros and credits"
           type="toggle"
-          value={autoLocal ? "true" : "false"}
+          value={provider.is_submitter && autoLocal ? "true" : "false"}
           onChange={(value) => setAutoLocal(value === "true")}
           disabled={!provider.is_submitter || !contributeEnabled}
-          description="Share intros detected on this server that meet the minimum confidence below."
+          description="Share intros and credits detected on this server that meet the minimum confidence under Advanced."
         />
-        <div className="border-border ml-3 border-l pl-4">
-          <SettingFieldRow
-            label="Minimum confidence for automatic sharing"
-            htmlFor={minConfidenceID}
-            description="Choose a value from 0% to 100%. Recommended: 95%."
-            unit="%"
-          >
-            <Input
-              id={minConfidenceID}
-              type="number"
-              value={minConfidence}
-              min={0}
-              max={100}
-              step="any"
-              onChange={(event) => setMinConfidence(event.target.value)}
-              className={SETTINGS_NUMBER_WIDTH}
-              aria-invalid={!confidenceValid}
-              disabled={!provider.is_submitter}
-            />
-          </SettingFieldRow>
-        </div>
       </div>
+      {/* Lookup order and the confidence thresholds have working defaults;
+          an edited or invalid value holds the section open so Save never
+          stalls on a field the admin cannot see. */}
+      <AdvancedSection
+        id={`providers.marker.${slug}`}
+        count={3}
+        forceOpen={
+          !priorityValid ||
+          !confidenceValid ||
+          provider.fetch_priority !== parsedFetchPriority ||
+          confidenceEdited
+        }
+      >
+        <SettingFieldRow
+          label="Provider priority"
+          htmlFor={priorityID}
+          description="Silo uses the marker with the highest confidence. When two providers are equally confident, it prefers the lower number."
+        >
+          <Input
+            id={priorityID}
+            type="number"
+            value={fetchPriority}
+            step={1}
+            onChange={(event) => setFetchPriority(event.target.value)}
+            className={SETTINGS_NUMBER_WIDTH}
+            aria-invalid={!priorityValid}
+          />
+        </SettingFieldRow>
+        <SettingFieldRow
+          label="Minimum confidence to use markers"
+          htmlFor={fetchMinConfidenceID}
+          description="Skip markers this provider rates lower, so another provider or local detection can fill them. 0% uses every marker."
+          unit="%"
+        >
+          <Input
+            id={fetchMinConfidenceID}
+            type="number"
+            value={fetchMinConfidence.input}
+            min={0}
+            max={100}
+            step="any"
+            onChange={(event) => fetchMinConfidence.setInput(event.target.value)}
+            className={SETTINGS_NUMBER_WIDTH}
+            aria-invalid={!fetchMinConfidence.valid}
+          />
+        </SettingFieldRow>
+        <SettingFieldRow
+          label="Minimum confidence for automatic sharing"
+          htmlFor={minConfidenceID}
+          description="Choose a value from 0% to 100%. Recommended: 95%."
+          unit="%"
+        >
+          <Input
+            id={minConfidenceID}
+            type="number"
+            value={minConfidence.input}
+            min={0}
+            max={100}
+            step="any"
+            onChange={(event) => minConfidence.setInput(event.target.value)}
+            className={SETTINGS_NUMBER_WIDTH}
+            aria-invalid={!minConfidence.valid}
+            disabled={!provider.is_submitter}
+          />
+        </SettingFieldRow>
+      </AdvancedSection>
 
       {stats && (
         <div className="border-border bg-muted/20 mt-3.5 rounded-md border px-3 py-3">

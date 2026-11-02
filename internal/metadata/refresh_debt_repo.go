@@ -24,6 +24,26 @@ const metadataRefreshDebtReturningColumns = `d.target_type, d.content_id, d.prio
 // A row whose lease expires unsettled can be claimed again by any node.
 const RefreshDebtLeaseDuration = 15 * time.Minute
 
+const metadataRefreshAttemptBucketCount = 5
+
+const metadataRefreshAttemptBucketCountsSQL = `
+	SELECT
+		COUNT(*) FILTER (WHERE attempt_count = 0),
+		COUNT(*) FILTER (WHERE attempt_count = 1),
+		COUNT(*) FILTER (WHERE attempt_count BETWEEN 2 AND 3),
+		COUNT(*) FILTER (WHERE attempt_count BETWEEN 4 AND 7),
+		COUNT(*) FILTER (WHERE attempt_count >= 8)
+	FROM metadata_refresh_debt
+`
+
+var metadataRefreshAttemptBucketLabels = [metadataRefreshAttemptBucketCount]string{
+	"0",
+	"1",
+	"2-3",
+	"4-7",
+	"8+",
+}
+
 const metadataRefreshDebtEnabledAccessPredicate = `(
 		(d.target_type = 'item' AND EXISTS (
 			SELECT 1
@@ -171,12 +191,31 @@ func (r *RefreshDebtRepository) RequestDue(
 	nextRefreshAt time.Time,
 	cooldown time.Duration,
 ) error {
+	return r.RequestDueMany(ctx, targetType, []string{contentID}, priority, reasonMask, nextRefreshAt, cooldown)
+}
+
+// RequestDueMany is RequestDue for several targets of one type, in one
+// statement.
+func (r *RefreshDebtRepository) RequestDueMany(
+	ctx context.Context,
+	targetType string,
+	contentIDs []string,
+	priority int,
+	reasonMask int64,
+	nextRefreshAt time.Time,
+	cooldown time.Duration,
+) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
 	}
 	targetType = NormalizeRefreshTargetType(targetType)
-	contentID = strings.TrimSpace(contentID)
-	if targetType == "" || contentID == "" || reasonMask == 0 {
+	ids := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if targetType == "" || len(ids) == 0 || reasonMask == 0 {
 		return nil
 	}
 	if cooldown < 0 {
@@ -191,7 +230,9 @@ func (r *RefreshDebtRepository) RequestDue(
 			reason_mask,
 			next_refresh_at,
 			updated_at
-		) VALUES ($1, $2, $3, $4, $5, NOW())
+		)
+		SELECT DISTINCT $1, id, $3::integer, $4::bigint, $5::timestamptz, NOW()
+		FROM unnest($2::text[]) AS id
 		ON CONFLICT (target_type, content_id) DO UPDATE SET
 			priority = GREATEST(metadata_refresh_debt.priority, EXCLUDED.priority),
 			reason_mask = metadata_refresh_debt.reason_mask | EXCLUDED.reason_mask,
@@ -208,7 +249,7 @@ func (r *RefreshDebtRepository) RequestDue(
 				ELSE LEAST(metadata_refresh_debt.next_refresh_at, EXCLUDED.next_refresh_at)
 			END,
 			updated_at = NOW()
-	`, targetType, contentID, priority, reasonMask, nextRefreshAt.UTC(), intervalLiteral(cooldown))
+	`, targetType, ids, priority, reasonMask, nextRefreshAt.UTC(), intervalLiteral(cooldown))
 	if err != nil {
 		return fmt.Errorf("requesting due metadata refresh debt: %w", err)
 	}
@@ -505,6 +546,17 @@ func (r *RefreshDebtRepository) MarkTargetSuccess(
 	return nil
 }
 
+func buildMetadataRefreshAttemptBuckets(counts [metadataRefreshAttemptBucketCount]int) []models.MetadataRefreshAttemptBucket {
+	buckets := make([]models.MetadataRefreshAttemptBucket, 0, metadataRefreshAttemptBucketCount)
+	for i, label := range metadataRefreshAttemptBucketLabels {
+		buckets = append(buckets, models.MetadataRefreshAttemptBucket{
+			Label: label,
+			Count: counts[i],
+		})
+	}
+	return buckets
+}
+
 func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int) (*models.MetadataRefreshMetrics, error) {
 	if err := r.requireConfigured(); err != nil {
 		return nil, err
@@ -548,6 +600,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 		{reason: "refresh_failure", mask: RefreshDebtReasonRefreshFailure},
 		{reason: "core_metadata_incomplete", mask: RefreshDebtReasonCoreMetadataIncomplete},
 		{reason: "trailers_requested", mask: RefreshDebtReasonTrailersRequested},
+		{reason: "provider_artwork", mask: RefreshDebtReasonProviderArtwork},
 	}
 	for _, def := range reasonDefs {
 		var count int
@@ -564,35 +617,17 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 		})
 	}
 
-	rows, err := r.pool.Query(ctx, `
-		SELECT label, count
-		FROM (
-			SELECT '0' AS label, COUNT(*) FILTER (WHERE attempt_count = 0) AS count FROM metadata_refresh_debt
-			UNION ALL
-			SELECT '1' AS label, COUNT(*) FILTER (WHERE attempt_count = 1) AS count FROM metadata_refresh_debt
-			UNION ALL
-			SELECT '2-3' AS label, COUNT(*) FILTER (WHERE attempt_count BETWEEN 2 AND 3) AS count FROM metadata_refresh_debt
-			UNION ALL
-			SELECT '4-7' AS label, COUNT(*) FILTER (WHERE attempt_count BETWEEN 4 AND 7) AS count FROM metadata_refresh_debt
-			UNION ALL
-			SELECT '8+' AS label, COUNT(*) FILTER (WHERE attempt_count >= 8) AS count FROM metadata_refresh_debt
-		) buckets
-		ORDER BY label
-	`)
-	if err != nil {
+	var attemptBucketCounts [metadataRefreshAttemptBucketCount]int
+	if err := r.pool.QueryRow(ctx, metadataRefreshAttemptBucketCountsSQL).Scan(
+		&attemptBucketCounts[0],
+		&attemptBucketCounts[1],
+		&attemptBucketCounts[2],
+		&attemptBucketCounts[3],
+		&attemptBucketCounts[4],
+	); err != nil {
 		return nil, fmt.Errorf("querying metadata refresh attempt buckets: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var bucket models.MetadataRefreshAttemptBucket
-		if err := rows.Scan(&bucket.Label, &bucket.Count); err != nil {
-			return nil, fmt.Errorf("scanning metadata refresh attempt bucket: %w", err)
-		}
-		metrics.AttemptBuckets = append(metrics.AttemptBuckets, bucket)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating metadata refresh attempt buckets: %w", err)
-	}
+	metrics.AttemptBuckets = buildMetadataRefreshAttemptBuckets(attemptBucketCounts)
 
 	dueSamples, err := r.querySamples(ctx, `
 		SELECT

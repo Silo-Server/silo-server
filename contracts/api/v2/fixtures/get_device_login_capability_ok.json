@@ -1,7 +1,8 @@
 {
-  "revision": "620a144f15ea20c4b95fc4a79b8bb310bc35997a9a18d070f7d708f1cc0aab2f",
+  "revision": "f7b8f864e1cda6340d501213eec94aad46ab2b27c63bebb0af0ca026c2678987",
   "state": "available",
   "remote_playback_handoff": true,
+  "jellyfin_quick_connect": true,
   "protocol_versions": [
     2
   ],

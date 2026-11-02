@@ -7,36 +7,27 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
-
-type becauseWatchedSourceReader interface {
-	GetBecauseYouWatchedWithSource(context.Context, int, string, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
-}
 
 // Resolve the title and items together, outside the shared, user-agnostic cache.
 // Never guess the anchor from the latest watch: that anchor may have no cache.
-func (f *Fetcher) fetchBecauseWatchedWithTitle(ctx context.Context, section ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter, reader becauseWatchedSourceReader) (SectionWithItems, error) {
+// The reader picks the anchor within the section's library scope, so a
+// library page passes over a recent watch with nothing to recommend there.
+func (f *Fetcher) fetchBecauseWatchedWithTitle(ctx context.Context, section ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter, reader recommendationReader) (SectionWithItems, error) {
 	result := SectionWithItems{ResolvedSection: section, Items: []*models.MediaItem{}}
 	if userID <= 0 || profileID == "" {
 		return result, nil
 	}
-	scored, sourceID, err := reader.GetBecauseYouWatchedWithSource(ctx, userID, profileID, parseRecommendationSectionConfig(section.Config).anchor(), section.ItemLimit, filter)
+	scope := collectionRailQueryAccess(filter, libraryID, libraryIDs).AllowedLibraryIDs
+	scored, sourceID, err := reader.SectionBecauseYouWatched(ctx, userID, profileID, parseRecommendationSectionConfig(section.Config).anchor(), scope, filter)
 	if err != nil {
 		return result, err
 	}
-	if len(scored) == 0 {
-		return result, nil
-	}
-	ids := make([]string, len(scored))
-	for i, item := range scored {
-		ids[i] = item.MediaItemID
-	}
-	items, err := f.fetchItemsByContentIDs(ctx, ids, libraryID, libraryIDs, filter)
+	items, err := f.scopeRecommendationItems(ctx, scored, libraryID, libraryIDs, filter)
 	if err != nil {
 		return result, err
 	}
-	result.Items = orderMediaItems(items, ids)
+	result.Items = limitRecommendationItems(items, section.ItemLimit)
 	result.TotalCount = len(result.Items)
 	if len(result.Items) > 0 && hasDefaultBecauseWatchedTitle(section.Title) {
 		var sources []*models.MediaItem

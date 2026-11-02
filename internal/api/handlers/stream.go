@@ -64,6 +64,14 @@ type StreamHandler struct {
 	// PlaybackHandler's); an aborted session's attempt row is marked stopped
 	// through it. May be nil (tests / minimal setups).
 	PlanStoreV3 playback.PlanStoreV3
+	// SessionRecipeStore is the PlaybackHandler's store of header-authenticated
+	// session recipes (same instance), the only reconstruction source for a
+	// session whose URLs carry no stream token. May be nil.
+	SessionRecipeStore sessionRecipeStoreV3
+	// FinishOtherEnd is the PlaybackHandler's finisher for a stop an abort
+	// here took over (same instance). May be nil; the finish hook then
+	// records the stop's history without its provider event.
+	FinishOtherEnd func(ctx context.Context, claim nativeEndClaim, sessionID string)
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -150,9 +158,20 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// let stale recipe routing override the current session, and do not revive
 		// the stale recipe if the live session disappears during this request.
 		loadCard = nil
-	} else if errors.Is(err, playback.ErrSessionNotFound) && !requireNativeRecipeAPIEgressV3(w, card) {
-		return
-	} else if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+	} else if errors.Is(err, playback.ErrSessionNotFound) {
+		if loadCard == nil {
+			// A header-authenticated session carries no token; its recipe is the
+			// server-side recovery card.
+			var recipeErr error
+			if loadCard, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, userID); recipeErr != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+				return
+			}
+		}
+		if !requireNativeRecipeAPIEgressV3(w, loadCard) {
+			return
+		}
+	} else {
 		// Do not turn an inconsistent backend read into authority to reconstruct
 		// from a recipe whose route was never checked against a clean miss.
 		loadCard = nil
@@ -269,7 +288,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			SourceAudioChannels:       session.SourceAudioChannels,
 			TargetAudioChannels:       session.TargetAudioChannels,
 			TargetAudioBitrateKbps:    session.TargetAudioBitrateKbps,
-			Abort:                     abort,
+			// For a copied track the planned codec is the source's.
+			CopyAudioCodec: session.TargetAudioCodec,
+			Abort:          abort,
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -295,6 +316,12 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 		loadCard = nil
 	} else if !errors.Is(err, playback.ErrSessionNotFound) {
 		loadCard = nil
+	} else if loadCard == nil {
+		// A header-authenticated session's sidecar URLs carry no reference either.
+		var recipeErr error
+		if loadCard, recipeErr = h.storedSessionRecipeV3(ctx, sessionID, userID); recipeErr != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		}
 	}
 	session, status, _ := h.TM.LoadOrReconstructSessionDetail(ctx, h.sessionMgr.GetSession, sessionID, userID, loadCard)
 	switch status {
@@ -443,7 +470,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 		// Other formats (MicroDVD .sub) cannot be retimed; ffmpeg converts
 		// them from the file.
-		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.ffmpegPath())
+		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub, h.ffmpegPath())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error",
 				"Failed to load external subtitle")
@@ -808,15 +835,33 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {
 		return
 	}
+	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
-	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
+	// An earlier stop that won the row and never finished is finished as
+	// that stop by the playback handler, which has its writers.
+	if claim.owned && !claim.ownEnd(abortStopID(session.ID)) && h.FinishOtherEnd != nil {
+		h.FinishOtherEnd(ctx, claim, session.ID)
+		deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
+		return
+	}
+	// The playback handler's finish hook writes the play's history, as it
+	// does for every other end, unless another stop already owns it.
+	if finisher, ok := h.sessionMgr.(detachedFinisher); ok && claim.owned {
+		snapshot := *session
+		claim.applyAccepted(&snapshot)
+		finisher.FinishDetached(playback.WithEndReason(ctx, string(claim.reason(session.ID, PlaybackEndAborted))), snapshot)
+		claim.finish(ctx, session.ID, "")
+	}
+	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 
 func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session *playback.Session, file *models.MediaFile, err error) {
 	if ctx == nil || session == nil || err == nil {
 		return
 	}
-	if preflightErr := preflightPlaybackFile(ctx, file, h.MissingMarker, h.EventsHub); preflightErr != nil {
+	// A request that already ended cannot stat the file; keep the transport's
+	// own error for the log instead of the preflight's context error.
+	if preflightErr := preflightPlaybackFile(ctx, file, h.MissingMarker, h.EventsHub); preflightErr != nil && ctx.Err() == nil {
 		err = preflightErr
 	}
 	if isPlaybackFileMissing(err) || errors.Is(err, os.ErrNotExist) {
@@ -831,10 +876,12 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 	)
 }
 
-// streamEmbeddedSubtitle runs a dedicated ffmpeg for a single embedded
-// track, optionally windowed by explicit client parameters, and pipes its
-// stdout directly to w. Because this ffmpeg is independent of the video
-// pipeline, it works the same for direct play, remux, and transcode.
+// streamEmbeddedSubtitle serves a single embedded track, optionally windowed
+// by explicit client parameters: from the subtitle cache, a kept copy, or
+// the container's index when it can, else from a dedicated ffmpeg demux of
+// the source that pipes its stdout to w (SubtitleCache.ServeExtract).
+// Because none of these depends on the video pipeline, it works the same for
+// direct play, remux, and transcode.
 func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
@@ -875,6 +922,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
 		AllowWindow:     allowWindow,
+		Embedded:        playback.EmbeddedSubtitleRefFor(file, embeddedIndex),
 		FFmpegPath:      h.ffmpegPath(),
 	}
 	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {
@@ -901,6 +949,10 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		if r.Context().Err() != nil {
 			return
 		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			writeSubtitleReadsBusy(w)
+			return
+		}
 		if response.Status() == 0 {
 			writeError(w, http.StatusInternalServerError, "subtitle_extract_failed", "Failed to extract subtitles")
 			return
@@ -908,6 +960,13 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		// A successful HTTP EOF would make clients accept the partial track.
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// writeSubtitleReadsBusy answers a subtitle the node had no room to read
+// (playback.ErrSubtitleReadsBusy) as a retryable 503.
+func writeSubtitleReadsBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+	writeError(w, http.StatusServiceUnavailable, "service_unavailable", "The server is busy; try again in a moment")
 }
 
 // subtitleSeekPosition uses only the caller's explicit position. Session

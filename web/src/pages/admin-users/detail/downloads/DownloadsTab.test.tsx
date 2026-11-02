@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AdminUser } from "@/api/types";
 
 import { DownloadsTab } from "./DownloadsTab";
+import { renderAdminUserTab, serveAdminAPI, stubRadixDom } from "../adminUserTab.test-support";
 
 const mocks = vi.hoisted(() => ({
   capabilities: { account_downloads: true, account_devices: true } as Record<string, boolean>,
@@ -69,10 +68,6 @@ const downloads = [
   row("5", { title: "Inside Out 2", device_id: "pixel", profile_id: "p2", status: "ready" }),
   row("6", { title: "Failed Movie", status: "failed" }),
 ];
-
-function json(body: unknown) {
-  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
-}
 
 function route(url: URL): unknown {
   const done = { has_more: false };
@@ -142,21 +137,8 @@ function route(url: URL): unknown {
 
 let requests: URL[] = [];
 
-class MockResizeObserver implements ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function renderTab() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/admin/users/7?tab=downloads"]}>
-        <DownloadsTab user={user} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  renderAdminUserTab(<DownloadsTab user={user} />, "/admin/users/7?tab=downloads");
 }
 
 function deviceCard(name: string) {
@@ -171,21 +153,8 @@ beforeEach(() => {
   setProfileToken(null);
   mocks.capabilities = { account_downloads: true, account_devices: true };
   requests = [];
-  vi.stubGlobal("ResizeObserver", MockResizeObserver);
-  Object.defineProperties(Element.prototype, {
-    hasPointerCapture: { configurable: true, value: () => false },
-    setPointerCapture: { configurable: true, value: () => {} },
-    releasePointerCapture: { configurable: true, value: () => {} },
-    scrollIntoView: { configurable: true, value: () => {} },
-  });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input) => {
-      const url = new URL(String(input), "http://localhost");
-      requests.push(url);
-      return json(route(url));
-    }),
-  );
+  stubRadixDom();
+  serveAdminAPI(route, requests);
 });
 
 afterEach(() => {

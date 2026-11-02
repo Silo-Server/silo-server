@@ -1,7 +1,9 @@
 import { useId, useState, type ReactNode } from "react";
-import { RotateCcw } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
+import { MetadataLanguageSetting } from "@/components/settings/MetadataLanguageSetting";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,11 +17,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSubtitleAppearanceSetting } from "@/hooks/queries/subtitleAppearance";
+import { SUBTITLE_SYNC_MAX_MS, useSubtitleSyncSetting } from "@/hooks/queries/subtitleSync";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
+import {
+  normalizeMetadataLanguageOverrides,
+  type MetadataLanguageOverrides,
+} from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
 import {
   BACKGROUND_STYLE_OPTIONS,
@@ -33,14 +40,20 @@ import {
 import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
-/* Subtitle behavior is a profile preference; a device tunes only appearance. */
+import { ResetButton } from "./ResetButton";
+
+/* Languages, subtitle behavior and subtitle appearance are profile preferences. */
 /**
  * The behavior modes come from the contract rather than a literal list, so a
  * member added to the manifest appears here without a matching edit.
  */
 const SUBTITLE_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]);
 
-const BEHAVIOR_KEYS: SettingKey[] = [
+/** Read in one batch: the language and subtitle rows want every key at once. */
+const PROFILE_KEYS: SettingKey[] = [
+  SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
   SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
   SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
   SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
@@ -172,28 +185,50 @@ function SettingRow({ label, description, labelForControl = true, children }: Se
 export default function SubtitleAppearanceSettings() {
   const {
     appearance: effectiveSettings,
-    hasDeviceOverride,
+    isCustomized,
     save: saveAppearance,
     reset: resetAppearance,
     isSaving,
-    isResetting,
   } = useSubtitleAppearanceSetting();
-  const { data: behavior } = useEffectiveSettings({ keys: BEHAVIOR_KEYS });
-  const { save: saveProfileDefault, isSaving: behaviorSaving } = useProfileDefaultWriter(behavior);
+  const subtitleSync = useSubtitleSyncSetting();
+  const { data: profileValues } = useEffectiveSettings({ keys: PROFILE_KEYS });
+  const {
+    save: saveProfileDefault,
+    reset: resetProfileDefault,
+    isSaving: profilePending,
+  } = useProfileDefaultWriter(profileValues);
 
   // The effective endpoint resolves an unset key to the contract default, so a
   // control can read its value straight off the answer without a local literal.
+  const read = <T,>(key: SettingKey) =>
+    (profileValues?.[key]?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T;
+  const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+  const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+  const audioLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+    audioLanguage,
+    profileValues?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
+  );
+  const metadataLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+    metadataLanguage,
+    profileValues?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
+  );
   const subtitleLanguage =
-    (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.value as string | null | undefined) ?? "";
+    (profileValues?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.value as
+      | string
+      | null
+      | undefined) ?? "";
   const subtitleLanguageOptions = namedLanguageOptionsFor(
     SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
     subtitleLanguage,
-    behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.suggested_values,
+    profileValues?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.suggested_values,
   );
   const subtitleMode =
-    (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as string | undefined) ?? "auto";
+    (profileValues?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as string | undefined) ?? "auto";
   const showForcedSubtitles =
-    (behavior?.[SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES]?.value as boolean | undefined) ?? true;
+    (profileValues?.[SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES]?.value as boolean | undefined) ??
+    true;
 
   const [draftState, setDraftState] = useState<{
     key: string;
@@ -232,48 +267,102 @@ export default function SubtitleAppearanceSettings() {
     }
   }
 
-  async function handleUseFallback() {
+  // Clears the profile's look (and this browser's own copy), so the built-in
+  // one applies on every device again. Any unsaved edits go with it.
+  async function handleResetAppearance() {
     try {
       await resetAppearance();
-      toast.success("Subtitle appearance reset");
+      discardLocalChanges();
+      toast.success("Subtitle appearance reset to the default");
     } catch {
       toast.error("Failed to reset subtitle appearance");
     }
   }
 
   /**
-   * Subtitle behavior writes at profile scope: it is the household member's
-   * choice, not the screen's. A device override would otherwise keep shadowing
-   * the write and snap the control back, so the shared writer clears one when
-   * the resolved value came from this device. A library or series override
-   * still ranks above the profile row, but those are edited where the content
-   * is and stay deliberately untouched here.
+   * Languages and subtitle behavior write at profile scope: they are the
+   * household member's choice, not the screen's. A device override would
+   * otherwise keep shadowing the write and snap the control back, so the
+   * shared writer clears one when the resolved value came from this device. A
+   * library or series override still ranks above the profile row, but those
+   * are edited where the content is and stay deliberately untouched here.
    */
   function saveBehavior(key: SettingKey, value: unknown) {
     saveProfileDefault(key, value).catch(() => toast.error("Failed to save subtitle setting"));
   }
 
+  function saveLanguage(key: SettingKey, value: unknown) {
+    saveProfileDefault(key, value).catch(() => toast.error("Failed to save language setting"));
+  }
+
+  function saveMetadataOverrides(overrides: MetadataLanguageOverrides) {
+    const request =
+      Object.keys(overrides).length === 0
+        ? resetProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES)
+        : saveProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, overrides);
+    return request.catch((error) => {
+      toast.error("Failed to save metadata language exceptions");
+      throw error;
+    });
+  }
+
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(effectiveSettings);
-  const behaviorPending = behaviorSaving;
   const usesTextOutline = settings.textOutline || settings.backgroundStyle === "outline";
   const isBoxStyle = settings.backgroundStyle === "box";
   const { containerStyle, cueStyle } = computeSubtitleStyles(settings);
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Subtitles</h2>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Choose when subtitles appear and how they look during playback.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Language & Subtitles"
+        subtitle="The languages this profile prefers, when subtitles appear, and how they look."
+      />
 
-      <SettingsGroup
-        title="Behavior"
-        description="These preferences decide which subtitles Silo chooses by default."
-      >
+      <SettingsGroup title="Language">
+        <SettingRow
+          label="Spoken language"
+          description="Prefer a spoken language for this profile when multiple tracks are available."
+        >
+          {({ id, descriptionId }) => (
+            <div className="w-full sm:w-[220px]">
+              <LanguageSelect
+                id={id}
+                aria-describedby={descriptionId}
+                value={audioLanguage ?? "none"}
+                options={audioLanguageOptions}
+                disabled={profilePending}
+                placeholder="No preference"
+                className="w-full"
+                onValueChange={(value) =>
+                  // The contract spells "no preference" as null, where the
+                  // legacy profile column spelled it as the empty string.
+                  saveLanguage(
+                    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+                    value === "none" ? null : value,
+                  )
+                }
+              >
+                <SelectItem value="none">No preference</SelectItem>
+              </LanguageSelect>
+            </div>
+          )}
+        </SettingRow>
+
+        <MetadataLanguageSetting
+          fallback={metadataLanguage}
+          overrides={normalizeMetadataLanguageOverrides(
+            read<unknown>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES),
+          )}
+          languageOptions={metadataLanguageOptions}
+          disabled={profilePending}
+          onFallbackChange={(language) =>
+            saveLanguage(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, language)
+          }
+          onOverridesChange={saveMetadataOverrides}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Subtitles" description="Which subtitles Silo picks for this profile.">
         <SettingRow
           label="Subtitle language"
           description="Pick a subtitle language or leave subtitles off by default."
@@ -285,7 +374,7 @@ export default function SubtitleAppearanceSettings() {
                 aria-describedby={descriptionId}
                 value={subtitleLanguage || "none"}
                 options={subtitleLanguageOptions}
-                disabled={behaviorPending}
+                disabled={profilePending}
                 placeholder="None"
                 className="w-full"
                 onValueChange={(value) =>
@@ -313,7 +402,7 @@ export default function SubtitleAppearanceSettings() {
                 id={id}
                 aria-describedby={descriptionId}
                 className="w-full sm:w-[220px]"
-                disabled={behaviorPending}
+                disabled={profilePending}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -337,7 +426,7 @@ export default function SubtitleAppearanceSettings() {
               id={id}
               aria-describedby={descriptionId}
               checked={showForcedSubtitles}
-              disabled={behaviorPending}
+              disabled={profilePending}
               onCheckedChange={(checked) =>
                 saveBehavior(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, checked)
               }
@@ -348,7 +437,16 @@ export default function SubtitleAppearanceSettings() {
 
       <SettingsGroup
         title="Preview"
-        description="This sample reflects the current subtitle appearance."
+        description="How subtitles look for this profile on every device."
+        actions={
+          isCustomized ? (
+            <ResetButton
+              label="Reset subtitle appearance to the default"
+              disabled={isSaving}
+              onClick={() => void handleResetAppearance()}
+            />
+          ) : null
+        }
       >
         <div
           className="surface-panel-subtle relative overflow-hidden rounded-[1.3rem]"
@@ -383,12 +481,6 @@ export default function SubtitleAppearanceSettings() {
           >
             Discard Changes
           </Button>
-          {hasDeviceOverride ? (
-            <Button variant="ghost" onClick={handleUseFallback} disabled={isResetting}>
-              <RotateCcw className="mr-2 h-4 w-4" />
-              Reset Appearance
-            </Button>
-          ) : null}
         </div>
       </SettingsGroup>
 
@@ -559,6 +651,92 @@ export default function SubtitleAppearanceSettings() {
           )}
         </SettingRow>
       </SettingsGroup>
+
+      <SettingsGroup
+        title="Timing"
+        description="Shift every subtitle earlier or later. Applies to this profile on every device."
+      >
+        <SettingRow
+          label="Subtitle offset"
+          labelForControl={false}
+          description="Negative values show subtitles earlier, positive values later."
+        >
+          {({ labelId, descriptionId }) => (
+            <SubtitleOffsetControl
+              labelId={labelId}
+              descriptionId={descriptionId}
+              valueMs={subtitleSync.offsetMs}
+              disabled={!subtitleSync.isLoaded || subtitleSync.isSaving}
+              onChange={(ms) =>
+                subtitleSync.save(ms).catch(() => toast.error("Failed to save subtitle offset"))
+              }
+            />
+          )}
+        </SettingRow>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+const SUBTITLE_OFFSET_STEP_MS = 100;
+
+function formatSubtitleOffset(ms: number): string {
+  if (ms === 0) return "0 ms";
+  return `${ms > 0 ? "+" : "−"}${Math.abs(ms)} ms`;
+}
+
+function SubtitleOffsetControl({
+  labelId,
+  descriptionId,
+  valueMs,
+  disabled,
+  onChange,
+}: {
+  labelId: string;
+  descriptionId: string;
+  valueMs: number;
+  disabled: boolean;
+  onChange: (ms: number) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={descriptionId}
+      className="flex items-center gap-1"
+    >
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Show subtitles ${SUBTITLE_OFFSET_STEP_MS} ms earlier`}
+        disabled={disabled || valueMs <= -SUBTITLE_SYNC_MAX_MS}
+        onClick={() => onChange(valueMs - SUBTITLE_OFFSET_STEP_MS)}
+      >
+        <Minus className="h-4 w-4" />
+      </Button>
+      <output
+        aria-live="polite"
+        className="min-w-[5.5rem] text-center font-mono text-sm tabular-nums"
+      >
+        {formatSubtitleOffset(valueMs)}
+      </output>
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Show subtitles ${SUBTITLE_OFFSET_STEP_MS} ms later`}
+        disabled={disabled || valueMs >= SUBTITLE_SYNC_MAX_MS}
+        onClick={() => onChange(valueMs + SUBTITLE_OFFSET_STEP_MS)}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={disabled || valueMs === 0}
+        onClick={() => onChange(0)}
+      >
+        Reset
+      </Button>
     </div>
   );
 }

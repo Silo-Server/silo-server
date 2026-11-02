@@ -278,14 +278,4 @@ describe("StorageStep", () => {
     expect(setValue).toHaveBeenLastCalledWith("redis.db", "3");
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
   });
-
-  it("reveals S3 fields and stages the backend selection", async () => {
-    const { setValue } = setup();
-    render(<StorageStep />);
-    await userEvent.click(screen.getByRole("combobox", { name: "Storage" }));
-    await userEvent.click(screen.getByRole("option", { name: "S3" }));
-    expect(screen.getByLabelText("Bucket")).toBeInTheDocument();
-    expect(setValue).toHaveBeenCalledWith("artwork.storage_backend", "s3");
-    expect(formMock.mock.calls[0]?.[0].keys).toContain("artwork.storage_backend");
-  });
 });

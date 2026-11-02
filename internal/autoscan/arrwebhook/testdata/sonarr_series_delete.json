@@ -1,0 +1,12 @@
+{
+  "series": {
+    "id": 12,
+    "title": "Example Show",
+    "path": "/data/tv/Example Show",
+    "tvdbId": 123456,
+    "type": "standard"
+  },
+  "deletedFiles": true,
+  "eventType": "SeriesDelete",
+  "instanceName": "Sonarr"
+}

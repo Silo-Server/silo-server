@@ -104,14 +104,7 @@ func canonicalValue(t *testing.T, db *sql.DB, key, scope string, where string, a
 // scope CHECK and the partial unique indexes, and that nothing violates the
 // json_valid constraints.
 func TestMigrateToV16BackfillsCanonicalValues(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	seedLegacySettings(t, db)
 
 	tx, err := db.Begin()
@@ -281,14 +274,7 @@ SELECT COUNT(*) FROM user_setting_migration_rejects WHERE source_key LIKE 'jelly
 // converted — an operator's restore point is the pre-upgrade backup, and a
 // partial migration is the one state neither backup nor rollback covers.
 func TestMigrateToV16IsAtomic(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	seedLegacySettings(t, db)
 
 	tx, err := db.Begin()
@@ -315,14 +301,7 @@ func TestMigrateToV16IsAtomic(t *testing.T) {
 }
 
 func TestMigrateToV16RejectsOrphansWhenProfileListIsEmpty(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	if _, err := db.Exec(`
 INSERT INTO user_device_settings (profile_id, device_id, key, value, updated_at)
 VALUES ('deleted', 'd1', 'subtitle_appearance', '{"fontSize":"large"}',
@@ -365,14 +344,7 @@ SELECT COUNT(*) FROM user_setting_migration_rejects
 // the same rows or a household's intro behavior would depend on which backend
 // its account happens to live in.
 func TestInitSchemaCarriesAutoSkipIntroOntoIntroSkipMode(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	// Three identities a real store can hold the boolean at, plus an enum a
 	// client already chose for itself.

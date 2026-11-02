@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -77,7 +78,9 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+jwtSecret)
+	if err := nodeauth.Sign(httpReq, node.URL, jwtSecret); err != nil {
+		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: sign request: %w", err)
+	}
 
 	client := e.client
 	if client == nil {

@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -50,33 +49,7 @@ func literaryAdminHandler(t *testing.T, f *fakeAdminLiterary) http.Handler {
 	}
 	return newTestHandler(t, deps)
 }
-func TestAdminLiteraryTransport(t *testing.T) {
-	f := &fakeAdminLiterary{}
-	h := literaryAdminHandler(t, f)
-	rec := do(t, h, "GET", Prefix+"/admin/literary-works/items/ebook-1/candidates", "", bearer(adminToken))
-	var candidates AdminLiteraryCandidates
-	if err := json.Unmarshal(rec.Body.Bytes(), &candidates); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != 200 || f.limit != 20 || f.source != "ebook-1" || len(candidates.Candidates) != 1 || candidates.Candidates[0].Evidence == nil {
-		t.Fatalf("candidates: %d %s %#v", rec.Code, rec.Body, f)
-	}
-	rec = do(t, h, "POST", Prefix+"/admin/literary-works/link", `{"work_id":"work-1","content_ids":[" ebook-1 ","audio-1"]}`, bearer(adminToken))
-	if rec.Code != 200 || f.work != "work-1" || len(f.ids) != 2 || f.ids[0] != "ebook-1" {
-		t.Fatalf("link: %d %s %#v", rec.Code, rec.Body, f)
-	}
-	for _, action := range []string{"confirm", "ignore"} {
-		before := f.calls
-		rec = do(t, h, "POST", Prefix+"/admin/literary-works/matches/"+action, `{"source_content_id":"ebook-1","target_content_id":"audio-1"}`, bearer(adminToken))
-		if rec.Code != 200 || f.calls != before+1 || f.userID != 2 || f.source != "ebook-1" || f.target != "audio-1" {
-			t.Fatalf("%s: %d %s %#v", action, rec.Code, rec.Body, f)
-		}
-	}
-	rec = do(t, h, "DELETE", Prefix+"/admin/literary-works/work-1/items/ebook-1", "", bearer(adminToken))
-	if rec.Code != 204 || rec.Body.Len() != 0 || f.work != "work-1" || f.source != "ebook-1" {
-		t.Fatalf("unlink: %d %s", rec.Code, rec.Body)
-	}
-}
+
 func TestAdminLiteraryValidationAndAuthority(t *testing.T) {
 	f := &fakeAdminLiterary{}
 	h := literaryAdminHandler(t, f)

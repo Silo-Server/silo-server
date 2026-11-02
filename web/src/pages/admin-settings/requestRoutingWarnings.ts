@@ -13,7 +13,7 @@ import {
   ratingAge,
   type Tier,
 } from "./requestRoutingModel";
-import { serverKind } from "./requestServerModel";
+import { serverKind, serverReady, type RequestRouterInstallation } from "./requestServerModel";
 
 /** A one-click fix a warning offers. */
 export type RoutingWarningFix =
@@ -36,6 +36,8 @@ export interface RoutingWarningInput {
   rules: readonly RequestRoute[];
   fallback: RequestRoute | undefined;
   servers: readonly RequestIntegration[];
+  /** The request_router.v1 capabilities, for which servers need a key. */
+  installations: readonly RequestRouterInstallation[];
   /** The plugin form fields a server's destination can set. */
   serverFields: (server: RequestIntegration) => readonly PluginAdminFormField[];
   /** The admin's language, as the Foreign-language preset uses it. */
@@ -54,6 +56,7 @@ type IncludeField = (typeof LIST_CONDITION_FIELDS)[keyof typeof LIST_CONDITION_F
 const SINGLE_VALUED: ReadonlySet<IncludeField> = new Set([
   "original_languages",
   "requester_user_ids",
+  "series_statuses",
 ]);
 
 const KNOWN_KEYS = new Set<string>([
@@ -155,7 +158,7 @@ function serverWarnings(
       });
     } else if (!server.enabled) {
       out.push({ key: `off-${id}`, text: `${server.name} is turned off. ${waits}` });
-    } else if (!server.installation_id || !server.has_api_key) {
+    } else if (!serverReady(server, input.installations)) {
       out.push({ key: `setup-${id}`, text: `${server.name} needs setup.` });
     }
   }

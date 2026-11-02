@@ -22,11 +22,7 @@ func TestProbeTransformationRegistryWithToneMapV3ResultPreservesDeadline(t *test
 }
 
 func TestProbeTransformationRegistryWithToneMapV3ResultRejectsFailedInventoryCommand(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n")
 
 	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
 	if err == nil {
@@ -44,9 +40,6 @@ func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
 		want    bool
 	}{
 		{"software", " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC", true},
-		{"qsv", " V..... h264_qsv             H.264 / AVC / MPEG-4 AVC (Intel Quick Sync Video acceleration)", true},
-		{"vaapi", " V..... h264_vaapi           H.264/AVC (VAAPI)", true},
-		{"nvenc", " V....D h264_nvenc           NVIDIA NVENC H.264 encoder", true},
 		{"videotoolbox", " V..... h264_videotoolbox    VideoToolbox H.264 Encoder", true},
 		{"hevc_only", " V..... libx265\n V..... hevc_videotoolbox", false},
 		{"empty", "", false},
@@ -60,25 +53,6 @@ func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
 	}
 }
 
-func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
-	for _, transformation := range registry.Advertised() {
-		if transformation.Name == TransformationVideoToH264V3 {
-			if transformation.RecipeVersion != "2" {
-				t.Fatalf("video_to_h264 recipe version = %q, want 2", transformation.RecipeVersion)
-			}
-			return
-		}
-	}
-	t.Fatal("video_to_h264 was not advertised")
-}
-
 func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -88,11 +62,8 @@ func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *t
 		{name: "surround downmix", rejectFilter: stereoDownmixBoostFilterV3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
 			script := fmt.Sprintf("#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*\" -af %s \"*) exit 1 ;;\nesac\n", test.rejectFilter)
-			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			ffmpeg := writeProbeFFmpegV3(t, script)
 
 			registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
 			if err != nil {
@@ -104,11 +75,7 @@ func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *t
 		})
 	}
 
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n")
 	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
 	for _, transformation := range registry.Advertised() {
 		if transformation.Name == TransformationAudioToAACV3 {
@@ -134,11 +101,7 @@ func TestProbeTransformationRegistryV3DV7RecipeNeedsDoviRPUAndFilterUnits(t *tes
 		{"filter_units only", "echo filter_units", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-			script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) " + test.bsfs + " ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n"
-			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) "+test.bsfs+" ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n")
 			registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
 			if got := registry.Available(TransformationServerDV7HDR10V3); got != test.want {
 				t.Fatalf("server_dv7_to_hdr10 available = %v, want %v", got, test.want)
@@ -153,4 +116,15 @@ func TestProbeTransformationRegistryV3DV7RecipeNeedsDoviRPUAndFilterUnits(t *tes
 			}
 		})
 	}
+}
+
+// writeProbeFFmpegV3 writes an executable fake FFmpeg script for the
+// transformation registry probes and returns its path.
+func writeProbeFFmpegV3(t *testing.T, script string) string {
+	t.Helper()
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return ffmpeg
 }

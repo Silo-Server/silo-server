@@ -367,33 +367,6 @@ func TestPrepareProgressiveTransportRequiredRollbackPreservesRetryableRoute(t *t
 	unlock()
 }
 
-// A legacy attempt carries its whole recipe in the client's stream token, which
-// the relay forwards to the node. It needs no stored copy, and writing one would
-// put a media path in Redis for no reason.
-func TestPrepareTransportV3LegacyAttemptStoresNoNodeRecipe(t *testing.T) {
-	node := remoteTranscodeNodeStubV3(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}}
-	recipes := &recordingRecipeCardStoreV3{}
-	handler.NodeRecipeStore = recipes
-
-	transport, transportErr := handler.prepareTransportV3(
-		httptest.NewRequest(http.MethodPost, "/", nil),
-		&playback.Session{ID: "session-legacy-recipe", UserID: 7, ProfileID: "profile-1"},
-		v3HandlerFixtureFile(t),
-		remoteHLSResultV3(),
-		mediaAuthModeV3{})
-	if transportErr != nil {
-		t.Fatalf("prepare remote transport: %v", transportErr)
-	}
-	defer transport.rollback()
-
-	if len(recipes.cards) != 0 {
-		t.Fatalf("recipes stored = %v, want none for a token-carrying attempt", recipes.cards)
-	}
-}
-
 // Committing a replacement stops the previous node process, so the recipe that
 // rebuilds it has to go with it — otherwise a buffered request could resurrect
 // the transport the replan just retired.
@@ -431,7 +404,8 @@ func TestPrepareTransportV3RemoteCommitDropsThePreviousTransportRecipe(t *testin
 	}
 }
 
-// A stopped session's node job is gone, so its stored recipe must be too.
+// A stopped session's node job is gone, so its stored recipe must be too, and a
+// stopped session is over, so its API recovery card goes with it.
 func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	const transportID = "session-node-stop-plan0001-aaaabbbb"
@@ -445,12 +419,16 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 		transportID: {SessionID: "session-node-stop", TranscodeTransportID: transportID},
 	}}
 	handler.NodeRecipeStore = recipes
+	sessionRecipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+		"session-node-stop": {SessionID: "session-node-stop", TranscodeTransportID: transportID, RequireMediaAuthorization: true},
+	}}
+	handler.SessionRecipeStore = sessionRecipes
 	session := &playback.Session{
 		ID: "session-node-stop", UserID: 7, ProfileID: "profile-1",
 		TranscodeNodeURL: node.URL, TranscodeTransportID: transportID,
 	}
 
-	handler.finalizeSessionStop(context.Background(), session, false, "", true)
+	handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 
 	select {
 	case request := <-requests:
@@ -463,6 +441,9 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 
 	if len(recipes.deleted) != 1 || recipes.deleted[0] != transportID {
 		t.Fatalf("recipes deleted on stop = %v, want the session's transport recipe dropped", recipes.deleted)
+	}
+	if len(sessionRecipes.deleted) != 1 || sessionRecipes.deleted[0] != "session-node-stop" {
+		t.Fatalf("session recipes deleted on stop = %v, want the session's recovery card dropped", sessionRecipes.deleted)
 	}
 }
 
@@ -495,7 +476,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	handler := NewPlaybackHandler(manager)
 	recipes := &recordingRecipeCardStoreV3{deleteErr: errors.New("redis is down")}
 	handler.NodeRecipeStore = recipes
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err == nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err == nil {
 		t.Fatal("stop succeeded without durable progressive authority revocation")
 	}
 	if _, err := manager.GetSession(session.ID); err != nil {
@@ -506,7 +487,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	}
 
 	recipes.deleteErr = nil
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err != nil {
 		t.Fatalf("retry stop after authority recovery: %v", err)
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
@@ -554,7 +535,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t 
 		transportID: {SessionID: session.ID, TranscodeTransportID: transportID},
 	}}
 	handler.NodeRecipeStore = recipes
-	stopErr := handler.stopPlaybackSession(t.Context(), session, true)
+	stopErr := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped)
 	if stopErr == nil || !strings.Contains(stopErr.Error(), "cancel progressive remux transport") {
 		t.Fatalf("stop error = %v, want remote cancellation failure", stopErr)
 	}
@@ -568,7 +549,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t 
 		t.Fatalf("remote cancellation requests = %d, want 1", requests)
 	}
 
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err != nil {
 		t.Fatalf("retry stop after node recovery: %v", err)
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
@@ -634,7 +615,7 @@ func TestStopPlaybackWaitsForReplacementAndRevokesItsCurrentAuthority(t *testing
 	}
 	stopDone := make(chan error, 1)
 	go func() {
-		stopDone <- handler.stopPlaybackSession(t.Context(), staleSession, true)
+		stopDone <- handler.stopPlaybackSession(t.Context(), staleSession, PlaybackEndStopped)
 	}()
 	select {
 	case stopErr := <-stopDone:

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminSession, Profile } from "@/api/types";
 import type { components } from "@/api/v2/schema";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
@@ -121,18 +122,32 @@ export async function listProfiles(): Promise<ProfileList> {
   };
 }
 
-export function createProfile(body: ProfileCreate): Promise<Profile> {
-  return v2("POST /api/v2/profiles", { body }).then(profileFromV2);
+/**
+ * Creates a profile. profileContext makes the request as that profile rather
+ * than the active one: Who's watching creates as the verified primary profile
+ * without selecting it.
+ */
+export function createProfile(
+  body: ProfileCreate,
+  profileContext?: ProfileRequestContextSnapshot,
+): Promise<Profile> {
+  return v2("POST /api/v2/profiles", { body, profileContext }).then(profileFromV2);
 }
 
 export function verifyProfilePIN(profileId: string, pin: string): Promise<ProfileVerification> {
   return v2("POST /api/v2/profiles/{id}/verify-pin", { path: { id: profileId }, body: { pin } });
 }
 
-export function uploadProfileAvatar(id: string, file: File): Promise<Profile> {
-  return v2("PUT /api/v2/profiles/{id}/avatar", { path: { id }, form: { avatar: file } }).then(
-    profileFromV2,
-  );
+export function uploadProfileAvatar(
+  id: string,
+  file: File,
+  profileContext?: ProfileRequestContextSnapshot,
+): Promise<Profile> {
+  return v2("PUT /api/v2/profiles/{id}/avatar", {
+    path: { id },
+    form: { avatar: file },
+    profileContext,
+  }).then(profileFromV2);
 }
 
 export async function listHouseholdSessions(): Promise<AdminSession[]> {
@@ -168,10 +183,10 @@ export function useProfiles(options?: { enabled?: boolean }) {
   };
 }
 
-export function useCreateProfile() {
+export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: createProfile,
+    mutationFn: (body: ProfileCreate) => createProfile(body, profileContext),
     onSuccess: () => {
       toast.success("Profile created");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
@@ -206,10 +221,11 @@ export function useUpdateProfile() {
   });
 }
 
-export function useUploadProfileAvatar() {
+export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSnapshot) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, file }: { id: string; file: File }) => uploadProfileAvatar(id, file),
+    mutationFn: ({ id, file }: { id: string; file: File }) =>
+      uploadProfileAvatar(id, file, profileContext),
     onSuccess: (updatedProfile) => {
       queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), (current) => ({
         profiles: replaceProfileInList(current?.profiles, updatedProfile),

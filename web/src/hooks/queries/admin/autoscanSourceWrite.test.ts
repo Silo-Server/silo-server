@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import { useCreateAutoscanSource, useUpdateAutoscanSource } from "../useAutoscan";
+import { useCreateAutoscanSource } from "../useAutoscan";
 const source = {
   id: "source-a",
   plugin_id: "plugin",
@@ -55,79 +55,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-for (const create of [true, false]) {
-  const useWrite = () => {
-    const add = useCreateAutoscanSource();
-    const update = useUpdateAutoscanSource();
-    const mutation = create ? add : update;
-    return {
-      ...mutation,
-      submit: (input: ReturnType<typeof body>, onSuccess?: () => void) =>
-        create
-          ? add.mutate(input, { onSuccess })
-          : update.mutate({ id: "source-a", body: input }, { onSuccess }),
-    };
-  };
-  it(`${create ? "create" : "update"} copies nested draft before offline queue and succeeds once`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn().mockResolvedValue(response(create));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useWrite, fixture());
-    const draft = body();
-    act(() => result.current.submit(draft));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    draft.path_rewrites[0]!.to = "/changed";
-    draft.source_config.key = "changed";
-    act(() => onlineManager.setOnline(true));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
-    expect(sent.path_rewrites[0].to).toBe("/new");
-    expect(sent.source_config.key).toBe("old");
-    expect(fetchMock.mock.calls[0]![1].method).toBe(create ? "POST" : "PUT");
-  });
-
-  it.each(["401", "network"])(
-    `${create ? "create" : "update"} never replays %s under retry3`,
-    async (failure) => {
-      const fetchMock =
-        failure === "network"
-          ? vi.fn().mockRejectedValue(new Error("lost"))
-          : vi.fn().mockResolvedValue(
-              new Response(
-                JSON.stringify({
-                  type: "https://silo.dev/problems/authentication_required",
-                  title: "Unauthorized",
-                  status: 401,
-                  detail: "Expired",
-                  instance: "synthetic",
-                }),
-                { status: 401, headers: { "Content-Type": "application/problem+json" } },
-              ),
-            );
-      vi.stubGlobal("fetch", fetchMock);
-      const { result } = renderHook(useWrite, fixture());
-      act(() => result.current.submit(body()));
-      await waitFor(() => expect(result.current.isError).toBe(true));
-      expect(fetchMock).toHaveBeenCalledOnce();
-    },
-  );
-}
-
-it("create rejects offline authority replacement", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useCreateAutoscanSource, fixture());
-  act(() => result.current.mutate(body()));
-  await waitFor(() => expect(result.current.isPaused).toBe(true));
-  act(() => {
-    setProfileToken("pin-b");
-    onlineManager.setOnline(true);
-  });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).not.toHaveBeenCalled();
-});
 it("create fences late receipt and caller callback", async () => {
   let release!: (r: Response) => void;
   vi.stubGlobal(

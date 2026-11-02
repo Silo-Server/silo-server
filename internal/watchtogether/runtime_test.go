@@ -363,3 +363,27 @@ func TestRoomRuntimeWaitingDeadlineStartsWithAttachmentPG(t *testing.T) {
 		t.Fatal("attached straggler blocked room past the waiting deadline")
 	}
 }
+
+// The requester state from before a pending command travels with the room, so
+// a guest on another server undoing a pending play keeps the paused position.
+func TestPendingCommandRequesterStateCrossesNodesPG(t *testing.T) {
+	f := newRoomClusterFixture(t)
+	if _, err := f.host.UpdatePolicy(t.Context(), f.roomID, 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
+		t.Fatal(err)
+	}
+	position := 100.0
+	request := func(s *Service, reg *Registration, user int, profile string, action TransportAction) {
+		t.Helper()
+		if _, err := s.HandleTransportRequestForConnection(t.Context(), reg, user, profile,
+			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request(f.host, f.hostReg, 7, "host", TransportActionPause)
+	f.now = f.now.Add(5 * time.Second)
+	request(f.host, f.hostReg, 7, "host", TransportActionPlay)
+	request(f.guest, f.guestReg, 8, "guest", TransportActionPause)
+	if undo := lastTransport(t, f.guestConn); undo.Action != TransportActionPause || undo.PositionSeconds != position {
+		t.Fatalf("guest pause undoing the host's pending play = %s at %.2f, want pause at the paused %.0f", undo.Action, undo.PositionSeconds, position)
+	}
+}

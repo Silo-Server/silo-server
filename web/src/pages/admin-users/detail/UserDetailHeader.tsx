@@ -139,7 +139,7 @@ export function UserDetailHeader({
           <InitialAvatar name={user.username} seed={user.id} size="lg" />
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="page-title min-w-0 text-[clamp(1.75rem,4vw,2.75rem)] break-words">
+              <h1 className="min-w-0 text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words sm:text-[2rem]">
                 {user.username}
               </h1>
               <Badge variant={user.role === "admin" ? "default" : "secondary"}>

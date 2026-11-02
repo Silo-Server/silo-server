@@ -1,248 +1,248 @@
-import { useId, useState, type ReactNode } from "react";
-import { Check, ImageIcon, ImageOff, RotateCcw, X } from "lucide-react";
+import { useId, useState } from "react";
+import { Check, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import {
-  OverlayPreviewCard,
-  type OverlayPreviewVariant,
-} from "@/components/overlays/OverlayPreviewCard";
-import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
+import type { EnabledCardQuickActionMode } from "@/lib/cardQuickActions";
 import {
   ACCENT_PALETTE,
   buildDefaultPrefs,
   CATEGORY_GROUPS,
   getOverlayDef,
-  isOverlaySuppressed,
-  OVERLAY_PREVIEW_VARIANTS,
-  OVERLAY_REGISTRY,
+  getPreset,
   isOverlayOffered,
+  isOverlaySuppressed,
   OVERLAY_PRESETS,
+  OVERLAY_REGISTRY,
   POSITION_OPTIONS,
   PRESET_IDS,
-  getPreset,
   type CardOverlayPrefs,
   type OverlayId,
+  type OverlayItemConfig,
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CARD_QUICK_ACTION_OPTIONS, type EnabledCardQuickActionMode } from "@/lib/cardQuickActions";
+import { cn } from "@/lib/utils";
 
-interface SettingRowProps {
-  label: string;
-  description: string;
-  hint?: string;
-  control: (props: { id: string }) => ReactNode;
+import { ChoiceButtons } from "./ChoiceButtons";
+import { ResetButton } from "./ResetButton";
+
+type ShortcutChoice = "off" | EnabledCardQuickActionMode;
+
+const SHORTCUT_CHOICES: readonly { value: ShortcutChoice; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "watched", label: "Watched" },
+  { value: "favorites", label: "Favorite" },
+  { value: "both", label: "Both" },
+];
+
+const CORNER_CLASSES: Record<OverlayPosition, string> = {
+  "top-left": "top-1 left-1",
+  "top-right": "top-1 right-1",
+  "bottom-left": "bottom-1 left-1",
+  "bottom-right": "bottom-1 right-1",
+};
+
+interface BadgeAdjustProps {
+  overlayId: OverlayId;
+  prefs: CardOverlayPrefs;
+  shortcutsOn: boolean;
+  onChange: (next: Partial<OverlayItemConfig>) => void;
 }
 
-function SettingRow({ label, description, hint, control }: SettingRowProps) {
-  const controlId = useId();
+/** Where one badge sits, its color, and its icon, behind one button. */
+function BadgeAdjust({ overlayId, prefs, shortcutsOn, onChange }: BadgeAdjustProps) {
+  const def = getOverlayDef(overlayId);
+  const iconSwitchId = useId();
+  if (!def) return null;
+  const config = prefs.items[overlayId];
+  const showIcon = !!def.iconCapable && (config.showIcon ?? getPreset(prefs.preset).preferIcon);
+  const color = config.accentColor;
+
   return (
-    <div className="border-border/50 flex flex-col gap-3 border-t pt-4 first:border-t-0 first:pt-0 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0 space-y-0.5">
-        <Label htmlFor={controlId} className="text-sm font-medium">
-          {label}
-        </Label>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
-        {hint && <p className="text-muted-foreground/70 text-xs italic">{hint}</p>}
-      </div>
-      <div className="w-full sm:w-auto">{control({ id: controlId })}</div>
-    </div>
-  );
-}
-
-interface AccentSwatchProps {
-  value: string | undefined;
-  defaultValue: string | undefined;
-  disabled?: boolean;
-  onChange: (next: string | undefined) => void;
-}
-
-function AccentSwatch({ value, defaultValue, disabled, onChange }: AccentSwatchProps) {
-  const [open, setOpen] = useState(false);
-  const display = value ?? defaultValue ?? "#94a3b8";
-  const hasOverride = !!value;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
-          disabled={disabled}
-          className="border-border/60 hover:border-border focus:border-border focus-visible:ring-ring relative h-6 w-6 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: display }}
-          aria-label={hasOverride ? "Change accent color" : "Set accent color"}
-          title={hasOverride ? `Accent: ${display}` : "Default accent"}
-        />
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground"
+          aria-label={`Adjust ${def.label}`}
+        >
+          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Adjust</span>
+        </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[200px] p-3">
+      <PopoverContent align="end" className="w-72 space-y-4 p-4">
+        <p className="text-sm font-semibold">{def.label}</p>
+
+        <div className="flex items-start gap-4">
+          <div
+            role="radiogroup"
+            aria-label="Corner"
+            className="bg-muted/50 border-border/70 relative aspect-[2/3] w-20 shrink-0 rounded-md border"
+          >
+            {POSITION_OPTIONS.map((option) => {
+              const active = config.position === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={option.label}
+                  title={option.label}
+                  onClick={() => onChange({ position: option.value })}
+                  className={cn(
+                    "focus-visible:ring-ring absolute h-4 w-7 rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none",
+                    CORNER_CLASSES[option.value],
+                    active ? "bg-primary" : "bg-foreground/15 hover:bg-foreground/30",
+                  )}
+                />
+              );
+            })}
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Corner</p>
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
+              Pick where it sits. Badges in the same corner stack.
+            </p>
+            {shortcutsOn && config.position.startsWith("bottom") ? (
+              <p className="text-muted-foreground text-[13px] leading-relaxed">
+                Shortcut buttons cover the bottom corners while they show.
+              </p>
+            ) : null}
+          </div>
+        </div>
+
         <div className="space-y-2">
-          <div className="text-xs font-medium tracking-wide uppercase">Accent color</div>
-          <div className="grid grid-cols-6 gap-1.5">
-            {ACCENT_PALETTE.map((color) => (
+          <p className="text-sm font-medium">Color</p>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Color">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!color}
+              onClick={() => onChange({ accentColor: undefined })}
+              className={cn(
+                "border-border text-muted-foreground hover:text-foreground focus-visible:ring-ring h-7 rounded-full border px-2.5 text-xs font-medium focus-visible:ring-2 focus-visible:outline-none",
+                !color && "border-primary text-foreground",
+              )}
+            >
+              Default
+            </button>
+            {ACCENT_PALETTE.map((swatch) => (
               <button
-                key={color.value}
+                key={swatch.value}
                 type="button"
-                onClick={() => {
-                  onChange(color.value);
-                  setOpen(false);
-                }}
-                className="border-border/40 hover:border-border focus-visible:ring-ring relative h-7 w-7 rounded-full border focus:outline-none focus-visible:ring-2"
-                style={{ background: color.value }}
-                title={color.label}
-                aria-label={color.label}
+                role="radio"
+                aria-checked={color === swatch.value}
+                aria-label={swatch.label}
+                title={swatch.label}
+                onClick={() => onChange({ accentColor: swatch.value })}
+                className="border-border/40 focus-visible:ring-ring relative h-7 w-7 rounded-full border focus-visible:ring-2 focus-visible:outline-none"
+                style={{ background: swatch.value }}
               >
-                {value === color.value && (
+                {color === swatch.value ? (
                   <Check
-                    size={12}
-                    className="absolute inset-0 m-auto"
-                    style={{
-                      color: color.value === "#ffffff" ? "black" : "white",
-                    }}
+                    aria-hidden="true"
+                    className="absolute inset-0 m-auto h-3.5 w-3.5"
+                    style={{ color: swatch.value === "#ffffff" ? "black" : "white" }}
                   />
-                )}
+                ) : null}
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              onChange(undefined);
-              setOpen(false);
-            }}
-            className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 text-xs"
-          >
-            <X size={12} /> Reset to default
-          </button>
         </div>
+
+        {def.iconCapable ? (
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor={iconSwitchId} className="text-sm font-medium">
+              Show icon
+            </Label>
+            <Switch
+              id={iconSwitchId}
+              checked={showIcon}
+              onCheckedChange={(checked) => onChange({ showIcon: checked })}
+            />
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );
 }
 
-interface OverlayToggleProps {
+interface BadgeRowProps {
   overlayId: OverlayId;
   prefs: CardOverlayPrefs;
+  shortcutsOn: boolean;
   onUpdate: (next: CardOverlayPrefs) => void;
 }
 
-function OverlayToggle({ overlayId, prefs, onUpdate }: OverlayToggleProps) {
+function BadgeRow({ overlayId, prefs, shortcutsOn, onUpdate }: BadgeRowProps) {
+  const switchId = useId();
   const def = getOverlayDef(overlayId);
   if (!def) return null;
   const config = prefs.items[overlayId];
-  const preset = getPreset(prefs.preset);
-  const resolvedShowIcon = !!def.iconCapable && (config.showIcon ?? preset.preferIcon);
   const suppressed = config.enabled && isOverlaySuppressed(overlayId, prefs);
+  const hint = suppressed
+    ? "Hidden while the combined Resolution + HDR badge is on."
+    : def.availabilityNote;
+  const update = (next: Partial<OverlayItemConfig>) =>
+    onUpdate({ ...prefs, items: { ...prefs.items, [overlayId]: { ...config, ...next } } });
 
   return (
-    <SettingRow
-      label={def.label}
-      description={def.description}
-      hint={
-        suppressed
-          ? "Hidden while the combined Resolution + HDR badge is enabled."
-          : def.availabilityNote
-      }
-      control={({ id }) => (
-        <div className="flex items-center gap-2">
-          {def.iconCapable && (
-            <button
-              type="button"
-              disabled={!config.enabled}
-              onClick={() =>
-                onUpdate({
-                  ...prefs,
-                  items: {
-                    ...prefs.items,
-                    [overlayId]: { ...config, showIcon: !resolvedShowIcon },
-                  },
-                })
-              }
-              className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-              title={resolvedShowIcon ? "Hide icon" : "Show icon"}
-              aria-label={resolvedShowIcon ? "Hide icon" : "Show icon"}
-            >
-              {resolvedShowIcon ? <ImageIcon size={16} /> : <ImageOff size={16} />}
-            </button>
-          )}
-          <AccentSwatch
-            value={config.accentColor}
-            defaultValue={def.defaultAccent}
-            disabled={!config.enabled}
-            onChange={(next) =>
-              onUpdate({
-                ...prefs,
-                items: {
-                  ...prefs.items,
-                  [overlayId]: { ...config, accentColor: next },
-                },
-              })
-            }
-          />
-          <Select
-            value={config.position}
-            disabled={!config.enabled}
-            onValueChange={(value) =>
-              onUpdate({
-                ...prefs,
-                items: {
-                  ...prefs.items,
-                  [overlayId]: { ...config, position: value as OverlayPosition },
-                },
-              })
-            }
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {POSITION_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Switch
-            id={id}
-            checked={config.enabled}
-            onCheckedChange={(checked) =>
-              onUpdate({
-                ...prefs,
-                items: {
-                  ...prefs.items,
-                  [overlayId]: { ...config, enabled: checked },
-                },
-              })
-            }
-          />
-        </div>
-      )}
-    />
+    <div className="border-border/50 flex items-center gap-3 border-t py-3 first:border-t-0">
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <Label htmlFor={switchId} className="text-sm font-medium">
+          {def.label}
+        </Label>
+        <p className="text-muted-foreground text-[13px] leading-relaxed">{def.description}</p>
+        {hint ? <p className="text-muted-foreground text-[13px] italic">{hint}</p> : null}
+      </div>
+      {config.enabled ? (
+        <BadgeAdjust
+          overlayId={overlayId}
+          prefs={prefs}
+          shortcutsOn={shortcutsOn}
+          onChange={update}
+        />
+      ) : null}
+      <Switch
+        id={switchId}
+        checked={config.enabled}
+        onCheckedChange={(checked) => update({ enabled: checked })}
+      />
+    </div>
   );
 }
 
-interface PresetPickerProps {
+function BadgeStylePicker({
+  value,
+  onChange,
+}: {
   value: PresetId;
   onChange: (next: PresetId) => void;
-}
-
-function PresetPicker({ value, onChange }: PresetPickerProps) {
+}) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+    <div
+      role="radiogroup"
+      aria-label="Badge style"
+      className="grid grid-cols-3 gap-2 sm:grid-cols-5"
+    >
       {PRESET_IDS.map((id) => {
         const preset = OVERLAY_PRESETS[id];
         const active = value === id;
@@ -250,25 +250,23 @@ function PresetPicker({ value, onChange }: PresetPickerProps) {
           <button
             key={id}
             type="button"
+            role="radio"
+            aria-checked={active}
             onClick={() => onChange(id)}
-            className={`flex flex-col items-stretch gap-2 rounded-lg border p-3 text-left transition-colors ${
-              active
-                ? "border-primary bg-primary/5"
-                : "border-border/60 hover:border-border bg-transparent"
-            }`}
+            className={cn(
+              "focus-visible:ring-ring flex flex-col items-stretch gap-2 rounded-xl border p-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
+              active ? "border-primary bg-primary/8" : "border-border/60 hover:border-border",
+            )}
           >
-            <div className="flex h-12 items-center justify-center rounded-md bg-gradient-to-br from-slate-700 to-slate-900">
+            <span className="flex h-10 items-center justify-center rounded-md bg-gradient-to-br from-slate-700 to-slate-900">
               <span
                 className={preset.badgeClass}
                 style={preset.badgeStyle(preset.id === "vibrant" ? "#f5c518" : undefined)}
               >
-                Sample
+                4K
               </span>
-            </div>
-            <div>
-              <div className="text-sm font-medium">{preset.label}</div>
-              <div className="text-muted-foreground text-xs leading-snug">{preset.description}</div>
-            </div>
+            </span>
+            <span className="text-center text-xs font-medium">{preset.label}</span>
           </button>
         );
       })}
@@ -276,7 +274,12 @@ function PresetPicker({ value, onChange }: PresetPickerProps) {
   );
 }
 
-export default function CardOverlaySettings() {
+/**
+ * Shortcut buttons and badges on media cards. These preferences are
+ * profile-wide and stored apart from the web card layout, so they render even
+ * when that layout cannot be edited.
+ */
+export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?: () => void }) {
   const shownRatingSources = useShownRatingSources();
   const {
     prefs,
@@ -288,223 +291,156 @@ export default function CardOverlaySettings() {
     overlaysEnabled,
     setOverlaysEnabled,
     resetPrefs,
-    hasOverride,
+    hasBadgeOverride,
+    hasQuickActionOverride,
     isResetting,
     isLoading,
     isOverlaySupported,
   } = useOverlayPrefs();
-  const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
-  // The request sample only shows a badge this server lets the profile keep.
-  const previewVariants = isOverlaySupported("request_status")
-    ? OVERLAY_PREVIEW_VARIANTS
-    : OVERLAY_PREVIEW_VARIANTS.filter((variant) => variant !== "requested");
-  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
+  const [confirmBadgeResetOpen, setConfirmBadgeResetOpen] = useState(false);
+  const badgesSwitchId = useId();
 
-  const handleUpdate = (next: CardOverlayPrefs) => {
-    setPrefs(next);
-    toast.success("Setting saved");
-  };
-
-  const handleQuickActionModeChange = (next: EnabledCardQuickActionMode) => {
-    setQuickActionMode(next);
-    toast.success("Setting saved");
-  };
-
-  const handleQuickActionsEnabledChange = (next: boolean) => {
-    setQuickActionsEnabled(next);
-    toast.success("Setting saved");
-  };
-
-  const handleOverlaysEnabledChange = (next: boolean) => {
-    setOverlaysEnabled(next);
-    toast.success("Setting saved");
-  };
-
-  // Removing the profile document is what puts this profile back on the
-  // server defaults for good: a copy of today's server values would freeze
-  // this profile at them and ignore every later change the admin makes.
-  const handleRestoreServerDefaults = async () => {
+  // Removing the profile's stored values is what puts it back on the server
+  // defaults for good: a copy of today's server values would freeze this
+  // profile at them and ignore every later change the admin makes.
+  const resetShortcuts = async () => {
     try {
-      await resetPrefs();
-      setConfirmRestoreOpen(false);
-      toast.success("Restored the server's default badges");
+      await resetPrefs("quickActions");
     } catch {
-      toast.error("Failed to restore the server's default badges");
+      toast.error("Couldn't reset shortcuts");
     }
+  };
+
+  const resetBadges = async () => {
+    try {
+      await resetPrefs("badges");
+      setConfirmBadgeResetOpen(false);
+    } catch {
+      toast.error("Couldn't reset badges");
+    }
+  };
+
+  const pickShortcuts = (next: ShortcutChoice) => {
+    if (next === "off") {
+      setQuickActionsEnabled(false);
+      return;
+    }
+    if (!quickActionsEnabled) setQuickActionsEnabled(true);
+    setQuickActionMode(next);
+    onShortcutsPicked?.();
   };
 
   if (isLoading) return null;
   const displayPrefs = prefs ?? buildDefaultPrefs();
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Card Overlays</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Choose the quick actions and badges shown on media cards, where badges sit, and how they
-          look. Inspired by Kometa.
-        </p>
-      </div>
-
-      <SettingsGroup title="General" description="Override the server defaults for this profile.">
-        <SettingRow
-          label="Card quick actions"
-          description="Choose the favorite and watched shortcuts shown for this profile."
-          control={({ id }) => (
-            <div className="flex items-center gap-2">
-              <Select
-                value={quickActionPreference}
-                disabled={!quickActionsEnabled}
-                onValueChange={(value) =>
-                  handleQuickActionModeChange(value as EnabledCardQuickActionMode)
-                }
-              >
-                <SelectTrigger className="w-[190px]" aria-label="Card quick action mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CARD_QUICK_ACTION_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Switch
-                id={id}
-                checked={quickActionsEnabled}
-                onCheckedChange={handleQuickActionsEnabledChange}
-                aria-label="Enable card quick actions"
-              />
-            </div>
-          )}
-        />
-        <SettingRow
-          label="Card overlay badges"
-          description="Show overlay badges on media cards for this profile."
-          control={({ id }) => (
-            <Switch
-              id={id}
-              checked={overlaysEnabled}
-              onCheckedChange={handleOverlaysEnabledChange}
-              aria-label="Enable card overlay badges"
+    <>
+      <SettingsGroup
+        title="Shortcuts"
+        description="Buttons on a poster that mark it watched or add it to your favorites, without opening it."
+        actions={
+          hasQuickActionOverride ? (
+            <ResetButton
+              label="Reset shortcuts"
+              disabled={isResetting}
+              onClick={() => void resetShortcuts()}
             />
-          )}
+          ) : null
+        }
+      >
+        <ChoiceButtons
+          label="Shortcut buttons"
+          hideLabel
+          value={quickActionsEnabled ? quickActionPreference : "off"}
+          options={SHORTCUT_CHOICES}
+          onChange={pickShortcuts}
         />
       </SettingsGroup>
 
+      <SettingsGroup
+        title="Badges"
+        description="Small labels on posters, such as 4K, Dolby Vision, or a rating."
+        actions={
+          hasBadgeOverride ? (
+            <ResetButton
+              label="Reset badges"
+              disabled={isResetting}
+              onClick={() => setConfirmBadgeResetOpen(true)}
+            />
+          ) : null
+        }
+      >
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={badgesSwitchId} className="text-sm font-medium">
+            Show badges on posters
+          </Label>
+          <Switch
+            id={badgesSwitchId}
+            checked={overlaysEnabled}
+            onCheckedChange={setOverlaysEnabled}
+          />
+        </div>
+
+        {overlaysEnabled ? (
+          <>
+            <div>
+              <SettingsSubheading>Style</SettingsSubheading>
+              <BadgeStylePicker
+                value={displayPrefs.preset}
+                onChange={(next) => setPrefs({ ...displayPrefs, preset: next })}
+              />
+            </div>
+            {/* Folded by category, each saying how many are on, so the page
+                stays short and the preview stays the main thing to look at. */}
+            <Accordion type="multiple" className="border-border/50 border-t">
+              {CATEGORY_GROUPS.map(({ category, title }) => {
+                const overlays = OVERLAY_REGISTRY.filter(
+                  (d) =>
+                    d.category === category &&
+                    isOverlaySupported(d.id) &&
+                    isOverlayOffered(d, shownRatingSources),
+                );
+                if (overlays.length === 0) return null;
+                const onCount = overlays.filter((d) => displayPrefs.items[d.id].enabled).length;
+                return (
+                  <AccordionItem key={category} value={category} className="border-border/50">
+                    <AccordionTrigger className="items-center hover:no-underline">
+                      <span className="flex-1">{title}</span>
+                      <span className="text-muted-foreground text-xs font-normal tabular-nums">
+                        {onCount === 0 ? "None on" : `${onCount} of ${overlays.length} on`}
+                      </span>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-2">
+                      {overlays.map((def) => (
+                        <BadgeRow
+                          key={def.id}
+                          overlayId={def.id}
+                          prefs={displayPrefs}
+                          shortcutsOn={quickActionsEnabled}
+                          onUpdate={setPrefs}
+                        />
+                      ))}
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })}
+            </Accordion>
+          </>
+        ) : null}
+      </SettingsGroup>
+
       <ConfirmDialog
-        open={confirmRestoreOpen}
-        onOpenChange={setConfirmRestoreOpen}
-        title="Restore default server settings"
-        description="Discard your badge customizations and follow the server defaults again, including any the administrator changes later. This cannot be undone."
-        confirmLabel="Restore"
+        open={confirmBadgeResetOpen}
+        onOpenChange={setConfirmBadgeResetOpen}
+        title="Reset badges?"
+        description="Your badge choices are cleared, and this profile follows your server's badge settings from then on."
+        confirmLabel="Reset badges"
         variant="destructive"
         isPending={isResetting}
         onConfirm={() => {
-          void handleRestoreServerDefaults();
+          void resetBadges();
         }}
       />
-
-      {/* `inert`, not just pointer-events: the controls must also be
-          unreachable by keyboard and invisible to assistive tech while card
-          overlays are disabled for this profile. */}
-      <div
-        inert={!overlaysEnabled}
-        className={overlaysEnabled ? "" : "pointer-events-none opacity-50"}
-      >
-        <SettingsGroup
-          title="Preview"
-          description="Live preview of your current overlay configuration."
-          actions={
-            hasOverride ? (
-              <button
-                type="button"
-                onClick={() => setConfirmRestoreOpen(true)}
-                className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-              >
-                <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                Restore default server settings
-              </button>
-            ) : (
-              <span className="text-muted-foreground text-xs">Following the server defaults</span>
-            )
-          }
-        >
-          <div className="flex flex-col items-center gap-4">
-            <OverlayPreviewCard prefs={displayPrefs} variant={previewVariant} size="md" />
-            <OverlayPreviewVariantToggle
-              value={previewVariant}
-              onChange={setPreviewVariant}
-              variants={previewVariants}
-            />
-          </div>
-        </SettingsGroup>
-
-        <Tabs defaultValue="overlays" className="mt-6">
-          <TabsList>
-            <TabsTrigger value="overlays">Overlays</TabsTrigger>
-            <TabsTrigger value="style">Style</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overlays" className="mt-4 space-y-6">
-            {CATEGORY_GROUPS.map(({ category, title, description }) => {
-              const overlays = OVERLAY_REGISTRY.filter(
-                (d) =>
-                  d.category === category &&
-                  isOverlaySupported(d.id) &&
-                  isOverlayOffered(d, shownRatingSources),
-              );
-              if (overlays.length === 0) return null;
-              return (
-                <SettingsGroup key={category} title={title} description={description}>
-                  {overlays.map((def) => (
-                    <OverlayToggle
-                      key={def.id}
-                      overlayId={def.id}
-                      prefs={displayPrefs}
-                      onUpdate={handleUpdate}
-                    />
-                  ))}
-                </SettingsGroup>
-              );
-            })}
-          </TabsContent>
-
-          <TabsContent value="style" className="mt-4 space-y-6">
-            <SettingsGroup
-              title="Preset"
-              description="A preset controls the base appearance of every badge. You can override the accent color of individual badges in the Overlays tab."
-            >
-              <PresetPicker
-                value={displayPrefs.preset}
-                onChange={(next) => handleUpdate({ ...displayPrefs, preset: next })}
-              />
-            </SettingsGroup>
-            <SettingsGroup title="How styling works" description="Where to find what.">
-              <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
-                <li>
-                  <strong className="text-foreground">Preset</strong> sets the badge shape,
-                  background, font, and whether icons show by default.
-                </li>
-                <li>
-                  <strong className="text-foreground">Accent color</strong> (per overlay) tints that
-                  badge — gold for IMDb, red for RT, etc.
-                </li>
-                <li>
-                  <strong className="text-foreground">Icon toggle</strong> (per overlay) overrides
-                  the preset's icon default for a single overlay.
-                </li>
-                <li>
-                  <strong className="text-foreground">Position</strong> picks which corner the badge
-                  sits in. Multiple badges in the same corner stack vertically. Bottom corners share
-                  space with the card's quick actions, which draw over the badge while they show.
-                </li>
-              </ul>
-            </SettingsGroup>
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div>
+    </>
   );
 }

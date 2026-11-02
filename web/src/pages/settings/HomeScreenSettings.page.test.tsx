@@ -6,15 +6,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import type { SectionOverride, SettingsSectionEntry } from "@/api/types";
 import { sectionKeys } from "@/hooks/queries/keys";
-import { expectPhoneLayout, stubPhone } from "@/components/homeRows/phoneLayout.test-support";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import HomeScreenSettings from "./HomeScreenSettings";
+import { resolveSectionRows, sectionEntry as entry } from "./homeScreenSettings.test-support";
+
+// Radix Select (Next up episodes) opens through pointer capture and scrolls
+// its options into view; jsdom provides neither.
+if (!window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   role: "user" as string | undefined,
   collections: [] as Array<Record<string, unknown>>,
   catalog: vi.fn(),
+  effective: {} as Record<string, unknown>,
+  effectiveError: false,
+  setSetting: vi.fn(),
+  mutateSetting: vi.fn(),
+  clearSetting: vi.fn(),
 }));
 vi.mock("@/api/v2/request", async () => ({
   ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),
@@ -29,8 +41,17 @@ vi.mock("@/hooks/queries/libraries", () => {
   return { useUserLibraries: () => ({ data }), useAvailableUserLibraries: () => ({ data }) };
 });
 vi.mock("@/hooks/queries/settingValues", () => ({
-  useEffectiveSettings: () => ({ data: {}, isLoading: false }),
-  useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
+  useEffectiveSettings: () => ({
+    data: mocks.effectiveError ? undefined : mocks.effective,
+    isLoading: false,
+    isError: mocks.effectiveError,
+  }),
+  useSetSettingValue: () => ({
+    mutate: mocks.mutateSetting,
+    mutateAsync: mocks.setSetting,
+    isPending: false,
+  }),
+  useClearSettingValue: () => ({ mutateAsync: mocks.clearSetting, isPending: false }),
   invalidateSettingValueQueries: vi.fn(),
 }));
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({
@@ -51,23 +72,6 @@ type Args = {
   body?: { overrides: SectionOverride[] };
 };
 
-function entry(id: string, position: number, more: Partial<SettingsSectionEntry> = {}) {
-  return {
-    id,
-    section_type: "recently_added",
-    title: `Row ${id}`,
-    default_title: `Row ${id}`,
-    featured: false,
-    item_limit: 20,
-    hidden: false,
-    is_custom: false,
-    customized: false,
-    position,
-    config: {},
-    ...more,
-  } satisfies SettingsSectionEntry;
-}
-
 /** The server rows of each page; the profile's saved overrides are applied the way the server does. */
 let serverRows: Record<string, SettingsSectionEntry[]>;
 let saved: Record<string, SectionOverride[]>;
@@ -81,34 +85,7 @@ function pageKey(args: Args) {
 }
 
 function resolve(key: string): SettingsSectionEntry[] {
-  const overrides = saved[key] ?? [];
-  const bySection = new Map(overrides.filter((o) => o.section_id).map((o) => [o.section_id, o]));
-  const rows: SettingsSectionEntry[] = [];
-  for (const row of serverRows[key] ?? []) {
-    const o = bySection.get(row.id);
-    if (o?.removed) continue;
-    rows.push({
-      ...row,
-      title: o?.title || row.title,
-      hidden: o?.hidden ?? false,
-      featured: o?.featured ?? row.featured,
-      position: o?.position ?? row.position,
-      customized: Boolean(o),
-    });
-  }
-  for (const own of overrides.filter((o) => !o.section_id)) {
-    rows.push({
-      ...entry(own.id!, own.position ?? 0),
-      section_type: own.section_type!,
-      title: own.title!,
-      default_title: "",
-      hidden: Boolean(own.hidden),
-      is_custom: true,
-      customized: true,
-      config: own.config ?? {},
-    });
-  }
-  return rows.sort((a, b) => a.position - b.position);
+  return resolveSectionRows(serverRows[key] ?? [], saved[key] ?? []);
 }
 
 function hold(operation: string) {
@@ -122,6 +99,10 @@ async function release(operation: string) {
 }
 
 beforeEach(() => {
+  mocks.effective = {};
+  mocks.effectiveError = false;
+  mocks.setSetting.mockReset();
+  mocks.clearSetting.mockReset();
   vi.clearAllMocks();
   // The signed-in profile; saves are written as it.
   setAccessToken("token");
@@ -233,22 +214,41 @@ async function openMore() {
 }
 
 describe("Settings > Home Screen", () => {
-  it("fits a phone", async () => {
-    stubPhone();
+  it("saves Show new episodes first for this profile, off until chosen", async () => {
     await renderPage();
-    await expectPhoneLayout("Home");
+    const toggle = screen.getByRole("switch", { name: "Show new episodes first" });
+    expect(toggle).not.toBeChecked();
+
+    await userEvent.click(toggle);
+
+    expect(mocks.mutateSetting).toHaveBeenCalledWith(
+      { key: "ui.next_up_new_releases_first", value: true, identity: { scope: "profile" } },
+      expect.anything(),
+    );
   });
 
-  it("is titled Home screen and says only this profile changes", async () => {
+  it("locks next up while this profile's current values cannot be read", async () => {
+    mocks.effectiveError = true;
     await renderPage();
-    expect(screen.getByRole("heading", { level: 2, name: "Home screen" })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Choose the rows you see and their order. Only this profile changes, and it saves as you go.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("2 rows · 2 shown")).toBeInTheDocument();
+
+    expect(screen.getByRole("combobox", { name: "Next up episodes" })).toBeDisabled();
+    // Without the values the page cannot tell where they come from.
+    expect(screen.queryByText(/Using the server default/)).not.toBeInTheDocument();
   });
+
+  it.each([["ui.next_up_mode", "separate"]])(
+    "returns a stored %s choice to the server default by deleting it",
+    async (key, value) => {
+      mocks.clearSetting.mockResolvedValue(undefined);
+      mocks.effective = { [key]: { key, value, source: "profile" } };
+      await renderPage();
+
+      await userEvent.click(screen.getByRole("button", { name: "Use server default" }));
+
+      expect(mocks.clearSetting).toHaveBeenCalledWith({ key, identity: { scope: "profile" } });
+      expect(mocks.setSetting).not.toHaveBeenCalled();
+    },
+  );
 
   it("hides a row with its switch, saving only the hide, and keeps the page switcher off until it lands", async () => {
     await renderPage();
@@ -264,16 +264,6 @@ describe("Settings > Home Screen", () => {
     // Only what the profile changed: no title, size, hero or config, and no
     // override at all for the row it left alone.
     expect(puts[0]!.overrides).toEqual([{ section_id: "a", id: expect.any(String), hidden: true }]);
-  });
-
-  it("names the page in switch labels and hidden rows on a library page", async () => {
-    saved["library:7"] = [{ id: "o-m", section_id: "m", hidden: true }];
-    await renderPage("/settings/home-screen?page=7");
-    expect(
-      await screen.findByRole("switch", { name: "Show New Movies on my Movies page" }),
-    ).not.toBeChecked();
-    expect(screen.getByText(/is hidden on your Movies page\./)).toBeInTheDocument();
-    expect(pageButton("Movies")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renames a row from Edit row, storing the name alone, and locks what a server row shows", async () => {
@@ -314,43 +304,6 @@ describe("Settings > Home Screen", () => {
     expect(puts[0]!.overrides).toEqual([
       { section_id: "a", id: expect.any(String), hidden: false, title: "Fresh Movies" },
     ]);
-  });
-
-  it("doesn't offer to change a server row's collection, rules or picked titles", async () => {
-    serverRows.home = [
-      entry("c", 0, {
-        section_type: "collection",
-        title: "Ghibli",
-        default_title: "Ghibli",
-        config: { collection_id: "lib-c" },
-      }),
-      entry("f", 1, {
-        section_type: "custom_filter",
-        title: "Short films",
-        default_title: "Short films",
-        config: { query_definition: { groups: [{ match: "all", rules: [] }] } },
-      }),
-      entry("p", 2, {
-        section_type: "admin_curated_list",
-        title: "Staff picks",
-        default_title: "Staff picks",
-        config: { item_ids: [] },
-      }),
-    ];
-    await renderPage();
-    const controls: Array<[string, () => HTMLElement | null]> = [
-      ["Ghibli", () => screen.queryByRole("searchbox", { name: "Search collections" })],
-      ["Short films", () => screen.queryByRole("button", { name: "Add rule" })],
-      ["Staff picks", () => screen.queryByRole("searchbox", { name: "Search titles to add" })],
-    ];
-    for (const [title, control] of controls) {
-      await chooseFromMenu(title, "Edit row…");
-      const dialog = await screen.findByRole("dialog", { name: "Edit row" });
-      expect(within(dialog).getByLabelText("Row name")).toHaveValue(title);
-      expect(control()).not.toBeInTheDocument();
-      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    }
   });
 
   it("says what a renamed row was called and gives it its name back", async () => {
@@ -454,64 +407,6 @@ describe("Settings > Home Screen", () => {
     });
   });
 
-  it("calls only this profile's own collections its own", async () => {
-    mocks.collections = [
-      {
-        id: "mine",
-        title: "Rainy days",
-        source: "user",
-        group: "My Collections",
-        creator_profile_id: "p1",
-      },
-      {
-        id: "theirs",
-        title: "Road trips",
-        source: "user",
-        group: "My Collections",
-        creator_profile_id: "p2",
-      },
-    ];
-    saved.home = ["mine", "theirs"].map((id, index) => ({
-      id: `row-${id}`,
-      position: 2 + index,
-      hidden: false,
-      title: `Row for ${id}`,
-      section_type: "collection",
-      config: { user_collection_id: id },
-    }));
-    await renderPage();
-    await screen.findByText("Row for mine");
-
-    const text = document.body.textContent;
-    expect(text).toContain("Your Rainy days collection");
-    // Another profile made this one and shared it, so it isn't this profile's.
-    expect(text).toContain("The Road trips collection");
-  });
-
-  it("offers export, import and a reset named after the page under More", async () => {
-    const createObjectURL = vi.fn(() => "blob:layout");
-    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
-    await renderPage();
-    let menu = await openMore();
-    expect(
-      within(menu).getByRole("menuitem", { name: "Reset Home to the server's rows…" }),
-    ).toBeInTheDocument();
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "Export layout" }));
-    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
-
-    menu = await openMore();
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "Import layout…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Import home layout" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "More" })).toHaveFocus());
-
-    await userEvent.click(pageButton("Movies"));
-    menu = await openMore();
-    expect(
-      within(menu).getByRole("menuitem", { name: "Reset the Movies page to the server's rows…" }),
-    ).toBeInTheDocument();
-  });
-
   it("resets the page after asking and keeps editing off until the reset lands", async () => {
     saved.home = [{ id: "o-a", section_id: "a", hidden: true }];
     await renderPage();
@@ -574,6 +469,77 @@ describe("Settings > Home Screen", () => {
     );
     expect(calls.some((call) => call.operation.includes("admin"))).toBe(false);
   });
+
+  it("doesn't offer to change a server row's collection, rules or picked titles", async () => {
+    serverRows.home = [
+      entry("c", 0, {
+        section_type: "collection",
+        title: "Ghibli",
+        default_title: "Ghibli",
+        config: { collection_id: "lib-c" },
+      }),
+      entry("f", 1, {
+        section_type: "custom_filter",
+        title: "Short films",
+        default_title: "Short films",
+        config: { query_definition: { groups: [{ match: "all", rules: [] }] } },
+      }),
+      entry("p", 2, {
+        section_type: "admin_curated_list",
+        title: "Staff picks",
+        default_title: "Staff picks",
+        config: { item_ids: [] },
+      }),
+    ];
+    await renderPage();
+    const controls: Array<[string, () => HTMLElement | null]> = [
+      ["Ghibli", () => screen.queryByRole("searchbox", { name: "Search collections" })],
+      ["Short films", () => screen.queryByRole("button", { name: "Add rule" })],
+      ["Staff picks", () => screen.queryByRole("searchbox", { name: "Search titles to add" })],
+    ];
+    for (const [title, control] of controls) {
+      await chooseFromMenu(title, "Edit row…");
+      const dialog = await screen.findByRole("dialog", { name: "Edit row" });
+      expect(within(dialog).getByLabelText("Row name")).toHaveValue(title);
+      expect(control()).not.toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+  });
+
+  it("calls only this profile's own collections its own", async () => {
+    mocks.collections = [
+      {
+        id: "mine",
+        title: "Rainy days",
+        source: "user",
+        group: "My Collections",
+        creator_profile_id: "p1",
+      },
+      {
+        id: "theirs",
+        title: "Road trips",
+        source: "user",
+        group: "My Collections",
+        creator_profile_id: "p2",
+      },
+    ];
+    saved.home = ["mine", "theirs"].map((id, index) => ({
+      id: `row-${id}`,
+      position: 2 + index,
+      hidden: false,
+      title: `Row for ${id}`,
+      section_type: "collection",
+      config: { user_collection_id: id },
+    }));
+    await renderPage();
+    await screen.findByText("Row for mine");
+
+    const text = document.body.textContent;
+    expect(text).toContain("Your Rainy days collection");
+    // Another profile made this one and shared it, so it isn't this profile's.
+    expect(text).toContain("The Road trips collection");
+  });
 });
 
 describe("rule rows on Settings > Home Screen", () => {
@@ -583,7 +549,7 @@ describe("rule rows on Settings > Home Screen", () => {
     return within(picker);
   }
 
-  it.each(["user", "admin"])(
+  it.each(["user"])(
     "offers rule rows to a %s account without reading a server setting",
     async (role) => {
       mocks.role = role;

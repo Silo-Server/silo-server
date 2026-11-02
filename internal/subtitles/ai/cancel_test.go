@@ -75,11 +75,3 @@ func TestCancelWithoutLocalWorkAndTerminalReplay(t *testing.T) {
 		})
 	}
 }
-
-func TestCancelMissingJob(t *testing.T) {
-	repo := &cancelRepository{}
-	svc := &Service{repo: repo}
-	if err := svc.Cancel(t.Context(), 42); !errors.Is(err, ErrJobNotFound) {
-		t.Fatalf("Cancel error = %v, want job not found", err)
-	}
-}

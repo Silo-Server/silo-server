@@ -579,11 +579,16 @@ type AdminViewCounts struct {
 }
 
 type Integration struct {
-	Revision            int64          `json:"-"`
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
-	Enabled             bool           `json:"enabled"`
-	BaseURL             string         `json:"base_url"`
+	Revision int64  `json:"-"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Enabled  bool   `json:"enabled"`
+	BaseURL  string `json:"base_url"`
+	// BaseURLCleared marks a connection test of a saved server that sent a
+	// blank base_url on purpose, rather than leaving it out. Only then does
+	// LoadIntegrationOptions test a router that needs no URL without one;
+	// an omitted URL means the saved one.
+	BaseURLCleared      bool           `json:"-"`
 	APIKeyRef           string         `json:"api_key_ref,omitempty"`
 	LastCheckAt         *time.Time     `json:"last_check_at,omitempty"`
 	LastCheckStatus     string         `json:"last_check_status,omitempty"`

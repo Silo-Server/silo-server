@@ -49,7 +49,7 @@ func assertSocketIOHijackSurvives(t *testing.T, registry *streamtelemetry.Regist
 	t.Helper()
 	router := chi.NewRouter()
 	router.Use(middleware.Recoverer)
-	router.Use(httpstream.CompressExcept(5, SkipMediaCompression))
+	router.Use(httpstream.CompressExcept(SkipMediaCompression))
 	handler := New(Dependencies{MediaStore: noopMediaStore{}, SocketIO: hijackingSocketIOServer{}})
 	handler.SetStreamTelemetry(registry)
 	handler.Mount(router)

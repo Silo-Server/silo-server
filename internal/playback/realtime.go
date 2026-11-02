@@ -24,6 +24,7 @@ type RealtimeEventName string
 
 const (
 	RealtimeEventChapterThumbnailReady    RealtimeEventName = "chapter_thumbnail_ready"
+	RealtimeEventMarkerThumbnailReady     RealtimeEventName = "marker_thumbnail_ready"
 	RealtimeEventMarkersUpdated           RealtimeEventName = "markers_updated"
 	RealtimeEventSubtitleReady            RealtimeEventName = "subtitle_ready"
 	RealtimeEventSubtitleTranslationStart RealtimeEventName = "subtitle_translation_started"
@@ -37,6 +38,7 @@ const (
 var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
 	RealtimeEventChapterThumbnailReady:    {},
 	RealtimeEventMarkersUpdated:           {},
+	RealtimeEventMarkerThumbnailReady:     {},
 	RealtimeEventSubtitleReady:            {},
 	RealtimeEventSubtitleTranslationStart: {},
 	RealtimeEventSubtitleTranslationCues:  {},
@@ -688,4 +690,14 @@ func normalizeJSONPayload(payload json.RawMessage) (json.RawMessage, error) {
 		return nil, ErrInvalidRealtimePayload
 	}
 	return payload, nil
+}
+
+// MarkerThumbnailReadyPayload is native-v2-only and requires negotiation.
+type MarkerThumbnailReadyPayload struct {
+	SessionID string `json:"session_id"`
+	FileID    int    `json:"file_id"`
+	models.MarkerSegment
+	ThumbnailURL            string  `json:"thumbnail_url"`
+	ThumbnailThumbhash      string  `json:"thumbnail_thumbhash,omitempty"`
+	ThumbnailCaptureSeconds float64 `json:"thumbnail_capture_seconds"`
 }

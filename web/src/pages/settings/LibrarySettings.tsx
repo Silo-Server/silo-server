@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { UserLibrary } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { SettingRow } from "@/components/settings/SettingRow";
@@ -170,7 +171,7 @@ function PlaybackField({
         </SelectTrigger>
         <SelectContent>{children}</SelectContent>
       </Select>
-      {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
+      {hint && <p className="text-muted-foreground text-xs leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -210,7 +211,7 @@ function LanguageField({
       >
         {children}
       </LanguageSelect>
-      {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
+      {hint && <p className="text-muted-foreground text-xs leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -364,11 +365,11 @@ function LibraryCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium">{library.name}</span>
-            <Badge variant="outline" className="shrink-0 text-[11px] capitalize">
+            <Badge variant="outline" className="shrink-0 capitalize">
               {library.type}
             </Badge>
             {hasOverride && (
-              <Badge variant="secondary" className="shrink-0 text-[11px]">
+              <Badge variant="secondary" className="shrink-0">
                 Custom
               </Badge>
             )}
@@ -522,7 +523,7 @@ export default function LibrarySettings() {
   useEffect(() => {
     // Keep the editable local order in sync with the latest saved setting.
     // This supports optimistic updates and rollback without changing behavior.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the saved setting into editable state
     setDisabledLibraryIDs(
       libraries
         ? sortLibrariesByOrder(libraries, savedDisabledLibraryIDs)
@@ -532,7 +533,7 @@ export default function LibrarySettings() {
 
   useEffect(() => {
     if (!libraries) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the saved order into editable state
     setOrderedLibraries(
       savedLibraryOrder.length > 0 ? applyLibraryOrder(libraries, savedLibraryOrder) : libraries,
     );
@@ -652,13 +653,10 @@ export default function LibrarySettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Libraries</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Toggle which libraries appear in your navigation and customize playback defaults per
-          library.
-        </p>
-      </div>
+      <PageHeader
+        title="Libraries"
+        subtitle="Toggle which libraries appear in your navigation and customize playback defaults per library."
+      />
 
       <SettingsGroup
         title="Browsing"
@@ -729,7 +727,7 @@ export default function LibrarySettings() {
             <div className="surface-panel flex items-center gap-3 rounded-[1.5rem] px-4 py-4 shadow-lg">
               <GripVertical className="text-muted-foreground h-4 w-4" />
               <span className="text-sm font-medium">{activeLibrary.name}</span>
-              <Badge variant="outline" className="text-[11px] capitalize">
+              <Badge variant="outline" className="capitalize">
                 {activeLibrary.type}
               </Badge>
             </div>

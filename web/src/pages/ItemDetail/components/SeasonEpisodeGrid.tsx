@@ -1,19 +1,24 @@
 import { useRef } from "react";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import UnreadableFileBadge, { episodeFilesUnreadable } from "@/components/UnreadableFileBadge";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useEpisodeSpoilerPrefs, type EpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
+import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
+import EpisodeCardCaption from "./EpisodeCardCaption";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
@@ -39,6 +44,7 @@ export default function SeasonEpisodeGrid({
   episodeLinkState,
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
 
@@ -68,6 +74,7 @@ export default function SeasonEpisodeGrid({
           episodeLinkState={episodeLinkState}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
+          spoilerPrefs={spoilerPrefs}
           onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
         />
       ))}
@@ -80,12 +87,14 @@ function SeasonEpisodeCard({
   episodeLinkState,
   overlayPrefs,
   quickActionMode,
+  spoilerPrefs,
   onPrefetch,
 }: {
   episode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
+  spoilerPrefs: EpisodeSpoilerPrefs;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -95,10 +104,16 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle = episode.title || `Episode ${episode.episode_number}`;
+  const unwatched = isEpisodeUnwatched(episode.user_data);
+  const hideImage =
+    spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
+  const hideOverview = spoilerPrefs.hideOverviews && unwatched;
+  const unreadable = episodeFilesUnreadable(episode);
+  const playable = (episode.files ?? []).some((file) => !file.unreadable);
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
-      <div className="relative">
+      <div className="group/media relative">
         <ViewTransitionLink
           to={`/item/${episode.content_id}`}
           state={episodeLinkState}
@@ -110,7 +125,10 @@ function SeasonEpisodeCard({
                 src={episode.still_url}
                 alt={episodeTitle}
                 decoding="async"
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                className={cn(
+                  "h-full w-full object-cover transition-transform duration-300",
+                  hideImage ? SPOILER_IMAGE_CLASS : "group-hover:scale-[1.03]",
+                )}
                 loading="lazy"
               />
             ) : (
@@ -125,6 +143,8 @@ function SeasonEpisodeCard({
                 variant="wide"
               />
             )}
+            {/* Hover dim behind the play button */}
+            {playable && <div className="media-card-hover-dim absolute inset-0" />}
             {hasPartialProgress && (
               <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
@@ -146,6 +166,9 @@ function SeasonEpisodeCard({
             )}
           </div>
         </ViewTransitionLink>
+        {playable && (
+          <CardPlayOverlay contentId={episode.content_id} title={episodeTitle} type="episode" />
+        )}
         <MediaItemMenu
           contentId={episode.content_id}
           mediaType="episode"
@@ -154,6 +177,7 @@ function SeasonEpisodeCard({
           showCollectionActions={false}
           showWatchedShortcut
           hasPartialProgress={hasPartialProgress}
+          hasResumePosition={(episode.user_data?.position_seconds ?? 0) > 0}
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={episodeTitle}
@@ -164,31 +188,12 @@ function SeasonEpisodeCard({
         state={episodeLinkState}
         className="block"
       >
-        <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
-          <span>Episode {episode.episode_number}</span>
-          {episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
-          {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
-        </div>
-        <p className="text-foreground truncate text-sm font-semibold">{episodeTitle}</p>
-        <div className="mt-1.5 space-y-1">
-          <div className="text-muted-foreground flex items-center gap-2 text-xs">
-            {episode.runtime > 0 && <span>{episode.runtime}m</span>}
-            {episode.air_date && (
-              <span>
-                {new Intl.DateTimeFormat(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }).format(new Date(episode.air_date))}
-              </span>
-            )}
-          </div>
-          {episode.overview && (
-            <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">
-              {episode.overview}
-            </p>
-          )}
-        </div>
+        <EpisodeCardCaption
+          episode={episode}
+          hideOverview={hideOverview}
+          badges={episode.user_data?.played && <WatchedCheckIndicator />}
+          notice={unreadable && <UnreadableFileBadge />}
+        />
       </ViewTransitionLink>
     </div>
   );

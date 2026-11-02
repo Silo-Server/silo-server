@@ -38,7 +38,7 @@ type WatchTrickplay struct {
 // WatchTrickplaySheet is one sprite sheet.
 type WatchTrickplaySheet struct {
 	Index int    `json:"index" example:"0"`
-	URL   string `json:"url" doc:"A JPEG image; the URL carries its own authorization"`
+	URL   string `json:"url" format:"uri-reference" doc:"A JPEG image; the URL carries its own authorization"`
 }
 
 // WatchTrickplayOutput is the getWatchTrickplay response.
@@ -79,6 +79,7 @@ func (reg *Registry) getWatchTrickplay(ctx context.Context, in *WatchTrickplayIn
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
+	filter.OmitWatchArtwork = true
 	detail, err := reg.deps.Watch.WatchDetail(ctx, claims.UserID, profileFrom(ctx), string(in.ID), filter)
 	if err != nil {
 		return nil, watchDetailProblem(err)

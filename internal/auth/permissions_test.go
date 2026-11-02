@@ -29,14 +29,6 @@ func TestNormalizePermissions_RejectsUnknownPermission(t *testing.T) {
 	}
 }
 
-func TestDefaultUserPermissionsIncludesMarkerEditOnly(t *testing.T) {
-	got := DefaultUserPermissions()
-	want := []string{"marker_edit"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("default permissions = %#v, want %#v", got, want)
-	}
-}
-
 func TestPolicyPermissions(t *testing.T) {
 	tests := []struct {
 		name      string

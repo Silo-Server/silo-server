@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import NotificationsAdminSettings from "./NotificationsAdminSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 const restartKeysMock = vi.fn(() => new Set<string>());
@@ -40,51 +41,31 @@ vi.mock("@/hooks/queries/admin/serverNotificationChannels", () => ({
   useServerNotificationChannels: () => ({ data: [] }),
 }));
 
-function makeForm(overrides: Record<string, string> = {}) {
-  return {
-    isLoading: false,
-    loadError: false,
-    loaded: true,
-    getValue: (key: string) => {
-      if (key in overrides) return overrides[key];
-      switch (key) {
-        case "notifications.release_events_enabled":
-        case "notifications.fanout_enabled":
-        case "notifications.ui_enabled":
-        case "notifications.web_push_enabled":
-        case "notifications.apple_push_delivery_enabled":
-        case "notifications.android_push_delivery_enabled":
-          return "true";
-        case "notifications.push_relay_url":
-          return "https://push.siloserver.org";
-        case "notifications.push_relay_deployment_id":
-          return "01DEPLOYMENT";
-        case "notifications.push_relay_key_prefix":
-          return "cap_v1_test";
-        case "notifications.push_relay_expires_at":
-          // Relative so the "renews automatically" (not-yet-expired) branch
-          // stays stable — a hardcoded date turned into a time bomb once the
-          // calendar passed it.
-          return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        default:
-          return "";
-      }
+const makeForm = (overrides: Record<string, string> = {}) =>
+  fakeSettingsForm(
+    {
+      "notifications.release_events_enabled": "true",
+      "notifications.fanout_enabled": "true",
+      "notifications.ui_enabled": "true",
+      "notifications.web_push_enabled": "true",
+      "notifications.apple_push_delivery_enabled": "true",
+      "notifications.android_push_delivery_enabled": "true",
+      "notifications.push_relay_url": "https://push.siloserver.org",
+      "notifications.push_relay_deployment_id": "01DEPLOYMENT",
+      "notifications.push_relay_key_prefix": "cap_v1_test",
+      // Relative so the "renews automatically" (not-yet-expired) branch
+      // stays stable — a hardcoded date turned into a time bomb once the
+      // calendar passed it.
+      "notifications.push_relay_expires_at": new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000,
+      ).toISOString(),
+      ...overrides,
     },
-    setValue: vi.fn(),
-    resetValue: vi.fn(),
-    dirtyCount: 0,
-    dirtyKeys: [],
-    isDirty: vi.fn((_key: string) => false),
-    isClearStaged: vi.fn((_key: string) => false),
-    save: vi.fn(() => Promise.resolve()),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-    sensitiveConfigured: ["notifications.push_relay_api_key"],
-    sensitiveManagedByEnv: [],
-    buildConnectionCheckRequest: vi.fn(),
-  };
-}
+    {
+      save: vi.fn(() => Promise.resolve()),
+      sensitiveConfigured: ["notifications.push_relay_api_key"],
+    },
+  );
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -103,7 +84,6 @@ async function openChannel(pattern: RegExp) {
   await userEvent.click(screen.getByRole("button", { name: pattern }));
 }
 
-const EMAIL_CHANNEL = /Daily summary or a message per episode/;
 const DISCORD_CHANNEL = /Direct messages from your Discord bot/;
 
 describe("NotificationsAdminSettings", () => {
@@ -117,89 +97,30 @@ describe("NotificationsAdminSettings", () => {
     mocks.toastSuccess.mockReset();
   });
 
-  it("shows the Silo Push Relay channel status", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    render(renderPage());
-
-    const keys = useSettingsFormMock.mock.calls.at(-1)?.[0]?.keys as string[];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "notifications.apple_push_delivery_enabled",
-        "notifications.android_push_delivery_enabled",
-        "notifications.push_relay_deployment_id",
-        "notifications.push_relay_expires_at",
-        "notifications.push_relay_key_prefix",
-        "notifications.push_relay_reregistration_required",
-      ]),
-    );
-    expect(keys).not.toContain("notifications.push_relay_api_key");
-    expect(keys).toContain("notifications.push_relay_url");
-    for (const key of [
-      "email.enabled",
-      "email.smtp_host",
-      "email.smtp_port",
-      "email.smtp_security",
-      "email.smtp_username",
-      "email.smtp_password",
-      "email.from_address",
-      "email.from_name",
-    ]) {
-      expect(keys).toContain(key);
-    }
-    for (const key of ["discord.client_id", "discord.client_secret", "discord.bot_token"]) {
-      expect(keys).toContain(key);
-    }
-
-    expect(screen.getByText("Silo Push Relay")).toBeInTheDocument();
-    expect(screen.getByText(/delivered by APNs or FCM/)).toBeInTheDocument();
-    expect(screen.getByText("Relay configured")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: /Silo Push Relay/ }));
-
-    expect(screen.getByText("Privacy disclosure")).toBeInTheDocument();
-    expect(screen.getByText("Apple Push (APNs)")).toBeInTheDocument();
-    expect(screen.getByText("Android Push (FCM)")).toBeInTheDocument();
-    expect(screen.getByText(/content-free request to Silo's push relay/)).toBeInTheDocument();
-    expect(screen.getByText(/does not receive notification titles/)).toBeInTheDocument();
-    expect(screen.getByText(/fetches private content directly/)).toBeInTheDocument();
-    expect(screen.getByText("Deployment ID")).toBeInTheDocument();
-    expect(screen.getByText("Rotate credential")).toBeInTheDocument();
-    expect(screen.getByText("Credential: cap_v1_test")).toBeInTheDocument();
-    expect(screen.getByText(/Silo renews automatically/)).toBeInTheDocument();
-    expect(screen.queryByText("Relay API Key")).not.toBeInTheDocument();
-    expect(screen.queryByText("Smoke Test Profile ID")).not.toBeInTheDocument();
-    expect(screen.queryByText("Server Device ID")).not.toBeInTheDocument();
-    expect(screen.queryByText("Send test push")).not.toBeInTheDocument();
-  });
-
-  it("shows the saved SMTP password as a masked, editable input", async () => {
-    const form = makeForm();
-    form.sensitiveConfigured = ["email.smtp_password"];
+  it("keeps the warning and opens the relay controls when re-registration is required", async () => {
+    // Parked by an admin's clear or the relay: first-use registration will not
+    // undo that, so the admin has to act.
+    const form = makeForm({
+      "notifications.push_relay_reregistration_required": "true",
+      "notifications.push_relay_deployment_id": "",
+    });
+    form.sensitiveConfigured = [];
     useSettingsFormMock.mockReturnValue(form);
 
     render(renderPage());
-    await openChannel(EMAIL_CHANNEL);
 
-    // No Replace step: typing stages a replacement, blank keeps the saved one.
-    const input = screen.getByLabelText("Password");
-    expect(input).toHaveAttribute("type", "password");
-    expect(input).toHaveAttribute("placeholder", "••••••••••••");
-    expect(screen.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Re-registration required")).toHaveClass("text-amber-500");
+    await userEvent.click(screen.getByRole("button", { name: /Silo Push Relay/ }));
+    expect(screen.getByRole("button", { name: "Re-register relay" })).toBeInTheDocument();
   });
 
-  it("confirms the invite link copy only once it has actually happened", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "discord.client_id": "1234567890" }));
+  it("says so up top, and opens the switches, when the pipeline is paused", () => {
+    useSettingsFormMock.mockReturnValue(makeForm({ "notifications.fanout_enabled": "false" }));
 
     render(renderPage());
-    await openChannel(DISCORD_CHANNEL);
-    await userEvent.click(screen.getByRole("button", { name: /Copy link/ }));
 
-    expect(mocks.copyTextToClipboard).toHaveBeenCalledWith(
-      expect.stringContaining("client_id=1234567890"),
-    );
-    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Invite link copied"));
-    expect(mocks.toastError).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(/Sending is paused/);
+    expect(screen.getByRole("switch", { name: "Work out who wants it" })).not.toBeChecked();
   });
 
   it("says so when the invite link could not be copied", async () => {

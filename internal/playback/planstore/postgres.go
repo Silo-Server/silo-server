@@ -88,6 +88,10 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 	if err != nil {
 		return err
 	}
+	desiredJSON, err := marshalDesiredTracks(record.DesiredTracks)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -108,13 +112,15 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
 			current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
-			normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps
-		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
+			desired_tracks
+		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
 		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON,
-		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt, record.ServerBitrateCapKbps)
+		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt, record.ServerBitrateCapKbps,
+		desiredJSON)
 	if err != nil {
 		return err
 	}
@@ -170,20 +176,22 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
-	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON []byte
+	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON, desiredJSON []byte
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
 		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
-		       last_sequence, last_sample, stopped_at, updated_at
+		       last_sequence, last_sample, stopped_at, COALESCE(stop_receipt->>'stop_id', ''), updated_at,
+		       desired_tracks, created_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
 		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
-		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.LastSampleAt,
+		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.StopID, &record.LastSampleAt,
+		&desiredJSON, &record.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -193,6 +201,12 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 	}
 	if record.LastSample, err = decodeProgressSample(sampleJSON); err != nil {
 		return nil, err
+	}
+	if len(desiredJSON) > 0 {
+		record.DesiredTracks = &playback.DesiredTracksV3{}
+		if err := json.Unmarshal(desiredJSON, record.DesiredTracks); err != nil {
+			return nil, err
+		}
 	}
 	if err := json.Unmarshal(planJSON, &record.CurrentPlan); err != nil {
 		return nil, err
@@ -315,6 +329,10 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 	if err != nil {
 		return err
 	}
+	desiredJSON, err := marshalDesiredTracks(record.DesiredTracks)
+	if err != nil {
+		return err
+	}
 	// The base-revision predicate makes the commit a true compare-and-swap:
 	// under the advisory session lock it never fails, but a skipped or broken
 	// lock must surface as a conflict rather than silently last-writer-win
@@ -323,9 +341,10 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 		UPDATE playback_v3_attempts SET
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
-			normalized_request = $7, start_response = $8, expires_at = $9, updated_at = NOW()
+			normalized_request = $7, start_response = $8, expires_at = $9, desired_tracks = $11,
+			updated_at = NOW()
 		WHERE session_id = $1::uuid AND current_replan_request_id = $10 AND stopped_at IS NULL`,
-		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
+		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID, desiredJSON)
 	if err != nil {
 		return err
 	}
@@ -410,7 +429,16 @@ func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample p
 	if err != nil {
 		return playback.ProgressReceiptV3{}, err
 	}
-	result, err := s.db.Exec(ctx, `
+	// The sample and the session's announced pause state commit together:
+	// the attempt's row lock, held to the commit, orders concurrent samples,
+	// and the lifecycle statement reads after it, so the announced state is
+	// always the latest accepted sample's.
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts
 		SET last_sequence = $2, last_sample = $3, updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence < $2`,
@@ -419,7 +447,30 @@ func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample p
 		return playback.ProgressReceiptV3{}, err
 	}
 	if result.RowsAffected() == 1 {
-		return playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}, nil
+		receipt := playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}
+		change := playback.LifecycleChangeV3{Paused: sample.IsPaused}
+		state := "playing"
+		if sample.IsPaused {
+			state = "paused"
+		}
+		err := tx.QueryRow(ctx, `
+			UPDATE playback_session_lifecycle
+			SET state = $2, seq = nextval('playback_session_lifecycle_seq'), updated_at = NOW()
+			WHERE session_id = $1 AND state NOT IN ('stopped', $2)
+			RETURNING seq, updated_at`, sessionID, state).Scan(&change.Seq, &change.At)
+		switch {
+		case err == nil:
+			receipt.Lifecycle = &change
+		case !errors.Is(err, pgx.ErrNoRows):
+			return playback.ProgressReceiptV3{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return playback.ProgressReceiptV3{}, err
+		}
+		return receipt, nil
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return playback.ProgressReceiptV3{}, err
 	}
 	var lastSequence int64
 	var lastJSON []byte
@@ -498,6 +549,27 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 	return receipt, false, nil
 }
 
+// ExpireIdleAttempt stops a live attempt under stopID only while it has
+// accepted no progress since idleBefore. The predicate runs under the row
+// lock ApplyProgress takes, so a sample that lands first keeps it live.
+func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID string, idleBefore time.Time) (bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return false, playback.ErrInvalidStopIDV3
+	}
+	tag, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET stopped_at = NOW(),
+		    stop_id = $2::uuid,
+		    stop_receipt = jsonb_strip_nulls(jsonb_build_object('stop_id', $2::uuid::text, 'accepted', last_sample)),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND updated_at < $3`,
+		sessionID, stopID, idleBefore)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, receipt playback.StopReceiptV3) error {
 	if _, err := uuid.Parse(receipt.StopID); err != nil {
 		return playback.ErrInvalidStopIDV3
@@ -555,4 +627,28 @@ func (s *Postgres) CleanupExpired(ctx context.Context, now time.Time) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+// PlanDelivery resolves the reported plan, including one replaced by a replan.
+// Looking only at current_plan would attribute the old plan's stalls to its replacement.
+func (s *Postgres) PlanDelivery(ctx context.Context, attempt, plan string) (string, error) {
+	var delivery string
+	err := s.db.QueryRow(ctx, `SELECT p->>'delivery' FROM (
+ SELECT start_response->'playback_plan' p FROM playback_v3_attempts WHERE playback_attempt_id=$1
+ UNION ALL SELECT current_plan FROM playback_v3_attempts WHERE playback_attempt_id=$1
+ UNION ALL SELECT r.response->'playback_plan' FROM playback_v3_replans r JOIN playback_v3_attempts a ON a.session_id=r.session_id WHERE a.playback_attempt_id=$1
+ ) plans WHERE p->>'plan_id'=$2 LIMIT 1`, attempt, plan).Scan(&delivery)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return delivery, err
+}
+
+// marshalDesiredTracks stores a nil intent as SQL NULL, the value rows
+// written before the column existed carry.
+func marshalDesiredTracks(desired *playback.DesiredTracksV3) ([]byte, error) {
+	if desired == nil {
+		return nil, nil
+	}
+	return json.Marshal(desired)
 }

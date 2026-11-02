@@ -224,6 +224,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
 	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
 	cfg.Server.PublicURL = stringOr(m, "server.public_url", "")
+	cfg.Server.LocalURL = stringOr(m, ServerLocalURLSettingKey, "")
 	lanDiscovery, err := boolOr(m, ServerLANDiscoverySettingKey, true)
 	if err != nil {
 		return nil, err
@@ -335,6 +336,15 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.ImageWorkers = imageWorkers
+	personRefreshPerMinute, err := intOr(m, MetadataPersonRefreshPerMinuteSettingKey, 120)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Metadata.PersonRefreshPerMinute = personRefreshPerMinute
+	cfg.Metadata.FallbackLanguage = strings.ToLower(stringOr(m, MetadataFallbackLanguageSettingKey, "en"))
+	if cfg.Metadata.FallbackLanguage == MetadataFallbackOriginal {
+		cfg.Metadata.FallbackLanguage = ""
+	}
 	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
 	if err != nil {
 		return nil, err
@@ -352,6 +362,24 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", playbackSegmentRetentionSettingKey)
 	}
 	cfg.Playback.SegmentRetentionSeconds = segmentRetentionSeconds
+	keyframePlaylist, err := boolOr(m, PlaybackKeyframePlaylistSettingKey, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.KeyframePlaylist = keyframePlaylist
+	automaticBandwidthProbe, err := boolOr(m, PlaybackBandwidthProbeAutomaticSettingKey, true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.AutomaticBandwidthProbeOff = !automaticBandwidthProbe
+	bandwidthProbeMaxAgeDays, err := intOr(m, PlaybackBandwidthProbeMaxAgeDaysSettingKey, DefaultBandwidthProbeMaxAgeDays)
+	if err != nil {
+		return nil, err
+	}
+	if bandwidthProbeMaxAgeDays < 1 || bandwidthProbeMaxAgeDays > maxBandwidthProbeMaxAgeDays {
+		return nil, fmt.Errorf("%s must be between 1 and %d", PlaybackBandwidthProbeMaxAgeDaysSettingKey, maxBandwidthProbeMaxAgeDays)
+	}
+	cfg.Playback.BandwidthProbeMaxAgeDays = bandwidthProbeMaxAgeDays
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -407,6 +435,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// AudiobookshelfCompat — dedicated listener for ABS client apps. Docker
 	// deployments publish :13378, so listen by default unless disabled.
+	// ABS_PORT moves it; see AudiobookshelfCompatConfig.WithBootstrapListen.
 	absCompatEnabled, err := boolOr(m, "audiobookshelf_compat.enabled", true)
 	if err != nil {
 		return nil, err
@@ -439,11 +468,17 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.JellyfinCompat.SessionTTL = sessionTTL
-	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 6*time.Hour)
+	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 24*time.Hour)
 	if err != nil {
 		return nil, err
 	}
 	cfg.JellyfinCompat.PlaybackSessionTTL = playbackSessionTTL
+
+	// AI provider registry: AI jobs resolve their endpoints from it below.
+	aiProviders, err := ParseAIProviderRegistry(m[AIProvidersSettingKey])
+	if err != nil {
+		return nil, err
+	}
 
 	// Recommendations
 	recsEnabled, err := boolOr(m, "recommendations.enabled", false)
@@ -451,23 +486,12 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Recommendations.Enabled = recsEnabled
-	legacyOpenAIConfigured := m["recommendations.openai_model"] != "" || m["recommendations.openai_api_key"] != "" || m["recommendations.embedding_provider"] == "openai"
-	cfg.Recommendations.EmbeddingBaseURL = stringOr(m, "recommendations.embedding_base_url", func() string {
-		if legacyOpenAIConfigured {
-			return "https://api.openai.com"
-		}
-		return "http://ollama:11434"
-	}())
-	cfg.Recommendations.EmbeddingModel = stringOr(m, "recommendations.embedding_model", func() string {
-		if model := m["recommendations.openai_model"]; model != "" {
-			return model
-		}
-		if m["recommendations.embedding_provider"] == "openai" {
-			return "text-embedding-3-small"
-		}
-		return "all-minilm"
-	}())
-	cfg.Recommendations.EmbeddingAuthToken = stringOr(m, "recommendations.embedding_auth_token", stringOr(m, "recommendations.openai_api_key", ""))
+	// The embedding endpoint and key come from the provider the binding
+	// names; with none, recommendations have no embedding model to run.
+	cfg.Recommendations.EmbeddingProviderID = strings.TrimSpace(m[EmbeddingProviderSettingKey])
+	cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingAuthToken, _ = aiProviders.Resolve(
+		cfg.Recommendations.EmbeddingProviderID, AICapabilityEmbeddings)
+	cfg.Recommendations.EmbeddingModel = strings.TrimSpace(m["recommendations.embedding_model"])
 	cfg.Recommendations.EmbeddingsCron = stringOr(m, "recommendations.embeddings_cron", "0 3 * * *")
 	cfg.Recommendations.EmbeddingsJobTimeout, err = durationOr(m, "recommendations.embeddings_job_timeout", 24*time.Hour)
 	if err != nil {
@@ -487,15 +511,18 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
 
-	// Shared AI endpoint (subtitle translation, metadata translation, Whisper
-	// ASR). The connection settings read ai.* with a fallback to the legacy
-	// subtitle_ai.* rows; the legacy rows are never renamed in SQL because
-	// encrypted values are GCM-bound to their setting key.
-	cfg.AI.BaseURL = stringOr(m, "ai.base_url", stringOr(m, "subtitle_ai.base_url", "https://api.openai.com"))
-	cfg.AI.APIKey = stringOr(m, "ai.api_key", stringOr(m, "subtitle_ai.api_key", ""))
-	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
-	cfg.AI.ASRBaseURL = stringOr(m, "ai.asr_base_url", "")
-	cfg.AI.ASRAPIKey = stringOr(m, "ai.asr_api_key", "")
+	// Shared AI endpoints (subtitle translation, metadata translation, Whisper
+	// ASR), resolved from the provider each job selects in ai.providers. A
+	// binding to a missing provider leaves that job unconfigured; settings
+	// validation refuses to store one.
+	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
+	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
+	cfg.AI.ServiceTier = ResolveAIServiceTier(m)
+	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
+	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
+	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-6-luna"))
+	cfg.AI.SpeechProviderID = strings.TrimSpace(m[AISpeechProviderSettingKey])
+	cfg.AI.ASRBaseURL, cfg.AI.ASRAPIKey, _ = aiProviders.Resolve(cfg.AI.SpeechProviderID, AICapabilitySpeech)
 	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")
 	aiMaxConcurrent, err := intOr(m, "ai.max_concurrent_jobs", 0)
 	if err != nil {
@@ -645,6 +672,20 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	if artifactMaxBytes < 0 {
 		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
 	}
+	artifactCacheHours, err := intOr(m, DownloadArtifactCacheHoursSettingKey, DefaultDownloadArtifactCacheHours)
+	if err != nil {
+		return nil, err
+	}
+	if artifactCacheHours < 0 || artifactCacheHours > MaxDownloadArtifactCacheHours {
+		return nil, fmt.Errorf("invalid value for %q: must be 0 to %d", DownloadArtifactCacheHoursSettingKey, MaxDownloadArtifactCacheHours)
+	}
+	artifactDiskCeiling, err := intOr(m, DownloadArtifactDiskCeilingSettingKey, DefaultDownloadArtifactDiskCeilingPercent)
+	if err != nil {
+		return nil, err
+	}
+	if artifactDiskCeiling < MinDownloadArtifactDiskCeilingPercent || artifactDiskCeiling > MaxDownloadArtifactDiskCeilingPercent {
+		return nil, fmt.Errorf("invalid value for %q: must be %d to %d", DownloadArtifactDiskCeilingSettingKey, MinDownloadArtifactDiskCeilingPercent, MaxDownloadArtifactDiskCeilingPercent)
+	}
 	artifactDir := strings.TrimSpace(stringOr(m, downloadArtifactDirSettingKey, ""))
 	if artifactDir != "" && !filepath.IsAbs(artifactDir) {
 		return nil, fmt.Errorf("invalid value for %q: must be an absolute path", downloadArtifactDirSettingKey)
@@ -653,6 +694,8 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.ArtifactDir = artifactDir
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
+	cfg.Download.ArtifactCacheHours = artifactCacheHours
+	cfg.Download.ArtifactDiskCeilingPercent = artifactDiskCeiling
 	// Playback owns these keys; read them the same way so one malformed value
 	// cannot stall the whole download config.
 	cfg.Download.Allow4KTranscode = AdminSettingEnabled(Allow4KTranscodeSettingKey, m[Allow4KTranscodeSettingKey])

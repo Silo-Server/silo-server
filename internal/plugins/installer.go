@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,18 +13,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 type InstallArchiveRequest struct {
 	ArchivePath  string
 	ArchiveURL   string
 	RepositoryID *int
+	// PluginID and Version, when set, are what the catalog lists; see
+	// InstallBinaryRequest.
+	PluginID string
+	Version  string
 }
 
 type InstallBinaryRequest struct {
@@ -31,6 +39,11 @@ type InstallBinaryRequest struct {
 	Checksum     string // expected SHA-256 hex checksum
 	Manifest     *pluginv1.PluginManifest
 	RepositoryID *int
+	// PluginID and Version, when set, are what the catalog lists. A binary
+	// whose own manifest names another plugin or version is refused, so a
+	// catalog entry cannot install or replace a different plugin.
+	PluginID string
+	Version  string
 }
 
 type InstallResult struct {
@@ -61,7 +74,7 @@ type Installer struct {
 func NewInstaller(installations installationStore, opts InstallerOptions) *Installer {
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newPackageFetchClient(defaultPackageFetchTimeouts)
 	}
 	baseDir := opts.BaseDir
 	if baseDir == "" {
@@ -82,7 +95,7 @@ func (i *Installer) InstallLocal(ctx context.Context, req InstallArchiveRequest)
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
-	return i.installArchive(ctx, data, req.RepositoryID)
+	return i.installArchive(ctx, data, req)
 }
 
 func (i *Installer) ReplaceLocal(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
@@ -96,7 +109,7 @@ func (i *Installer) ReplaceLocal(ctx context.Context, existing *Installation, re
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
-	return i.replaceArchive(ctx, existing, data, req.RepositoryID)
+	return i.replaceArchive(ctx, existing, data, req)
 }
 
 func (i *Installer) InstallRemote(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error) {
@@ -107,7 +120,7 @@ func (i *Installer) InstallRemote(ctx context.Context, req InstallArchiveRequest
 	if err != nil {
 		return nil, err
 	}
-	return i.installArchive(ctx, data, req.RepositoryID)
+	return i.installArchive(ctx, data, req)
 }
 
 func (i *Installer) ReplaceRemote(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
@@ -118,29 +131,11 @@ func (i *Installer) ReplaceRemote(ctx context.Context, existing *Installation, r
 	if err != nil {
 		return nil, err
 	}
-	return i.replaceArchive(ctx, existing, data, req.RepositoryID)
+	return i.replaceArchive(ctx, existing, data, req)
 }
 
 func (i *Installer) downloadArchive(ctx context.Context, archiveURL string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build archive request: %w", err)
-	}
-	resp, err := i.httpClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("download archive %q: %w", archiveURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download archive %q: unexpected status %d", archiveURL, resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read archive response: %w", err)
-	}
-	return data, nil
+	return fetchPackageResource(ctx, i.httpClient, archiveURL, "the plugin")
 }
 
 func (i *Installer) InstallBinary(ctx context.Context, req InstallBinaryRequest) (*InstallResult, error) {
@@ -150,11 +145,11 @@ func (i *Installer) InstallBinary(ctx context.Context, req InstallBinaryRequest)
 	if req.Checksum == "" {
 		return nil, fmt.Errorf("binary checksum is required")
 	}
-	binaryData, manifest, actualChecksum, err := i.downloadBinary(ctx, req)
+	binaryData, manifest, manifestJSON, actualChecksum, err := i.downloadBinary(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return i.installBinary(ctx, binaryData, actualChecksum, manifest, req.RepositoryID)
+	return i.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, req.RepositoryID)
 }
 
 func (i *Installer) ReplaceBinary(ctx context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error) {
@@ -164,53 +159,44 @@ func (i *Installer) ReplaceBinary(ctx context.Context, existing *Installation, r
 	if req.Checksum == "" {
 		return nil, fmt.Errorf("binary checksum is required")
 	}
-	binaryData, manifest, actualChecksum, err := i.downloadBinary(ctx, req)
+	binaryData, manifest, manifestJSON, actualChecksum, err := i.downloadBinary(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return i.replaceBinary(ctx, existing, binaryData, actualChecksum, manifest, req.RepositoryID)
+	return i.replaceBinary(ctx, existing, binaryData, actualChecksum, manifest, manifestJSON, req.RepositoryID)
 }
 
 func (i *Installer) downloadBinary(
 	ctx context.Context,
 	req InstallBinaryRequest,
-) ([]byte, *pluginv1.PluginManifest, string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BinaryURL, nil)
+) ([]byte, *pluginv1.PluginManifest, []byte, string, error) {
+	binaryData, err := fetchPackageResource(ctx, i.httpClient, req.BinaryURL, "the plugin")
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("build binary request: %w", err)
-	}
-	resp, err := i.httpClient.Do(request)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("download binary %q: %w", req.BinaryURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, "", fmt.Errorf("download binary %q: unexpected status %d", req.BinaryURL, resp.StatusCode)
-	}
-
-	binaryData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("read binary response: %w", err)
+		return nil, nil, nil, "", err
 	}
 
 	checksum := sha256.Sum256(binaryData)
 	actualChecksum := hex.EncodeToString(checksum[:])
 	if actualChecksum != req.Checksum {
-		return nil, nil, "", fmt.Errorf("binary checksum mismatch: expected %s, got %s", req.Checksum, actualChecksum)
+		return nil, nil, nil, "", packageError(fmt.Errorf("binary checksum mismatch: expected %s, got %s", req.Checksum, actualChecksum),
+			"The downloaded plugin doesn't match the SHA-256 checksum its catalog lists, so Silo didn't install it.")
 	}
 
 	manifest := req.Manifest
+	var manifestJSON []byte
 	if manifest == nil {
-		manifest, err = loadManifestFromBinary(ctx, binaryData)
+		manifest, manifestJSON, err = loadManifestFromBinary(ctx, binaryData)
 		if err != nil {
-			return nil, nil, "", err
+			return nil, nil, nil, "", err
 		}
 	} else if err := ValidateManifest(manifest); err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
+	}
+	if err := checkCatalogIdentity(manifest, req.PluginID, req.Version); err != nil {
+		return nil, nil, nil, "", err
 	}
 
-	return binaryData, manifest, actualChecksum, nil
+	return binaryData, manifest, manifestJSON, actualChecksum, nil
 }
 
 func (i *Installer) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*InstallResult, error) {
@@ -218,7 +204,7 @@ func (i *Installer) InstallBinaryUpload(ctx context.Context, binaryData []byte) 
 		return nil, fmt.Errorf("binary data is required")
 	}
 
-	manifest, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +212,7 @@ func (i *Installer) InstallBinaryUpload(ctx context.Context, binaryData []byte) 
 	checksum := sha256.Sum256(binaryData)
 	actualChecksum := hex.EncodeToString(checksum[:])
 
-	return i.installBinary(ctx, binaryData, actualChecksum, manifest, nil)
+	return i.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
 }
 
 // replaceBinary replaces existing in place with a binary from repositoryID,
@@ -239,6 +225,7 @@ func (i *Installer) replaceBinary(
 	binaryData []byte,
 	checksum string,
 	manifest *pluginv1.PluginManifest,
+	manifestJSON []byte,
 	repositoryID *int,
 ) (*InstallResult, error) {
 	if existing == nil {
@@ -256,17 +243,23 @@ func (i *Installer) replaceBinary(
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err
 	}
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
+	}
 
-	manifestBytes, err := protojson.Marshal(manifest)
+	manifestBytes, err := binaryManifestBytes(manifest, manifestJSON)
 	if err != nil {
-		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
+		return nil, err
 	}
 	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
 	if err != nil {
 		return nil, fmt.Errorf("package plugin archive: %w", err)
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -317,9 +310,8 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
+	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
+		_ = removeInstallationFiles(ctx, existing)
 	}
 
 	keepInstallDir = true
@@ -342,18 +334,25 @@ func (i *Installer) replaceArchive(
 	ctx context.Context,
 	existing *Installation,
 	data []byte,
-	repositoryID *int,
+	req InstallArchiveRequest,
 ) (*InstallResult, error) {
 	if existing == nil {
 		return nil, fmt.Errorf("existing installation is required")
 	}
+	repositoryID := req.RepositoryID
 
-	reader, manifestBytes, manifest, err := openPluginArchive(data)
+	reader, manifestBytes, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
 	}
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
+	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -400,9 +399,8 @@ func (i *Installer) replaceArchive(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
+	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
+		_ = removeInstallationFiles(ctx, existing)
 	}
 
 	keepInstallDir = true
@@ -421,17 +419,20 @@ func (i *Installer) replaceArchive(
 	}, nil
 }
 
-func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checksum string, manifest *pluginv1.PluginManifest, repositoryID *int) (*InstallResult, error) {
-	manifestBytes, err := protojson.Marshal(manifest)
+func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checksum string, manifest *pluginv1.PluginManifest, manifestJSON []byte, repositoryID *int) (*InstallResult, error) {
+	manifestBytes, err := binaryManifestBytes(manifest, manifestJSON)
 	if err != nil {
-		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
+		return nil, err
 	}
 	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
 	if err != nil {
 		return nil, fmt.Errorf("package plugin archive: %w", err)
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -481,7 +482,7 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 
 	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, checksum, archiveBytes); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("persist plugin archive: %w", err)
 	}
@@ -491,7 +492,7 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 		Enabled: &enabled,
 	}); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("enable plugin installation: %w", err)
 	}
@@ -507,13 +508,32 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 	}, nil
 }
 
-func (i *Installer) installArchive(ctx context.Context, data []byte, repositoryID *int) (*InstallResult, error) {
-	reader, manifestBytes, manifest, err := openPluginArchive(data)
+// binaryManifestBytes returns the manifest.json to store for a binary install:
+// the plugin's own manifest output when there is one, so fields this server's
+// SDK doesn't know survive for a later server that does, and otherwise the
+// manifest serialized.
+func binaryManifestBytes(manifest *pluginv1.PluginManifest, manifestJSON []byte) ([]byte, error) {
+	if manifestJSON != nil {
+		return manifestJSON, nil
+	}
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
+	}
+	return manifestBytes, nil
+}
+
+func (i *Installer) installArchive(ctx context.Context, data []byte, req InstallArchiveRequest) (*InstallResult, error) {
+	repositoryID := req.RepositoryID
+	reader, manifestBytes, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -555,14 +575,14 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, repositoryI
 
 	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, manifest.GetChecksum(), data); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("persist plugin archive: %w", err)
 	}
 
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("extract plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("extract plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, err
 	}
@@ -572,7 +592,7 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, repositoryI
 		Enabled: &enabled,
 	}); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("enable plugin installation: %w", err)
 	}
@@ -599,35 +619,57 @@ func LoadManifestBytes(data []byte) (*pluginv1.PluginManifest, error) {
 	return manifest, nil
 }
 
-func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.PluginManifest, error) {
+// loadManifestFromBinary runs the plugin's manifest command and returns the
+// manifest it prints, both decoded and as printed.
+func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.PluginManifest, []byte, error) {
 	tmpDir, err := os.MkdirTemp("", "plugin-manifest-")
 	if err != nil {
-		return nil, fmt.Errorf("create temp dir for binary manifest: %w", err)
+		return nil, nil, fmt.Errorf("create temp dir for binary manifest: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	tmpBinary := filepath.Join(tmpDir, "plugin")
 	if err := os.WriteFile(tmpBinary, binaryData, 0755); err != nil {
-		return nil, fmt.Errorf("write temp binary for manifest: %w", err)
+		return nil, nil, fmt.Errorf("write temp binary for manifest: %w", err)
 	}
 
 	execCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, tmpBinary, "manifest")
+	cmd.Env = pluginhost.ProcessEnv()
 	manifestOut, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("execute plugin manifest command: %w", err)
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("execute plugin manifest command: %w", ctx.Err())
+		}
+		runErr := fmt.Errorf("execute plugin manifest command: %w", err)
+		// Only a binary that ran and failed (or timed out), or that isn't an
+		// executable for this platform, is the package's fault. Any other
+		// start failure, such as a noexec temp directory, is the server's.
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) && !errors.Is(err, syscall.ENOEXEC) {
+			return nil, nil, runErr
+		}
+		return nil, nil, packageError(runErr,
+			"Silo couldn't run the plugin to read its manifest. It may be built for another platform, or the file may be damaged.")
 	}
 
+	// Fields this server's SDK doesn't know yet are dropped, as when an
+	// archive's manifest.json is loaded, so a plugin built on a newer SDK
+	// still installs.
 	var manifest pluginv1.PluginManifest
-	if err := protojson.Unmarshal(manifestOut, &manifest); err != nil {
-		return nil, fmt.Errorf("parse plugin manifest output: %w", err)
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(manifestOut, &manifest); err != nil {
+		return nil, nil, packageError(fmt.Errorf("parse plugin manifest output: %w", err),
+			"The plugin's manifest couldn't be read.")
 	}
 	if err := ValidateManifest(&manifest); err != nil {
-		return nil, err
+		return nil, nil, packageError(err, "The plugin's manifest is invalid: %v.", err)
 	}
-	return &manifest, nil
+	if manifest.GetSiloApiVersion() != DefaultSiloAPIVersion {
+		return nil, nil, unsupportedAPIVersionError(manifest.GetSiloApiVersion(), DefaultSiloAPIVersion)
+	}
+	return &manifest, manifestOut, nil
 }
 
 func extractZipFile(file *zip.File, root string) error {
@@ -679,4 +721,47 @@ func readZipFile(file *zip.File) ([]byte, error) {
 func sanitizeFilesystemSegment(value string) string {
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "@", "_")
 	return replacer.Replace(value)
+}
+
+// checkReplacementIdentity refuses a package that names a different plugin
+// than the installation it would replace.
+func checkReplacementIdentity(manifest *pluginv1.PluginManifest, existing *Installation) error {
+	if manifest.GetPluginId() == existing.PluginID {
+		return nil
+	}
+	return packageError(
+		fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID),
+		"The package is %s, not the installed %s, so Silo didn't replace it.",
+		manifest.GetPluginId(), existing.PluginID,
+	)
+}
+
+// checkCatalogIdentity refuses a binary whose own manifest is not the plugin
+// and version the catalog listed. An empty expectation skips that half.
+func checkCatalogIdentity(manifest *pluginv1.PluginManifest, pluginID, version string) error {
+	if (pluginID == "" || manifest.GetPluginId() == pluginID) && (version == "" || manifest.GetVersion() == version) {
+		return nil
+	}
+	return packageError(
+		fmt.Errorf("binary manifest is %s@%s, catalog lists %s@%s", manifest.GetPluginId(), manifest.GetVersion(), pluginID, version),
+		"The downloaded plugin identifies itself as %s %s, not the %s %s its catalog lists, so Silo didn't install it.",
+		manifest.GetPluginId(), manifest.GetVersion(), pluginID, version,
+	)
+}
+
+// openInstallArchive opens an archive being installed and refuses one the
+// server can't run or that isn't the plugin its catalog lists. Stored
+// archives of existing installations are opened with openPluginArchive.
+func openInstallArchive(data []byte, req InstallArchiveRequest) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
+	reader, manifestBytes, manifest, err := openPluginArchive(data)
+	if err != nil {
+		return nil, nil, nil, packageError(err, "The plugin archive couldn't be read.")
+	}
+	if manifest.GetSiloApiVersion() != DefaultSiloAPIVersion {
+		return nil, nil, nil, unsupportedAPIVersionError(manifest.GetSiloApiVersion(), DefaultSiloAPIVersion)
+	}
+	if err := checkCatalogIdentity(manifest, req.PluginID, req.Version); err != nil {
+		return nil, nil, nil, err
+	}
+	return reader, manifestBytes, manifest, nil
 }

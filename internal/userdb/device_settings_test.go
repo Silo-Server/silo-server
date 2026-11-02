@@ -11,15 +11,7 @@ import (
 )
 
 func TestDeviceSettingsTiesAndRollback(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	db.SetMaxOpenConns(1)
-	if err := InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := newSingleConnSchemaDB(t)
 	ctx := t.Context()
 	store := NewSQLiteUserStore(db)
 	for _, p := range []string{"a", "b"} {

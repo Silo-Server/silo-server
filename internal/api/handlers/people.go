@@ -25,7 +25,10 @@ type peopleRepository interface {
 }
 
 type PersonRefreshQueue interface {
-	Enqueue(id int64)
+	// Enqueue asks for a lookup of person id. lastAttempt is the person's
+	// MetadataRefreshAttemptedAt as read; the request is dropped if a lookup
+	// started after it.
+	Enqueue(id int64, lastAttempt *time.Time)
 }
 
 type PersonRefresher interface {
@@ -259,7 +262,7 @@ func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Requ
 
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
-		items = append(items, h.itemsHandler.toItemListResponse(r.Context(), viewerFromRequest(r, filter), item, filter.ImageSize))
+		items = append(items, h.itemsHandler.toItemListResponse(r.Context(), viewerFromRequest(r, filter), item, filter.Artwork()))
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{
@@ -308,7 +311,7 @@ func (h *PeopleHandler) enqueuePersonRefreshIfDue(person models.Person) {
 	}
 
 	if catalog.PersonRefreshDue(person, time.Now()) {
-		h.refreshQueue.Enqueue(person.ID)
+		h.refreshQueue.Enqueue(person.ID, person.MetadataRefreshAttemptedAt)
 	}
 }
 

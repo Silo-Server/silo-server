@@ -28,6 +28,23 @@ type ToneMap struct {
 	// AllowSoftware lets an attempt tone map in software. Without it such an
 	// attempt fails as unsupported before ffmpeg starts.
 	AllowSoftware bool `json:"allow_software,omitempty"`
+	// Source is the base signal tonemap.ResolveSource classified the input's
+	// video as. Only Sheets take it. With it, every attempt, on a GPU too,
+	// converts in software with the chain playback converts that signal with
+	// in software (tonemap.SoftwareFilter): a Dolby Vision base only through
+	// tonemapx, which applies its RPU, an HLG source with the HLG transfer. It
+	// therefore needs AllowSoftware, and an attempt the binary has no filter
+	// for fails as unsupported before ffmpeg starts. Empty keeps the
+	// best-effort chains below, for sources whose catalog facts cannot
+	// classify them.
+	Source tonemap.SourceKind `json:"source,omitempty"`
+}
+
+func (t ToneMap) validate() error {
+	if t.Source != "" && !tonemap.ValidSourceKind(t.Source) {
+		return fmt.Errorf("tone-map source %q is not a known base signal", t.Source)
+	}
+	return nil
 }
 
 // Image is one decoded image.
@@ -79,11 +96,26 @@ func (r Request) imageToneMap() *ToneMap {
 // toneMapResolver picks the software tone-map chain at most once per run, when
 // the first attempt that needs it starts, so a hardware attempt that succeeds
 // never loads capabilities and a failed choice is not retried by the next
-// attempt.
+// attempt. A run whose request names its source's base signal picks that
+// signal's chain instead (see selectSourceToneMap).
 type toneMapResolver struct {
 	done    bool
 	filter  string
 	failure *AttemptError
+}
+
+// source returns the software chain that converts the base signal kind,
+// chosen once per run.
+func (t *toneMapResolver) source(ctx context.Context, r Runner, kind tonemap.SourceKind) (string, *AttemptError) {
+	if !t.done {
+		t.filter, t.failure = r.selectSourceToneMap(ctx, kind)
+		t.done = true
+	}
+	if t.failure != nil {
+		failure := *t.failure
+		return "", &failure
+	}
+	return t.filter, nil
 }
 
 func (t *toneMapResolver) resolve(ctx context.Context, r Runner) (string, *AttemptError) {
@@ -119,6 +151,34 @@ func (r Runner) selectSoftwareToneMap(ctx context.Context) (string, *AttemptErro
 		return softwareToneMapHable, nil
 	}
 	return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("configured FFmpeg lacks the required tonemapx or tonemap filter")}
+}
+
+// selectSourceToneMap picks the chain playback converts the base signal kind
+// with in software (tonemap.SoftwareFilter), on a filter the binary lists:
+// Jellyfin's tonemapx, the only one that applies a Dolby Vision RPU, else the
+// standard tonemap filter's Hable curve for the standard signals. A base that
+// is already SDR needs no tone-map filter. Every chain needs zscale and
+// sidedata.
+func (r Runner) selectSourceToneMap(ctx context.Context, kind tonemap.SourceKind) (string, *AttemptError) {
+	load := r.Capabilities
+	if load == nil {
+		load = LoadCapabilities
+	}
+	caps, err := load(ctx, r.FFmpegPath)
+	if err != nil {
+		return "", &AttemptError{Reason: ReasonCapabilities, Err: err}
+	}
+	switch {
+	case !caps.HasFilter("zscale") || !caps.HasFilter("sidedata"):
+		return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("configured FFmpeg lacks the required zscale or sidedata filter")}
+	case tonemap.IsSDRSource(kind):
+		return tonemap.SoftwareFilter(kind, ""), nil
+	case caps.HasFilter(tonemap.SoftwareFilterBT2390):
+		return tonemap.SoftwareFilter(kind, tonemap.SoftwareFilterBT2390), nil
+	case kind != tonemap.SourceDolbyVision && caps.HasFilter(tonemap.SoftwareFilterHable):
+		return tonemap.SoftwareFilter(kind, tonemap.SoftwareFilterHable), nil
+	}
+	return "", &AttemptError{Reason: ReasonUnsupported, Err: fmt.Errorf("configured FFmpeg has no tone-map filter that converts a %s source", kind)}
 }
 
 // softwareToneMapFilter settles, before ffmpeg starts, the software tone-map
@@ -162,6 +222,9 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 		args = append(args, "-threads", strconv.Itoa(req.Threads))
 	}
 	if attempt.Hardware {
+		if !SupportsHardwareDecode(hw.Accel) {
+			return nil, fmt.Errorf("hardware decode does not support %q", hw.Accel)
+		}
 		decode, err := hardwareDecodeArgs(hw, false)
 		if err != nil {
 			return nil, err

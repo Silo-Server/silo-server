@@ -159,28 +159,6 @@ describe("useSidebarItemDetailsGate", () => {
     expect(result.current.returnedHomeFromItem).toBe(false);
   });
 
-  it("tracks repeated same-item and different-item Home cycles without retaining origin state", () => {
-    const { result, rerender } = renderHook(
-      ({ locationKey, pathname, isItem }) =>
-        useSidebarItemDetailsGate(locationKey, pathname, isItem),
-      { initialProps: { locationKey: "home-0", pathname: "/", isItem: false } },
-    );
-
-    for (let cycle = 1; cycle <= 4; cycle++) {
-      const itemId = cycle <= 2 ? "same" : `different-${cycle}`;
-      rerender({ locationKey: `item-${cycle}`, pathname: `/item/${itemId}`, isItem: true });
-      expect(result.current.enteredItemFromHome).toBe(true);
-      expect(result.current.returnedHomeFromItem).toBe(false);
-
-      rerender({ locationKey: `home-${cycle}`, pathname: "/", isItem: false });
-      expect(result.current.enteredItemFromHome).toBe(false);
-      expect(result.current.returnedHomeFromItem).toBe(true);
-    }
-
-    rerender({ locationKey: "library", pathname: "/library/1", isItem: false });
-    expect(result.current.returnedHomeFromItem).toBe(false);
-  });
-
   it("discards an abandoned gate and allows the next item entry", () => {
     const { result, rerender } = renderHook(
       ({

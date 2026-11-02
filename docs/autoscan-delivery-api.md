@@ -10,8 +10,25 @@ The shared application method resolves the source token before reading at most
 The declared request schema is attached after Huma input registration so its
 decoder does not read or re-encode provider bytes before token resolution.
 HTTP request compression and non-JSON media types are refused. When configured,
-the same `autoscan_webhook` per-endpoint rate-limit bucket as the bridge applies;
-rate-limit problems retain `Retry-After`.
+the same `autoscan_webhook` per-endpoint rate-limit bucket as the bridge applies,
+including the per-connection cap for forwarded clients described in
+[Sign-in rate limits](auth-api.md#sign-in-rate-limits); rate-limit problems retain
+`Retry-After`.
+
+That budget only refuses unknown tokens. Every delivery spends it, but once it is
+spent a delivery whose token resolves to a source is still accepted, and only the
+rest get `429`. Sonarr and Radarr do not retry a refused delivery, so refusing a
+real one would lose the change until the next library scan; the budget exists to
+slow guesses at tokens, and a sender with a real token often shares its address
+with whatever spent it, or imports more files at once than the budget holds. The
+token is looked up only for a request over the budget. Those lookups spend a
+budget of their own per client address, ten times the endpoint's, so one client
+sending unknown tokens cannot use up the lookups of the senders it shares a
+reverse proxy with. A client address taken from forwarding headers also spends a
+cap on the connection's own address, a hundred times the endpoint's, so rotating
+the headers cannot multiply the lookups. A real delivery is refused only once its
+own client, or its connection, has spent that lookup budget. The per-address
+request budget and the server-wide budget still apply to every delivery.
 
 Accepted requests return `202` with `{"status":"accepted"}`. Test events,
 unsupported event types and disabled sources/global autoscan settings return the

@@ -10,19 +10,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// resolveDefaultLibrary returns the first audiobook library (the canonical
-// "default" for response embedding) or a virtual fallback when the store
-// is empty or errors. Centralizes the snippet that handleItem,
-// handleSimilarItems, and handleItemsInProgress all need so the fallback
-// shape stays consistent across all three response paths.
-func (h *Handler) resolveDefaultLibrary(ctx context.Context, filters ...catalog.AccessFilter) AudiobookLibrary {
-	access := emptyAccessFilter()
-	if len(filters) > 0 {
-		access = filters[0]
-	}
+// resolveDefaultLibrary returns the first audiobook library the caller's
+// access filter allows (the canonical "default" for response embedding) or a
+// virtual fallback when the store is empty or errors. The filter is required:
+// an empty filter would pick the server's first library even when the
+// caller's profile cannot see it.
+func (h *Handler) resolveDefaultLibrary(ctx context.Context, access catalog.AccessFilter) AudiobookLibrary {
 	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx, access); err == nil && len(libs) > 0 {
 		return libs[0]
 	}
+	return virtualAudiobookLibrary()
+}
+
+// virtualAudiobookLibrary is the stand-in library for responses when the
+// caller can see no audiobook library, so clients still get a well-formed
+// (empty) library.
+func virtualAudiobookLibrary() AudiobookLibrary {
 	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
 }
 

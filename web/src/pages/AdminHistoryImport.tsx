@@ -30,6 +30,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1030,6 +1031,16 @@ function SourceBar({
 // User mappings section
 // ---------------------------------------------------------------------------
 
+// How far back a run reads Jellyfin plays. Full history is the default and
+// matches a run started without a lookback.
+const LOOKBACK_CHOICES: { value: string; label: string; hours?: number }[] = [
+  { value: "full", label: "Full history" },
+  { value: "24", label: "Last 24 hours", hours: 24 },
+  { value: "72", label: "Last 72 hours", hours: 72 },
+  { value: "168", label: "Last 7 days", hours: 168 },
+  { value: "720", label: "Last 30 days", hours: 720 },
+];
+
 function MappingsSection({
   source,
   mappings,
@@ -1044,19 +1055,44 @@ function MappingsSection({
   const [deleteTarget, setDeleteTarget] = useState<HistoryImportUserMapping | null>(null);
   const [deleteConflict, setDeleteConflict] = useState(false);
   const { data: users = [] } = useAdminUsers();
+  const { data: capabilities } = useAdminHistoryImportCapabilities();
+  const [lookback, setLookback] = useState("full");
+  // Only Jellyfin sources accept a lookback; the server refuses it elsewhere.
+  const lookbackChoices =
+    capabilities?.played_lookback && source.source_type === "jellyfin"
+      ? LOOKBACK_CHOICES.filter(
+          (choice) => !choice.hours || choice.hours <= capabilities.max_lookback_hours,
+        )
+      : [];
+  const lookbackChoice = lookbackChoices.find((choice) => choice.value === lookback);
+  const lookbackHours = lookbackChoice?.hours;
 
   if (!source.has_admin_token || source.needs_reconfiguration) return null;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold tracking-wide">User mappings</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {mappings.length > 0 && lookbackChoices.length > 0 && (
+            <Select value={lookbackChoice ? lookback : "full"} onValueChange={setLookback}>
+              <SelectTrigger size="sm" className="w-36" aria-label="Plays to import">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {lookbackChoices.map((choice) => (
+                  <SelectItem key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {mappings.length > 0 && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => bulkRun.mutate(source.id)}
+              onClick={() => bulkRun.mutate({ id: source.id, lookbackHours })}
               disabled={bulkRun.isPending || mappings.length > 200}
             >
               {bulkRun.isPending ? (
@@ -1143,9 +1179,11 @@ function MappingsSection({
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => createRun.mutate(m.id)}
+                        onClick={() => createRun.mutate({ id: m.id, lookbackHours })}
                         disabled={createRun.isPending}
-                        title="Run import"
+                        title={
+                          lookbackHours ? `Run import (${lookbackChoice?.label})` : "Run import"
+                        }
                       >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
@@ -1305,6 +1343,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         {userMap.get(run.user_id) ?? `User ${run.user_id}`}
                         {" · "}
                         {formatDate(run.created_at)}
+                        {run.played_since ? ` · Plays since ${formatDate(run.played_since)}` : ""}
                       </p>
                     </div>
                     <div className="text-muted-foreground hidden items-center gap-4 text-xs sm:flex">
@@ -1490,15 +1529,11 @@ function AdminHistoryImportPage() {
   if (sourcesError && sources.length === 0)
     return <p role="alert">Saved servers could not be loaded.</p>;
   return (
-    <div className="page-shell space-y-8 py-4 sm:py-6">
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">History Import</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Import watch history from external servers into Silo user profiles.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-8 pb-4 sm:pb-6">
+      <PageHeader
+        title="History Import"
+        subtitle="Import watch history from external servers into Silo user profiles."
+      />
 
       {/* Source selector */}
       <SourceBar

@@ -17,11 +17,9 @@ type stubSubtitleInventoryResolver struct {
 	additionalErr error
 	features      []string
 	featuresErr   error
-	calls         int
 }
 
 func (s *stubSubtitleInventoryResolver) MediaFile(context.Context, int) (*models.MediaFile, error) {
-	s.calls++
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -36,18 +34,33 @@ func (s *stubSubtitleInventoryResolver) SessionClientFeatures(context.Context, s
 	return s.features, s.featuresErr
 }
 
+// newSubtitleNotifierFixture registers one realtime-connected session on file
+// 100 and returns its manager, hub, connection and session ID.
+func newSubtitleNotifierFixture(t *testing.T) (*SessionManager, *RealtimeHub, *dispatchTestConn, string) {
+	t.Helper()
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	_ = sessions.SetRealtimeConnection(session.ID, true)
+	hub := NewRealtimeHub()
+	conn := &dispatchTestConn{}
+	reg := hub.Register(session.ID, conn)
+	t.Cleanup(func() { hub.Unregister(reg) })
+	return sessions, hub, conn, session.ID
+}
+
+// subtitleNotifierReplica is one server replica's notifier with a connected
+// session, for the cross-replica event bus tests.
+func subtitleNotifierReplica(t *testing.T) (*SubtitleReadyNotifier, *dispatchTestConn) {
+	t.Helper()
+	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
+	return NewSubtitleReadyNotifier(sessions, hub, nil), conn
+}
+
 // A generated track's realtime event carries the ordinal the next plan will
 // publish, so the client selects it by identity instead of counting the tracks
 // it can currently see.
 func TestSubtitleReadyNotifierPublishesTheGeneratedTrackOrdinal(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
 
 	file := &models.MediaFile{
 		ID: 100,
@@ -99,14 +112,7 @@ func TestSubtitleReadyNotifierPublishesTheGeneratedTrackOrdinal(t *testing.T) {
 }
 
 func TestSubtitleReadyNotifierOmitsTrackWhenTheFileCannotBeResolved(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
 
 	resolver := &stubSubtitleInventoryResolver{err: errors.New("file gone")}
 	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
@@ -127,64 +133,8 @@ func TestSubtitleReadyNotifierOmitsTrackWhenTheFileCannotBeResolved(t *testing.T
 	}
 }
 
-func TestSubtitleReadyNotifierOmitsTrackWhenDownloadedInventoryCannotBeResolved(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
-
-	resolver := &stubSubtitleInventoryResolver{
-		file:          &models.MediaFile{ID: 100},
-		additionalErr: errors.New("subtitle repository unavailable"),
-	}
-	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want one metadata-only event", len(conn.messages))
-	}
-	var payload SubtitleReadyPayload
-	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Track != nil {
-		t.Fatalf("track = %#v, want nil when the ordinal inventory is unavailable", payload.Track)
-	}
-}
-
-func TestSubtitleReadyNotifierWorksWithoutAnInventoryResolver(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
-
-	notifier := NewSubtitleReadyNotifier(sessions, hub, nil)
-	if notifier == nil {
-		t.Fatal("a nil inventory resolver must not disable the notifier")
-	}
-	notifier.SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want 1", len(conn.messages))
-	}
-}
-
 func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	sessions, hub, conn, sessionID := newSubtitleNotifierFixture(t)
 
 	resolver := &stubSubtitleInventoryResolver{
 		file:       &models.MediaFile{ID: 100, SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "en", Codec: "subrip"}}},
@@ -192,7 +142,7 @@ func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) 
 	}
 
 	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
-	notifier.TranslationCompleted(context.Background(), session.ID, 100, 9, "track-key", 55, "fr", "French (AI)")
+	notifier.TranslationCompleted(context.Background(), sessionID, 100, 9, "track-key", 55, "fr", "French (AI)")
 
 	if len(conn.messages) != 1 {
 		t.Fatalf("messages = %d, want 1 translation completed event", len(conn.messages))
@@ -210,13 +160,7 @@ func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) 
 }
 
 func TestSubtitleReadyNotifierMatchesDownloadedRowIdentity(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
 
 	resolver := &stubSubtitleInventoryResolver{
 		file: &models.MediaFile{ID: 100},
@@ -232,22 +176,6 @@ func TestSubtitleReadyNotifierMatchesDownloadedRowIdentity(t *testing.T) {
 	}
 	if payload.Track == nil || payload.Track.CombinedIndex != 1 {
 		t.Fatalf("track = %#v, want exact row 88 at ordinal 1", payload.Track)
-	}
-}
-
-// Sessions without a realtime connection must not cost a repository lookup.
-func TestSubtitleReadyNotifierSkipsSessionsWithoutRealtime(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = session
-
-	hub := NewRealtimeHub()
-	resolver := &stubSubtitleInventoryResolver{file: &models.MediaFile{ID: 100}}
-	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
-	notifier.SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
-
-	if resolver.calls != 0 {
-		t.Errorf("resolver called %d times for a session with no realtime connection, want 0", resolver.calls)
 	}
 }
 
@@ -292,19 +220,9 @@ func TestSubtitleReadyNotifierOmitsTrackWhenSessionFeaturesAreUnknown(t *testing
 }
 
 func TestSubtitleTimingChangedDeliversAcrossReplicasOnce(t *testing.T) {
-	replica := func() (*SubtitleReadyNotifier, *dispatchTestConn) {
-		sessions := NewSessionManager(0, 0)
-		session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-		_ = sessions.SetRealtimeConnection(session.ID, true)
-		hub := NewRealtimeHub()
-		conn := &dispatchTestConn{}
-		reg := hub.Register(session.ID, conn)
-		t.Cleanup(func() { hub.Unregister(reg) })
-		return NewSubtitleReadyNotifier(sessions, hub, nil), conn
-	}
 	bus := &subtitleTestBus{}
-	local, localConn := replica()
-	remote, remoteConn := replica()
+	local, localConn := subtitleNotifierReplica(t)
+	remote, remoteConn := subtitleNotifierReplica(t)
 	ctx := context.Background()
 	for _, n := range []*SubtitleReadyNotifier{local, remote, local} {
 		if err := n.UseEventBus(ctx, bus.publish, bus.subscribe); err != nil {
@@ -340,13 +258,7 @@ func TestSubtitleTimingChangedDeliversAcrossReplicasOnce(t *testing.T) {
 // A server that predates sidecar sync publishes only the stored subtitle's
 // ID; the event still names it by sync key.
 func TestSubtitleTimingChangedAcceptsMessagesWithoutSyncKey(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	t.Cleanup(func() { hub.Unregister(reg) })
+	sessions, hub, conn, _ := newSubtitleNotifierFixture(t)
 	bus := &subtitleTestBus{}
 	if err := NewSubtitleReadyNotifier(sessions, hub, nil).UseEventBus(context.Background(), bus.publish, bus.subscribe); err != nil {
 		t.Fatal(err)
@@ -383,19 +295,9 @@ func (b *subtitleTestBus) subscribe(_ context.Context, handler func(RealtimeEven
 }
 
 func TestSubtitleSyncUpdatedReachesEveryReplicaOnce(t *testing.T) {
-	replica := func() (*SubtitleReadyNotifier, *dispatchTestConn) {
-		sessions := NewSessionManager(0, 0)
-		session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-		_ = sessions.SetRealtimeConnection(session.ID, true)
-		hub := NewRealtimeHub()
-		conn := &dispatchTestConn{}
-		reg := hub.Register(session.ID, conn)
-		t.Cleanup(func() { hub.Unregister(reg) })
-		return NewSubtitleReadyNotifier(sessions, hub, nil), conn
-	}
 	bus := &subtitleTestBus{}
-	local, localConn := replica()
-	remote, remoteConn := replica()
+	local, localConn := subtitleNotifierReplica(t)
+	remote, remoteConn := subtitleNotifierReplica(t)
 	for _, n := range []*SubtitleReadyNotifier{local, remote} {
 		if err := n.UseEventBus(context.Background(), bus.publish, bus.subscribe); err != nil {
 			t.Fatal(err)

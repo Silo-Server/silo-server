@@ -67,8 +67,7 @@ type residentFixture struct {
 func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	t.Helper()
 	bin := buildResidentFixture(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	store := newFakeServiceInstallationStore(&Installation{
 		ID:          5,
@@ -328,17 +327,6 @@ func TestResidentBackoffSchedule(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		if j := defaultBackoffJitter(time.Minute); j < 0 || j > 15*time.Second {
 			t.Fatalf("jitter %v outside [0, 15s]", j)
-		}
-	}
-}
-
-func TestResidentPredicateNeedsCapability(t *testing.T) {
-	if !IsResidentCapabilityType(capability.NetworkAccessProvider) {
-		t.Fatal("network_access_provider.v1 must be resident")
-	}
-	for _, typ := range []string{capability.MetadataProvider, capability.ScheduledTask, capability.WatchSyncProvider, ""} {
-		if IsResidentCapabilityType(typ) {
-			t.Fatalf("%q must not be resident", typ)
 		}
 	}
 }

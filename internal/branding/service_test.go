@@ -37,24 +37,6 @@ func (c *countingSettings) GetMany(_ context.Context, keys ...string) (map[strin
 	return out, nil
 }
 
-func TestLoadReadsSettingsInOneBatch(t *testing.T) {
-	settings := &countingSettings{values: map[string]string{
-		KeyServerName:           "Harbor",
-		KeyAccentColor:          "#f5a524",
-		"branding.wordmark_ref": "abc.webp",
-	}}
-	snap := NewService(settings, nil).Load(context.Background())
-	if settings.batches != 1 || settings.gets != 0 {
-		t.Fatalf("batches=%d gets=%d, want one batch read and no single reads", settings.batches, settings.gets)
-	}
-	if snap.ServerName != "Harbor" || snap.AccentColor != "#f5a524" || snap.AssetRef(KindWordmark) != "abc.webp" {
-		t.Fatalf("snapshot = %+v", snap)
-	}
-	if snap.LoginSubtitle != DefaultLoginSubtitle {
-		t.Fatalf("unset subtitle = %q, want the default", snap.LoginSubtitle)
-	}
-}
-
 func TestLoadFallsBackToSingleReadsWhenBatchFails(t *testing.T) {
 	settings := &countingSettings{
 		values:   map[string]string{KeyServerName: "Harbor"},

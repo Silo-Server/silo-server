@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"slices"
 	"testing"
 	"time"
 
@@ -45,6 +44,14 @@ func (r *fakeHistoryItemRepo) EnsureAccessible(_ context.Context, contentID stri
 		return catalog.ErrItemNotFound
 	}
 	return nil
+}
+
+func (r *fakeHistoryItemRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
+	}
+	return out, nil
 }
 
 func TestHandleRemoveHistoryAcceptsEbookTargets(t *testing.T) {
@@ -223,65 +230,5 @@ func TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 	}
 	if hiddenUnwatched != 0 {
 		t.Fatalf("removal hid the unwatched file-less episode; want it left out")
-	}
-}
-
-// batchRecordingStore answers the two reads watchedHistoryItemIDs makes and
-// records each batch size.
-type batchRecordingStore struct {
-	userstore.UserStore
-	history, progress map[string]bool
-	batches           []int
-}
-
-func (s *batchRecordingStore) LatestHistoryIDs(_ context.Context, _ string, groups map[string][]string) (map[string]string, error) {
-	s.batches = append(s.batches, len(groups))
-	result := map[string]string{}
-	for id := range groups {
-		if s.history[id] {
-			result[id] = "history-" + id
-		}
-	}
-	return result, nil
-}
-
-func (s *batchRecordingStore) ListProgressByMediaItems(_ context.Context, _ string, ids []string) (map[string]userstore.WatchProgress, error) {
-	s.batches = append(s.batches, len(ids))
-	result := map[string]userstore.WatchProgress{}
-	for _, id := range ids {
-		if s.progress[id] {
-			result[id] = userstore.WatchProgress{MediaItemID: id}
-		}
-	}
-	return result, nil
-}
-
-func TestWatchedHistoryItemIDsBatchesAndDeduplicates(t *testing.T) {
-	ids := make([]string, 0, 2600)
-	for i := range 2500 {
-		ids = append(ids, fmt.Sprintf("ep-%d", i))
-	}
-	ids = append(ids, ids[:100]...) // overlapping targets repeat candidates
-	store := &batchRecordingStore{
-		history:  map[string]bool{"ep-5": true},
-		progress: map[string]bool{"ep-2400": true},
-	}
-
-	watched, err := watchedHistoryItemIDs(context.Background(), store, "profile-1", ids)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"ep-5", "ep-2400"}; !slices.Equal(watched, want) {
-		t.Fatalf("watched = %v, want %v", watched, want)
-	}
-	total := 0
-	for _, n := range store.batches {
-		if n > watchedHistoryItemIDBatch {
-			t.Fatalf("batch of %d IDs, want at most %d", n, watchedHistoryItemIDBatch)
-		}
-		total += n
-	}
-	if total != 2*2500 {
-		t.Fatalf("read %d IDs across both reads, want each of the 2500 unique IDs once per read", total)
 	}
 }

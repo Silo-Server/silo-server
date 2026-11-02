@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,12 +20,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-// maxLocalImageSourceBytes caps local sidecar artwork reads at 8 MiB,
-// matching the NFO provider's discovery guard.
-const maxLocalImageSourceBytes = 8 << 20
 
 const (
 	immediateImageCacheClaimLimit  = 16
@@ -104,13 +103,7 @@ type targetImageCacheJobStore interface {
 	retryTargetNow(ctx context.Context, targetContentID string) error
 	claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error)
 	targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error)
-}
-
-// imageCacheTargetCachedPathReader is optionally implemented by the job store
-// (ImageCacheJobRepository does) to expose the target's currently stored
-// cached path for the local-artwork unchanged-skip and stale-prefix cleanup.
-type imageCacheTargetCachedPathReader interface {
-	CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
+	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
 }
 
 // imageCacheBacklogReader is optional so lightweight processor fakes and
@@ -126,14 +119,8 @@ type LibraryRootResolver interface {
 	LibraryRootsForContent(ctx context.Context, contentID string) ([]string, error)
 }
 
-// ImagePrefixDeleter deletes cached image objects under a key prefix; used to
-// sweep the previous hashed local/ prefix after a successful re-cache.
-type ImagePrefixDeleter interface {
-	DeletePrefix(context.Context, string) (int, error)
-}
-
 type SeasonArtworkUpdater interface {
-	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error)
+	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
 type EpisodeStillUpdater interface {
@@ -156,8 +143,13 @@ type PersonPhotoUpdater interface {
 	UpdatePhotoIfSourceMatches(ctx context.Context, personID int64, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
+type ItemBackdropArtworkUpdater interface {
+	UpdateArtworkIfSourceMatches(ctx context.Context, id int64, sourcePath, cachedPath, thumbhash string) (bool, error)
+}
+
 type ImageCacheProcessorTargets struct {
 	Items               ItemArtworkUpdater
+	ItemBackdrops       ItemBackdropArtworkUpdater
 	Seasons             SeasonArtworkUpdater
 	Episodes            EpisodeStillUpdater
 	ItemLocalizations   ItemLocalizationArtworkUpdater
@@ -175,11 +167,17 @@ type ImageCacheProcessor struct {
 	logger  *slog.Logger
 
 	// Local file:// artwork support. libraryRoots confines reads to the
-	// owning library's roots; prefixDeleter sweeps stale hashed prefixes.
-	// The processor host must mount the libraries, like the metadata worker.
-	libraryRoots  LibraryRootResolver
-	prefixDeleter ImagePrefixDeleter
+	// owning library's roots. localCopies copies art this process
+	// discovered (CopyLocalArtwork).
+	libraryRoots LibraryRootResolver
+	localCopies  localArtworkCopies
+	// workBudget bounds artwork jobs across drains, manual refreshes and
+	// discovery copies (SetWorkerBudget).
+	workBudget imageWorkBudget
 
+	// enabled mirrors metadata.cache_images. While it is off nothing is
+	// cached, remote or local: clients load artwork straight from the
+	// providers.
 	enabled atomic.Bool
 
 	// idleWaitTimeout bounds how long CacheTargetArtwork waits on jobs held by
@@ -203,20 +201,11 @@ func (p *ImageCacheProcessor) SetLibraryRootResolver(resolver LibraryRootResolve
 	p.libraryRoots = resolver
 }
 
-// SetImagePrefixDeleter wires the object store used to delete the previous
-// hashed local/ prefix after a successful local re-cache. Optional: without
-// it, stale prefixes are left behind (item deletion still sweeps them).
-func (p *ImageCacheProcessor) SetImagePrefixDeleter(deleter ImagePrefixDeleter) {
-	if p == nil {
-		return
-	}
-	p.prefixDeleter = deleter
-}
-
-// SetEnabled toggles background caching. When disabled the processor begins no
-// new discovery, claims, or uploads; a job already in flight may finish. This
-// honors metadata.cache_images so merely configuring object storage does not
-// download the whole catalog.
+// SetEnabled toggles artwork caching. When disabled the processor begins no
+// new discovery, claims, downloads, or local copies; a job already in flight
+// may finish, and the stored-artwork release sweep undoes what it publishes.
+// This honors metadata.cache_images so merely configuring object storage does
+// not download the whole catalog.
 func (p *ImageCacheProcessor) SetEnabled(enabled bool) {
 	if p == nil {
 		return
@@ -269,6 +258,9 @@ type ImageCacheRunStats struct {
 	Succeeded        int
 	Failed           int
 	Skipped          int
+	// Deferred counts jobs, also counted in Skipped, that were released for a
+	// server that can see the job's library root.
+	Deferred         int
 	DeletedSucceeded int
 	UploadedVariants int
 	ExistingVariants int
@@ -297,6 +289,7 @@ func (s *ImageCacheRunStats) add(other ImageCacheRunStats) {
 	s.Succeeded += other.Succeeded
 	s.Failed += other.Failed
 	s.Skipped += other.Skipped
+	s.Deferred += other.Deferred
 	s.DeletedSucceeded += other.DeletedSucceeded
 	s.UploadedVariants += other.UploadedVariants
 	s.ExistingVariants += other.ExistingVariants
@@ -307,7 +300,10 @@ func (s *ImageCacheRunStats) add(other ImageCacheRunStats) {
 // explicit full-catalog backfill.
 func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, claimLimit int, concurrency int) (ImageCacheRunStats, error) {
 	var stats ImageCacheRunStats
-	if p == nil || p.jobs == nil || p.cacher == nil || !p.enabled.Load() {
+	if p == nil || p.jobs == nil || p.cacher == nil {
+		return stats, nil
+	}
+	if !p.enabled.Load() {
 		return stats, nil
 	}
 	if claimLimit <= 0 {
@@ -317,6 +313,7 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 		concurrency = 4
 	}
 
+	claimStarted := time.Now()
 	jobs, err := p.jobs.ClaimDue(ctx, workerID, claimLimit)
 	if err != nil {
 		return stats, err
@@ -325,15 +322,13 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 		p.cleanupSucceeded(ctx, &stats)
 		return stats, nil
 	}
-	stats = p.processClaimedJobs(ctx, workerID, jobs, concurrency)
+	stats = p.processClaimedJobs(ctx, workerID, jobs, concurrency, claimStarted)
 	p.cleanupSucceeded(ctx, &stats)
 	return stats, nil
 }
 
-// ArtworkCachingEnabled reports whether the processor would actually cache
-// anything right now. Callers use it to decide whether to advertise an artwork
-// step at all: the processor is wired whenever object storage is configured,
-// but metadata.cache_images can still have it turned off.
+// ArtworkCachingEnabled reports whether the processor caches anything. Callers
+// use it to decide whether to advertise an artwork step at all.
 func (p *ImageCacheProcessor) ArtworkCachingEnabled() bool {
 	return p != nil && p.jobs != nil && p.cacher != nil && p.enabled.Load()
 }
@@ -343,7 +338,9 @@ func (p *ImageCacheProcessor) ArtworkCachingEnabled() bool {
 // and localizations, which are queued under their own content IDs. It waits a
 // bounded while for jobs a background worker already holds so the interactive
 // refresh does not report success before the cached paths have been updated;
-// past that it returns ErrTargetArtworkPending and lets the queue finish.
+// past that it returns ErrTargetArtworkPending and lets the queue finish. It
+// does the same when a job was left for a server that can see its library
+// root. While metadata.cache_images is off it does nothing.
 func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetContentID string) error {
 	if !p.ArtworkCachingEnabled() {
 		return nil
@@ -373,17 +370,36 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	poll := immediateImageCacheMinPoll
 	deadline := time.Now().Add(idleTimeout)
 	failed := 0
+	pending := false
 	for {
+		// Re-read each round: once caching is turned off, jobs must not be
+		// claimed only to be handed straight back.
+		if !p.enabled.Load() {
+			return nil
+		}
+		claimStarted := time.Now()
 		jobs, err := store.claimDueForTarget(ctx, workerID, targetContentID, immediateImageCacheClaimLimit)
 		if err != nil {
 			return err
 		}
 		if len(jobs) > 0 {
-			stats := p.processClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency)
+			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, claimStarted, true)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// Failures are collected rather than returned: the remaining
 			// artwork still gets cached, and a failed job carries its own
-			// backoff so it is not reclaimed by the loop below.
+			// backoff so it is not reclaimed by the loop below. A deferred
+			// job waits for a server that can see its library root; the
+			// check after the loop finds it.
 			failed += stats.Failed
+			// A page that went back to the queue unstarted (no worker or
+			// budget slot in time) leaves the rest to the background drain
+			// rather than claiming it again.
+			if stats.Processed() == 0 {
+				pending = true
+				break
+			}
 			poll = immediateImageCacheMinPoll
 			deadline = time.Now().Add(idleTimeout)
 			continue
@@ -411,13 +427,38 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 		}
 		poll = min(2*poll, immediateImageCacheMaxPoll)
 	}
-	if failed > 0 {
+	// A target job left for a server with its storage mounted, by this call
+	// or another worker, keeps the artwork pending while it still waits; one
+	// such a server has copied since does not.
+	if !pending {
+		waiting, err := store.targetHasDeferredLocalJobs(ctx, targetContentID)
+		if err != nil {
+			return err
+		}
+		pending = waiting
+	}
+	switch {
+	case failed > 0 && pending:
+		return fmt.Errorf("%d refreshed artwork image(s) failed to cache, and %w", failed, ErrTargetArtworkPending)
+	case failed > 0:
 		return fmt.Errorf("%d refreshed artwork image(s) failed to cache", failed)
+	case pending:
+		return ErrTargetArtworkPending
 	}
 	return nil
 }
 
-func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int) ImageCacheRunStats {
+// processClaimedJobs processes claimed jobs with up to concurrency at once,
+// each also holding a slot of the process's artwork budget, which drains,
+// manual refreshes and discovery copies share (see imageWorkBudget).
+// claimStarted is when the claim that returned jobs began.
+func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, claimStarted time.Time) ImageCacheRunStats {
+	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, claimStarted, false)
+}
+
+// runClaimedJobs is processClaimedJobs for a manual refresh when interactive
+// is set: its jobs wait for budget slots ahead of background work.
+func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, claimStarted time.Time, interactive bool) ImageCacheRunStats {
 	stats := ImageCacheRunStats{Claimed: len(jobs)}
 	if len(jobs) == 0 {
 		return stats
@@ -430,13 +471,24 @@ func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID s
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var unstarted []int64
+	leaveFrom := func(i int) {
+		for _, rem := range jobs[i:] {
+			unstarted = append(unstarted, rem.ID)
+		}
+	}
+	// A job waiting for a worker or the shared budget must start early enough
+	// to finish inside its lease; past that, another server could recover it
+	// as abandoned and run it twice. Jobs not started by then go back to the
+	// queue.
+	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart(claimStarted))
+	defer cancelStart()
 loop:
 	for i, job := range jobs {
+		// Disabling caching mid-run stops jobs from starting (see
+		// SetEnabled).
 		if !p.enabled.Load() {
-			for _, rem := range jobs[i:] {
-				unstarted = append(unstarted, rem.ID)
-			}
-			break loop
+			unstarted = append(unstarted, job.ID)
+			continue
 		}
 		// Acquire the semaphore before spawning so cancellation is observed here
 		// rather than inside a goroutine that already holds a claimed job. Jobs we
@@ -444,23 +496,32 @@ loop:
 		// lease expires.
 		select {
 		case sem <- struct{}{}:
-		case <-ctx.Done():
-			for _, rem := range jobs[i:] {
-				unstarted = append(unstarted, rem.ID)
-			}
+		case <-startCtx.Done():
+			leaveFrom(i)
+			break loop
+		}
+		release, err := p.workBudget.acquireFor(startCtx, interactive)
+		// A free slot can still be taken after the deadline passed.
+		if err == nil && startCtx.Err() != nil {
+			release()
+			err = startCtx.Err()
+		}
+		if err != nil {
+			<-sem
+			leaveFrom(i)
 			break loop
 		}
 		if !p.enabled.Load() {
+			release()
 			<-sem
-			for _, rem := range jobs[i:] {
-				unstarted = append(unstarted, rem.ID)
-			}
-			break loop
+			unstarted = append(unstarted, job.ID)
+			continue
 		}
 		wg.Add(1)
 		go func(job *models.MetadataImageCacheJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer release()
 			jobCtx, cancelJob := context.WithTimeout(ctx, ImageCacheJobTimeout)
 			result := p.processOne(jobCtx, job)
 			cancelJob()
@@ -470,6 +531,9 @@ loop:
 				stats.Succeeded++
 			case "skipped":
 				stats.Skipped++
+			case imageCacheOutcomeDeferred:
+				stats.Skipped++
+				stats.Deferred++
 			default:
 				stats.Failed++
 			}
@@ -620,13 +684,16 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	if p.jobs == nil || p.cacher == nil {
 		return total, nil
 	}
-	if !p.enabled.Load() {
-		if discover {
-			return total, ErrImageCachingDisabled
-		}
-		return total, nil
+	// With caching off the provider-artwork backfill does not run, and
+	// draining claims nothing (RunOnce).
+	if discover && !p.enabled.Load() {
+		return total, ErrImageCachingDisabled
 	}
-	total.Backlog = p.sampleBacklog(ctx)
+	// The backlog counts every queued job; with caching off this run touches
+	// none of them, so it reports no denominator.
+	if p.enabled.Load() {
+		total.Backlog = p.sampleBacklog(ctx)
+	}
 	reportImageCacheRunProgress(reportProgress, total)
 
 	// A positive runtime bounds scheduled draining; zero or negative means the
@@ -645,11 +712,8 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		if !p.enabled.Load() {
-			if discover {
-				return total, ErrImageCachingDisabled
-			}
-			return total, nil
+		if discover && !p.enabled.Load() {
+			return total, ErrImageCachingDisabled
 		}
 		if limited && !time.Now().Before(deadline) {
 			total.RuntimeLimited = true
@@ -666,11 +730,8 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 		// SetEnabled may change while a claimed batch is in flight. Re-check
 		// before looping or discovering so disabling caching cannot turn an
 		// unbounded manual backfill into a rapid enqueue-only catalog sweep.
-		if !p.enabled.Load() {
-			if discover {
-				return total, ErrImageCachingDisabled
-			}
-			return total, nil
+		if discover && !p.enabled.Load() {
+			return total, ErrImageCachingDisabled
 		}
 		if stats.Claimed > 0 {
 			// Keep draining the queue before spending a full-table sweep.
@@ -812,11 +873,14 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		return imageCacheProcessResult{outcome: "skipped"}
 	}
 
-	if isLocalImageSourcePath(job.SourcePath) {
+	downloadURL := job.SourcePath
+	if url, ok := localMetadataImageURL(job.SourcePath); ok {
+		// An image URL an NFO names downloads like a provider's, through the
+		// cacher's public-address guard.
+		downloadURL = url
+	} else if isLocalImageSourcePath(job.SourcePath) {
 		return p.processLocalOne(ctx, job, imageType)
 	}
-
-	downloadURL := job.SourcePath
 	if isProviderImagePath(downloadURL) {
 		if p.resolver == nil {
 			p.markFailed(ctx, job, "missing image resolver")
@@ -886,6 +950,15 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 			return false, errors.New("missing item updater")
 		}
 		return p.targets.Items.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
+	case ImageCacheTargetItemBackdrop:
+		if p.targets.ItemBackdrops == nil {
+			return false, errors.New("missing item backdrop updater")
+		}
+		rowID, parseErr := strconv.ParseInt(job.TargetContentID, 10, 64)
+		if parseErr != nil {
+			return false, fmt.Errorf("invalid item backdrop image cache target %q: %w", job.TargetContentID, parseErr)
+		}
+		return p.targets.ItemBackdrops.UpdateArtworkIfSourceMatches(ctx, rowID, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetItemLocalization:
 		if p.targets.ItemLocalizations == nil {
 			return false, errors.New("missing item localization updater")
@@ -895,7 +968,7 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 		if p.targets.Seasons == nil {
 			return false, errors.New("missing season updater")
 		}
-		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, thumbhash)
+		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			return false, errors.New("missing season localization updater")
@@ -938,7 +1011,10 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	localPath := filepath.Clean(strings.TrimSpace(job.SourcePath)[len("file://"):])
+	// The source carries a size+mtime fingerprint that only exists to change
+	// the source path when the file is replaced; confinement and the read use
+	// the bare path.
+	localPath, _ := localImageSourceFilePath(job.SourcePath)
 	rootsContentID := firstNonEmpty(job.SeriesID, job.TargetContentID)
 	roots, err := p.libraryRoots.LibraryRootsForContent(ctx, rootsContentID)
 	if err != nil {
@@ -946,40 +1022,33 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 	if !localImagePathWithinRoots(localPath, roots) {
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
+		p.markFailed(ctx, job, localImageOutsideRootsError(localPath).Error())
 		return imageCacheProcessResult{outcome: "failed"}
 	}
-	// The lexical check above cannot see through symlinks. Resolve the path and
-	// roots and re-confine so an intermediate directory symlink planted inside a
-	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
-	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
-	// symlinked root still matches. This is a confinement GATE only: the read
-	// below still uses the logical path so readLocalImageFile's Lstat keeps
-	// rejecting a symlinked leaf. A not-yet-existent path (ErrNotExist) falls
-	// through to the reader, which classifies it as the stable "missing" failure.
-	if _, err := localImagePathResolvedWithinRoots(localPath, roots); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-
-	data, err := readLocalImageFile(localPath)
+	// readConfinedLocalImage re-confines the path through symlinks and reads it
+	// through an opened library root. A failure there first asks whether this
+	// server has the file's storage mounted at all; when it does not, the job
+	// waits for one that does (deferLocalJobWithoutStorage).
+	data, err := readConfinedLocalImage(localPath, roots)
 	if err != nil {
+		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
+			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
+		}
 		p.markFailed(ctx, job, err.Error())
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	// The target's current cached path drives the unchanged-skip (same hash →
-	// same key → nothing to sweep) and the stale-prefix cleanup below.
-	previousCachedPath := ""
-	if reader, ok := p.jobs.(imageCacheTargetCachedPathReader); ok {
-		previousCachedPath, err = reader.CurrentTargetCachedPath(ctx, job)
-		if err != nil {
-			p.logger.WarnContext(ctx, "metadata image cache: failed to read current cached path", "job_id", job.ID, "error", err)
-			previousCachedPath = ""
-		}
-	}
-
 	digest := sha256.Sum256(data)
+	discriminator := hex.EncodeToString(digest[:4])
+	if job.TargetType == ImageCacheTargetItemBackdrop {
+		// An item's backdrops share its key folder, and two sidecars can hold
+		// the same bytes. A hash of the sidecar's own path keeps each file's
+		// key apart from the primary's and every other file's, so each copy is
+		// replaced and retired on its own, even after rows shift. A backdrop
+		// that moves to another row keeps its key.
+		pathDigest := sha256.Sum256([]byte(localPath))
+		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
+	}
 	result, err := byteCacher.CacheImageBytes(ctx, data, CacheImageRequest{
 		SourceURL:        job.SourcePath,
 		ProviderID:       imageCacheLocalProviderID,
@@ -989,7 +1058,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		SeasonNumber:     job.SeasonNumber,
 		EpisodeNumber:    job.EpisodeNumber,
 		Language:         job.TargetLanguage,
-		KeyDiscriminator: hex.EncodeToString(digest[:4]),
+		KeyDiscriminator: discriminator,
 	})
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
@@ -1009,62 +1078,155 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		processResult.outcome = "failed"
 		return processResult
 	}
+	// The target update displaces the previous copy, and the displacement
+	// trigger hands it to the artwork revision GC, which deletes it only once
+	// nothing references it. Deleting it here would break an admin pick of
+	// the same bytes, which shares this key, published since the update.
 	p.finishJobWithTargetUpdate(ctx, job, cachedPath, result.Thumbhash, &processResult)
-	if processResult.outcome == "succeeded" {
-		p.deleteStaleLocalPrefix(ctx, previousCachedPath, cachedPath)
-	}
 	return processResult
 }
 
-// deleteStaleLocalPrefix removes the previous hashed local/ image prefix
-// after a re-cache stored the artwork under a different key.
-func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previousCachedPath, cachedPath string) {
-	previousCachedPath = strings.TrimSpace(previousCachedPath)
-	if p.prefixDeleter == nil ||
-		previousCachedPath == "" ||
-		previousCachedPath == cachedPath ||
-		!strings.HasPrefix(previousCachedPath, "local/") {
-		return
+// readConfinedLocalImage reads the sidecar image at localPath (a cleaned
+// logical path, without the file:// scheme or fingerprint) after confining it
+// to roots. Its error texts are the stable local failures
+// isStableProviderImageFailure matches.
+func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
+	if !localImagePathWithinRoots(localPath, roots) {
+		return nil, localImageOutsideRootsError(localPath)
 	}
-	lastSlash := strings.LastIndex(previousCachedPath, "/")
-	if lastSlash <= 0 {
-		return
+	// Open every library root before resolving anything. All reads go through
+	// one of these handles, so a root or an intermediate directory replaced
+	// after this point cannot redirect the read outside the library.
+	opened := openLibraryRoots(roots)
+	defer closeLibraryRoots(opened)
+	// The lexical check above cannot see through symlinks. Resolve the path and
+	// roots and re-confine so an intermediate directory symlink planted inside a
+	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
+	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
+	// symlinked root still matches. A not-yet-existent path (ErrNotExist) is the
+	// stable "missing" failure.
+	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(localPath, roots)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("local image missing: %s", localPath)
 	}
-	prefix := previousCachedPath[:lastSlash+1]
-	if strings.HasPrefix(cachedPath, prefix) {
-		return
+	if err != nil {
+		return nil, localImageOutsideRootsError(localPath)
 	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
-		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
+	// The resolved root must be one of the directories opened above; a root
+	// replaced in between resolves somewhere else and is refused.
+	root, err := openedLibraryRootFor(opened, resolvedRoot)
+	if err != nil {
+		// A root that could not be opened or stat'ed is a read failure, not a
+		// path outside the library: keep it off the stable-failure texts so a
+		// transient error (EMFILE, EIO, a mount hiccup) is retried normally.
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, fmt.Errorf("local image forbidden: %s", localPath)
+		}
+		return nil, fmt.Errorf("local image read failed: library root: %w", err)
 	}
+	rel, relErr := filepath.Rel(resolvedRoot, resolvedPath)
+	if root == nil || relErr != nil || !filepath.IsLocal(rel) {
+		return nil, localImageOutsideRootsError(localPath)
+	}
+	return readLocalImageFile(localPath, root, rel)
+}
+
+// openedLibraryRoot is a library root opened before the image path is
+// resolved, or the error that kept it from opening.
+type openedLibraryRoot struct {
+	path   string
+	handle *os.Root
+	err    error
+}
+
+// openLibraryRoots opens each library root that exists as an os.Root. A root
+// that exists but fails to open keeps its error.
+func openLibraryRoots(roots []string) []openedLibraryRoot {
+	opened := make([]openedLibraryRoot, 0, len(roots))
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." || !filepath.IsAbs(root) {
+			continue
+		}
+		handle, err := os.OpenRoot(root)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		opened = append(opened, openedLibraryRoot{path: root, handle: handle, err: err})
+	}
+	return opened
+}
+
+func closeLibraryRoots(opened []openedLibraryRoot) {
+	for _, root := range opened {
+		if root.handle != nil {
+			_ = root.handle.Close()
+		}
+	}
+}
+
+// openedLibraryRootFor returns the opened root that is the same directory as
+// resolvedRoot. It returns nil and no error when no opened root is that
+// directory, which means the path left the library. An error means the
+// matching root failed to open, or a directory could not be stat'ed, so
+// nothing is known about confinement.
+func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
+	current, err := fspath.Stat(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	var failure error
+	for _, root := range opened {
+		if root.handle == nil {
+			if info, err := fspath.Stat(root.path); err == nil && fspath.SameFile(info, current) && failure == nil {
+				failure = root.err
+			}
+			continue
+		}
+		info, err := root.handle.Stat(".")
+		if err != nil {
+			failure = cmp.Or(failure, err)
+			continue
+		}
+		if fspath.SameFile(info, current) {
+			return root.handle, nil
+		}
+	}
+	return nil, failure
 }
 
 // errLocalImageOutsideRoots is returned by localImagePathResolvedWithinRoots
 // when a fully symlink-resolved path escapes every resolved library root.
 var errLocalImageOutsideRoots = errors.New("local image path outside library roots")
 
+// localImageOutsideRootsError is the stable failure text for a path outside
+// the library roots, which isStableProviderImageFailure matches.
+func localImageOutsideRootsError(path string) error {
+	return errors.New(errLocalImageOutsideRoots.Error() + ": " + path)
+}
+
 // localImagePathResolvedWithinRoots resolves symlinks on both the path and the
-// library roots and returns the real path when it stays within a real root.
+// library roots and returns the real path and the real root containing it.
 // This closes the gap the lexical check leaves open — an intermediate directory
 // symlink planted inside a root that points outside it. Resolving both sides
 // keeps a legitimately symlinked root valid. A path that does not exist yet
 // surfaces as fs.ErrNotExist for the caller to treat as a stable "missing"
 // failure via the reader; any other resolution failure fails closed.
-func localImagePathResolvedWithinRoots(path string, roots []string) (string, error) {
-	resolvedPath, err := filepath.EvalSymlinks(path)
+func localImagePathResolvedWithinRoots(path string, roots []string) (string, string, error) {
+	resolvedPath, err := fspath.EvalSymlinks(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, root := range roots {
-		resolvedRoot, err := filepath.EvalSymlinks(strings.TrimSpace(root))
+		resolvedRoot, err := fspath.EvalSymlinks(strings.TrimSpace(root))
 		if err != nil {
 			continue
 		}
 		if localImagePathWithinRoots(resolvedPath, []string{resolvedRoot}) {
-			return resolvedPath, nil
+			return resolvedPath, resolvedRoot, nil
 		}
 	}
-	return "", errLocalImageOutsideRoots
+	return "", "", errLocalImageOutsideRoots
 }
 
 // localImagePathWithinRoots confines path (already cleaned, logical) to the
@@ -1092,11 +1254,13 @@ func localImagePathWithinRoots(path string, roots []string) bool {
 	return false
 }
 
-// readLocalImageFile reads a sidecar image with the same guards as discovery:
-// Lstat rejects symlinked leaves and non-regular files, the opened handle is
-// fstat-re-checked, and reads cap at maxLocalImageSourceBytes. ENOENT/EPERM
-// map to the stable-failure texts matched by isStableProviderImageFailure.
-func readLocalImageFile(path string) ([]byte, error) {
+// readLocalImageFile reads rel inside root with the same guards as discovery.
+// path is the logical path, used for the leaf check and in error texts: Lstat
+// on it rejects symlinked leaves and non-regular files, the handle opened
+// through root is fstat-re-checked against it, and reads cap at
+// MaxArtworkSourceBytes. ENOENT/EPERM map to the stable-failure texts
+// matched by isStableProviderImageFailure.
+func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) {
 	classify := func(err error) error {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -1107,17 +1271,20 @@ func readLocalImageFile(path string) ([]byte, error) {
 			return fmt.Errorf("local image read failed: %w", err)
 		}
 	}
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return nil, classify(err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if info.Size() > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if info.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
-	file, err := os.Open(path)
+	// Open through the root handle: it refuses any path that leaves the root,
+	// including through a directory swapped for a symlink after resolution,
+	// so confinement holds at the open itself.
+	file, err := root.Open(fspath.Decode(rel))
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1126,25 +1293,23 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, classify(err)
 	}
-	// Close the symlink-swap window: os.Open follows symlinks, so a leaf swapped
-	// to a symlink between the Lstat above and this Open would be followed to its
-	// target. Reject unless the opened handle is the exact file Lstat inspected,
-	// so an out-of-root target can never be pulled into the public cache.
-	if !os.SameFile(info, stat) {
+	// Reject unless the opened handle is the exact file the Lstat above
+	// inspected, so a leaf swapped between the two cannot be read instead.
+	if !fspath.SameFile(info, stat) {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if stat.Size() > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if stat.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxLocalImageSourceBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, MaxArtworkSourceBytes+1))
 	if err != nil {
 		return nil, classify(err)
 	}
-	if len(data) > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if len(data) > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("local image read failed: empty file %s", path)
@@ -1164,7 +1329,25 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 		return ImageStill, nil
 	case ImageCacheImageProfile:
 		return ImageProfile, nil
+	case ImageCacheImageBanner:
+		return ImageBanner, nil
+	case ImageCacheImageThumb:
+		return ImageThumb, nil
+	case ImageCacheImageClearArt:
+		return ImageClearArt, nil
+	case ImageCacheImageDisc:
+		return ImageDisc, nil
 	default:
 		return ImagePoster, fmt.Errorf("unknown metadata image cache image type %q", value)
 	}
+}
+
+// latestImageCacheJobStart is the latest time a job of a page whose claim
+// began at claimStarted can start and still finish, within
+// ImageCacheJobTimeout, before its lease runs out. The lease starts during
+// the claim, so counting from the claim's start on this server's clock keeps
+// the job inside it without comparing that clock with the database's
+// locked_at.
+func latestImageCacheJobStart(claimStarted time.Time) time.Time {
+	return claimStarted.Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
 }

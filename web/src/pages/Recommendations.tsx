@@ -9,6 +9,19 @@ import { Sparkles, RefreshCw } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
+/** Rows built from the profile's own history; the others are shared rows. */
+const PERSONAL_ROW_TYPES = new Set(["cluster", "similar_users_liked"]);
+
+/**
+ * The page's subtitle. A profile with no personal row yet sees the default
+ * rows, so it is not told they come from its history.
+ */
+function pageSubtitle(rows: DiscoverRow[]): string {
+  return rows.some((row) => PERSONAL_ROW_TYPES.has(row.type))
+    ? "Personalized picks based on your viewing history and ratings."
+    : "Highly rated and recently added titles from your library. Watch and rate titles to personalize this page.";
+}
+
 function buildSectionHref(row: DiscoverRow): string | undefined {
   if (!row.section_kind) return undefined;
   const base = `/recommendations/section/${encodeURIComponent(row.section_kind)}`;
@@ -23,7 +36,6 @@ function TasteProfileCard({
     | {
         top_genres: string[];
         favorite_directors: string[];
-        signal_counts: Record<string, number>;
       }
     | undefined;
   isLoading: boolean;
@@ -41,18 +53,9 @@ function TasteProfileCard({
     return null;
   }
 
-  const totalSignals = Object.values(profile.signal_counts).reduce((a, b) => a + b, 0);
-
   return (
     <div className="glass-subtle space-y-4 rounded-xl p-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Your Taste Profile</h2>
-        {totalSignals > 0 && (
-          <span className="text-muted-foreground text-xs">
-            {totalSignals} signal{totalSignals !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
+      <h2 className="text-base font-semibold">Your Taste Profile</h2>
 
       {profile.top_genres.length > 0 && (
         <div className="space-y-1.5">
@@ -98,9 +101,9 @@ function DiscoverEmptyState() {
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <Sparkles className="text-muted-foreground/50 h-10 w-10" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">Not enough data yet</p>
+        <p className="text-sm font-medium">Nothing to show yet</p>
         <p className="text-muted-foreground max-w-sm text-xs">
-          Watch and rate more content to unlock personalized recommendations.
+          Movies and series appear here once your libraries have titles you can watch.
         </p>
       </div>
     </div>
@@ -167,9 +170,9 @@ export default function Recommendations() {
             <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
               For You
             </h1>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Personalized picks based on your viewing history and ratings.
-            </p>
+            {rows.length > 0 && (
+              <p className="text-muted-foreground mt-1 text-sm">{pageSubtitle(rows)}</p>
+            )}
           </div>
           <TasteProfileCard
             profile={tasteProfileQuery.data}

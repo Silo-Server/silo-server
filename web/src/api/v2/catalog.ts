@@ -75,6 +75,8 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     position_seconds: item.position_seconds,
     duration_seconds: item.duration_seconds,
     progress_updated_at: item.progress_updated_at,
+    poster_is_episode_still: item.poster_is_episode_still,
+    backdrop_is_episode_still: item.backdrop_is_episode_still,
     poster_url: item.poster_url ?? "",
     poster_thumbhash: item.poster_thumbhash ?? "",
     backdrop_url: item.backdrop_url ?? "",
@@ -95,6 +97,9 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
       : undefined,
     manga_chapter_count: item.manga_chapter_count,
     manga_volume_count: item.manga_volume_count,
+    pending_translation_language: item.pending_translation_language,
+    machine_translated_fields: item.machine_translated_fields,
+    ...(item.box_set ? { box_set: item.box_set } : {}),
   };
 }
 
@@ -271,6 +276,7 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     overview: item.overview ?? "",
     tagline: item.tagline,
     pending_translation_language: item.pending_translation_language,
+    machine_translated_fields: item.machine_translated_fields,
     runtime: item.runtime ?? 0,
     content_rating: item.content_rating ?? "",
     advisory_age: item.advisory_age ?? null,
@@ -296,6 +302,8 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     last_air_date: item.last_air_date ?? null,
     air_time: item.air_time ?? null,
     air_timezone: item.air_timezone ?? null,
+    poster_is_episode_still: item.poster_is_episode_still,
+    backdrop_is_episode_still: item.backdrop_is_episode_still,
     poster_url: item.poster_url ?? "",
     poster_thumbhash: item.poster_thumbhash ?? "",
     backdrop_url: item.backdrop_url ?? "",
@@ -361,11 +369,14 @@ export function episodeFromV2(episode: EpisodeV2): EpisodeListItem {
     imdb_id: episode.imdb_id,
     tmdb_id: episode.tmdb_id,
     tvdb_id: episode.tvdb_id,
+    still_is_episode_still: episode.still_is_episode_still,
     still_url: episode.still_url ?? "",
     still_thumbhash: episode.still_thumbhash ?? "",
     user_data: episode.user_data ? watchRollupFromV2(episode.user_data) : undefined,
     files: (episode.files ?? []).map(episodeFileFromV2),
     overlay_summary: episode.overlay_summary,
+    machine_translated_fields: episode.machine_translated_fields,
+    pending_translation_language: episode.pending_translation_language,
   };
 }
 
@@ -382,6 +393,7 @@ export function seasonFromV2(season: SeasonV2): Season {
     poster_url: season.poster_url ?? "",
     poster_thumbhash: season.poster_thumbhash ?? "",
     user_data: season.user_data ? watchRollupFromV2(season.user_data) : undefined,
+    machine_translated_fields: season.machine_translated_fields,
   };
 }
 

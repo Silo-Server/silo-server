@@ -131,6 +131,18 @@ func (r *ArtifactRepository) ResumePreparations(ctx context.Context, ids []strin
 // preparing and fails the downloads still waiting on them with errMsg, in one
 // transaction. It returns the deleted jobs and the downloads it failed.
 func (r *ArtifactRepository) CancelPreparations(ctx context.Context, ids []string, errMsg string) ([]stoppedArtifact, []*Download, error) {
+	return r.cancelPreparations(ctx, ids, errMsg, "")
+}
+
+// CancelAbandonedPreparations is CancelPreparations for jobs no live download
+// refers to any more. The check runs in the statement that deletes the job,
+// so a download that linked the job since the caller looked keeps it.
+func (r *ArtifactRepository) CancelAbandonedPreparations(ctx context.Context, ids []string, errMsg string) ([]stoppedArtifact, []*Download, error) {
+	return r.cancelPreparations(ctx, ids, errMsg,
+		` AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = download_artifacts.id AND `+liveLinkPredicate+`)`)
+}
+
+func (r *ArtifactRepository) cancelPreparations(ctx context.Context, ids []string, errMsg, filter string) ([]stoppedArtifact, []*Download, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("beginning preparation cancel: %w", err)
@@ -140,7 +152,7 @@ func (r *ArtifactRepository) CancelPreparations(ctx context.Context, ids []strin
 		`WITH target AS (
 		     SELECT id, status IN `+runningArtifactStatuses+` AS running
 		     FROM download_artifacts
-		     WHERE id = ANY($1) AND status NOT IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')
+		     WHERE id = ANY($1) AND `+preparingArtifactPredicate+filter+`
 		     FOR UPDATE
 		 )
 		 DELETE FROM download_artifacts a USING target t
@@ -198,7 +210,7 @@ func scanStoppedArtifacts(rows pgx.Rows) ([]stoppedArtifact, error) {
 func (r *ArtifactRepository) failedPreparations(ctx context.Context, ids []string) (map[string]bool, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, status = 'failed' FROM download_artifacts
-		 WHERE id = ANY($1) AND status NOT IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')`, ids)
+		 WHERE id = ANY($1) AND `+preparingArtifactPredicate, ids)
 	if err != nil {
 		return nil, fmt.Errorf("reading preparation states: %w", err)
 	}
@@ -365,8 +377,16 @@ func (m *ArtifactManager) ResumePreparations(ctx context.Context, ids []string) 
 // CancelPreparations deletes the listed jobs, stops their running attempts,
 // and fails the downloads waiting on them.
 func (m *ArtifactManager) CancelPreparations(ctx context.Context, ids []string) ([]PreparationResult, error) {
+	return m.cancelPreparations(ctx, ids, m.repo.CancelPreparations)
+}
+
+func (m *ArtifactManager) cancelPreparations(
+	ctx context.Context,
+	ids []string,
+	cancel func(context.Context, []string, string) ([]stoppedArtifact, []*Download, error),
+) ([]PreparationResult, error) {
 	ids = uniqueIDs(ids)
-	canceled, failed, err := m.repo.CancelPreparations(ctx, ids, PreparationCanceledMessage)
+	canceled, failed, err := cancel(ctx, ids, PreparationCanceledMessage)
 	if err != nil {
 		return nil, err
 	}

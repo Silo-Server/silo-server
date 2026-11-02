@@ -75,18 +75,14 @@ export function BrandingAssetField({
           )}
         </div>
         {showingDefault && (
-          <span className="text-muted-foreground text-[10px] leading-none">
-            {spec.emptyCaption}
-          </span>
+          <span className="text-muted-foreground text-xs leading-none">{spec.emptyCaption}</span>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{label}</p>
         {description && <p className="text-muted-foreground mt-0.5 text-xs">{description}</p>}
-        <p className="text-muted-foreground/80 mt-0.5 text-[11px] leading-relaxed">
-          {spec.guidance}
-        </p>
+        <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.guidance}</p>
       </div>
 
       <input

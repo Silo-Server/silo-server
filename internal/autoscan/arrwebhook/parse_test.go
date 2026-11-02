@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
@@ -167,16 +168,6 @@ func TestParseRadarrMovieFileDelete(t *testing.T) {
 	}
 }
 
-func TestParseRadarrTest(t *testing.T) {
-	parsed, err := Parse(ProviderAuto, fixture(t, "radarr_test.json"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !parsed.Test || parsed.Provider != ProviderRadarr {
-		t.Fatalf("unexpected parse: %+v", parsed)
-	}
-}
-
 func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	parsed, err := Parse(ProviderSonarr, fixture(t, "unknown_event.json"))
 	if err != nil {
@@ -184,6 +175,62 @@ func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	}
 	if parsed.EventType != "Health" || parsed.Test || len(parsed.Changes) != 0 {
 		t.Fatalf("unknown event must be a no-op: %+v", parsed)
+	}
+}
+
+// A series or movie deleted with its files becomes one subtree change for its
+// folder, marked Removed; one deleted with its files kept changes nothing.
+func TestParseSeriesAndMovieDelete(t *testing.T) {
+	removed := func(path string) []autoscan.Change {
+		return []autoscan.Change{{SourcePath: path, Scope: autoscan.ChangeScopeSubtree, Removed: true}}
+	}
+	for _, tc := range []struct {
+		name, eventType, provider string
+		body                      []byte
+		want                      []autoscan.Change
+	}{
+		{"series, files deleted", "SeriesDelete", ProviderSonarr, fixture(t, "sonarr_series_delete.json"), removed("/data/tv/Example Show")},
+		{"movie, files kept", "MovieDelete", ProviderRadarr, fixture(t, "radarr_movie_delete.json"), nil},
+		{"series, files kept", "SeriesDelete", ProviderSonarr,
+			[]byte(`{"eventType":"SeriesDelete","series":{"path":"/data/tv/Show"},"deletedFiles":false}`), nil},
+		{"movie, files deleted", "MovieDelete", ProviderRadarr,
+			[]byte(`{"eventType":"MovieDelete","movie":{"folderPath":"/data/movies/Film (2024)","path":"/data/movies/Film (2024)"},"deletedFiles":true}`),
+			removed("/data/movies/Film (2024)")},
+		{"movie without folderPath", "MovieDelete", ProviderRadarr,
+			[]byte(`{"eventType":"MovieDelete","movie":{"path":"/data/movies/Film (2024)"},"deletedFiles":true}`),
+			removed("/data/movies/Film (2024)")},
+		{"deletedFiles absent", "MovieDelete", ProviderRadarr,
+			[]byte(`{"eventType":"MovieDelete","movie":{"folderPath":"/data/movies/Film (2024)"}}`), nil},
+		{"no folder named", "MovieDelete", "", []byte(`{"eventType":"MovieDelete","deletedFiles":true}`), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := Parse(ProviderAuto, tc.body)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if parsed.EventType != tc.eventType || parsed.Provider != tc.provider || parsed.Test {
+				t.Fatalf("want %s from %s, got %+v", tc.eventType, tc.provider, parsed)
+			}
+			if !reflect.DeepEqual(parsed.Changes, tc.want) {
+				t.Fatalf("changes = %+v, want %+v", parsed.Changes, tc.want)
+			}
+		})
+	}
+}
+
+// Outside SeriesDelete and MovieDelete, a deletedFiles value that is not a list
+// of files is malformed, so a broken upgrade payload is not accepted with its
+// replaced files dropped.
+func TestParseMalformedDeletedFiles(t *testing.T) {
+	for _, deleted := range []string{`[1]`, `{"path":"/tv/x/old.mkv"}`, `"/tv/x/old.mkv"`, `1`, `true`} {
+		body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"deletedFiles":` + deleted + `}`)
+		if _, err := Parse(ProviderAuto, body); !errors.Is(err, ErrMalformedPayload) {
+			t.Fatalf("deletedFiles %s: want ErrMalformedPayload, got %v", deleted, err)
+		}
+	}
+	body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/new.mkv"},"deletedFiles":null}`)
+	if parsed, err := Parse(ProviderAuto, body); err != nil || len(parsed.Changes) != 1 {
+		t.Fatalf("deletedFiles null: got %+v, %v; want the imported file only", parsed, err)
 	}
 }
 

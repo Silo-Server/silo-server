@@ -1,21 +1,24 @@
 import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
-import { useWatchedStateMutation } from "@/hooks/queries/items";
 import { useDeleteRating, useSetRating } from "@/hooks/queries/ratings";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { getWatchedActionLabel } from "../watchedState";
+import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
+import { useDetailWatchedActions } from "./useDetailWatchedActions";
 
 type UserActionProps =
   | "isWatched"
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
+  | "onMarkUnwatched"
   | "onToggleFavorite"
   | "isFavorite"
   | "onToggleWatchlist"
   | "inWatchlist"
+  | "onToggleNotInterested"
+  | "notInterested"
   | "rating"
   | "onRatingChange";
 
@@ -31,16 +34,13 @@ interface MediaUserActionBarProps extends Omit<ActionBarProps, UserActionProps> 
 export default function MediaUserActionBar({ item, ...props }: MediaUserActionBarProps) {
   const isFavorite = item.user_state?.is_favorite ?? false;
   const inWatchlist = item.user_state?.in_watchlist ?? false;
-  const { mutate: toggleWatched, isPending: isUpdatingWatched } = useWatchedStateMutation(item);
+  const notInterested = item.user_state?.not_interested ?? false;
+  const watchedActions = useDetailWatchedActions(item);
   const { mutate: toggleFavorite } = useToggleFavorite(item.content_id);
   const { mutate: toggleWatchlist } = useToggleWatchlist(item.content_id);
+  const { mutate: toggleNotInterested } = useToggleNotInterested(item.content_id);
   const { mutate: setRating } = useSetRating(item.content_id);
   const { mutate: deleteRating } = useDeleteRating(item.content_id);
-
-  const handleToggleWatched = useCallback(
-    () => toggleWatched(!(item.user_data?.played ?? false)),
-    [item.user_data?.played, toggleWatched],
-  );
   const handleToggleFavorite = useCallback(
     () => toggleFavorite(isFavorite),
     [isFavorite, toggleFavorite],
@@ -48,6 +48,10 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   const handleToggleWatchlist = useCallback(
     () => toggleWatchlist(inWatchlist),
     [inWatchlist, toggleWatchlist],
+  );
+  const handleToggleNotInterested = useCallback(
+    () => toggleNotInterested(notInterested),
+    [notInterested, toggleNotInterested],
   );
   const handleRatingChange = useCallback(
     (rating: number | null) => {
@@ -63,15 +67,16 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   return (
     <ActionBar
       {...props}
+      {...watchedActions}
       itemTitle={item.title}
-      watchedLabel={getWatchedActionLabel(item)}
-      isWatched={item.user_data?.played ?? false}
-      onToggleWatched={handleToggleWatched}
-      isUpdatingWatched={isUpdatingWatched}
       onToggleFavorite={handleToggleFavorite}
       isFavorite={isFavorite}
       onToggleWatchlist={handleToggleWatchlist}
       inWatchlist={inWatchlist}
+      onToggleNotInterested={
+        canMarkNotInterested(item.type) && item.user_state ? handleToggleNotInterested : undefined
+      }
+      notInterested={notInterested}
       rating={item.user_rating ?? null}
       onRatingChange={handleRatingChange}
     />

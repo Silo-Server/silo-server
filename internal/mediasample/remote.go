@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
@@ -88,7 +90,7 @@ type RemoteClient struct {
 }
 
 // Run sends req to the node route at endpoint (the node URL joined with
-// RemotePath) with the node bearer secret. A failure is a *RemoteError.
+// RemotePath), signed with the node secret. A failure is a *RemoteError.
 func (c RemoteClient) Run(ctx context.Context, endpoint, secret string, req Request) (Result, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -99,7 +101,9 @@ func (c RemoteClient) Run(ctx context.Context, endpoint, secret string, req Requ
 		return Result{}, &RemoteError{Reason: ReasonNodeUnavailable, Err: err}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+secret)
+	if err := nodeauth.Sign(httpReq, strings.TrimSuffix(endpoint, RemotePath), secret); err != nil {
+		return Result{}, &RemoteError{Reason: ReasonNodeUnavailable, Err: err}
+	}
 	resp, err := telemetry.DoTrustedNode(c.HTTP, httpReq, "media_sample")
 	if err != nil {
 		reason := ReasonNodeUnavailable

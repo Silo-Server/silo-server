@@ -271,6 +271,9 @@ func (r *Runner) runNext() {
 	}
 	if job.CancelRequested {
 		message := "Library metadata refresh canceled"
+		if job.JobType == JobTypeImageCacheCleanup {
+			message = QueuedImageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal)
+		}
 		if job.JobType == JobTypeStorageTransition {
 			message = "Storage transition canceled; verified copy checkpoints retained"
 			if recorder, ok := r.storageTransition.(storageTransitionCancellationRecorder); ok {
@@ -601,6 +604,30 @@ func (r *Runner) queueImageCacheCleanup(ctx context.Context, createdByUserID int
 	return cleanupJob
 }
 
+var (
+	errImageCacheCleanupCancelRequested = errors.New("image cache cleanup cancel requested")
+	errImageCacheCleanupClaimLost       = errors.New("image cache cleanup claim lost")
+)
+
+// QueuedImageCacheCleanupCanceledMessage is the message for a cleanup canceled
+// while queued, either before its first claim or between slices.
+func QueuedImageCacheCleanupCanceledMessage(current, total int) string {
+	if total > 0 && current >= total {
+		return imageCacheCleanupCanceledMessage(current, total)
+	}
+	return "Image cache cleanup canceled; cached images not yet deleted remain in storage"
+}
+
+// imageCacheCleanupCanceledMessage describes a canceled cleanup that stopped
+// before prefix next of total. A cancel seen only after the last prefix left
+// nothing behind, so it must not say that undeleted images remain.
+func imageCacheCleanupCanceledMessage(next, total int) string {
+	if next >= total {
+		return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total)
+	}
+	return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; cached images not yet deleted remain in storage", next, total)
+}
+
 func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	if r.imageCacheCleanup == nil {
 		r.failJob(job.ID, 0, 0, "Image cache cleanup failed", "image cache cleanup executor is not configured")
@@ -634,8 +661,48 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	if slice <= 0 {
 		slice = imageCacheCleanupSlice
 	}
-	ctx, cancel := context.WithTimeout(r.executionContext(), slice)
-	defer cancel()
+	sliceCtx, sliceCancel := context.WithTimeout(r.executionContext(), slice)
+	defer sliceCancel()
+	// A cancellation request or a lost claim stops the slice at once, not at
+	// its next claim: Execute checks ctx before every prefix, so no further
+	// prefix is deleted once either cause is set.
+	ctx, stop := context.WithCancelCause(sliceCtx)
+	defer stop(nil)
+	unregisterCancel := r.cancelRegistry.Register(job.ID, func() { stop(errImageCacheCleanupCancelRequested) })
+	defer unregisterCancel()
+	// pollCancel reports whether it stopped the slice.
+	pollCancel := func() bool {
+		cancelRequested, claimGeneration, err := r.repo.CancelState(ctx, job.ID)
+		switch {
+		case err != nil:
+			return false
+		case claimGeneration != job.ClaimGeneration:
+			stop(errImageCacheCleanupClaimLost)
+		case cancelRequested:
+			stop(errImageCacheCleanupCancelRequested)
+		default:
+			return false
+		}
+		return true
+	}
+	// A cancel that arrived after the claim but before Register found no
+	// callback to run, so check the flag once before deleting anything.
+	if !pollCancel() {
+		go func() {
+			ticker := time.NewTicker(r.heartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if pollCancel() {
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	heartbeatStop := make(chan struct{})
 	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
@@ -660,11 +727,43 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 
 	finishCtx, finishCancel := r.finalizeContext()
 	defer finishCancel()
+	cause := context.Cause(ctx)
+	if (err == nil && cause == nil) || errors.Is(cause, context.DeadlineExceeded) {
+		// A cancellation seen only after the last prefix would be recorded by
+		// Complete as canceled with an empty result, and one that arrived
+		// after the slice deadline would be requeued until the next claim.
+		// End the job here with its totals instead.
+		if cancelRequested, _, getErr := r.repo.CancelState(finishCtx, job.ID); getErr == nil && cancelRequested {
+			cause = errImageCacheCleanupCancelRequested
+		}
+	}
 	switch {
+	case errors.Is(cause, errImageCacheCleanupClaimLost):
+		slog.Warn("admin jobs: image cache cleanup claim lost; leaving the job to its new owner", "job_id", job.ID)
+	case errors.Is(cause, errImageCacheCleanupCancelRequested):
+		message := imageCacheCleanupCanceledMessage(next, total)
+		// One claim-fenced write records the totals and the canceled status
+		// together. If it fails the job stays running; stale recovery then
+		// reclaims it and the claim-time cancel ends it with the last
+		// checkpointed totals.
+		canceled, err := r.repo.CancelWithResult(finishCtx, job.ID, next, total, message, result, time.Now().UTC().Add(r.retention))
+		if err != nil {
+			slog.Warn("admin jobs: failed to record image cache cleanup cancellation", "job_id", job.ID, "error", err)
+			return
+		}
+		if r.observation != nil {
+			r.observation.Finish(canceled.Status)
+		}
+		if r.realtimeHub != nil {
+			if err := r.realtimeHub.PublishJob(finishCtx, notifications.TypeJobCancelled, canceled); err != nil {
+				slog.Warn("admin jobs: failed to publish job cancellation", "job_id", job.ID, "error", err)
+			}
+		}
 	case err == nil:
 		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 			ResultPayload:   result,
 			Message:         "Cached image cleanup completed",
+			CanceledMessage: imageCacheCleanupCanceledMessage(total, total),
 			ProgressCurrent: total,
 			ProgressTotal:   total,
 			ExpiresAt:       time.Now().UTC().Add(r.retention),
@@ -687,7 +786,10 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 				"prefix_index", next, "stalled_claims", result.StalledClaims)
 		}
 		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
-		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result); err != nil {
+		// A cancel that commits after the check above still ends the job here:
+		// Yield cancels a flagged row in the same write instead of requeueing it.
+		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result,
+			imageCacheCleanupCanceledMessage(next, total), time.Now().UTC().Add(r.retention)); err != nil {
 			slog.Warn("admin jobs: failed to yield image cache cleanup", "job_id", job.ID, "error", err)
 			return
 		}

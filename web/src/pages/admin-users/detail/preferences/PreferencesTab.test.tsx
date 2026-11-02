@@ -8,6 +8,7 @@ import type { AdminUser } from "@/api/types";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 import { PreferencesTab } from "./PreferencesTab";
+import { stubRadixDom } from "../adminUserTab.test-support";
 
 const mocks = vi.hoisted(() => ({
   settings: [] as unknown[],
@@ -57,21 +58,6 @@ const user = { id: 7, username: "taylor" } as AdminUser;
 const SUBTITLES = SETTING_KEYS.PLAYBACK_SUBTITLE_MODE;
 const RECAPS = SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP;
 
-class MockResizeObserver implements ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-function installPointerCaptureMocks() {
-  Object.defineProperties(Element.prototype, {
-    hasPointerCapture: { configurable: true, value: () => false },
-    setPointerCapture: { configurable: true, value: () => {} },
-    releasePointerCapture: { configurable: true, value: () => {} },
-    scrollIntoView: { configurable: true, value: () => {} },
-  });
-}
-
 function LocationProbe() {
   const location = useLocation();
   return <output data-testid="search">{location.search}</output>;
@@ -113,8 +99,7 @@ const shield = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal("ResizeObserver", MockResizeObserver);
-  installPointerCaptureMocks();
+  stubRadixDom();
   mocks.settings = [
     { key: SUBTITLES, scope: "profile", profile_id: "p1", value: "off" },
     { key: RECAPS, scope: "profile", profile_id: "p1", value: "true" },
@@ -192,20 +177,6 @@ describe("PreferencesTab levels", () => {
         libraryId: undefined,
         seriesId: undefined,
       },
-    });
-  });
-
-  it("offers the app default when a profile value is removed", async () => {
-    const u = userEvent.setup();
-    renderTab("?tab=preferences&level=profile.p1");
-    await u.click(screen.getByRole("button", { name: "Remove Subtitles" }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Go back to the app default?");
-    expect(dialog).toHaveTextContent("Subtitles goes back to the app default, Auto, for Main.");
-    await u.click(within(dialog).getByRole("button", { name: "Use app default" }));
-    expect(mocks.deleteMutate.mock.calls[0]?.[0]).toMatchObject({
-      key: SUBTITLES,
-      identity: { scope: "profile", profileId: "p1", deviceId: undefined },
     });
   });
 

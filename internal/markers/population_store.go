@@ -38,6 +38,7 @@ type PopulationStore interface {
 	Eligible(context.Context, int) (bool, error)
 	Claim(context.Context, int, string, string, string, bool) (FetchClaim, bool, error)
 	Complete(context.Context, FetchClaim, FetchCompletion) error
+	Release(context.Context, FetchClaim) error
 	Cooldown(context.Context, string, string, time.Time) error
 	Cached(context.Context, int, string) (map[string]Result, error)
 	CooldownEnd(context.Context, map[string]string) (time.Time, error)
@@ -113,6 +114,22 @@ func (s *DBPopulationStore) Complete(ctx context.Context, claim FetchClaim, resu
 		claim.FileID, claim.Provider, claim.Identity, claim.Token, result.Outcome, result.RetryAt, result.Error, payload, fetchedAt)
 	if err != nil {
 		return fmt.Errorf("complete marker fetch: %w", err)
+	}
+	return nil
+}
+
+// Release gives up a claim without recording an outcome, for a request its
+// caller abandoned. Failures, backoff, the last error and any cached result
+// stay as the claim found them. A claim for a new identity has already
+// dropped the old result, so that row becomes due now instead of waiting out
+// the old result's freshness with nothing cached.
+func (s *DBPopulationStore) Release(ctx context.Context, claim FetchClaim) error {
+	_, err := s.pool.Exec(ctx, `UPDATE marker_fetch_state SET lease_token=NULL,lease_until=NULL,
+		retry_at=CASE WHEN result IS NULL THEN LEAST(retry_at,now()) ELSE retry_at END
+		WHERE media_file_id=$1 AND provider=$2 AND identity_key=$3 AND lease_token=$4::uuid`,
+		claim.FileID, claim.Provider, claim.Identity, claim.Token)
+	if err != nil {
+		return fmt.Errorf("release marker fetch: %w", err)
 	}
 	return nil
 }

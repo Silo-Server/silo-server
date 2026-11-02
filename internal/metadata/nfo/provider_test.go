@@ -2,10 +2,8 @@ package nfo
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -18,31 +16,11 @@ func TestFindNFO_ExtensionlessFilePathUsesBasenameMatchedNFO(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "Blade Runner (1982)")
 	want := filepath.Join(dir, "Blade Runner (1982).nfo")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file) error = %v", err)
-	}
-	if err := os.WriteFile(want, []byte("<movie><title>File</title></movie>"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file.nfo) error = %v", err)
-	}
+	writeFile(t, filePath, "video")
+	writeFile(t, want, "<movie><title>File</title></movie>")
 
-	if got, _ := findNFO([]string{filePath}, ""); got != want {
-		t.Fatalf("findNFO(extensionless file path) = %q, want %q", got, want)
-	}
-}
-
-func TestNFOCandidatesForMissingDottedDirectoryPathIncludeDirectoryLevelSidecars(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join("/media/shows", "Mr. Robot")
-	got := nfoCandidatesForPath(path)
-
-	wantMovie := filepath.Join(path, "movie.nfo")
-	wantTV := filepath.Join(path, "tvshow.nfo")
-	if !slices.Contains(got, wantMovie) {
-		t.Fatalf("nfoCandidatesForPath(%q) missing %q in %#v", path, wantMovie, got)
-	}
-	if !slices.Contains(got, wantTV) {
-		t.Fatalf("nfoCandidatesForPath(%q) missing %q in %#v", path, wantTV, got)
+	if got, _, _ := NewProvider().newLookup(context.Background()).findItemNFO([]string{filePath}, nil, ""); got != want {
+		t.Fatalf("findItemNFO(extensionless file path) = %q, want %q", got, want)
 	}
 }
 
@@ -54,18 +32,15 @@ func TestGetMetadata_TVShowNFOBesideMovieFileDoesNotInject(t *testing.T) {
 
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "Home Movie (2021).mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file) error = %v", err)
-	}
+	writeFile(t, filePath, "video")
 	nfoXML := `<tvshow><title>Some Series</title><uniqueid type="tvdb">123</uniqueid></tvshow>`
-	if err := os.WriteFile(filepath.Join(dir, "tvshow.nfo"), []byte(nfoXML), 0o644); err != nil {
-		t.Fatalf("WriteFile(tvshow.nfo) error = %v", err)
-	}
+	writeFile(t, filepath.Join(dir, "tvshow.nfo"), nfoXML)
 
 	p := NewProvider()
 	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
-		ContentType: "movie",
-		FilePath:    filePath,
+		ContentType:               "movie",
+		FilePath:                  filePath,
+		PrimarySidecarSearchPaths: []string{dir},
 	})
 	if err != nil {
 		t.Fatalf("GetMetadata() error = %v", err)
@@ -75,73 +50,20 @@ func TestGetMetadata_TVShowNFOBesideMovieFileDoesNotInject(t *testing.T) {
 	}
 }
 
-// A stray movie.nfo in a series root must not shadow tvshow.nfo: findNFO
-// falls through to the next candidate on type mismatch.
-func TestFindNFO_StrayMovieNFOInSeriesRootFallsThroughToTVShow(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "movie.nfo"), []byte(`<movie><title>Stray</title></movie>`), 0o644); err != nil {
-		t.Fatalf("WriteFile(movie.nfo) error = %v", err)
-	}
-	want := filepath.Join(dir, "tvshow.nfo")
-	if err := os.WriteFile(want, []byte(`<tvshow><title>The Show</title></tvshow>`), 0o644); err != nil {
-		t.Fatalf("WriteFile(tvshow.nfo) error = %v", err)
-	}
-
-	got, parsed := findNFO([]string{dir}, "series")
-	if got != want {
-		t.Fatalf("findNFO(series root) = %q, want %q", got, want)
-	}
-	if parsed == nil || parsed.Title != "The Show" {
-		t.Fatalf("parsed = %#v, want tvshow content", parsed)
-	}
-}
-
-// A candidate that exists but fails to parse falls through to the next
-// candidate instead of masking a valid sidecar.
-func TestFindNFO_ParseFailureFallsThroughToNextCandidate(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	filePath := filepath.Join(dir, "Blade Runner (1982).mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "movie.nfo"), []byte("not xml at all"), 0o644); err != nil {
-		t.Fatalf("WriteFile(movie.nfo) error = %v", err)
-	}
-	want := filepath.Join(dir, "Blade Runner (1982).nfo")
-	if err := os.WriteFile(want, []byte(`<movie><title>Blade Runner</title></movie>`), 0o644); err != nil {
-		t.Fatalf("WriteFile(basename nfo) error = %v", err)
-	}
-
-	got, parsed := findNFO([]string{filePath}, "movie")
-	if got != want {
-		t.Fatalf("findNFO(parse-failure fallthrough) = %q, want %q", got, want)
-	}
-	if parsed == nil || parsed.Title != "Blade Runner" {
-		t.Fatalf("parsed = %#v, want valid movie content", parsed)
-	}
-}
-
 // GetMetadata surfaces the full Phase-B field set from a curated movie NFO.
 func TestGetMetadata_FullMovieFieldSet(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "Blade Runner (1982).mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "movie.nfo"), []byte(fullMovieNFO), 0o644); err != nil {
-		t.Fatalf("WriteFile(movie.nfo) error = %v", err)
-	}
+	writeFile(t, filePath, "video")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), fullMovieNFO)
 
 	p := NewProvider()
 	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
-		ContentType: "movie",
-		FilePath:    filePath,
+		ContentType:               "movie",
+		FilePath:                  filePath,
+		PrimarySidecarSearchPaths: []string{dir},
 	})
 	if err != nil {
 		t.Fatalf("GetMetadata() error = %v", err)
@@ -182,8 +104,20 @@ func TestGetMetadata_FullMovieFieldSet(t *testing.T) {
 	if result.Ratings.IMDB != 8.1 || result.Ratings.TMDB != 7.9 || result.Ratings.RTCritic != 89 || result.Ratings.RTAudience != 91 {
 		t.Errorf("Ratings = %#v", result.Ratings)
 	}
+	// IMDb and TMDB fill the rating columns above; their rows, which hold the
+	// vote counts discovery ranks by, stay the remote providers'.
+	wantSources := map[string]metadata.RatingSource{
+		models.RatingSourceRTCritic:   {Score: 89, Provider: "nfo"},
+		models.RatingSourceRTAudience: {Score: 91, Provider: "nfo"},
+	}
+	if !reflect.DeepEqual(result.RatingSources, wantSources) {
+		t.Errorf("RatingSources = %#v, want %#v", result.RatingSources, wantSources)
+	}
+	if result.SortTitle != "Blade Runner 1" {
+		t.Errorf("SortTitle = %q, want Blade Runner 1", result.SortTitle)
+	}
 	wantPeople := []models.ItemPerson{
-		{Person: models.Person{Name: "Harrison Ford"}, Kind: models.PersonKindActor, Character: "Rick Deckard", SortOrder: 0},
+		{Person: models.Person{Name: "Harrison Ford"}, Kind: models.PersonKindActor, Character: "Rick Deckard", SortOrder: 0, LocalPhotoSource: "nfo+https://example.com/ford.jpg"},
 		{Person: models.Person{Name: "Rutger Hauer"}, Kind: models.PersonKindActor, Character: "Roy Batty", SortOrder: 1},
 		{Person: models.Person{Name: "Ridley Scott"}, Kind: models.PersonKindDirector, SortOrder: 0},
 		{Person: models.Person{Name: "Hampton Fancher"}, Kind: models.PersonKindWriter, SortOrder: 0},
@@ -207,17 +141,14 @@ func TestGetMetadata_MinimalNFOEmitsNoPlaceholders(t *testing.T) {
 
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "Home Movie (2021).mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("WriteFile(file) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "movie.nfo"), []byte(`<movie><title>Home Movie</title></movie>`), 0o644); err != nil {
-		t.Fatalf("WriteFile(movie.nfo) error = %v", err)
-	}
+	writeFile(t, filePath, "video")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Home Movie</title></movie>`)
 
 	p := NewProvider()
 	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
-		ContentType: "movie",
-		FilePath:    filePath,
+		ContentType:               "movie",
+		FilePath:                  filePath,
+		PrimarySidecarSearchPaths: []string{dir},
 	})
 	if err != nil {
 		t.Fatalf("GetMetadata() error = %v", err)
@@ -227,45 +158,5 @@ func TestGetMetadata_MinimalNFOEmitsNoPlaceholders(t *testing.T) {
 	}
 	if result.Runtime != 0 || result.ReleaseDate != "" || result.ContentRating != "" {
 		t.Errorf("placeholder scalars emitted: %#v", result)
-	}
-}
-
-// The series GetMetadata path maps aired/premiered onto FirstAirDate.
-func TestGetMetadata_SeriesFirstAirDate(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "tvshow.nfo"), []byte(fullTVShowNFO), 0o644); err != nil {
-		t.Fatalf("WriteFile(tvshow.nfo) error = %v", err)
-	}
-
-	p := NewProvider()
-	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
-		ContentType:               "series",
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if !result.HasMetadata {
-		t.Fatal("HasMetadata = false, want true")
-	}
-	if result.Year != 2015 || result.ContentRating != "TV-MA" || result.Ratings.IMDB != 8.5 {
-		t.Errorf("series fields = %#v", result)
-	}
-	if want := []string{"Drama", "Crime"}; !reflect.DeepEqual(result.Genres, want) {
-		t.Errorf("Genres = %#v, want %#v", result.Genres, want)
-	}
-	if len(result.People) != 1 || result.People[0].Name != "Rami Malek" || result.People[0].Character != "Elliot Alderson" {
-		t.Errorf("People = %#v", result.People)
-	}
-	if result.ProviderIDs["tvdb"] != "289590" {
-		t.Errorf("ProviderIDs = %#v", result.ProviderIDs)
-	}
-	if result.FirstAirDate != "2015-06-24" {
-		t.Errorf("FirstAirDate = %q, want 2015-06-24", result.FirstAirDate)
-	}
-	if result.ReleaseDate != "" {
-		t.Errorf("ReleaseDate = %q, want empty for a series", result.ReleaseDate)
 	}
 }

@@ -3,6 +3,7 @@ package webhooksync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -123,7 +124,7 @@ func scanWebhookEventLog(row interface {
 		&entry.BodyExcerpt,
 		&attrsJSON,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrConnectionNotFound
 		}
 		return nil, fmt.Errorf("scan webhook event log: %w", err)

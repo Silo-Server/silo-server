@@ -14,6 +14,12 @@ WEB_JOBS = ("web", "web-test")
 # Run on every event regardless of what the diff touched.
 ALWAYS_JOBS = ("repo-checks",)
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
+# These are embedded by contracts/api/v2 and consumed by the Go ledger,
+# scenario and compatibility gates. Web generation consumes openapi/fixtures.
+GO_ONLY_CONTRACTS = frozenset("contracts/api/v2/" + name for name in (
+    "migration.json", "migration.schema.json", "offline-routes.txt",
+    "breaking-approvals.json", "breaking-approvals.schema.json",
+))
 
 
 def all_jobs(reason):
@@ -29,6 +35,16 @@ def classify(paths):
         if (not parts or path.startswith("/") or ".." in parts
                 or any(ord(char) < 32 for char in path)):
             return all_jobs("unrecognized path")
+        if (path == ".github/evidence.yml"
+                or (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".yml", ".yaml", ".md")))
+                or (path.endswith(".md") and path.startswith((".github/", "scripts/", "cmd/")))):
+            continue
+        if (path in GO_ONLY_CONTRACTS
+                or path in {"scripts/ci/db-pins.txt", "scripts/ci/db-contracts.txt"}
+                or (path.startswith("internal/apiv2/") and path.endswith(".go"))
+                or (path.startswith("cmd/") and not path.startswith("cmd/settingsgen/"))):
+            go = True
+            continue
         # These feed both generated Go artifacts and their Web bindings, or
         # change how validation runs. Keep the entire gate for them.
         # Schemas under docs include executable fixtures whose tests glob all
@@ -90,7 +106,9 @@ def plan(event_name, event):
         # count a rename once, so a larger local count is still complete.
         if len(paths) < count:
             return all_jobs("incomplete changed-file count")
-        return classify(paths)
+        result = classify(paths)
+        result["paths"] = paths
+        return result
     except (KeyError, TypeError, ValueError, UnicodeError, OSError, subprocess.CalledProcessError):
         return all_jobs("PR comparison unavailable")
 
@@ -120,10 +138,20 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in {"plan", "check"}:
         raise SystemExit("expected plan or check")
     if sys.argv[1] == "check":
-        errors = check_results(json.loads(os.environ["CI_JOB_RESULTS"]))
+        needs = json.loads(os.environ["CI_JOB_RESULTS"])
+        errors = check_results(needs)
         if errors:
+            cancelled_jobs = sorted(job for job, outcome in needs.items()
+                                    if outcome.get("result") == "cancelled")
+            if cancelled_jobs:
+                print("Cancelled CI jobs: " + ", ".join(cancelled_jobs))
             for error in errors:
                 print("::error::" + error)
+            # A distinct nonzero status preserves cancellation evidence without
+            # turning an unexpectedly cancelled required child into success.
+            if cancelled_jobs and all(error.endswith(" ended with cancelled")
+                                      for error in errors):
+                return 2
             return 1
         print("Every selected CI job passed.")
         return 0

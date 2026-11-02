@@ -75,6 +75,10 @@ type Artifact struct {
 	RetryAfter            *time.Time
 	RecordedBy            string
 	UpdatedAt             time.Time
+	// MarkersInvalidatedAt is the file's markers_invalidated_at that the
+	// analysis storing this artifact saw: a later invalidation of the file
+	// leaves the two different. Nil when the file had never been invalidated.
+	MarkersInvalidatedAt *time.Time
 }
 
 // Failure is an analysis error to record for a file.
@@ -85,6 +89,11 @@ type Failure struct {
 	RecordedBy string
 	Error      string
 	At         time.Time
+	// ReplacesUnusable lists the details of unusable rows the failure
+	// replaces even for the same file identity: verdicts an earlier build
+	// stored that the kind no longer trusts. No current writer may store
+	// them, or a failure could overwrite a verdict settled meanwhile.
+	ReplacesUnusable []string
 }
 
 // State is what a stored artifact means for a file now.

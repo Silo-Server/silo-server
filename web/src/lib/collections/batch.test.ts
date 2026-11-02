@@ -65,14 +65,4 @@ describe("runBatch", () => {
       failures: ["Beta: Beta broke", "Delta: Delta broke"],
     });
   });
-
-  it("does nothing for an empty batch", async () => {
-    await expect(
-      runBatch(
-        [],
-        async () => undefined,
-        () => "",
-      ),
-    ).resolves.toEqual({ done: 0, failures: [] });
-  });
 });

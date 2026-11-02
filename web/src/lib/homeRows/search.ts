@@ -4,7 +4,6 @@ import { variantFamily } from "./variants";
 /** Words people search for that a card's own text doesn't contain. */
 const ALIASES: Record<string, readonly string[]> = {
   continue_watching: ["resume", "in progress", "audiobook"],
-  next_up: ["next episode", "up next"],
   recently_added: ["new", "latest"],
   recently_released: ["new", "release"],
   new_to_library: ["new", "added"],

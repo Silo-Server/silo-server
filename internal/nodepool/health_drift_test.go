@@ -3,6 +3,7 @@ package nodepool
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -20,7 +21,7 @@ func TestHealthCheckerCarriesCapabilityDriftIntoThePool(t *testing.T) {
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
+		CapabilitiesHash: strPtr("sha256:old"),
 	}, fetcher)
 
 	fixture.sweep()
@@ -47,7 +48,7 @@ func TestHealthCheckerClearsCapabilityDriftOnRecovery(t *testing.T) {
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(degradedCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:degraded"),
+		CapabilitiesHash: strPtr("sha256:degraded"),
 		CapabilityDrift:  &previousNote,
 	}, fetcher)
 
@@ -73,7 +74,7 @@ func TestHealthCheckerKeepsCapabilityDriftWhileTheReportIsStillDegraded(t *testi
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(degradedCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:degraded"),
+		CapabilitiesHash: strPtr("sha256:degraded"),
 		CapabilityDrift:  &previousNote,
 	}, fetcher)
 
@@ -100,7 +101,7 @@ func TestRefreshNodeCapabilitiesKeepsDriftWhenNothingRecovered(t *testing.T) {
 	node := &Node{
 		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(degradedCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:degraded"),
+		CapabilitiesHash: strPtr("sha256:degraded"),
 		CapabilityDrift:  &previousNote,
 	}
 	fixture := newCapabilityCheckerFixture(t, node, fetcher)
@@ -114,49 +115,300 @@ func TestRefreshNodeCapabilitiesKeepsDriftWhenNothingRecovered(t *testing.T) {
 	}
 }
 
-// Clearing the note requires evidence that hardware came back, and a report in
-// which nothing was probed carries none.
-//
-// The two shapes that produce no passing probe are the two ways hardware goes
-// away: a device the node can no longer open reports the backend `skipped`, and
-// a card that is gone entirely leaves no candidate backend to report at all.
-// Both used to read as clean — the first because a skipped backend is not a
-// failure, the second because a loop over an empty list finds none — so a
-// standing regression was erased by the next unrelated hash change (a reboot
-// moving boot_id is enough), telling an operator a still-broken node had
-// recovered.
-//
-// A proxy pointed at a cluster-wide hw_device does not get stuck behind this:
-// it never verified those backends in the first place, so computeCapabilityDrift
-// never gives it a note to hold open.
-func TestResolveDriftNoteKeepsNoteWhenNoProbePassed(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload string
-	}{
-		{
-			name: "every candidate device is inaccessible",
-			payload: `{"resolved":"none","render_devices":[],` +
-				`"detected_backends":[{"backend":"vaapi","verified":false,"skipped":true}]}`,
-		},
-		{
-			name:    "the gpu is gone, so nothing was a candidate",
-			payload: `{"resolved":"none","render_devices":[],"detected_backends":[]}`,
-		},
-	}
-	for _, test := range tests {
+const withUUID = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+	`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-abc"}],` +
+	`"detected_backends":[{"backend":"nvenc","verified":true}]}`
+const withoutUUID = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+	`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+	`"detected_backends":[{"backend":"nvenc","verified":true}]}`
+
+var computeCapabilityDriftCases = []struct {
+	name          string
+	before, after string
+	lostDevices   []string
+	lostBackends  []string
+}{
+	{
+		// DRM is free to hand the same card a different renderD number
+		// across a reboot. Comparing enumeration paths alone reports a GPU
+		// as gone for a card that never moved.
+		name: "a renumbered path at the same PCI slot is no regression",
+		before: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		after: `{"resolved":"qsv","render_devices":["/dev/dri/renderD129"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD129","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+	},
+	{
+		// A card that genuinely goes away has neither its path nor its slot
+		// in the new report.
+		name: "a removed device is still caught",
+		before: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128","/dev/dri/renderD129"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"},` +
+			`{"path":"/dev/dri/renderD129","pci_address":"0000:04:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		after: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		lostDevices: []string{"/dev/dri/renderD129"},
+	},
+	{
+		// An NVIDIA uuid outranks the slot.
+		name: "a card moved between slots is matched by uuid",
+		before: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-abc"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		after: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD130"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD130","pci_address":"0000:07:00.0","gpu_uuid":"GPU-abc"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+	},
+	// nvidia-smi is queried behind a circuit breaker, so the same card
+	// publishes a uuid on one pass and only its PCI address on another; a
+	// shared alias identifies it.
+	{name: "uuid disappears", before: withUUID, after: withoutUUID},
+	{name: "uuid appears", before: withoutUUID, after: withUUID},
+	{
+		// A replacement card in the same slot keeps the slot's PCI address
+		// and render path; two permanent uuids that disagree settle it.
+		name: "a replaced card in the same slot is reported gone",
+		before: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-old"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		after: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-new"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		lostDevices: []string{"/dev/dri/renderD128"},
+	},
+	{
+		// "Could not try" (skipped) is not a loss; "tried and the driver
+		// said no" is.
+		name: "a backend failing its probe is still a loss",
+		before: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		after: `{"resolved":"none","render_devices":["/dev/dri/renderD128"],` +
+			`"detected_backends":[{"backend":"qsv","verified":false,"reason":"h264_qsv smoke encode failed"}]}`,
+		lostBackends: []string{"qsv"},
+	},
+	{
+		// The device comparison reads the host's own inventory; the backend
+		// going unreported alongside it is a consequence, not evidence.
+		name: "a vanished GPU is a device loss",
+		before: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		after:       `{"resolved":"none","render_devices":[],"detected_backends":[]}`,
+		lostDevices: []string{"/dev/dri/renderD128"},
+	},
+	{
+		// Detection only probes backends the configured hw_device gives it
+		// candidates for. Repointing a node from QSV to NVENC must not latch
+		// a warning demanding QSV verify again, which nothing could satisfy.
+		name: "a backend the policy stopped probing is no regression",
+		before: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true}]}`,
+		after: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+	},
+	{
+		// The ordinary NVENC container has no /dev/dri, so its cards exist
+		// only in nvidia_gpu_uuids, and NVENC still verifies on the one left.
+		name: "an NVIDIA-only card going away is noted",
+		before: `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-aaa","GPU-bbb"],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		after: `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-bbb"],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		lostDevices:  []string{"GPU-aaa"},
+		lostBackends: []string{},
+	},
+	{
+		// nvidia-smi can be missing from an image outright; NVENC is only
+		// probed where /dev/nvidia* opens, so the cards are still present.
+		name: "NVIDIA uuids lost with the query tool are no regression",
+		before: `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-aaa"],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		after: `{"resolved":"nvenc","detected_backends":[{"backend":"nvenc","verified":true}]}`,
+	},
+	{
+		// A card with both a render node and an nvidia-smi entry is one card.
+		name: "one card counts once across both identity sources",
+		before: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","gpu_uuid":"GPU-aaa"}],` +
+			`"nvidia_gpu_uuids":["GPU-aaa"],"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		after: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+	},
+}
+
+// computeCapabilityDrift compares the stored report with a new one. A row
+// with neither lostDevices nor lostBackends wants no regression; otherwise
+// each non-nil list must match exactly.
+func TestComputeCapabilityDrift(t *testing.T) {
+	for _, test := range computeCapabilityDriftCases {
 		t.Run(test.name, func(t *testing.T) {
-			standing := "verified hardware backends lost: vaapi"
-			payload := []byte(test.payload)
-			// Both sides degraded: the delta finds nothing newly lost, which is
-			// exactly the state in which clearing has to be refused.
-			drift, parsed := computeCapabilityDrift(payload, payload)
-			got, _ := resolveDriftNote(&standing, nil, drift, parsed, payload)
-			if got == nil {
-				t.Fatal("capability_drift was cleared by a report in which no probe passed")
+			drift, parsed := computeCapabilityDrift([]byte(test.before), []byte(test.after))
+			if !parsed {
+				t.Fatal("both reports should parse")
 			}
-			if *got != standing {
+			if test.lostDevices == nil && test.lostBackends == nil {
+				if drift.regressed() {
+					t.Fatalf("drift = %+v, want no regression", drift)
+				}
+				return
+			}
+			if test.lostDevices != nil && !slices.Equal(drift.lostDevices, test.lostDevices) {
+				t.Fatalf("lostDevices = %v, want %v", drift.lostDevices, test.lostDevices)
+			}
+			if test.lostBackends != nil && !slices.Equal(drift.lostBackends, test.lostBackends) {
+				t.Fatalf("lostBackends = %v, want %v", drift.lostBackends, test.lostBackends)
+			}
+		})
+	}
+}
+
+const (
+	lostVAAPI   = "verified hardware backends lost: vaapi"
+	lostD128    = "render devices gone: /dev/dri/renderD128"
+	card0300    = `{"devices":[{"aliases":["0000:03:00.0","/dev/dri/renderD128"]}]}`
+	oldCardSlot = `{"devices":[{"uuid":"GPU-old","aliases":["GPU-old","0000:03:00.0","/dev/dri/renderD128"]}]}`
+)
+
+var resolveDriftNoteOnARepeatedReportCases = []struct {
+	name          string
+	standing      string
+	baseline      string
+	payload       string
+	clears        bool
+	exact         bool
+	keepsBaseline bool
+	probesClean   bool
+}{
+	// A device the node can no longer open reports the backend skipped, and
+	// a card that is gone leaves no candidate backend at all. Neither is a
+	// passing probe, so neither is evidence of recovery.
+	{
+		name:     "every candidate device is inaccessible",
+		standing: lostVAAPI,
+		payload: `{"resolved":"none","render_devices":[],` +
+			`"detected_backends":[{"backend":"vaapi","verified":false,"skipped":true}]}`,
+		exact: true,
+	},
+	{
+		name:     "the gpu is gone, so nothing was a candidate",
+		standing: lostVAAPI,
+		payload:  `{"resolved":"none","render_devices":[],"detected_backends":[]}`,
+		exact:    true,
+	},
+	{
+		// Growth is not repair: the note keeps what it is waiting for.
+		name:     "an unrelated GPU is added",
+		standing: lostD128,
+		baseline: card0300,
+		payload: `{"resolved":"vaapi","render_devices":["/dev/dri/renderD130"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD130","pci_address":"0000:09:00.0"}],` +
+			`"detected_backends":[{"backend":"vaapi","verified":true}]}`,
+		exact: true, keepsBaseline: true,
+	},
+	{
+		// The baseline keeps every identity the lost card answered to.
+		name:     "the lost card returns renumbered",
+		standing: lostD128,
+		baseline: card0300,
+		payload: `{"resolved":"vaapi","render_devices":["/dev/dri/renderD129"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD129","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"vaapi","verified":true}]}`,
+		clears: true,
+	},
+	{
+		// A multi-GPU node that lost one card probes the survivor cleanly.
+		name:     "a sibling GPU is still missing",
+		standing: "render devices gone: /dev/dri/renderD129",
+		baseline: `{"devices":[{"aliases":["0000:04:00.0","/dev/dri/renderD129"]}]}`,
+		payload: `{"resolved":"vaapi","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"vaapi","verified":true}]}`,
+		exact: true, probesClean: true,
+	},
+	{
+		// A replacement card inherits the PCI address and render path.
+		name:     "a replacement card takes the slot",
+		standing: lostD128,
+		baseline: oldCardSlot,
+		payload: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-new"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		exact: true,
+	},
+	{
+		name:     "the same card returns by uuid in a new slot",
+		standing: lostD128,
+		baseline: oldCardSlot,
+		payload: `{"resolved":"nvenc","render_devices":["/dev/dri/renderD131"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD131","pci_address":"0000:09:00.0","gpu_uuid":"GPU-old"}],` +
+			`"detected_backends":[{"backend":"nvenc","verified":true}]}`,
+		clears: true,
+	},
+	{
+		// VAAPI failing beside a working QSV is ordinary on a mixed host.
+		name:     "an unrelated backend is failing",
+		standing: lostD128,
+		baseline: `{"backends":["qsv"],"devices":[{"aliases":["0000:03:00.0","/dev/dri/renderD128"]}]}`,
+		payload: `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":true},{"backend":"vaapi","verified":false,"reason":"no driver"}]}`,
+		clears: true,
+	},
+	{
+		name:     "the baseline backend is still failing",
+		standing: "backends no longer verifying: qsv",
+		baseline: `{"backends":["qsv"]}`,
+		payload: `{"resolved":"vaapi","render_devices":["/dev/dri/renderD128"],` +
+			`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
+			`"detected_backends":[{"backend":"qsv","verified":false,"reason":"no driver"},{"backend":"vaapi","verified":true}]}`,
+	},
+	{
+		name:     "every backend was skipped",
+		standing: lostD128,
+		baseline: `{"devices":[{"aliases":["/dev/dri/renderD128"]}]}`,
+		payload: `{"resolved":"none","render_devices":[],` +
+			`"detected_backends":[{"backend":"qsv","skipped":true},{"backend":"vaapi","skipped":true}]}`,
+	},
+}
+
+// A refetch that finds nothing newly lost (the report compared with itself)
+// may clear a standing note only on evidence that what the baseline waits for
+// came back. exact also requires the note unchanged; keepsBaseline requires the
+// baseline kept; probesClean pins the fixture's premise.
+func TestResolveDriftNoteOnARepeatedReport(t *testing.T) {
+	for _, test := range resolveDriftNoteOnARepeatedReportCases {
+		t.Run(test.name, func(t *testing.T) {
+			standing := test.standing
+			var baseline []byte
+			if test.baseline != "" {
+				baseline = []byte(test.baseline)
+			}
+			payload := []byte(test.payload)
+			drift, parsed := computeCapabilityDrift(payload, payload)
+			if test.probesClean && !hardwareProbesClean(payload) {
+				t.Fatal("the surviving card should probe cleanly; that is the point")
+			}
+			got, gotBaseline := resolveDriftNote(&standing, baseline, drift, parsed, payload)
+			if test.clears {
+				if got != nil {
+					t.Fatalf("capability_drift = %q, want it cleared", *got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("capability_drift was cleared")
+			}
+			if test.exact && *got != standing {
 				t.Fatalf("capability_drift = %q, want the standing note %q", *got, standing)
+			}
+			if test.keepsBaseline && len(gotBaseline) == 0 {
+				t.Fatal("the baseline was dropped while the note still stands")
 			}
 		})
 	}
@@ -182,51 +434,6 @@ func TestResolveDriftNoteClearsWhenHardwareComesBack(t *testing.T) {
 	}
 	if gotBaseline != nil {
 		t.Fatalf("baseline = %s, want it cleared with the note", gotBaseline)
-	}
-}
-
-// Growth is not repair. A node standing on a lost GPU that gains an unrelated
-// one has a bigger, perfectly clean inventory and still has not got its card
-// back — which is why the note keeps what it is waiting for rather than
-// re-deriving it from the stored report.
-func TestResolveDriftNoteKeepsNoteWhenAnUnrelatedGPUIsAdded(t *testing.T) {
-	const gained = `{"resolved":"vaapi","render_devices":["/dev/dri/renderD130"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD130","pci_address":"0000:09:00.0"}],` +
-		`"detected_backends":[{"backend":"vaapi","verified":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	// The lost card, by every identity it answered to.
-	baseline := []byte(`{"devices":[{"aliases":["0000:03:00.0","/dev/dri/renderD128"]}]}`)
-	payload := []byte(gained)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	got, gotBaseline := resolveDriftNote(&standing, baseline, drift, parsed, payload)
-	if got == nil {
-		t.Fatal("capability_drift cleared because an unrelated GPU appeared")
-	}
-	if *got != standing {
-		t.Fatalf("capability_drift = %q, want the standing note %q", *got, standing)
-	}
-	if len(gotBaseline) == 0 {
-		t.Fatal("the baseline was dropped while the note still stands")
-	}
-}
-
-// The lost card coming back under a renumbered render node still counts: the
-// baseline keeps every identity it answered to, and any one of them matching
-// identifies it.
-func TestResolveDriftNoteClearsWhenTheLostCardReturnsRenumbered(t *testing.T) {
-	const back = `{"resolved":"vaapi","render_devices":["/dev/dri/renderD129"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD129","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"vaapi","verified":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	baseline := []byte(`{"devices":[{"aliases":["0000:03:00.0","/dev/dri/renderD128"]}]}`)
-	payload := []byte(back)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	if got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload); got != nil {
-		t.Fatalf("capability_drift = %q, want the card at the same slot to clear it", *got)
 	}
 }
 
@@ -261,51 +468,6 @@ func TestResolveDriftNoteAccumulatesSuccessiveLosses(t *testing.T) {
 	// Both back clears it.
 	if got, _ := resolveDriftNote(note, baseline, capabilityDrift{}, true, []byte(twoCards)); got != nil {
 		t.Fatalf("capability_drift = %q, want both cards returning to clear it", *got)
-	}
-}
-
-// A multi-GPU node that lost one card keeps probing the survivor cleanly, and
-// once the degraded report is stored the delta finds nothing lost ever again.
-// Clearing on that generic success told an operator the node recovered while
-// one of its cards was still missing.
-func TestResolveDriftNoteKeepsNoteWhileASiblingGPUIsStillMissing(t *testing.T) {
-	// Two cards before the loss, one after — and the survivor verifies, so
-	// every probe that ran passes.
-	const degraded = `{"resolved":"vaapi","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"vaapi","verified":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD129"
-	baseline := []byte(`{"devices":[{"aliases":["0000:04:00.0","/dev/dri/renderD129"]}]}`)
-	payload := []byte(degraded)
-	// The next refetch is degraded-to-degraded: nothing newly lost, and every
-	// probe that ran passed, because the survivor is fine.
-	drift, parsed := computeCapabilityDrift(payload, payload)
-	if !hardwareProbesClean(payload) {
-		t.Fatal("the surviving card should probe cleanly; that is the point")
-	}
-	got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload)
-	if got == nil {
-		t.Fatal("capability_drift cleared while the lost card was still missing")
-	}
-	if *got != standing {
-		t.Fatalf("capability_drift = %q, want the standing note %q", *got, standing)
-	}
-}
-
-// A node's very first report has nothing to compare against, so it must not be
-// flagged.
-func TestHealthCheckerStoresNoDriftOnFirstReport(t *testing.T) {
-	url := newHealthNode(t, "sha256:new")
-	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
-	fixture := newCapabilityCheckerFixture(t, &Node{
-		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
-	}, fetcher)
-
-	fixture.sweep()
-
-	if stored := fixture.storedNode(t); stored.CapabilityDrift != nil {
-		t.Fatalf("capability_drift = %q on a first report, want none", *stored.CapabilityDrift)
 	}
 }
 
@@ -374,7 +536,7 @@ func TestRefreshNodeCapabilitiesStoresImmediately(t *testing.T) {
 	node := &Node{
 		ID: 1, Name: "gpu-1", Type: NodeTypeTranscode, URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
+		CapabilitiesHash: strPtr("sha256:old"),
 	}
 	fixture := newCapabilityCheckerFixture(t, node, fetcher)
 
@@ -417,111 +579,6 @@ func TestRefreshNodeCapabilitiesRefusesWhenAlreadyInFlight(t *testing.T) {
 	}
 }
 
-// DRM is free to hand the same card a different renderD number across a reboot.
-// Comparing enumeration paths alone then reports a GPU as gone, and because the
-// reboot moves boot_id it also triggers the refetch that persists the note — so
-// an operator sees a hardware regression for a card that never moved.
-func TestComputeCapabilityDriftMatchesRenumberedRenderDevices(t *testing.T) {
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"qsv","render_devices":["/dev/dri/renderD129"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD129","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if drift.regressed() {
-		t.Fatalf("drift = %+v, want a renumbered path at the same PCI slot to be no regression", drift)
-	}
-}
-
-// A card that genuinely goes away has neither its path nor its slot in the new
-// report, and must still be caught.
-func TestComputeCapabilityDriftStillCatchesARemovedDevice(t *testing.T) {
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128","/dev/dri/renderD129"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"},` +
-		`{"path":"/dev/dri/renderD129","pci_address":"0000:04:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if len(drift.lostDevices) != 1 || drift.lostDevices[0] != "/dev/dri/renderD129" {
-		t.Fatalf("lostDevices = %v, want the card at 0000:04:00.0 reported gone", drift.lostDevices)
-	}
-}
-
-// An NVIDIA uuid outranks the slot, so a card moved between slots is still the
-// same card.
-func TestComputeCapabilityDriftMatchesAMovedCardByUUID(t *testing.T) {
-	const before = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-abc"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	const after = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD130"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD130","pci_address":"0000:07:00.0","gpu_uuid":"GPU-abc"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed || drift.regressed() {
-		t.Fatalf("drift = %+v (parsed=%v), want the same uuid to be the same card", drift, parsed)
-	}
-}
-
-// nvidia-smi is queried behind a circuit breaker, so the same NVIDIA card
-// publishes a uuid on one pass and only its PCI address on another. Keeping
-// just the strongest identity made those two reports describe different
-// devices, persisting a "render device gone" note for a card that never moved.
-func TestComputeCapabilityDriftMatchesAcrossIdentityStrength(t *testing.T) {
-	const withUUID = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-abc"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	const withoutUUID = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	for _, test := range []struct{ name, before, after string }{
-		{"uuid disappears", withUUID, withoutUUID},
-		{"uuid appears", withoutUUID, withUUID},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			drift, parsed := computeCapabilityDrift([]byte(test.before), []byte(test.after))
-			if !parsed {
-				t.Fatal("both reports should parse")
-			}
-			if drift.regressed() {
-				t.Fatalf("drift = %+v, want a shared PCI alias to identify the same card", drift)
-			}
-		})
-	}
-}
-
-// A replacement card in the same slot keeps the slot's PCI address and usually
-// the render path too, so matching on any shared alias would hide the old card's
-// disappearance entirely. Two permanent uuids that disagree settle it.
-func TestComputeCapabilityDriftReportsAReplacedCardInTheSameSlot(t *testing.T) {
-	const before = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-old"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	const after = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-new"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if len(drift.lostDevices) != 1 || drift.lostDevices[0] != "/dev/dri/renderD128" {
-		t.Fatalf("lostDevices = %v, want the replaced card reported gone", drift.lostDevices)
-	}
-}
-
 // Skipped means no probe ran, because the node cannot open the backend's
 // configured devices — a statement about access, not about hardware. Counting
 // it as a loss also contradicted hardwareProbesClean, which treats a skipped
@@ -547,160 +604,6 @@ func TestComputeCapabilityDriftDoesNotTreatASkippedBackendAsLost(t *testing.T) {
 	standing := "verified hardware backends lost: qsv"
 	if got, _ := resolveDriftNote(&standing, nil, drift, parsed, []byte(after)); got == nil || *got != standing {
 		t.Fatalf("resolveDriftNote = %v, want a skipped report to leave a standing note alone", got)
-	}
-}
-
-// A backend that fails its probe outright is still a loss — the distinction is
-// "could not try" versus "tried and the driver said no".
-func TestComputeCapabilityDriftStillCatchesAFailedBackend(t *testing.T) {
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"none","render_devices":["/dev/dri/renderD128"],` +
-		`"detected_backends":[{"backend":"qsv","verified":false,"reason":"h264_qsv smoke encode failed"}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if len(drift.lostBackends) != 1 || drift.lostBackends[0] != "qsv" {
-		t.Fatalf("lostBackends = %v, want the failing backend reported", drift.lostBackends)
-	}
-}
-
-// A GPU that actually disappears is caught by the device comparison, which reads
-// the host's own inventory and owes nothing to the configuration. The backend
-// going unreported alongside it is a consequence, not separate evidence.
-func TestComputeCapabilityDriftCatchesAVanishedGPUAsADeviceLoss(t *testing.T) {
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"none","render_devices":[],"detected_backends":[]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if !drift.regressed() {
-		t.Fatalf("drift = %+v, want a vanished GPU recorded", drift)
-	}
-	if len(drift.lostDevices) != 1 || drift.lostDevices[0] != "/dev/dri/renderD128" {
-		t.Fatalf("lostDevices = %v, want the vanished card reported", drift.lostDevices)
-	}
-}
-
-// Detection only probes the backends the configured hw_device gives it
-// candidates for, so repointing a node from a QSV render path to an NVENC index
-// legitimately stops QSV being reported. Treating that as a disappeared backend
-// latched a warning demanding QSV verify again on a node deliberately configured
-// for NVENC — which nothing could ever satisfy, so the false incident could
-// never clear.
-func TestComputeCapabilityDriftIgnoresABackendThePolicyStoppedProbing(t *testing.T) {
-	// The host's inventory is unchanged; only what was probed moved.
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if drift.regressed() {
-		t.Fatalf("drift = %+v, want a policy change not recorded as hardware loss", drift)
-	}
-}
-
-// A replacement card in the same slot inherits the PCI address and usually the
-// render path. Clearing on that would report the lost card as returned when a
-// different one arrived — the same false match the loss comparison already
-// refuses, applied to the recovery side.
-func TestResolveDriftNoteKeepsNoteWhenAReplacementCardTakesTheSlot(t *testing.T) {
-	const replaced = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0","gpu_uuid":"GPU-new"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	baseline := []byte(`{"devices":[{"uuid":"GPU-old","aliases":["GPU-old","0000:03:00.0","/dev/dri/renderD128"]}]}`)
-	payload := []byte(replaced)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload)
-	if got == nil {
-		t.Fatal("capability_drift cleared because a different card took the slot")
-	}
-	if *got != standing {
-		t.Fatalf("capability_drift = %q, want the standing note %q", *got, standing)
-	}
-}
-
-// The original card returning does clear it, even under a renumbered path.
-func TestResolveDriftNoteClearsWhenTheSameCardReturnsByUUID(t *testing.T) {
-	const back = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD131"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD131","pci_address":"0000:09:00.0","gpu_uuid":"GPU-old"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	baseline := []byte(`{"devices":[{"uuid":"GPU-old","aliases":["GPU-old","0000:03:00.0","/dev/dri/renderD128"]}]}`)
-	payload := []byte(back)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	if got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload); got != nil {
-		t.Fatalf("capability_drift = %q, want the same uuid in a new slot to clear it", *got)
-	}
-}
-
-// A mixed host can carry a backend that has never worked — VAAPI failing beside
-// a working QSV is ordinary. Requiring every backend to verify before clearing
-// meant a note about a lost render device latched forever, long after that
-// device came back and the backend that used it verified again.
-func TestResolveDriftNoteClearsDespiteAnUnrelatedFailingBackend(t *testing.T) {
-	const recovered = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":true},{"backend":"vaapi","verified":false,"reason":"no driver"}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	baseline := []byte(`{"backends":["qsv"],"devices":[{"aliases":["0000:03:00.0","/dev/dri/renderD128"]}]}`)
-	payload := []byte(recovered)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	if got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload); got != nil {
-		t.Fatalf("capability_drift = %q, want it cleared: the lost device is back and qsv verifies", *got)
-	}
-}
-
-// The baseline still decides. A backend the note is waiting on that has not come
-// back keeps it latched, however healthy the rest of the report looks.
-func TestResolveDriftNoteKeepsNoteWhenTheBaselineBackendIsStillFailing(t *testing.T) {
-	const stillBroken = `{"resolved":"vaapi","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"qsv","verified":false,"reason":"no driver"},{"backend":"vaapi","verified":true}]}`
-
-	standing := "backends no longer verifying: qsv"
-	baseline := []byte(`{"backends":["qsv"]}`)
-	payload := []byte(stillBroken)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload)
-	if got == nil {
-		t.Fatal("capability_drift cleared while the backend it names is still failing")
-	}
-}
-
-// A report with nothing probed is not evidence of anything. Every backend
-// skipped means the node could not open its configured devices, which says
-// nothing about the hardware the note is waiting on.
-func TestResolveDriftNoteKeepsNoteWhenEveryBackendWasSkipped(t *testing.T) {
-	const allSkipped = `{"resolved":"none","render_devices":[],` +
-		`"detected_backends":[{"backend":"qsv","skipped":true},{"backend":"vaapi","skipped":true}]}`
-
-	standing := "render devices gone: /dev/dri/renderD128"
-	baseline := []byte(`{"devices":[{"aliases":["/dev/dri/renderD128"]}]}`)
-	payload := []byte(allSkipped)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	if got, _ := resolveDriftNote(&standing, baseline, drift, parsed, payload); got == nil {
-		t.Fatal("capability_drift cleared on a report where nothing was probed")
 	}
 }
 
@@ -748,73 +651,5 @@ func TestResolveDriftNoteNamesEveryOutstandingLoss(t *testing.T) {
 	}
 	if !strings.Contains(*still, "/dev/dri/renderD129") {
 		t.Fatalf("capability_drift = %q, want the still-missing card named", *still)
-	}
-}
-
-// The ordinary NVENC container has /dev/nvidia* and the toolkit and no /dev/dri,
-// so its cards exist only in nvidia_gpu_uuids. Losing one moves nothing in
-// render_devices, and the backend comparison does not cover it either: NVENC
-// stops being a candidate the moment the device nodes go away, and an absent
-// backend is deliberately not a lost one.
-func TestCapabilityDriftNotesAnNVIDIAOnlyCardGoingAway(t *testing.T) {
-	const before = `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-aaa","GPU-bbb"],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	// One card left. NVENC still verifies on it, so nothing else in the report
-	// says anything was lost.
-	const after = `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-bbb"],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("drift did not parse")
-	}
-	if !drift.regressed() {
-		t.Fatal("a card that disappeared produced no drift")
-	}
-	if got := drift.lostDevices; len(got) != 1 || got[0] != "GPU-aaa" {
-		t.Fatalf("lost devices = %v, want the missing GPU-aaa", got)
-	}
-	if len(drift.lostBackends) != 0 {
-		t.Fatalf("lost backends = %v, want none — NVENC still verifies on the remaining card", drift.lostBackends)
-	}
-}
-
-// nvidia-smi sits behind a circuit breaker and can be missing from an image
-// outright, so an empty uuid list is not evidence a card is gone. NVENC is only
-// probed where /dev/nvidia* opens, so a report still carrying it describes a
-// node whose cards are present and whose query tool is not — latching drift
-// there would demand a uuid come back that nothing on the node can produce.
-func TestCapabilityDriftIgnoresNVIDIAUUIDsLostWithTheQueryTool(t *testing.T) {
-	const before = `{"resolved":"nvenc","nvidia_gpu_uuids":["GPU-aaa"],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	const after = `{"resolved":"nvenc","detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("drift did not parse")
-	}
-	if drift.regressed() {
-		t.Fatalf("nvidia-smi going quiet was read as hardware loss: %+v", drift)
-	}
-}
-
-// A card with both a render node and an nvidia-smi entry is one card. Counting
-// it twice would report a device gone whenever the two sources disagree about
-// which of them can currently see it.
-func TestCapabilityDriftCountsOneCardOnceAcrossBothIdentitySources(t *testing.T) {
-	const before = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","gpu_uuid":"GPU-aaa"}],` +
-		`"nvidia_gpu_uuids":["GPU-aaa"],"detected_backends":[{"backend":"nvenc","verified":true}]}`
-	// nvidia-smi went quiet; the render node still reports the same card.
-	const after = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128"}],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("drift did not parse")
-	}
-	if drift.regressed() {
-		t.Fatalf("one card read as two: %+v", drift)
 	}
 }

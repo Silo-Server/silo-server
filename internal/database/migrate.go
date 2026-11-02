@@ -68,7 +68,13 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer provider.Close()
 
-	return applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval)
+	if err := applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval); err != nil {
+		return err
+	}
+	// Connections look up the vector types when they open. On a new database
+	// the migrations create them, so reconnect for the binary codecs.
+	pool.Reset()
+	return nil
 }
 
 // MigrateDownTo rolls back every migration newer than version, newest first.
@@ -189,16 +195,19 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// in Go packages shared with other write paths: the settings backfill
 		// validates every value against the contract and re-encodes it as
 		// typed JSON, the displayprefs move parses the legacy jellycompat
-		// keys, and the subtitle language backfill applies the scanner's
-		// lang.CompatibleTag — none expressible in SQL without duplicating
-		// those rules. The invalid index rebuild decides per index whether to
-		// drop and rebuild it concurrently, which SQL cannot do outside a
-		// transaction.
+		// keys, the subtitle language backfill applies the scanner's
+		// lang.CompatibleTag, and the sidecar subtitle name backfill applies
+		// the scanner's naming.SidecarSubtitleTags. None of these can be
+		// expressed in SQL without duplicating those rules. The invalid index rebuild and the
+		// push attempt key scope decide per index whether to drop and build it
+		// concurrently, which SQL cannot do outside a transaction.
 		goose.WithGoMigrations(
 			settingsBackfillMigration(),
 			displayPrefsMoveMigration(),
 			subtitleLanguageBackfillMigration(),
 			invalidIndexRebuildMigration(),
+			pushAttemptKeyScopeMigration(),
+			externalSubtitleNameBackfillMigration(),
 		),
 	)
 	if err != nil {

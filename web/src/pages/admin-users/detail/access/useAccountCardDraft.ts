@@ -98,7 +98,8 @@ export function useAccountCardDraft<D>(opts: {
   toDraft: (user: AdminUser) => D;
   toBody: (draft: D, base: AdminUser) => UpdateUserRequest;
   changedRows: (draft: D, base: D) => string[];
-  validate?: (draft: D) => string | null;
+  /** Refuses a save, on every path that saves, with the message to show. */
+  validate?: (draft: D, base: AdminUser) => string | null;
   extra?: CardExtraWrite<D>;
   /**
    * Rebases the draft onto a reloaded account (old and fresh are toDraft of
@@ -145,7 +146,7 @@ export function useAccountCardDraft<D>(opts: {
     const { captured, draft, conflict, opts } = latest.current;
     if (!captured || draft === undefined) return true;
     if (busy.current || conflict) return false;
-    const invalid = opts.validate?.(draft) ?? null;
+    const invalid = opts.validate?.(draft, captured.user) ?? null;
     if (invalid) {
       setError(invalid);
       return false;

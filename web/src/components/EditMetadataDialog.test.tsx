@@ -1,19 +1,34 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
+  updateAsync: vi.fn(),
   refresh: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
-  useUpdateItemMetadata: () => ({ mutate: mocks.update, isPending: false }),
+  useUpdateItemMetadata: () => ({
+    mutate: mocks.update,
+    mutateAsync: mocks.updateAsync,
+    isPending: false,
+  }),
   useRefreshItemMetadata: () => ({ mutate: mocks.refresh }),
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 vi.mock("@/components/MetadataTranslatePanel", () => ({ MetadataTranslatePanel: () => null }));
-vi.mock("@/components/ConfirmDialog", () => ({ ConfirmDialog: () => null }));
+vi.mock("@/components/ConfirmDialog", () => ({
+  ConfirmDialog: ({
+    open,
+    confirmLabel,
+    onConfirm,
+  }: {
+    open: boolean;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }) => (open ? <button onClick={onConfirm}>{confirmLabel}</button> : null),
+}));
 vi.mock("@/components/ImageSelectorTab", () => ({
   default: ({
     onImageApplied,
@@ -81,5 +96,93 @@ describe("EditMetadataDialog image locks", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Finish image apply" }));
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+  });
+});
+
+describe("EditMetadataDialog field locks", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+    mocks.updateAsync.mockReset();
+    mocks.refresh.mockReset();
+  });
+
+  it("locks the overview when only the tagline changes", () => {
+    render(<EditMetadataDialog item={series()} open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("No tagline"), {
+      target: { value: "Edited tagline" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      { tagline: "Edited tagline", locked_fields: [1] },
+      expect.any(Object),
+    );
+  });
+
+  it("unlocks every field before a reset refreshes from providers", async () => {
+    mocks.updateAsync.mockResolvedValue({});
+    const item = series([0, 1, 10]);
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
+    fireEvent.click(screen.getByText("Reset & Refresh"));
+
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" }));
+    expect(mocks.updateAsync).toHaveBeenCalledWith({ locked_fields: [] });
+    expect(mocks.updateAsync.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.refresh.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("keeps the dialog open and does not refresh when unlocking fails", async () => {
+    mocks.updateAsync.mockRejectedValue(new Error("nope"));
+    const onOpenChange = vi.fn();
+    render(<EditMetadataDialog item={series([0])} open onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
+    fireEvent.click(screen.getByText("Reset & Refresh"));
+
+    await waitFor(() => expect(mocks.updateAsync).toHaveBeenCalled());
+    // Let the rejected unlock settle before checking what the reset did next.
+    await mocks.updateAsync.mock.results[0]!.value.catch(() => undefined);
+    await Promise.resolve();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("refreshes straight away when nothing is locked", () => {
+    const item = series();
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
+    fireEvent.click(screen.getByText("Reset & Refresh"));
+
+    expect(mocks.updateAsync).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" });
+  });
+});
+
+describe("EditMetadataDialog cleared fields", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+  });
+
+  // The server clears a nullable field only on an explicit null; it leaves an
+  // omitted field as it was.
+  it("sends null for a cleared rating, date, and air timezone", () => {
+    const item = {
+      ...series(),
+      rating_imdb: 7.2,
+      first_air_date: "2016-03-08",
+      air_timezone: "America/New_York",
+    } as ItemDetail;
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));
+    for (const value of ["7.2", "2016-03-08", "America/New_York"]) {
+      fireEvent.change(screen.getByDisplayValue(value), { target: { value: "" } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ rating_imdb: null, first_air_date: null, air_timezone: null }),
+      expect.any(Object),
+    );
   });
 });

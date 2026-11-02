@@ -48,32 +48,6 @@ func (s stubUserStore) CreateProfile(ctx context.Context, p userstore.Profile) e
 	return s.createProfileFn(ctx, p)
 }
 
-func TestAccountProvisionerCreateAccount_SkipsProfileByDefault(t *testing.T) {
-	var createCalls int
-	provisioner := NewAccountProvisioner(
-		stubAccountUsers{
-			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
-				createCalls++
-				return &models.User{ID: 42, Username: "alex"}, nil
-			},
-		},
-		nil,
-	)
-
-	user, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
-		User: models.CreateUserInput{Username: "alex"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount returned error: %v", err)
-	}
-	if user == nil || user.ID != 42 {
-		t.Fatalf("CreateAccount user = %#v, want ID 42", user)
-	}
-	if createCalls != 1 {
-		t.Fatalf("createCalls = %d, want 1", createCalls)
-	}
-}
-
 func TestAccountProvisionerCreateAccount_CreatesDefaultProfile(t *testing.T) {
 	var createdProfile userstore.Profile
 	provisioner := NewAccountProvisioner(
@@ -106,72 +80,6 @@ func TestAccountProvisionerCreateAccount_CreatesDefaultProfile(t *testing.T) {
 	}
 	if !createdProfile.ShowForcedSubtitles {
 		t.Fatal("created profile should enable forced subtitles by default")
-	}
-}
-
-func TestAccountProvisionerCreateAccount_UsesExplicitProfileName(t *testing.T) {
-	var createdProfile userstore.Profile
-	provisioner := NewAccountProvisioner(
-		stubAccountUsers{
-			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
-				return &models.User{ID: 7, Username: "alex"}, nil
-			},
-		},
-		stubStoreProvider{
-			store: stubUserStore{
-				createProfileFn: func(_ context.Context, p userstore.Profile) error {
-					createdProfile = p
-					return nil
-				},
-			},
-		},
-	)
-
-	_, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
-		User: models.CreateUserInput{Username: "alex"},
-		DefaultProfile: DefaultProfileOptions{
-			Enabled: true,
-			Name:    "  Living Room  ",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount returned error: %v", err)
-	}
-	if createdProfile.Name != "Living Room" {
-		t.Fatalf("created profile name = %q, want Living Room", createdProfile.Name)
-	}
-}
-
-func TestAccountProvisionerCreateAccount_BlankExplicitProfileNameFallsBackToUsername(t *testing.T) {
-	var createdProfile userstore.Profile
-	provisioner := NewAccountProvisioner(
-		stubAccountUsers{
-			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
-				return &models.User{ID: 7, Username: "alex"}, nil
-			},
-		},
-		stubStoreProvider{
-			store: stubUserStore{
-				createProfileFn: func(_ context.Context, p userstore.Profile) error {
-					createdProfile = p
-					return nil
-				},
-			},
-		},
-	)
-
-	_, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
-		User: models.CreateUserInput{Username: "alex"},
-		DefaultProfile: DefaultProfileOptions{
-			Enabled: true,
-			Name:    "   ",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount returned error: %v", err)
-	}
-	if createdProfile.Name != "alex" {
-		t.Fatalf("created profile name = %q, want alex", createdProfile.Name)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type realtimeClientMessage struct {
@@ -105,7 +106,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
 
 	for {
-		_, data, err := conn.ReadMessage()
+		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			break
 		}
@@ -191,7 +192,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			if record.Name == playback.CommandPlanInvalidated {
 				slog.Warn("client rejected a plan invalidation; stopping the session",
 					"session", sessionID, "playback_session_id", sessionID, "error", result.Error)
-				if err := h.stopPlaybackSessionByID(context.Background(), sessionID, false); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+				if err := h.stopPlaybackSessionByID(context.Background(), sessionID, ""); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 					slog.Error("failed to stop playback after a rejected plan invalidation", "session", sessionID, "playback_session_id", sessionID, "error", err)
 				}
 			}
@@ -199,10 +200,53 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		}
 		switch record.Name {
 		case playback.CommandStop, playback.CommandTerminate:
-			err := h.stopPlaybackSessionByID(context.Background(), sessionID, true)
-			if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-				slog.Error("failed to stop playback after realtime completion", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			ctx := context.Background()
+			session, err := func() (*playback.Session, error) {
+				unlock := h.tm.LockSessionLifecycle(sessionID)
+				defer unlock()
+				session, err := h.sessionMgr.GetSession(sessionID)
+				if err != nil {
+					return nil, err
+				}
+				session, err = h.endPlaybackSessionAuthority(ctx, session, true)
+				if err == nil {
+					h.cleanupStoppedSessionTransport(ctx, session)
+				}
+				return session, err
+			}()
+			if err != nil {
+				if !errors.Is(err, playback.ErrSessionNotFound) {
+					slog.Error("failed to stop playback after realtime completion", "session", sessionID, "playback_session_id", sessionID, "error", err)
+				}
+				return nil
 			}
+			// Stop authority and transport immediately. Only provider/history
+			// finalization waits for an in-flight pause or resume scrobble.
+			h.runRealtimeResult(sessionID, false, func() {
+				h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
+				h.recordRealtimeStoppedSession(ctx, session)
+				h.syncSessionsNow(ctx, "stop")
+			})
+		case playback.CommandPause, playback.CommandUnpause:
+			// The player confirmed the new state; show it now instead of after
+			// its next progress report, up to ten seconds later.
+			paused := record.Name == playback.CommandPause
+			// The sequence must be read at receipt, on this reader. Keep the
+			// read well inside the default command deadline so a stalled
+			// store cannot hold back the next command's result and trigger
+			// its fallback stop; the next progress report recovers state.
+			ctx, cancel := context.WithTimeout(context.Background(), realtimeReceiptReadBudget)
+			attempt, err := h.realtimeProgressAttempt(ctx, sessionID)
+			cancel()
+			if err != nil {
+				slog.Warn("failed to read progress sequence at realtime confirmation", "session", sessionID, "error", err)
+				return nil
+			}
+			var sequence int64
+			if attempt != nil {
+				sequence = attempt.LastSequence
+			}
+			h.runRealtimeResult(sessionID, true, func() { h.setConfirmedPauseState(sessionID, paused, sequence) })
 		case playback.CommandPlanInvalidated:
 			// Completion means the client replanned itself; the session stays
 			// alive on its replacement plan and nothing else is required here.

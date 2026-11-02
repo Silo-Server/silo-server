@@ -12,7 +12,6 @@ import {
   profileCollectionRows,
   rowMeta,
   rowPages,
-  rowPlaceInSentence,
   rowPlaces,
   type CollectionRow,
 } from "./rows";
@@ -102,31 +101,6 @@ describe("collection rows", () => {
     const params = paramsOf(openRowPath({ id: "s9", page: { kind: "library", libraryId: 2 } }));
     expect(params.get("page")).toBe("2");
     expect(params.get("edit")).toBe("s9");
-  });
-
-  it("names this profile's own pages as yours", () => {
-    const mine = (overrides: Partial<CollectionRow>) => row({ surface: "profile", ...overrides });
-    expect(rowMeta(mine({ position: 4, pageRowCount: 8 }), NAMES)).toBe("My Home · row 4 of 8");
-    expect(rowMeta(mine({ page: { kind: "library", libraryId: 2 }, enabled: false }), NAMES)).toBe(
-      "My Kids page · row 6 of 9 · Hidden",
-    );
-    expect(
-      onRowsLine(
-        [mine({ id: "a" }), mine({ id: "b", page: { kind: "library", libraryId: 2 } })],
-        NAMES,
-      ),
-    ).toBe("On my Home and my Kids page");
-    expect(
-      rowPlaces(
-        [
-          mine({ page: { kind: "library", libraryId: 1 } }),
-          mine({ page: { kind: "library", libraryId: 2 } }),
-        ],
-        NAMES,
-      ),
-    ).toBe("my Movies and Kids pages");
-    expect(rowPlaceInSentence({ kind: "home" }, NAMES, "profile")).toBe("my Home");
-    expect(rowPlaceInSentence({ kind: "library", libraryId: 2 }, NAMES)).toBe("the Kids page");
   });
 
   it("finds a personal collection's rows on each page, placed by rank with hidden rows counted", () => {

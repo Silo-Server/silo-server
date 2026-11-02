@@ -190,7 +190,7 @@ export default function LibraryPage() {
     setSearchParams,
     shouldApplySavedLibrarySearch,
   ]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  /* eslint-enable react-hooks/set-state-in-effect -- ends the hydration exception */
 
   useEffect(() => {
     if (!libraryType || shouldApplySavedLibrarySearch) {
@@ -462,6 +462,7 @@ export default function LibraryPage() {
             <LibraryBrowse
               libraryId={id}
               libraryType={libraryType || "mixed"}
+              boxSetsEnabled={library?.box_sets_enabled === true}
               browseType={browseType}
               queryDefinition={queryDefinition}
               onBrowseTypeChange={handleBrowseTypeChange}

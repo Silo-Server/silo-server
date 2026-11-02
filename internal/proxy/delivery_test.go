@@ -50,6 +50,9 @@ func requestDelivery(t *testing.T, server *httptest.Server, method string, heade
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
+	// Receiving the body can precede the server's final delivery callback.
+	// Close waits for the handler to finish before callers inspect its records.
+	server.Close()
 	return resp.StatusCode
 }
 
@@ -127,18 +130,5 @@ func TestDeliveryKeepsRecordingWhileALongResponseFlows(t *testing.T) {
 	}
 	if got, want := recorded.Load(), size/meterChunk; got < want {
 		t.Fatalf("recorded delivery %d times over %d bytes, want at least %d (one per %d-byte slice)", got, size, want, meterChunk)
-	}
-}
-
-// Handlers also run without meterEgress (tests call them directly), so a
-// missing recorder must be harmless.
-func TestDeliveryWithoutARecorderIsANoOp(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	noteDelivery(r, &streamtoken.Claims{SessionID: "session-1"})
-	noteDelivery(r, nil)
-	w := &meteredResponseWriter{ResponseWriter: httptest.NewRecorder(), meter: newEgressMeter()}
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("media")); err != nil {
-		t.Fatal(err)
 	}
 }

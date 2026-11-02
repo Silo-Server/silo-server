@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,8 +72,8 @@ type translateSubtitleRequest struct {
 // HandleStatus reports whether AI subtitle translation / ASR generation are
 // available, so the player can show or hide the entry points.
 // GET /api/v1/subtitles/ai/status
-func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.SubtitleAIStatus())
+func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.SubtitleAIStatus(r.Context()))
 }
 
 type SubtitleAIStatusView struct {
@@ -81,11 +82,11 @@ type SubtitleAIStatusView struct {
 }
 
 // SubtitleAIStatus reports configured engine capabilities without starting work.
-func (h *SubtitleAIHandler) SubtitleAIStatus() SubtitleAIStatusView {
+func (h *SubtitleAIHandler) SubtitleAIStatus(ctx context.Context) SubtitleAIStatusView {
 	if h == nil || h.service == nil {
 		return SubtitleAIStatusView{}
 	}
-	return SubtitleAIStatusView{Enabled: h.service.Enabled(), TranscribeEnabled: h.service.TranscribeEnabled()}
+	return SubtitleAIStatusView{Enabled: h.service.Enabled(ctx), TranscribeEnabled: h.service.TranscribeEnabled()}
 }
 
 // WriteSubtitleAIDisabledStatus answers the AI status capability probe with a
@@ -204,7 +205,20 @@ func (h *SubtitleAIHandler) HandleGetJob(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+	writeJSON(w, http.StatusOK, map[string]any{"job": publicSubtitleAIJob(job)})
+}
+
+// publicSubtitleAIJob returns a copy of job whose error message is the
+// viewer-facing reason. Rows written before failure reasons were classified,
+// or by an older replica during a rolling upgrade, hold raw provider
+// diagnostics that must not reach clients.
+func publicSubtitleAIJob(job *ai.Job) *ai.Job {
+	if job == nil {
+		return nil
+	}
+	out := *job
+	out.ErrorMessage = ai.PublicFailureMessage(job.ErrorMessage)
+	return &out
 }
 
 // HandleCancelJob cancels a job. POST /api/v1/subtitles/ai/jobs/{job_id}/cancel
@@ -235,6 +249,9 @@ func (h *SubtitleAIHandler) HandleListJobs(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list_error", "Failed to list jobs")
 		return
+	}
+	for i := range jobs {
+		jobs[i].ErrorMessage = ai.PublicFailureMessage(jobs[i].ErrorMessage)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }

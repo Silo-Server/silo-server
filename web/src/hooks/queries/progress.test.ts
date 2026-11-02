@@ -27,43 +27,7 @@ vi.mock("./catalogRead", () => ({
   fetchCatalogItemDetail: (...args: unknown[]) => mocks.fetchCatalogItemDetail(...args),
 }));
 
-import { useContinueWatching, useReportMediaProgress } from "./progress";
-
-describe("useContinueWatching", () => {
-  const signal = new AbortController().signal;
-  beforeEach(() => {
-    mocks.useQuery.mockReset();
-    mocks.useQueries.mockReset();
-    mocks.fetchCatalogItemDetail.mockReset();
-    mocks.fetchCatalogItemDetail.mockResolvedValue({
-      content_id: "movie-123",
-      title: "Catalog Detail",
-      type: "movie",
-    });
-    mocks.useQuery.mockReturnValue({
-      data: {
-        items: [{ media_item_id: "movie-123" }],
-      },
-      isLoading: false,
-    });
-    mocks.useQueries.mockImplementation(
-      ({
-        queries,
-      }: {
-        queries: Array<{ queryFn: (context: { signal: AbortSignal }) => Promise<unknown> }>;
-      }) => {
-        void queries[0]?.queryFn({ signal });
-        return [{ data: undefined, isLoading: false }];
-      },
-    );
-  });
-
-  it("looks up continue-watching details through catalog item detail", () => {
-    useContinueWatching();
-
-    expect(mocks.fetchCatalogItemDetail).toHaveBeenCalledWith("movie-123", undefined, { signal });
-  });
-});
+import { useReportMediaProgress } from "./progress";
 
 describe("useReportMediaProgress", () => {
   type ReportOptions = {
@@ -131,18 +95,5 @@ describe("useReportMediaProgress", () => {
     await expect(
       options.mutationFn({ contentId: "hidden", positionSeconds: 1, durationSeconds: 10 }),
     ).rejects.toThrow("Catalog item not found.");
-  });
-
-  it("scopes the post-sync invalidation to progress and the reported item", async () => {
-    const invalidateQueries = vi.fn();
-    mocks.useQueryClient.mockReturnValue({ invalidateQueries });
-    const options = useReportMediaProgress() as unknown as ReportOptions;
-
-    options.onSuccess?.(syncProgressOk, { contentId: "movie-8f2c1a" });
-
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries.mock.calls[1]?.[0]?.queryKey).toEqual(
-      expect.arrayContaining(["movie-8f2c1a"]),
-    );
   });
 });

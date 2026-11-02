@@ -38,7 +38,7 @@ func (r *SilenceBoundaryRefiner) RefineChapterEnd(ctx context.Context, candidate
 		return segment, false, nil
 	}
 
-	result, err := analysisRunner(cfg).Run(ctx, mediasample.Request{
+	result, err := runAnalysis(ctx, cfg, analysisRunner(cfg), mediasample.Request{
 		Input:  candidate.FilePath,
 		Window: &mediasample.Window{StartSeconds: windowStart, DurationSeconds: windowEnd - windowStart},
 		Audio: &mediasample.AudioOutput{Silence: &mediasample.SilenceParams{

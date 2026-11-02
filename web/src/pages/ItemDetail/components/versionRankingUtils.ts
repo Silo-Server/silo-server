@@ -1,5 +1,6 @@
 import type { FileVersion, LeafItemUserData, PlaybackVariant } from "@/api/types";
-import { mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackAtmosEvidence, mapAudioLabel } from "@/lib/mediaFormat";
+import { versionAudioAtmosEvidence } from "./versionFormatUtils";
 
 const RESOLUTION_RANK: Record<string, number> = {
   "4k": 4,
@@ -86,6 +87,26 @@ export function pickBestAttributes(
   hdr: boolean;
   audioLabel: string;
 } | null {
+  const best = bestAttributes(versions, qualityPreference);
+  if (!best) return null;
+  return {
+    resolution: best.resolution,
+    hdr: best.hdr,
+    audioLabel: best.audioCodec ? mapAudioLabel(best.audioCodec, best.audioEvidence) : "",
+  };
+}
+
+// bestAttributes ranks audio by codec alone; the profile and titles only
+// refine the displayed label, so they never change which version is preferred.
+function bestAttributes(
+  versions: FileVersion[],
+  qualityPreference?: string | null,
+): {
+  resolution: string;
+  hdr: boolean;
+  audioCodec: string;
+  audioEvidence?: string;
+} | null {
   if (versions.length === 0) return null;
 
   // When the user has a quality preference, only consider versions at or below that cap.
@@ -102,7 +123,18 @@ export function pickBestAttributes(
   let bestResScore = -1;
   let hdr = false;
   let bestAudioCodec = "";
+  let bestAudioEvidence: string | undefined;
   let bestAudioScore = -1;
+
+  // On equal codec scores an Atmos track supplies the label. Equal scores are
+  // the same codec family, so the codec-only label used to pick a version
+  // does not change.
+  const replacesBestAudio = (score: number, codec: string, evidence?: string) =>
+    score > bestAudioScore ||
+    (score >= 0 &&
+      score === bestAudioScore &&
+      !mapAudioLabel(bestAudioCodec, bestAudioEvidence).includes("Atmos") &&
+      mapAudioLabel(codec, evidence).includes("Atmos"));
 
   for (const v of candidates) {
     const rs = resolutionScore(v.resolution);
@@ -113,9 +145,11 @@ export function pickBestAttributes(
     if (v.hdr) hdr = true;
 
     const as_ = audioScore(v.codec_audio);
-    if (as_ > bestAudioScore) {
+    const versionEvidence = versionAudioAtmosEvidence(v);
+    if (replacesBestAudio(as_, v.codec_audio, versionEvidence)) {
       bestAudioScore = as_;
       bestAudioCodec = v.codec_audio;
+      bestAudioEvidence = versionEvidence;
     }
 
     // Also check individual audio tracks for higher-quality codecs
@@ -123,9 +157,11 @@ export function pickBestAttributes(
       for (const t of v.audio_tracks) {
         if (t.codec) {
           const ts = audioScore(t.codec);
-          if (ts > bestAudioScore) {
+          const trackEvidence = audioTrackAtmosEvidence(t);
+          if (replacesBestAudio(ts, t.codec, trackEvidence)) {
             bestAudioScore = ts;
             bestAudioCodec = t.codec;
+            bestAudioEvidence = trackEvidence;
           }
         }
       }
@@ -135,7 +171,8 @@ export function pickBestAttributes(
   return {
     resolution: bestRes,
     hdr,
-    audioLabel: bestAudioCodec ? mapAudioLabel(bestAudioCodec) : "",
+    audioCodec: bestAudioCodec,
+    audioEvidence: bestAudioEvidence,
   };
 }
 
@@ -169,14 +206,15 @@ export function selectDefaultVersion(
   if (candidates.length === 1) return candidates[0] ?? null;
 
   // Use quality-preference ranking to find the best match.
-  const preferred = pickBestAttributes(candidates, qualityPreference);
+  const preferred = bestAttributes(candidates, qualityPreference);
   if (preferred) {
+    const preferredAudio = preferred.audioCodec ? mapAudioLabel(preferred.audioCodec) : "";
     const matching = candidates.find(
       (v) =>
         v.resolution === preferred.resolution &&
         v.hdr === preferred.hdr &&
-        (preferred.audioLabel === "" ||
-          mapAudioLabel(v.codec_audio).toLowerCase() === preferred.audioLabel.toLowerCase()),
+        (preferredAudio === "" ||
+          mapAudioLabel(v.codec_audio).toLowerCase() === preferredAudio.toLowerCase()),
     );
     if (matching) return matching;
   }

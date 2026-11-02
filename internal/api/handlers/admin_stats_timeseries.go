@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -34,6 +38,10 @@ const (
 	// under. A dashboard widget is a few hundred CSS pixels wide, so a month of
 	// minutes would spend megabytes drawing sub-pixel detail nobody can see.
 	adminTimeseriesMaxPoints = 750
+
+	// bytesPerKbpsMinute converts one sampled minute at 1 kbps into bytes:
+	// 1000 bits/s × 60 s ÷ 8 bits per byte.
+	bytesPerKbpsMinute = 1000 * adminTimeseriesResolutionSeconds / 8
 )
 
 // timeseriesBucketSeconds picks the display bucket for a window, keeping every
@@ -83,7 +91,37 @@ type AdminTimeseriesPoint struct {
 	Transcode          int64     `json:"transcode"`
 	EgressKbps         int64     `json:"egress_kbps"`
 	DownloadEgressKbps int64     `json:"download_egress_kbps"`
+	// EgressBySource splits EgressKbps by AdminTimeseriesEgressSource key, taken
+	// from the bucket's peak-egress minute so the parts belong to the same
+	// minute as the total. Egress no source accounts for, such as minutes
+	// sampled before per-node rows existed, is the remainder. /api/v1 is frozen,
+	// so only v2 emits it.
+	EgressBySource map[string]int64 `json:"-"`
 }
+
+// AdminTimeseriesEgressSource names one key of AdminTimeseriesPoint.EgressBySource:
+// a stream node ("node:<id>", from dashboard_node_egress_samples) or every API
+// process together ("api", the "proc:" rows).
+type AdminTimeseriesEgressSource struct {
+	Key    string
+	Kind   string // EgressSourceKindNode or EgressSourceKindAPI
+	NodeID int    // zero for the API source
+	Name   string
+	// EgressBytes is what the source served over the whole window, integrated
+	// from every sampled minute like AdminTimeseries.EgressBytes.
+	EgressBytes int64
+}
+
+// Kinds of AdminTimeseriesEgressSource.
+const (
+	EgressSourceKindAPI  = "api"
+	EgressSourceKindNode = "node"
+)
+
+const (
+	egressSourceAPIKey  = "api"
+	egressSourceAPIName = "API server"
+)
 
 // AdminTimeseries is the GET /admin/stats/timeseries body.
 //
@@ -95,12 +133,26 @@ type AdminTimeseriesPoint struct {
 //
 // ResolutionSeconds is the bucket this window was aggregated into, not a
 // constant: it widens with the requested window (timeseriesBucketSeconds).
+//
+// EgressBytes and DownloadEgressBytes are the data transferred over the whole
+// window, integrated from every sampled minute rather than from Points: the
+// points are peak-per-bucket, so summing them would count a one-minute spike
+// as if it lasted the whole bucket. Minutes the sampler missed contribute
+// nothing, and node egress is a rolling average, so the totals are a close
+// estimate rather than exact byte accounting. /api/v1 is frozen, so only v2
+// emits them (json:"-").
 type AdminTimeseries struct {
-	ResolutionSeconds int                    `json:"resolution_seconds"`
-	From              time.Time              `json:"from"`
-	To                time.Time              `json:"to"`
-	OldestSampleAt    *time.Time             `json:"oldest_sample_at"`
-	Points            []AdminTimeseriesPoint `json:"points"`
+	ResolutionSeconds   int        `json:"resolution_seconds"`
+	From                time.Time  `json:"from"`
+	To                  time.Time  `json:"to"`
+	OldestSampleAt      *time.Time `json:"oldest_sample_at"`
+	EgressBytes         int64      `json:"-"`
+	DownloadEgressBytes int64      `json:"-"`
+	// EgressSources lists every source with samples in the window, which
+	// covers every key a point's EgressBySource uses, the API source first and
+	// nodes by name. v2 only.
+	EgressSources []AdminTimeseriesEgressSource `json:"-"`
+	Points        []AdminTimeseriesPoint        `json:"points"`
 }
 
 // AdminTimeseriesSource returns cached or freshly queried samples for a window
@@ -227,6 +279,20 @@ type timeseriesRow struct {
 	Transcode          *int64
 	EgressKbps         int64
 	DownloadEgressKbps int64
+	// The Sum columns add up every sampled minute's rate in the bucket, which
+	// the transfer totals integrate; the Kbps columns above are the peak.
+	EgressKbpsSum         int64
+	DownloadEgressKbpsSum int64
+}
+
+// sumTransferredBytes integrates the per-minute rates of every bucket into
+// total bytes transferred over the window.
+func sumTransferredBytes(rows []timeseriesRow) (egressBytes, downloadBytes int64) {
+	for _, row := range rows {
+		egressBytes += row.EgressKbpsSum * bytesPerKbpsMinute
+		downloadBytes += row.DownloadEgressKbpsSum * bytesPerKbpsMinute
+	}
+	return egressBytes, downloadBytes
 }
 
 // assembleTimeseries turns grouped rows into response points, reading a missing
@@ -262,6 +328,14 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 
 	bucketSeconds := timeseriesBucketSeconds(hours)
 
+	// Every read below shares one snapshot, so a sample committed between them
+	// cannot give the newest point a split larger than its total.
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("beginning dashboard timeseries read: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
 	// Two passes, in one statement. The inner one collapses the sources of a
 	// single minute: MAX over the shared source rather than SUM, because
 	// replicas may each have written the same minute's cluster-wide counts and
@@ -271,8 +345,10 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 	// The outer one collapses those minutes into the display bucket by taking
 	// the peak minute of each column. Averaging would erase the spikes these
 	// charts exist to show; a bucket therefore answers "the worst minute in
-	// here", and its columns may come from different minutes.
-	rows, err := pool.Query(ctx, `
+	// here", and its columns may come from different minutes. The trailing
+	// SUM columns are the exception: they feed the window's transfer totals,
+	// which need every minute's rate, not the peak.
+	rows, err := tx.Query(ctx, `
 		WITH minutes AS (
 			SELECT bucket,
 			       MAX(streams_total)     FILTER (WHERE source = 'shared') AS streams_total,
@@ -291,7 +367,9 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 		       MAX(streams_remux),
 		       MAX(streams_transcode),
 		       MAX(egress_kbps)::bigint,
-		       MAX(download_egress_kbps)::bigint
+		       MAX(download_egress_kbps)::bigint,
+		       SUM(egress_kbps)::bigint,
+		       SUM(download_egress_kbps)::bigint
 		FROM minutes
 		GROUP BY display_bucket
 		ORDER BY display_bucket
@@ -312,11 +390,16 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 			&row.Transcode,
 			&row.EgressKbps,
 			&row.DownloadEgressKbps,
+			&row.EgressKbpsSum,
+			&row.DownloadEgressKbpsSum,
 		); err != nil {
 			return nil, fmt.Errorf("scanning dashboard metric sample: %w", err)
 		}
 		grouped = append(grouped, row)
 	}
+	// The transaction's connection runs one query at a time, so free it for
+	// the reads below rather than at return.
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating dashboard metric samples: %w", err)
 	}
@@ -325,12 +408,16 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 		ResolutionSeconds: bucketSeconds,
 		Points:            assembleTimeseries(grouped),
 	}
+	series.EgressBytes, series.DownloadEgressBytes = sumTransferredBytes(grouped)
+	if err := queryEgressBySource(ctx, tx, hours, bucketSeconds, series); err != nil {
+		return nil, err
+	}
 
 	// The window bounds come from the same clock the samples were bucketed
 	// with, so a client comparing them against point timestamps never sees the
 	// API server's clock skew.
 	var oldest *time.Time
-	if err := pool.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		SELECT MIN(bucket),
 		       now() - make_interval(hours => $1),
 		       now()
@@ -346,4 +433,166 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 	series.To = series.To.UTC()
 
 	return series, nil
+}
+
+// egressPartsSQL is every source's egress per sampled minute inside the
+// window ($1 hours): all API processes folded into "api", and each node's row.
+const egressPartsSQL = `
+	SELECT bucket, 'api' AS source_key, egress_kbps
+	FROM dashboard_metric_samples
+	WHERE source LIKE 'proc:%' AND bucket >= now() - make_interval(hours => $1)
+	UNION ALL
+	SELECT bucket, 'node:' || node_id, egress_kbps
+	FROM dashboard_node_egress_samples
+	WHERE bucket >= now() - make_interval(hours => $1)
+`
+
+// queryEgressBySource fills each point's EgressBySource and the series'
+// EgressSources. For every display bucket it picks the minute whose total
+// egress peaked and reads that minute's node rows and API process rows; taking
+// each source's own peak instead would add up to more than the point's egress
+// whenever sources peak in different minutes. The per-minute total here must
+// stay the same SUM queryAdminTimeseries peaks over, or the split and the
+// point would describe different minutes.
+func queryEgressBySource(ctx context.Context, tx pgx.Tx, hours, bucketSeconds int, series *AdminTimeseries) error {
+	rows, err := tx.Query(ctx, `
+		WITH minutes AS (
+			SELECT bucket, SUM(egress_kbps) AS egress_kbps
+			FROM dashboard_metric_samples
+			WHERE bucket >= now() - make_interval(hours => $1)
+			GROUP BY bucket
+		), peaks AS (
+			SELECT DISTINCT ON (display_bucket) display_bucket, bucket
+			FROM (
+				SELECT date_bin(make_interval(secs => $2), bucket, 'epoch') AS display_bucket, bucket, egress_kbps
+				FROM minutes
+			) binned
+			ORDER BY display_bucket, egress_kbps DESC, bucket
+		), parts AS (`+egressPartsSQL+`)
+		SELECT peaks.display_bucket, parts.source_key, SUM(parts.egress_kbps)::bigint
+		FROM peaks
+		JOIN parts ON parts.bucket = peaks.bucket
+		GROUP BY 1, 2
+	`, hours, float64(bucketSeconds))
+	if err != nil {
+		return fmt.Errorf("querying dashboard egress by source: %w", err)
+	}
+
+	byBucket := make(map[time.Time]map[string]int64)
+	for rows.Next() {
+		var bucket time.Time
+		var key string
+		var kbps int64
+		if err := rows.Scan(&bucket, &key, &kbps); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning dashboard egress by source: %w", err)
+		}
+		bucket = bucket.UTC()
+		if byBucket[bucket] == nil {
+			byBucket[bucket] = make(map[string]int64)
+		}
+		byBucket[bucket][key] = kbps
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating dashboard egress by source: %w", err)
+	}
+
+	for i := range series.Points {
+		bySource := byBucket[series.Points[i].T]
+		if bySource == nil {
+			bySource = map[string]int64{}
+		}
+		series.Points[i].EgressBySource = bySource
+	}
+
+	// Window totals cover every sampled minute, not only the peak minutes the
+	// points show, so a source that is busy all window but never at a bucket's
+	// peak is still listed and ranked by what it served.
+	rows, err = tx.Query(ctx, `
+		SELECT source_key, SUM(egress_kbps)::bigint FROM (`+egressPartsSQL+`) parts GROUP BY 1
+	`, hours)
+	if err != nil {
+		return fmt.Errorf("querying dashboard egress source totals: %w", err)
+	}
+	totals := make(map[string]int64)
+	for rows.Next() {
+		var key string
+		var kbpsMinutes int64
+		if err := rows.Scan(&key, &kbpsMinutes); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning dashboard egress source total: %w", err)
+		}
+		totals[key] = kbpsMinutes * bytesPerKbpsMinute
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating dashboard egress source totals: %w", err)
+	}
+
+	sources, err := describeEgressSources(ctx, tx, totals)
+	if err != nil {
+		return err
+	}
+	series.EgressSources = sources
+	return nil
+}
+
+// describeEgressSources names the sources that served egress in the window,
+// keyed with their window totals in bytes. A node row
+// outlives the node it describes, so a deleted node gets a placeholder name
+// rather than disappearing from the chart.
+func describeEgressSources(ctx context.Context, tx pgx.Tx, totals map[string]int64) ([]AdminTimeseriesEgressSource, error) {
+	sources := make([]AdminTimeseriesEgressSource, 0, len(totals))
+	var nodeIDs []int
+	for key := range totals {
+		if key == egressSourceAPIKey {
+			sources = append(sources, AdminTimeseriesEgressSource{Key: key, Kind: EgressSourceKindAPI, Name: egressSourceAPIName, EgressBytes: totals[key]})
+			continue
+		}
+		id, err := strconv.Atoi(strings.TrimPrefix(key, "node:"))
+		if err != nil {
+			return nil, fmt.Errorf("parsing dashboard egress source %q: %w", key, err)
+		}
+		nodeIDs = append(nodeIDs, id)
+	}
+
+	names := make(map[int]string, len(nodeIDs))
+	if len(nodeIDs) > 0 {
+		rows, err := tx.Query(ctx, `SELECT id, name FROM stream_nodes WHERE id = ANY($1)`, nodeIDs)
+		if err != nil {
+			return nil, fmt.Errorf("querying dashboard egress source names: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return nil, fmt.Errorf("scanning dashboard egress source name: %w", err)
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating dashboard egress source names: %w", err)
+		}
+	}
+	for _, id := range nodeIDs {
+		name, ok := names[id]
+		if !ok {
+			name = fmt.Sprintf("Removed node %d", id)
+		}
+		key := fmt.Sprintf("node:%d", id)
+		sources = append(sources, AdminTimeseriesEgressSource{Key: key, Kind: EgressSourceKindNode, NodeID: id, Name: name, EgressBytes: totals[key]})
+	}
+
+	slices.SortFunc(sources, func(a, b AdminTimeseriesEgressSource) int {
+		if (a.Kind == EgressSourceKindAPI) != (b.Kind == EgressSourceKindAPI) {
+			if a.Kind == EgressSourceKindAPI {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.Key, b.Key))
+	})
+	return sources, nil
 }

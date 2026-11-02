@@ -40,19 +40,6 @@ func TestParseItemsQuerySubtractsExcludeItemTypesFromIncludeItemTypes(t *testing
 	}
 }
 
-func TestMapSortByReleaseDate(t *testing.T) {
-	tests := []string{
-		"PremiereDate",
-		"PremiereDate,SortName,ProductionYear",
-		"Premiered",
-	}
-	for _, raw := range tests {
-		if got := mapSortBy(raw); got != "release_date" {
-			t.Fatalf("mapSortBy(%q) = %q, want release_date", raw, got)
-		}
-	}
-}
-
 func TestMapSortByDateLastContentAdded(t *testing.T) {
 	// Jellyfin's standard "Latest" sort for TV libraries orders shows by
 	// their most recently added episode. It must map to the

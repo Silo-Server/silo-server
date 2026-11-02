@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -37,6 +38,9 @@ var (
 	// ErrSourceUnsupported is returned when the chosen source track cannot be
 	// translated (bitmap track, or a styled/unsupported format in this version).
 	ErrSourceUnsupported = errors.New("subtitle source is not supported for translation")
+	// errSourceChanged is returned when a queued translation's source index
+	// names a different track by the time the job runs.
+	errSourceChanged = errors.New("the selected subtitle track changed while the job was queued")
 )
 
 // MediaFileResolver loads a media file (path + subtitle metadata) by ID.
@@ -78,12 +82,25 @@ type Service struct {
 	ffmpegPath      string
 	logger          *slog.Logger
 	runner          *jobrunner.Runner
+	// subtitleCache, when set, holds complete embedded text extracts shared
+	// with subtitle delivery, so a source track is demuxed once rather than
+	// on every translation of it. Optional; nil extracts every time.
+	subtitleCache *playback.SubtitleCache
+	// extractEmbedded demuxes one embedded subtitle stream (ffmpeg's 0:s:N)
+	// as SRT. Nil uses playback.ExtractSubtitle; tests replace it.
+	extractEmbedded func(ctx context.Context, filePath string, ordinal int) ([]byte, error)
 }
 
 // SetExternalTimings makes a sidecar source carry its timing correction, as
 // a stored source does. Call it before Recover.
 func (s *Service) SetExternalTimings(timings subtitles.ExternalTimingLookup) {
 	s.externalTimings = timings
+}
+
+// SetSubtitleCache shares the node's subtitle extract cache with translation
+// source loading. Call it before Recover or the first Enqueue.
+func (s *Service) SetSubtitleCache(cache *playback.SubtitleCache) {
+	s.subtitleCache = cache
 }
 
 // UpdateConfig swaps the service config. Safe for concurrent use; running
@@ -137,7 +154,24 @@ func NewService(
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool { return s.config().TranslateReady() }
+func (s *Service) Enabled(ctx context.Context) bool {
+	cfg, _ := s.translationConfig(ctx)
+	return cfg.TranslateReady()
+}
+
+func (s *Service) translationConfig(ctx context.Context) (Config, *llm.Config) {
+	cfg := s.config()
+	if cfg.TextConfigSource == nil || !cfg.TranslateEnabled {
+		return cfg, nil
+	}
+	text, err := cfg.TextConfigSource(ctx)
+	if err != nil || !text.TextConfigured() {
+		cfg.TranslateEnabled = false
+		return cfg, nil
+	}
+	cfg.ChatModel = text.ChatModel
+	return cfg, new(text)
+}
 
 // TranscribeEnabled reports whether ASR subtitle generation can currently run.
 func (s *Service) TranscribeEnabled() bool {
@@ -159,6 +193,10 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	// Snapshot once so the job's model provenance is internally consistent
 	// even if the config reloads mid-enqueue.
 	cfg := s.config()
+	var textConfig *llm.Config
+	if req.Kind == JobKindTranslate || req.Kind == JobKindTranscribeTranslate {
+		cfg, textConfig = s.translationConfig(ctx)
+	}
 	jobModel := cfg.ChatModel
 	switch req.Kind {
 	case JobKindTranslate:
@@ -193,11 +231,20 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	req.SourceLanguage = normalizeOptionalLanguageCode(req.SourceLanguage)
 
-	key := idempotencyKey(req.MediaFileID, req.Kind, req.SourceIndex, req.TargetLanguage, jobModel)
+	source, stable := strconv.Itoa(req.SourceIndex), false
+	if req.Kind == JobKindTranslate {
+		source, stable = s.translationSource(ctx, req.MediaFileID, req.SourceIndex)
+	}
+	key := idempotencyKey(req.MediaFileID, req.Kind, source, req.TargetLanguage, jobModel)
 	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
 		return nil, err
 	} else if existing != nil {
-		return existing, nil
+		return asRequested(existing, req.SourceIndex), nil
+	}
+	if stable {
+		if existing, err := s.findTranslationByIndexOrReuse(ctx, req, key, jobModel); err != nil || existing != nil {
+			return existing, err
+		}
 	}
 
 	// Quota gates only the creation of a new job: collapsing onto an existing
@@ -227,12 +274,12 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		// The same lookup also covers a quota rejection that raced an identical
 		// request: collapsing onto the winner is free, so it stays allowed.
 		if existing, lookupErr := s.repo.GetActiveJobByIdempotencyKey(ctx, key); lookupErr == nil && existing != nil {
-			return existing, nil
+			return asRequested(existing, req.SourceIndex), nil
 		}
 		return nil, err
 	}
 
-	s.dispatch(*job)
+	s.dispatch(*job, textConfig)
 	return job, nil
 }
 
@@ -267,7 +314,7 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 	// Canceling a context alone cannot acknowledge a job-state change: the
 	// provider may ignore it, and the process may exit before its cleanup runs.
 	if !job.Status.Terminal() {
-		err = s.repo.FailJob(ctx, id, JobStatusCancelled, "cancelled") //nolint:misspell // Preserve the existing persisted message.
+		err = s.repo.FailJob(ctx, id, JobStatusCancelled, storedCancelled)
 	}
 	// Still ask local work to stop if the database outcome is uncertain, but
 	// return that error rather than reporting a successful cancellation. This
@@ -277,11 +324,14 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 }
 
 // dispatch launches a bounded background goroutine to run the job.
-func (s *Service) dispatch(job Job) {
+func (s *Service) dispatch(job Job, textConfig *llm.Config) {
 	s.runner.Dispatch(job.ID, func(ctx context.Context) {
+		if textConfig != nil {
+			ctx = llm.WithTextConfig(ctx, *textConfig)
+		}
 		s.run(ctx, &job)
 	}, func(ctx context.Context) {
-		_ = s.repo.FailJob(ctx, job.ID, JobStatusCancelled, "cancelled before start")
+		_ = s.repo.FailJob(ctx, job.ID, JobStatusCancelled, storedCancelledBeforeStart)
 	})
 }
 
@@ -304,6 +354,10 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		s.logger.WarnContext(ctx, "failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}
 
+	if s.sourceChanged(ctx, job) {
+		s.finishWithError(ctx, job, errSourceChanged)
+		return
+	}
 	cues, sourceLang, err := s.loadSource(ctx, job)
 	if err != nil {
 		s.finishWithError(ctx, job, err)
@@ -380,10 +434,10 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 
 	audioIdx := job.SourceIndex
 	if audioIdx < 0 {
-		audioIdx = defaultAudioTrackIndex(file.AudioTracks)
+		audioIdx = playback.SelectAudioTrack(file.AudioTracks, "", nil)
 	}
 	if audioIdx >= len(file.AudioTracks) {
-		s.finishWithError(ctx, job, fmt.Errorf("%w: audio track index out of range", ErrInvalidRequest))
+		s.finishWithError(ctx, job, fmt.Errorf("%w: audio track index out of range", errSourceMissing))
 		return
 	}
 
@@ -558,8 +612,9 @@ func (s *Service) translateLiveChunk(
 	if err != nil {
 		state.err = err
 		if !state.failedNotified {
+			_, msg := failureOutcome(ctx, job.Kind, err)
 			s.notifierFor(job).TranslationFailed(ctx, job.SessionID, job.MediaFileID, job.ID,
-				trackKey, llm.Truncate(err.Error(), 500))
+				trackKey, PublicFailureMessage(msg))
 			state.failedNotified = true
 		}
 		return
@@ -602,17 +657,6 @@ func (s *Service) finishTranslatedTrack(
 	return true
 }
 
-// defaultAudioTrackIndex returns the index of the default-flagged audio
-// track, falling back to the first track.
-func defaultAudioTrackIndex(tracks []models.AudioTrack) int {
-	for i, t := range tracks {
-		if t.Default {
-			return i
-		}
-	}
-	return 0
-}
-
 func transcribedReleaseName(lang string) string {
 	name := aitranslate.LanguageDisplayName(lang)
 	if name == "" {
@@ -632,20 +676,15 @@ func (s *Service) finishWithErrorNotify(ctx context.Context, job *Job, err error
 	if errors.Is(err, subtitles.ErrAIJobInactive) || errors.Is(err, subtitles.ErrAIPublicationUncertain) {
 		return
 	}
-	status := JobStatusFailed
-	msg := llm.Truncate(err.Error(), 500)
-	// Only a genuine cancellation (user cancel, or shutdown via cancel) becomes
-	// "cancelled". A deadline/timeout (context.DeadlineExceeded) stays "failed".
-	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-		status = JobStatusCancelled
-		msg = "cancelled"
-	}
+	// The job keeps a viewer-facing reason; the raw error, which can carry
+	// provider responses, goes to the log below.
+	status, msg := failureOutcome(ctx, job.Kind, err)
 	if dbErr := s.repo.FailJob(context.WithoutCancel(ctx), job.ID, status, msg); dbErr != nil {
 		s.logger.WarnContext(ctx, "failed to record subtitle ai job failure", "job", job.ID, "error", dbErr)
 	}
 	if notify && job.SessionID != "" && s.notifierFor(job) != nil {
 		s.notifierFor(job).TranslationFailed(context.WithoutCancel(ctx), job.SessionID, job.MediaFileID, job.ID,
-			liveTrackKey(job.ID), msg)
+			liveTrackKey(job.ID), PublicFailureMessage(msg))
 	}
 	if status == JobStatusFailed {
 		s.logger.WarnContext(ctx, "subtitle ai job failed", "job", job.ID, "media_file", job.MediaFileID, "error", err)
@@ -678,7 +717,7 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 
 	switch {
 	case idx < 0:
-		return nil, "", fmt.Errorf("invalid source subtitle index")
+		return nil, "", fmt.Errorf("%w: invalid source subtitle index", errSourceMissing)
 
 	case idx < externalCount:
 		ext := file.ExternalSubtitles[idx]
@@ -692,7 +731,7 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		}
 		cues, err := ParseCues(data)
 		if err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("%w: %w", errSourceEmpty, err)
 		}
 		return cues, ext.Language, nil
 
@@ -702,13 +741,39 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if playback.NeedsBurnIn(track.Codec) {
 			return nil, "", fmt.Errorf("%w: bitmap track", ErrSourceUnsupported)
 		}
-		data, _, err := playback.ExtractSubtitle(ctx, file.FilePath, embeddedIndex, s.ffmpegPath)
+		extract := func(ctx context.Context) ([]byte, error) {
+			if s.extractEmbedded != nil {
+				return s.extractEmbedded(ctx, file.FilePath, embeddedIndex)
+			}
+			data, _, err := playback.ExtractSubtitle(ctx, file.FilePath, embeddedIndex, s.ffmpegPath)
+			return data, err
+		}
+		var data []byte
+		var sourced bool
+		if cached, ok := s.subtitleCache.LookupWebVTT(file.FilePath, embeddedIndex); ok {
+			// Native playback already demuxed this track as WebVTT; ParseCues
+			// reads it, so the source is not demuxed again.
+			data = cached
+		} else {
+			// A kept copy of the track, or one read through the file's index,
+			// saves demuxing the whole source.
+			data, sourced, err = s.subtitleCache.ExtractSourcedText(ctx, file.FilePath,
+				playback.EmbeddedSubtitleRefFor(file, embeddedIndex), embeddedIndex, "srt", s.ffmpegPath)
+		}
+		switch {
+		case data != nil || sourced || err != nil:
+		case s.subtitleCache != nil:
+			// ExtractSubtitle writes SRT for ffmpeg's 0:s:N, the cache's key.
+			data, err = s.subtitleCache.ExtractText(ctx, file.FilePath, embeddedIndex, "srt", extract)
+		default:
+			data, err = extract(ctx)
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("extract embedded subtitle: %w", err)
 		}
 		cues, err := ParseCues(data)
 		if err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("%w: %w", errSourceEmpty, err)
 		}
 		return cues, track.Language, nil
 
@@ -719,7 +784,7 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 			return nil, "", fmt.Errorf("list downloaded subtitles: %w", err)
 		}
 		if downloadedIndex < 0 || downloadedIndex >= len(list) {
-			return nil, "", fmt.Errorf("source subtitle index out of range")
+			return nil, "", fmt.Errorf("%w: source subtitle index out of range", errSourceMissing)
 		}
 		dl := list[downloadedIndex]
 		if !isParsableTextFormat(string(dl.Format)) {
@@ -736,7 +801,7 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		}
 		cues, err := ParseCues(data)
 		if err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("%w: %w", errSourceEmpty, err)
 		}
 		return cues, dl.Language, nil
 	}

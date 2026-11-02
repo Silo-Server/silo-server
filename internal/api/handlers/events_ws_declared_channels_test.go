@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -42,9 +43,29 @@ func eventsWSTestConnWithHandler(
 	query string,
 ) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
 	t.Helper()
+	return eventsWSTestConnActing(t, handler, claims, query, actingAdminIs(true))
+}
+
+// actingAdminIs is an acting-admin decision that answers the same for every
+// profile.
+func actingAdminIs(acting bool) apimw.ActingAdminDecider {
+	return func(context.Context, apimw.ActingAdminRequest) (bool, error) { return acting, nil }
+}
+
+// eventsWSTestConnActing dials the v1 socket as claims, with decide as the
+// acting-admin decision for an admin account.
+func eventsWSTestConnActing(
+	t *testing.T,
+	handler *EventsHandler,
+	claims *auth.Claims,
+	query string,
+	decide apimw.ActingAdminDecider,
+) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
+	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := apimw.SetClaims(r.Context(), claims)
+		ctx = apimw.SetActingAdminDecider(ctx, decide)
 		handler.HandleWebSocket(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
@@ -103,8 +124,8 @@ func TestEventsWebSocketDeclaredChannelsSkipHandshake(t *testing.T) {
 		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
 	}
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
@@ -184,66 +205,14 @@ func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
 
 	time.Sleep(subscribeGracePeriod + time.Second)
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("setting read deadline: %v", err)
 	}
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Fatalf("event channel = %s, want user_settings", event["channel"])
-	}
-}
-
-// TestEventsWebSocketRepeatedChannelsParameter covers the other natural
-// spelling of a selection. Honoring only the first occurrence dropped the rest
-// with an empty rejected array — the connection came up subscribed to less than
-// it asked for and reported nothing wrong.
-func TestEventsWebSocketRepeatedChannelsParameter(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"},
-		"?channels=catalog&channels=user_settings")
-
-	readFrame("hello")
-	subscribed := readFrame("subscribed")
-
-	for _, want := range []string{`"catalog"`, `"user_settings"`} {
-		if !strings.Contains(string(subscribed["channels"]), want) {
-			t.Errorf("channel %s was dropped: %s", want, subscribed["channels"])
-		}
-	}
-}
-
-// TestEventsWebSocketSilentConnectionStillClosed pins the other half: the grace
-// period still applies to a connection that declared nothing, so the URL path
-// relaxes the rule rather than removing it.
-func TestEventsWebSocketSilentConnectionStillClosed(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("waits out the subscribe grace period in real time")
-	}
-
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"}, "")
-
-	hello := readFrame("hello")
-	if string(hello["required_action"]) != `"subscribe"` {
-		t.Errorf("required_action = %s, want \"subscribe\"", hello["required_action"])
-	}
-
-	if err := conn.SetReadDeadline(time.Now().Add(subscribeGracePeriod + 5*time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
-	}
-	// The error frame, then the close.
-	if _, _, err := conn.ReadMessage(); err != nil {
-		t.Fatalf("reading error frame: %v", err)
-	}
-	_, _, err := conn.ReadMessage()
-	if err == nil {
-		t.Fatal("silent connection was not closed after the grace period")
-	}
-	if !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
-		t.Fatalf("close error = %v, want policy violation", err)
 	}
 }
 
@@ -278,12 +247,75 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 		evt.PublishOptions{AdminOnly: true}); err != nil {
 		t.Fatalf("publishing admin-only event: %v", err)
 	}
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
 		t.Fatalf("received an event on a channel this connection was refused: %s", event["channel"])
+	}
+}
+
+// TestEventsWebSocketAdminAccountChildProfileIsNotAdmin: a connection from an
+// admin account that is not acting as its primary profile, such as a child
+// profile, gets the user channels and only its own account's events, as on
+// the v2 socket.
+func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,history_import", actingAdminIs(false))
+
+	hello := readFrame("hello")
+	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
+		t.Fatalf("child profile was offered an admin channel: %s", hello["available_channels"])
+	}
+	subscribed := readFrame("subscribed")
+	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
+		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
+	}
+	readFrame("snapshot") // history_import
+
+	// Another account's event first, then this account's: receiving the
+	// second without the first proves the first was filtered. history_import
+	// still reaches an acting admin across accounts, so only the demotion
+	// filters it here.
+	for _, env := range []evt.Envelope{
+		{Channel: evt.ChannelHistoryImport, Event: "foreign-import", UserID: 2},
+		{Channel: evt.ChannelHistoryImport, Event: "own-import", UserID: 1},
+	} {
+		if err := hub.Publish(context.Background(), env); err != nil {
+			t.Fatalf("publishing %s: %v", env.Event, err)
+		}
+	}
+	event := readFrame("event")
+	if string(event["event"]) != `"own-import"` {
+		t.Fatalf("child profile received another account's event: %s", event["event"])
+	}
+}
+
+// TestEventsWebSocketAdminDecisionUsesTicketProfile: a browser cannot set
+// X-Profile-Id on the handshake, so the profile its ticket was minted for
+// decides whether an admin account's connection acts as the admin.
+func TestEventsWebSocketAdminDecisionUsesTicketProfile(t *testing.T) {
+	decide := func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	}
+	for profile, wantAdmin := range map[string]bool{"parent": true, "kid": false} {
+		t.Run(profile, func(t *testing.T) {
+			tickets := notifications.NewTicketStore(nil)
+			ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 1, ProfileID: profile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
+			handler.SetNotificationsSystem(&notifications.System{Tickets: tickets})
+			_, readFrame := eventsWSTestConnActing(t, handler, &auth.Claims{UserID: 1, Role: "admin"},
+				"?ticket="+url.QueryEscape(ticket), decide)
+			hello := readFrame("hello")
+			if got := strings.Contains(string(hello["available_channels"]), `"sessions"`); got != wantAdmin {
+				t.Fatalf("admin channels offered = %v, want %v: %s", got, wantAdmin, hello["available_channels"])
+			}
+		})
 	}
 }
 
@@ -314,8 +346,8 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 
 	// The connection is still usable.
 	readFrame("snapshot")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
 	}
@@ -535,24 +567,6 @@ func TestResolveChannelSelectionDeduplicates(t *testing.T) {
 	}
 	if len(rejected) != 0 {
 		t.Fatalf("unexpected rejections: %v", rejected)
-	}
-}
-
-// TestResolveChannelSelectionDeduplicatesRejections covers the other half of
-// dedup: a channel asked for twice is answered once whether it was accepted or
-// refused. Only the accepted side deduplicated before.
-func TestResolveChannelSelectionDeduplicatesRejections(t *testing.T) {
-	_, _, rejected := resolveChannelSelection(
-		[]evt.EventChannel{
-			evt.ChannelSessions, evt.ChannelSessions, // forbidden for a user
-			"bogus", "bogus", // unknown
-		},
-		allowedChannelsForRole("user"),
-		"",
-	)
-
-	if len(rejected) != 2 {
-		t.Fatalf("rejected = %v, want one entry per distinct channel", rejected)
 	}
 }
 

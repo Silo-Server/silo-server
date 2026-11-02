@@ -12,18 +12,19 @@ import (
 
 type fakeNotificationDestinationTests struct {
 	calls       int
+	user        int
 	profile, id string
 	err         error
 }
 
-func (f *fakeNotificationDestinationTests) TestNotificationWebhook(_ context.Context, profile, id string) (*notifications.WebhookTestResult, error) {
+func (f *fakeNotificationDestinationTests) TestNotificationWebhook(_ context.Context, user int, profile, id string) (*notifications.WebhookTestResult, error) {
 	f.calls++
-	f.profile = profile
+	f.user, f.profile = user, profile
 	f.id = id
 	return &notifications.WebhookTestResult{OK: false, HTTPStatus: 429, DurationMS: 2, Message: "429 Too Many Requests"}, f.err
 }
 func (f *fakeNotificationDestinationTests) TestNotificationServerChannel(ctx context.Context, id string) (*notifications.WebhookTestResult, error) {
-	return f.TestNotificationWebhook(ctx, "", id)
+	return f.TestNotificationWebhook(ctx, 0, "", id)
 }
 
 func TestNotificationDestinationDispatch(t *testing.T) {
@@ -33,11 +34,12 @@ func TestNotificationDestinationDispatch(t *testing.T) {
 	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name, path, profile string
+		user                int
 		headers             map[string]string
 		missing, disabled   error
 	}{
-		{"webhook", Prefix + "/notifications/webhooks/hook/test", "p-owner", profileOwner(), notifications.ErrWebhookNotFound, notifications.ErrWebhooksDisabled},
-		{"server-channel", Prefix + "/admin/notifications/server-channels/hook/test", "", bearer(adminToken), notifications.ErrServerChannelNotFound, notifications.ErrServerChannelsDisabled},
+		{"webhook", Prefix + "/notifications/webhooks/hook/test", "p-owner", 1, profileOwner(), notifications.ErrWebhookNotFound, notifications.ErrWebhooksDisabled},
+		{"server-channel", Prefix + "/admin/notifications/server-channels/hook/test", "", 0, bearer(adminToken), notifications.ErrServerChannelNotFound, notifications.ErrServerChannelsDisabled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			*fake = fakeNotificationDestinationTests{}
@@ -50,7 +52,7 @@ func TestNotificationDestinationDispatch(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if rec.Code != 200 || fake.calls != 1 || fake.profile != tc.profile || fake.id != "hook" || body.OK || body.HTTPStatus != 429 || body.DurationMS != 2 || body.Message != "429 Too Many Requests" {
+			if rec.Code != 200 || fake.calls != 1 || fake.user != tc.user || fake.profile != tc.profile || fake.id != "hook" || body.OK || body.HTTPStatus != 429 || body.DurationMS != 2 || body.Message != "429 Too Many Requests" {
 				t.Fatalf("%d %+v %+v", rec.Code, body, fake)
 			}
 			if rec.Header().Get("Cache-Control") != "no-store" {

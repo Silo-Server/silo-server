@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 var (
@@ -25,6 +27,9 @@ var (
 	// answers to. It is a client input problem, not an upstream failure, so the
 	// API layer answers 404 instead of 500.
 	ErrUnknownProvider = errors.New("unknown subtitle provider")
+	// ErrInvalidSubtitleID reports a provider result ID that is not in the
+	// shape the provider's search returns; no provider request was made.
+	ErrInvalidSubtitleID = errors.New("invalid subtitle id")
 )
 
 // Manager orchestrates subtitle search and download across providers.
@@ -112,7 +117,14 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 
 			results, err := prov.Search(pctx, req)
 			if err != nil {
-				ch <- providerResult{warning: fmt.Sprintf("%s: %v", prov.Name(), err)}
+				// Provider errors can carry request URLs and upstream bodies, so
+				// callers only learn which provider failed; the detail is logged
+				// unless the caller has already gone away.
+				if ctx.Err() == nil {
+					slog.WarnContext(ctx, "subtitle provider search failed", "component", "subtitles", "provider", prov.Name(),
+						"error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
+				}
+				ch <- providerResult{warning: prov.Name() + ": search failed"}
 				return
 			}
 			ch <- providerResult{results: results}
@@ -173,6 +185,8 @@ type DownloadRequest struct {
 	ReleaseName     string
 	Score           float64
 	HearingImpaired bool
+	// Target is the media file's episode, resolved by the server.
+	Target DownloadTarget
 }
 
 // StoreSubtitleRequest contains metadata and content for persisting a subtitle.
@@ -211,9 +225,14 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, req.ProviderName)
 	}
 
-	data, format, err := prov.Download(ctx, req.SubtitleID)
+	data, format, err := prov.Download(ctx, req.SubtitleID, req.Target)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
+	}
+	// Providers bound their own reads; this check keeps any provider from
+	// storing a subtitle larger than an upload may be.
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("download from %s: %w: %d bytes, limit %d", req.ProviderName, ErrSubtitleTooLarge, len(data), MaxUploadSize)
 	}
 
 	return m.StoreSubtitle(ctx, StoreSubtitleRequest{
@@ -242,8 +261,16 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 	if err != nil {
 		return nil, err
 	}
+	// Subtitles are served as UTF-8, so UTF-16 uploads are stored converted.
+	data := decodeUTF16WithBOM(req.Data)
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("subtitle file exceeds maximum size of %d bytes", MaxUploadSize)
+	}
+	if err := ValidateSubtitleContent(format, data); err != nil {
+		return nil, err
+	}
 
-	detected, err := ResolveUploadLanguage(req.Filename, format, req.Data, req.Language, req.PreferUserLanguage)
+	detected, err := ResolveUploadLanguage(req.Filename, format, data, req.Language, req.PreferUserLanguage)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +289,7 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 		ReleaseName:     releaseName,
 		Score:           0,
 		HearingImpaired: req.HearingImpaired,
-		Data:            req.Data,
+		Data:            data,
 	})
 }
 

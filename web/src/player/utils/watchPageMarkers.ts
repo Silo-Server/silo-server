@@ -2,6 +2,7 @@ import type {
   MarkerKind,
   MarkerRegionView,
   PlayerFileVersion,
+  PlayerMarkerRange,
   PlayerMarkerSegment,
   PlayerTimeRange,
 } from "../types";
@@ -22,7 +23,10 @@ function segmentsEqual(a: PlayerMarkerSegment[] | undefined, b: PlayerMarkerSegm
     (segment, index) =>
       segment.kind === b[index]?.kind &&
       segment.start_seconds === b[index]?.start_seconds &&
-      segment.end_seconds === b[index]?.end_seconds,
+      segment.end_seconds === b[index]?.end_seconds &&
+      segment.thumbnail_url === b[index]?.thumbnail_url &&
+      segment.thumbnail_thumbhash === b[index]?.thumbnail_thumbhash &&
+      segment.thumbnail_capture_seconds === b[index]?.thumbnail_capture_seconds,
   );
 }
 
@@ -55,7 +59,25 @@ export function patchVersionMarkers(
     const nextCredits = credits === undefined ? version.credits : credits;
     const nextRecap = recap === undefined ? version.recap : recap;
     const nextPreview = preview === undefined ? version.preview : preview;
-    let nextSegments = markerSegments ?? version.marker_segments;
+    let nextSegments =
+      markerSegments?.map((segment) => {
+        const previous = version.marker_segments?.find(
+          (candidate) =>
+            candidate.kind === segment.kind &&
+            candidate.start_seconds === segment.start_seconds &&
+            candidate.end_seconds === segment.end_seconds,
+        );
+        // Range updates contain navigation metadata only. Keep a ready image for
+        // an unchanged occurrence when another provider occurrence changes.
+        return !segment.thumbnail_url && previous?.thumbnail_url
+          ? {
+              ...segment,
+              thumbnail_url: previous.thumbnail_url,
+              thumbnail_thumbhash: previous.thumbnail_thumbhash,
+              thumbnail_capture_seconds: previous.thumbnail_capture_seconds,
+            }
+          : segment;
+      }) ?? version.marker_segments;
     if (markerSegments === undefined && nextSegments !== undefined) {
       const updates = { intro, credits, recap, preview };
       for (const kind of markerKinds) {
@@ -93,6 +115,25 @@ export function patchVersionMarkers(
   return changed ? nextVersions : versions;
 }
 
+/**
+ * The provenance fields a region carries, taken from the singular per-kind
+ * marker. Occurrences in `marker_segments` do not carry their own: the file row
+ * stores one origin per kind, so every occurrence of a kind shares it, and
+ * inventing a per-occurrence answer would be a guess.
+ *
+ * Absent stays absent — an unrated marker's confidence is 0 in the row, and
+ * spreading that as `confidence: 0` would render a real "0%" for a range nobody
+ * rated.
+ */
+function provenanceOf(range: PlayerMarkerRange | null | undefined) {
+  return {
+    ...(range?.source ? { source: range.source } : {}),
+    ...(range?.provider ? { provider: range.provider } : {}),
+    ...(range?.confidence != null ? { confidence: range.confidence } : {}),
+    ...(range?.algorithm ? { algorithm: range.algorithm } : {}),
+  };
+}
+
 /** Prefer the complete inventory, retaining singular fields for older servers. */
 export function resolveMarkerRegions(
   version: Pick<PlayerFileVersion, "intro" | "credits" | "recap" | "preview" | "marker_segments">,
@@ -102,6 +143,14 @@ export function resolveMarkerRegions(
       kind: segment.kind,
       start: segment.start_seconds,
       end: segment.end_seconds,
+      ...provenanceOf(version[segment.kind]),
+      ...(segment.thumbnail_url
+        ? {
+            thumbnail_url: segment.thumbnail_url,
+            thumbnail_thumbhash: segment.thumbnail_thumbhash,
+            thumbnail_capture_seconds: segment.thumbnail_capture_seconds,
+          }
+        : {}),
     })) ??
     markerKinds.flatMap((kind) => {
       const range = version[kind];
@@ -165,10 +214,10 @@ export function resolveAutoplayMarker(
 export function resolveActiveVersionMarkers(
   version: Pick<PlayerFileVersion, "intro" | "credits" | "recap" | "preview"> | null | undefined,
 ): {
-  intro: PlayerTimeRange | null;
-  credits: PlayerTimeRange | null;
-  recap: PlayerTimeRange | null;
-  preview: PlayerTimeRange | null;
+  intro: PlayerMarkerRange | null;
+  credits: PlayerMarkerRange | null;
+  recap: PlayerMarkerRange | null;
+  preview: PlayerMarkerRange | null;
 } {
   return {
     intro: version?.intro ?? null,

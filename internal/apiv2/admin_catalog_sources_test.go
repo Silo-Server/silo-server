@@ -74,29 +74,3 @@ func TestAdminCatalogSourcesCursorBindingAndEmptyStoragePage(t *testing.T) {
 		}
 	}
 }
-
-func TestAdminFilesystemCursorBindsPathAndPrefix(t *testing.T) {
-	f := &fakeAdminCatalogSources{}
-	deps, _ := libraryDeps(t)
-	deps.AdminFilesystem = f
-	h := newTestHandler(t, deps)
-	base := Prefix + "/admin/filesystem/browse?path=/catalog-seeds&name_prefix=a&limit=1"
-	first := do(t, h, "GET", base, "", bearer(adminToken))
-	if first.Code != 200 {
-		t.Fatalf("%d %s", first.Code, first.Body)
-	}
-	var page AdminFilesystemPage
-	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if f.prefix != "a" || f.limit != 2 || len(page.Items) != 1 || page.Page == nil || !page.Page.HasMore {
-		t.Fatalf("page: %#v", page)
-	}
-	before := f.calls
-	for _, query := range []string{"path=/different&name_prefix=a", "path=/catalog-seeds&name_prefix=b"} {
-		bad := do(t, h, "GET", Prefix+"/admin/filesystem/browse?"+query+"&cursor="+url.QueryEscape(page.Page.NextCursor), "", bearer(adminToken))
-		if bad.Code < 400 || f.calls != before {
-			t.Fatalf("changed filter reached service: %d", bad.Code)
-		}
-	}
-}

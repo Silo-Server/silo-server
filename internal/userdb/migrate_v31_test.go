@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"maps"
 	"testing"
 )
@@ -10,15 +9,7 @@ import (
 // covers every profile; a collection shared with some profiles, or with
 // nobody but its creator, becomes private (#1615).
 func TestMigrateToV31AppliesLoginSharingRule(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSingleConnSchemaDB(t)
 	for _, id := range []string{"p1", "p2", "p3"} {
 		if err := CreateProfile(db, Profile{ID: id, Name: id, CreatedAt: "2026-01-01T00:00:00Z"}); err != nil {
 			t.Fatalf("CreateProfile(%s): %v", id, err)
@@ -85,15 +76,7 @@ func TestMigrateToV31AppliesLoginSharingRule(t *testing.T) {
 // sharing already applied and without main's v30 pin_revision column. It gains
 // the column and keeps collections shared since then, which have no allow list.
 func TestMigrateRevampV30StoreAddsPINRevisionAndKeepsSharing(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSingleConnSchemaDB(t)
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}

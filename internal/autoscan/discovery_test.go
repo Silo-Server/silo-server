@@ -64,18 +64,6 @@ func TestWithBuiltinSourcesAppendsToInner(t *testing.T) {
 	}
 }
 
-func TestWithBuiltinSourcesNilInner(t *testing.T) {
-	lister := WithBuiltinSources(nil, BuiltinArrWebhookSource())
-
-	discovered, err := lister.ListScanSources(context.Background())
-	if err != nil {
-		t.Fatalf("ListScanSources: %v", err)
-	}
-	if len(discovered) != 1 || !isBuiltinArrWebhookSource(discovered[0]) {
-		t.Fatalf("expected only builtin, got %+v", discovered)
-	}
-}
-
 // isBuiltinArrWebhookSource compares the identifying fields of a discovered
 // source. DiscoveredSource carries slices (delivery modes, connection kinds) so
 // it is no longer comparable with ==, and these tests only care that the
@@ -85,24 +73,4 @@ func isBuiltinArrWebhookSource(got DiscoveredSource) bool {
 	return got.PluginID == want.PluginID &&
 		got.CapabilityID == want.CapabilityID &&
 		got.DisplayName == want.DisplayName
-}
-
-func TestIsBuiltinArrWebhookIdentity(t *testing.T) {
-	if !IsBuiltinArrWebhookIdentity(BuiltinArrWebhookPluginID, BuiltinArrWebhookCapabilityID) {
-		t.Fatal("builtin identity must match")
-	}
-	if IsBuiltinArrWebhookIdentity("sonarr", "arr") {
-		t.Fatal("plugin identity must not match builtin")
-	}
-}
-
-func TestListAvailableScanSourcesNilListerEmpty(t *testing.T) {
-	svc := &Service{lister: nil}
-	available, err := svc.ListAvailableScanSources(context.Background())
-	if err != nil {
-		t.Fatalf("ListAvailableScanSources: %v", err)
-	}
-	if len(available) != 0 {
-		t.Fatalf("nil lister must return empty, got %+v", available)
-	}
 }

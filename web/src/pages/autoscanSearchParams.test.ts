@@ -2,73 +2,55 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  buildLegacyAutoscanRedirectTarget,
-  isLegacyAdvancedTab,
-  normalizeTab,
-} from "./autoscanSearchParams";
+import { legacyAutoscanPageTarget, legacyLibrariesAutoscanTarget } from "./autoscanSearchParams";
 
-describe("buildLegacyAutoscanRedirectTarget", () => {
-  it("lands a bare link on the Autoscan tab", () => {
-    expect(buildLegacyAutoscanRedirectTarget("")).toBe("/admin/libraries?tab=autoscan");
+describe("legacyAutoscanPageTarget", () => {
+  it("leaves the Sources page alone when there is no old tab", () => {
+    expect(legacyAutoscanPageTarget("")).toBeNull();
+    expect(legacyAutoscanPageTarget("?source=42")).toBeNull();
   });
 
-  it("translates the legacy tab into the embedded page's view parameter", () => {
-    // `tab` names the Libraries tab now, so the panel's own selection has to
-    // move to `view` or the link silently lands on Sources.
-    expect(buildLegacyAutoscanRedirectTarget("?tab=activity")).toBe(
-      "/admin/libraries?tab=autoscan&view=activity",
+  it("sends the old Activity tab to its page, carrying other parameters", () => {
+    expect(legacyAutoscanPageTarget("?tab=activity")).toBe("/admin/autoscan/activity");
+    expect(legacyAutoscanPageTarget("?tab=activity&source=42")).toBe(
+      "/admin/autoscan/activity?source=42",
     );
   });
 
-  it("carries the retired connections and settings tabs through", () => {
-    // AdminAutoscan opens its Advanced section for these, but only if the value
-    // reaches it.
-    expect(buildLegacyAutoscanRedirectTarget("?tab=connections")).toBe(
-      "/admin/libraries?tab=autoscan&view=connections",
+  it("sends the old Connections and Settings tabs to the Settings page", () => {
+    expect(legacyAutoscanPageTarget("?tab=connections")).toBe("/admin/settings/autoscan");
+    expect(legacyAutoscanPageTarget("?tab=settings&source=42")).toBe("/admin/settings/autoscan");
+  });
+
+  it("reads an old view parameter when there is no tab", () => {
+    expect(legacyAutoscanPageTarget("?view=activity&source=42")).toBe(
+      "/admin/autoscan/activity?source=42",
     );
-    expect(buildLegacyAutoscanRedirectTarget("?tab=settings")).toBe(
-      "/admin/libraries?tab=autoscan&view=settings",
+    expect(legacyAutoscanPageTarget("?view=connections")).toBe("/admin/settings/autoscan");
+    expect(legacyAutoscanPageTarget("?tab=activity&view=settings")).toBe(
+      "/admin/autoscan/activity",
     );
   });
 
-  it("leaves the default view implicit", () => {
-    // An absent `view` already means Sources, and the panel deletes the param
-    // when Sources is selected.
-    expect(buildLegacyAutoscanRedirectTarget("?tab=sources")).toBe("/admin/libraries?tab=autoscan");
-  });
-
-  it("drops a tab value nothing answers to", () => {
-    expect(buildLegacyAutoscanRedirectTarget("?tab=nonsense")).toBe(
-      "/admin/libraries?tab=autoscan",
-    );
-  });
-
-  it("keeps unrelated query parameters", () => {
-    expect(buildLegacyAutoscanRedirectTarget("?tab=activity&source=42")).toBe(
-      "/admin/libraries?tab=autoscan&view=activity&source=42",
-    );
-  });
-
-  it("emits one view even when the old link already used that name", () => {
-    expect(buildLegacyAutoscanRedirectTarget("?view=activity")).toBe(
-      "/admin/libraries?tab=autoscan&view=activity",
-    );
+  it("lands an explicit or unknown tab on Sources without the tab", () => {
+    expect(legacyAutoscanPageTarget("?tab=sources")).toBe("/admin/autoscan");
+    expect(legacyAutoscanPageTarget("?tab=nonsense&source=42")).toBe("/admin/autoscan?source=42");
   });
 });
 
-describe("autoscan tab helpers", () => {
-  it("falls back to Sources for anything it does not serve", () => {
-    expect(normalizeTab("activity")).toBe("activity");
-    expect(normalizeTab("sources")).toBe("sources");
-    expect(normalizeTab("connections")).toBe("sources");
-    expect(normalizeTab(null)).toBe("sources");
+describe("legacyLibrariesAutoscanTarget", () => {
+  it("ignores Libraries URLs that do not name the Autoscan tab", () => {
+    expect(legacyLibrariesAutoscanTarget("")).toBeNull();
+    expect(legacyLibrariesAutoscanTarget("?tab=libraries")).toBeNull();
   });
 
-  it("recognises only the two retired tabs as Advanced deep links", () => {
-    expect(isLegacyAdvancedTab("connections")).toBe(true);
-    expect(isLegacyAdvancedTab("settings")).toBe(true);
-    expect(isLegacyAdvancedTab("activity")).toBe(false);
-    expect(isLegacyAdvancedTab(null)).toBe(false);
+  it("maps the old tab and its view to the Autoscan pages", () => {
+    expect(legacyLibrariesAutoscanTarget("?tab=autoscan")).toBe("/admin/autoscan");
+    expect(legacyLibrariesAutoscanTarget("?tab=autoscan&view=activity&source=42")).toBe(
+      "/admin/autoscan/activity?source=42",
+    );
+    expect(legacyLibrariesAutoscanTarget("?tab=autoscan&view=connections")).toBe(
+      "/admin/settings/autoscan",
+    );
   });
 });

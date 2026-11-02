@@ -18,6 +18,21 @@ type NFOSeriesHarness struct {
 	seasons  *fakeSeasonRepo
 	episodes *fakeEpisodeRepo
 	jobs     *capturingImageJobEnqueuer
+	copier   *recordingLocalArtworkCopier
+}
+
+// recordingLocalArtworkCopier records the local artwork a refresh hands to
+// the discovering process's copier.
+type recordingLocalArtworkCopier struct {
+	mu     sync.Mutex
+	inputs []EnqueueImageCacheJobInput
+}
+
+func (c *recordingLocalArtworkCopier) CopyLocalArtwork(_ context.Context, inputs []EnqueueImageCacheJobInput) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.inputs = append(c.inputs, inputs...)
+	return nil
 }
 
 type capturingImageJobEnqueuer struct {
@@ -135,6 +150,57 @@ func (x *NFOSeriesHarness) Episodes(seriesID string) []*models.Episode {
 		return out[i].EpisodeNumber < out[j].EpisodeNumber
 	})
 	return out
+}
+
+// RecordLocalArtworkCopies wires a copier that records the local artwork
+// refreshes hand to it instead of queueing it.
+func (x *NFOSeriesHarness) RecordLocalArtworkCopies() {
+	x.copier = &recordingLocalArtworkCopier{}
+	x.h.service.SetLocalArtworkCopier(x.copier)
+}
+
+// LocalArtworkCopies returns every local artwork input handed to the copier.
+func (x *NFOSeriesHarness) LocalArtworkCopies() []EnqueueImageCacheJobInput {
+	x.copier.mu.Lock()
+	defer x.copier.mu.Unlock()
+	return append([]EnqueueImageCacheJobInput(nil), x.copier.inputs...)
+}
+
+// LandLocalArtworkCopies stores a cached copy for every slot of the series
+// whose source is local, the way the image-cache processor's source-matched
+// update does once a copy succeeds.
+func (x *NFOSeriesHarness) LandLocalArtworkCopies(seriesID string) error {
+	ctx := context.Background()
+	cached := func(source string) string {
+		return fmt.Sprintf("local/series/%s/%08x/copy.webp", seriesID, len(source))
+	}
+	item, err := x.h.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		return err
+	}
+	for _, field := range itemArtworkFields(item) {
+		if isLocalImageSourcePath(*field.source) {
+			*field.path = cached(*field.source)
+		}
+	}
+	if err := x.h.itemRepo.Upsert(ctx, item); err != nil {
+		return err
+	}
+	x.seasons.mu.Lock()
+	for _, season := range x.seasons.seasons {
+		if season.SeriesID == seriesID && isLocalImageSourcePath(season.PosterSourcePath) {
+			season.PosterPath = cached(season.PosterSourcePath)
+		}
+	}
+	x.seasons.mu.Unlock()
+	x.episodes.mu.Lock()
+	for _, episode := range x.episodes.episodes {
+		if episode.SeriesID == seriesID && isLocalImageSourcePath(episode.StillSourcePath) {
+			episode.StillPath = cached(episode.StillSourcePath)
+		}
+	}
+	x.episodes.mu.Unlock()
+	return nil
 }
 
 // EnqueuedImageJobs returns every image cache job the pipeline enqueued.

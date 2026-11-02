@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,18 @@ class GitSelectionTests(unittest.TestCase):
             ("pkg/client/client.go", True, False),
             ("example.go", True, False),
             ("docs/example.go", True, False),
+            ("internal/apiv2/registry.go", True, False),
+            ("internal/apiv2/registry_test.go", True, False),
+            ("cmd/silo/main.go", True, False),
+            ("scripts/ci/db-pins.txt", True, False),
+            ("scripts/ci/db-contracts.txt", True, False),
+            ("contracts/api/v2/migration.json", True, False),
+            ("contracts/api/v2/migration.schema.json", True, False),
+            ("contracts/api/v2/offline-routes.txt", True, False),
+            ("contracts/api/v2/breaking-approvals.json", True, False),
+            (".github/actions/README.md", False, False),
+            (".github/evidence.yml", False, False),
+            (".github/ISSUE_TEMPLATE/bug-report.yml", False, False),
         ]
         for number, (path, go, web) in enumerate(cases):
             with self.subTest(path=path):
@@ -133,13 +146,11 @@ class GitSelectionTests(unittest.TestCase):
     def test_shared_generation_and_validation_inputs_require_both_groups(self):
         cases = [
             ".github/workflows/ci.yml",
-            ".github/actions/README.md",
             "scripts/check-local-path-leaks.sh",
             "contracts/api/v2/openapi.json",
             "contracts/api/v2/README.md",
             "contracts/settings/v1/conformance.json",
             "tools/generate.py",
-            "internal/apiv2/registry.go",
             "internal/apiv2/docsui/LICENSE",
             "internal/settingscontract/contract.go",
             "cmd/settingsgen/main.go",
@@ -163,6 +174,11 @@ class GitSelectionTests(unittest.TestCase):
                 self.repo.write(path)
                 self.repo.commit()
                 self.assert_groups(self.repo.plan(), True, True)
+
+    def test_plan_reports_triggering_paths(self):
+        self.repo.write("internal/apiv2/registry.go")
+        self.repo.commit()
+        self.assertEqual(self.repo.plan().get("paths"), ["internal/apiv2/registry.go"])
 
     def test_markdown_inside_schema_inputs_is_not_skipped_as_documentation(self):
         for path in (
@@ -516,6 +532,153 @@ class AggregateResultTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 1 if failed else 0, run.stderr)
                 if failed:
                     self.assertIn("::error::go-integration ended with failure", run.stdout)
+
+    def test_check_cli_distinguishes_cancelled_children_from_failures(self):
+        needs = self.results()
+        needs["go-test"]["result"] = "cancelled"
+        run = subprocess.run(
+            [sys.executable, str(SCRIPT), "check"], capture_output=True, text=True,
+            env=dict(os.environ, CI_JOB_RESULTS=json.dumps(needs)),
+        )
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("Cancelled CI jobs: go-test", run.stdout)
+        self.assertNotIn("Every selected CI job passed", run.stdout)
+        needs["web"]["result"] = "failure"
+        run = subprocess.run(
+            [sys.executable, str(SCRIPT), "check"], capture_output=True, text=True,
+            env=dict(os.environ, CI_JOB_RESULTS=json.dumps(needs)),
+        )
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("web ended with failure", run.stdout)
+
+
+class WorkflowGateTests(unittest.TestCase):
+    root = SCRIPT.parents[3]
+
+    def pin_script(self):
+        workflow = (self.root / ".github/workflows/trusted-linux-ci.yml").read_text()
+        marker = "      - name: Check action SHA pins\n"
+        self.assertIn(marker, workflow, "Repository checks must enforce immutable actions")
+        step = workflow.split(marker, 1)[1].split("      - ", 1)[0]
+        script = step.split("        run: |\n", 1)[1]
+        return "\n".join(line[10:] for line in script.splitlines() if line.strip())
+
+    def test_pin_gate_rejects_nested_mutable_and_malformed_references(self):
+        script = self.pin_script()
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Repository(Path(directory) / "repo")
+            for reference in ("actions/cache@v4", "owner/repo/workflow.yml@main",
+                              "actions/checkout@" + "a" * 39,
+                              "actions/checkout@" + "z" * 40):
+                with self.subTest(reference=reference):
+                    repo.write(".github/actions/nested/action.yml", "steps:\n  - uses: " + reference + "\n")
+                    repo.commit()
+                    run = subprocess.run(["bash", "-c", script], cwd=repo.path,
+                                         capture_output=True, text=True)
+                    self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+                    self.assertIn(reference, run.stdout + run.stderr)
+
+    def check_pin_fixture(self, step, expected):
+        workflow = ("name: pins\non: push\npermissions: {}\njobs:\n  test:\n"
+                    "    runs-on: ubuntu-24.04\n    steps:\n"
+                    "      - uses: actions/checkout@" + "a" * 40 + "\n"
+                    "      " + step + "\n")
+        if shutil.which("actionlint"):
+            valid = subprocess.run(["actionlint", "-oneline", "-"], input=workflow,
+                                   cwd=self.root, capture_output=True, text=True)
+            self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Repository(Path(directory) / "repo")
+            repo.write(".github/workflows/test.yml", workflow)
+            repo.commit()
+            run = subprocess.run(["bash", "-c", self.pin_script()], cwd=repo.path,
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, expected,
+                             f"{step}: gate returned {run.returncode}, want {expected}\n"
+                             + run.stdout + run.stderr)
+
+    def test_pin_gate_rejects_flow_mapping(self):
+        self.check_pin_fixture("- { uses: actions/checkout@v4 }", 1)
+
+    def test_pin_gate_rejects_quoted_key(self):
+        self.check_pin_fixture('- "uses": actions/checkout@v4', 1)
+
+    def test_pin_gate_accepts_flow_mapping_without_uses(self):
+        self.check_pin_fixture("- run: echo ok\n        env: { A: b }", 0)
+
+    def test_pin_gate_accepts_pinned_block_mapping(self):
+        self.check_pin_fixture("- uses: actions/checkout@" + "b" * 40, 0)
+
+    def check_workflow_pin_fixture(self, reference, expected):
+        workflow = ("name: pins\non: push\npermissions: {}\njobs:\n  test:\n"
+                    "    uses: " + reference + "\n")
+        if shutil.which("actionlint"):
+            valid = subprocess.run(["actionlint", "-oneline", "-"], input=workflow,
+                                   cwd=self.root, capture_output=True, text=True)
+            self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Repository(Path(directory) / "repo")
+            repo.write(".github/workflows/test.yml", workflow)
+            repo.commit()
+            run = subprocess.run(["bash", "-c", self.pin_script()], cwd=repo.path,
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, expected,
+                             f"{reference}: gate returned {run.returncode}, want {expected}\n"
+                             + run.stdout + run.stderr)
+
+    def test_pin_gate_accepts_same_repository_workflows_at_main(self):
+        for filename in ("trusted-linux-ci.yml", "another-workflow.yaml"):
+            with self.subTest(filename=filename):
+                self.check_workflow_pin_fixture(
+                    "Silo-Server/silo-server/.github/workflows/" + filename + "@main", 0)
+
+    def test_pin_gate_rejects_other_repository_workflows_at_main(self):
+        for repository in ("another-owner/silo-server", "Silo-Server/another-repo"):
+            with self.subTest(repository=repository):
+                self.check_workflow_pin_fixture(
+                    repository + "/.github/workflows/trusted-linux-ci.yml@main", 1)
+
+    def test_pin_gate_rejects_same_repository_workflows_at_other_refs(self):
+        for ref in ("feature", "v1.0.0"):
+            with self.subTest(ref=ref):
+                self.check_workflow_pin_fixture(
+                    "Silo-Server/silo-server/.github/workflows/trusted-linux-ci.yml@" + ref, 1)
+
+    def test_pin_gate_accepts_immutable_and_local_references(self):
+        script = self.pin_script()
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Repository(Path(directory) / "repo")
+            repo.write(".github/workflows/test.yml", "steps:\n  - uses: actions/checkout@" + "a" * 40 + " # reviewed release\n  - uses: ./.github/actions/setup-go\n")
+            repo.write(".github/actions/nested/action.yml", "steps:\n  - uses: ./.github/actions/local\n")
+            repo.commit()
+            run = subprocess.run(["bash", "-c", script], cwd=repo.path,
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            run = subprocess.run(["bash", "-c", script], cwd=directory,
+                                 capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0, "A missing Git input must fail")
+
+    def test_full_tree_tool_targets_exist(self):
+        run = subprocess.run(["make", "-n", "verify-actionlint", "verify-shellcheck"],
+                             cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("1.7.12", run.stdout)
+        self.assertIn("0.11.0", run.stdout)
+
+    def test_workflow_and_shell_tools_reject_seeded_defects(self):
+        missing = [tool for tool in ("actionlint", "shellcheck") if not shutil.which(tool)]
+        if missing:
+            self.skipTest("required tools not on PATH: " + ", ".join(missing))
+        workflow = "name: test\non: push\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n"
+        for contents, expected in ((workflow, 0), (workflow.replace("echo ok", "echo ${{ unknown.value }}"), 1)):
+            run = subprocess.run(["actionlint", "-oneline", "-"], input=contents,
+                                 cwd=self.root, capture_output=True, text=True)
+            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
+        for contents, expected in (("#!/bin/bash\nprintf '%s\\n' \"$1\"\n", 0),
+                                   ("#!/bin/bash\nprintf '%s\\n' $1\n", 1)):
+            run = subprocess.run(["shellcheck", "-s", "bash", "-"], input=contents,
+                                 cwd=self.root, capture_output=True, text=True)
+            self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
 
 
 if __name__ == "__main__":

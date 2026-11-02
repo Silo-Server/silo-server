@@ -199,3 +199,21 @@ func TestBothCandidatesHaveContentDetectsRealUserData(t *testing.T) {
 		t.Fatal("did not expect both-content when both sides are skeletons")
 	}
 }
+
+// Merged localizations keep their provenance; without the source columns the
+// copies take the column default and AI text becomes provider text.
+func TestMergeStepsKeepLocalizationProvenance(t *testing.T) {
+	for _, step := range mediaItemMergeSteps {
+		stepSQL := normalizeMergeStepSQL(step.sql)
+		if !strings.Contains(stepSQL, "INSERT INTO media_item_localizations") {
+			continue
+		}
+		for _, column := range []string{"overview_source", "tagline_source"} {
+			if strings.Count(stepSQL, column) != 2 {
+				t.Errorf("%s must copy %s into the canonical item: %s", step.name, column, stepSQL)
+			}
+		}
+		return
+	}
+	t.Fatal("media item merge steps must merge media_item_localizations")
+}

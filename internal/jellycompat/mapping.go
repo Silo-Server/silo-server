@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -154,14 +154,15 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.BackdropImageTags = tags
 	}
 	// Advertise the logo as Jellyfin does, so clients that check ImageTags
-	// know it exists. Episodes carry no logo of their own; theirs belongs to
-	// the series.
+	// know it exists. Episodes carry no logo of their own; applySeriesImages
+	// points their ParentLogoItemId at the series instead.
 	if item.LogoURL != "" && item.Type != "episode" {
 		dto.ImageTags["Logo"] = m.imageTagSigner.Tag(
 			imageTagSeed(item.ContentID, "Logo", compatCardImageSize, item.LogoPath, "", item.UpdatedAt),
 			item.LogoURL,
 		)
 	}
+	m.applyExtraImageTags(&dto, item)
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
 	}
@@ -188,6 +189,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.Studios = m.namePairs(item.Studios, EncodedIDStudio)
 	}
 	if allFields || fields["taglines"] {
+		dto.Taglines = []string{}
 		if item.Tagline != "" {
 			dto.Taglines = []string{item.Tagline}
 		}
@@ -277,6 +279,12 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		TmdbID:            item.TmdbID,
 		TvdbID:            item.TvdbID,
 		UserData:          item.UserData,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         item.BannerPath,
+		ThumbPath:          item.ThumbPath,
+		ClearArtPath:       item.ClearArtPath,
+		DiscPath:           item.DiscPath,
+		ExtraBackdropPaths: item.ExtraBackdropPaths,
 	}, isFavorite, progress, allDetailFields)
 
 	if wantField("people") {
@@ -360,7 +368,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if len(firstVersion.VideoTracks) > 0 {
 			dto.Width = firstVersion.VideoTracks[0].Width
 			dto.Height = firstVersion.VideoTracks[0].Height
-			dto.IsHD = firstVersion.VideoTracks[0].Height >= 720 || firstVersion.VideoTracks[0].Width >= 1280
+			dto.IsHD = isHDVideo(firstVersion.VideoTracks[0])
 		}
 		routeItemID := m.codec.EncodeStringID(EncodedIDItem, item.ContentID)
 		wantMediaSources := wantField("mediasources")
@@ -392,15 +400,66 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		// itemFromList with Jellyfin's Virtual contract.
 		applyPlayableLocation(&dto, false)
 	}
-	slog.Info("jellycompat item detail mapped",
-		"content_id", item.ContentID,
-		"type", item.Type,
-		"is_folder", dto.IsFolder,
-		"media_type", dto.MediaType,
-		"versions", len(item.Versions),
-		"media_sources", len(dto.MediaSources),
-	)
+	// A requested MediaSources on a playable item without a present version
+	// is [], as in Jellyfin; series and seasons have no media sources.
+	if wantField("mediasources") && isPlayableItemType(item.Type) && dto.MediaSources == nil {
+		dto.MediaSources = []mediaSourceDTO{}
+	}
+	if !allFields {
+		dropUnrequestedEmptyLists(&dto, wantField)
+	}
 	return dto
+}
+
+// dropUnrequestedEmptyLists leaves an empty list field out of a list
+// response unless Fields asked for it. The detail mapping fills every list
+// field, and an empty one would otherwise be sent as [], which Jellyfin sends
+// only for requested fields. Non-empty values are left as they were.
+func dropUnrequestedEmptyLists(dto *baseItemDTO, wantField func(string) bool) {
+	if !wantField("genres") {
+		dto.Genres = nilIfEmpty(dto.Genres)
+		dto.GenreItems = nilIfEmpty(dto.GenreItems)
+	}
+	if !wantField("studios") {
+		dto.Studios = nilIfEmpty(dto.Studios)
+	}
+	if !wantField("tags") {
+		dto.Tags = nilIfEmpty(dto.Tags)
+	}
+	if !wantField("taglines") {
+		dto.Taglines = nilIfEmpty(dto.Taglines)
+	}
+	if !wantField("productionlocations") {
+		dto.ProductionLocations = nilIfEmpty(dto.ProductionLocations)
+	}
+	if !wantField("externalurls") {
+		dto.ExternalURLs = nilIfEmpty(dto.ExternalURLs)
+	}
+	if !wantField("remotetrailers") {
+		dto.RemoteTrailers = nilIfEmpty(dto.RemoteTrailers)
+	}
+	if !wantField("settings") {
+		dto.LockedFields = nilIfEmpty(dto.LockedFields)
+	}
+	if !wantField("people") {
+		dto.People = nilIfEmpty(dto.People)
+	}
+	if !wantField("chapters") {
+		dto.Chapters = nilIfEmpty(dto.Chapters)
+	}
+	if !wantField("mediasources") {
+		dto.MediaSources = nilIfEmpty(dto.MediaSources)
+	}
+	if !wantField("mediastreams") {
+		dto.MediaStreams = nilIfEmpty(dto.MediaStreams)
+	}
+}
+
+func nilIfEmpty[T any](values []T) []T {
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 func (m *mapper) seasonFromUpstream(season upstreamSeason, seriesID string, isFavorite bool) baseItemDTO {
@@ -468,11 +527,15 @@ type seriesImageSet struct {
 	BackdropURL       string
 	BackdropPath      string
 	BackdropThumbhash string
+	LogoURL           string
+	LogoPath          string
 	UpdatedAt         time.Time
 }
 
 // applySeriesImages sets series/parent image tags on an episode DTO so clients
-// can display the series poster and backdrop in Continue Watching / Next Up.
+// can display the series poster, backdrop and logo in Continue Watching / Next
+// Up and the player. Jellyfin points an episode's ParentLogoItemId at its
+// series; clients read the show logo from there, never from the episode.
 func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 	if dto.SeriesID == "" {
 		return
@@ -496,6 +559,15 @@ func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 		dto.ParentBackdropItemID = dto.SeriesID
 		dto.ParentThumbImageTag = tag
 		dto.ParentThumbItemID = dto.SeriesID
+	}
+	if series.LogoURL != "" {
+		// Seeded as the series' own ImageTags["Logo"] is, so both name one
+		// cached image.
+		dto.ParentLogoItemID = dto.SeriesID
+		dto.ParentLogoImageTag = m.imageTagSigner.Tag(
+			imageTagSeed(series.ContentID, "Logo", compatCardImageSize, series.LogoPath, "", series.UpdatedAt),
+			series.LogoURL,
+		)
 	}
 }
 
@@ -652,6 +724,12 @@ func primaryAspectRatio(native string) *float64 {
 	default:
 		return nil
 	}
+}
+
+// isHDVideo reports Jellyfin's IsHD for a video track: 720 lines and up, as
+// Jellyfin 12 reports it (a 1280x536 scope encode is not HD there).
+func isHDVideo(track models.VideoTrack) bool {
+	return track.Height >= 720
 }
 
 func versionsHaveSubtitles(versions []catalog.FileVersion) bool {
@@ -896,7 +974,7 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 		Formats:                             []string{strings.ToLower(version.Container)},
 		RequiredHTTPHeaders:                 map[string]string{},
 		MediaAttachments:                    []map[string]any{},
-		TranscodingSubProtocol:              "hls",
+		TranscodingSubProtocol:              compatStreamProtocolHTTP,
 		Bitrate:                             version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             defaultAudioStreamIndex(version),
 		DefaultSubtitleStreamIndex:          defaultSubtitleStreamIndex(version),
@@ -907,7 +985,7 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 func mediaSourceName(version catalog.FileVersion) string {
 	name := strings.TrimSpace(version.FileName)
 	if name == "" {
-		name = filepath.Base(version.FilePath)
+		name = fspath.Display(filepath.Base(version.FilePath))
 	}
 	if name == "" {
 		return ""
@@ -982,4 +1060,41 @@ func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[
 		}}
 	}
 	return out
+}
+
+// applyExtraImageTags advertises a movie's or series' banner, thumb, clear art
+// (Jellyfin's Art) and disc art in ImageTags, and its backdrops after the
+// primary in BackdropImageTags, so BackdropImageTags[i] names
+// /Items/{id}/Images/Backdrop/{i}. The tags are seeded by cached path, so they
+// change with the image, not with each presigned URL. Jellyfin clients fall
+// back to the backdrop for a thumb they are not offered.
+func (m *mapper) applyExtraImageTags(dto *baseItemDTO, item upstreamListItem) {
+	if item.Type != "movie" && item.Type != "series" {
+		return
+	}
+	for _, art := range []struct{ imageType, path string }{
+		{compatImageBanner, item.BannerPath},
+		{compatImageThumb, item.ThumbPath},
+		{compatImageArt, item.ClearArtPath},
+		{compatImageDisc, item.DiscPath},
+	} {
+		if art.path == "" {
+			continue
+		}
+		dto.ImageTags[art.imageType] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, art.imageType, compatCardImageSize, art.path, "", item.UpdatedAt),
+			"",
+		)
+	}
+	// Without a primary there is no Backdrop/0, so the extra indexes would
+	// name the wrong images.
+	if len(dto.BackdropImageTags) == 0 {
+		return
+	}
+	for i, path := range item.ExtraBackdropPaths {
+		dto.BackdropImageTags = append(dto.BackdropImageTags, m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, compatBackdropImageType+"/"+strconv.Itoa(i+1), compatCardImageSize, path, "", item.UpdatedAt),
+			"",
+		))
+	}
 }

@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -11,85 +12,57 @@ import (
 
 const aggregateMediaTypeFloorDivisor = 5
 
-var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook", "ebook"}
-
-// ForYou returns personalised recommendations grouped by taste clusters.
-// For cold-start users, non-personalized rows are returned.
-func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit int) (*ForYouResponse, error) {
-	// Check signal count to determine cold-start level.
-	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get taste profile meta: %w", err)
-	}
-
-	positiveSignals := 0
-	if meta != nil {
-		for k, v := range meta.SignalCounts {
-			switch k {
-			case "rated_low", "watch_low":
-				// negative signals don't count
-			default:
-				positiveSignals += v
-			}
-		}
-	}
-
-	level := coldStartLevel(positiveSignals)
-
-	// Build cold-start rows (always available).
-	coldStartRows, err := e.buildColdStartRows(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build cold start rows: %w", err)
-	}
-
-	watchedSet, err := e.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
-	}
-	watchedIDs := scoredItemIDsFromSet(watchedSet)
-	coldStartRows = excludeWatchedRows(coldStartRows, watchedSet)
-
-	// If no taste profile at all, return cold-start only.
-	if meta == nil || level == 0 {
-		return &ForYouResponse{Rows: coldStartRows}, nil
-	}
-
-	// Build personalized rows from taste clusters.
-	liveFilter := catalog.AccessFilter{UserID: userID, ProfileID: profileID}
-	personalRows, err := e.buildClusterRows(ctx, userID, profileID, limit, watchedIDs, liveFilter)
-	if err != nil {
-		return nil, fmt.Errorf("build cluster rows: %w", err)
-	}
-
-	aggregatedRow, err := e.buildAggregatedRow(ctx, userID, profileID, limit, watchedIDs, liveFilter)
-	if err != nil {
-		return nil, fmt.Errorf("build aggregated row: %w", err)
-	}
-	personalRows = combinePersonalRows(aggregatedRow, personalRows)
-
-	merged := mergePersonalizedAndColdStart(personalRows, coldStartRows, level)
-	return &ForYouResponse{Rows: merged}, nil
+// rowStore is the part of *Repo that builds a profile's personal rows.
+type rowStore interface {
+	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
+	GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
+	FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, map[string][]string, error)
+	FindTasteProfileCandidatesByMediaType(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string][]string, error)
+	GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[string][]float32, error)
+	GetItemMediaTypes(ctx context.Context, itemIDs []string) (map[string]string, error)
+	GetItemAddedDates(ctx context.Context, itemIDs []string) (map[string]time.Time, error)
+	PresentMediaTypes(ctx context.Context, mediaTypes []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+	GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error)
 }
 
-func combinePersonalRows(aggregated *ForYouRow, clusterRows []ForYouRow) []ForYouRow {
-	if aggregated == nil {
-		return clusterRows
-	}
-
-	rows := make([]ForYouRow, 0, len(clusterRows)+1)
-	rows = append(rows, *aggregated)
-	rows = append(rows, clusterRows...)
-	return rows
+// rowBuilder builds a profile's main and cluster rows.
+type rowBuilder struct {
+	store  rowStore
+	lambda float64
+	now    time.Time
+	// aversion is the titles the profile turned away, which the rows rank
+	// against (see aversion.apply); nil for none.
+	aversion *aversion
+	// penalized, when set, counts the candidates the aversion pushed down.
+	penalized *int
 }
 
-// buildClusterRows generates per-cluster recommendation rows.
-func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	clusters, err := e.repo.GetTasteClusters(ctx, userID, profileID)
+// withAversion applies the builder's aversion to a pool fetched around
+// query, before MMR ranks it.
+func (b rowBuilder) withAversion(pool []ScoredItem, embeddings map[string][]float32, query []float32) ([]ScoredItem, aversionResult) {
+	pool, res := b.aversion.apply(pool, embeddings, query)
+	if b.penalized != nil {
+		*b.penalized += res.penalized
+	}
+	return pool, res
+}
+
+// rowBuilder returns the builder for the rows cached now.
+func (e *Engine) rowBuilder() rowBuilder {
+	return rowBuilder{store: e.repo, lambda: e.mmrLambda(), now: time.Now()}
+}
+
+// clusterRows generates per-cluster recommendation rows. A cluster whose
+// candidates or their embeddings cannot be read is logged and skipped;
+// failed counts them. A cluster
+// with no candidates gets a row without items, so its cached row is dropped.
+func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
+	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("get taste clusters: %w", err)
+		return nil, 0, fmt.Errorf("get taste clusters: %w", err)
 	}
 	if len(clusters) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	// Calculate total weight across all clusters for proportional allocation.
@@ -98,7 +71,6 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		totalWeight += c.TotalWeight
 	}
 
-	var rows []ForYouRow
 	for _, c := range clusters {
 		if c.Embedding == nil || len(c.Embedding) == 0 {
 			continue
@@ -113,198 +85,296 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		if clusterLimit < 3 {
 			clusterLimit = 3
 		}
+		// The cache takes the main row's served window out of the row (see
+		// withoutMainRowItems), so it gets that many places more.
+		clusterLimit = min(limit, clusterLimit+ServedRowSize)
 
 		// Fetch after access and genre constraints so filtered-out items do not
 		// consume the candidate headroom before MMR.
-		candidates, _, err := e.repo.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
+		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
 		if err != nil {
+			failed++
+			slog.WarnContext(ctx, "cluster recommendation candidates failed", "component", "recommendations",
+				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
 			continue
 		}
 		if len(candidates) == 0 {
+			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
-
-		// Apply MMR re-ranking.
-		candidateIDs := make([]string, len(candidates))
-		for i, item := range candidates {
-			candidateIDs[i] = item.MediaItemID
+		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, qualityMinSmallPool))
+		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
+		if err != nil {
+			// Ranked without embeddings, MMR could not spread the row.
+			failed++
+			slog.WarnContext(ctx, "cluster recommendation embeddings failed", "component", "recommendations",
+				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
+			continue
 		}
-
-		embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-		reranked := applyMMR(candidates, embMap, e.mmrLambda(LambdaGenreRow), clusterLimit)
-
-		// Apply recency boost.
-		addedDates, _ := e.repo.GetItemAddedDates(ctx, candidateIDs)
-		reranked = applyRecencyBoost(reranked, addedDates, time.Now())
-
-		label := c.Label
-		if label == "" {
-			label = "For You"
+		candidates, averse := b.withAversion(candidates, embMap, c.Embedding)
+		if averse.interestShare(c.TotalWeight) < aversionInterestFloor {
+			// The profile turned away enough of this interest's titles that
+			// it no longer gets a row of its own.
+			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
+			continue
 		}
+		reranked := applyMMR(candidates, embMap, b.lambda, clusterLimit)
 
-		reason := "Because you enjoy " + label
+		// Every item carries the row title, so a reader can title the cached
+		// row from the build that produced it (see clusterRow).
+		title := clusterTitle(c.Label)
 		for i := range reranked {
-			reranked[i].Reason = reason
+			reranked[i].Reason = title
 		}
 
 		rows = append(rows, ForYouRow{
-			Type:         "cluster",
-			Label:        reason,
+			Type:         clusterRowType,
+			Label:        title,
 			ClusterIndex: c.ClusterIdx,
 			Items:        reranked,
 		})
 	}
 
-	return rows, nil
+	return rows, failed, nil
 }
 
-// buildAggregatedRow builds a single "For You" row from the aggregated taste profile.
-func (e *Engine) buildAggregatedRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
-	embedding, err := e.repo.GetTasteProfile(ctx, userID, profileID)
+// withRecencyBoost applies applyRecencyBoost to a candidate pool with its
+// candidates' added dates. A pool whose dates cannot be read keeps its
+// scores.
+func (b rowBuilder) withRecencyBoost(ctx context.Context, pool []ScoredItem) []ScoredItem {
+	if len(pool) == 0 {
+		return pool
+	}
+	added, err := b.store.GetItemAddedDates(ctx, scoredItemIDs(pool))
+	if err != nil {
+		slog.WarnContext(ctx, "candidate added dates failed; candidates keep their scores", "component", "recommendations", "error", err)
+		return pool
+	}
+	return applyRecencyBoost(pool, added, b.now)
+}
+
+// minClusterRowItems is the fewest items a cluster row keeps once the main
+// row's served items are taken out of it; a thinner row is cached empty.
+const minClusterRowItems = 10
+
+// withoutMainRowItems takes every title the main row can serve, its first
+// rotationReach(ServedRowSize) under the daily rotation, out of each cluster
+// row, so the main row and a cluster row built from the same interest do not
+// show the same titles. A row this leaves with fewer than minClusterRowItems
+// is emptied; a row it takes nothing from is kept whole.
+func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
+	reach := rotationReach(ServedRowSize)
+	served := make(map[string]struct{}, reach)
+	for _, item := range main[:min(len(main), reach)] {
+		served[item.MediaItemID] = struct{}{}
+	}
+	for i, row := range rows {
+		kept := make([]ScoredItem, 0, len(row.Items))
+		for _, item := range row.Items {
+			if _, ok := served[item.MediaItemID]; !ok {
+				kept = append(kept, item)
+			}
+		}
+		if len(kept) == len(row.Items) {
+			continue
+		}
+		if len(kept) < minClusterRowItems {
+			kept = []ScoredItem{}
+		}
+		rows[i].Items = kept
+	}
+	return rows
+}
+
+// mainRow builds the "For You" row of a profile with a taste profile. A
+// profile with several interests gets a row composed per interest (see
+// mainRowAnchors), whose every prefix holds each interest's share by weight;
+// any other, or one whose anchors find nothing, a row of the candidates
+// nearest its averaged taste vector, ranked by MMR, whose served window the
+// genre pass then shapes. A profile that turned away every one of its
+// interests gets a main row with no items (see anchoredRow). The genre pass leaves a
+// composed row alone: capping
+// a genre at half the window would cut an interest heavier than half the
+// profile below its share. Type supplements fill the rest of either row.
+func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
+	embedding, err := b.store.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get taste profile: %w", err)
 	}
 	if embedding == nil {
 		return nil, nil
 	}
-
-	candidates, genreMap, err := e.repo.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
+	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("find similar for aggregated: %w", err)
+		return nil, fmt.Errorf("get taste clusters: %w", err)
 	}
-	if len(candidates) == 0 {
+
+	var row, pool []ScoredItem
+	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
+		var allAverted bool
+		if row, pool, allAverted, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
+			return nil, err
+		}
+		if allAverted {
+			// The profile turned away every interest; a row around the
+			// averaged taste vector would serve them all again. The empty
+			// row is cached, so reads know it was built.
+			return &ForYouRow{Type: clusterRowType, Label: ForYouLabel, Items: []ScoredItem{}}, nil
+		}
+	}
+	if len(row) == 0 {
+		var genreMap map[string][]string
+		pool, genreMap, err = b.store.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
+		if err != nil {
+			return nil, fmt.Errorf("find similar for aggregated: %w", err)
+		}
+		pool = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, pool, 0))
+		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
+		if err != nil {
+			return nil, fmt.Errorf("main row embeddings: %w", err)
+		}
+		pool, _ = b.withAversion(pool, embMap, embedding)
+		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), genreMap)
+	}
+	if len(row) == 0 {
 		return nil, nil
 	}
+	row = b.addTypeSupplements(ctx, embedding, excludeIDs, filter, pool, row, limit)
 
-	candidates, genreMap, mediaTypes := e.addAggregateMediaTypeSupplements(ctx, embedding, excludeIDs, filter, candidates, genreMap, limit)
-	candidateIDs := make([]string, len(candidates))
-	for i, item := range candidates {
-		candidateIDs[i] = item.MediaItemID
-	}
-
-	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	reranked := applyMMR(candidates, embMap, e.mmrLambda(LambdaForYou), limit)
-
-	// Apply genre cap on the main For You row.
-	reranked = applyGenreCap(reranked, genreMap, GenreCapPercent)
-	reranked = applyMediaTypeFloor(reranked, candidates, mediaTypes)
-
-	for i := range reranked {
-		reranked[i].Reason = "Personalized for you"
+	for i := range row {
+		row[i].Reason = "Personalized for you"
 	}
 
 	return &ForYouRow{
-		Type:  "cluster",
-		Label: "For You",
-		Items: reranked,
+		Type:  clusterRowType,
+		Label: ForYouLabel,
+		Items: row,
 	}, nil
 }
 
-func (e *Engine) addAggregateMediaTypeSupplements(
+// addTypeSupplements gives row at least mediaTypeFloor(len(row)) items of
+// each media type the viewer can see, so a library section, which scopes the
+// whole cached row to its libraries, still fills. The extra items come from
+// pool, the candidates the row was ranked from, and from a per-type candidate
+// query for a type pool is short of; placeTypeSupplements puts them after the
+// served window. A type the viewer has no titles of is not queried.
+func (b rowBuilder) addTypeSupplements(
 	ctx context.Context,
 	embedding []float32,
 	excludeIDs []string,
 	filter catalog.AccessFilter,
-	candidates []ScoredItem,
-	genreMap map[string][]string,
+	pool []ScoredItem,
+	row []ScoredItem,
 	limit int,
-) ([]ScoredItem, map[string][]string, map[string]string) {
-	mediaTypes, err := e.repo.GetItemMediaTypes(ctx, scoredItemIDs(candidates))
+) []ScoredItem {
+	if len(row) <= ServedRowSize {
+		return row
+	}
+	mediaTypes, err := b.store.GetItemMediaTypes(ctx, scoredItemIDs(pool))
 	if err != nil {
-		return candidates, genreMap, map[string]string{}
+		slog.WarnContext(ctx, "main row media types failed; row left without type supplements", "component", "recommendations", "error", err)
+		return row
 	}
 
-	floor := mediaTypeFloor(limit)
-	changed := false
-	for _, mediaType := range aggregateSupplementMediaTypes {
-		if countMediaType(candidates, mediaTypes, mediaType) >= floor {
-			continue
-		}
-
-		extra, extraGenres, err := e.repo.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
-		if err != nil || len(extra) == 0 {
-			continue
-		}
-		candidates = mergeScoredCandidates(candidates, extra)
-		for id, genres := range extraGenres {
-			genreMap[id] = genres
-		}
-		changed = true
-	}
-
-	if changed {
-		if refreshed, err := e.repo.GetItemMediaTypes(ctx, scoredItemIDs(candidates)); err == nil {
-			mediaTypes = refreshed
+	floor := mediaTypeFloor(len(row))
+	var short []string
+	for _, mediaType := range recommendableMediaTypes {
+		if countMediaType(pool, mediaTypes, mediaType) < floor {
+			short = append(short, mediaType)
 		}
 	}
-	return candidates, genreMap, mediaTypes
+	if len(short) > 0 {
+		present, err := b.store.PresentMediaTypes(ctx, short, filter)
+		if err != nil {
+			slog.WarnContext(ctx, "main row media type check failed; querying every short type", "component", "recommendations", "error", err)
+			present = make(map[string]struct{}, len(short))
+			for _, mediaType := range short {
+				present[mediaType] = struct{}{}
+			}
+		}
+		for _, mediaType := range short {
+			if _, ok := present[mediaType]; !ok {
+				continue
+			}
+			extra, _, err := b.store.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
+			if err != nil {
+				slog.WarnContext(ctx, "main row type supplement failed", "component", "recommendations", "media_type", mediaType, "error", err)
+				continue
+			}
+			extra = b.withQualityPrior(ctx, extra, 0)
+			if !b.aversion.empty() {
+				// Supplements rank against the turned-away titles like the
+				// rest of the row; a type whose embeddings cannot be read is
+				// not supplemented rather than supplemented unranked.
+				embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(extra))
+				if err != nil {
+					slog.WarnContext(ctx, "main row type supplement embeddings failed", "component", "recommendations", "media_type", mediaType, "error", err)
+					continue
+				}
+				extra, _ = b.withAversion(extra, embMap, embedding)
+			}
+			pool = mergeScoredCandidates(pool, extra)
+			for _, item := range extra {
+				mediaTypes[item.MediaItemID] = mediaType
+			}
+		}
+	}
+	return placeTypeSupplements(row, pool, mediaTypes)
 }
 
-func applyMediaTypeFloor(items []ScoredItem, candidates []ScoredItem, mediaTypes map[string]string) []ScoredItem {
-	if len(items) == 0 || len(candidates) == 0 || len(mediaTypes) == 0 {
-		return items
+// placeTypeSupplements raises each media type pool offers to at least
+// mediaTypeFloor(len(row)) items of row. The type's best candidates not yet in
+// the row join its end, and as many items leave the part after the served
+// window, last first, from types holding more than the floor. The served
+// window and the order of every item kept are unchanged.
+func placeTypeSupplements(row, pool []ScoredItem, mediaTypes map[string]string) []ScoredItem {
+	if len(row) <= ServedRowSize {
+		return row
+	}
+	floor := mediaTypeFloor(len(row))
+	counts := make(map[string]int)
+	inRow := make(map[string]struct{}, len(row))
+	for _, item := range row {
+		counts[mediaTypes[item.MediaItemID]]++
+		inRow[item.MediaItemID] = struct{}{}
 	}
 
-	floor := mediaTypeFloor(len(items))
-	for _, mediaType := range aggregateSupplementMediaTypes {
-		if countMediaType(candidates, mediaTypes, mediaType) == 0 {
-			continue
+	var added []ScoredItem
+	for _, mediaType := range recommendableMediaTypes {
+		for _, candidate := range pool {
+			if counts[mediaType] >= floor {
+				break
+			}
+			if mediaTypes[candidate.MediaItemID] != mediaType {
+				continue
+			}
+			if _, ok := inRow[candidate.MediaItemID]; ok {
+				continue
+			}
+			added = append(added, candidate)
+			inRow[candidate.MediaItemID] = struct{}{}
+			counts[mediaType]++
 		}
-		items = ensureMediaTypeFloor(items, candidates, mediaTypes, mediaType, floor)
 	}
-	return items
-}
-
-func ensureMediaTypeFloor(items []ScoredItem, candidates []ScoredItem, mediaTypes map[string]string, mediaType string, floor int) []ScoredItem {
-	if floor <= 0 || countMediaType(items, mediaTypes, mediaType) >= floor {
-		return items
-	}
-
-	selected := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		selected[item.MediaItemID] = struct{}{}
-	}
-
-	needed := floor - countMediaType(items, mediaTypes, mediaType)
-	replacements := make([]ScoredItem, 0, needed)
-	for _, candidate := range candidates {
-		if len(replacements) >= needed {
-			break
-		}
-		if mediaTypes[candidate.MediaItemID] != mediaType {
-			continue
-		}
-		if _, ok := selected[candidate.MediaItemID]; ok {
-			continue
-		}
-		replacements = append(replacements, candidate)
-		selected[candidate.MediaItemID] = struct{}{}
-	}
-	if len(replacements) == 0 {
-		return items
+	if len(added) == 0 {
+		return row
 	}
 
-	remove := make(map[string]struct{}, len(replacements))
-	for i := len(items) - 1; i >= 0 && len(remove) < len(replacements); i-- {
-		if mediaTypes[items[i].MediaItemID] == mediaType {
-			continue
+	drop := make(map[int]struct{}, len(added))
+	for i := len(row) - 1; i >= ServedRowSize && len(drop) < len(added); i-- {
+		if mediaType := mediaTypes[row[i].MediaItemID]; counts[mediaType] > floor {
+			drop[i] = struct{}{}
+			counts[mediaType]--
 		}
-		remove[items[i].MediaItemID] = struct{}{}
-	}
-	if len(remove) < len(replacements) {
-		return items
 	}
 
-	mixed := make([]ScoredItem, 0, len(items))
-	for _, item := range items {
-		if _, ok := remove[item.MediaItemID]; ok {
-			continue
+	out := make([]ScoredItem, 0, len(row))
+	for i, item := range row {
+		if _, ok := drop[i]; !ok {
+			out = append(out, item)
 		}
-		mixed = append(mixed, item)
 	}
-	mixed = append(mixed, replacements...)
-	sortScoredItems(mixed)
-	return mixed
+	return append(out, added[:len(drop)]...)
 }
 
 func mediaTypeFloor(limit int) int {
@@ -366,27 +436,25 @@ func sortScoredItems(items []ScoredItem) {
 	})
 }
 
-// buildColdStartRows generates non-personalized rows.
-func (e *Engine) buildColdStartRows(ctx context.Context) ([]ForYouRow, error) {
-	popular, _ := e.repo.GetPopularItems(ctx, 30, 20)
-	recentlyAdded, _ := e.repo.GetRecentlyAddedItems(ctx, 14, 20)
-	topRated, _ := e.repo.GetTopRatedItems(ctx, 5, 20)
-
-	genreSamplers := make(map[string][]ScoredItem)
-	topGenres, _ := e.repo.GetTopGenres(ctx, 5)
-	for _, genre := range topGenres {
-		items, _ := e.repo.GetGenreSamplerItems(ctx, genre, 20)
-		if len(items) > 0 {
-			genreSamplers[genre] = items
-		}
+// BecauseYouWatched returns items similar to a specific item the user has
+// watched. Blends embedding similarity (70%) with co-watch data (30%). Titles
+// in the profile's recommendation exclusion set, and those filter does not
+// admit, are left out before ranking.
+func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
 	}
-
-	return buildColdStartRows(popular, recentlyAdded, topRated, genreSamplers), nil
+	builder := e.rowBuilder()
+	if builder.aversion, err = e.loadAversion(ctx, userID, profileID, builder.now); err != nil {
+		return nil, fmt.Errorf("get turned-away titles: %w", err)
+	}
+	return e.becauseYouWatched(ctx, builder, sourceItemID, limit, excluded, filter)
 }
 
-// BecauseYouWatched returns items similar to a specific item the user has
-// watched. Blends embedding similarity (70%) with co-watch data (30%).
-func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]ScoredItem, error) {
+// becauseYouWatched is BecauseYouWatched with the exclusion set given, ranked
+// by builder, whose aversion it applies.
+func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
@@ -403,29 +471,46 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		sourceType = sourceMeta.Type
 	}
 
-	// Get embedding-based candidates (3x for MMR).
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{sourceItemID}, sourceType, limit*3)
+	// Get embedding-based candidates (3x for MMR). Excluded titles and those
+	// the viewer cannot see are left out in the query, so they do not take
+	// the candidates' places.
+	excludeIDs := append([]string{sourceItemID}, scoredItemIDsFromSet(excluded)...)
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
 	}
 
-	// Get co-watch neighbors.
+	// Get co-watch neighbors the viewer can see, of the source item's media
+	// type like the embedding candidates: co-watch counts ebook reading too,
+	// and a movie's row would otherwise take series its viewers also watched.
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
-	cowatchMap := make(map[string]float64, len(cowatchPairs))
-	for _, p := range cowatchPairs {
-		cowatchMap[p.SimilarItemID] = p.JaccardScore
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, recommendableMediaTypes))
+	if err != nil {
+		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
 
-	// Blend scores.
+	// Blend scores, then drop excluded titles before MMR so they do not take
+	// the row's places.
 	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
+	blended = excludeScoredItems(blended, excluded)
+	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
 
 	// Apply MMR re-ranking.
 	candidateIDs := make([]string, len(blended))
 	for i, item := range blended {
 		candidateIDs[i] = item.MediaItemID
 	}
-	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	result := applyMMR(blended, embMap, e.mmrLambda(LambdaBecauseWatched), limit)
+	embMap, err := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
+	if err != nil {
+		if !builder.aversion.empty() {
+			// Without embeddings the row could not rank against the
+			// profile's turned-away titles.
+			return nil, fmt.Errorf("because watched embeddings: %w", err)
+		}
+		embMap = nil
+	}
+	blended, _ = builder.withAversion(blended, embMap, embedding)
+	result := applyMMR(blended, embMap, builder.lambda, limit)
 
 	for i := range result {
 		if result[i].Reason == "" {
@@ -433,26 +518,40 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		}
 	}
 
-	watchedSet, err := e.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
-	}
-
-	return excludeScoredItems(result, watchedSet), nil
+	return result, nil
 }
 
-func excludeWatchedRows(rows []ForYouRow, watchedSet map[string]struct{}) []ForYouRow {
-	if len(rows) == 0 || len(watchedSet) == 0 {
-		return rows
+// cowatchMediaTypes is the media types a list anchored on an item of
+// sourceType keeps its co-watch neighbors to: the source's own, or
+// unknownSource when the source's type is unknown.
+func cowatchMediaTypes(sourceType string, unknownSource []string) []string {
+	if sourceType == "" {
+		return unknownSource
 	}
+	return []string{sourceType}
+}
 
-	filteredRows := make([]ForYouRow, 0, len(rows))
-	for _, row := range rows {
-		row.Items = excludeScoredItems(row.Items, watchedSet)
-		if len(row.Items) == 0 {
-			continue
-		}
-		filteredRows = append(filteredRows, row)
+// cowatchScores maps each co-watch neighbor filter admits, and whose media
+// type is one of mediaTypes, to its Jaccard score. Co-watch neighbors bypass
+// the access and type predicates of the embedding query, so they are checked
+// here.
+func (e *Engine) cowatchScores(ctx context.Context, pairs []CowatchPair, filter catalog.AccessFilter, mediaTypes []string) (map[string]float64, error) {
+	scores := make(map[string]float64, len(pairs))
+	if len(pairs) == 0 {
+		return scores, nil
 	}
-	return filteredRows
+	ids := make([]string, len(pairs))
+	for i, p := range pairs {
+		ids[i] = p.SimilarItemID
+	}
+	accessible, err := e.repo.filterItemIDs(ctx, ids, filter, mediaTypes)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range pairs {
+		if _, ok := accessible[p.SimilarItemID]; ok {
+			scores[p.SimilarItemID] = p.JaccardScore
+		}
+	}
+	return scores, nil
 }

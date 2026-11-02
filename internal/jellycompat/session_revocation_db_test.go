@@ -36,9 +36,14 @@ func TestRevokedCompatSessionStaysDeletedPostgres(t *testing.T) {
 	now := start
 	store := NewPersistentSessionStore(24*time.Hour, func() time.Time { return now }, repo)
 	extendToken, refreshToken := fmt.Sprintf("jfrevoke-extend-%d", suffix), fmt.Sprintf("jfrevoke-refresh-%d", suffix)
+	// A stored session names its login session through its refresh token.
+	bridgedRefresh, err := auth.NewJWTService("jellycompat-revoke-test-secret-0123456789", time.Hour, 24*time.Hour).GenerateRefreshToken(user.ID, models.RoleUser, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, token := range []string{extendToken, refreshToken} {
 		if err := store.Put(Session{Token: token, StreamAppUserID: user.ID, PseudoUserID: uuid.New(),
-			StreamAppAccessToken: "access", StreamAppRefreshToken: "refresh", StreamAppTokenExpiry: start.Add(time.Hour)}); err != nil {
+			StreamAppAccessToken: "access", StreamAppRefreshToken: bridgedRefresh, StreamAppTokenExpiry: start.Add(time.Hour)}); err != nil {
 			t.Fatal(err)
 		}
 	}

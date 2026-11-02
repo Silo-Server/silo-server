@@ -32,7 +32,7 @@ func (h *PersonalDataHandler) SetWatchlistTitles(titles *watchlist.Titles) {
 // library watchlist notifies the same listeners as a manual add.
 func (h *PersonalDataHandler) WatchlistPromoted(ctx context.Context, userID int, profileID, contentID string) {
 	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, userID, profileID, contentID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watchlist", userStateEventState{
 		InWatchlist: boolPtr(true),
 	})

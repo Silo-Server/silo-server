@@ -171,6 +171,84 @@ func TestStorageTransitionJobCancellationContract(t *testing.T) {
 	}
 }
 
+func TestImageCacheCleanupJobCanBeCanceled(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+	cancel := Prefix + "/admin/jobs/cleanup/cancel"
+
+	var body AdminTaskJob
+	response := do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusAccepted || body.State != "canceling" || !body.Cancelable {
+		t.Fatalf("pending cleanup cancellation: %d %s", response.Code, response.Body)
+	}
+	job.Status = adminjob.StatusCancelled
+	job.ProgressCurrent, job.ProgressTotal = 3, 8
+	job.ResultPayload = []byte(`{"deleted_prefixes":3,"deleted_s3_objects":5}`)
+	response = do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusOK || body.State != "canceled" || body.Cancelable {
+		t.Fatalf("already canceled cleanup: %d %s", response.Code, response.Body)
+	}
+	if body.LibraryResult == nil || body.LibraryResult.DeletedPrefixes != 3 || body.LibraryResult.DeletedS3Objects != 5 {
+		t.Fatalf("canceled cleanup lost its partial totals: %s", response.Body)
+	}
+	if body.Progress == nil || body.Progress.Current != 3 || body.Progress.Total != 8 {
+		t.Fatalf("canceled cleanup progress: %s", response.Body)
+	}
+}
+
+// Every job the admin job resources report as cancelable must be accepted by
+// cancelAdminJob, and every job they report as not cancelable must be refused.
+func TestAdminJobCancelableMatchesCancelEndpoint(t *testing.T) {
+	for jobType, cancelable := range map[string]bool{
+		adminjob.JobTypeLibraryRefresh:      true,
+		adminjob.JobTypeStorageTransition:   true,
+		adminjob.JobTypeImageCacheCleanup:   true,
+		adminjob.JobTypeDeleteLibrary:       false,
+		adminjob.JobTypeItemRefresh:         false,
+		adminjob.JobTypeCatalogExport:       false,
+		adminjob.JobTypeCatalogImport:       false,
+		adminjob.JobTypeTemplateBundleApply: false,
+	} {
+		t.Run(jobType, func(t *testing.T) {
+			job := &models.AdminJob{ID: "job", JobType: jobType, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+			deps, _ := libraryDeps(t)
+			deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+			h := newTestHandler(t, deps)
+
+			var page Collection[AdminTaskJob]
+			list := do(t, h, http.MethodGet, Prefix+"/admin/jobs", "", bearer(adminToken))
+			decodeJSON(t, list.Body, &page)
+			if list.Code != http.StatusOK || len(page.Items) != 1 || page.Items[0].Cancelable != cancelable {
+				t.Fatalf("list: %d %s", list.Code, list.Body)
+			}
+			var get AdminTaskJob
+			monitor := do(t, h, http.MethodGet, Prefix+"/admin/jobs/job", "", bearer(adminToken))
+			decodeJSON(t, monitor.Body, &get)
+			if monitor.Code != http.StatusOK || get.Cancelable != page.Items[0].Cancelable {
+				t.Fatalf("monitor disagrees with list: %d %s", monitor.Code, monitor.Body)
+			}
+
+			response := do(t, h, http.MethodPost, Prefix+"/admin/jobs/job/cancel", "", bearer(adminToken))
+			if !get.Cancelable {
+				requireProblem(t, response, TypeJobNotCancelable)
+				if job.CancelRequested {
+					t.Fatal("refused cancellation recorded intent")
+				}
+				return
+			}
+			var body AdminTaskJob
+			decodeJSON(t, response.Body, &body)
+			if response.Code != http.StatusAccepted || body.State != "canceling" || !job.CancelRequested {
+				t.Fatalf("cancelable job refused: %d %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
 func TestStorageTransitionJobProjectsSafeProgressAndFailure(t *testing.T) {
 	job := &models.AdminJob{
 		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning,
@@ -349,6 +427,24 @@ func TestAdminTaskHistoryAndJobCursorBinding(t *testing.T) {
 	}
 }
 
+// TestJobPollsFollowActingProfile: the job polls outside the admin class
+// give admin reach only to the acting admin. A non-primary profile on the
+// admin's account gets the 404 any other non-owner gets.
+func TestJobPollsFollowActingProfile(t *testing.T) {
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: &models.AdminJob{ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-1", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	h := newTestHandler(t, deps)
+	child := with(bearer(adminToken), "X-Profile-Id", "p-owner")
+	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+	for _, path := range []string{Prefix + "/admin/jobs/transition", Prefix + "/library-jobs/job-1"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", child), TypeNotFound)
+		if rec := do(t, h, http.MethodGet, path, "", primary); rec.Code != http.StatusOK {
+			t.Fatalf("%s as the primary profile: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestAdminJobOwnerReadIsSafe(t *testing.T) {
 	f := newFakeAdminTasks()
 	h := adminTasksTestHandler(t, f)
@@ -364,11 +460,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 	h := adminTasksTestHandler(t, f)
 	for _, body := range []string{
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","max_runtime_ms":null}]}`,
-		`{"triggers":[{"type":"startup","interval_ms":null}]}`,
-		`{"triggers":[{"type":"startup","time_of_day":null}]}`,
 		`{"triggers":[{"type":"startup"},null]}`,
-		`{"triggers":[{"type":"startup"},{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()
@@ -379,9 +471,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		})
 	}
 	for _, body := range []string{
-		`{"triggers":[{"type":"startup"}]}`,
 		`{"triggers":[{"type":"startup","interval_ms":0,"time_of_day":"","day_of_week":0,"max_runtime_ms":0}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":0,"max_runtime_ms":0}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()

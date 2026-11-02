@@ -99,7 +99,10 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 		FROM media_item_libraries mil
 		JOIN media_folders f ON f.id = mil.media_folder_id
 		JOIN media_items mi ON mi.content_id = mil.content_id
-		WHERE mil.media_folder_id = $1`
+		WHERE mil.media_folder_id = $1
+		  -- An item an admin ignored is left unmatched on purpose; refreshing
+		  -- it would only rescan its folder for nothing.
+		  AND mi.match_ignored_at IS NULL`
 	args := []any{libraryID}
 
 	if normalizeLibraryRefreshMode(mode) == LibraryRefreshModeQuick {

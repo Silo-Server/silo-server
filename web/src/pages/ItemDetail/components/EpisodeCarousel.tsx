@@ -3,6 +3,7 @@ import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -11,8 +12,10 @@ import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import EpisodeCardCaption from "./EpisodeCardCaption";
 
 interface EpisodeCarouselProps {
   episodes: EpisodeListItem[];
@@ -30,6 +33,7 @@ export default function EpisodeCarousel({
   );
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
+  const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -66,6 +70,8 @@ export default function EpisodeCarousel({
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={episodeLinkState}
                 quickActionMode={quickActionMode}
+                hideImageIfUnwatched={hideImages}
+                hideOverviewIfUnwatched={hideOverviews}
                 onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
               />
             ))}
@@ -92,18 +98,26 @@ function EpisodeCarouselCard({
   isCurrent,
   episodeLinkState,
   quickActionMode,
+  hideImageIfUnwatched,
+  hideOverviewIfUnwatched,
   onPrefetch,
 }: {
   ep: EpisodeListItem;
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
   quickActionMode: CardQuickActionMode;
+  hideImageIfUnwatched: boolean;
+  hideOverviewIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
+  const hideImage =
+    hideImageIfUnwatched &&
+    isEpisodeStill(ep.still_is_episode_still) &&
+    isEpisodeUnwatched(ep.user_data);
   const progress =
     !ep.user_data?.played &&
     (ep.user_data?.position_seconds ?? 0) > 0 &&
@@ -139,7 +153,7 @@ function EpisodeCarouselCard({
                   : "border-border/30",
               )}
               style={
-                thumbhashUrl
+                !hideImage && thumbhashUrl
                   ? { backgroundImage: `url(${thumbhashUrl})`, backgroundSize: "cover" }
                   : undefined
               }
@@ -148,7 +162,7 @@ function EpisodeCarouselCard({
                 <img
                   src={ep.still_url}
                   alt={episodeTitle}
-                  className="h-full w-full object-cover"
+                  className={cn("h-full w-full object-cover", hideImage && SPOILER_IMAGE_CLASS)}
                   loading="lazy"
                   decoding="async"
                 />
@@ -184,6 +198,7 @@ function EpisodeCarouselCard({
             showCollectionActions={false}
             showWatchedShortcut
             hasPartialProgress={progress != null}
+            hasResumePosition={(ep.user_data?.position_seconds ?? 0) > 0}
             quickActionMode={quickActionMode}
             longPressRef={cardRef}
             itemTitle={episodeTitle}
@@ -195,17 +210,12 @@ function EpisodeCarouselCard({
           aria-current={isCurrent ? "page" : undefined}
           className="block"
         >
-          <div className="text-muted-foreground/70 mt-2 flex items-center gap-2 text-xs">
-            <span>Episode {ep.episode_number}</span>
-            {ep.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
-          </div>
-          <p
-            className="truncate text-sm font-semibold"
-            style={isCurrent ? { color: "var(--primary)" } : undefined}
-          >
-            {episodeTitle}
-          </p>
-          {ep.runtime > 0 && <p className="text-muted-foreground/70 text-xs">{ep.runtime}m</p>}
+          <EpisodeCardCaption
+            episode={ep}
+            hideOverview={hideOverviewIfUnwatched && isEpisodeUnwatched(ep.user_data)}
+            isCurrent={isCurrent}
+            badges={ep.user_data?.played && <WatchedCheckIndicator />}
+          />
         </ViewTransitionLink>
       </div>
     </li>

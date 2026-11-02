@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { variantFamily, variantOf } from "@/lib/homeRows/variants";
+import type { GalleryPreset } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 const COLUMNS: Record<number, string> = {
@@ -12,14 +13,18 @@ const COLUMNS: Record<number, string> = {
 /**
  * Radio cards for the presets of one row kind. A config that matches no
  * preset shows none selected; nothing changes until the user picks one.
+ * A card without its own hint shows the server's description of the preset
+ * (a mood's genres, rating floor and vote minimum).
  */
 export function VariantChoice({
   sectionType,
   config,
+  presets,
   onChange,
 }: {
   sectionType: string;
   config: Record<string, unknown>;
+  presets?: readonly GalleryPreset[];
   onChange: (presetKey: string) => void;
 }) {
   const labelId = useId();
@@ -41,7 +46,12 @@ export function VariantChoice({
             key={option.presetKey}
             value={option.presetKey}
             label={option.label}
-            hint={option.hint}
+            hint={
+              option.hint ??
+              presets
+                ?.find((preset) => preset.key === option.presetKey)
+                ?.description_short.replace(/\.$/, "")
+            }
           />
         ))}
       </RadioGroup>

@@ -12,7 +12,7 @@ type SubtitleProviderStatusService interface {
 }
 
 type SubtitleAIStatusService interface {
-	SubtitleAIStatus() handlers.SubtitleAIStatusView
+	SubtitleAIStatus(context.Context) handlers.SubtitleAIStatusView
 }
 
 type SubtitleProviderStatus struct {
@@ -52,10 +52,10 @@ func registerSubtitleCapabilities(reg *Registry) {
 		}
 		return &SubtitleProviderStatusOutput{Body: SubtitleProviderStatus{Capability: Capability{State: configuredEnabledCapabilityState(reg.deps.SubtitleProviders != nil, view.Enabled)}, SchemaVersion: view.SchemaVersion, Enabled: view.Enabled, Providers: append([]string{}, view.Providers...)}}, nil
 	})
-	Register(reg, op("/subtitles/ai/status", "getSubtitleAIStatus"), func(_ context.Context, _ *CapabilityInput) (*SubtitleAIStatusOutput, error) {
+	Register(reg, op("/subtitles/ai/status", "getSubtitleAIStatus"), func(ctx context.Context, _ *CapabilityInput) (*SubtitleAIStatusOutput, error) {
 		var view handlers.SubtitleAIStatusView
 		if reg.deps.SubtitleAI != nil {
-			view = reg.deps.SubtitleAI.SubtitleAIStatus()
+			view = reg.deps.SubtitleAI.SubtitleAIStatus(ctx)
 		}
 		return &SubtitleAIStatusOutput{Body: SubtitleAIStatus{Capability: Capability{State: configuredEnabledCapabilityState(reg.deps.SubtitleAI != nil, view.Enabled || view.TranscribeEnabled)}, Enabled: view.Enabled, TranscribeEnabled: view.TranscribeEnabled}}, nil
 	})

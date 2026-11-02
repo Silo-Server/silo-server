@@ -182,11 +182,12 @@ to them.
   (`Service.FollowLifecycleChanges`), so a missed publish costs at most one
   minute. A caller that cancels an accepted restart stops waiting while the
   supervisor continues the restart and records the result.
-- The API reaches proxies over their backend URL with the node bearer:
+- The API reaches proxies over their backend URL with
+  [signed worker requests](worker-http-protocol.md#authentication):
   `GET /network-access/status`, `POST /network-access/{provider}/connect`
   and `.../disconnect` on the proxy listener, ten seconds each, in parallel,
   like force-reload. Those routes carry `auth_url` and error text because
-  they take the bearer; the public `/health` report carries only state,
+  they require a signed request; the public `/health` report carries only state,
   origin and hostname. The proxy listener also runs `netaccess.Middleware`,
   so its own provider's stamped requests are validated there too.
 - The proxy's `/health` `network_access` block is what the API stores on the

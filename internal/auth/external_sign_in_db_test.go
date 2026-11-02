@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -492,7 +493,7 @@ func TestLocalPasswordPolicyDB(t *testing.T) {
 		"disable":       {Enabled: new(false)},
 		"password off":  {LocalPasswordLoginEnabled: new(false)},
 		"delete (nil)":  nil,
-		"harmless edit": {MaxProfiles: new(3)},
+		"harmless edit": {MaxProfiles: models.SetValue(3)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if count := env.usableBreakGlass(t); count != 1 {
@@ -828,7 +829,7 @@ func TestEnableAccountLocalLoginDB(t *testing.T) {
 	}
 
 	user, err = users.EnableAccountLocalLogin(ctx, owner.Email, "temporary-pass-1")
-	if err != nil || !user.PasswordChangeRequired || !CheckPassword(user, "temporary-pass-1") {
+	if err != nil || !user.PasswordChangeRequired || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("temporary-pass-1")) != nil {
 		t.Fatalf("temporary password = %+v, %v", user, err)
 	}
 	var live int

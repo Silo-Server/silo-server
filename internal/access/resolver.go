@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -34,6 +35,7 @@ type Resolver struct {
 	tokens       ProfileTokenValidator
 	groups       GroupPolicyProvider
 	unrated      UnratedContentPolicy
+	defaults     settingsresolve.ServerSettings
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -43,6 +45,17 @@ type Resolver struct {
 func (r *Resolver) WithUnratedContentPolicy(policy UnratedContentPolicy) *Resolver {
 	if r != nil {
 		r.unrated = policy
+	}
+	return r
+}
+
+// WithAdminDefaults installs the administrator's setting defaults (the node's
+// shared *config.AdminDefaults) and returns the resolver. Without it a profile
+// with no Next Up choice of its own gets the contract default instead of the
+// administrator's.
+func (r *Resolver) WithAdminDefaults(defaults settingsresolve.ServerSettings) *Resolver {
+	if r != nil {
+		r.defaults = defaults
 	}
 	return r
 }
@@ -92,7 +105,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		return Scope{}, fmt.Errorf("opening user store for %d: %w", input.UserID, err)
 	}
 
-	preferences := ResolveViewerPreferences(ctx, store, input.ProfileID)
+	preferences := ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
 	if input.ProfileID != "" {
 		profile, err := store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
@@ -109,6 +122,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.NextUpMode = preferences.NextUpMode
+		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
@@ -116,6 +130,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		}
 		scope.ProfileVerified = verified
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
+		scope.ProfilePINRevision = profile.PINRevision
 	}
 
 	scope.PreferencesDegraded = preferences.Degraded
@@ -203,7 +218,8 @@ func CheckProfileToken(
 // pre-cutover snapshot runs both the backfill and that migration before it
 // serves a request.
 func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
-	return ResolveViewerPreferences(ctx, store, profileID).DisabledLibraryIDs
+	// ui.disabled_library_ids declares no admin_default.
+	return ResolveViewerPreferences(ctx, store, nil, profileID).DisabledLibraryIDs
 }
 
 // parseLibraryIDList decodes a JSON library-id array, dropping anything that
@@ -297,4 +313,13 @@ func cloneInts(values []int) []int {
 	out := make([]int, len(values))
 	copy(out, values)
 	return out
+}
+
+// CheckProfileVerification checks request proof against a freshly loaded profile.
+// PIN exemptions cannot authorize household management of a locked profile.
+func (s Scope) CheckProfileVerification(profile *userstore.Profile) error {
+	if profile == nil || s.ProfileID != profile.ID || !s.ProfileVerified || s.PINVerificationSkipped || s.ProfilePINRevision != profile.PINRevision {
+		return ErrProfileUnverified
+	}
+	return nil
 }

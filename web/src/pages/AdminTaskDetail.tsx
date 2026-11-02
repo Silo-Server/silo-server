@@ -5,6 +5,7 @@ import { isNotFoundProblem } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
   trailers_requested: "Trailers requested",
+  provider_artwork: "Provider artwork",
 };
 
 function formatDuration(ms: number): string {
@@ -602,7 +604,7 @@ export default function AdminTaskDetail() {
   };
 
   if (isLoading) {
-    return <p className="page-shell text-muted-foreground py-8 text-sm">Loading...</p>;
+    return <p className="text-muted-foreground pb-8 text-sm">Loading...</p>;
   }
 
   // A key that names no task used to leave this on "Loading..." for good.
@@ -634,53 +636,53 @@ export default function AdminTaskDetail() {
   const isRunning = task.state === "running" || task.state === "cancelling";
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <nav
-        aria-label="Breadcrumb"
-        className="text-muted-foreground flex items-center gap-1.5 text-sm"
-      >
-        <Link to="/admin" className="hover:text-foreground transition-colors">
-          Admin
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link to="/admin/tasks" className="hover:text-foreground transition-colors">
-          Scheduled Tasks
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <span className="text-foreground font-medium">{task.name}</span>
-      </nav>
-
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{task.name}</h1>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        eyebrow={
+          <nav
+            aria-label="Breadcrumb"
+            className="text-muted-foreground flex items-center gap-1.5 text-sm"
+          >
+            <Link to="/admin" className="hover:text-foreground transition-colors">
+              Admin
+            </Link>
+            <ChevronRight className="h-3.5 w-3.5" />
+            <Link to="/admin/tasks" className="hover:text-foreground transition-colors">
+              Scheduled Tasks
+            </Link>
+            <ChevronRight className="h-3.5 w-3.5" />
+            <span className="text-foreground font-medium">{task.name}</span>
+          </nav>
+        }
+        title={task.name}
+        subtitle={task.description}
+        actions={
+          <>
             <Badge variant="outline">{task.category}</Badge>
-          </div>
-          <p className="page-subtitle text-sm sm:text-base">{task.description}</p>
-        </div>
-
-        {isRunning ? (
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={() => cancelTask.mutate(task.key)}
-            disabled={cancelTask.isPending || task.state === "cancelling"}
-          >
-            <Square className="mr-1.5 h-4 w-4" />
-            Cancel
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={() => runTask.mutate(task.key)}
-            disabled={runTask.isPending}
-          >
-            <Play className="mr-1.5 h-4 w-4" />
-            Run Now
-          </Button>
-        )}
-      </div>
+            {isRunning ? (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => cancelTask.mutate(task.key)}
+                disabled={cancelTask.isPending || task.state === "cancelling"}
+              >
+                <Square className="mr-1.5 h-4 w-4" />
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => runTask.mutate(task.key)}
+                disabled={runTask.isPending}
+              >
+                <Play className="mr-1.5 h-4 w-4" />
+                Run Now
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {task.key === "scan_libraries" && (
         <div className="surface-panel-subtle rounded-xl p-4 text-sm leading-relaxed">

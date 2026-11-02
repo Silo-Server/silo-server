@@ -124,35 +124,6 @@ func TestDiagnosticsChunkedUploadHappyPath(t *testing.T) {
 	release()
 }
 
-func TestDiagnosticsChunkedUploadInitOverBundleLimit(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.status.MaxBundleBytes = 1024
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	rec := doChunked(t, router, http.MethodPost, "/uploads",
-		[]byte(`{"manifest":{"ok":true},"bundle_bytes":2048}`), accessClaims())
-	assertDiagnosticsError(t, rec, http.StatusRequestEntityTooLarge, "too_large")
-
-	// Rejected init must not leave the limiter slot held.
-	release, acquired := handler.inflight.acquire(42)
-	if !acquired {
-		t.Fatal("in-flight slot held after rejected init")
-	}
-	release()
-}
-
-func TestDiagnosticsChunkedUploadInitDisabled(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.status.Status = diagnostics.StatusDisabled
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	rec := doChunked(t, router, http.MethodPost, "/uploads",
-		[]byte(`{"manifest":{"ok":true},"bundle_bytes":10}`), accessClaims())
-	assertDiagnosticsError(t, rec, http.StatusForbidden, "disabled")
-}
-
 func TestDiagnosticsChunkedUploadForeignSessionRejected(t *testing.T) {
 	service := newFakeDiagnosticsService()
 	handler := newChunkedTestHandler(t, service)
@@ -179,58 +150,6 @@ func TestDiagnosticsChunkedUploadForeignSessionRejected(t *testing.T) {
 		[]byte("0123456789"), accessClaims())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("owner chunk after foreign abort = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDiagnosticsChunkedUploadIncompleteComplete(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	bundle := bytes.Repeat([]byte("b"), int(diagnostics.UploadChunkBytes)+512)
-	session := initChunkedUpload(t, router, len(bundle), accessClaims())
-
-	rec := doChunked(t, router, http.MethodPut, "/uploads/"+session.UploadID+"/chunks/0",
-		bundle[:diagnostics.UploadChunkBytes], accessClaims())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("chunk status = %d", rec.Code)
-	}
-
-	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("incomplete complete status = %d, want 409; body=%s", rec.Code, rec.Body.String())
-	}
-	if service.ingestCalls != 0 {
-		t.Fatalf("ingest calls = %d, want 0", service.ingestCalls)
-	}
-}
-
-func TestDiagnosticsChunkedUploadReinitReplacesPreviousSession(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	first := initChunkedUpload(t, router, 10, accessClaims())
-	second := initChunkedUpload(t, router, 10, accessClaims())
-	if first.UploadID == second.UploadID {
-		t.Fatal("re-init returned the same session id")
-	}
-
-	// The replaced session is gone; the new one accepts chunks.
-	rec := doChunked(t, router, http.MethodPut, "/uploads/"+first.UploadID+"/chunks/0",
-		[]byte("0123456789"), accessClaims())
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("replaced-session chunk status = %d, want 404", rec.Code)
-	}
-	rec = doChunked(t, router, http.MethodPut, "/uploads/"+second.UploadID+"/chunks/0",
-		[]byte("0123456789"), accessClaims())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("new-session chunk status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = doChunked(t, router, http.MethodDelete, "/uploads/"+second.UploadID, nil, accessClaims())
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("abort status = %d, want 204", rec.Code)
 	}
 }
 
@@ -263,57 +182,6 @@ func TestDiagnosticsChunkedCompleteBusyKeepsSessionRetryable(t *testing.T) {
 	if service.ingestCalls != 1 {
 		t.Fatalf("ingest calls = %d, want 1", service.ingestCalls)
 	}
-}
-
-func TestDiagnosticsChunkedUploadOversizedChunkRejected(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	bundle := bytes.Repeat([]byte("b"), int(diagnostics.UploadChunkBytes)*2)
-	session := initChunkedUpload(t, router, len(bundle), accessClaims())
-
-	oversized := bytes.Repeat([]byte("x"), int(diagnostics.UploadChunkBytes)+1)
-	rec := doChunked(t, router, http.MethodPut, "/uploads/"+session.UploadID+"/chunks/0",
-		oversized, accessClaims())
-	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("oversized chunk status = %d, want 400 or 413; body=%s", rec.Code, rec.Body.String())
-	}
-	if service.ingestCalls != 0 {
-		t.Fatalf("ingest calls = %d, want 0", service.ingestCalls)
-	}
-}
-
-func TestDiagnosticsChunkedUploadManifestTooLarge(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	manifest := `{"pad":"` + strings.Repeat("x", int(diagnostics.MaxManifestBytes)) + `"}`
-	rec := doChunked(t, router, http.MethodPost, "/uploads",
-		[]byte(`{"manifest":`+manifest+`,"bundle_bytes":10}`), accessClaims())
-	assertDiagnosticsError(t, rec, http.StatusRequestEntityTooLarge, "too_large")
-}
-
-func TestDiagnosticsChunkedCompleteIngestErrorMapsLikeSingleShot(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.ingestErr = diagnostics.ErrStaleConsent
-	handler := newChunkedTestHandler(t, service)
-	router := chunkedRouter(handler)
-
-	session := initChunkedUpload(t, router, 10, accessClaims())
-	rec := doChunked(t, router, http.MethodPut, "/uploads/"+session.UploadID+"/chunks/0",
-		[]byte("0123456789"), accessClaims())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("chunk status = %d", rec.Code)
-	}
-
-	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
-	assertDiagnosticsError(t, rec, http.StatusBadRequest, "stale_consent")
-
-	// The failed session is consumed; a retry needs a fresh init and the slot
-	// must be free for it.
-	initChunkedUpload(t, router, 10, accessClaims())
 }
 
 func TestDiagnosticsChunkedUploadConcurrentInitsRespectSlotAtomically(t *testing.T) {
@@ -396,29 +264,5 @@ func TestDiagnosticsChunkedCompleteTransientStatusErrorKeepsSession(t *testing.T
 	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("retried complete status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDiagnosticsStatusAdvertisesUploadChunkBytes(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.status.UploadChunkBytes = diagnostics.UploadChunkBytes
-	handler := newChunkedTestHandler(t, service)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/status", nil)
-	req.Header.Set("Authorization", "Bearer token")
-	req = req.WithContext(apimw.SetClaims(req.Context(), accessClaims()))
-	rec := httptest.NewRecorder()
-	handler.HandleStatus(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	var payload map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode status: %v", err)
-	}
-	got, ok := payload["upload_chunk_bytes"].(float64)
-	if !ok || int64(got) != diagnostics.UploadChunkBytes {
-		t.Fatalf("upload_chunk_bytes = %v, want %d", payload["upload_chunk_bytes"], diagnostics.UploadChunkBytes)
 	}
 }

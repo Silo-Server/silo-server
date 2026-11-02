@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
@@ -38,6 +40,9 @@ type healthResponse struct {
 	// Build is the node's own build identity, carried opaquely for the same
 	// reason as the sample: it is display data for the nodes dashboard.
 	Build json.RawMessage `json:"build"`
+	// Artifacts is the node's measurement of its prepared-download directory,
+	// carried opaquely like the sample; the downloads package reads it.
+	Artifacts json.RawMessage `json:"artifacts"`
 	// NetworkAccess is the node's report about the network access provider
 	// plugins running beside it, keyed by provider slug. Unlike the sample it
 	// is decoded here, because stream URL selection routes on it: an overlay
@@ -76,43 +81,73 @@ const maxLastStatsBytes = 32 << 10
 // that served it, and the cost of clearing is only a fallback to the API
 // relay until the next 30 s sweep.
 func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) {
+	report := CheckNodeReport(ctx, n)
+	return report.Healthy, report.ActiveJobs, report.EgressKbps, report.CapabilitiesHash, report.LastStats, report.NetworkAccess
+}
+
+// HealthReport is one health check's full result: CheckNode's values plus the
+// node's drain state.
+type HealthReport struct {
+	Healthy          bool
+	ActiveJobs       int
+	EgressKbps       int
+	CapabilitiesHash string
+	LastStats        []byte
+	NetworkAccess    netaccess.NodeNetworkAccess
+	// DrainState comes from the status the node answered with. A node that did
+	// not answer, or predates draining, reports DrainStateNone.
+	DrainState DrainState
+}
+
+// CheckNodeReport is CheckNode returning the whole report. A node that did not
+// answer reports DrainStateNone.
+func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
+	unreachable := HealthReport{DrainState: DrainStateNone}
 	client := &http.Client{Timeout: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, NodeEndpoint(n.URL, "/api/v1/health"), nil)
 	if err != nil {
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHealthResponseBytes+1))
 	if err != nil {
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 	if len(body) > maxHealthResponseBytes {
 		// Nothing in the body can be trusted to be well-formed at that size, so
 		// the node is treated as not answering rather than partially believed.
 		slog.WarnContext(ctx, "node health response too large to read", "component", "nodepool",
 			"id", n.ID, "name", n.Name, "url", n.URL, "limit_bytes", maxHealthResponseBytes)
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 
 	var hr healthResponse
 	if err := json.Unmarshal(body, &hr); err != nil {
-		return false, 0, 0, "", nil, nil
+		return unreachable
 	}
 
-	return true, hr.ActiveJobs, hr.EgressKbps, hr.CapabilitiesHash, marshalLastStats(ctx, n, hr), hr.NetworkAccess.Normalized()
+	return HealthReport{
+		Healthy:          true,
+		ActiveJobs:       hr.ActiveJobs,
+		EgressKbps:       hr.EgressKbps,
+		CapabilitiesHash: hr.CapabilitiesHash,
+		LastStats:        marshalLastStats(ctx, n, hr),
+		NetworkAccess:    hr.NetworkAccess.Normalized(),
+		DrainState:       drainStateOfHealthStatus(hr.Status),
+	}
 }
 
 // marshalLastStats packs a health response's resource fields and build
@@ -129,7 +164,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	attribution := trimJSONNull(hr.Attribution)
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
-	if system == nil && gpu == nil && attribution == nil && build == nil {
+	artifacts := trimJSONNull(hr.Artifacts)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
 		return nil
 	}
 	payload := struct {
@@ -138,7 +174,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		Attribution json.RawMessage `json:"attribution,omitempty"`
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
 		Build       json.RawMessage `json:"build,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build}
+		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -245,15 +282,38 @@ type HealthChecker struct {
 	// a fetch that outlives the sweep that started it is not started again by
 	// the next sweep. Node ids are unique across both pools (one table).
 	capabilityRefreshInFlight sync.Map
+
+	// ctx is the context Start ran with; the rechecks started between sweeps
+	// end with it. Guarded by mu.
+	ctx context.Context
+	// broadcastUnreachable tells other API servers about a transcode node this
+	// one could not connect to. Guarded by mu.
+	broadcastUnreachable func(payload string)
+	// origin identifies this process in its unreachable-node announcements.
+	origin string
+	// recheckInterval separates the rechecks of a node marked unreachable;
+	// tests shorten it.
+	recheckInterval time.Duration
+	// rechecks tracks the recheck goroutines so tests can wait for them, and
+	// recheckInFlight holds the URLs being rechecked so repeated reports about
+	// one node share a single recheck.
+	rechecks        sync.WaitGroup
+	recheckInFlight sync.Map
+
+	// nodeChecks holds one lock per node id; see lockNodeCheck.
+	nodeChecksMu sync.Mutex
+	nodeChecks   map[int]*sync.Mutex
 }
 
 // NewHealthChecker creates a health checker for the given pools.
 func NewHealthChecker(proxyPool *ProxyPool, transcodePool *TranscodePool, repo *Repository) *HealthChecker {
 	return &HealthChecker{
-		proxyPool:     proxyPool,
-		transcodePool: transcodePool,
-		repo:          repo,
-		interval:      30 * time.Second,
+		proxyPool:       proxyPool,
+		transcodePool:   transcodePool,
+		repo:            repo,
+		interval:        30 * time.Second,
+		recheckInterval: unreachableRecheckInterval,
+		origin:          uuid.NewString(),
 	}
 }
 
@@ -316,6 +376,9 @@ func (hc *HealthChecker) hooks() (CapabilityFetcher, func(nodeURL string)) {
 
 // Start runs health checks in a background goroutine. Stops when ctx is cancelled.
 func (hc *HealthChecker) Start(ctx context.Context) {
+	hc.mu.Lock()
+	hc.ctx = ctx //nolint:fatcontext // stores the caller's ctx as is; nothing derives from hc.ctx here
+	hc.mu.Unlock()
 	go func() {
 		hc.checkAll(ctx)
 		ticker := time.NewTicker(hc.interval)
@@ -332,55 +395,88 @@ func (hc *HealthChecker) Start(ctx context.Context) {
 }
 
 // applyHealthFunc is a pool's copy-on-write health writer.
-type applyHealthFunc func(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time)
+type applyHealthFunc func(id int, checkedURL string, report HealthReport, checkedAt time.Time)
 
 // applyCapabilitiesFunc is a pool's copy-on-write capability writer.
 type applyCapabilitiesFunc func(id int, fetchedFrom string, capabilities []byte, hash string, refreshedAt time.Time, drift *string, driftBaseline []byte)
 
 func (hc *HealthChecker) checkAll(ctx context.Context) {
 	var wg sync.WaitGroup
-	check := func(n *Node, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
-		wg.Go(func() {
-			healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess := CheckNode(ctx, n)
-
-			// Publish the result through the pool lock so readers never see
-			// a Node struct mutated in place (the pool swaps in a copy). Fenced
-			// on the checked URL, like the database write below: the pool can be
-			// reloaded with a different worker on this id while the check runs.
-			applyHealth(n.ID, n.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
-
-			if n.Healthy && !healthy {
-				slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
-			} else if !n.Healthy && healthy {
-				slog.InfoContext(ctx, "stream node recovered", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
-			}
-
-			if hc.repo != nil {
-				// Fenced on the URL that was checked: last_stats feeds transcode
-				// admission, so one worker's disk reading must never land on a
-				// row an administrator has since repointed at another.
-				if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, healthy, activeJobs, egressKbps, lastStats, networkAccess); err != nil {
-					if errors.Is(err, ErrNodeMoved) {
-						slog.InfoContext(ctx, "discarded a health result for a node that changed identity mid-check",
-							"component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
-					} else {
-						slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
-					}
-				}
-			}
-
-			if healthy && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
-				hc.startCapabilityRefresh(ctx, n, applyCapabilities)
-			}
-		})
-	}
 	for _, n := range hc.proxyPool.Nodes() {
-		check(n, hc.proxyPool.ApplyHealth, hc.proxyPool.ApplyCapabilities)
+		wg.Go(func() { hc.checkOne(ctx, n, hc.proxyPool.ApplyHealthReport, hc.proxyPool.ApplyCapabilities) })
 	}
 	for _, n := range hc.transcodePool.Nodes() {
-		check(n, hc.transcodePool.ApplyHealth, hc.transcodePool.ApplyCapabilities)
+		wg.Go(func() { hc.checkOne(ctx, n, hc.transcodePool.ApplyHealthReport, hc.transcodePool.ApplyCapabilities) })
 	}
 	wg.Wait()
+}
+
+// lockNodeCheck waits until no other health check of node id runs, and returns
+// the func that ends this one.
+func (hc *HealthChecker) lockNodeCheck(id int) func() {
+	hc.nodeChecksMu.Lock()
+	mu := hc.nodeChecks[id]
+	if mu == nil {
+		if hc.nodeChecks == nil {
+			hc.nodeChecks = make(map[int]*sync.Mutex)
+		}
+		mu = new(sync.Mutex)
+		hc.nodeChecks[id] = mu
+	}
+	hc.nodeChecksMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
+// checkOne checks one pooled node and publishes the result to its pool and the
+// database.
+func (hc *HealthChecker) checkOne(ctx context.Context, n *Node, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
+	// One check per node at a time, from the sweep or a recheck, so the result
+	// written last is also the one asked for last: a sweep answer from before a
+	// node began draining cannot overwrite the recheck its announcement caused.
+	unlock := hc.lockNodeCheck(n.ID)
+	defer unlock()
+	hc.publishHealth(ctx, n, CheckNodeReport(ctx, n), applyHealth, applyCapabilities)
+}
+
+// publishHealth publishes one health check's result for n to its pool and the
+// database. The caller holds n's check lock.
+func (hc *HealthChecker) publishHealth(ctx context.Context, n *Node, report HealthReport, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
+	healthy, capabilitiesHash := report.Healthy, report.CapabilitiesHash
+
+	// Publish the result through the pool lock so readers never see
+	// a Node struct mutated in place (the pool swaps in a copy). Fenced
+	// on the checked URL, like the database write below: the pool can be
+	// reloaded with a different worker on this id while the check runs.
+	applyHealth(n.ID, n.URL, report, time.Now())
+
+	if n.Healthy && !healthy {
+		slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
+	} else if !n.Healthy && healthy {
+		slog.InfoContext(ctx, "stream node recovered", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
+	}
+	if healthy && n.DrainState.normalized() != report.DrainState {
+		slog.InfoContext(ctx, "stream node drain state changed", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL,
+			"drain_state", report.DrainState, "active_jobs", report.ActiveJobs)
+	}
+
+	if hc.repo != nil {
+		// Fenced on the URL that was checked: last_stats feeds transcode
+		// admission, so one worker's disk reading must never land on a
+		// row an administrator has since repointed at another.
+		if err := hc.repo.UpdateHealthReport(ctx, n.ID, n.URL, report); err != nil {
+			if errors.Is(err, ErrNodeMoved) {
+				slog.InfoContext(ctx, "discarded a health result for a node that changed identity mid-check",
+					"component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
+			} else {
+				slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
+			}
+		}
+	}
+
+	if healthy && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
+		hc.startCapabilityRefresh(ctx, n, applyCapabilities)
+	}
 }
 
 // startCapabilityRefresh runs one node's capability fetch off the sweep's

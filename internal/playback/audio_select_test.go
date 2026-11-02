@@ -1,6 +1,7 @@
 package playback_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -9,259 +10,193 @@ import (
 )
 
 func TestSelectAudioTrack(t *testing.T) {
-	tracks := []models.AudioTrack{
+	pref := func(index int, language string) *playback.AudioTrackPreference {
+		return &playback.AudioTrackPreference{AudioTrackIndex: index, AudioLanguage: language}
+	}
+	mixed := []models.AudioTrack{
 		{Language: "en", Codec: "aac", Default: true, Channels: 2},
 		{Language: "ja", Codec: "aac", Channels: 2},
 		{Language: "ja", Codec: "flac", Channels: 6, Layout: "5.1"},
 		{Language: "de", Codec: "aac", Channels: 2},
 	}
-
-	tests := []struct {
-		name           string
-		preferredLang  string
-		seriesPrefIdx  int
-		seriesPrefLang string
-		hasSeriesPref  bool
-		want           int
-	}{
-		{
-			name:          "series pref index+lang match",
-			preferredLang: "en",
-			seriesPrefIdx: 2, seriesPrefLang: "ja", hasSeriesPref: true,
-			want: 2,
-		},
-		{
-			name:          "series pref index out of bounds falls back to lang",
-			preferredLang: "en",
-			seriesPrefIdx: 99, seriesPrefLang: "ja", hasSeriesPref: true,
-			want: 1,
-		},
-		{
-			name:          "series pref index wrong lang falls back to lang match",
-			preferredLang: "en",
-			seriesPrefIdx: 0, seriesPrefLang: "ja", hasSeriesPref: true,
-			want: 1,
-		},
-		{
-			name:          "no series pref uses profile language",
-			preferredLang: "de",
-			hasSeriesPref: false,
-			want:          3,
-		},
-		{
-			name:          "no matching language uses default track",
-			preferredLang: "fr",
-			hasSeriesPref: false,
-			want:          0,
-		},
-		{
-			name:          "empty preferred lang uses default track",
-			preferredLang: "",
-			hasSeriesPref: false,
-			want:          0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var seriesPref *playback.AudioTrackPreference
-			if tt.hasSeriesPref {
-				seriesPref = &playback.AudioTrackPreference{
-					AudioTrackIndex: tt.seriesPrefIdx,
-					AudioLanguage:   tt.seriesPrefLang,
-				}
-			}
-			got := playback.SelectAudioTrack(tracks, tt.preferredLang, seriesPref)
-			if got != tt.want {
-				t.Errorf("SelectAudioTrack() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSelectAudioTrack_NoTracks(t *testing.T) {
-	got := playback.SelectAudioTrack(nil, "en", nil)
-	if got != 0 {
-		t.Errorf("SelectAudioTrack(nil) = %d, want 0", got)
-	}
-}
-
-func TestSelectAudioTrack_PrefersExactRegionalTag(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "en-GB"},
-		{Language: "en"},
-		{Language: "en-US"},
-	}
-	if got := playback.SelectAudioTrack(tracks, "en-US", nil); got != 2 {
-		t.Fatalf("SelectAudioTrack(en-US) = %d, want exact en-US track 2", got)
-	}
-	if got := playback.SelectAudioTrack(tracks, "en-AU", nil); got != 1 {
-		t.Fatalf("SelectAudioTrack(en-AU) = %d, want generic en track 1", got)
-	}
-}
-
-func TestSelectAudioTrack_NoDefaultFallsToFirst(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "ja", Codec: "aac"},
-		{Language: "en", Codec: "aac"},
-	}
-	got := playback.SelectAudioTrack(tracks, "fr", nil)
-	if got != 0 {
-		t.Errorf("SelectAudioTrack() = %d, want 0", got)
-	}
-}
-
-// TestSelectAudioTrack_ISO639CrossFormat tests that 2-letter profile
-// preferences match 3-letter FFmpeg track codes and vice versa.
-func TestSelectAudioTrack_ISO639CrossFormat(t *testing.T) {
+	regional := []models.AudioTrack{{Language: "en-GB"}, {Language: "en"}, {Language: "en-US"}}
 	// Real-world FFmpeg track languages use 3-letter ISO 639-2 codes.
-	tracks := []models.AudioTrack{
+	iso639 := []models.AudioTrack{
 		{Language: "spa", Codec: "aac", Default: true, Channels: 2},
 		{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
 		{Language: "jpn", Codec: "flac", Channels: 2},
 	}
+	// Preference saved before regional subtags were preserved: bare "en" for
+	// the track at index 1. The saved index must still win over the bare
+	// "en" commentary track at index 0.
+	regionalVariant := []models.AudioTrack{
+		{Language: "en", Codec: "aac", Channels: 2, Title: "Commentary"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Title: "English 5.1", Default: true},
+	}
+	regionalSignatures := []models.AudioTrack{
+		{Language: "en-GB", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+	}
+	regionalSignature := func(language string) *playback.AudioTrackPreference {
+		return &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: language, TrackSignature: &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}}
+	}
+	undecodable := undecodableFirstAudioTracks()
+	undecodableSignature := func(track int) *playback.AudioTrackPreference {
+		return &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(undecodable[track])}
+	}
 
 	tests := []struct {
 		name          string
+		tracks        []models.AudioTrack
 		preferredLang string
+		seriesPref    *playback.AudioTrackPreference
 		want          int
 	}{
-		{"2-letter en matches 3-letter eng", "en", 1},
-		{"2-letter es matches 3-letter spa", "es", 0},
-		{"2-letter ja matches 3-letter jpn", "ja", 2},
-		{"3-letter eng matches 3-letter eng", "eng", 1},
-		{"unmatched falls to default", "fr", 0},
+		{name: "series pref index+lang match", tracks: mixed, preferredLang: "en", seriesPref: pref(2, "ja"), want: 2},
+		{name: "series pref index out of bounds falls back to lang", tracks: mixed, preferredLang: "en", seriesPref: pref(99, "ja"), want: 1},
+		{name: "series pref index wrong lang falls back to lang match", tracks: mixed, preferredLang: "en", seriesPref: pref(0, "ja"), want: 1},
+		{name: "no series pref uses profile language", tracks: mixed, preferredLang: "de", want: 3},
+		{name: "no matching language uses default track", tracks: mixed, preferredLang: "fr", want: 0},
+		{name: "no tracks", preferredLang: "en", want: 0},
+		{name: "exact regional tag", tracks: regional, preferredLang: "en-US", want: 2},
+		{name: "other region falls back to the generic tag", tracks: regional, preferredLang: "en-AU", want: 1},
+		{name: "no default falls to first", tracks: []models.AudioTrack{{Language: "ja", Codec: "aac"}, {Language: "en", Codec: "aac"}}, preferredLang: "fr", want: 0},
+		// 2-letter profile preferences match 3-letter FFmpeg track codes and vice versa.
+		{name: "2-letter en matches 3-letter eng", tracks: iso639, preferredLang: "en", want: 1},
+		{name: "3-letter eng matches 3-letter eng", tracks: iso639, preferredLang: "eng", want: 1},
+		// Series pref stored with 3-letter code (from track), profile uses 2-letter.
+		{name: "series pref jpn at index 2", tracks: iso639, preferredLang: "en", seriesPref: pref(2, "jpn"), want: 2},
+		{name: "series pref 2-letter ja language fallback", tracks: iso639, preferredLang: "en", seriesPref: pref(99, "ja"), want: 2},
+		{name: "series pref index keeps the regional variant", tracks: regionalVariant, seriesPref: pref(1, "en"), want: 1},
+		// A regional signature must not settle for the earlier variant.
+		{name: "en-US signature", tracks: regionalSignatures, seriesPref: regionalSignature("en-US"), want: 1},
+		// A legacy bare-language signature still matches a regional track.
+		{name: "bare en signature", tracks: regionalSignatures, seriesPref: regionalSignature("en"), want: 0},
+		{name: "exact track signature over index fallback", tracks: []models.AudioTrack{
+			{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Title: "English Stereo", Default: true},
+			{Language: "eng", Codec: "flac", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+		}, preferredLang: "en", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: &userstore.AudioTrackSignature{
+			Language: "eng", Title: "English 5.1", Codec: "flac", Layout: "5.1", Channels: 6, Default: false,
+		}}, want: 1},
+		{name: "undecodable file default", tracks: undecodable, want: 1},
+		{name: "undecodable: language match prefers a decodable track", tracks: undecodable, preferredLang: "zh", want: 1},
+		{name: "undecodable: saved index on the undecodable track", tracks: undecodable, seriesPref: pref(0, "zh"), want: 1},
+		{name: "undecodable: saved index after the undecodable track", tracks: undecodable, seriesPref: pref(2, "zh"), want: 2},
+		{name: "undecodable: saved signature of the undecodable track", tracks: undecodable, seriesPref: undecodableSignature(0), want: 1},
+		{name: "undecodable: saved signature of a decodable track", tracks: undecodable, seriesPref: undecodableSignature(2), want: 2},
+		{name: "no decodable track keeps the container default", tracks: []models.AudioTrack{
+			{Language: "zh", Codec: "unknown"},
+			{Language: "en", Codec: "", Default: true},
+		}, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := playback.SelectAudioTrack(tracks, tt.preferredLang, nil)
-			if got != tt.want {
-				t.Errorf("SelectAudioTrack() = %d, want %d", got, tt.want)
+			if got := playback.SelectAudioTrack(tt.tracks, tt.preferredLang, tt.seriesPref); got != tt.want {
+				t.Fatalf("SelectAudioTrack(%q) = %d, want %d", tt.preferredLang, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestSelectAudioTrack_SeriesPrefCrossFormat(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "spa", Codec: "aac", Default: true, Channels: 2},
-		{Language: "eng", Codec: "aac", Channels: 6},
-		{Language: "jpn", Codec: "flac", Channels: 2},
+func TestPreferUnconvertedAudioTrackV3(t *testing.T) {
+	trueHD := models.AudioTrack{Language: "en", Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos", Channels: 8, Layout: "7.1", Default: true}
+	atmos := models.AudioTrack{Language: "en", Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Channels: 6, Layout: "5.1(side)"}
+	ac3 := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1(side)"}
+	stereo := models.AudioTrack{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"}
+	commentary := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1", Title: "Director's Commentary"}
+	french := models.AudioTrack{Language: "fr", Codec: "eac3", Channels: 6, Layout: "5.1(side)"}
+	copied := func(channels int) playback.StartAudioOutcomeV3 {
+		return playback.StartAudioOutcomeV3{Playable: true, Channels: channels}
+	}
+	converted := func(channels int) playback.StartAudioOutcomeV3 {
+		return playback.StartAudioOutcomeV3{Playable: true, Converted: true, Channels: channels}
 	}
 
-	// Series pref stored with 3-letter code (from track), profile uses 2-letter.
-	pref := &playback.AudioTrackPreference{
-		AudioTrackIndex: 2,
-		AudioLanguage:   "jpn",
+	tests := []struct {
+		name     string
+		tracks   []models.AudioTrack
+		outcomes []playback.StartAudioOutcomeV3
+		want     int
+	}{
+		{name: "an unconverted track replaces a converted default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 1},
+		{name: "a default that plays as it is stays", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{copied(8), copied(6)}, want: 0},
+		{name: "a track that plans replaces one that does not", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{{}, copied(6)}, want: 1},
+		{name: "most channels, then Atmos, then codec", tracks: []models.AudioTrack{trueHD, stereo, ac3, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(2), copied(6), copied(6)}, want: 3},
+		{name: "a track with fewer channels never replaces a conversion", tracks: []models.AudioTrack{trueHD, stereo}, outcomes: []playback.StartAudioOutcomeV3{converted(6), copied(2)}, want: 0},
+		{name: "a track that is converted too never replaces the default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(6), converted(2)}, want: 0},
+		{name: "commentary is never substituted in", tracks: []models.AudioTrack{trueHD, commentary}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
+		{name: "another language is never substituted in", tracks: []models.AudioTrack{trueHD, french}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
 	}
-	got := playback.SelectAudioTrack(tracks, "en", pref)
-	if got != 2 {
-		t.Errorf("series pref jpn at index 2: got %d, want 2", got)
-	}
-
-	// Series pref language fallback with 2-letter stored code.
-	pref2 := &playback.AudioTrackPreference{
-		AudioTrackIndex: 99,   // out of bounds
-		AudioLanguage:   "ja", // 2-letter
-	}
-	got = playback.SelectAudioTrack(tracks, "en", pref2)
-	if got != 2 {
-		t.Errorf("series pref ja fallback: got %d, want 2", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{Container: "mkv", CodecAudio: tt.tracks[0].Codec, AudioTracks: tt.tracks}
+			outcome := func(index int) playback.StartAudioOutcomeV3 { return tt.outcomes[index] }
+			if got := playback.PreferUnconvertedAudioTrackV3(file, 0, outcome); got != tt.want {
+				t.Fatalf("PreferUnconvertedAudioTrackV3 = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestSelectAudioTrack_SeriesPrefIndexKeepsRegionalVariant(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "en", Codec: "aac", Channels: 2, Title: "Commentary"},
-		{Language: "en-US", Codec: "eac3", Channels: 6, Title: "English 5.1", Default: true},
-	}
-
-	// Preference saved before regional subtags were preserved: bare "en" for
-	// the track at index 1. The saved index must still win over the bare
-	// "en" commentary track at index 0.
-	pref := &playback.AudioTrackPreference{
-		AudioTrackIndex: 1,
-		AudioLanguage:   "en",
-	}
-	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
-		t.Fatalf("SelectAudioTrack() = %d, want saved index 1", got)
-	}
-}
-
-func TestSelectAudioTrack_SignaturePrefersExactRegionalTag(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "en-GB", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
-		{Language: "en-US", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
-	}
-	sig := func(language string) *userstore.AudioTrackSignature {
-		return &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}
-	}
-
-	// A regional signature must not settle for the earlier variant.
-	pref := &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en-US", TrackSignature: sig("en-US")}
-	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
-		t.Fatalf("en-US signature: SelectAudioTrack() = %d, want 1", got)
-	}
-
-	// A legacy bare-language signature still matches a regional track.
-	pref = &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: sig("en")}
-	if got := playback.SelectAudioTrack(tracks, "", pref); got != 0 {
-		t.Fatalf("bare en signature: SelectAudioTrack() = %d, want 0", got)
-	}
-}
-
-func TestSelectAudioTrack_PrefersExactTrackSignatureOverIndexFallback(t *testing.T) {
-	tracks := []models.AudioTrack{
-		{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Title: "English Stereo", Default: true},
-		{Language: "eng", Codec: "flac", Channels: 6, Layout: "5.1", Title: "English 5.1"},
-	}
-
-	pref := &playback.AudioTrackPreference{
-		AudioTrackIndex: 0,
-		AudioLanguage:   "en",
-		TrackSignature: &userstore.AudioTrackSignature{
-			Language: "eng",
-			Title:    "English 5.1",
-			Codec:    "flac",
-			Layout:   "5.1",
-			Channels: 6,
-			Default:  false,
-		},
-	}
-
-	got := playback.SelectAudioTrack(tracks, "en", pref)
-	if got != 1 {
-		t.Fatalf("SelectAudioTrack() = %d, want 1", got)
-	}
-}
-
-func TestMatchAudioTrackAcrossVersionsRemapsReorderedLanguage(t *testing.T) {
-	requested := []models.AudioTrack{
-		{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
-		{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
-	}
-	effective := []models.AudioTrack{
-		{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
-		{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
-	}
-
-	if got := playback.MatchAudioTrackAcrossVersions(requested, effective, 1); got != 0 {
-		t.Fatalf("MatchAudioTrackAcrossVersions() = %d, want English track 0", got)
-	}
-}
-
-func TestMatchAudioTrackAcrossVersionsFallsBackToLanguageAcrossCodecs(t *testing.T) {
-	requested := []models.AudioTrack{
-		{Language: "ja", Codec: "aac", Channels: 2},
-		{Language: "en", Codec: "truehd", Channels: 8},
-	}
-	effective := []models.AudioTrack{
-		{Language: "en", Codec: "eac3", Channels: 6},
-		{Language: "es", Codec: "aac", Channels: 2, Default: true},
-	}
-
-	if got := playback.MatchAudioTrackAcrossVersions(requested, effective, 1); got != 0 {
-		t.Fatalf("MatchAudioTrackAcrossVersions() = %d, want English track 0", got)
+func TestMatchAudioTrackAcrossVersions(t *testing.T) {
+	for _, tt := range []struct {
+		name                 string
+		requested, effective []models.AudioTrack
+		index, want          int
+	}{
+		{"remaps a reordered language", []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
+			{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
+		}, []models.AudioTrack{
+			{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
+			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
+		}, 1, 0},
+		{"falls back to the language across codecs", []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "truehd", Channels: 8},
+		}, []models.AudioTrack{
+			{Language: "en", Codec: "eac3", Channels: 6},
+			{Language: "es", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"keeps the language when the codec changes and the order differs", []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 6, Default: true},
+			{Language: "ja", Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"keeps the language when only the channels change", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+			{Language: "ja", Codec: "aac", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"prefers the exact regional tag", []models.AudioTrack{
+			{Language: "en-GB", Codec: "eac3", Channels: 6},
+			{Language: "en-US", Codec: "eac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "en-GB", Codec: "aac", Channels: 2},
+			{Language: "en-US", Codec: "aac", Channels: 2},
+		}, 1, 1},
+		{"keeps main audio over commentary in the same language", []models.AudioTrack{
+			{Language: "en", Codec: "truehd", Channels: 8, Title: "Main"},
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+		}, []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+			{Language: "en", Codec: "eac3", Channels: 6, Title: "Main"},
+		}, 0, 1},
+		{"matches an untagged track among untagged tracks", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2},
+			{Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+	} {
+		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, tt.index); got != tt.want {
+			t.Errorf("%s: MatchAudioTrackAcrossVersions() = %d, want %d", tt.name, got, tt.want)
+		}
 	}
 }
 
@@ -272,6 +207,45 @@ func TestIsOriginalLanguagePreference(t *testing.T) {
 	} {
 		if got := playback.IsOriginalLanguagePreference(value); got != want {
 			t.Errorf("IsOriginalLanguagePreference(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
+
+// undecodableFirstAudioTracks mirrors an MP4 whose first audio track is AVS3
+// (av3a): ffprobe's JSON names no codec for it, so the scanner stores none.
+func undecodableFirstAudioTracks() []models.AudioTrack {
+	return []models.AudioTrack{
+		{Language: "zh", Codec: "", Channels: 6, Default: true},
+		{Language: "zh", Codec: "eac3", Channels: 6, Layout: "5.1"},
+		{Language: "zh", Codec: "aac", Channels: 2, Layout: "stereo"},
+	}
+}
+
+func TestAudioTrackDecodable(t *testing.T) {
+	tests := []struct {
+		name      string
+		codecs    []string
+		fileCodec string
+		want      []bool
+	}{
+		{name: "named codecs", codecs: []string{"eac3", "aac", " TrueHD "}, fileCodec: "eac3", want: []bool{true, true, true}},
+		{name: "ffprobe text unknown", codecs: []string{" Unknown ", "aac"}, fileCodec: "aac", want: []bool{false, true}},
+		{name: "unnamed beside a named track", codecs: []string{"", "eac3"}, fileCodec: "eac3", want: []bool{false, true}},
+		{name: "no audio codec named anywhere", codecs: []string{"", ""}, want: []bool{false, false}},
+		{name: "older rows without per-track codecs", codecs: []string{"", ""}, fileCodec: "aac", want: []bool{true, true}},
+	}
+	for _, tt := range tests {
+		tracks := make([]models.AudioTrack, len(tt.codecs))
+		for i, codec := range tt.codecs {
+			tracks[i].Codec = codec
+		}
+		for i, want := range tt.want {
+			if got := playback.AudioTrackDecodable(tracks, i, tt.fileCodec); got != want {
+				t.Errorf("%s: AudioTrackDecodable(track %d) = %v, want %v", tt.name, i, got, want)
+			}
+		}
+		if got, want := playback.AnyAudioTrackDecodable(tracks, tt.fileCodec), slices.Contains(tt.want, true); got != want {
+			t.Errorf("%s: AnyAudioTrackDecodable = %v, want %v", tt.name, got, want)
 		}
 	}
 }

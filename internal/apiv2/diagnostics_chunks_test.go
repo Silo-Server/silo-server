@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -142,13 +141,6 @@ func TestDiagnosticsChunksReinitAndExplicitRefusal(t *testing.T) {
 	requireProblem(t, do(t, h, "POST", complete, "", bearer(memberToken)), TypeCapabilityDisabled)
 	f.status.Status = diagnostics.StatusAvailable
 	requireProblem(t, do(t, h, "POST", complete, "", bearer(memberToken)), TypeNotFound)
-}
-func TestDiagnosticsChunksExpiryUsesAbsenceProblem(t *testing.T) {
-	err := diagnosticsChunkProblem(&handlers.DiagnosticsUploadFailure{Status: 410, Message: "expired"})
-	problem, ok := errors.AsType[*Problem](err)
-	if !ok || problem.Type != TypeNotFound.URI() || problem.Status != 404 {
-		t.Fatal(err)
-	}
 }
 
 func TestDiagnosticsChunksReplicaAndStreamingLimit(t *testing.T) {

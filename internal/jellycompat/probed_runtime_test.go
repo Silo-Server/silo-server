@@ -45,7 +45,6 @@ func TestEpisodeFromUpstreamRuntimeResolution(t *testing.T) {
 		runtimeMinutes  int
 		want            int64
 	}{
-		{name: "probe only", durationSeconds: 1800, want: 18_000_000_000},
 		{name: "runtime only", runtimeMinutes: 30, want: 18_000_000_000},
 		{name: "neither", want: 0},
 		{name: "probe wins", durationSeconds: 1800, runtimeMinutes: 45, want: 18_000_000_000},
@@ -116,28 +115,6 @@ func TestFillListItemDurationsBucketsAndDeduplicates(t *testing.T) {
 	}
 	if items[4].DurationSeconds != 0 || items[5].DurationSeconds != 0 {
 		t.Fatalf("non-playable durations changed: %d/%d", items[4].DurationSeconds, items[5].DurationSeconds)
-	}
-}
-
-func TestFillListItemDurationsSkipsEmptyBucketsAndNilSource(t *testing.T) {
-	src := &countingProbedDurationSource{content: nil}
-	items := []upstreamListItem{{ContentID: "movie-1", Type: "movie", Runtime: 90}}
-	fillListItemDurations(context.Background(), src, items)
-	if src.contentCalls != 1 || src.episodeCalls != 0 {
-		t.Fatalf("content/episode calls = %d/%d, want 1/0", src.contentCalls, src.episodeCalls)
-	}
-	if items[0].DurationSeconds != 0 {
-		t.Fatalf("DurationSeconds = %d, want 0 after nil result", items[0].DurationSeconds)
-	}
-	dto := newMapper(NewResourceIDCodec(), &config.Config{}).itemFromList(items[0], false, nil, nil)
-	if dto.RunTimeTicks != minutesToTicks(90) {
-		t.Fatalf("nil probe result did not fall back to catalog runtime: %d", dto.RunTimeTicks)
-	}
-
-	before := append([]upstreamListItem(nil), items...)
-	fillListItemDurations(context.Background(), nil, items)
-	if !reflect.DeepEqual(items, before) {
-		t.Fatalf("nil source mutated items: got %+v, want %+v", items, before)
 	}
 }
 

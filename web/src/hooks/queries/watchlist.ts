@@ -31,6 +31,7 @@ export function useToggleWatchlist(itemId: string) {
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
         user_state: {
+          ...detail.user_state,
           played: detail.user_state?.played ?? detail.user_data?.played ?? false,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: !currentlyInWatchlist,
@@ -43,6 +44,7 @@ export function useToggleWatchlist(itemId: string) {
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
         user_state: {
+          ...detail.user_state,
           played: detail.user_state?.played ?? detail.user_data?.played ?? false,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: currentlyInWatchlist,

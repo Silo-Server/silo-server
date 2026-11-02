@@ -24,6 +24,7 @@ type recordingRecipeCardStoreV3 struct {
 	disabled  bool
 	putErr    error
 	deleteErr error
+	lookupErr error
 	cards     map[string]playback.RecipeCard
 	deleted   []string
 	// ops is the ordered call log ("get", "put", "delete"), so a test can
@@ -40,6 +41,16 @@ func (s *recordingRecipeCardStoreV3) Get(_ context.Context, sessionID string) (*
 		return nil, false
 	}
 	return &card, true
+}
+
+// Lookup is Get as the session-recipe store reads it, with a store outage
+// reported rather than folded into a miss.
+func (s *recordingRecipeCardStoreV3) Lookup(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error) {
+	if s.lookupErr != nil {
+		return nil, false, s.lookupErr
+	}
+	card, ok := s.Get(ctx, sessionID)
+	return card, ok, nil
 }
 
 func (s *recordingRecipeCardStoreV3) Put(_ context.Context, sessionID string, card playback.RecipeCard) error {

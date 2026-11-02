@@ -9,6 +9,7 @@ import {
   parseLibraryPageState,
   serializeLibraryPageSearchParams,
   updateLibraryPageSearchParams,
+  type LibraryPageState,
 } from "./libraryPageSearchParams";
 
 function params(search: string) {
@@ -19,45 +20,37 @@ function asObject(searchParams: URLSearchParams) {
   return Object.fromEntries(searchParams.entries());
 }
 
+const DEFAULT_QUERY = {
+  library_ids: [],
+  match: "all",
+  groups: [],
+  sort: { field: "title", order: "asc" },
+} satisfies LibraryPageState["queryDefinition"];
+
+function pageState(
+  activeTab: LibraryPageState["activeTab"],
+  browseType: LibraryPageState["browseType"] = "series",
+  query: Partial<LibraryPageState["queryDefinition"]> = {},
+): LibraryPageState {
+  return { activeTab, browseType, queryDefinition: { ...DEFAULT_QUERY, ...query } };
+}
+
 describe("parseLibraryPageState", () => {
-  it("uses recommended tab and title ascending defaults when params are absent", () => {
-    const state = parseLibraryPageState(params(""), "mixed");
-
-    expect(state).toEqual({
-      activeTab: "recommended",
-      browseType: "series",
-      queryDefinition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "title", order: "asc" },
-      },
-    });
-  });
-
-  it("ignores library filters unless tab=library is set", () => {
-    const state = parseLibraryPageState(
-      params("genre=Crime&sort=year&order=desc&year_min=1990"),
-      "mixed",
-    );
-
-    expect(state).toEqual({
-      activeTab: "recommended",
-      browseType: "series",
-      queryDefinition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "title", order: "asc" },
-      },
-    });
-  });
-
-  it("treats tab=collections as a non-browse tab with default filters", () => {
-    const state = parseLibraryPageState(params("tab=collections&genre=Crime&sort=year"), "mixed");
-
-    expect(state).toEqual({
-      activeTab: "collections",
+  it.each<[string, string, LibraryPageState["activeTab"]]>([
+    ["uses recommended tab and title ascending defaults when params are absent", "", "recommended"],
+    [
+      "ignores library filters unless tab=library is set",
+      "genre=Crime&sort=year&order=desc&year_min=1990",
+      "recommended",
+    ],
+    [
+      "treats tab=collections as a non-browse tab with default filters",
+      "tab=collections&genre=Crime&sort=year",
+      "collections",
+    ],
+  ])("%s", (_name, search, activeTab) => {
+    expect(parseLibraryPageState(params(search), "mixed")).toEqual({
+      activeTab,
       browseType: "series",
       queryDefinition: {
         library_ids: [],
@@ -143,14 +136,6 @@ describe("parseLibraryPageState", () => {
     expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
   });
 
-  it("preserves ebook scope for mixed library filters", () => {
-    const state = parseLibraryPageState(params("tab=library&type=ebook&sort=author"), "mixed");
-
-    expect(state.activeTab).toBe("library");
-    expect(state.queryDefinition.media_scope).toBe("ebook");
-    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
-  });
-
   it("accepts grouped query params and canonical sorts", () => {
     const state = parseLibraryPageState(
       params(
@@ -168,63 +153,46 @@ describe("parseLibraryPageState", () => {
     ]);
   });
 
-  it("accepts last_air_date as a valid sort value", () => {
-    const state = parseLibraryPageState(
-      params("tab=library&sort=last_air_date&order=desc"),
-      "series",
-    );
-
-    expect(state.queryDefinition.sort).toEqual({ field: "last_air_date", order: "desc" });
-  });
-
-  it("parses series-library browse mode from the type param", () => {
-    const state = parseLibraryPageState(params("tab=library&type=episode"), "series");
+  it.each([
+    ["parses series-library browse mode from the type param", "tab=library&type=episode"],
+    [
+      "normalizes series-only sorts away in episode browse mode",
+      "tab=library&type=episode&sort=last_air_date&order=desc",
+    ],
+  ])("%s", (_name, search) => {
+    const state = parseLibraryPageState(params(search), "series");
 
     expect(state.browseType).toBe("episode");
     expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
   });
 
-  it("normalizes series-only sorts away in episode browse mode", () => {
-    const state = parseLibraryPageState(
-      params("tab=library&type=episode&sort=last_air_date&order=desc"),
-      "series",
-    );
-
-    expect(state.browseType).toBe("episode");
-    expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
-  });
-
-  it("normalizes video-only sorts away on audiobook libraries", () => {
-    const state = parseLibraryPageState(
-      params("tab=library&sort=rating_imdb&order=desc"),
+  it.each([
+    [
+      "normalizes video-only sorts away on audiobook libraries",
+      "tab=library&sort=rating_imdb&order=desc",
       "audiobooks",
-    );
-    expect(state.queryDefinition.media_scope).toBe("audiobook");
-    expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
-  });
-
-  it("keeps audiobook-applicable sorts on audiobook libraries", () => {
-    const state = parseLibraryPageState(
-      params("tab=library&sort=runtime&order=desc"),
+      "audiobook",
+      { field: "title", order: "asc" },
+    ],
+    [
+      "keeps audiobook-applicable sorts on audiobook libraries",
+      "tab=library&sort=runtime&order=desc",
       "audiobooks",
-    );
-    expect(state.queryDefinition.media_scope).toBe("audiobook");
-    expect(state.queryDefinition.sort).toEqual({ field: "runtime", order: "desc" });
-  });
-
-  it("uses ebook scope for ebook libraries", () => {
-    const state = parseLibraryPageState(params("tab=library&sort=author&order=asc"), "ebooks");
-
-    expect(state.queryDefinition.media_scope).toBe("ebook");
-    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
-  });
-
-  it("uses manga scope for manga libraries", () => {
-    const state = parseLibraryPageState(params("tab=library&sort=author&order=asc"), "manga");
-
-    expect(state.queryDefinition.media_scope).toBe("manga");
+      "audiobook",
+      { field: "runtime", order: "desc" },
+    ],
     // Manga sort relevance mirrors ebooks, so ebook-applicable sorts survive.
-    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
+    [
+      "uses manga scope for manga libraries",
+      "tab=library&sort=author&order=asc",
+      "manga",
+      "manga",
+      { field: "author", order: "asc" },
+    ],
+  ])("%s", (_name, search, libraryType, scope, sort) => {
+    const state = parseLibraryPageState(params(search), libraryType);
+    expect(state.queryDefinition.media_scope).toBe(scope);
+    expect(state.queryDefinition.sort).toEqual(sort);
   });
 
   it("normalizes legacy sort aliases to canonical values", () => {
@@ -243,162 +211,74 @@ describe("parseLibraryPageState", () => {
 });
 
 describe("updateLibraryPageSearchParams", () => {
-  it("writes grouped query params and preserves unrelated params", () => {
-    const next = updateLibraryPageSearchParams(
-      params("foo=bar"),
-      {
-        activeTab: "library",
-        browseType: "series",
-        queryDefinition: {
-          library_ids: [],
-          media_scope: "movie",
-          match: "all",
-          groups: [
-            {
-              match: "all",
-              rules: [{ field: "genre", op: "contains", value: "Crime" }],
-            },
-          ],
-          sort: { field: "title", order: "asc" },
-        },
-      },
+  it.each<[string, string, LibraryPageState, string, Record<string, string>]>([
+    [
+      "writes grouped query params and preserves unrelated params",
+      "foo=bar",
+      pageState("library", "series", {
+        media_scope: "movie",
+        groups: [{ match: "all", rules: [{ field: "genre", op: "contains", value: "Crime" }] }],
+      }),
       "mixed",
-    );
-
-    expect(asObject(next)).toEqual({
-      foo: "bar",
-      tab: "library",
-      type: "movie",
-      "groups[0][match]": "all",
-      "groups[0][rules][0][field]": "genre",
-      "groups[0][rules][0][op]": "contains",
-      "groups[0][rules][0][value]": "Crime",
-    });
-  });
-
-  it("omits default sort params and legacy filter params from canonical writes", () => {
-    const next = updateLibraryPageSearchParams(
-      params("tab=library&genre=Crime&year_min=2000"),
       {
-        activeTab: "library",
-        browseType: "series",
-        queryDefinition: {
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        },
+        foo: "bar",
+        tab: "library",
+        type: "movie",
+        "groups[0][match]": "all",
+        "groups[0][rules][0][field]": "genre",
+        "groups[0][rules][0][op]": "contains",
+        "groups[0][rules][0][value]": "Crime",
       },
+    ],
+    [
+      "omits default sort params and legacy filter params from canonical writes",
+      "tab=library&genre=Crime&year_min=2000",
+      pageState("library"),
       "mixed",
-    );
-
-    expect(asObject(next)).toEqual({ tab: "library" });
-  });
-
-  it("removes library params when switching back to recommended", () => {
-    const next = updateLibraryPageSearchParams(
-      params("foo=bar&tab=library&type=movie&groups[0][match]=all"),
-      {
-        activeTab: "recommended",
-        browseType: "series",
-        queryDefinition: {
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        },
-      },
+      { tab: "library" },
+    ],
+    [
+      "removes library params when switching back to recommended",
+      "foo=bar&tab=library&type=movie&groups[0][match]=all",
+      pageState("recommended"),
       "mixed",
-    );
-
-    expect(asObject(next)).toEqual({ foo: "bar" });
-  });
-
-  it("writes only the collections tab marker and drops browse-only filters", () => {
-    const next = updateLibraryPageSearchParams(
-      params("foo=bar&tab=library&type=movie&groups[0][match]=all"),
-      {
-        activeTab: "collections",
-        browseType: "series",
-        queryDefinition: {
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        },
-      },
+      { foo: "bar" },
+    ],
+    [
+      "writes only the collections tab marker and drops browse-only filters",
+      "foo=bar&tab=library&type=movie&groups[0][match]=all",
+      pageState("collections"),
       "mixed",
-    );
-
-    expect(asObject(next)).toEqual({
-      foo: "bar",
-      tab: "collections",
-    });
-  });
-
-  it("writes the episode browse mode for series libraries", () => {
-    const next = updateLibraryPageSearchParams(
-      params("foo=bar"),
-      {
-        activeTab: "library",
-        browseType: "episode",
-        queryDefinition: {
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "last_air_date", order: "desc" },
-        },
-      },
+      { foo: "bar", tab: "collections" },
+    ],
+    [
+      "writes the episode browse mode for series libraries",
+      "foo=bar",
+      pageState("library", "episode", { sort: { field: "last_air_date", order: "desc" } }),
       "series",
-    );
-
-    expect(asObject(next)).toEqual({
-      foo: "bar",
-      tab: "library",
-      type: "episode",
-    });
-  });
-
-  it("does not write a redundant type param for audiobook libraries", () => {
-    const next = updateLibraryPageSearchParams(
-      params("foo=bar"),
-      {
-        activeTab: "library",
-        browseType: "books",
-        queryDefinition: {
-          library_ids: [],
-          media_scope: "audiobook",
-          match: "all",
-          groups: [],
-          sort: { field: "author", order: "asc" },
-        },
-      },
+      { foo: "bar", tab: "library", type: "episode" },
+    ],
+    [
+      "does not write a redundant type param for audiobook libraries",
+      "foo=bar",
+      pageState("library", "books", {
+        media_scope: "audiobook",
+        sort: { field: "author", order: "asc" },
+      }),
       "audiobooks",
+      { foo: "bar", tab: "library", sort: "author", order: "asc" },
+    ],
+  ])("%s", (_name, search, state, libraryType, expected) => {
+    expect(asObject(updateLibraryPageSearchParams(params(search), state, libraryType))).toEqual(
+      expected,
     );
-
-    expect(asObject(next)).toEqual({
-      foo: "bar",
-      tab: "library",
-      sort: "author",
-      order: "asc",
-    });
   });
 
   it("round-trips audiobook browse axes through the type param", () => {
     for (const axis of ["series", "authors", "narrators"] as const) {
       const next = updateLibraryPageSearchParams(
         params(""),
-        {
-          activeTab: "library",
-          browseType: axis,
-          queryDefinition: {
-            library_ids: [],
-            media_scope: "audiobook",
-            match: "all",
-            groups: [],
-            sort: { field: "title", order: "asc" },
-          },
-        },
+        pageState("library", axis, { media_scope: "audiobook" }),
         "audiobooks",
       );
 
@@ -456,17 +336,6 @@ describe("library page saved state helpers", () => {
 });
 
 describe("getLibrarySortRelevanceScope", () => {
-  it("maps library types to sort relevance scopes", () => {
-    expect(getLibrarySortRelevanceScope("movie")).toBe("movie");
-    expect(getLibrarySortRelevanceScope("series")).toBe("series");
-    expect(getLibrarySortRelevanceScope("audiobook")).toBe("audiobook");
-    expect(getLibrarySortRelevanceScope("audiobooks")).toBe("audiobook");
-    expect(getLibrarySortRelevanceScope("ebook")).toBe("ebook");
-    expect(getLibrarySortRelevanceScope("ebooks")).toBe("ebook");
-    // Manga has its own sort universe (no Duration/Bitrate, reading labels).
-    expect(getLibrarySortRelevanceScope("manga")).toBe("manga");
-  });
-
   it("falls back to the media scope and then to all for mixed libraries", () => {
     expect(getLibrarySortRelevanceScope("mixed", "episode")).toBe("episode");
     expect(getLibrarySortRelevanceScope("mixed", "ebook")).toBe("ebook");

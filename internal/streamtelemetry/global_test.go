@@ -59,7 +59,7 @@ func TestBuildGlobalViewMergeRules(t *testing.T) {
 	if session.ViewerBytesAccepted != 300 || session.RelayBytesAccepted != 50 {
 		t.Fatalf("bytes = viewer %d relay %d", session.ViewerBytesAccepted, session.RelayBytesAccepted)
 	}
-	if session.StartedAt != claim || session.StartedAtSource != StartedAtSourceClaim {
+	if !session.StartedAt.Equal(claim) || session.StartedAtSource != StartedAtSourceClaim {
 		t.Fatalf("started = %v %s", session.StartedAt, session.StartedAtSource)
 	}
 	if !session.StartedAtDegraded {

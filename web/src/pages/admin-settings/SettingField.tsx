@@ -55,7 +55,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-[12.5px] leading-snug",
+        "inline-flex items-center gap-1.5 text-[13px] leading-snug",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
@@ -71,12 +71,6 @@ export interface SettingFieldRowProps {
   label: ReactNode;
   /** Ties the label to the control; omit for rows whose control has no id. */
   htmlFor?: string;
-  /**
-   * The `server_settings` key behind the row, e.g. `branding.server_name`.
-   * Rendered as a small mono caption under the label so an admin can match
-   * what they see to the API, environment overrides, and support answers.
-   */
-  settingKey?: string;
   /** The row has an unsaved edit; shows the violet dot before the label. */
   dirty?: boolean;
   /** Description under the label. One short sentence, or nothing at all. */
@@ -107,7 +101,6 @@ export interface SettingFieldRowProps {
 export function SettingFieldRow({
   label,
   htmlFor,
-  settingKey,
   dirty,
   description,
   descriptionId,
@@ -142,13 +135,8 @@ export function SettingFieldRow({
           </Label>
           {restartRequired && !groupSaysRestart && <RestartBadge />}
         </div>
-        {settingKey ? (
-          <span className="text-muted-foreground/70 mt-0.5 block font-mono text-[10px] tracking-[0.02em]">
-            {settingKey}
-          </span>
-        ) : null}
         {description ? (
-          <p id={descriptionId} className="text-muted-foreground mt-1 text-xs leading-relaxed">
+          <p id={descriptionId} className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
             {description}
           </p>
         ) : null}
@@ -166,7 +154,7 @@ export function SettingFieldRow({
           {children}
         </div>
         {unit ? (
-          <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap sm:w-[var(--settings-unit-w)]">
+          <span className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
             {unit}
           </span>
         ) : (
@@ -184,8 +172,6 @@ export function SettingFieldRow({
 
 interface SettingFieldProps {
   label: string;
-  /** The `server_settings` key, shown as a mono caption under the label. */
-  settingKey?: string;
   /** The field has an unsaved edit; drive it from `form.isDirty(key)`. */
   dirty?: boolean;
   type?: "text" | "number" | "password" | "toggle" | "duration" | "select";
@@ -212,7 +198,6 @@ interface SettingFieldProps {
 
 export function SettingField({
   label,
-  settingKey,
   dirty,
   type = "text",
   hint,
@@ -240,7 +225,6 @@ export function SettingField({
     <SettingFieldRow
       label={label}
       htmlFor={controlId}
-      settingKey={settingKey}
       dirty={dirty}
       description={rowDescription}
       descriptionId={hintId}

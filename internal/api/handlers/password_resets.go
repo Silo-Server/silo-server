@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
@@ -42,6 +44,9 @@ func (h *PasswordResetHandler) PasswordResetCapabilities(ctx context.Context) pa
 // may reset another admin's password, nobody else may reset the Owner's, and a
 // scoped API key may not reset an admin account: like setting its password,
 // each would let the link's holder sign in with that account's full authority.
+// These checks answer early; the service repeats them with the accounts
+// locked as it stores the link, so a promotion that lands in between is still
+// refused.
 func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input passwordreset.IssueInput) (*passwordreset.IssueResult, error) {
 	target, err := h.users.GetByID(ctx, input.UserID)
 	if err != nil {
@@ -54,10 +59,19 @@ func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input pas
 	if err := auth.CheckOwnerTarget(actor, target); err != nil {
 		return nil, ownerError(err)
 	}
-	if actorIsScopedAPIKey(ctx) && target.Role == roleAdmin {
-		return nil, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
+	input.ScopedKey = apimw.IsScopedAPIKey(ctx)
+	if input.ScopedKey && target.Role == roleAdmin {
+		return nil, scopedKeyAdminResetError()
 	}
-	return h.service.Issue(ctx, input)
+	result, err := h.service.Issue(ctx, input)
+	if errors.Is(err, passwordreset.ErrScopedKeyAdmin) {
+		return nil, scopedKeyAdminResetError()
+	}
+	return result, ownerError(err)
+}
+
+func scopedKeyAdminResetError() error {
+	return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
 }
 
 // PasswordResetSelfService reports whether self-service reset is turned on

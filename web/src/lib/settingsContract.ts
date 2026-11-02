@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 16;
+export const SETTINGS_REVISION = 24;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -180,6 +180,10 @@ export const SETTING_OPTION_SETS = {
 export type SettingOptionSetId = keyof typeof SETTING_OPTION_SETS;
 
 export const SETTING_KEYS = {
+  /** Blur unwatched episode images */
+  CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES: "catalog.hide_unwatched_episode_images",
+  /** Hide unwatched episode descriptions */
+  CATALOG_HIDE_UNWATCHED_EPISODE_OVERVIEWS: "catalog.hide_unwatched_episode_overviews",
   /** Metadata language */
   CATALOG_METADATA_LANGUAGE: "catalog.metadata_language",
   /** Metadata language exceptions */
@@ -212,6 +216,12 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Lower quality when buffering */
+  PLAYBACK_BUFFERING_QUALITY_MODE: "playback.buffering_quality_mode",
+  /** Cellular maximum bitrate */
+  PLAYBACK_CELLULAR_MAX_BITRATE_KBPS: "playback.cellular_max_bitrate_kbps",
+  /** Cellular quality */
+  PLAYBACK_CELLULAR_PREFERRED_QUALITY: "playback.cellular_preferred_quality",
   /** Skip intros */
   PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
@@ -222,6 +232,10 @@ export const SETTING_KEYS = {
   PLAYBACK_PREFERRED_QUALITY: "playback.preferred_quality",
   /** Show forced subtitles */
   PLAYBACK_SHOW_FORCED_SUBTITLES: "playback.show_forced_subtitles",
+  /** Show marker confidence */
+  PLAYBACK_SHOW_MARKER_CONFIDENCE: "playback.show_marker_confidence",
+  /** Show marker source */
+  PLAYBACK_SHOW_MARKER_SOURCE: "playback.show_marker_source",
   /** Subtitle appearance */
   PLAYBACK_SUBTITLE_APPEARANCE: "playback.subtitle_appearance",
   /** Preferred subtitle language */
@@ -296,6 +310,8 @@ export const SETTING_KEYS = {
   UI_LIBRARY_PAGE_STATE: "ui.library_page_state",
   /** Next up episodes */
   UI_NEXT_UP_MODE: "ui.next_up_mode",
+  /** Show new episodes first */
+  UI_NEXT_UP_NEW_RELEASES_FIRST: "ui.next_up_new_releases_first",
   /** Remember library view */
   UI_REMEMBER_LIBRARY_PAGE_STATE: "ui.remember_library_page_state",
   /** Pinned sidebar items */
@@ -338,6 +354,9 @@ export interface SettingDefinition {
   scopeIntroducedIn: readonly number[];
   resolutionOrder: readonly string[];
   defaultValue: unknown;
+  /** The server administrator may replace defaultValue for the whole server,
+   * so a value with source "default" can differ from it. */
+  adminDefault?: boolean;
   label: string;
   description: string;
   category: string;
@@ -349,7 +368,8 @@ export interface SettingDefinition {
   platforms?: readonly string[];
   suggestedOptions?: SettingOptionSetId;
   unsetLabel?: string;
-  values?: readonly { value: unknown; label: string; introducedIn: number }[];
+  /** A deprecated member stays a valid stored value but is no longer offered. */
+  values?: readonly { value: unknown; label: string; introducedIn: number; deprecated?: boolean }[];
   /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */
   ordered?: boolean;
   minimum?: number;
@@ -368,6 +388,39 @@ export interface SettingDefinition {
 }
 
 export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
+  "catalog.hide_unwatched_episode_images": {
+    key: "catalog.hide_unwatched_episode_images",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile"],
+    scopeIntroducedIn: [17],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Blur unwatched episode images",
+    description:
+      "Blur an episode's thumbnail until you start watching it, so the image does not give away the story.",
+    category: "catalog",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "catalog.hide_unwatched_episode_overviews": {
+    key: "catalog.hide_unwatched_episode_overviews",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile"],
+    scopeIntroducedIn: [17],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Hide unwatched episode descriptions",
+    description: "Hide an episode's description until you start watching it.",
+    category: "catalog",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
   "catalog.metadata_language": {
     key: "catalog.metadata_language",
     type: "language_tag",
@@ -629,6 +682,71 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
   },
+  "playback.buffering_quality_mode": {
+    key: "playback.buffering_quality_mode",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 23,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [23, 23],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "always",
+    label: "Lower quality when buffering",
+    description:
+      "What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked.",
+    category: "playback",
+    control: "select",
+    values: [
+      { value: "never", label: "Never", introducedIn: 23 },
+      { value: "ask", label: "Ask first", introducedIn: 23 },
+      { value: "always", label: "Automatically", introducedIn: 23 },
+    ],
+  },
+  "playback.cellular_max_bitrate_kbps": {
+    key: "playback.cellular_max_bitrate_kbps",
+    type: "integer",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: 2000,
+    label: "Cellular maximum bitrate",
+    description: "Cap how much data playback may use on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    unit: "kbps",
+    platforms: ["ios", "android", "web"],
+    minimum: 100,
+    maximum: 200000,
+  },
+  "playback.cellular_preferred_quality": {
+    key: "playback.cellular_preferred_quality",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "720p",
+    label: "Cellular quality",
+    description: "The resolution to play at on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    platforms: ["ios", "android", "web"],
+    values: [
+      { value: "auto", label: "Auto", introducedIn: 20 },
+      { value: "480p", label: "480p", introducedIn: 20 },
+      { value: "720p", label: "720p", introducedIn: 20 },
+      { value: "1080p", label: "1080p", introducedIn: 20 },
+      { value: "2160p", label: "2160p / 4K", introducedIn: 20 },
+    ],
+    ordered: true,
+    constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
+  },
   "playback.intro_skip_mode": {
     key: "playback.intro_skip_mode",
     type: "enum",
@@ -707,7 +825,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "720p", label: "720p", introducedIn: 1 },
       { value: "1080p", label: "1080p", introducedIn: 1 },
       { value: "2160p", label: "2160p / 4K", introducedIn: 1 },
-      { value: "original", label: "Original quality", introducedIn: 1 },
+      { value: "original", label: "Original quality", introducedIn: 1, deprecated: true },
     ],
     ordered: true,
     constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
@@ -724,6 +842,38 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     defaultValue: true,
     label: "Show forced subtitles",
     description: "Show subtitles for foreign-language dialogue even when subtitles are off.",
+    category: "playback",
+    control: "switch",
+  },
+  "playback.show_marker_confidence": {
+    key: "playback.show_marker_confidence",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker confidence",
+    description:
+      "Show how confident the source is above the Skip Intro button. Each source rates on its own scale, so the percentage is only comparable within one source; turn the source line on to see which one it is.",
+    category: "playback",
+    control: "switch",
+  },
+  "playback.show_marker_source": {
+    key: "playback.show_marker_source",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker source",
+    description:
+      "Show where the skip came from above the Skip Intro button: Silo's own detection, a person, or the provider that supplied the marker.",
     category: "playback",
     control: "switch",
   },
@@ -1062,16 +1212,17 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     nullable: false,
     persistence: "remote",
     introducedIn: 1,
-    scopes: ["profile_device"],
-    scopeIntroducedIn: [1],
-    resolutionOrder: ["profile_device", "default"],
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [19, 1],
+    resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: 0,
     label: "Subtitle sync offset",
-    description: "Shift subtitles earlier or later on this device.",
+    description:
+      "Shift subtitles earlier or later for this profile. A device can keep its own offset.",
     category: "player",
     control: "slider",
     unit: "milliseconds",
-    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
     minimum: -10000,
     maximum: 10000,
   },
@@ -1243,7 +1394,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
     defaultValue: { poster_size: "standard", caption: "title_metadata" },
     label: "Media cards",
-    description: "Poster size and caption detail used by media cards.",
+    description: "Poster size used by media cards.",
     category: "appearance",
     control: "panel",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
@@ -1409,6 +1560,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: "combined",
+    adminDefault: true,
     label: "Next up episodes",
     description: "Whether upcoming episodes stay with Continue Watching or get their own row.",
     category: "navigation",
@@ -1417,6 +1569,23 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "combined", label: "With Continue Watching", introducedIn: 1 },
       { value: "separate", label: "Separate row", introducedIn: 1 },
     ],
+  },
+  "ui.next_up_new_releases_first": {
+    key: "ui.next_up_new_releases_first",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 18,
+    scopes: ["profile"],
+    scopeIntroducedIn: [18],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    adminDefault: true,
+    label: "Show new episodes first",
+    description:
+      "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
+    category: "navigation",
+    control: "switch",
   },
   "ui.remember_library_page_state": {
     key: "ui.remember_library_page_state",
@@ -1577,6 +1746,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [16, 16],
     resolutionOrder: ["profile", "profile_device", "default"],
     defaultValue: true,
+    adminDefault: true,
     label: "Show title art",
     description:
       "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",

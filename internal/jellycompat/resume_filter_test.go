@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -12,22 +13,17 @@ import (
 )
 
 // resumeFilteringUserData serves a fixed in-progress list and hides a chosen
-// set of media item IDs from FilterResumeProgress, recording which statuses
-// were listed and how often the filter ran.
+// set of media item IDs from FilterResumeProgress, recording how often the
+// filter ran.
 type resumeFilteringUserData struct {
 	mockUserDataService
-	entries           []upstreamProgress
-	hidden            map[string]bool
-	listedStatuses    []string
-	filteredStatuses  []string
-	lastFilteredTypes []string
-	filterCalls       int
-	filteredBatchSize []int
-	maxScanned        int // highest row index read across ListProgress pages
+	entries     []upstreamProgress
+	hidden      map[string]bool
+	filterCalls int
+	maxScanned  int // highest row index read across ListProgress pages
 }
 
-func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, status string, limit, offset int) ([]upstreamProgress, error) {
-	s.listedStatuses = append(s.listedStatuses, status)
+func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, _ string, limit, offset int) ([]upstreamProgress, error) {
 	if offset >= len(s.entries) {
 		return nil, nil
 	}
@@ -38,9 +34,7 @@ func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, st
 	return s.entries[offset:end], nil
 }
 
-func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Session, status string, types []string, _ *int, limit, offset int) ([]upstreamProgress, error) {
-	s.filteredStatuses = append(s.filteredStatuses, status)
-	s.lastFilteredTypes = types
+func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Session, _ string, _ []string, _ *int, limit, offset int) ([]upstreamProgress, error) {
 	if offset >= len(s.entries) {
 		return nil, nil
 	}
@@ -50,7 +44,6 @@ func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Ses
 
 func (s *resumeFilteringUserData) FilterResumeProgress(_ context.Context, _ *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	s.filterCalls++
-	s.filteredBatchSize = append(s.filteredBatchSize, len(entries))
 	kept := make([]upstreamProgress, 0, len(entries))
 	for _, entry := range entries {
 		if s.hidden[entry.MediaItemID] {
@@ -121,75 +114,52 @@ func TestLoadProgressPage_ResumeHidesFilteredEntries(t *testing.T) {
 // FilterResumeProgress must not page through the entire history looking to fill
 // the visible page. Before the cap was made unconditional, the scan only stopped
 // once len(items) >= limit, so a page that never fills walked every row.
+//
+// The general loop and the raw-offset fast path (default Continue Watching
+// shape: no type/library filter, EnableTotalRecordCount=false, StartIndex=0)
+// have separate scan loops, so each needs its own cap. The fast path is the
+// branch the sections fallback hits in production.
 func TestLoadProgressPage_BoundsScanForSparseVisibleSet(t *testing.T) {
-	const total = 5000
-	entries := make([]upstreamProgress, 0, total)
-	items := make(map[string]*models.MediaItem, total)
-	hidden := make(map[string]bool, total)
-	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("movie-%d", i)
-		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
-		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
-		hidden[id] = true // everything dismissed → visible page never fills
-	}
-	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
-	h := resumeTestHandler(userData, items)
+	for _, tc := range []struct {
+		name  string
+		query itemsQuery
+	}{
+		// EnableTotalRecordCount=true is the shape that previously forced the
+		// full O(history) scan.
+		{name: "general loop", query: itemsQuery{limit: 20, enableTotalRecordCount: true}},
+		// Default shape → the raw-offset fast path (loop A), not the general loop.
+		{name: "raw-offset fast path", query: itemsQuery{limit: 20}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const total = 5000
+			entries := make([]upstreamProgress, 0, total)
+			items := make(map[string]*models.MediaItem, total)
+			hidden := make(map[string]bool, total)
+			for i := 0; i < total; i++ {
+				id := fmt.Sprintf("movie-%d", i)
+				entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
+				items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+				hidden[id] = true // everything dismissed → visible page never fills
+			}
+			userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
+			h := resumeTestHandler(userData, items)
 
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	// EnableTotalRecordCount=true is the shape that previously forced the full
-	// O(history) scan.
-	query := itemsQuery{limit: 20, enableTotalRecordCount: true}
-	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+			_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", tc.query, nil, nil)
+			if err != nil {
+				t.Fatalf("loadProgressPage: %v", err)
+			}
 
-	// The scan must stop near the cap, not walk all `total` rows. Allow one extra
-	// batch of overshoot (the break fires after offset crosses the cap).
-	const oneBatchOvershoot = 200
-	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
-		t.Fatalf("scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
-	}
-	if userData.maxScanned >= total {
-		t.Fatalf("scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
-	}
-}
-
-// TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet pins the cap on the
-// raw-offset fast path (default Continue Watching shape: no type/library filter,
-// EnableTotalRecordCount=false, StartIndex=0). This is the branch the sections
-// fallback hits in production, and it has its own scan loop separate from the
-// general loop. Without the fast-path cap a fully-dismissed history would page to
-// the end here even though the other bounds test (which sets
-// EnableTotalRecordCount=true) routes around this branch entirely.
-func TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet(t *testing.T) {
-	const total = 5000
-	entries := make([]upstreamProgress, 0, total)
-	items := make(map[string]*models.MediaItem, total)
-	hidden := make(map[string]bool, total)
-	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("movie-%d", i)
-		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
-		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
-		hidden[id] = true
-	}
-	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
-	h := resumeTestHandler(userData, items)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	// Default shape → the raw-offset fast path (loop A), not the general loop.
-	query := itemsQuery{limit: 20}
-	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
-
-	const oneBatchOvershoot = 200
-	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
-		t.Fatalf("fast-path scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
-	}
-	if userData.maxScanned >= total {
-		t.Fatalf("fast path scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
+			// The scan must stop near the cap, not walk all `total` rows. Allow one
+			// extra batch of overshoot (the break fires after offset crosses the cap).
+			const oneBatchOvershoot = 200
+			if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
+				t.Fatalf("scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
+			}
+			if userData.maxScanned >= total {
+				t.Fatalf("scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
+			}
+		})
 	}
 }
 
@@ -289,41 +259,46 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 	}
 }
 
-// TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch pins that the
-// watched-items path (completed status with an IncludeItemTypes filter) routes
-// through ListProgressFiltered — the SQL pre-filter — instead of the full-set
-// ListProgress scan it replaced.
-func TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch(t *testing.T) {
-	items := map[string]*models.MediaItem{
-		"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
-		"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
-	}
-	userData := &resumeFilteringUserData{
-		entries: []upstreamProgress{
-			{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
-			{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
-		},
-	}
-	h := resumeTestHandler(userData, items)
+// TestLoadProgressPage_HugeLimitDoesNotPreallocate pins that a client-supplied
+// Limit far beyond the profile's progress rows sizes nothing by Limit. Both
+// scan loops used Limit as the result slice's capacity, so
+// /Items?IsPlayed=true&Limit=100000000 asked for about 120 GB and crashed the
+// server. Limit=math.MaxInt, which parseItemsQuery accepts, makes the unfixed
+// make() panic at once, so the test catches a revert without measuring memory.
+// The page must still hold every row.
+func TestLoadProgressPage_HugeLimitDoesNotPreallocate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query itemsQuery
+	}{
+		{name: "raw-offset fast path", query: itemsQuery{limit: math.MaxInt}},
+		{name: "general loop", query: itemsQuery{limit: math.MaxInt, enableTotalRecordCount: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := map[string]*models.MediaItem{
+				"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+				"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
+			}
+			userData := &resumeFilteringUserData{entries: []upstreamProgress{
+				{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+				{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+			}}
+			h := resumeTestHandler(userData, items)
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	typeSet := map[string]bool{"movie": true}
-	dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", itemsQuery{limit: 10}, typeSet, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
-
-	if len(userData.filteredStatuses) == 0 {
-		t.Fatal("expected ListProgressFiltered to serve completed + type filter")
-	}
-	if len(userData.listedStatuses) != 0 {
-		t.Fatalf("expected ListProgress not to be called; got %v", userData.listedStatuses)
-	}
-	if len(userData.lastFilteredTypes) != 1 || userData.lastFilteredTypes[0] != "movie" {
-		t.Fatalf("filtered types = %v, want [movie]", userData.lastFilteredTypes)
-	}
-	if got := dtoNames(dtos); len(got) != 2 {
-		t.Fatalf("completed names = %v, want 2 movies", got)
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("loadProgressPage sized an allocation by Limit: %v", r)
+				}
+			}()
+			dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", tc.query, nil, nil)
+			if err != nil {
+				t.Fatalf("loadProgressPage: %v", err)
+			}
+			if got := dtoNames(dtos); len(got) != 2 || got[0] != "Movie One" || got[1] != "Movie Two" {
+				t.Fatalf("names = %v, want [Movie One Movie Two]", got)
+			}
+		})
 	}
 }
 
@@ -380,5 +355,93 @@ func TestDirectUserDataServiceFilterResumeProgressDropsDismissedEntries(t *testi
 	}
 	if len(got) != 1 || got[0].MediaItemID != "movie-2" {
 		t.Fatalf("filtered = %+v, want only movie-2", got)
+	}
+}
+
+// A ParentId must scope Resume. Moonfin for Roku resumes a series by asking
+// for one resumable item under it; ignoring ParentId answered with whatever
+// the profile played last, so Resume started the wrong title.
+// resumeSeriesEpisodeRepo lists a fixed set of episodes for each series.
+type resumeSeriesEpisodeRepo struct {
+	countingEpisodeRepo
+	bySeries map[string][]*models.Episode
+}
+
+func (r *resumeSeriesEpisodeRepo) ListIDsBySeriesIDs(_ context.Context, seriesIDs []string) (map[string][]string, error) {
+	ids := map[string][]string{}
+	for _, seriesID := range seriesIDs {
+		for _, episode := range r.bySeries[seriesID] {
+			ids[seriesID] = append(ids[seriesID], episode.ContentID)
+		}
+	}
+	return ids, nil
+}
+
+// resumableUserData answers ListResumableProgress from a fixed set of
+// in-progress entries and records the ids it was asked about.
+type resumableUserData struct {
+	mockUserDataService
+	inProgress map[string]upstreamProgress
+	asked      []string
+}
+
+func (u *resumableUserData) ListResumableProgress(_ context.Context, _ *Session, ids []string) ([]upstreamProgress, error) {
+	u.asked = append(u.asked, ids...)
+	var result []upstreamProgress
+	for _, id := range ids {
+		if entry, ok := u.inProgress[id]; ok {
+			result = append(result, entry)
+		}
+	}
+	return result, nil
+}
+
+// Resume under a series reads that series' episodes the viewer can see,
+// however much else the profile has watched since, and a movie ParentId lists
+// nothing.
+func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
+	episodes := []*models.Episode{
+		{ContentID: "ep-1", SeriesID: "series-1", Title: "Episode One", SeasonNumber: 1, EpisodeNumber: 1},
+		{ContentID: "ep-2", SeriesID: "series-1", Title: "Episode Two", SeasonNumber: 1, EpisodeNumber: 2},
+		// Without a pool, visibleEpisodeIDs falls back to live files, so an
+		// episode with none stands in for one the viewer may not see.
+		{ContentID: "ep-hidden", SeriesID: "series-1", Title: "Hidden Episode", SeasonNumber: 1, EpisodeNumber: 3},
+	}
+	episodeRepo := &resumeSeriesEpisodeRepo{
+		countingEpisodeRepo: countingEpisodeRepo{
+			episodesByID: map[string]*models.Episode{"ep-1": episodes[0], "ep-2": episodes[1], "ep-hidden": episodes[2]},
+			hasFilesByID: map[string]bool{"ep-1": true, "ep-2": true},
+		},
+		bySeries: map[string][]*models.Episode{"series-1": episodes},
+	}
+	userData := &resumableUserData{inProgress: map[string]upstreamProgress{
+		"ep-hidden": {MediaItemID: "ep-hidden", PositionSeconds: 30, DurationSeconds: 100},
+		"ep-2":      {MediaItemID: "ep-2", PositionSeconds: 20, DurationSeconds: 100},
+		"movie-1":   {MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
+	}}
+	h := resumeTestHandler(userData, map[string]*models.MediaItem{
+		"series-1": {ContentID: "series-1", Type: "series", Title: "Series One"},
+		"movie-1":  {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+	})
+	h.episodeRepo = episodeRepo
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	dtos, total, err := h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "series-1"}, nil)
+	if err != nil {
+		t.Fatalf("loadParentResume: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 1 || got[0] != "Episode Two" || total != 1 {
+		t.Fatalf("resume under series-1 = %v (total %d), want [Episode Two]", got, total)
+	}
+	if fmt.Sprint(userData.asked) != "[ep-1 ep-2]" {
+		t.Fatalf("progress read for %v, want only the series' visible episodes", userData.asked)
+	}
+
+	dtos, _, err = h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "movie-1"}, nil)
+	if err != nil {
+		t.Fatalf("loadParentResume: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 0 {
+		t.Fatalf("resume under movie-1 = %v, want none", got)
 	}
 }

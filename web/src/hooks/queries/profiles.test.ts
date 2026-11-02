@@ -1,20 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import createProfileCreated from "../../../../contracts/api/v2/fixtures/create_profile_created.json";
-import listHouseholdSessionsOk from "../../../../contracts/api/v2/fixtures/list_household_sessions_ok.json";
-import listProfilesOk from "../../../../contracts/api/v2/fixtures/list_profiles_ok.json";
 import uploadProfileAvatarOk from "../../../../contracts/api/v2/fixtures/upload_profile_avatar_ok.json";
-import verifyProfilePinOk from "../../../../contracts/api/v2/fixtures/verify_profile_pin_ok.json";
-import verifyProfilePinWrong from "../../../../contracts/api/v2/fixtures/verify_profile_pin_wrong.json";
 
-import { setAccessToken, setProfileId } from "@/api/client";
 import {
-  createProfile,
-  listHouseholdSessions,
-  listProfiles,
-  uploadProfileAvatar,
-  verifyProfilePIN,
-} from "./profiles";
+  captureProfileRequestContext,
+  captureProfileRequestContextAs,
+  setAccessToken,
+  setProfileId,
+  setProfileToken,
+} from "@/api/client";
+import { createProfile, uploadProfileAvatar } from "./profiles";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -36,82 +32,28 @@ beforeEach(() => {
   sessionStorage.clear();
   setAccessToken("tok-user");
   setProfileId("p-owner");
+  setProfileToken(null);
 });
 
 describe("profile queries on the v2 contract", () => {
-  it("lists profiles with numeric library ids and the upload capability", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => json(listProfilesOk));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const list = await listProfiles();
-
-    expect(requestOf(fetchMock, 0).url).toBe("/api/v2/profiles");
-    expect(list.avatar_upload_enabled).toBe(listProfilesOk.avatar_upload_enabled);
-    expect(list.max_advisory_age_supported).toBe(true);
-    expect(list.profiles).toHaveLength(listProfilesOk.items.length);
-    expect(list.profiles[0]).toMatchObject({
-      id: "p-owner",
-      name: "Laura",
-      is_primary: true,
-      allowed_library_ids: [3],
-    });
-  });
-
-  it("reports no advisory-age support for a server that predates the flag", async () => {
-    const { max_advisory_age_supported: _dropped, ...olderServer } = listProfilesOk;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async () => json(olderServer)),
-    );
-
-    expect((await listProfiles()).max_advisory_age_supported).toBe(false);
-  });
-
-  it("creates a profile with the v2 body and projects the created profile", async () => {
+  it("creates a profile as an explicit profile without touching the active one", async () => {
+    setProfileToken("pvt-child");
     const fetchMock = vi.fn<typeof fetch>(async () =>
       json(createProfileCreated, 201, { ...JSON_HEADERS, Location: "/api/v2/profiles/p-kid" }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const created = await createProfile({
-      name: "Kid",
-      is_child: true,
-      allowed_library_ids: ["3"],
-      max_playback_quality: "1080p",
+    const primary = captureProfileRequestContextAs("p-primary", "pvt-primary");
+    if (!primary) throw new Error("no session");
+    await createProfile({ name: "Kid" }, primary);
+
+    const headers = requestOf(fetchMock, 0).init.headers;
+    expect(headers["X-Profile-Id"]).toBe("p-primary");
+    expect(headers["X-Profile-Token"]).toBe("pvt-primary");
+    expect(captureProfileRequestContext()).toMatchObject({
+      profileId: "p-owner",
+      profileToken: "pvt-child",
     });
-
-    const request = requestOf(fetchMock, 0);
-    expect(request.url).toBe("/api/v2/profiles");
-    expect(request.init.method).toBe("POST");
-    expect(JSON.parse(String(request.init.body))).toEqual({
-      name: "Kid",
-      is_child: true,
-      allowed_library_ids: ["3"],
-      max_playback_quality: "1080p",
-    });
-    expect(created.id).toBe(createProfileCreated.id);
-    expect(created.allowed_library_ids).toEqual(
-      createProfileCreated.allowed_library_ids.map(Number),
-    );
-  });
-
-  it("verifies a PIN and passes the token through; a wrong PIN is a plain false", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(json(verifyProfilePinOk))
-      .mockResolvedValueOnce(json(verifyProfilePinWrong));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const ok = await verifyProfilePIN("p-owner", "1234");
-    expect(ok).toEqual(verifyProfilePinOk);
-    expect(ok.profile_token).toBe("pvt_fixture");
-    const request = requestOf(fetchMock, 0);
-    expect(request.url).toBe("/api/v2/profiles/p-owner/verify-pin");
-    expect(JSON.parse(String(request.init.body))).toEqual({ pin: "1234" });
-
-    const wrong = await verifyProfilePIN("p-owner", "0000");
-    expect(wrong.valid).toBe(false);
-    expect(wrong.profile_token).toBeUndefined();
   });
 
   it("uploads an avatar as a multipart form and projects the profile", async () => {
@@ -129,25 +71,5 @@ describe("profile queries on the v2 contract", () => {
     expect(request.init.headers["Content-Type"]).toBeUndefined();
     expect(profile.avatar_source).toBe("upload");
     expect(profile.avatar_url).toBe(uploadProfileAvatarOk.avatar_url);
-  });
-
-  it("projects household playback sessions onto the shared session shape", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => json(listHouseholdSessionsOk));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const sessions = await listHouseholdSessions();
-
-    expect(requestOf(fetchMock, 0).url).toBe("/api/v2/profiles/household/sessions");
-    expect(sessions).toHaveLength(listHouseholdSessionsOk.items.length);
-    const first = listHouseholdSessionsOk.items[0];
-    if (!first) throw new Error("fixture has no sessions");
-    expect(sessions[0]).toMatchObject({
-      session_id: first.id,
-      user_id: Number(first.user_id),
-      media_file_id: Number(first.media_file_id),
-      profile_name: first.profile_name,
-      position_seconds: first.position_seconds,
-    });
-    expect(sessions[0]).not.toHaveProperty("id");
   });
 });

@@ -77,9 +77,10 @@ func preferredRoomVersion(versions []catalog.FileVersion) catalog.FileVersion {
 
 func (r *CatalogSelectionResolver) watchDetail(ctx context.Context, userID int, profileID string, input SelectItemInput) (*catalog.WatchDetail, error) {
 	filter := catalog.AccessFilter{
-		UserID:         userID,
-		ProfileID:      profileID,
-		SelectedFileID: 0,
+		UserID:           userID,
+		ProfileID:        profileID,
+		SelectedFileID:   0,
+		OmitWatchArtwork: true,
 	}
 	if scope, ok := access.GetScope(ctx); ok {
 		filter.AllowedLibraryIDs = scope.AllowedLibraryIDs

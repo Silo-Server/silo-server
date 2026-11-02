@@ -3,15 +3,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ResolvedSection } from "@/api/types";
+import type { ResolvedSection, SectionItem } from "@/api/types";
 import SectionRow from "./SectionRow";
 
 const mockTogglePin = vi.fn();
 const mockIsPinned = vi.fn();
-const mockNavigate = vi.fn();
 let latestCarouselProps:
   | {
-      onViewAll?: () => void;
+      titleHref?: string;
+      viewAllHref?: string;
       headerActions?: ReactNode;
     }
   | undefined;
@@ -19,18 +19,20 @@ let latestCarouselProps:
 vi.mock("@/components/MediaCarousel", () => ({
   default: ({
     children,
-    onViewAll,
+    titleHref,
+    viewAllHref,
     headerActions,
     title,
   }: {
     children: ReactNode;
-    onViewAll?: () => void;
+    titleHref?: string;
+    viewAllHref?: string;
     headerActions?: ReactNode;
     title: string;
   }) => {
-    latestCarouselProps = { onViewAll, headerActions };
+    latestCarouselProps = { titleHref, viewAllHref, headerActions };
     return (
-      <section data-title={title} data-has-view-all={String(Boolean(onViewAll))}>
+      <section data-title={title} data-has-view-all={String(Boolean(viewAllHref))}>
         {headerActions}
         {children}
       </section>
@@ -54,65 +56,85 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useViewTransition", () => ({
-  useViewTransitionNavigate: () => mockNavigate,
-}));
+function continueSection(items: ResolvedSection["items"]): ResolvedSection {
+  return {
+    id: "continue-watching",
+    section_type: "continue_watching",
+    title: "Continue Watching",
+    featured: false,
+    item_limit: 10,
+    total_count: items.length,
+    is_custom: false,
+    customized: false,
+    items,
+  };
+}
 
-vi.mock("@/playback/watchPlaybackContext", () => ({
-  useWatchPlaybackController: () => ({ startPlayback: () => {} }),
-}));
+function progressItem(
+  contentId: string,
+  type: ResolvedSection["items"][number]["type"],
+  art: { poster_url?: string; backdrop_url?: string },
+): ResolvedSection["items"][number] {
+  return {
+    content_id: contentId,
+    type,
+    title: contentId,
+    position_seconds: 600,
+    duration_seconds: 6000,
+    year: 2020,
+    genres: [],
+    status: "matched",
+    rating_imdb: null,
+    overview: "",
+    poster_url: art.poster_url ?? "",
+    poster_thumbhash: "",
+    backdrop_url: art.backdrop_url ?? "",
+    backdrop_thumbhash: "",
+    logo_url: "",
+  };
+}
+
+const pilotEpisode: ResolvedSection["items"][number] = {
+  content_id: "ep-001",
+  type: "episode",
+  title: "Pilot",
+  series_title: "Breaking Bad",
+  season_number: 1,
+  episode_number: 1,
+  position_seconds: 120,
+  duration_seconds: 3600,
+  year: 0,
+  genres: [],
+  status: "matched",
+  rating_imdb: null,
+  overview: "Episode overview",
+  poster_url: "",
+  poster_thumbhash: "",
+  backdrop_url: "/episode-backdrop.jpg",
+  backdrop_thumbhash: "",
+  logo_url: "",
+};
+
+function renderRow(section: ResolvedSection, libraryId?: number) {
+  return renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <SectionRow section={section} libraryId={libraryId} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 describe("SectionRow", () => {
   beforeEach(() => {
     latestCarouselProps = undefined;
     mockTogglePin.mockReset();
     mockIsPinned.mockReset();
-    mockNavigate.mockReset();
     mockIsPinned.mockReturnValue(false);
   });
 
   it("renders continue watching sections with separate watch and item links", () => {
-    const queryClient = new QueryClient();
-    const section: ResolvedSection = {
-      id: "continue-watching",
-      section_type: "continue_watching",
-      title: "Continue Watching",
-      featured: false,
-      item_limit: 10,
-      total_count: 1,
-      is_custom: false,
-      customized: false,
-      items: [
-        {
-          content_id: "ep-001",
-          type: "episode",
-          title: "Pilot",
-          series_title: "Breaking Bad",
-          season_number: 1,
-          episode_number: 1,
-          position_seconds: 120,
-          duration_seconds: 3600,
-          year: 0,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "Episode overview",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "/episode-backdrop.jpg",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={section} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    const markup = renderRow(continueSection([pilotEpisode]));
 
     expect(markup).toContain('href="/watch/ep-001"');
     expect(markup).toContain('href="/item/ep-001"');
@@ -123,226 +145,90 @@ describe("SectionRow", () => {
   });
 
   it("renders all-audiobook continue sections as square poster cards", () => {
-    const queryClient = new QueryClient();
-    const section: ResolvedSection = {
-      id: "continue-listening",
-      section_type: "continue_watching",
-      title: "Continue Listening",
-      featured: false,
-      item_limit: 10,
-      total_count: 1,
-      is_custom: false,
-      customized: false,
-      items: [
+    const markup = renderRow({
+      ...continueSection([
         {
-          content_id: "book-001",
-          type: "audiobook",
+          ...progressItem("book-001", "audiobook", { poster_url: "/book-cover.jpg" }),
           title: "Project Hail Mary",
-          position_seconds: 600,
           duration_seconds: 58000,
           year: 2021,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "",
-          poster_url: "/book-cover.jpg",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
         },
-      ],
-    };
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={section} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+      ]),
+      id: "continue-listening",
+      title: "Continue Listening",
+    });
 
     expect(markup).toContain("aspect-square");
     expect(markup).not.toContain("aspect-video");
   });
 
-  it("renders all-ebook continue sections as upright poster cards", () => {
-    const queryClient = new QueryClient();
-    const section: ResolvedSection = {
-      id: "continue-reading",
-      section_type: "continue_watching",
-      title: "Continue Reading",
-      featured: false,
-      item_limit: 10,
-      total_count: 1,
-      is_custom: false,
-      customized: false,
-      items: [
-        {
-          content_id: "ebook-001",
-          type: "ebook",
-          title: "The Hobbit",
-          position_seconds: 250,
-          duration_seconds: 1000,
-          year: 1937,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "",
-          poster_url: "/ebook-cover.jpg",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={section} />
-        </MemoryRouter>
-      </QueryClientProvider>,
+  it("falls back to the poster on a wide movie card without a backdrop", () => {
+    const markup = renderRow(
+      continueSection([progressItem("movie-1", "movie", { poster_url: "/movie-poster.jpg" })]),
     );
 
-    expect(markup).toContain("aspect-[2/3]");
-    expect(markup).not.toContain("aspect-video");
+    expect(markup).toContain("aspect-video");
+    expect(markup).toContain('src="/movie-poster.jpg"');
   });
 
-  it("routes supported home section view-all actions to home browse destinations", () => {
-    const queryClient = new QueryClient();
-    const section: ResolvedSection = {
-      id: "featured-picks",
-      section_type: "recently_added",
-      title: "Featured Picks",
-      featured: false,
-      item_limit: 1,
-      total_count: 3,
-      is_custom: false,
-      customized: false,
-      items: [
-        {
-          content_id: "movie-1",
-          type: "movie",
-          title: "Heat",
-          year: 1995,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
-
-    renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={section} />
-        </MemoryRouter>
-      </QueryClientProvider>,
+  it("keeps continue sections that mix movies and books wide", () => {
+    const markup = renderRow(
+      continueSection([
+        progressItem("movie-1", "movie", { backdrop_url: "/movie-backdrop.jpg" }),
+        progressItem("book-1", "audiobook", { poster_url: "/book-cover.jpg" }),
+      ]),
     );
 
-    expect(latestCarouselProps?.onViewAll).toBeTypeOf("function");
-
-    latestCarouselProps?.onViewAll?.();
-
-    expect(mockNavigate).toHaveBeenCalledWith(
-      "/catalog?source=section&scope=home&section_id=featured-picks&title=Featured+Picks",
-    );
-    expect(String(renderToStaticMarkup(<>{latestCarouselProps?.headerActions}</>))).toBe("");
+    expect(markup).toContain("aspect-video");
+    expect(markup).not.toContain("aspect-square");
+    expect(markup).not.toContain("aspect-[2/3]");
   });
 
-  it("only shows pin affordances for browse-supported section types", () => {
-    const queryClient = new QueryClient();
-    const unsupportedSection: ResolvedSection = {
-      id: "continue-watching",
-      section_type: "continue_watching",
-      title: "Continue Watching",
-      featured: false,
-      item_limit: 1,
-      total_count: 1,
-      is_custom: false,
-      customized: false,
-      items: [
-        {
-          content_id: "ep-001",
-          type: "episode",
-          title: "Pilot",
-          series_title: "Breaking Bad",
-          season_number: 1,
-          episode_number: 1,
-          position_seconds: 120,
-          duration_seconds: 3600,
-          year: 0,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "Episode overview",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "/episode-backdrop.jpg",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
+  const movie = (contentId: string, title: string): SectionItem => ({
+    content_id: contentId,
+    type: "movie",
+    title,
+    year: 1995,
+    genres: [],
+    status: "matched",
+    rating_imdb: null,
+    overview: "",
+    poster_url: "",
+    poster_thumbhash: "",
+    backdrop_url: "",
+    backdrop_thumbhash: "",
+    logo_url: "",
+  });
 
-    const unsupportedMarkup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={unsupportedSection} libraryId={7} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+  it("links every home row title to its browse page", () => {
+    for (const sectionType of ["recently_added", "recommended_for_you", "trending_on_server"]) {
+      renderRow({
+        id: "featured-picks",
+        section_type: sectionType,
+        title: "Featured Picks",
+        featured: false,
+        item_limit: 1,
+        total_count: 3,
+        is_custom: false,
+        customized: false,
+        items: [movie("movie-1", "Heat")],
+      });
 
-    expect(unsupportedMarkup).not.toContain("Pin to sidebar");
-    expect(latestCarouselProps?.onViewAll).toBeUndefined();
+      const href =
+        "/catalog?source=section&scope=home&section_id=featured-picks&title=Featured+Picks";
+      expect(latestCarouselProps?.titleHref).toBe(href);
+      expect(latestCarouselProps?.viewAllHref).toBe(href);
+      expect(String(renderToStaticMarkup(<>{latestCarouselProps?.headerActions}</>))).toBe("");
+    }
+  });
 
-    const supportedSection: ResolvedSection = {
-      ...unsupportedSection,
-      id: "recently-added",
-      section_type: "recently_added",
-      title: "Recently Added",
-      total_count: 4,
-      items: [
-        {
-          content_id: "movie-1",
-          type: "movie",
-          title: "Alien",
-          year: 1979,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
+  it("links and pins library rows of every type", () => {
+    const markup = renderRow({ ...continueSection([pilotEpisode]), item_limit: 1 }, 7);
 
-    const supportedMarkup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={supportedSection} libraryId={7} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(supportedMarkup).toContain("Pin to sidebar");
-    expect(latestCarouselProps?.onViewAll).toBeTypeOf("function");
-
-    latestCarouselProps?.onViewAll?.();
-    expect(mockNavigate).toHaveBeenCalledWith(
-      "/catalog?source=section&scope=library&section_id=recently-added&library_id=7&title=Recently+Added",
-    );
+    expect(markup).toContain("Pin to sidebar");
+    const href =
+      "/catalog?source=section&scope=library&section_id=continue-watching&library_id=7&title=Continue+Watching";
+    expect(latestCarouselProps?.titleHref).toBe(href);
+    expect(latestCarouselProps?.viewAllHref).toBe(href);
   });
 });

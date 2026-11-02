@@ -103,10 +103,12 @@ type facetFetcher interface {
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
 // the existing package-level helpers using the supplied pool. values caches
-// column facet value lists for typeahead; nil disables caching.
+// column facet value lists for typeahead and technical the resolution and
+// track language lists; a nil cache disables caching.
 type pgxFacetFetcher struct {
-	pool   *pgxpool.Pool
-	values *facetValueCache
+	pool      *pgxpool.Pool
+	values    *facetValueCache
+	technical *technicalFacetCache
 }
 
 func (f *pgxFacetFetcher) DistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -118,15 +120,15 @@ func (f *pgxFacetFetcher) DistinctScalarColumn(ctx context.Context, column strin
 }
 
 func (f *pgxFacetFetcher) Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listResolutionsWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listResolutionsWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listDistinctJSONBLanguageWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope)
+	return listDistinctJSONBLanguageWithSource(ctx, f.pool, f.technical, column, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listSubtitleLanguagesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listSubtitleLanguagesWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -157,12 +159,13 @@ type previewExecutor interface {
 }
 
 type CatalogResolver struct {
-	browseRepo     *BrowseRepository
-	itemRepo       *ItemRepository
-	episodeRepo    *EpisodeRepository
-	searchProvider CatalogSearchProvider
-	storeProvider  userstore.UserStoreProvider
-	facets         facetFetcher
+	browseRepo      *BrowseRepository
+	itemRepo        *ItemRepository
+	episodeRepo     *EpisodeRepository
+	searchProvider  CatalogSearchProvider
+	storeProvider   userstore.UserStoreProvider
+	sectionResolver SectionResolver
+	facets          facetFetcher
 	// previewExecutorForScope, when non-nil, is used by previewQuerySource
 	// instead of the default queryExecutorForScope. Tests inject a stub here
 	// to observe how many times the executor is asked for a result page.
@@ -171,6 +174,11 @@ type CatalogResolver struct {
 	// collectionOwners limits another profile's shared personal collection
 	// to its owner's access. Without it such a collection cannot be read.
 	collectionOwners PersonalCollectionAccess
+	// seekAnchors serves window jumps into a browse snapshot; see
+	// seekAnchorCache.
+	seekAnchors *seekAnchorCache
+	// letterIndexes serves the A-Z bar; see letterIndexCache.
+	letterIndexes *letterIndexCache
 }
 
 // WatchlistPromoter moves a profile's watchlist entries for titles the
@@ -195,6 +203,8 @@ func NewCatalogResolver(browseRepo *BrowseRepository, itemRepo *ItemRepository) 
 		browseRepo:     browseRepo,
 		itemRepo:       itemRepo,
 		searchProvider: NewPostgresSearchProvider(itemRepo),
+		seekAnchors:    newSeekAnchorCache(),
+		letterIndexes:  newLetterIndexCache(),
 	}
 	if browseRepo != nil {
 		r.facets = browseRepo.facetFetcher()
@@ -207,6 +217,38 @@ func (r *CatalogResolver) WithUserStoreProvider(provider userstore.UserStoreProv
 		return nil
 	}
 	r.storeProvider = provider
+	return r
+}
+
+// SectionDefinition is a row after the acting profile's overrides are applied.
+type SectionDefinition struct {
+	SectionType string
+	Title       string
+	ItemLimit   int
+	Config      json.RawMessage
+	// FetchItems answers a row the catalog cannot express as a query
+	// (recommendations, trending, Continue Watching, ...) by building the
+	// row itself with up to limit items. The list starts with the items the
+	// row shows and is already scoped to the acting profile. Nil when the
+	// resolver cannot build rows.
+	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
+}
+
+// SectionResolver shares the page's visibility and configuration with catalog
+// paging, including rows that exist only in the profile's settings.
+type SectionResolver interface {
+	ResolveCatalogSection(context.Context, CatalogRequest) (SectionDefinition, error)
+}
+
+// SectionBrowseItemCap is the most items Explore all lists for a row-backed
+// section. Those rows are built whole on every page request, and several of
+// their engines stop well short of it anyway (recommendations at 60).
+const SectionBrowseItemCap = 200
+
+func (r *CatalogResolver) WithSectionResolver(resolver SectionResolver) *CatalogResolver {
+	if r != nil {
+		r.sectionResolver = resolver
+	}
 	return r
 }
 
@@ -404,6 +446,12 @@ func (r *CatalogResolver) previewQuerySource(ctx context.Context, req CatalogReq
 		}
 		pager := r.queryExecutorForScope(req.Query.MediaScope, &snapshot)
 		pager.GroupByWork = req.GroupByWork
+		pager.BoxSetCollections = req.BoxSetCollections
+		if req.SnapshotAt != nil {
+			// The client pins this snapshot for the whole browse, so its
+			// later jumps reuse the anchors.
+			pager.SeekAnchors = r.seekAnchors
+		}
 		if req.Seek != nil {
 			after, err := pager.SeekCursor(ctx, req.Query, access, *req.Seek)
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -514,7 +562,7 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 	case "genre", "custom_filter":
 		def, err := parseCatalogSectionQueryDefinition(section.Config)
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing section query definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing section query definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		if section.Scope == "library" && section.LibraryID != nil {
 			def.LibraryIDs = []int{*section.LibraryID}
@@ -528,8 +576,33 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			SkipTotal: req.SkipTotal,
 		}, stripCatalogUserScope(access))
 	default:
+		return resolveRowBackedSectionSource(ctx, req, section)
+	}
+}
+
+// resolveRowBackedSectionSource pages a row built by its section fetcher. The
+// frozen v1 catalog keeps answering these rows with no items.
+func resolveRowBackedSectionSource(ctx context.Context, req CatalogRequest, section catalogPageSection) (*CatalogResult, error) {
+	if !req.CursorPaging || section.FetchItems == nil {
 		return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
 	}
+	snapshot := time.Now().UTC()
+	if req.SnapshotAt != nil {
+		snapshot = req.SnapshotAt.UTC()
+	}
+	items, err := section.FetchItems(ctx, SectionBrowseItemCap)
+	if err != nil {
+		return nil, err
+	}
+	paged := paginateCatalogItems(items, req.Offset, req.Limit)
+	return &CatalogResult{
+		Items:   paged,
+		Total:   len(items),
+		HasMore: req.Offset+len(paged) < len(items),
+		// A row cut at the cap may hold more than it lists.
+		TotalExact: len(items) < SectionBrowseItemCap,
+		SnapshotAt: snapshot,
+	}, nil
 }
 
 func (r *CatalogResolver) resolveRecentTVSectionSource(
@@ -827,7 +900,7 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 	if IsLiveQueryType(collection.CollectionType) {
 		def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing user collection query_definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		def = ApplySmartCollectionItemLimit(def)
 		if catalogRequestHasOverlay(req) || strings.TrimSpace(collection.DisplayQueryDefinition) != "" {
@@ -1173,6 +1246,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	if r == nil || r.browseRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires a browse repository")
 	}
+	req = withCacheableHistorySnapshot(req)
 	var (
 		filters    BrowseFilters
 		earlyEmpty bool
@@ -1246,6 +1320,17 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
+// withCacheableHistorySnapshot pins a history request without a snapshot to
+// the next whole minute. The snapshot is part of the cached facet lists' keys
+// (facet values, technical facets), so a per-request "now" would never hit;
+// the next whole minute still covers every event watched so far.
+func withCacheableHistorySnapshot(req CatalogRequest) CatalogRequest {
+	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
+	}
+	return req
+}
+
 // CatalogFacetSearchResult is the typed return for SearchFacet.
 type CatalogFacetSearchResult struct {
 	// Matches are the values that start with q, case-insensitively, A-Z;
@@ -1293,12 +1378,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	if q == "" && !isColumn {
 		return result, nil
 	}
-	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
-		// The snapshot is part of the facet value cache key, so a
-		// per-request "now" would never hit. The next whole minute still
-		// covers every event watched so far.
-		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
-	}
+	req = withCacheableHistorySnapshot(req)
 	scope, err := r.facetSearchScope(ctx, req, access)
 	if err != nil {
 		return nil, err
@@ -1860,6 +1940,7 @@ var catalogQueryRuleFields = map[string]bool{
 	"subtitle_language": true,
 
 	querySortTitle:              true,
+	ruleFieldShowTitle:          true,
 	ruleFieldDecade:             true,
 	querySortRuntime:            true,
 	querySortRatingTMDb:         true,
@@ -1902,6 +1983,7 @@ var catalogPersonalRuleFields = map[string]bool{
 	"subtitle_language": true,
 
 	querySortTitle:              true,
+	ruleFieldShowTitle:          true,
 	ruleFieldDecade:             true,
 	querySortRuntime:            true,
 	querySortRatingTMDb:         true,
@@ -1953,6 +2035,8 @@ type catalogPageSection struct {
 	Config           json.RawMessage
 	CollectionID     string // library collection ID
 	UserCollectionID string // personal user collection ID
+	// FetchItems builds a row-backed section; see SectionDefinition.
+	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
 }
 
 type catalogSectionFilters struct {
@@ -2004,6 +2088,38 @@ func defaultCatalogLibrarySection(libraryID int, sectionID string) (catalogPageS
 
 func (r *CatalogResolver) loadCatalogSection(ctx context.Context, req CatalogRequest) (catalogPageSection, error) {
 	var section catalogPageSection
+	if r.sectionResolver != nil {
+		definition, err := r.sectionResolver.ResolveCatalogSection(ctx, req)
+		if err != nil {
+			return section, err
+		}
+		section = catalogPageSection{ID: req.SectionID, Scope: req.Scope,
+			SectionType: definition.SectionType, Title: definition.Title,
+			ItemLimit: definition.ItemLimit, Config: definition.Config, FetchItems: definition.FetchItems}
+		if req.Scope == "library" {
+			section.LibraryID = new(req.LibraryID)
+		}
+	} else {
+		var err error
+		section, err = r.loadStoredCatalogSection(ctx, req)
+		if err != nil {
+			return section, err
+		}
+	}
+	var collectionCfg struct {
+		LibraryCollectionID string `json:"library_collection_id"`
+		UserCollectionID    string `json:"user_collection_id"`
+	}
+	if len(section.Config) > 0 {
+		_ = json.Unmarshal(section.Config, &collectionCfg)
+	}
+	section.CollectionID = collectionCfg.LibraryCollectionID
+	section.UserCollectionID = collectionCfg.UserCollectionID
+	return section, nil
+}
+
+func (r *CatalogResolver) loadStoredCatalogSection(ctx context.Context, req CatalogRequest) (catalogPageSection, error) {
+	var section catalogPageSection
 	query := `
 		SELECT id, scope, library_id, section_type, title, item_limit, config
 		FROM page_sections
@@ -2038,15 +2154,6 @@ func (r *CatalogResolver) loadCatalogSection(ctx context.Context, req CatalogReq
 		return catalogPageSection{}, err
 	}
 
-	var collectionCfg struct {
-		LibraryCollectionID string `json:"library_collection_id"`
-		UserCollectionID    string `json:"user_collection_id"`
-	}
-	if len(section.Config) > 0 {
-		_ = json.Unmarshal(section.Config, &collectionCfg)
-	}
-	section.CollectionID = collectionCfg.LibraryCollectionID
-	section.UserCollectionID = collectionCfg.UserCollectionID
 	return section, nil
 }
 

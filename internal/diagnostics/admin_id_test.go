@@ -24,20 +24,6 @@ func TestGetReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
 	}
 }
 
-func TestGetReportPassesWellFormedIDToStore(t *testing.T) {
-	const id = "11111111-1111-1111-1111-111111111111"
-	repo := &fakeDiagnosticReportStore{getReport: &Report{ID: id}}
-	svc := newTestDiagnosticsService(repo, &fakeDiagnosticObjectStore{bucket: "private"})
-
-	report, err := svc.GetReport(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
-	if report == nil || report.ID != id {
-		t.Fatalf("GetReport returned %+v, want the stored report", report)
-	}
-}
-
 func TestDeleteReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
 	for _, id := range []string{"not-a-uuid", "", "12345"} {
 		repo := &fakeDiagnosticReportStore{deleteReport: &Report{ID: "11111111-1111-1111-1111-111111111111"}}

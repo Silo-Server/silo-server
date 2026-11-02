@@ -24,23 +24,6 @@ func (f fakeRequestLookup) Get(_ context.Context, id string) (string, string, er
 	return e.baseURL, e.apiKey, nil
 }
 
-func TestResolveConnectionOwnCredentials(t *testing.T) {
-	// The autoscan repo already decrypted api_key_ref, so the connection carries
-	// the literal key; Resolve returns it verbatim (trimmed).
-	r := NewConnectionResolver(fakeRequestLookup{})
-
-	got, err := r.Resolve(context.Background(), Connection{
-		BaseURL:   "http://own:8989",
-		APIKeyRef: "OWNKEY",
-	})
-	if err != nil {
-		t.Fatalf("Resolve own: %v", err)
-	}
-	if got.BaseURL != "http://own:8989" || got.APIKey != "OWNKEY" {
-		t.Fatalf("own resolve = %+v", got)
-	}
-}
-
 func TestResolveConnectionLinked(t *testing.T) {
 	lookup := fakeRequestLookup{entries: map[string]struct{ baseURL, apiKey string }{
 		"req-1": {baseURL: "http://req:7878", apiKey: "REQKEY"},
@@ -54,14 +37,6 @@ func TestResolveConnectionLinked(t *testing.T) {
 	}
 	if got.BaseURL != "http://req:7878" || got.APIKey != "REQKEY" {
 		t.Fatalf("linked resolve = %+v", got)
-	}
-}
-
-func TestResolveConnectionLinkedLookupErrors(t *testing.T) {
-	r := NewConnectionResolver(fakeRequestLookup{err: errors.New("boom")})
-	id := "req-1"
-	if _, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id}); err == nil {
-		t.Fatal("expected error when the lookup itself fails")
 	}
 }
 

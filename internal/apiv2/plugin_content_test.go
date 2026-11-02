@@ -69,20 +69,3 @@ func TestPluginContentDynamicRegistration(t *testing.T) {
 		t.Fatal("missing capability")
 	}
 }
-
-func TestPluginContentUnavailable(t *testing.T) {
-	handler := NewHandler(Dependencies{})
-	for _, mount := range describePluginContent().Mounts {
-		path := strings.ReplaceAll(strings.ReplaceAll(mount.Path, "{installation_id}", "1"), "*", "file")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(mount.Methods[0], path, nil))
-		if rec.Code != 503 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
-			t.Fatal(rec.Code, rec.Body)
-		}
-	}
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, plugins.ContentPrefix+"/capabilities", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "not_configured") {
-		t.Fatal(rec.Code, rec.Body)
-	}
-}

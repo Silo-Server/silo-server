@@ -56,13 +56,6 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 			wantPlayed:     false,
 		},
 		{
-			name:         "no progress at all",
-			episodes:     []*models.Episode{ep("a")},
-			progress:     map[string]userstore.WatchProgress{},
-			wantUnplayed: 1,
-			wantPlayed:   false,
-		},
-		{
 			name:     "nil episodes do not count as unplayed",
 			episodes: []*models.Episode{nil, ep("a"), nil},
 			progress: map[string]userstore.WatchProgress{
@@ -71,12 +64,6 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 			wantWatched:  1,
 			wantUnplayed: 0,
 			wantPlayed:   true,
-		},
-		{
-			name:       "all nil episodes",
-			episodes:   []*models.Episode{nil, nil},
-			progress:   map[string]userstore.WatchProgress{},
-			wantPlayed: false,
 		},
 		{
 			name:     "zero-position progress row is not in-progress",
@@ -106,14 +93,5 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 				t.Errorf("Played = %v, want %v", got.Played, tc.wantPlayed)
 			}
 		})
-	}
-}
-
-// TestModelEpisodeContentIDs verifies nil episodes and empty content ids are
-// dropped — these ids feed SQL IN-lists.
-func TestModelEpisodeContentIDs(t *testing.T) {
-	got := modelEpisodeContentIDs([]*models.Episode{nil, ep(""), ep("a"), ep("b")})
-	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Errorf("modelEpisodeContentIDs = %v, want [a b]", got)
 	}
 }

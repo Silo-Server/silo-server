@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -13,15 +14,17 @@ import (
 
 // directUserDataService implements UserDataService using the user store directly.
 type directUserDataService struct {
-	storeProvider           userstore.UserStoreProvider
-	itemRepo                *catalog.ItemRepository
-	detailSvc               *catalog.DetailService
-	watchState              *watchstate.Service
-	resumeFilter            *catalog.ContinueWatchingProgressFilter
-	profileStaler           profileStaler
-	profileRefreshRequester profileRefreshRequester
+	storeProvider   userstore.UserStoreProvider
+	itemRepo        *catalog.ItemRepository
+	detailSvc       *catalog.DetailService
+	watchState      *watchstate.Service
+	resumeFilter    *catalog.ContinueWatchingProgressFilter
+	signalsNotifier signalsChangedNotifier
 	// events announces watched-state changes to other surfaces and replicas.
 	events UserStateEvents
+	// episodes expands a series or season unplayed mark to its episodes,
+	// including watched ones that no longer have a file.
+	episodes watchstate.EpisodePartitioner
 }
 
 func newDirectUserDataService(
@@ -31,21 +34,23 @@ func newDirectUserDataService(
 	providerIDRepo *catalog.ProviderIDRepository,
 	detailSvc *catalog.DetailService,
 	resumeFilter *catalog.ContinueWatchingProgressFilter,
-	staler profileStaler,
-	requester profileRefreshRequester,
+	signalsNotifier signalsChangedNotifier,
 	completionObserver watchstate.CompletionObserver,
 ) *directUserDataService {
-	return &directUserDataService{
+	svc := &directUserDataService{
 		storeProvider: storeProvider,
 		itemRepo:      itemRepo,
 		detailSvc:     detailSvc,
 		watchState: watchstate.NewService(storeProvider).
 			WithStableIdentityResolver(watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)).
 			WithCompletionObserver(completionObserver),
-		resumeFilter:            resumeFilter,
-		profileStaler:           staler,
-		profileRefreshRequester: requester,
+		resumeFilter:    resumeFilter,
+		signalsNotifier: signalsNotifier,
 	}
+	if episodeRepo != nil {
+		svc.episodes = episodeRepo
+	}
+	return svc
 }
 
 func (s *directUserDataService) ListFavorites(ctx context.Context, session *Session, limit, offset int) ([]upstreamListItem, error) {
@@ -108,6 +113,20 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	return result, nil
 }
 
+// ListNotInterestedByMediaItems reports which of mediaItemIDs the session's
+// profile marked Not interested.
+func (s *directUserDataService) ListNotInterestedByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	result, err := store.ListNotInterestedByMediaItems(ctx, session.ProfileID, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list not interested by media items: %w", err)
+	}
+	return result, nil
+}
+
 func (s *directUserDataService) ListFavoritesByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error) {
 	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
 	if err != nil {
@@ -142,10 +161,10 @@ func (s *directUserDataService) AddFavorite(ctx context.Context, session *Sessio
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	return nil
 }
 
@@ -154,10 +173,10 @@ func (s *directUserDataService) RemoveFavorite(ctx context.Context, session *Ses
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	return nil
 }
 
@@ -171,12 +190,7 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	if err != nil {
 		return nil, fmt.Errorf("list progress: %w", err)
 	}
-
-	result := make([]upstreamProgress, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, toUpstreamProgress(entry))
-	}
-	return result, nil
+	return completedProgressWithPlayDates(ctx, store, session.ProfileID, status, entries)
 }
 
 func (s *directUserDataService) ListProgressFiltered(ctx context.Context, session *Session, status string, types []string, libraryID *int, limit, offset int) ([]upstreamProgress, error) {
@@ -189,10 +203,32 @@ func (s *directUserDataService) ListProgressFiltered(ctx context.Context, sessio
 	if err != nil {
 		return nil, fmt.Errorf("list filtered progress: %w", err)
 	}
+	return completedProgressWithPlayDates(ctx, store, session.ProfileID, status, entries)
+}
 
+// completedProgressWithPlayDates converts a progress page and, for completed
+// pages, reports each row's play date instead of its write time, matching
+// GetProgress and ListProgressByMediaItems. In-progress pages keep the write
+// time: FilterResumeProgress matches dismissals against it.
+func completedProgressWithPlayDates(ctx context.Context, store userstore.UserStore, profileID, status string, entries []userstore.WatchProgress) ([]upstreamProgress, error) {
+	var dates map[string]string
+	if status == "completed" && len(entries) > 0 {
+		ids := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			ids = append(ids, entry.MediaItemID)
+		}
+		var err error
+		if dates, err = jellycompatProgressDates(ctx, store, profileID, ids); err != nil {
+			return nil, err
+		}
+	}
 	result := make([]upstreamProgress, 0, len(entries))
 	for _, entry := range entries {
-		result = append(result, toUpstreamProgress(entry))
+		progress := toUpstreamProgress(entry)
+		if date := dates[entry.MediaItemID]; date != "" {
+			progress.UpdatedAt = date
+		}
+		result = append(result, progress)
 	}
 	return result, nil
 }
@@ -236,6 +272,44 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 	result := make([]upstreamProgress, 0, len(progress))
 	for _, entry := range progress {
 		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
+func (s *directUserDataService) ListResumableProgress(ctx context.Context, session *Session, mediaItemIDs []string) ([]upstreamProgress, error) {
+	mediaItemIDs = normalizeContentIDs(mediaItemIDs)
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	// Chunked like chunkedProgressByMediaItems: a long series expands to
+	// thousands of episode ids.
+	const chunkSize = 500
+	var rows []userstore.WatchProgress
+	for start := 0; start < len(mediaItemIDs); start += chunkSize {
+		chunk, err := store.ListProgressByMediaItems(ctx, session.ProfileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		if err != nil {
+			return nil, fmt.Errorf("list progress by media items: %w", err)
+		}
+		for _, row := range chunk {
+			// The in_progress predicate of ListProgress.
+			if row.PositionSeconds > 0 {
+				rows = append(rows, row)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].UpdatedAt != rows[j].UpdatedAt {
+			return rows[i].UpdatedAt > rows[j].UpdatedAt
+		}
+		return rows[i].MediaItemID > rows[j].MediaItemID
+	})
+	result := make([]upstreamProgress, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, toUpstreamProgress(row))
 	}
 	return result, nil
 }
@@ -299,7 +373,7 @@ func (s *directUserDataService) MarkPlayed(ctx context.Context, session *Session
 	if err := s.watchState.RecordJellycompatMarkPlayed(ctx, session.StreamAppUserID, session.ProfileID, contentID, time.Now().UTC()); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, []string{contentID}, true)
 	return nil
 }
@@ -314,7 +388,7 @@ func (s *directUserDataService) MarkPlayedBatch(ctx context.Context, session *Se
 	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, contentIDs, time.Now().UTC()); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, contentIDs, true)
 	return nil
 }
@@ -326,9 +400,19 @@ func (s *directUserDataService) MarkUnplayed(ctx context.Context, session *Sessi
 	if err := s.watchState.RecordJellycompatMarkUnplayed(ctx, session.StreamAppUserID, session.ProfileID, contentID); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, []string{contentID}, false)
 	return nil
+}
+
+// ParentUnplayedTargets returns the episodes a series or season unplayed mark
+// must clear, including watched episodes whose file is gone; see
+// watchstate.Service.ParentUnwatchTargets.
+func (s *directUserDataService) ParentUnplayedTargets(ctx context.Context, session *Session, parentKind, parentID string) ([]string, error) {
+	if s.watchState == nil || s.episodes == nil {
+		return nil, nil
+	}
+	return s.watchState.ParentUnwatchTargets(ctx, session.StreamAppUserID, session.ProfileID, s.episodes, parentKind, parentID)
 }
 
 func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *Session, contentIDs []string) error {
@@ -341,7 +425,7 @@ func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *
 	if err := s.watchState.RecordJellycompatMarkUnplayedBatch(ctx, session.StreamAppUserID, session.ProfileID, contentIDs); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, contentIDs, false)
 	return nil
 }
@@ -373,7 +457,7 @@ func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *
 	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, ids, date); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, ids, true)
 	return nil
 }
@@ -427,15 +511,15 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		}
 	} else if req.IsFavorite != nil {
 		if *req.IsFavorite {
-			err = store.AddFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.AddFavorite(ctx, session.ProfileID, contentID)
 		} else {
-			err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
 		}
 		if err != nil {
 			return err
 		}
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	return nil
 }
 
@@ -456,6 +540,6 @@ func (s *directUserDataService) UpdateParentUserData(ctx context.Context, sessio
 	if err := s.watchState.RecordJellycompatParent(ctx, session.StreamAppUserID, session.ProfileID, parentID, targets, played, favorite); err != nil {
 		return err
 	}
-	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	return nil
 }

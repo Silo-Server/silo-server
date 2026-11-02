@@ -84,6 +84,24 @@ function num(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * The TMDB vote minimums rating-led rows require, as the server's
+ * recipes.DiscoveryMinVotes and recipes.AcclaimedMinVotes set them.
+ */
+const MIN_VOTES = 100;
+const ACCLAIMED_MIN_VOTES = 500;
+
+/** A setting the server reads as its default unless it is above zero. */
+function positive(value: unknown, fallback: number): number {
+  const n = num(value);
+  return n !== undefined && n > 0 ? n : fallback;
+}
+
+/** A TMDB rating floor as the presets write it: 7.5, 8.0. */
+function rating(value: unknown, fallback: number): string {
+  return (num(value) || fallback).toFixed(1);
+}
+
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -249,18 +267,32 @@ export function describeRow(row: HomeRow, context: DescribeContext): Description
       return [describeSpotlight(config)];
     case "format_showcase":
       return [describeFormat(config)];
-    case "hidden_gems":
-      return ["Well rated, rarely watched"];
+    case "hidden_gems": {
+      const plays = num(config.max_play_count) ?? 0;
+      const times = plays === 1 ? "once" : plays === 2 ? "twice" : `${plays} times`;
+      const watched = plays > 0 ? `watched ${times} or less` : "never watched";
+      return [
+        `Rated ${rating(config.min_rating, 7.5)}+ on TMDB with ${MIN_VOTES}+ votes, and ${watched}`,
+      ];
+    }
     case "critically_acclaimed":
-      return ["Highly rated by critics"];
-    case "forgotten_favorites":
-      return ["Titles nobody has watched in a long while"];
+      return [`Rated ${rating(config.min_score, 8)}+ on TMDB with ${ACCLAIMED_MIN_VOTES}+ votes`];
+    case "forgotten_favorites": {
+      const days = positive(config.lookback_days, 365);
+      return [
+        `Rated 7.0+ on TMDB with ${MIN_VOTES}+ votes, and not watched in the past ${days === 365 ? "year" : plural(days, "day")}`,
+      ];
+    }
     case "genre_roulette":
-      return [`A different genre every ${cadence(config)}`];
+      return [
+        `A different genre every ${cadence(config)}, rated ${rating(config.min_rating, 6)}+ on TMDB with ${MIN_VOTES}+ votes`,
+      ];
     case "random":
       return ["A random mix"];
     case "short_watches":
-      return [`Well-rated movies under ${num(config.max_minutes) ?? 95} minutes`];
+      return [
+        `Movies of ${positive(config.max_minutes, 95)} minutes or less, rated ${rating(config.min_rating, 6)}+ on TMDB with ${MIN_VOTES}+ votes`,
+      ];
     case "anniversaries":
       return ["Titles marking a release anniversary this month"];
     case "collection":

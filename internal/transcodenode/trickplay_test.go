@@ -1,18 +1,17 @@
 package transcodenode
 
 import (
-	"bytes"
 	"encoding/json"
-	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
@@ -30,9 +29,9 @@ func newTrickplayTestServer(t *testing.T, ffmpeg string) *Server {
 	return &Server{watcher: watcher, inputPaths: allowInputPaths{}, sessions: make(map[string]*playback.TranscodeSession)}
 }
 
-func postTrickplay(server *Server, body string) *httptest.ResponseRecorder {
+func postTrickplay(t *testing.T, server *Server, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/trickplay/extract", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, req, testSecret)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -54,32 +53,25 @@ func sheetsRequestJSON(t *testing.T, input string) string {
 	return string(data)
 }
 
-// TestTrickplayExtractMakesSheets runs a sheets request on a node without
-// hardware decode: the hardware attempt is dropped and the software attempt
-// answers the sheets.
-func TestTrickplayExtractMakesSheets(t *testing.T) {
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	clip := filepath.Join(t.TempDir(), "clip.mkv")
-	if output, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=4", "-g", "24", clip).CombinedOutput(); err != nil {
-		t.Skipf("cannot generate the clip: %v: %s", err, output)
-	}
-	server := newTrickplayTestServer(t, ffmpeg)
-	rec := postTrickplay(server, sheetsRequestJSON(t, clip))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var result mediasample.Result
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+// TestTrickplayExtractReportsUnreadableInput checks that a file this node's
+// ffmpeg cannot open answers input_unreadable, so the API server does not
+// count it against the file.
+func TestTrickplayExtractReportsUnreadableInput(t *testing.T) {
+	// ffmpeg stands in as a script that fails to open its input, so the
+	// test needs no ffmpeg on the host.
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\necho '/media/movie.mkv: Permission denied' >&2\nexit 1\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if result.Decoder != "software" || len(result.Sheets) != 1 || result.SheetFrames.Decoded != 2 {
-		t.Fatalf("result %s sheets %d frames %+v", result.Decoder, len(result.Sheets), result.SheetFrames)
+	server := newTrickplayTestServer(t, ffmpeg)
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, "/media/movie.mkv"))
+	var failure trickplay.ExtractError
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG)); err != nil {
-		t.Fatalf("sheet: %v", err)
+	if rec.Code != http.StatusUnprocessableEntity || failure.Reason != trickplay.InputUnreadableReason || failure.Permanent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -91,20 +83,20 @@ func TestTrickplayExtractRefuses(t *testing.T) {
 		_ = json.Unmarshal(rec.Body.Bytes(), &failure)
 		return failure
 	}
-	if rec := postTrickplay(server, `{`); rec.Code != http.StatusBadRequest {
+	if rec := postTrickplay(t, server, `{`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad body: %d", rec.Code)
 	}
 	stats := `{"input":"/media/movie.mkv","samples":{"seconds":[1]},"stats":{"crop_width":1,"crop_height":1,"width":64}}`
-	if rec := postTrickplay(server, stats); rec.Code != http.StatusBadRequest || decode(rec).Reason != "invalid_request" {
+	if rec := postTrickplay(t, server, stats); rec.Code != http.StatusBadRequest || decode(rec).Reason != "invalid_request" {
 		t.Fatalf("stats request: %d %s", rec.Code, rec.Body.String())
 	}
 	server.trickplay.busy.Lock()
-	if rec := postTrickplay(server, valid); rec.Code != http.StatusServiceUnavailable || decode(rec).Reason != trickplay.NodeBusyReason {
+	if rec := postTrickplay(t, server, valid); rec.Code != http.StatusServiceUnavailable || decode(rec).Reason != trickplay.NodeBusyReason {
 		t.Fatalf("busy: %d %s", rec.Code, rec.Body.String())
 	}
 	server.trickplay.busy.Unlock()
 	server.inputPaths = denyInputPaths{}
-	if rec := postTrickplay(server, valid); rec.Code == http.StatusOK || rec.Code == http.StatusUnprocessableEntity {
+	if rec := postTrickplay(t, server, valid); rec.Code == http.StatusOK || rec.Code == http.StatusUnprocessableEntity {
 		t.Fatalf("unapproved path: %d", rec.Code)
 	}
 	unauthorized := httptest.NewRecorder()

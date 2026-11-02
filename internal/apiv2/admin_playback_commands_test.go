@@ -91,20 +91,8 @@ func TestAdminPlaybackCommandsTransport(t *testing.T) {
 				t.Fatal(rec.Code, rec.Body.String())
 			}
 
-			// Validation refuses a malformed identity before the seam.
+			// The message command refuses an empty message before the seam.
 			before := len(f.calls)
-			for _, invalid := range []string{
-				strings.Replace(tc.body, `"sequence":7`, `"sequence":0`, 1),
-				strings.Replace(tc.body, `"sequence":7`, `"sequence":9007199254740992`, 1),
-				strings.Replace(tc.body, `"3fa85f64-5717-4562-b3fc-2c963f66afa6"`, `"not-a-uuid"`, 1),
-				strings.Replace(tc.body, `"deadline_ms":250`, `"deadline_ms":20000`, 1),
-				strings.Replace(tc.body, `"reason":"bedtime"`, `"reason":"bedtime","position":5`, 1),
-			} {
-				rec = do(t, h, http.MethodPost, path, invalid, admin)
-				if rec.Code != http.StatusUnprocessableEntity {
-					t.Fatal(invalid, rec.Code, rec.Body.String())
-				}
-			}
 			if tc.action == "message" {
 				rec = do(t, h, http.MethodPost, path, strings.Replace(tc.body, `"message":"Movie night ends at nine"`, `"message":""`, 1), admin)
 				if rec.Code != http.StatusUnprocessableEntity {

@@ -36,7 +36,7 @@ func (h *PlaybackHandler) compatHEVCExecutable(ctx context.Context, source Playb
 			}
 			for _, nodeURL := range enumerator.TranscodeNodeURLs() {
 				node, ok := lookup.TranscodeNodeByURL(nodeURL)
-				if ok && node != nil && node.Enabled && node.Healthy && compatHEVCNodeSupportsSource(node, source, toneMapPolicy) {
+				if ok && node.TakesNewWork() && compatHEVCNodeSupportsSource(node, source, toneMapPolicy) {
 					return true
 				}
 			}

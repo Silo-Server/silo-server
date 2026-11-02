@@ -8,9 +8,11 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   buildDeliveriesV3,
+  detectBandwidthEstimateKbpsV3,
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
+import { readMeasuredBandwidthKbps } from "./bandwidth-probe";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -37,7 +39,7 @@ describe("detectHLSSupport", () => {
 });
 
 describe("buildDeliveriesV3", () => {
-  it("advertises the embedded text artifacts rendered by the web player", () => {
+  it("advertises the embedded text and PGS artifacts rendered by the web player", () => {
     const deliveries = buildDeliveriesV3({
       containers: ["mp4"],
       codecsVideo: ["h264"],
@@ -60,6 +62,8 @@ describe("buildDeliveriesV3", () => {
     for (const delivery of Object.values(deliveries)) {
       expect(delivery.subtitles.embedded_text).toBe(true);
       expect(delivery.subtitles.sidecar_text).toBe(true);
+      expect(delivery.subtitles.embedded_bitmap).toBe(true);
+      expect(delivery.subtitles.sidecar_bitmap).toBe(false);
     }
   });
 });
@@ -158,5 +162,138 @@ describe("structured HDR capabilities", () => {
     expect(deliveries.original_http?.audio_decode_codecs).toEqual(["aac", "vorbis"]);
     expect(deliveries.progressive?.audio_decode_codecs).toEqual(["aac"]);
     expect(deliveries.hls?.audio_decode_codecs).toEqual(["aac", "vorbis"]);
+  });
+});
+
+describe("browser decode engine capabilities", () => {
+  const probe: WebCapabilityProbe = {
+    containers: ["mp4", "webm"],
+    codecsVideo: ["h264", "av1"],
+    progressiveCodecsVideo: ["h264", "av1"],
+    codecsAudio: ["aac", "opus"],
+    progressiveCodecsAudio: ["aac", "opus"],
+    maxResolution: "2160p",
+    hdr: false,
+    hdrDetails: {
+      hdr10: false,
+      hdr10_plus: false,
+      hlg: false,
+      dolby_vision_profiles: [],
+      dolby_vision_profile_levels: [],
+    },
+    hls: true,
+    nativeHLS: false,
+  };
+  const engine = {
+    containers: ["mkv", "mp4"],
+    videoCodecs: ["h264", "hevc", "av1"],
+    audioCodecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+    hdr: true,
+  };
+
+  it("widens only original_http and claims track selection and managed range", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", engine);
+    expect(deliveries.original_http).toMatchObject({
+      containers: ["mp4", "webm", "mkv"],
+      video_codecs: ["h264", "av1", "hevc"],
+      audio_decode_codecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+      validated_claims: ["client_selected_audio_track_v1", "client_managed_dynamic_range_v1"],
+    });
+    expect(deliveries.progressive?.audio_decode_codecs).toEqual(["aac", "opus"]);
+    expect(deliveries.progressive?.validated_claims).toEqual([]);
+    expect(deliveries.hls?.video_codecs).toEqual(["h264", "av1"]);
+  });
+
+  it("claims managed range only when WebGPU can tone-map", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", { ...engine, hdr: false });
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
+  it("leaves HDR to HDR-preserving routes on an HDR display", () => {
+    // The engine tone-maps to SDR; claiming managed range here would take HDR
+    // sources off the remux that keeps them HDR.
+    const deliveries = buildDeliveriesV3({ ...probe, hdr: true }, "test", engine);
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
+  it("carries the engine codecs in the device-level lists the planner reads first", () => {
+    const capabilities = buildClientCapabilitiesV3(probe, engine);
+    expect(capabilities.codecs_audio).toContain("truehd");
+    expect(capabilities.codecs_video).toContain("hevc");
+    expect(capabilities.containers).toContain("mkv");
+    expect(buildClientCapabilitiesV3(probe).codecs_audio).toEqual(["aac", "opus"]);
+    expect(
+      buildClientPlaybackContextV3(probe, engine).deliveries.original_http?.validated_claims,
+    ).toHaveLength(2);
+  });
+});
+
+describe("detectBandwidthEstimateKbpsV3", () => {
+  // Chromium rounds and caps `downlink`, so it is a guess. Auto sends the
+  // source when nothing was measured, rather than plan from it.
+  it("sends no estimate when only connection.downlink is available", () => {
+    for (const downlink of [4.5, 10, 0.05, undefined]) {
+      vi.stubGlobal("navigator", { connection: { downlink } });
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    }
+  });
+
+  const week = 7 * 24 * 60 * 60 * 1000;
+  /** A reading this device measured on the named connection type. */
+  const keptReading = (kbps: number, network = "unknown") => ({
+    readings: [{ kbps, measuredAt: Date.now(), maxAgeMs: week, network }],
+    writtenAt: Date.now(),
+  });
+
+  // `kept` is what the page has read back, so a row that sends nothing shows
+  // the reading was there to send.
+  it.each<[string, Record<string, unknown>, unknown, number | undefined, number | undefined]>([
+    [
+      "prefers the kept speed reading over the downlink hint",
+      { downlink: 10 },
+      keptReading(180_000),
+      180_000,
+      180_000,
+    ],
+    [
+      "ignores a cached measurement while Data Saver is on",
+      { downlink: 10, saveData: true },
+      keptReading(180_000),
+      180_000,
+      undefined,
+    ],
+    [
+      "ignores a cached measurement on cellular without falling back to the downlink",
+      { downlink: 4.5, type: "cellular" },
+      keptReading(180_000, "cellular"),
+      180_000,
+      undefined,
+    ],
+    [
+      "does not send a server's reading kept from before this page read the server",
+      { downlink: 10 },
+      {
+        readings: [{ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: week }],
+        writtenAt: Date.now(),
+      },
+      undefined,
+      undefined,
+    ],
+    [
+      "sends no estimate from a stall limit an older build cached",
+      { downlink: 8 },
+      { kbps: 4_200, measuredAt: Date.now(), observed: true },
+      undefined,
+      undefined,
+    ],
+  ])("%s", (_name, connection, stored, kept, sent) => {
+    vi.stubGlobal("navigator", { connection });
+    localStorage.setItem("silo-bandwidth-estimate", JSON.stringify(stored));
+    try {
+      expect(readMeasuredBandwidthKbps()).toBe(kept);
+      expect(detectBandwidthEstimateKbpsV3()).toBe(sent);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
   });
 });

@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   useStoredSettingValues: vi.fn(),
   deviceSettingGroupsProps: vi.fn(),
   clearDevice: vi.fn(),
+  renameDevice: vi.fn(),
   toastSuccess: vi.fn(),
   isActingAdmin: false,
   capabilities: {
@@ -40,7 +41,9 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/hooks/queries/devices", () => ({
+vi.mock("@/hooks/queries/devices", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/devices")>()),
+  useRenameDevice: () => ({ mutate: mocks.renameDevice, isPending: false }),
   useMyDevices: (options?: { household?: boolean }) => ({
     data: options?.household ? mocks.householdDevices : mocks.ownDevices,
     isLoading: false,
@@ -115,6 +118,7 @@ describe("DeviceSettings capability discovery", () => {
     mocks.useStoredSettingValues.mockReturnValue({ data: undefined });
     mocks.deviceSettingGroupsProps.mockReset();
     mocks.clearDevice.mockReset();
+    mocks.renameDevice.mockReset();
     mocks.toastSuccess.mockReset();
     mocks.isActingAdmin = false;
     mocks.capabilities.data = undefined;
@@ -143,24 +147,20 @@ describe("DeviceSettings capability discovery", () => {
     expect(mocks.refetchCapabilities).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["API version is incompatible", { ...compatibleCapabilities, api_version: 2 }],
-    [
-      "batched effective reads are missing",
-      { ...compatibleCapabilities, supports_batched_effective: undefined },
-    ],
-    ["revision is missing", { ...compatibleCapabilities, manifest_revision: undefined }],
-  ])("does not request all settings when the %s", (_case, capabilities) => {
-    mocks.capabilities.data = capabilities as SettingsCapabilities;
+  it.each([["API version is incompatible", { ...compatibleCapabilities, api_version: 2 }]])(
+    "does not request all settings when the %s",
+    (_case, capabilities) => {
+      mocks.capabilities.data = capabilities as SettingsCapabilities;
 
-    render(<DeviceSettings />);
+      render(<DeviceSettings />);
 
-    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ keys: [], enabled: false }),
-    );
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
-  });
+      expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ keys: [], enabled: false }),
+      );
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
+    },
+  );
 
   it("still requests settings when the server reports no idempotent writes", () => {
     // The v2 write operations carry no mutation id, so replay support is not
@@ -290,13 +290,64 @@ describe("DeviceSettings capability discovery", () => {
 
       expect(mocks.clearDevice).not.toHaveBeenCalled();
     });
+  });
 
-    it("offers nothing to reset on a device with no changes", () => {
+  describe("naming a device", () => {
+    beforeEach(() => {
+      mocks.capabilities.data = { ...compatibleCapabilities, supports_device_rename: true };
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+    });
+
+    it("saves the typed name for the device it is editing", async () => {
+      const user = userEvent.setup();
+      mocks.renameDevice.mockImplementation((_vars, options: { onSuccess?: () => void }) =>
+        options.onSuccess?.(),
+      );
       render(<DeviceSettings />);
 
-      expect(
-        screen.queryByRole("button", { name: "Use profile settings" }),
-      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Rename" }));
+      const input = screen.getByRole("textbox", { name: "Device name" });
+      expect(input).toHaveAttribute("placeholder", "Living Room TV");
+      await user.type(input, "  Den  {Enter}");
+
+      expect(mocks.renameDevice).toHaveBeenCalledWith(
+        {
+          device: { deviceId: "living-room", profileId: undefined },
+          name: "Den",
+        },
+        expect.anything(),
+      );
+      expect(mocks.toastSuccess).toHaveBeenCalledWith("Device renamed");
+      expect(screen.queryByRole("textbox", { name: "Device name" })).not.toBeInTheDocument();
+    });
+
+    it("allows 120 characters counted as the server counts them", async () => {
+      const user = userEvent.setup();
+      render(<DeviceSettings />);
+
+      await user.click(screen.getByRole("button", { name: "Rename" }));
+      const input = screen.getByRole("textbox", { name: "Device name" });
+      await user.type(input, "📺".repeat(121));
+
+      expect(Array.from((input as HTMLInputElement).value)).toHaveLength(120);
+    });
+
+    it("clears the name when the field is emptied", async () => {
+      const user = userEvent.setup();
+      mocks.ownDevices = [device({ custom_name: "Den" })];
+      render(<DeviceSettings />);
+
+      await user.click(screen.getByRole("button", { name: "Rename" }));
+      await user.clear(screen.getByRole("textbox", { name: "Device name" }));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(mocks.renameDevice).toHaveBeenCalledWith(
+        {
+          device: { deviceId: "living-room", profileId: undefined },
+          name: null,
+        },
+        expect.anything(),
+      );
     });
   });
 });

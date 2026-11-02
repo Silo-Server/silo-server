@@ -114,8 +114,12 @@ templates only, never bundles. The rules the web keeps:
   `validateTMDBFranchiseConfig` (`internal/catalog/library_collection_service.go`) fails its sync
   until a real ID is set. `Template.NeedsSetup` reports this case: bundle apply creates the
   collection without a first sync, and the `/api/v2` bundle list marks its summary `needs_setup`.
-- `trakt`: the validator still accepts it, but the server rejects new Trakt collections with
-  `unsupported_source`. Don't add Trakt templates.
+
+The `tmdb` and `tmdb_discover` rules are exported (`ValidateTMDBSpec`,
+`ValidateTMDBDiscoverSpec`) and also check the Requests Discover page's chart and
+filter rows ([Request Discover rows](request-discover-rows.md)). Stored layouts are
+not checked again, so tightening a rule here changes what the next layout save
+accepts.
 
 ## Templates in the Synced list step
 

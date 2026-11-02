@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -89,7 +88,7 @@ func (s *PGEbookReaderConfigStore) ReplaceGuarded(ctx context.Context, config Eb
 	}
 	// Use the database-returned timestamp/JSON representation for the next tag.
 	err = tx.QueryRow(ctx, `UPDATE ebook_reader_config SET config=$4::jsonb,updated_at=clock_timestamp()
- WHERE user_id=$1 AND profile_id=$2 AND content_id=$3 RETURNING config,updated_at`, config.UserID, config.ProfileID, config.ContentID, json.RawMessage(config.Config)).Scan(&config.Config, &config.UpdatedAt)
+ WHERE user_id=$1 AND profile_id=$2 AND content_id=$3 RETURNING config,updated_at`, config.UserID, config.ProfileID, config.ContentID, config.Config).Scan(&config.Config, &config.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

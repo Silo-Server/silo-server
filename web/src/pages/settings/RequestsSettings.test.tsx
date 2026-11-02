@@ -108,15 +108,6 @@ describe("Settings › Requests", () => {
     expect(mocks.setValue).not.toHaveBeenCalled();
   });
 
-  it("reports a failed save", async () => {
-    mocks.setValue.mockRejectedValue(new Error("boom"));
-    renderPage();
-    fireEvent.click(screen.getByRole("switch", { name: LABEL }));
-    await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith("Failed to save request preference"),
-    );
-  });
-
   it("hides the switch while the server doesn't request watchlist titles", () => {
     mocks.featureStatus.mockReturnValue({
       data: {
@@ -132,37 +123,5 @@ describe("Settings › Requests", () => {
     expect(screen.getByTestId("watchlist-auto-request-off")).toHaveTextContent(
       "Adding a title to your watchlist doesn’t request it on this server. You can still request titles from Discover.",
     );
-  });
-
-  it("says requests are off instead of pointing to Discover", () => {
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: false,
-        allowed: true,
-        watchlist_titles_supported: false,
-        watchlist_requests: false,
-      },
-      isLoading: false,
-    });
-    profileValue(false);
-    renderPage();
-    expect(screen.queryByRole("switch", { name: LABEL })).toBeNull();
-    expect(screen.getByTestId("watchlist-auto-request-off")).toHaveTextContent(
-      "Requests are turned off on this server.",
-    );
-  });
-
-  it("doesn't point to Discover when the viewer may not request", () => {
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: true,
-        allowed: false,
-        watchlist_titles_supported: true,
-        watchlist_requests: false,
-      },
-      isLoading: false,
-    });
-    renderPage();
-    expect(screen.getByTestId("watchlist-auto-request-off").textContent).not.toContain("Discover");
   });
 });

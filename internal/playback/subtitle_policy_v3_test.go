@@ -6,16 +6,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestResolveSubtitlePolicyV3RendersCEA608AsTextArtifact(t *testing.T) {
+// subtitlePolicyForTrackV3 selects the only subtitle track, of codec, on the
+// fixture file (or an ordinal past it) and resolves the original_http
+// subtitle policy with or without transcoding allowed.
+func subtitlePolicyForTrackV3(codec string, index int) func(transcodeAllowed bool) SubtitlePolicyResultV3 {
 	file := detailedFixtureFileV3()
 	file.ExternalSubtitles = nil
-	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "eia_608"}}
+	file.SubtitleTracks = []models.SubtitleTrack{{Codec: codec}}
 	req := validStartRequestV3()
-	index := 0
 	req.SubtitleTrackIndex = &index
+	return func(transcodeAllowed bool) SubtitlePolicyResultV3 {
+		return ResolveSubtitlePolicyV3(file, req, transcodeAllowed, DeliveryClassOriginalHTTPV3, nil, 0, nil)
+	}
+}
 
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
-
+func TestResolveSubtitlePolicyV3RendersCEA608AsTextArtifact(t *testing.T) {
+	result := subtitlePolicyForTrackV3("eia_608", 0)(true)
 	if result.Terminal != nil || result.RequiresBurn || result.Decision.Mode != SubtitleRenderV3 {
 		t.Fatalf("CEA-608 should render as a client-styled text artifact: %#v", result)
 	}
@@ -25,15 +31,7 @@ func TestResolveSubtitlePolicyV3RendersCEA608AsTextArtifact(t *testing.T) {
 }
 
 func TestResolveSubtitlePolicyV3DoesNotOfferDVBTeletextAsClientBitmap(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.ExternalSubtitles = nil
-	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "dvb_teletext"}}
-	req := validStartRequestV3()
-	index := 0
-	req.SubtitleTrackIndex = &index
-
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
-
+	result := subtitlePolicyForTrackV3("dvb_teletext", 0)(true)
 	if result.Terminal != nil || !result.RequiresBurn || result.Decision.Mode != SubtitleBurnInV3 {
 		t.Fatalf("DVB teletext must stay on the server fallback: %#v", result)
 	}
@@ -43,30 +41,68 @@ func TestResolveSubtitlePolicyV3DoesNotOfferDVBTeletextAsClientBitmap(t *testing
 }
 
 func TestResolveSubtitlePolicyV3UnknownCodecIsExplicitlyUnsupported(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.ExternalSubtitles = nil
-	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "arib_caption"}}
-	req := validStartRequestV3()
-	index := 0
-	req.SubtitleTrackIndex = &index
-
-	for _, transcodeAllowed := range []bool{true, false} {
-		result := ResolveSubtitlePolicyV3(file, req, transcodeAllowed, DeliveryClassOriginalHTTPV3, nil)
-		if result.Terminal == nil || result.Terminal.Reason != "subtitle_codec_unsupported" {
-			t.Fatalf("transcodeAllowed=%v: unknown codec must be explicitly unsupported, got %#v", transcodeAllowed, result)
+	for codec, message := range map[string]string{
+		"arib_caption": "Subtitle format arib_caption has no validated rendering or burn-in route.",
+		// A format the probe couldn't name has no name to give.
+		"": "The subtitle track's format was not recognized, so it has no validated rendering or burn-in route.",
+	} {
+		resolve := subtitlePolicyForTrackV3(codec, 0)
+		for _, transcodeAllowed := range []bool{true, false} {
+			result := resolve(transcodeAllowed)
+			if result.Terminal == nil || result.Terminal.Reason != "subtitle_codec_unsupported" || result.Terminal.Message != message {
+				t.Fatalf("codec %q, transcodeAllowed=%v: unknown codec must be explicitly unsupported, got %#v", codec, transcodeAllowed, result.Terminal)
+			}
 		}
 	}
 }
 
-func TestResolveSubtitlePolicyV3BurnsFFmpegBitmapAliases(t *testing.T) {
+// The inventory marks exactly the tracks the policy refuses as unsupported,
+// so a client can list them as unavailable instead of offering them.
+func TestSubtitleInventoryV3MarksTracksWithoutARouteUnplayable(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Format: "srt"}}
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, Codec: ""}, {Index: 3, Codec: "webvtt", IndexOnly: true}, {Index: 4, Codec: "dvd_subtitle"}, {Index: 5, Codec: "arib_caption"}}
+	want := []bool{false, true, false, false, true}
+	items := BuildSubtitleInventoryV3(file, nil)
+	for i, item := range items {
+		if item.Unplayable != want[i] {
+			t.Errorf("track %d (%s %q): unplayable = %v, want %v", i, item.Source, item.Codec, item.Unplayable, want[i])
+		}
+	}
+	if len(items) != len(want) {
+		t.Fatalf("inventory has %d tracks, want %d", len(items), len(want))
+	}
+}
+
+// A track FFmpeg can't demux from the source (Matroska S_TEXT/WEBVTT) renders
+// from its sidecar, which the server reads through the index, but can't be
+// burned in: burn-in demuxes the source.
+func TestResolveSubtitlePolicyV3KeepsIndexOnlyTracksOffBurnIn(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.ExternalSubtitles = nil
-	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "dvdsub"}}
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, ContainerTrackID: "3", Codec: "webvtt", IndexOnly: true}}
 	req := validStartRequestV3()
-	index := 0
-	req.SubtitleTrackIndex = &index
+	req.SubtitleTrackIndex = new(0)
+	resolve := func() SubtitlePolicyResultV3 {
+		return ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
+	}
+	if got := resolve(); got.Terminal != nil || got.RequiresBurn || got.Decision.Mode != SubtitleRenderV3 || got.Codec != "webvtt" {
+		t.Fatalf("sidecar: %#v", got)
+	}
+	caps := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	caps.Subtitles.SidecarText = false
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = caps
+	if got := resolve(); got.Terminal == nil || got.Terminal.Reason != "subtitle_burn_in_source_unsupported" || got.RequiresBurn {
+		t.Fatalf("without a sidecar: %#v", got)
+	}
+	file.SubtitleTracks[0].IndexOnly = false
+	if got := resolve(); !got.RequiresBurn {
+		t.Fatalf("an ordinary WebVTT track without a sidecar burns in: %#v", got)
+	}
+}
 
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+func TestResolveSubtitlePolicyV3BurnsFFmpegBitmapAliases(t *testing.T) {
+	result := subtitlePolicyForTrackV3("dvdsub", 0)(true)
 	if result.Terminal != nil || !result.RequiresBurn || result.Decision.Mode != SubtitleBurnInV3 || !result.Claims.BitmapOverlay {
 		t.Fatalf("dvdsub alias must burn in like dvd_subtitle: %#v", result)
 	}
@@ -102,33 +138,12 @@ func TestPlanPlaybackV3TranscodeUsesHLSDeliverySubtitleCapabilities(t *testing.T
 	}
 }
 
-func TestClientRenderableBitmapSubtitleV3UsesExactCodecFamilies(t *testing.T) {
-	for _, codec := range []string{"pgs", "pgssub", "hdmv_pgs_subtitle", "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub", "vobsub"} {
-		if !isClientRenderableBitmapSubtitleV3(codec) {
-			t.Errorf("expected client-renderable bitmap codec: %s", codec)
-		}
-	}
-	for _, codec := range []string{"dvb_teletext", "hdmv_text_subtitle", "arib_caption", "eia_608"} {
-		if isClientRenderableBitmapSubtitleV3(codec) {
-			t.Errorf("must not advertise unsupported client bitmap codec: %s", codec)
-		}
-	}
-}
-
 // A selection carried over from another file — the next episode routinely has
 // a different track layout — must degrade to subtitles-off, not refuse
 // playback. This is the direct-start path; the version-switch remap in the
 // handlers degrades the same way.
 func TestResolveSubtitlePolicyV3DegradesOutOfRangeSelectionToOff(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.ExternalSubtitles = nil
-	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "subrip"}}
-	req := validStartRequestV3()
-	index := 7
-	req.SubtitleTrackIndex = &index
-
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
-
+	result := subtitlePolicyForTrackV3("subrip", 7)(true)
 	if result.Terminal != nil {
 		t.Fatalf("an out-of-range subtitle selection must not refuse playback: %#v", result.Terminal)
 	}
@@ -147,8 +162,7 @@ func TestResolveSubtitlePolicyV3StillRejectsInvalidIdentity(t *testing.T) {
 	req := validStartRequestV3()
 	req.SubtitleTrackID = "not-a-track-id"
 
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
-
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_track_invalid" {
 		t.Fatalf("a malformed identity must stay terminal: %#v", result)
 	}

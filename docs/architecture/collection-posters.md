@@ -68,6 +68,20 @@ does this viewer see". Never build a viewer-facing response from `poster_url` al
 
 Collection list responses differ by viewer. None of them may be cached across profiles.
 
+## Counts and visibility
+
+A server collection's stored count is every member it has; a smart collection's
+`item_count_cached` is counted with no access filter and can be up to an hour old. A viewer whose
+access narrows the catalog (library allowlist or disabled libraries, maturity limits, excluded
+media types) is shown its own count instead: `LibraryCollectionRepository.ViewerCollectionCounts`
+counts the members the collection's catalog page lists for it (manga chapters excluded), and
+`catalog.CollectionsShownToViewer` applies it. A collection is left out for that viewer when it
+has members and the viewer can open none, or when its count could not be read; it never falls back
+to the stored count. Whether a smart collection has members is counted live, never taken from its
+cache. A collection empty for everyone stays listed. This covers the library Collections tab,
+server collections and Jellyfin BoxSets (list, by ID, detail and session-authorized images).
+Unrestricted viewers and the admin collection routes keep the stored count.
+
 ## Personal collections
 
 A personal collection's assigned poster is the one its creator uploaded, linked or imported,

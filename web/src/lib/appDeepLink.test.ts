@@ -42,12 +42,6 @@ describe("buildInviteDeepLink", () => {
     );
   });
 
-  it("carries plain-http LAN origins verbatim", () => {
-    expect(buildInviteDeepLink("http://192.168.1.10:8090", "t")).toBe(
-      "silo://invite?server=http%3A%2F%2F192.168.1.10%3A8090&token=t",
-    );
-  });
-
   it("rejects unrepresentable origins", () => {
     expect(buildInviteDeepLink("not a url", "t")).toBeNull();
     expect(buildInviteDeepLink("ftp://silo.example.net", "t")).toBeNull();

@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Login from "./Login";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
+import { renderLogin } from "./loginPage.test-support";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", async () => ({
@@ -32,23 +31,6 @@ afterEach(() => {
 
 const SIGNUP_STATUS = ["auth", "signup-status"];
 
-function renderLogin(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  return client;
-}
-
-it("hides the sign up link until the signup status loads", () => {
-  request.mockReturnValue(new Promise(() => {}));
-  renderLogin();
-  expect(screen.queryByRole("link", { name: "Sign up" })).toBeNull();
-});
-
 it("ignores a cached enabled status and uses the fresh one", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 120_000 } },
@@ -56,7 +38,7 @@ it("ignores a cached enabled status and uses the fresh one", async () => {
   client.setQueryData(SIGNUP_STATUS, { enabled: true });
   let finish: (value: { enabled: boolean }) => void = () => {};
   request.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-  renderLogin(client);
+  renderLogin("/login", client);
 
   expect(request).toHaveBeenCalledWith("GET /api/v2/auth/signup");
   expect(screen.queryByRole("link", { name: "Sign up" })).toBeNull();
@@ -68,7 +50,7 @@ it("ignores a cached enabled status and uses the fresh one", async () => {
 
 it("hides the sign up link when a refetch fails", async () => {
   request.mockResolvedValueOnce({ enabled: true });
-  const client = renderLogin();
+  const { client } = renderLogin();
   await screen.findByRole("link", { name: "Sign up" });
   expect(request).toHaveBeenCalledWith("GET /api/v2/auth/signup");
 

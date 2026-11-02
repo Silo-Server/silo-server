@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -207,5 +208,169 @@ func TestSortPresentationFilesOrdersLegacyRowsNaturally(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("presentation order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
+	// A 40-minute episode, whose credits window opens at 32:30, from a
+	// provider that copied its intro into the credits.
+	for _, tc := range []struct {
+		name        string
+		update      MarkerUpdate
+		wantCredits []models.MarkerSegment
+	}{
+		{
+			name: "singular bounds",
+			update: MarkerUpdate{
+				IntroStart: floatPtr(94), IntroEnd: floatPtr(114),
+				CreditsStart: floatPtr(94), CreditsEnd: floatPtr(112),
+				MarkersSource: models.MarkerSourcePlugin,
+			},
+		},
+		{
+			name: "ranges",
+			update: MarkerUpdate{
+				Segments: []models.MarkerSegment{
+					{Kind: models.MarkerSegmentIntro, StartSeconds: 94, EndSeconds: 114},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 1300, EndSeconds: 1400},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400},
+				},
+				MarkersSource: models.MarkerSourceOnline,
+			},
+			wantCredits: []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := markerMutationState{duration: 2400, file: models.MediaFile{EpisodeID: "episode"}}
+
+			applied, err := applyMarkerUpdateToMutationState(&tc.update, &state, time.Now())
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+
+			if !applied.intro || state.intro.start == nil || *state.intro.start != 94 {
+				t.Fatalf("intro not written: applied=%v start=%v", applied.intro, state.intro.start)
+			}
+			if tc.wantCredits == nil {
+				if applied.credits || state.credits.start != nil || len(state.credits.ranges) != 0 {
+					t.Fatalf("early credits written: start=%v ranges=%v", state.credits.start, state.credits.ranges)
+				}
+				return
+			}
+			if !applied.credits || len(state.credits.ranges) != len(tc.wantCredits) || state.credits.ranges[0] != tc.wantCredits[0] {
+				t.Fatalf("credits ranges = %v, want %v", state.credits.ranges, tc.wantCredits)
+			}
+			if state.credits.start == nil || *state.credits.start != tc.wantCredits[0].StartSeconds {
+				t.Fatalf("credits start = %v, want %v", state.credits.start, tc.wantCredits[0].StartSeconds)
+			}
+		})
+	}
+}
+
+func TestMarkerRefreshClearsProviderCreditsWhenOnlyEarlyCreditsReturn(t *testing.T) {
+	plugin := models.MarkerSourcePlugin
+	provider := "provider"
+	state := markerMutationState{duration: 2400, file: models.MediaFile{EpisodeID: "episode"}, credits: segmentState{
+		start: floatPtr(94), end: floatPtr(112), source: &plugin, provider: &provider,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112}},
+	}}
+	update := MarkerUpdate{
+		Segments:           []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112}},
+		MarkersSource:      models.MarkerSourcePlugin,
+		MarkersProvider:    &provider,
+		RefreshedProviders: []string{provider},
+	}
+
+	applied, err := applyMarkerUpdateToMutationState(&update, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if !applied.credits || state.credits.start != nil || len(state.credits.ranges) != 0 {
+		t.Fatalf("early credits survived the refresh: applied=%v start=%v ranges=%v", applied.credits, state.credits.start, state.credits.ranges)
+	}
+}
+
+func TestMarkerMutationChecksCreditsAgainstTheIntroItLeaves(t *testing.T) {
+	// A 25-minute episode whose wrong intro runs into the credits window: the
+	// edit clears it and sets the credits in one request.
+	manual := models.MarkerSourceManual
+	state := markerMutationState{duration: 1500, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		start: floatPtr(60), end: floatPtr(1400), source: &manual,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentIntro, StartSeconds: 60, EndSeconds: 1400}},
+	}}
+	update := MarkerUpdate{CreditsStart: floatPtr(1350), CreditsEnd: floatPtr(1500), MarkersSource: models.MarkerSourceManual}
+
+	changed, err := applyMarkerMutation(&update, markerSegmentFlags{intro: true}, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if !changed.intro || state.intro.end != nil {
+		t.Fatalf("intro not cleared: changed=%v end=%v", changed.intro, state.intro.end)
+	}
+	if !changed.credits || state.credits.start == nil || *state.credits.start != 1350 {
+		t.Fatalf("credits not written: changed=%v start=%v", changed.credits, state.credits.start)
+	}
+}
+
+// A provider's absent answer replaces a local intro with a tombstone carrying
+// the provider's provenance, and leaves with the answer once the refreshed
+// provider stops giving it.
+func TestMarkerUpdateWritesAndWithdrawsAbsentAnswer(t *testing.T) {
+	scannerSource, algorithm := models.MarkerSourceScanner, "chromaprint:v4"
+	state := markerMutationState{duration: 1800, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		start: floatPtr(10), end: floatPtr(70), source: &scannerSource, confidence: floatPtr(0.9), algorithm: &algorithm,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentIntro, StartSeconds: 10, EndSeconds: 70}},
+	}}
+	const provider = "plugin:1:markers"
+	absent := MarkerUpdateFromPayload(markers.BuildUpdatePayload(markers.Result{
+		SourceClass: models.MarkerSourceOnline, RefreshedProviders: []string{provider},
+		Markers: []markers.Marker{{Kind: markers.MarkerKindIntro, Absent: true, Confidence: 0.9,
+			SourceClass: models.MarkerSourcePlugin, ProviderID: provider, Algorithm: "consensus:v1"}},
+	}))
+
+	applied, err := applyMarkerUpdateToMutationState(&absent, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply absent: %v", err)
+	}
+	intro := state.intro
+	if !applied.intro || intro.start != nil || intro.end != nil || len(intro.ranges) != 0 ||
+		intro.source == nil || *intro.source != models.MarkerSourcePlugin || intro.provider == nil || *intro.provider != provider ||
+		intro.algorithm == nil || *intro.algorithm != "consensus:v1" || intro.confidence == nil || *intro.confidence != 0.9 {
+		t.Fatalf("absent answer not stored as a plugin tombstone: applied=%v state=%+v", applied.intro, intro)
+	}
+
+	miss := MarkerUpdateFromPayload(markers.BuildUpdatePayload(markers.Result{RefreshedProviders: []string{provider}}))
+	applied, err = applyMarkerUpdateToMutationState(&miss, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply refresh: %v", err)
+	}
+	if !applied.intro || !segmentEqual(state.intro, segmentState{}) {
+		t.Fatalf("withdrawn absent answer kept: applied=%v state=%+v", applied.intro, state.intro)
+	}
+}
+
+// A manual clear that a save withholds is written as a manual tombstone with
+// the withheld algorithm, replacing a provider's absent answer, so no
+// contribution sends it.
+func TestManualClearStoresWithheldProvenance(t *testing.T) {
+	pluginSource, provider, algorithm := models.MarkerSourcePlugin, "plugin:1:markers", "consensus:v1"
+	state := markerMutationState{duration: 1800, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		source: &pluginSource, provider: &provider, confidence: floatPtr(0.9), algorithm: &algorithm,
+	}}
+	update := MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: floatPtr(1), MarkersAlgorithm: markers.ManualAlgorithm,
+		IntroProvenance: &SegmentProvenance{Source: models.MarkerSourceManual, Confidence: floatPtr(1), Algorithm: markers.ManualWithheldAlgorithm, Absent: true}}
+
+	changed, err := applyMarkerMutation(&update, markerSegmentFlags{intro: true}, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply clear: %v", err)
+	}
+	intro := state.intro
+	if !changed.intro || intro.start != nil || intro.end != nil || intro.provider != nil ||
+		intro.source == nil || *intro.source != models.MarkerSourceManual ||
+		intro.algorithm == nil || *intro.algorithm != markers.ManualWithheldAlgorithm {
+		t.Fatalf("withheld clear not stored as a withheld manual tombstone: changed=%v state=%+v", changed.intro, intro)
 	}
 }

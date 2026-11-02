@@ -157,7 +157,7 @@ catalog merges them. For each title with exactly one visible copy:
    run `Effects.WatchlistPromoted`, implemented by
    `handlers.PersonalDataHandler`: the provider export event
    (`dispatchLocalListEvent`), the recommendations refresh
-   (`triggerProfileRefresh`) and a realtime `user_state.changed` event with
+   (`notifySignalsChanged`) and a realtime `user_state.changed` event with
    `change: "watchlist"`. These are the effects of a manual add.
 
 The library add in step 3 uses a second pool connection while the promotion's
@@ -296,7 +296,9 @@ kept. Promotion on library reads does not depend on that gate.
   one a re-add put back, is on the watchlist and keeps its request. An absent
   entry succeeds with 204.
 
-Both mutations are `non_retryable`, as the library watchlist mutations are.
+Both mutations are `non_retryable`: an add can create or follow a request and a removal can
+cancel a watchlist-made request. The library watchlist mutations they reuse are
+`natural_idempotent`, because they notify only for a changed row.
 Discovery results and the title detail carry `in_watchlist`, hydrated with two
 reads per page: title entries by TMDB ID, and the library watchlist by
 `library_content_id`. `GET /api/v2/requests/status` advertises
@@ -339,7 +341,7 @@ least 15.
 
 ## Not built
 
-Watch-provider (Trakt, Simkl, MDBList) and Plex imports still drop rows the
+Watch-provider (Simkl, MDBList) and Plex imports still drop rows the
 library doesn't have, and export only library items. Carrying unowned titles
 through them needs its own design; imports would never auto-request. A profile
 that cannot request, or has opted out, gets no arrival notification: only the

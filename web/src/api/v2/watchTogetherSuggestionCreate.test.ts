@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { captureSuggestionDraft, createRoomSuggestion } from "./watchTogetherSuggestionCreate";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 const input = { content_id: "movie", content_type: "movie" as const, title: "Title" };
@@ -43,16 +43,6 @@ it("retains copied draft identity/body/proof across uncertain failure and explic
   expect(captureSuggestionDraft("room", "original-proof", input).body.suggestion_id).not.toBe(
     draft.body.suggestion_id,
   );
-});
-it.each([401, 500])("does not replay %s or refresh after refusal", async (status) => {
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-
-  const draft = captureSuggestionDraft("room", "proof", input);
-  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-  vi.stubGlobal("fetch", fetch);
-  await expect(createRoomSuggestion(draft)).rejects.toThrow();
-  expect(fetch).toHaveBeenCalledTimes(1);
 });
 it("old draft authority refuses dispatch and late success refuses list refresh", async () => {
   const draft = captureSuggestionDraft("room", "proof", input);

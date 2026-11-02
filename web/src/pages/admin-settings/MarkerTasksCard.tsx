@@ -131,8 +131,8 @@ export function MarkerTasksCard() {
       />
       <TaskActionRow
         task={contributeTask}
-        fallbackName="Share intro markers"
-        fallbackDescription="Sends eligible intros detected on this server to providers with automatic sharing enabled."
+        fallbackName="Share detected markers"
+        fallbackDescription="Sends eligible intros and credits detected on this server to providers with automatic sharing enabled, and manual corrections a save could not deliver to providers that accept corrections."
         onRun={() => void run("contribute_markers")}
         pending={pendingTasks.has("contribute_markers")}
       />

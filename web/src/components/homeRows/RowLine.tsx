@@ -1,4 +1,4 @@
-import { Star } from "lucide-react";
+import { Star, type LucideIcon } from "lucide-react";
 import { ListRow, MetaDot, type ListRowProps } from "@/components/calm/ListRow";
 import { PosterPeek } from "@/components/calm/PosterPeek";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
@@ -20,6 +20,8 @@ export interface RowLineProps extends Pick<
   surface: Surface;
   pageLabel: string;
   description: DescriptionPart[];
+  /** The row's icon; its kind's group icon when absent. */
+  icon?: LucideIcon;
   /** Where the row's poster peek comes from; null keeps its icon. */
   peek: PeekRequest | null;
   switchDisabled?: boolean;
@@ -52,6 +54,7 @@ export function RowLine({
   surface,
   pageLabel,
   description,
+  icon,
   peek,
   switchDisabled,
   onShownChange,
@@ -64,17 +67,17 @@ export function RowLine({
       title={row.title}
       collapsed={!row.shown}
       collapsedText={collapsedRowText(surface, pageLabel)}
-      art={<PosterPeek icon={GROUP_ICONS[rowKindGroup(row.sectionType)]} request={peek} />}
+      art={<PosterPeek icon={icon ?? GROUP_ICONS[rowKindGroup(row.sectionType)]} request={peek} />}
       tags={
         <>
           {row.hero ? (
-            <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset max-sm:hidden">
+            <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset max-sm:hidden">
               <Star className="size-3" aria-hidden />
               Hero banner
             </span>
           ) : null}
           {row.own ? (
-            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset">
+            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-xs font-semibold ring-1 ring-inset">
               Yours
             </span>
           ) : null}
@@ -91,8 +94,12 @@ export function RowLine({
             </span>
           ) : null}
           <Description parts={description} />
-          <MetaDot />
-          {titleCount(row.itemLimit)}
+          {row.itemLimit > 0 ? (
+            <>
+              <MetaDot />
+              {titleCount(row.itemLimit)}
+            </>
+          ) : null}
         </>
       }
       shown={{

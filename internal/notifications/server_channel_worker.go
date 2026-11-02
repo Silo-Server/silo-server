@@ -206,8 +206,9 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	}
 	// A title another library already had is a second copy (a 4K library
 	// beside an HD one), not news for a server-wide post. Profile fanout
-	// keeps these events: it dedupes per episode across libraries and still
-	// reaches profiles that can see only the newer library.
+	// keeps these events so it still reaches profiles that can see only the
+	// newer library; it skips the profiles that can open an earlier copy
+	// (ReleaseRepository.EarlierEpisodeCopies).
 	if len(fresh) > 0 {
 		fresh, err = w.dropLibraryRepeats(ctx, tx, fresh)
 		if err != nil {

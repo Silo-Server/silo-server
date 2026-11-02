@@ -16,6 +16,14 @@ type RouterFeatures struct {
 	// ReportsDownloadProgress: CheckStatus fills each live target's download
 	// progress. The download refresh pass polls only such plugins.
 	ReportsDownloadProgress bool
+	// APIKeyOptional: the plugin works without an API key, so a connection
+	// with none is used like any other. Any other plugin's connection needs
+	// a key (see missingAPIKey).
+	APIKeyOptional bool
+	// BaseURLOptional: the plugin works without a base URL, so a blank one
+	// in a connection test of a saved server is tested as blank rather than
+	// as the saved address (see blankURLMeansSaved).
+	BaseURLOptional bool
 }
 
 // RouterFeatureReader reads a router capability's declared features from the
@@ -57,6 +65,19 @@ func (s *Service) routerFeatures(ctx context.Context, fc *fulfillContext, instal
 	fc.features[key] = features
 	fc.mu.Unlock()
 	return features, nil
+}
+
+// blankURLMeansSaved reports whether a blank base URL in a connection test
+// of a saved server stands for its saved address, as it does for a plugin that needs
+// one. A plugin that declares base_url_optional takes a blank address as it
+// is, so an admin can clear it. When the declaration cannot be read, a blank
+// address stands for the saved one, as before.
+func (s *Service) blankURLMeansSaved(ctx context.Context, in Integration) bool {
+	if in.InstallationID == nil || in.CapabilityID == "" {
+		return true
+	}
+	features, err := s.routerFeatures(ctx, &fulfillContext{}, *in.InstallationID, in.CapabilityID)
+	return err != nil || !features.BaseURLOptional
 }
 
 // routerSupportsSeasons reports whether the router capability takes a request

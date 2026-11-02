@@ -27,6 +27,9 @@ type QueryBuilder struct {
 	profileID   string
 	libraryIDs  []int
 	mediaScope  string
+	// titleNotNull records that the relation behind alias is media_items,
+	// whose title and sort_title are NOT NULL, so its title key never is.
+	titleNotNull bool
 	// requireUserHistoryCTE is set when an emitted clause references the
 	// per-user history aggregate (audit 2026-05-01 §3.1 Pattern B). The
 	// executor reads this flag to inject the user_last_watched CTE and
@@ -53,6 +56,14 @@ func (qb *QueryBuilder) WithUserScope(userID int, profileID string) *QueryBuilde
 
 func (qb *QueryBuilder) WithLibraryScope(libraryIDs []int) *QueryBuilder {
 	qb.libraryIDs = append([]int(nil), libraryIDs...)
+	return qb
+}
+
+// WithMediaItemsRelation declares that alias is media_items itself rather than
+// a derived relation (episodes, search unions), so sort keys built from its
+// NOT NULL columns can be marked notNull for cursor seeks.
+func (qb *QueryBuilder) WithMediaItemsRelation() *QueryBuilder {
+	qb.titleNotNull = true
 	return qb
 }
 
@@ -258,12 +269,16 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 		}
 	}
 
-	titleExpr := qb.normalizedTitleExpr()
 	plan := QuerySortPlan{}
+	if isEpisodeCatalogScope(qb.mediaScope) && (sortConfig.Field == querySortReleaseDate || sortConfig.Field == querySortLastAirDate) {
+		plan.OrderBy = qb.episodeAirDateOrderBy(dir)
+		return plan, nil
+	}
+	titleExpr := qb.normalizedTitleExpr()
 
 	switch sortConfig.Field {
 	case "title":
-		qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC"}, {expression: qb.alias + ".content_id"}}
+		qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC", notNull: qb.titleNotNull}, {expression: qb.alias + ".content_id", notNull: true}}
 		plan.OrderBy = fmt.Sprintf("ORDER BY %s %s, %s.content_id ASC", titleExpr, dir, qb.alias)
 		return plan, nil
 	case "release_date":
@@ -448,7 +463,16 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	case querySortLastAirDate:
 		return qb.buildDateRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
 	case querySortTitle:
-		return qb.buildTitleClause(rule)
+		return qb.buildTextRuleClause(qb.alias+".title", rule)
+	case ruleFieldShowTitle:
+		if !isEpisodeCatalogScope(qb.mediaScope) {
+			return "FALSE", nil //nolint:goconst // Keep the SQL predicate literal beside the scope guard.
+		}
+		match, err := qb.buildTextRuleClause("show_title.title", rule)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM media_items show_title WHERE show_title.content_id = %s.episode_series_id AND %s)", qb.alias, match), nil
 	case ruleFieldDecade:
 		return qb.buildDecadeClause(rule)
 	case querySortRuntime, querySortRatingTMDb, querySortRatingRTCritic, querySortRatingRTAudience:
@@ -1175,15 +1199,14 @@ func (qb *QueryBuilder) buildNumericRuleClause(column string, rule QueryRule) (s
 	}
 }
 
-// buildTitleClause matches the title case-insensitively, whole or in part.
+// buildTextRuleClause matches text case-insensitively, whole or in part.
 // The partial operators escape LIKE wildcards, so "100%" matches literally.
-func (qb *QueryBuilder) buildTitleClause(rule QueryRule) (string, error) {
+func (qb *QueryBuilder) buildTextRuleClause(column string, rule QueryRule) (string, error) {
 	value, ok := rule.Value.(string)
 	if !ok {
-		return "", fmt.Errorf("title requires a string value")
+		return "", fmt.Errorf("%s requires a string value", rule.Field)
 	}
 	value = strings.TrimSpace(value)
-	column := qb.alias + ".title"
 	escaped := pathscope.EscapeLike(value)
 	var clause string
 	switch rule.Op {
@@ -1200,7 +1223,7 @@ func (qb *QueryBuilder) buildTitleClause(rule QueryRule) (string, error) {
 		qb.args = append(qb.args, "%"+escaped)
 		clause = fmt.Sprintf(`BTRIM(%s) ILIKE $%d ESCAPE '\'`, column, qb.argIdx)
 	default:
-		return "", fmt.Errorf("unsupported operator %q for title", rule.Op)
+		return "", fmt.Errorf("unsupported operator %q for %s", rule.Op, rule.Field)
 	}
 	qb.argIdx++
 	if rule.Op == "is_not" || rule.Op == ruleOpNotContains {
@@ -1442,6 +1465,27 @@ func (qb *QueryBuilder) normalizedTitleExpr() string {
 		"LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))",
 		qb.alias,
 		qb.alias,
+	)
+}
+
+// episodeAirDateOrderBy orders episodes by air date, then keeps same-day
+// episodes together by series and in season/episode order, matching how a
+// show lists them. Series order on a tie is alphabetical in both directions;
+// season and episode numbers follow the requested direction.
+func (qb *QueryBuilder) episodeAirDateOrderBy(dir string) string {
+	descending := dir == "DESC"
+	qb.cursorTerms = []queryCursorTerm{
+		{expression: qb.alias + ".episode_air_date", kind: cursorKindDate, descending: descending, nullsLast: true},
+		{expression: qb.alias + ".episode_series_sort_key"},
+		{expression: qb.alias + ".episode_series_id"},
+		{expression: qb.alias + ".episode_season_number", kind: cursorKindNumber, descending: descending},
+		{expression: qb.alias + ".episode_number", kind: cursorKindNumber, descending: descending},
+		{expression: qb.alias + ".content_id"},
+	}
+	return fmt.Sprintf(
+		"ORDER BY %[1]s.episode_air_date %[2]s NULLS LAST, %[1]s.episode_series_sort_key ASC, %[1]s.episode_series_id ASC, %[1]s.episode_season_number %[2]s, %[1]s.episode_number %[2]s, %[1]s.content_id ASC",
+		qb.alias,
+		dir,
 	)
 }
 
@@ -1820,8 +1864,10 @@ func (qb *QueryBuilder) ebookPlaysSortPlan() (string, []string, []any) {
 	return "NULLIF(sort_ebook_plays.completed_play_count, 0)", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
+// lastAirDateSortPlan orders by the newest aired episode with a file, the
+// value the last_air_date rule reads (issue #2741).
 func (qb *QueryBuilder) lastAirDateSortPlan() (string, []string) {
-	expr := fmt.Sprintf("%s.last_air_date_at", qb.alias)
+	expr := queryColumnSQL(qb.alias, latestAvailableAirDateColumn)
 	return expr, nil // denormalized column — no JOIN required
 }
 

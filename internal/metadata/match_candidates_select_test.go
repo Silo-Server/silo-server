@@ -16,87 +16,409 @@ const (
 	testNFOProvider        = "nfo"
 )
 
+// matchCand builds a MatchCandidate for selection tables.
+func matchCand(title string, year int, contentType string, ids map[string]string, sources ...string) MatchCandidate {
+	return MatchCandidate{Title: title, Year: year, ContentType: contentType, ProviderIDs: ids, Sources: sources}
+}
+
+type selectInitialMatchCandidateDecisionsCase struct {
+	name             string
+	hints            *MatchHints
+	candidates       []MatchCandidate
+	priority         []string
+	reject           bool
+	wantIDs          map[string]string
+	wantTitle        string
+	wantMatchedTitle string
+	wantReason       string
+}
+
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_LocalizedPrimaryTitleMatchesEnglishAlias(t *testing.T) {
-	hints := &MatchHints{Title: localizedEnglishTitle, Year: 1999, Type: anchoredItemTypeSeries}
-	candidates := []MatchCandidate{
+var selectInitialMatchCandidateDecisionsCases = func() []selectInitialMatchCandidateDecisionsCase {
+	ids := func(kv ...string) map[string]string {
+		out := map[string]string{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			out[kv[i]] = kv[i+1]
+		}
+		return out
+	}
+	movie := func(title string, year int) *MatchHints {
+		return &MatchHints{Title: title, Year: year, Type: "movie"}
+	}
+	series := func(title string, year int) *MatchHints {
+		return &MatchHints{Title: title, Year: year, Type: "series"}
+	}
+	const ufcTitle = "UFC 4: Revenge of the Warriors"
+	ufc := func(name string, year, detail int, ids map[string]string, sources ...string) MatchCandidate {
+		c := matchCand(name, year, "movie", ids, sources...)
+		c.DetailScore = detail
+		return c
+	}
+	adventureConsensus := matchCand(adventureTimeTestTitle, 2010, anchoredItemTypeSeries,
+		ids(testTMDBProvider, "15260", testTVDBProvider, "152831", testIMDBProvider, "tt1305826"), testTVDBProvider, testTMDBProvider)
+	baseConsensus := matchCand(adventureTimeTestTitle, 2010, "series", ids("tmdb", "15260", "tvdb", "152831"), "tmdb", "tvdb")
+	baseCompetitor := matchCand(adventureTimeTestTitle, 1967, "series", ids("tmdb", "245745"), "tmdb")
+	daysWild := []MatchCandidate{
+		matchCand("100 Days Wild", 2020, "series", ids("tvdb", "386908"), "tvdb"),
+		matchCand("100 Days Wild", 2020, "series", ids("tmdb", "109476"), "tmdb"),
+		matchCand("Some Other Show", 2026, "series", ids("tvdb", "476741"), "tvdb"),
+		matchCand("Live to 100", 2023, "series", ids("tvdb", "437829"), "tvdb"),
+	}
+
+	return []selectInitialMatchCandidateDecisionsCase{
 		{
-			Title:         localizedOriginalTitle,
-			OriginalTitle: localizedOriginalTitle,
-			TitleAliases: []TitleAlias{
-				{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind, Provider: testTVDBProvider},
+			name:       "local content id does not force trusted-ID matching",
+			hints:      &MatchHints{ContentID: "local-skeleton-id", Title: "AEW Worlds End", Year: 2023, Type: "movie"},
+			candidates: []MatchCandidate{matchCand("AEW Worlds End", 2023, "movie", ids("tmdb", "1217341"), "tmdb")},
+		},
+		{
+			name:  "trusted id can win below noisy top result",
+			hints: &MatchHints{Title: "10 Tricks", Year: 2022, Type: "movie", ImdbID: "tt0473100"},
+			candidates: []MatchCandidate{
+				matchCand("10 Tricks", 2022, "movie", ids("imdb", "tt9999999", "tmdb", "1"), "tmdb", "tvdb"),
+				matchCand("Ten Tricks", 2021, "movie", ids("imdb", "tt0473100", "tmdb", "2"), "tmdb"),
 			},
-			Year:        1999,
-			ContentType: anchoredItemTypeSeries,
-			Sources:     []string{testTVDBProvider},
-			ProviderIDs: map[string]string{testTVDBProvider: localizedTVDBID, testTMDBProvider: localizedTMDBID},
-		},
-	}
-
-	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
-	if !ok || got == nil {
-		t.Fatal("localized primary title with an exact English alias was not matched")
-	}
-	if got.MatchedTitle != localizedEnglishTitle {
-		t.Fatalf("MatchedTitle = %q, want English alias", got.MatchedTitle)
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_MissingYearTMDBTVDBTitleConsensus(t *testing.T) {
-	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
-	consensus := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        2010,
-		ContentType: anchoredItemTypeSeries,
-		Sources:     []string{testTVDBProvider, testTMDBProvider},
-		ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831", testIMDBProvider: "tt1305826"},
-	}
-	competitor := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        1967,
-		ContentType: "series",
-		Sources:     []string{"tmdb"},
-		ProviderIDs: map[string]string{"tmdb": "245745"},
-	}
-
-	for _, candidates := range [][]MatchCandidate{{consensus, competitor}, {competitor, consensus}} {
-		got, ok := selectInitialMatchCandidate(hints, candidates, nil)
-		if !ok || got == nil || got.ProviderIDs["tvdb"] != "152831" {
-			t.Fatalf("ordered candidates %+v returned ok=%v candidate=%+v", candidates, ok, got)
-		}
-		if !slices.Contains(got.MatchReasons, "tmdb_tvdb_title_consensus") {
-			t.Fatalf("MatchReasons = %v, want tmdb_tvdb_title_consensus", got.MatchReasons)
-		}
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_MissingYearConsensusStripsCandidateYearDecoration(t *testing.T) {
-	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
-	candidates := []MatchCandidate{
-		{
-			Title:       adventureTimeTestTitle + " (2010)",
-			Year:        2010,
-			ContentType: anchoredItemTypeSeries,
-			Sources:     []string{testTMDBProvider, testTVDBProvider},
-			ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831"},
+			wantIDs: ids("imdb", "tt0473100"),
 		},
 		{
-			Title:       adventureTimeTestTitle,
-			Year:        1967,
-			ContentType: anchoredItemTypeSeries,
-			Sources:     []string{testTMDBProvider},
-			ProviderIDs: map[string]string{testTMDBProvider: "245745"},
+			// Sole distinct candidate, exact title, year off by 2: scores below the
+			// single-candidate >=70 gate but matches through title corroboration.
+			name:       "sole exact title year off by two matches",
+			hints:      movie("Stasi FC", 2023),
+			candidates: []MatchCandidate{matchCand("Stasi FC", 2025, "movie", ids("tmdb", "111"), "tmdb")},
+			wantIDs:    ids("tmdb", "111"),
 		},
+		{
+			// A 3-year gap exceeds the ±2 bound and stays subject to the >=70 gate.
+			name:       "sole exact title year off by three rejected",
+			hints:      movie("Stasi FC", 2023),
+			candidates: []MatchCandidate{matchCand("Stasi FC", 2026, "movie", ids("tmdb", "111"), "tmdb")},
+			reject:     true,
+		},
+		{
+			// Source agreement may replace a missing local year; it must not
+			// override a known conflicting one.
+			name:  "cross-provider agreement does not override year conflict",
+			hints: series("The Piano Forest", 2007),
+			candidates: []MatchCandidate{{
+				Title:        "Five Fingers",
+				TitleAliases: []TitleAlias{{Title: "Piano Forest", Language: "en", Kind: "alternate"}},
+				Year:         2012,
+				ContentType:  "series",
+				ProviderIDs:  ids("imdb", "tt2242048", "tvdb", "261129"),
+				Sources:      []string{"tmdb", "tvdb"},
+			}},
+			reject: true,
+		},
+		{
+			// Below the 55 title-similarity floor: title corroboration must not
+			// rescue a low-similarity title just because the year matches.
+			name:       "sole different title exact year still floored",
+			hints:      movie("Hotel Transylvania Puppy!", 2017),
+			candidates: []MatchCandidate{matchCand("Puppy!", 2017, "movie", ids("tmdb", "222"), "tmdb")},
+			reject:     true,
+		},
+		{name: "punctuation: colon variant", hints: movie("Anchorman The Legend of Ron Burgundy", 2004),
+			candidates: []MatchCandidate{matchCand("Anchorman: The Legend of Ron Burgundy", 2004, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "Anchorman: The Legend of Ron Burgundy"},
+		{name: "punctuation: apostrophe and question mark variant", hints: movie("Whats Your Number", 2011),
+			candidates: []MatchCandidate{matchCand("What's Your Number?", 2011, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "What's Your Number?"},
+		{name: "punctuation: ampersand variant", hints: movie("Tromeo and Juliet", 1996),
+			candidates: []MatchCandidate{matchCand("Tromeo & Juliet", 1996, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "Tromeo & Juliet"},
+		{name: "punctuation: hyphen variant", hints: movie("Ant Man and the Wasp", 2018),
+			candidates: []MatchCandidate{matchCand("Ant-Man and the Wasp", 2018, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "Ant-Man and the Wasp"},
+		{name: "punctuation: superscript digit variant", hints: movie("Alien 3", 1992),
+			candidates: []MatchCandidate{matchCand("Alien³", 1992, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "Alien³"},
+		{name: "punctuation: comparison safe edition suffix variant", hints: movie("Zack Snyders Justice League Justice Is Gray", 2021),
+			candidates: []MatchCandidate{matchCand("Zack Snyder's Justice League", 2021, "movie", ids("tmdb", "123"), "tmdb")},
+			wantTitle:  "Zack Snyder's Justice League"},
+		{
+			name:  "provider title with repeated year",
+			hints: movie("AEW Worlds End", 2023),
+			candidates: []MatchCandidate{
+				matchCand("AEW Worlds End 2023", 2023, "movie", ids("tmdb", "1217341"), "tmdb"),
+				matchCand("AEW Worlds End 2023: Zero Hour", 2023, "movie", ids("tmdb", "1217342"), "tmdb"),
+			},
+			wantTitle: "AEW Worlds End 2023",
+		},
+		{
+			name:  "detail score breaks duplicate provider tie",
+			hints: movie("UFC 4 Revenge of the Warriors", 1994),
+			candidates: []MatchCandidate{
+				ufc(ufcTitle, 1994, 18, ids("tmdb", "1558410"), "tmdb"),
+				ufc(ufcTitle, 1994, 46, ids("tmdb", "17508", "imdb", "tt0487980"), "tmdb"),
+			},
+			wantIDs: ids("tmdb", "17508"),
+		},
+		{name: "detail score: duplicate tie without clear detail gap", hints: movie("UFC 4 Revenge of the Warriors", 1994), reject: true,
+			candidates: []MatchCandidate{
+				ufc(ufcTitle, 1994, 28, ids("tmdb", "1558410"), "tmdb"),
+				ufc(ufcTitle, 1994, 34, ids("tmdb", "17508"), "tmdb"),
+			}},
+		{name: "detail score: richer different-title candidate", hints: movie("UFC 4 Revenge of the Warriors", 1994), reject: true,
+			candidates: []MatchCandidate{
+				ufc(ufcTitle+" Event", 1994, 22, ids("tmdb", "17508"), "tmdb"),
+				ufc("UFC 4 Revenge of the Warriors Bonus", 1994, 80, ids("tmdb", "999999", "imdb", "tt9999999"), "imdb", "tmdb"),
+			}},
+		{name: "detail score: duplicates without years", hints: movie("UFC 4 Revenge of the Warriors", 1994), reject: true,
+			candidates: []MatchCandidate{
+				ufc(ufcTitle, 0, 18, ids("tmdb", "1558410"), "tmdb"),
+				ufc(ufcTitle, 0, 46, ids("tmdb", "17508", "imdb", "tt0487980"), "tmdb"),
+			}},
+		{name: "detail score: hint-incompatible type", hints: series("UFC 4 Revenge of the Warriors", 1994), reject: true,
+			candidates: []MatchCandidate{
+				ufc(ufcTitle, 1994, 18, ids("tmdb", "1558410"), "tmdb"),
+				ufc(ufcTitle, 1994, 46, ids("tmdb", "17508", "imdb", "tt0487980"), "tmdb"),
+			}},
+		{
+			name:  "provider order tie requires exact title and year",
+			hints: series("100 Days Wild", 2020),
+			candidates: []MatchCandidate{
+				matchCand("100 Days Wild", 2020, "series", ids("tvdb", "383893"), "tvdb"),
+				matchCand("Step Brothers", 2020, "series", ids("tmdb", "109792", "imdb", "tt1234567"), "imdb", "metadb", "tmdb", "xattr"),
+			},
+			reject: true,
+		},
+		{
+			name:  "localized primary title matches English alias",
+			hints: &MatchHints{Title: localizedEnglishTitle, Year: 1999, Type: anchoredItemTypeSeries},
+			candidates: []MatchCandidate{{
+				Title:         localizedOriginalTitle,
+				OriginalTitle: localizedOriginalTitle,
+				TitleAliases: []TitleAlias{
+					{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind, Provider: testTVDBProvider},
+				},
+				Year:        1999,
+				ContentType: anchoredItemTypeSeries,
+				Sources:     []string{testTVDBProvider},
+				ProviderIDs: ids(testTVDBProvider, localizedTVDBID, testTMDBProvider, localizedTMDBID),
+			}},
+			wantMatchedTitle: localizedEnglishTitle,
+		},
+		{
+			name:       "missing year tmdb+tvdb title consensus, consensus first",
+			hints:      &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries},
+			candidates: []MatchCandidate{adventureConsensus, baseCompetitor},
+			wantIDs:    ids("tvdb", "152831"),
+			wantReason: "tmdb_tvdb_title_consensus",
+		},
+		{
+			name:       "missing year tmdb+tvdb title consensus, competitor first",
+			hints:      &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries},
+			candidates: []MatchCandidate{baseCompetitor, adventureConsensus},
+			wantIDs:    ids("tvdb", "152831"),
+			wantReason: "tmdb_tvdb_title_consensus",
+		},
+		{
+			name:  "missing year consensus strips candidate year decoration",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries},
+			candidates: []MatchCandidate{
+				matchCand(adventureTimeTestTitle+" (2010)", 2010, anchoredItemTypeSeries, ids(testTMDBProvider, "15260", testTVDBProvider, "152831"), testTMDBProvider, testTVDBProvider),
+				matchCand(adventureTimeTestTitle, 1967, anchoredItemTypeSeries, ids(testTMDBProvider, "245745"), testTMDBProvider),
+			},
+			wantIDs:    ids(testTVDBProvider, "152831"),
+			wantReason: "tmdb_tvdb_title_consensus",
+		},
+		{name: "missing year consensus control: movie content type", reject: true,
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeMovie},
+			candidates: []MatchCandidate{
+				matchCand(adventureTimeTestTitle, 2010, anchoredItemTypeMovie, ids(testTMDBProvider, "1", testTVDBProvider, "2"), testTMDBProvider, testTVDBProvider),
+				matchCand(adventureTimeTestTitle, 1967, anchoredItemTypeMovie, ids(testTMDBProvider, "3"), testTMDBProvider),
+			}},
+		{name: "missing year consensus control: one remote provider even with cross references", reject: true,
+			hints: series(adventureTimeTestTitle, 0),
+			candidates: []MatchCandidate{
+				matchCand(adventureTimeTestTitle, 2010, "series", ids("tmdb", "1", "tvdb", "2"), "tmdb"),
+				baseCompetitor,
+			}},
+		{name: "missing year consensus control: two corroborated identities", reject: true,
+			hints: series(adventureTimeTestTitle, 0),
+			candidates: []MatchCandidate{
+				baseConsensus,
+				matchCand(adventureTimeTestTitle, 1967, "series", ids("tmdb", "3", "tvdb", "4"), "tmdb", "tvdb"),
+			}},
+		{name: "missing year consensus control: coherent title is not exact", reject: true,
+			hints: series("The Real History of the World War", 0),
+			candidates: []MatchCandidate{
+				matchCand("The Real History of the World War Europe", 2010, "series", ids("tmdb", "1", "tvdb", "2"), "tmdb", "tvdb"),
+				matchCand("The Real History of the World War Pacific", 2010, "series", ids("tmdb", "3"), "tmdb"),
+			}},
+		{name: "missing year consensus control: missing retained tvdb id", reject: true,
+			hints: series(adventureTimeTestTitle, 0),
+			candidates: []MatchCandidate{
+				matchCand(adventureTimeTestTitle, 2010, "series", ids("tmdb", "1"), "tmdb", "tvdb"),
+				baseCompetitor,
+			}},
+		{name: "missing year consensus control: quarantined tvdb id", reject: true,
+			hints: series(adventureTimeTestTitle, 0),
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: ids("tmdb", "1", "tvdb", "2"), ConflictingProviderIDKeys: []string{"tvdb"}},
+				baseCompetitor,
+			}},
+		{name: "missing year consensus control: nfo is not a second provider", reject: true,
+			hints: series(adventureTimeTestTitle, 0),
+			candidates: []MatchCandidate{
+				matchCand(adventureTimeTestTitle, 2010, anchoredItemTypeSeries, ids(testTMDBProvider, "1", testTVDBProvider, "2"), testTMDBProvider, testNFOProvider),
+				baseCompetitor,
+			}},
+		{
+			// Exact title, matching year, no sources, no provider IDs: 45+20 = 65 (<70).
+			name:       "lone result year match below 70",
+			hints:      movie("1201", 1993),
+			candidates: []MatchCandidate{{Title: "1201", Year: 1993, ContentType: "movie"}},
+			wantTitle:  "1201",
+		},
+		{
+			// Exact title, year mismatch, one source: 45+12 = 57; year does not corroborate.
+			name:       "lone result year mismatch still rejected",
+			hints:      movie("1201", 1993),
+			candidates: []MatchCandidate{{Title: "1201", Year: 1990, ContentType: "movie", Sources: []string{"tmdb"}}},
+			reject:     true,
+		},
+		{
+			// Multi-source evidence clears the 55 floor, but the title is not
+			// coherent with the scanner hint.
+			name:       "corroboration requires hint title coherence",
+			hints:      movie("Hotel Transylvania Puppy!", 2017),
+			candidates: []MatchCandidate{matchCand("Puppy!", 2017, "movie", ids("tmdb", "222"), "tmdb", "tvdb", "imdb")},
+			priority:   []string{"tmdb", "tvdb", "imdb"},
+			reject:     true,
+		},
+		{
+			// Each candidate is coherent with the hint (Jaccard 7/8) and scores 78,
+			// but they differ from each other (Jaccard 7/9), so
+			// candidatesAreSingleDistinctShow is false and the tie-break returns nil.
+			name:  "two different shows unchanged",
+			hints: series("The Real History of the World War", 2010),
+			candidates: []MatchCandidate{
+				matchCand("The Real History of the World War Europe", 2010, "series", ids("tvdb", "1"), "tvdb", "tmdb"),
+				matchCand("The Real History of the World War Pacific", 2010, "series", ids("tvdb", "2"), "tvdb", "tmdb"),
+			},
+			reject: true,
+		},
+		{
+			// Same title and year but conflicting tmdb IDs: two distinct shows.
+			name:  "conflicting provider ids not accepted",
+			hints: movie("Alpha", 2022),
+			candidates: []MatchCandidate{
+				matchCand("Alpha", 2022, "movie", ids("tmdb", "111")),
+				matchCand("Alpha", 2022, "movie", ids("tmdb", "222")),
+			},
+			reject: true,
+		},
+		{
+			// Multi-source agreement substitutes for the missing hint year.
+			name:  "cross source no hint year accepted by multi-source",
+			hints: series("100 Deeds for Eddie McDowd", 0),
+			candidates: []MatchCandidate{
+				matchCand("100 Deeds for Eddie McDowd", 1999, "series", ids("tvdb", "72450"), "tvdb"),
+				matchCand("100 Deeds for Eddie McDowd", 1999, "series", ids("tmdb", "6518"), "tmdb"),
+			},
+			priority: []string{"tvdb", "tmdb"},
+			wantIDs:  ids("tvdb", "72450"),
+		},
+		{
+			// Year equality between two 0-years is meaningless.
+			name:  "cross source no candidate year not accepted",
+			hints: series("Untitled Show", 0),
+			candidates: []MatchCandidate{
+				matchCand("Untitled Show", 0, "series", ids("tvdb", "111"), "tvdb"),
+				matchCand("Untitled Show", 0, "series", ids("tmdb", "222"), "tmdb"),
+			},
+			priority: []string{"tvdb", "tmdb"},
+			reject:   true,
+		},
+		{
+			// No year corroboration and only one source: the >=70 gate applies.
+			name:       "lone no-year single-source not accepted",
+			hints:      series("Some Obscure Show", 0),
+			candidates: []MatchCandidate{matchCand("Some Obscure Show", 1999, "series", ids("tvdb", "999"), "tvdb")},
+			priority:   []string{"tvdb"},
+			reject:     true,
+		},
+		{
+			// An ID-less candidate (e.g. the NFO title-only search candidate) must
+			// never win the proven-single-show tie-break on chain priority when an
+			// ID-bearing member exists, and the winner adopts the union of the
+			// group's provider IDs. nfo sits first in the chain priority.
+			name:  "ID-less candidate excluded when an ID-bearing one exists",
+			hints: movie("Inception", 2010),
+			candidates: []MatchCandidate{
+				matchCand("Inception", 2010, "movie", ids(), "nfo"),
+				matchCand("Inception", 2010, "movie", ids("tmdb", "27205"), "tmdb"),
+				matchCand("Inception", 2010, "movie", ids("tvdb", "83898"), "tvdb"),
+			},
+			priority: []string{"nfo", "tmdb", "tvdb"},
+			wantIDs:  ids("tmdb", "27205", "tvdb", "83898"),
+		},
+		{
+			// A local file echoing a title is not a second provider agreeing, so
+			// it cannot stand in for a missing hint year.
+			name:  "nfo source does not corroborate",
+			hints: movie("Some Show", 0),
+			candidates: []MatchCandidate{
+				matchCand("Some Show", 2015, "movie", ids("tmdb", "1"), "tmdb"),
+				matchCand("Some Show", 2015, "movie", ids(), "nfo"),
+			},
+			reject: true,
+		},
+		{
+			name:  "remote multi-source group still corroborates",
+			hints: movie("Some Show", 0),
+			candidates: []MatchCandidate{
+				matchCand("Some Show", 2015, "movie", ids("tmdb", "1"), "tmdb"),
+				matchCand("Some Show", 2015, "movie", ids("tvdb", "2"), "tvdb"),
+			},
+		},
+		// Two correct candidates score 83 each; the noise rows score 18, outside the
+		// 15-point tie window. pickByProviderPriority follows the chain order.
+		{name: "cross source tie resolved by provider priority: tvdb first", hints: series("100 Days Wild", 2020),
+			candidates: daysWild, priority: []string{"tvdb", "tmdb"}, wantIDs: ids("tvdb", "386908")},
+		{name: "cross source tie resolved by provider priority: tmdb first", hints: series("100 Days Wild", 2020),
+			candidates: daysWild, priority: []string{"tmdb", "tvdb"}, wantIDs: ids("tmdb", "109476")},
+		{name: "cross source tie resolved by provider priority: nil priority still accepts", hints: series("100 Days Wild", 2020),
+			candidates: daysWild},
 	}
+}()
 
-	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
-	if !ok || got == nil || got.ProviderIDs[testTVDBProvider] != "152831" {
-		t.Fatalf("decorated corroborated candidate lost to competitor: ok=%v candidate=%+v", ok, got)
-	}
-	if !slices.Contains(got.MatchReasons, "tmdb_tvdb_title_consensus") {
-		t.Fatalf("MatchReasons = %v, want tmdb_tvdb_title_consensus", got.MatchReasons)
+// TestSelectInitialMatchCandidate_Decisions holds the selectInitialMatchCandidate
+// cases that differ only in hints, candidates and provider priority. A reject
+// row must return no winner; an accept row must return a winner that carries
+// every wanted provider ID, title, matched title and reason.
+func TestSelectInitialMatchCandidate_Decisions(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range selectInitialMatchCandidateDecisionsCases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := selectInitialMatchCandidate(tt.hints, tt.candidates, tt.priority)
+			if tt.reject {
+				if ok || got != nil {
+					t.Fatalf("expected no match, got ok=%v winner=%+v", ok, got)
+				}
+				return
+			}
+			if !ok || got == nil {
+				t.Fatalf("expected a match, got ok=%v winner=%+v", ok, got)
+			}
+			for key, want := range tt.wantIDs {
+				if got.ProviderIDs[key] != want {
+					t.Fatalf("winner %s id = %q, want %q (winner %+v)", key, got.ProviderIDs[key], want, got)
+				}
+			}
+			if tt.wantTitle != "" && got.Title != tt.wantTitle {
+				t.Fatalf("winner.Title = %q, want %q", got.Title, tt.wantTitle)
+			}
+			if tt.wantMatchedTitle != "" && got.MatchedTitle != tt.wantMatchedTitle {
+				t.Fatalf("MatchedTitle = %q, want %q", got.MatchedTitle, tt.wantMatchedTitle)
+			}
+			if tt.wantReason != "" && !slices.Contains(got.MatchReasons, tt.wantReason) {
+				t.Fatalf("MatchReasons = %v, want %s", got.MatchReasons, tt.wantReason)
+			}
+		})
 	}
 }
 
@@ -126,32 +448,6 @@ func TestSelectInitialMatchCandidate_MissingYearConsensusIsOrderIndependentAtEqu
 		if !ok || got == nil || got.ProviderIDs[testTVDBProvider] != "152831" {
 			t.Fatalf("ordered candidates %+v returned ok=%v candidate=%+v", candidates, ok, got)
 		}
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_MissingYearConsensusBeatsSameYearSingleProvider(t *testing.T) {
-	hints := &MatchHints{Title: exampleSeriesTestTitle, Type: "series"}
-	candidates := []MatchCandidate{
-		{
-			Title:       exampleSeriesTestTitle,
-			Year:        2021,
-			ContentType: "series",
-			Sources:     []string{"tmdb", "tvdb"},
-			ProviderIDs: map[string]string{"tmdb": "101", "tvdb": "201"},
-		},
-		{
-			Title:       exampleSeriesTestTitle,
-			Year:        2021,
-			ContentType: "series",
-			Sources:     []string{"tmdb"},
-			ProviderIDs: map[string]string{"tmdb": "102"},
-		},
-	}
-
-	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
-	if !ok || got == nil || got.ProviderIDs["tvdb"] != "201" {
-		t.Fatalf("same-year single-provider competitor displaced consensus: ok=%v candidate=%+v", ok, got)
 	}
 }
 
@@ -200,95 +496,6 @@ func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonical
 }
 
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.
-func TestSelectInitialMatchCandidate_MissingYearConsensusNegativeControls(t *testing.T) {
-	baseConsensus := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        2010,
-		ContentType: "series",
-		Sources:     []string{"tmdb", "tvdb"},
-		ProviderIDs: map[string]string{"tmdb": "15260", "tvdb": "152831"},
-	}
-	baseCompetitor := MatchCandidate{
-		Title:       adventureTimeTestTitle,
-		Year:        1967,
-		ContentType: "series",
-		Sources:     []string{"tmdb"},
-		ProviderIDs: map[string]string{"tmdb": "245745"},
-	}
-
-	tests := []struct {
-		name       string
-		hints      *MatchHints
-		candidates []MatchCandidate
-	}{
-		{
-			name:  "movie content type",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeMovie},
-			candidates: []MatchCandidate{
-				{Title: adventureTimeTestTitle, Year: 2010, ContentType: anchoredItemTypeMovie, Sources: []string{testTMDBProvider, testTVDBProvider}, ProviderIDs: map[string]string{testTMDBProvider: "1", testTVDBProvider: "2"}},
-				{Title: adventureTimeTestTitle, Year: 1967, ContentType: anchoredItemTypeMovie, Sources: []string{testTMDBProvider}, ProviderIDs: map[string]string{testTMDBProvider: "3"}},
-			},
-		},
-		{
-			name:  "one remote provider even with cross references",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			candidates: []MatchCandidate{
-				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}},
-				baseCompetitor,
-			},
-		},
-		{
-			name:  "two corroborated identities",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			candidates: []MatchCandidate{
-				baseConsensus,
-				{Title: adventureTimeTestTitle, Year: 1967, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "3", "tvdb": "4"}},
-			},
-		},
-		{
-			name:  "coherent title is not exact",
-			hints: &MatchHints{Title: "The Real History of the World War", Type: "series"},
-			candidates: []MatchCandidate{
-				{Title: "The Real History of the World War Europe", Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}},
-				{Title: "The Real History of the World War Pacific", Year: 2010, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "3"}},
-			},
-		},
-		{
-			name:  "missing retained tvdb id",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			candidates: []MatchCandidate{
-				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1"}},
-				baseCompetitor,
-			},
-		},
-		{
-			name:  "quarantined tvdb id",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			candidates: []MatchCandidate{
-				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}, ConflictingProviderIDKeys: []string{"tvdb"}},
-				baseCompetitor,
-			},
-		},
-		{
-			name:  "nfo is not a second provider",
-			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
-			candidates: []MatchCandidate{
-				{Title: adventureTimeTestTitle, Year: 2010, ContentType: anchoredItemTypeSeries, Sources: []string{testTMDBProvider, testNFOProvider}, ProviderIDs: map[string]string{testTMDBProvider: "1", testTVDBProvider: "2"}},
-				baseCompetitor,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got, ok := selectInitialMatchCandidate(tt.hints, tt.candidates, nil); ok {
-				t.Fatalf("negative control matched candidate %+v", got)
-			}
-		})
-	}
-}
-
-//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
 func TestTMDBTVDBTitleConsensusWinner_NegativeControls(t *testing.T) {
 	consensus := MatchCandidate{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "2", "tvdb": "3"}}
 	competitor := MatchCandidate{Title: adventureTimeTestTitle, Year: 1967, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1"}}
@@ -321,160 +528,5 @@ func TestTMDBTVDBTitleConsensusWinner_NegativeControls(t *testing.T) {
 				t.Fatalf("negative control returned candidate %+v", got)
 			}
 		})
-	}
-}
-
-func TestSelectInitialMatchCandidate_LoneResultYearMatchBelow70(t *testing.T) {
-	// Exact title, matching year, NO sources, NO provider IDs => score 45+20 = 65 (<70).
-	// Old behavior rejected this (single candidate <70); the new rule accepts it.
-	hints := &MatchHints{Title: "1201", Year: 1993, Type: "movie"}
-	cands := []MatchCandidate{{Title: "1201", Year: 1993, ContentType: "movie"}}
-	got, ok := selectInitialMatchCandidate(hints, cands, nil)
-	if !ok || got == nil || got.Title != "1201" {
-		t.Fatalf("expected lone year-matching result to be accepted, got ok=%v cand=%+v", ok, got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_LoneResultYearMismatchStillRejected(t *testing.T) {
-	// Exact title but year mismatch, one source => score 45+12 = 57 (in [55,70), no year bonus).
-	// Year does NOT corroborate, so the new rule must NOT fire; single candidate <70 => reject.
-	hints := &MatchHints{Title: "1201", Year: 1993, Type: "movie"}
-	cands := []MatchCandidate{{Title: "1201", Year: 1990, ContentType: "movie", Sources: []string{"tmdb"}}}
-	if got, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
-		t.Fatalf("expected year-mismatch lone result to be rejected, got cand=%+v", got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_CorroborationRequiresHintTitleCoherence(t *testing.T) {
-	// Same-year, multi-source candidate scores above the 55 floor via provider
-	// evidence, but the title is not coherent with the scanner hint. The lone
-	// result rule must not rescue it just because the year/source evidence is
-	// strong enough to reach the corroboration branch.
-	hints := &MatchHints{Title: "Hotel Transylvania Puppy!", Year: 2017, Type: "movie"}
-	cands := []MatchCandidate{
-		{
-			Title:       "Puppy!",
-			Year:        2017,
-			ContentType: "movie",
-			Sources:     []string{"tmdb", "tvdb", "imdb"},
-			ProviderIDs: map[string]string{"tmdb": "222"},
-		},
-	}
-	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tmdb", "tvdb", "imdb"}); ok {
-		t.Fatalf("unrelated same-year candidate must not be auto-accepted, got %+v", got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_TwoDifferentShowsUnchanged(t *testing.T) {
-	// Two genuinely different shows that BOTH score >=55 (so the new rule IS evaluated,
-	// not short-circuited by the <55 floor): candidatesAreSingleDistinctShow must return
-	// false (titles differ), so the new rule does NOT fire and behavior falls through to
-	// the existing tie-break (which returns nil here because DetailScore is 0). Guards
-	// against over-accepting distinct results.
-	//
-	// Each candidate shares 7 tokens with the hint plus one distinct trailing word, so
-	// each is coherent with the hint (Jaccard 7/8 = 0.875 >= 0.85 => sim 0.8 => +28) and
-	// scores 28 + 20(year) + 24(2 sources) + 5 + 1(1 id) = 78 (>=55, reaches the guard).
-	// The two candidates differ from each other (Jaccard 7/9 = 0.78 < 0.85 => sim 0), so
-	// candidatesAreSingleDistinctShow returns false. Equal scores => gap 0 < 15 => tie-break.
-	hints := &MatchHints{Title: "The Real History of the World War", Year: 2010, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "The Real History of the World War Europe", Year: 2010, ContentType: "series", Sources: []string{"tvdb", "tmdb"}, ProviderIDs: map[string]string{"tvdb": "1"}},
-		{Title: "The Real History of the World War Pacific", Year: 2010, ContentType: "series", Sources: []string{"tvdb", "tmdb"}, ProviderIDs: map[string]string{"tvdb": "2"}},
-	}
-	if _, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
-		t.Fatalf("two distinct shows must not be auto-accepted by the lone-result rule")
-	}
-}
-
-func TestSelectInitialMatchCandidate_ConflictingProviderIDsNotAccepted(t *testing.T) {
-	// Same title+year but different tmdb IDs => two distinct shows; must NOT auto-accept.
-	// Each scores 65 (45 exact title + 20 year) + 5 + 1(richness) = ... actually
-	// 45+20+5+1 = 71 (no sources, one provider ID), well above the 55 floor, so the new
-	// branch is reached. candidatesAreSingleDistinctShow must return false because the two
-	// candidates carry the same canonical provider key (tmdb) with conflicting values.
-	hints := &MatchHints{Title: "Alpha", Year: 2022, Type: "movie"}
-	cands := []MatchCandidate{
-		{Title: "Alpha", Year: 2022, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "111"}},
-		{Title: "Alpha", Year: 2022, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "222"}},
-	}
-	if _, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
-		t.Fatal("conflicting tmdb IDs must not be auto-accepted")
-	}
-}
-
-func TestSelectInitialMatchCandidate_CrossSourceNoHintYearAcceptedByMultiSource(t *testing.T) {
-	// Hint has NO year (0). Both providers return the same show (year 1999), tied.
-	// Multi-source agreement substitutes for the missing hint year.
-	hints := &MatchHints{Title: "100 Deeds for Eddie McDowd", Year: 0, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "100 Deeds for Eddie McDowd", Year: 1999, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "72450"}},
-		{Title: "100 Deeds for Eddie McDowd", Year: 1999, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "6518"}},
-	}
-	got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"})
-	if !ok || got == nil || got.ProviderIDs["tvdb"] != "72450" {
-		t.Fatalf("expected tvdb winner via multi-source corroboration, got ok=%v cand=%+v", ok, got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_CrossSourceNoCandidateYearNotAccepted(t *testing.T) {
-	// Both providers return the same title but neither carries a release year.
-	// Year-equality between two 0-years is meaningless, so
-	// candidatesAreSingleDistinctShow must reject and the multi-source
-	// corroboration arm must NOT fire — otherwise two no-year cross-source
-	// results would auto-accept, over-accepting ambiguous matches.
-	hints := &MatchHints{Title: "Untitled Show", Year: 0, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "Untitled Show", Year: 0, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "111"}},
-		{Title: "Untitled Show", Year: 0, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "222"}},
-	}
-	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"}); ok {
-		t.Fatalf("no-year cross-source candidates must not be auto-accepted, got %+v", got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_LoneNoYearSingleSourceNotAccepted(t *testing.T) {
-	// Single candidate, no hint year, single source: no year corroboration AND only
-	// one source -> must NOT auto-accept (falls to the single-candidate >=70 gate).
-	hints := &MatchHints{Title: "Some Obscure Show", Year: 0, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "Some Obscure Show", Year: 1999, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "999"}},
-	}
-	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb"}); ok {
-		t.Fatalf("lone no-year single-source result must not be auto-accepted, got %+v", got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_CrossSourceTieResolvedByProviderPriority(t *testing.T) {
-	// "100 Days Wild" (2020, series, no shared IDs): TVDB and TMDB each return the correct
-	// show (score 83 each: 45 exact title + 20 year + 12 source + 5 has IDs + 1 richness).
-	// Two noise candidates (unrelated title/year) score 18 — well outside the 15-pt tie
-	// window of 83, so topTieGroup contains only the two correct candidates.
-	// candidatesAreSingleDistinctShow passes (same title/year, no conflicting IDs),
-	// and pickByProviderPriority selects the winner by the library's chain order.
-	hints := &MatchHints{Title: "100 Days Wild", Year: 2020, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "100 Days Wild", Year: 2020, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "386908"}},
-		{Title: "100 Days Wild", Year: 2020, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "109476"}},
-		{Title: "Some Other Show", Year: 2026, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "476741"}},
-		{Title: "Live to 100", Year: 2023, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "437829"}},
-	}
-
-	// tvdb ranked first in provider chain -> tvdb candidate wins
-	got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"})
-	if !ok || got == nil || got.ProviderIDs["tvdb"] != "386908" {
-		t.Fatalf("expected tvdb winner (386908), got ok=%v cand=%+v", ok, got)
-	}
-
-	// tmdb ranked first in provider chain -> tmdb candidate wins
-	got, ok = selectInitialMatchCandidate(hints, cands, []string{"tmdb", "tvdb"})
-	if !ok || got == nil || got.ProviderIDs["tmdb"] != "109476" {
-		t.Fatalf("expected tmdb winner (109476), got ok=%v cand=%+v", ok, got)
-	}
-
-	// nil priority -> still accepts (fallback to top-scored, i.e. first in sorted order)
-	got, ok = selectInitialMatchCandidate(hints, cands, nil)
-	if !ok || got == nil {
-		t.Fatalf("expected nil-priority to still accept a match, got ok=%v cand=%+v", ok, got)
 	}
 }

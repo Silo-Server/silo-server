@@ -33,6 +33,7 @@ import { DownloadsWidget } from "./widgets/DownloadsWidget";
 import { ScanActivityWidget } from "./widgets/ScanActivityWidget";
 import { RecentErrorsWidget } from "./widgets/RecentErrorsWidget";
 import { RecentActivityWidget } from "./widgets/RecentActivityWidget";
+import { ApiClientsWidget } from "./widgets/ApiClientsWidget";
 
 /**
  * Sampled charts read `dashboard_metric_samples`, which the sampler keeps for a
@@ -270,9 +271,9 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     minSpan: 6,
     maxSpan: 12,
     defaultSpan: 12,
-    // One compact row per provider. It starts at the single row it occupied as
-    // a Trakt-only strip and grows to three for a deployment running several
-    // providers; past that the list scrolls like the other list widgets.
+    // One compact row per provider. It starts at a single row and grows to
+    // three for a deployment running several providers; past that the list
+    // scrolls like the other list widgets.
     minRows: 1,
     maxRows: 3,
     defaultRows: 1,
@@ -389,6 +390,21 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     defaultRows: 4,
     Component: RecentActivityWidget,
   },
+  {
+    id: "api-clients",
+    title: "Busiest API clients",
+    description: "Sign-in sessions with the most API requests, and a way to sign one out",
+    minSpan: 6,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 6,
+    defaultRows: 3,
+    // API usage is summarized per hour and kept for 30 days: the same spread
+    // as the sampled charts.
+    ranges: SAMPLED_RANGES,
+    Component: ApiClientsWidget,
+  },
 ];
 
 const WIDGETS_BY_ID = new Map(DASHBOARD_WIDGETS.map((widget) => [widget.id, widget]));
@@ -409,8 +425,7 @@ export function getDashboardWidget(id: WidgetId): DashboardWidgetDefinition {
  * both the old and the new id collapses to one entry.
  */
 const LEGACY_WIDGET_IDS: Record<string, WidgetId> = {
-  // Became the pluggable per-provider widget; the payload it reads is no
-  // longer Trakt-specific.
+  // The old single-provider sync widget, replaced by the per-provider one.
   "trakt-sync": "watch-providers",
 };
 

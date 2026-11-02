@@ -81,7 +81,7 @@ type ArtworkObjectChecker interface {
 
 // nonProviderImageSchemesSQL mirrors isNonProviderImageScheme for use inside
 // SQL predicates: source paths with these schemes cannot be re-downloaded.
-const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%']`
+const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'nfo+%', 'local://%', 'upload://%', 'generated://%']`
 
 const (
 	artworkReconcileSampleTarget = 200
@@ -220,6 +220,9 @@ type artworkSweepSurface struct {
 	// Used for small tables holding admin/user uploads, where a blind reset
 	// would discard the last pointer to an object that survived migration.
 	alwaysVerify bool
+	// filter, when set, narrows the surface to rows matching this SQL
+	// predicate.
+	filter string
 }
 
 func (s artworkSweepSurface) keyColumnNames() []string {
@@ -256,11 +259,29 @@ func (s artworkSweepSurface) parseKeys(raw []string) ([]any, error) {
 	return values, nil
 }
 
+// cachedPredicate selects rows whose path is an artwork storage key. Provider
+// URLs ('%://%') and app-relative paths ('/%') are excluded: the latter are
+// bundled frontend assets such as "/images/collection-templates/x.jpg", which
+// have nothing in storage behind them and which blobstore.ValidateKey rejects
+// outright, so checking them would fail every sweep with "invalid key".
 func (s artworkSweepSurface) cachedPredicate() string {
-	return fmt.Sprintf(
-		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%'`,
-		s.pathCol, s.pathCol,
+	predicate := fmt.Sprintf(
+		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%' AND %s NOT LIKE '/%%'`,
+		s.pathCol, s.pathCol, s.pathCol,
 	)
+	if s.filter != "" {
+		predicate += " AND (" + s.filter + ")"
+	}
+	return predicate
+}
+
+// uploadedSourcePredicate holds for rows whose source is an image an admin
+// uploaded, which no pipeline can fetch again.
+func (s artworkSweepSurface) uploadedSourcePredicate() string {
+	if s.sourceCol == "" {
+		return "FALSE"
+	}
+	return fmt.Sprintf(`lower(coalesce(%s, '')) LIKE '%s%%'`, s.sourceCol, uploadedImageSourcePrefix)
 }
 
 func (s artworkSweepSurface) remoteSourcePredicate() string {
@@ -308,13 +329,33 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "item posters", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: itemClear(posterPathColumn)},
 		{name: "item backdrops", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: itemClear("backdrop_path")},
 		{name: "item logos", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: itemClear("logo_path")},
+		// Banners, thumbs, clear art and disc art reset like the slots above:
+		// a provider copy goes back to its source for the backfill to cache
+		// again, and a sidecar copy is cleared so the item's next refresh
+		// queues it.
+		{name: "item banners", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "banner_path", sourceCol: "banner_source_path", clearSet: itemClear("banner_path")},
+		{name: "item thumbs", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "thumb_path", sourceCol: "thumb_source_path", clearSet: itemClear("thumb_path")},
+		{name: "item clear art", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "clearart_path", sourceCol: "clearart_source_path", clearSet: itemClear("clearart_path")},
+		{name: "item disc art", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "disc_path", sourceCol: "disc_source_path", clearSet: itemClear("disc_path")},
+		// Extra backdrops are local sidecars only (planExtraBackdrops), so
+		// there is no provider source to reset to.
+		{name: "item extra backdrops", table: "media_item_backdrops", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "path", clearSet: `path = '', thumbhash = ''`},
 		{name: "localized item posters", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "localized item backdrops", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
 		{name: "localized item logos", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: plainClear("logo_path")},
 		{name: "season posters", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
+		{name: "season backdrops", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
 		{name: "localized season posters", table: "season_localizations", keyCols: []artworkSweepKey{textSweepKey("season_content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "episode stills", table: "episodes", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", sourceCol: "still_source_path", clearSet: plainClear("still_path")},
+		// Local extra images come from a sidecar or a generated frame, not a
+		// provider: clearing the source too makes the next scan copy the
+		// sidecar again, or the extra stills task take the frame again.
+		{name: "extra stills", table: "media_extras", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", clearSet: `still_path = '', still_source = '', still_thumbhash = '', still_retry_after = NULL, updated_at = NOW()`},
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
+		// Movie box set artwork; a reset row is served from TMDB until the box
+		// set sync caches it again.
+		{name: "box set posters", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: `poster_path = '', poster_thumbhash = '', updated_at = NOW()`},
+		{name: "box set backdrops", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: `backdrop_path = '', backdrop_thumbhash = '', updated_at = NOW()`},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
 		// to the generated collage (collections) or the default tile (library
@@ -781,7 +822,8 @@ func (r *ArtworkCacheReconciler) objectExistsWithRetry(ctx context.Context, key 
 // bulkResetSurface resets every cached row without per-row verification. Rows
 // with a re-downloadable provider source go back to that source so an explicit
 // manual backfill can cache them again. Rows without one are cleared so their
-// owning pipeline can refill them.
+// owning pipeline can refill them, except uploaded images: nothing can refill
+// those, so each is verified and cleared only when its object is gone.
 func (r *ArtworkCacheReconciler) bulkResetSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats) error {
 	// Counts are recorded before the error check: batches commit as they go,
 	// and the task serializes stats on failure, so an interrupted reset must
@@ -797,13 +839,19 @@ func (r *ArtworkCacheReconciler) bulkResetSurface(ctx context.Context, s artwork
 	}
 
 	cleared, err := r.bulkUpdateInBatches(ctx, s, s.clearSet,
-		fmt.Sprintf(`%s AND NOT (%s)`, s.cachedPredicate(), s.remoteSourcePredicate()))
+		fmt.Sprintf(`%s AND NOT (%s) AND NOT (%s)`, s.cachedPredicate(), s.remoteSourcePredicate(), s.uploadedSourcePredicate()))
 	stats.Cleared += cleared
 	stats.Checked += cleared
 	if err != nil {
 		return fmt.Errorf("artwork reconcile: bulk clear %s: %w", s.name, err)
 	}
-	return nil
+
+	if s.sourceCol == "" {
+		return nil
+	}
+	uploads := s
+	uploads.filter = s.uploadedSourcePredicate()
+	return r.sweepSurface(ctx, uploads, stats, func(int) {})
 }
 
 // bulkUpdateInBatches applies setClause to every row of s matching where, in

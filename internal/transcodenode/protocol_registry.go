@@ -3,6 +3,7 @@ package transcodenode
 import (
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -17,6 +18,9 @@ type statusResponse struct {
 	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
 	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
 	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
+	// Artifacts is the last measurement of the prepared-download directory,
+	// path included: this route requires the node bearer.
+	Artifacts *downloadstorage.Usage `json:"artifacts,omitempty"`
 }
 
 // ProtocolReads preserves this listener's status shape independently of the
@@ -25,7 +29,14 @@ func ProtocolReads(schemas huma.Registry) []workerprotocol.Operation {
 	return []workerprotocol.Operation{
 		workerprotocol.JSONRead[playback.HWAccelInfo](schemas, "transcode_node", "/hw-capabilities", "(*internal/transcodenode.Server).handleHWCapabilities", 401, 503),
 		workerprotocol.JSONRead[statusResponse](schemas, "transcode_node", "/status", "(*internal/transcodenode.Server).handleStatus", 401, 503),
+		artifactListOperation(schemas),
 	}
+}
+
+func artifactListOperation(schemas huma.Registry) workerprotocol.Operation {
+	op := workerprotocol.JSONRead[downloadstorage.Listing](schemas, "transcode_node", "/downloads/artifacts", "(*internal/transcodenode.Server).handleListDownloadArtifacts", 401, 503)
+	op.Description = "List the prepared-download directory with its measurement, including the directory path. One listing runs at a time; a second, or one the volume does not answer within 15 seconds, gets 503."
+	return op
 }
 
 // ProtocolControls describes the existing worker admin commands, not native API aliases.

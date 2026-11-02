@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/url"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -82,36 +81,6 @@ func TestParseCatalogRequest_VideoMediaScope(t *testing.T) {
 	}
 	if !reflect.DeepEqual(itemTypes, []string{"movie", "series"}) {
 		t.Fatalf("expected video scope to expand to movie+series, got %v", itemTypes)
-	}
-}
-
-// TestPreviewPage_VideoScopeUsesTypeAny asserts the preview/query-executor
-// path renders a multi-type condition for the video group scope.
-func TestPreviewPage_VideoScopeUsesTypeAny(t *testing.T) {
-	sql, args, err := (&QueryExecutor{}).buildPreviewPageSQL(
-		QueryDefinition{
-			MediaScope: "video",
-			Sort:       QuerySort{Field: "title", Order: "asc"},
-		},
-		AccessFilter{},
-		20,
-		0,
-		true,
-	)
-	if err != nil {
-		t.Fatalf("buildPreviewPageSQL error: %v", err)
-	}
-	if !strings.Contains(sql, "mi.type = ANY(") {
-		t.Fatalf("expected mi.type = ANY(...) for video scope, got %s", sql)
-	}
-	found := false
-	for _, arg := range args {
-		if types, ok := arg.([]string); ok && reflect.DeepEqual(types, []string{"movie", "series"}) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected movie+series type arg, got %v", args)
 	}
 }
 

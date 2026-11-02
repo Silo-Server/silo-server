@@ -5,7 +5,11 @@ A user asks for a movie or series the server does not have, an admin approves it
 to a downstream service such as Sonarr or Radarr, and the request completes when
 the media is in the library. The code lives in `internal/requests`; the reconcile
 pass is the `reconcile_requests` task in `internal/taskmanager/tasks`, and the
-download refresh pass is `refresh_request_downloads` beside it.
+download refresh pass is `refresh_request_downloads` beside it. The Discover
+page people request from follows an admin-defined layout; see
+[Request Discover rows](request-discover-rows.md), whose list rows the
+`refresh_request_discover_lists` task keeps (under snapshot leases, not the
+reconcile locks).
 
 ## State
 
@@ -29,8 +33,8 @@ Creating a request reads the title's TMDB detail once, after the cheap refusals
 (a movie already in the library, a title already requested). The server's copy of the title and
 year replaces the client's, and a snapshot of what routing can match on is
 stored with the request as `routing_facts`: TMDB genre, keyword, network and
-company IDs, original language, origin countries, year, rating, and whether
-it is anime. IDs rather than names, because names follow the configured TMDB
+company IDs, original language, origin countries, year, rating, whether it is
+anime, and a series' status. IDs rather than names, because names follow the configured TMDB
 language.
 
 Anime means Japanese animation (`internal/requests/anime.go`). TMDB's anime
@@ -65,7 +69,8 @@ media type and hold conditions and a destination per tier: a server plus
 overrides for its plugin config (root folder, quality profile, tags, series type,
 minimum availability, ...). Conditions match on the request's routing facts and
 requester: anime, genre, keyword, original language, origin country, year range,
-network, studio, requesting account, and content rating ("at most PG"). Every
+network, studio, requesting account, content rating ("at most PG"), and, for
+series, status. Every
 set condition must hold; a list matches any of its values, and each list has an
 exclude form that matches when the title has none of them ("original language
 is not English"). A title with no rating (US or its own country's) never
@@ -74,6 +79,18 @@ their own minimum ages ("TV-Y7 or lower" does not take TV-PG), and a title TMDB
 had not rated yet is asked about again a day later. The rating is captured with
 the other facts from the detail TMDB already returns; a request captured before
 the rating was gets it at submission, only when a route checks ratings.
+A series' status is stored in the catalog's terms (`internal/metadata/showstatus`:
+returning, in_production, upcoming, ended, cancelled; TMDB's Pilot is
+in_production and Planned is upcoming), never as a continuing/ended pair, so
+regrouping the editor's presets cannot change a saved rule. It is read once,
+with the request: a show that ends later keeps its route, and a series TMDB
+gives no status matches no status list but passes an exclude one. A request
+captured before status was gets it at submission, only when a route checks
+status, without moving the capture time the rating's recheck runs on; a
+series TMDB no longer lists has none. A caller can read facts before taking
+the submission claim (a season request's deliverability check), so the
+capture and the status keep the first value any API server stored, and the
+rating's recheck writes only the rating and its capture time.
 
 Each tier is decided on its own: the first enabled route, in position order,
 whose conditions match and that has a destination for the tier wins, and the
@@ -97,14 +114,20 @@ records the route that sent it. A server a route sends to cannot be deleted
 until the route stops using it, so deleting a server never silently reroutes
 titles, and it cannot be switched to the type the route's media type cannot use
 (Sonarr for movies, Radarr for series) or stop taking that media type. A chosen
-server that is disabled, not set up (no installation, no key), of the wrong type
+server that is disabled, not set up (no installation, or no key when its plugin
+needs one; see [Without a router](#without-a-router)), of the wrong type
 or not taking the media type anyway is an admin-fixable
 problem: when nothing has been
 sent yet, the submission retries with backoff; a later tier that fails that way
 becomes a failed target. Status checks go through the plugin installation that
 owns each target's server, and one plugin failing does not discard the statuses
 another reported. A media type with no routes keeps the plugin's own routing:
-every usable connection is handed over and the plugin picks.
+every usable connection is handed over and the plugin picks. Without
+`force_dual_quality`, the request asks such a plugin for 4K only when one of
+those connections says it takes 4K (a Sonarr/Radarr `is_default_4k`, or the
+Seerr plugin's `supports_4k` switch), so a Seerr without 4K does not leave a
+failed 4K target beside a finished HD copy. A plugin whose connections carry
+none of these keys is still asked for 4K and decides itself.
 
 Admins manage routes through `/api/v2/admin/request-routes` (in the web admin,
 Settings › Requests, which also hides the server switches routing now owns).
@@ -391,6 +414,28 @@ installation) is a setup problem instead: the submission retries with backoff
 and records the reason in `last_error`, so fixing the connection lets the
 request through.
 
+A connection needs an API key unless its plugin declares
+`request_router.api_key_optional` in its manifest. The host reads the
+declaration from the capability metadata stored when the plugin was installed
+or updated, without launching the plugin, and only for a connection without a
+key. Such a connection is routed, status-checked and probed like any other,
+with an empty key. A connection whose declaration cannot be read is skipped
+like one without a key; when no other connection can take the request, the
+submission retries with the read error. The v2 plugin installation view
+carries the same stored declaration, with `request_router.base_url_optional`,
+so the admin form saves a server without a key or URL only when routing will
+use it; the host itself never requires a URL. A saved key still has to be
+typed again when the server's URL changes to another address; a server saved
+without a key has none to protect, so its URL can change without one. The save
+checks this again under the row lock, so a key saved, or an address changed,
+by another admin in the meantime is never paired with a different address. A
+connection test of a saved server that leaves the URL out tests its saved
+address. A blank URL in a test stands for the saved address too, unless the
+plugin declares `base_url_optional`; then it is tested blank, so an admin can
+clear it. A save validates and stores the URL it is given, blank included.
+Clearing it counts as changing the address: a saved key has to be typed again,
+and the test goes without it.
+
 The library also completes requests that never reached a router: a `pending`
 request whose title appears needs no approval any more, and a `failed` request
 whose title appears is complete, unless it failed after delivering one quality,
@@ -540,6 +585,16 @@ request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
 `/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
 return them to everyone.
+
+On these profile routes, v1 and v2 alike, "admin" means the acting admin
+(`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
+acting through its primary profile, an admin API key, or an admin login session
+with no profile while no profile on the account has a PIN or an access limit, the
+same decision the admin request queue's gate makes. Only the acting admin reads or cancels another
+account's request, gets another account's `request_id` in request state, or
+cancels while requests are turned off. Any other profile on an admin's account,
+such as a child profile, is a requester like any other: it reads and cancels
+its own account's requests, including ones its household's other profiles made.
 
 ## Admin queue
 

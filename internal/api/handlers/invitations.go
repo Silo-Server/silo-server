@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -68,8 +68,7 @@ func (h *InvitationHandler) HandleLookupInvitation(w http.ResponseWriter, r *htt
 // reuse their existing session plumbing.
 func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	var req acceptInvitationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 	if len(req.Password) < 8 {
@@ -96,6 +95,10 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 		case errors.Is(err, invitations.ErrEmailRequired):
 			// Link invitations are claimed through /api/v2, which accepts an address.
 			writeError(w, http.StatusBadRequest, "email_required", "This invitation needs an email address; update the app to accept it")
+		case errors.Is(err, passwordhash.ErrBusy) && !errors.Is(err, invitations.ErrSessionStart):
+			// Only before the invitation was spent: a retry after it could
+			// only fail as already used.
+			writeAPIError(w, busyError(err))
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 		}

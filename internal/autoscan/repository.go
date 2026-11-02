@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -199,11 +200,13 @@ func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connec
 	// linked Requests integration) makes every bound source's marker refer to a
 	// different upstream, so they restart from now, matching UpdateSource.
 	// Rotating the API key, renaming or relabelling the kind keeps them.
+	// A source without a marker (its first poll failed, for example) is
+	// reset too, so it retries the new upstream at the next cycle.
 	if old.differsFrom(out) {
 		if _, err := tx.Exec(ctx, `
 			UPDATE autoscan_sources
-			SET marker = NULL, updated_at = now()
-			WHERE connection_id = $1 AND marker IS NOT NULL`, c.ID); err != nil {
+			SET marker = NULL, last_run_at = NULL, updated_at = now()
+			WHERE connection_id = $1 AND (marker IS NOT NULL OR last_run_at IS NOT NULL)`, c.ID); err != nil {
 			return Connection{}, fmt.Errorf("reset autoscan source markers: %w", err)
 		}
 	}
@@ -233,7 +236,27 @@ func (u connectionUpstream) differsFrom(c Connection) bool {
 	if oldLink != "" || newLink != "" {
 		return oldLink != newLink
 	}
-	return derefString(u.baseURL) != c.BaseURL
+	return comparableBaseURL(derefString(u.baseURL)) != comparableBaseURL(c.BaseURL)
+}
+
+// comparableBaseURL is the form in which two base URLs name the same server:
+// the scheme and host are not case-sensitive, and a trailing slash or
+// surrounding space changes nothing. Resetting markers for such an edit
+// would skip whatever the upstream imports before the next poll.
+func comparableBaseURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(value, "/")
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	// Trim the escaped form so an escaped slash (%2F) still tells two paths
+	// apart, including one at the end of the path.
+	escaped := strings.TrimRight(u.EscapedPath(), "/")
+	u.Path, _ = url.PathUnescape(escaped)
+	u.RawPath = escaped
+	return u.String()
 }
 
 // linkedIntegration returns the Requests integration a connection resolves
@@ -441,18 +464,22 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 }
 
 // UpdateSource updates a source's binding/scheduling fields by id. Identity
-// (plugin_id, capability_id) and the last_run_at/last_error bookkeeping are left
-// untouched. An unknown id maps to ErrNotFound; a non-existent connection trips
-// the FK constraint and also maps to ErrNotFound.
+// (plugin_id, capability_id) and last_error are left untouched, and
+// last_run_at only changes with a marker reset (below). An unknown id maps to
+// ErrNotFound; a non-existent connection trips the FK constraint and also maps
+// to ErrNotFound.
 //
 // The stored marker is kept unless the update changes what it points into. A
 // marker is the plugin's opaque continuation token for one upstream, so it is
 // cleared when the bound connection or the plugin's source_config changes:
 // handing Sonarr's marker to Radarr would replay or skip that server's history.
-// An empty marker tells the plugin to start from now. Label, enabled, delivery
-// mode, interval and path rewrites only change how the host treats results, so
-// they keep it. The comparison runs inside the UPDATE against the row's current
-// values, so a concurrent update cannot slip between a read and the write.
+// An empty marker tells the plugin to start from now. last_run_at is cleared
+// with it, so the next cycle polls the source at once instead of waiting out
+// its interval: changes the upstream makes before that first poll are not
+// reported. Label, enabled, delivery mode, interval and path rewrites only
+// change how the host treats results, so they keep both. The comparison runs
+// inside the UPDATE against the row's current values, so a concurrent update
+// cannot slip between a read and the write.
 func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error) {
 	if err := missingID("source", s.ID); err != nil {
 		return Source{}, err
@@ -482,6 +509,12 @@ func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error)
 		          OR source_config IS DISTINCT FROM $7::jsonb
 		        THEN NULL
 		        ELSE marker
+		    END,
+		    last_run_at = CASE
+		        WHEN connection_id IS DISTINCT FROM $2::uuid
+		          OR source_config IS DISTINCT FROM $7::jsonb
+		        THEN NULL
+		        ELSE last_run_at
 		    END,
 		    updated_at = now()
 		WHERE id = $1
@@ -615,49 +648,71 @@ func (r *Repository) AdvanceMarker(ctx context.Context, adv MarkerAdvance) (bool
 	if src.ConnectionID != nil && (adv.Connection == nil || adv.Connection.ID != *src.ConnectionID) {
 		return false, fmt.Errorf("advance autoscan marker: source %s: the poll's connection row is missing or does not match its binding", src.ID)
 	}
+	wrote, err := r.writeIfPollStateHolds(ctx, src, adv.Connection,
+		`marker = $5, last_run_at = now(), last_error = NULL, updated_at = now()`, nullable(adv.NextMarker))
+	if err != nil {
+		return false, fmt.Errorf("advance autoscan marker: %w", err)
+	}
+	return wrote, nil
+}
+
+// writeIfPollStateHolds applies set to the source in one transaction, but only
+// while the source and connection rows a poll read still describe the upstream
+// it polled: the same marker, connection binding and source_config, and, when
+// conn is given, the same connection upstream. It reports whether it wrote.
+// $1-$4 in the statement are the snapshot, so set's own arguments start at $5.
+// A given conn must be the source's bound connection.
+//
+// The connection row is read FOR SHARE first, so a concurrent connection
+// update either commits before the check or waits for this write and then
+// resets it, matching UpdateConnection's lock order.
+func (r *Repository) writeIfPollStateHolds(ctx context.Context, src Source, conn *Connection, set string, args ...any) (bool, error) {
+	if conn != nil && (src.ConnectionID == nil || conn.ID != *src.ConnectionID) {
+		return false, fmt.Errorf("source %s: the poll's connection row does not match its binding", src.ID)
+	}
 	sourceConfig, err := sourceConfigSnapshot(src.SourceConfig)
 	if err != nil {
 		return false, err
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("begin autoscan marker advance: %w", err)
+		return false, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if src.ConnectionID != nil {
+	if conn != nil {
 		var current connectionUpstream
 		err := tx.QueryRow(ctx, `
 			SELECT base_url, request_integration_id
 			FROM autoscan_connections
 			WHERE id = $1
-			FOR SHARE`, adv.Connection.ID).Scan(&current.baseURL, &current.integrationID)
+			FOR SHARE`, conn.ID).Scan(&current.baseURL, &current.integrationID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("read autoscan connection for marker advance: %w", err)
+			return false, fmt.Errorf("read connection: %w", err)
 		}
-		if current.differsFrom(*adv.Connection) {
+		if current.differsFrom(*conn) {
 			return false, nil
 		}
 	}
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE autoscan_sources
-		SET marker = $2, last_run_at = now(), last_error = NULL, updated_at = now()
+		SET `+set+`
 		WHERE id = $1
-		  AND COALESCE(marker, '') = $3
-		  AND connection_id IS NOT DISTINCT FROM $4::uuid
-		  AND source_config = $5::jsonb`,
-		src.ID, nullable(adv.NextMarker), derefString(src.Marker), connectionIDArg(src.ConnectionID), sourceConfig)
+		  AND COALESCE(marker, '') = $2
+		  AND connection_id IS NOT DISTINCT FROM $3::uuid
+		  AND source_config = $4::jsonb`,
+		append([]any{src.ID, derefString(src.Marker), connectionIDArg(src.ConnectionID), sourceConfig}, args...)...)
 	if err != nil {
-		return false, fmt.Errorf("advance autoscan marker: %w", err)
+		return false, err
 	}
 	if tag.RowsAffected() == 0 {
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM autoscan_sources WHERE id = $1)`, src.ID).Scan(&exists); err != nil {
-			return false, fmt.Errorf("check autoscan source: %w", err)
+			return false, fmt.Errorf("check source: %w", err)
 		}
 		if !exists {
 			return false, fmt.Errorf("%w: source %s", ErrNotFound, src.ID)
@@ -665,7 +720,7 @@ func (r *Repository) AdvanceMarker(ctx context.Context, adv MarkerAdvance) (bool
 		return false, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit autoscan marker advance: %w", err)
+		return false, fmt.Errorf("commit: %w", err)
 	}
 	return true, nil
 }
@@ -703,21 +758,36 @@ func truncateUTF8(s string, maxBytes int) string {
 	return s[:cut]
 }
 
+// PollFailure is a failed poll's error message together with the rows the poll
+// read, which the write is compared against as MarkerAdvance's are.
+type PollFailure struct {
+	// Source is the source row the poll used.
+	Source Source
+	// Connection is the connection row the poll read. It is nil when there is
+	// none to compare: the source has no connection, the poll failed before
+	// reading it, or the caller is a webhook delivery, which doesn't read it.
+	// Without it only the source's own columns are compared.
+	Connection *Connection
+	Message    string
+}
+
 // RecordError records a poll failure for a source: it stamps last_run_at and
 // stores the (length-bounded) error message without advancing the marker.
-func (r *Repository) RecordError(ctx context.Context, sourceID, msg string) error {
-	msg = truncateUTF8(msg, maxLastErrorLen)
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE autoscan_sources
-		SET last_error = $2, last_run_at = now(), updated_at = now()
-		WHERE id = $1`, sourceID, msg)
+//
+// Like AdvanceMarker, it writes only while the poll's snapshot still holds. A
+// poll that read the source before an admin reset its marker was talking to
+// the old upstream, so its error says nothing about the new one, and stamping
+// last_run_at would make the source wait out its interval before its first
+// poll of the new upstream. RecordError then writes nothing and returns false;
+// the caller still records the error on the poll's own event.
+func (r *Repository) RecordError(ctx context.Context, failure PollFailure) (bool, error) {
+	msg := truncateUTF8(failure.Message, maxLastErrorLen)
+	wrote, err := r.writeIfPollStateHolds(ctx, failure.Source, failure.Connection,
+		`last_error = $5, last_run_at = now(), updated_at = now()`, msg)
 	if err != nil {
-		return fmt.Errorf("record autoscan error: %w", err)
+		return false, fmt.Errorf("record autoscan error: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: source %s", ErrNotFound, sourceID)
-	}
-	return nil
+	return wrote, nil
 }
 
 const eventColumns = `id, source_id, plugin_id, capability_id, started_at, completed_at,

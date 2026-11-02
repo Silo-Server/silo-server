@@ -16,6 +16,7 @@ type PolicyDefaults struct {
 	MaxTranscodes              int    `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited" example:"0"`
 	MaxRemoteStreamBitrateKbps int    `json:"max_remote_stream_bitrate_kbps" minimum:"0" doc:"Remote per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
 	MaxLocalStreamBitrateKbps  int    `json:"max_local_stream_bitrate_kbps" minimum:"0" doc:"Local per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
+	MaxProfiles                int    `json:"max_profiles" minimum:"1" doc:"Household profile limit" example:"5"`
 	TranscodeAllowed           bool   `json:"transcode_allowed" example:"true"`
 	AudioTranscodeAllowed      bool   `json:"audio_transcode_allowed" example:"true"`
 	DownloadAllowed            bool   `json:"download_allowed" example:"true"`
@@ -40,6 +41,7 @@ func policyDefaultsOf(p access.GroupPolicy) PolicyDefaults {
 		MaxTranscodes:              p.MaxTranscodes,
 		MaxRemoteStreamBitrateKbps: p.MaxRemoteStreamBitrateKbps,
 		MaxLocalStreamBitrateKbps:  p.MaxLocalStreamBitrateKbps,
+		MaxProfiles:                p.MaxProfiles,
 		TranscodeAllowed:           p.TranscodeAllowed,
 		AudioTranscodeAllowed:      p.AudioTranscodeAllowed,
 		DownloadAllowed:            p.DownloadAllowed,

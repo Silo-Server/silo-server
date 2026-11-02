@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
 )
 
@@ -44,6 +45,27 @@ func trickplayDeps(watch *fakeWatch, tp *fakeTrickplay) Dependencies {
 	deps := watchDeps(watch)
 	deps.Trickplay = tp
 	return deps
+}
+
+type watchWithUnavailableArtwork struct{ fakeWatch }
+
+func (f *watchWithUnavailableArtwork) WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error) {
+	if !filter.OmitWatchArtwork {
+		return nil, errors.New("artwork provider unavailable")
+	}
+	return f.fakeWatch.WatchDetail(ctx, userID, profileID, contentID, filter)
+}
+
+func TestWatchTrickplayDoesNotNeedArtwork(t *testing.T) {
+	tp := &fakeTrickplay{}
+	deps := trickplayDeps(&fakeWatch{}, tp)
+	deps.Watch = &watchWithUnavailableArtwork{}
+	h := newTestHandler(t, deps)
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner)
+	if rec.Code != http.StatusOK || len(tp.calls) != 1 || tp.calls[0] != 42 {
+		t.Fatalf("seek previews = %d %s; manifest calls = %v", rec.Code, rec.Body.String(), tp.calls)
+	}
 }
 
 func TestGetWatchTrickplay(t *testing.T) {

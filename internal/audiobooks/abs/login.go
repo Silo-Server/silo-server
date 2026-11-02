@@ -1,18 +1,23 @@
 package abs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // ErrNotFound is returned by TokenStore when a JTI is absent.
@@ -82,10 +87,23 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	userID, profileID, displayName, err := h.deps.CredValidator.Validate(r.Context(), body.Username, body.Password)
+	principal, err := h.deps.CredValidator.Validate(r.Context(), body.Username, body.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			// The name has used its sign-in budget, shared with every other
+			// sign-in surface.
+			w.Header().Set("Retry-After", strconv.Itoa(ratelimit.RetryAfterSeconds(throttled.RetryAfter)))
+			http.Error(w, "too many failed sign-ins for this name; try again later", http.StatusTooManyRequests)
+		} else if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINRequired) {
+			http.Error(w, "this profile has a PIN: sign in as username#profile with password#PIN", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINIncorrect) {
+			http.Error(w, "incorrect profile PIN", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINLocked) {
+			// Fails like a wrong PIN, as on the Jellyfin-compatible listener;
+			// only the message names the lockout.
+			http.Error(w, "too many incorrect PINs for this profile; try again later", http.StatusUnauthorized)
 		} else if errors.Is(err, auth.ErrLocalLoginDisabled) {
 			// The server turned local passwords off; this beta surface has no
 			// external sign-in.
@@ -97,6 +115,9 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		} else if errors.Is(err, auth.ErrPasswordChangeRequired) {
 			// This client cannot run the change a temporary password requires.
 			http.Error(w, "sign in to Silo to replace your temporary password", http.StatusUnauthorized)
+		} else if errors.Is(err, passwordhash.ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(passwordhash.RetryAfterSeconds))
+			http.Error(w, "the server is busy; try again in a moment", http.StatusServiceUnavailable)
 		} else {
 			slog.ErrorContext(r.Context(), "abs login: cred validator failed", "component", "audiobooks", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
@@ -106,21 +127,26 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 
 	// If the validator didn't return a displayName, derive it from the username
 	// (the profile portion after '#', or the whole username).
-	if displayName == "" {
-		displayName = body.Username
-		if i := strings.LastIndexByte(displayName, '#'); i >= 0 && i < len(displayName)-1 {
-			displayName = displayName[i+1:]
+	if principal.DisplayName == "" {
+		principal.DisplayName = body.Username
+		if i := strings.LastIndexByte(principal.DisplayName, '#'); i >= 0 && i < len(principal.DisplayName)-1 {
+			principal.DisplayName = principal.DisplayName[i+1:]
 		}
 	}
 
 	slog.DebugContext(r.Context(), "abs standalone login: validator OK", "component", "audiobooks",
-		"username", body.Username, "user_id", userID, "profile_id", profileID)
-	h.completeLogin(w, r, userID, profileID, displayName)
+		"username", body.Username, "user_id", principal.UserID, "profile_id", principal.ProfileID)
+	h.completeLogin(w, r, principal)
 }
 
 // completeLogin mints ABS access + refresh JWTs for the validated user and
 // writes the login response.
-func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, profileID, displayName string) {
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, principal Principal) {
+	userID, profileID, displayName := principal.UserID, principal.ProfileID, principal.DisplayName
+	var pinRevision *int64
+	if profileID != "" {
+		pinRevision = &principal.PINRevision
+	}
 	if h.deps.Config == nil {
 		http.Error(w, "config not available", http.StatusServiceUnavailable)
 		return
@@ -148,33 +174,29 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	accessJTI := ulid.Make().String()
 	refreshJTI := ulid.Make().String()
 
-	access, err := IssueAccessToken(secret, userID, profileID, accessJTI, accessTTL)
+	access, err := IssueAccessToken(secret, userID, profileID, pinRevision, accessJTI, accessTTL)
 	if err != nil {
 		http.Error(w, "mint access token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	refresh, err := IssueRefreshToken(secret, userID, profileID, refreshJTI, refreshTTL)
+	refresh, err := IssueRefreshToken(secret, userID, profileID, pinRevision, refreshJTI, refreshTTL)
 	if err != nil {
 		http.Error(w, "mint refresh token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	now := time.Now()
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	// Both tokens are stored together, and only while the login session the
+	// credential check opened is live: a sign-out everywhere since then
+	// refuses the sign-in.
+	if err := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{LoginSessionID: principal.LoginSessionID}, ABSToken{
 		ID:        accessJTI,
 		UserID:    userID,
 		ProfileID: profileID,
 		Type:      "access",
 		JTI:       accessJTI,
 		ExpiresAt: now.Add(accessTTL),
-	}); err != nil {
-		http.Error(w, "persist access token: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Refresh-token insert must also succeed: a client that receives a refresh
-	// token whose JTI isn't in the store will fail on its first use (the
-	// bearer middleware looks up by JTI), forcing an interactive re-login.
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	}, ABSToken{
 		ID:        refreshJTI,
 		UserID:    userID,
 		ProfileID: profileID,
@@ -182,7 +204,11 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		JTI:       refreshJTI,
 		ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		http.Error(w, "persist refresh token: "+err.Error(), http.StatusInternalServerError)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "signed out while signing in; sign in again", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "persist tokens: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -197,7 +223,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		setRefreshCookie(w, r, refresh, refreshTTL)
 	}
 
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), now, ctxAuth{UserID: userID, ProfileID: profileID}, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
@@ -287,8 +313,8 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 	}
 }
 
-// loginEnvelope builds the response body shared by /login and /authorize.
-// Both endpoints must return the identical shape so the iOS client's
+// loginEnvelope builds the response body shared by /login, /auth/refresh and /authorize.
+// All three endpoints must return the identical shape so the iOS client's
 // resume-on-launch flow validates the same way as fresh login.
 // accessToken/refreshToken may be empty for /authorize (client already has
 // them); in that case the top-level fields are still included as empty
@@ -298,16 +324,28 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 // timestamps share a single instant with the token ExpiresAt the caller
 // persisted — avoids two near-simultaneous time.Now() calls drifting apart.
 func (h *Handler) loginEnvelope(
-	r *http.Request,
+	ctx context.Context,
 	now time.Time,
-	userID, displayName, accessToken, refreshToken string,
+	a ctxAuth,
+	displayName, accessToken, refreshToken string,
 	returnRefreshInBody bool,
 ) map[string]any {
 	// displayName falls back to userID when the validator didn't supply one.
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
-	access, _, _ := h.accessFilterFromRequest(r)
-	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
+	// Fresh authentication has an explicit principal, without bearer middleware
+	// context. Resolve that principal and omit metadata when its scope is unknown.
+	access, err := h.accessFilterForAuth(ctx, a)
+	var libs []AudiobookLibrary
+	if err == nil {
+		libs, err = h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "abs login envelope: library metadata unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		// Drop any partial listing so an unknown scope never widens the result.
+		libs = nil
+	}
 	for i, lib := range libs {
 		if i == 0 {
 			defaultLibraryID = audiobookLibraryID(lib)
@@ -315,7 +353,7 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	user := absUserObject(userID, displayName, accessToken, defaultLibraryID, now)
+	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, now)
 
 	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
 	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY
@@ -435,16 +473,21 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 				accessTTL = 24 * time.Hour
 			}
 			newJTI := ulid.Make().String()
-			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, newJTI, accessTTL); mintErr == nil {
-				if persistErr := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, a.PINRevision, newJTI, accessTTL); mintErr == nil {
+				persistErr := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{JTI: a.JTI}, ABSToken{
 					ID:        newJTI,
 					UserID:    a.UserID,
 					ProfileID: a.ProfileID,
 					Type:      "access",
 					JTI:       newJTI,
 					ExpiresAt: time.Now().Add(accessTTL),
-				}); persistErr == nil {
+				})
+				if persistErr == nil {
 					access = token
+				} else if errors.Is(persistErr, ErrNotFound) {
+					// Revoked since bearerAuth checked it.
+					http.Error(w, "token revoked", http.StatusUnauthorized)
+					return
 				}
 			}
 		}
@@ -457,23 +500,46 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 			displayName = resolved
 		}
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, displayName, access, "", false))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), time.Now(), a, displayName, access, "", false))
 }
 
 // setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
 // does when a client did not opt into body-token delivery. HttpOnly + Lax,
-// Secure only under TLS so plain-HTTP LAN deployments still receive it.
+// Secure only when the client reached the server over HTTPS, so plain-HTTP
+// LAN deployments still receive it.
 func setRefreshCookie(w http.ResponseWriter, r *http.Request, refresh string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    refresh,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   refreshCookieSecure(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(ttl / time.Second),
 	})
 }
+
+// refreshCookieSecure reports whether the client reached the server over
+// HTTPS. A TLS-terminating proxy leaves r.TLS nil, so the scheme comes from
+// clientip.RequestScheme: X-Forwarded-Proto counts only from a trusted proxy,
+// and without clientip.Middleware only the connection's own TLS state does.
+// Ambiguous proxy metadata (an empty scheme) falls back to the connection's
+// TLS state, so a TLS connection always gets a Secure cookie.
+// Login and logout share it so the deleting Set-Cookie carries the same Secure
+// flag as the cookie it replaces; browsers refuse to let a non-Secure cookie
+// overwrite a Secure one.
+func refreshCookieSecure(r *http.Request) bool {
+	switch clientip.RequestScheme(r) {
+	case schemeHTTPS:
+		return true
+	case "":
+		return r.TLS != nil
+	default:
+		return false
+	}
+}
+
+const schemeHTTPS = "https"
 
 // handleRefresh — POST /auth/refresh
 //
@@ -482,11 +548,12 @@ func setRefreshCookie(w http.ResponseWriter, r *http.Request, refresh string, tt
 // the JSON body. Accept either; header takes precedence when both are sent.
 //
 // Token rotation semantics:
-//  1. Validate the refresh token signature + type.
-//  2. Atomically revoke the old refresh JTI. A concurrent reuse loses here.
-//  3. Mint a NEW access + refresh pair with fresh JTIs.
-//  4. Persist both new JTIs.
-//  5. Return {user:{accessToken, refreshToken}} AND top-level token fields
+//  1. Validate the refresh token signature + type, and its stored row.
+//  2. Mint a NEW access + refresh pair with fresh JTIs.
+//  3. Revoke the old refresh JTI and persist both new JTIs in one step
+//     (TokenStore.IssueTokens). A concurrent reuse, or a sign-out everywhere
+//     that revoked the old JTI first, loses here.
+//  4. Return {user:{accessToken, refreshToken}} AND top-level token fields
 //     for client compatibility — mainline app reads from user{}, third-party
 //     readers may read from the top level.
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -533,9 +600,17 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 		return
 	}
-	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
+	// A PIN set or changed since sign-in ends the refresh token too, so the
+	// client has to sign in again with the PIN.
+	if !h.verifyTokenProfile(w, r, claims) {
+		return
+	}
+	row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
+	if err == nil && row.RevokedAt != nil {
+		err = ErrNotFound
+	}
 	if err != nil {
-		slog.DebugContext(r.Context(), "abs refresh: jti revoke failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
+		slog.DebugContext(r.Context(), "abs refresh: jti lookup failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
 		} else {
@@ -571,32 +646,32 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	newAccessJTI := ulid.Make().String()
 	newRefreshJTI := ulid.Make().String()
-	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, newAccessJTI, accessTTL)
+	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, claims.PINRevision, newAccessJTI, accessTTL)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs refresh: mint access failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
-	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, newRefreshJTI, refreshTTL)
+	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, claims.PINRevision, newRefreshJTI, refreshTTL)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs refresh: mint refresh failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
 	now := time.Now()
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	if err := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{JTI: claims.JTI, Rotate: true}, ABSToken{
 		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "access", JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "abs refresh: persist access failed", "component", "audiobooks", "user", claims.UserID, "jti", newAccessJTI, "err", err)
-		http.Error(w, "token persist failed", http.StatusInternalServerError)
-		return
-	}
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	}, ABSToken{
 		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "refresh", JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		slog.ErrorContext(r.Context(), "abs refresh: persist refresh failed", "component", "audiobooks", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
+		if errors.Is(err, ErrNotFound) {
+			slog.DebugContext(r.Context(), "abs refresh: jti revoked before rotation", "component", "audiobooks", "jti", claims.JTI)
+			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+			return
+		}
+		slog.ErrorContext(r.Context(), "abs refresh: rotation failed", "component", "audiobooks", "user", claims.UserID, "jti", claims.JTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -619,7 +694,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 			displayName = resolved
 		}
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, displayName, access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), now, ctxAuth{UserID: claims.UserID, ProfileID: claims.ProfileID}, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)
@@ -642,6 +717,8 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   refreshCookieSecure(r),
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 

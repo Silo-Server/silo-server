@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPreparationControlsPauseResumeAndCancel(t *testing.T) {
@@ -347,4 +349,64 @@ func TestStopLocalAttemptsCancelsOnlyRunningAttemptsOnThisReplica(t *testing.T) 
 	if tracked {
 		t.Fatal("a finished attempt is still tracked")
 	}
+}
+
+// seedPreparationRequester links a managed device download to artifactID.
+func seedPreparationRequester(t *testing.T, pool *pgxpool.Pool, fileID int, artifactID, status string) (int, string) {
+	t.Helper()
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("prep-user-%d", suffix),
+	).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	deviceID := fmt.Sprintf("prep-device-%d", suffix)
+	downloadID := fmt.Sprintf("prep-download-%d", suffix)
+	repo := NewRepository(pool)
+	if err := repo.EnsureDevice(ctx, userID, "profile-prep", deviceID, "Test iPhone", "ios"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, &Download{
+		ID: downloadID, UserID: userID, ProfileID: "profile-prep", DeviceID: deviceID, MediaFileID: fileID,
+		ContentID: "prep-content", Kind: KindQueued, Status: status,
+		Format: FormatTranscode, ArtifactID: artifactID,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_devices WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	return userID, deviceID
+}
+
+// linkRecoveryDownload links one managed download in status to artifactID.
+func linkRecoveryDownload(t *testing.T, pool *pgxpool.Pool, fileID int, artifactID, status string) {
+	t.Helper()
+	ctx := context.Background()
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("recovery-user-%d", time.Now().UnixNano()),
+	).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	downloadID := fmt.Sprintf("recovery-download-%d", time.Now().UnixNano())
+	if err := NewRepository(pool).Create(ctx, &Download{
+		ID: downloadID, UserID: userID, MediaFileID: fileID,
+		ContentID: "recovery-content", Kind: KindQueued, Status: status,
+		Format: FormatTranscode, ArtifactID: artifactID, FileSize: 4242,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
 }

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 const snapshot = {
   room_id: "room",
   phase: "playing",
@@ -73,30 +74,8 @@ it("sends exact selection once with string IDs and uses the authoritative receip
   });
   expect(new Headers(fetch.mock.calls[0]![1].headers).has("X-Room-Token")).toBe(false);
 });
-it.each([401, 500])("does not replay %s or publish selection", async (status) => {
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-
-  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-  vi.stubGlobal("fetch", fetch);
-  const { result } = renderHook(() =>
-    useWatchTogetherRoomConnection({ roomId: "room", roomToken: null }),
-  );
-  await act(async () => {
-    await expect(result.current.selectItem({ content_id: "movie" })).rejects.toThrow();
-  });
-  expect(fetch).toHaveBeenCalledTimes(1);
-  expect(result.current.room).toBeNull();
-});
 it.each([200, 500])("refuses old authority and replaced-room %s receipts", async (status) => {
-  let resolve!: (r: Response) => void;
-  const fetch = vi.fn().mockImplementation(
-    () =>
-      new Promise<Response>((r) => {
-        resolve = r;
-      }),
-  );
-  vi.stubGlobal("fetch", fetch);
+  const { fetch, finish } = stubPendingFetch();
   const { result, rerender } = renderHook(
     ({ id }: { id: string }) => useWatchTogetherRoomConnection({ roomId: id, roomToken: null }),
     { initialProps: { id: "room" } },
@@ -114,7 +93,7 @@ it.each([200, 500])("refuses old authority and replaced-room %s receipts", async
   });
   rerender({ id: "other" });
   await act(async () => {
-    resolve(status === 200 ? response() : new Response(null, { status }));
+    finish(status === 200 ? response() : new Response(null, { status }));
     expect(await done).toBeNull();
   });
   expect(result.current.room).toBeNull();

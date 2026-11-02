@@ -36,6 +36,8 @@ func NewReservations(initial map[string]int) *Reservations {
 // Reserve picks the enabled, healthy node with the least effective load (its
 // reported active jobs plus this feature's reservations) among nodes with
 // fewer than capacity reservations, and reserves it until release is called.
+// A draining node takes no new work; it counts as healthy with no capacity, so
+// a cluster whose only node is draining reports CapacityExhausted.
 func (r *Reservations) Reserve(nodes []*Node, capacity int) (node *Node, release func(), outcome ReserveOutcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -51,7 +53,7 @@ func (r *Reservations) Reserve(nodes []*Node, capacity int) (node *Node, release
 		}
 		healthy = true
 		reserved := r.counts[NormalizeNodeURL(n.URL)]
-		if reserved >= capacity {
+		if reserved >= capacity || n.Draining() {
 			continue
 		}
 		if load := n.ActiveJobs + reserved; best == nil || load < bestLoad {

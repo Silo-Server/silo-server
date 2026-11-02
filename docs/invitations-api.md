@@ -60,8 +60,10 @@ Administrator creation takes optional `delivery`, `email`, optional `role`
 (default `user`), optional
 string `access_group_id`, optional string-ID array `library_ids`, optional
 `create_profile` and `show_tour` (both default true), and optional `note`.
-Omitted library IDs inherit access; `[]` is an explicit empty override. Omit
-optional members instead of sending null. Explicit false must remain false.
+Omitted library IDs inherit access; `[]` is an explicit empty override. An ID
+that names no library returns `422 validation_failed` at `body.library_ids`, and
+deleting a library removes its ID from stored invitations. Omit optional members
+instead of sending null. Explicit false must remain false.
 Default-profile requests are refused before effects when unsupported. Only the
 server Owner may create or resend an invitation with role `admin`; another
 administrator receives `403 permission_denied`.

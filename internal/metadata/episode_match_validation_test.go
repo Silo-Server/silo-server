@@ -101,64 +101,182 @@ func TestExtractEpisodeMatchTitle(t *testing.T) {
 	}
 }
 
-func TestValidateSeriesMatchByEpisodes_LeavesMemoriesUnmatched(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"2018": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "A New Beginning"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Home"},
-		},
-		"1998": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Old Friends"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Reunion"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Memories", Type: "series",
-		AllGroupFilePaths: []string{
-			"/anime/Memories/Season 1/Memories - S01E01 - Magnetic Rose[Bluray-1080p].mkv",
-			"/anime/Memories/Season 1/Memories - S01E02 - Stink Bomb[Bluray-1080p].mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Memories", Year: 2018, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "2018"}},
-		{Title: "Memories", Year: 1998, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1998"}},
-	}
-
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner != nil {
-		t.Fatalf("winner = %+v, want unmatched type conflict", winner)
-	}
+type validateSeriesMatchByEpisodesDecisionsCase struct {
+	name       string
+	episodes   map[string][]EpisodeResult
+	errors     map[string]error
+	hints      *MatchHints
+	candidates []MatchCandidate
+	wantWinner bool
+	wantTMDB   string
+	wantReason string
+	checkErrs  bool
+	wantErrs   int
+	wantCalls  int // 0: not checked
 }
 
-func TestValidateSeriesMatchByEpisodes_SearchesPastFormerTopThree(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"1": {{SeasonNumber: 1, EpisodeNumber: 1, Title: "Wrong One"}, {SeasonNumber: 1, EpisodeNumber: 2, Title: "Wrong Two"}},
-		"2": {{SeasonNumber: 1, EpisodeNumber: 1, Title: "Wrong One"}, {SeasonNumber: 1, EpisodeNumber: 2, Title: "Wrong Two"}},
-		"3": {{SeasonNumber: 1, EpisodeNumber: 1, Title: "Wrong One"}, {SeasonNumber: 1, EpisodeNumber: 2, Title: "Wrong Two"}},
-		"4": {{SeasonNumber: 1, EpisodeNumber: 1, Title: "Right One"}, {SeasonNumber: 1, EpisodeNumber: 2, Title: "Right Two"}},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Season 1/Shared - S01E01 - Right One[WEBDL-1080p].mkv",
-			"/tv/Shared/Season 1/Shared - S01E02 - Right Two[WEBDL-1080p].mkv",
+var validateSeriesMatchByEpisodesDecisionsCases = func() []validateSeriesMatchByEpisodesDecisionsCase {
+	ep := func(season, episode int, title string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: episode, Title: title}
+	}
+	hints := func(title string, year int, paths ...string) *MatchHints {
+		return &MatchHints{Title: title, Year: year, Type: "series", AllGroupFilePaths: paths}
+	}
+	tmdbCand := func(title string, year int, id string) MatchCandidate {
+		return matchCand(title, year, "series", map[string]string{"tmdb": id}, "tmdb")
+	}
+	crimsPaths := []string{"/tv/Crims/Crims - S01E01 - Day One.mkv", "/tv/Crims/Crims - S01E02 - Day Thirty-Six.mkv"}
+	crimsEpisodes := map[string][]EpisodeResult{"correct": {ep(1, 1, "Day One"), ep(1, 2, "Day Thirty-Six")}}
+	crimsCandidates := []MatchCandidate{tmdbCand("Crims", 0, "rival"), tmdbCand("Crims", 0, "correct")}
+	weakPaths := []string{"/tv/Shared/Shared - S01E01.mkv", "/tv/Shared/Shared - S01E02.mkv", "/tv/Shared/Shared - S01E03.mkv"}
+	weakEpisodes := map[string][]EpisodeResult{"show": {ep(1, 1, "Episode 1"), ep(1, 2, "Episode 2"), ep(1, 3, "Episode 3")}}
+	distinctivePaths := []string{"/tv/Shared/Shared - S02E01.mkv", "/tv/Shared/Shared - S02E04.mkv", "/tv/Shared/Shared - S02E08.mkv"}
+	distinctiveEpisodes := []EpisodeResult{ep(2, 1, "Episode 1"), ep(2, 4, "Episode 4"), ep(2, 8, "Episode 8")}
+	wrongPair := []EpisodeResult{ep(1, 1, "Wrong One"), ep(1, 2, "Wrong Two")}
+	const coordinates3of3 = "episode_coordinate_corroboration:3_of_3"
+
+	return []validateSeriesMatchByEpisodesDecisionsCase{
+		{
+			name: "leaves Memories unmatched",
+			episodes: map[string][]EpisodeResult{
+				"2018": {ep(1, 1, "A New Beginning"), ep(1, 2, "Home")},
+				"1998": {ep(1, 1, "Old Friends"), ep(1, 2, "Reunion")},
+			},
+			hints: hints("Memories", 0,
+				"/anime/Memories/Season 1/Memories - S01E01 - Magnetic Rose[Bluray-1080p].mkv",
+				"/anime/Memories/Season 1/Memories - S01E02 - Stink Bomb[Bluray-1080p].mkv"),
+			candidates: []MatchCandidate{tmdbCand("Memories", 2018, "2018"), tmdbCand("Memories", 1998, "1998")},
+		},
+		{
+			name: "searches past former top three",
+			episodes: map[string][]EpisodeResult{
+				"1": wrongPair, "2": wrongPair, "3": wrongPair,
+				"4": {ep(1, 1, "Right One"), ep(1, 2, "Right Two")},
+			},
+			hints: hints("Shared", 0,
+				"/tv/Shared/Season 1/Shared - S01E01 - Right One[WEBDL-1080p].mkv",
+				"/tv/Shared/Season 1/Shared - S01E02 - Right Two[WEBDL-1080p].mkv"),
+			candidates: []MatchCandidate{tmdbCand("Shared", 2000, "1"), tmdbCand("Shared", 2000, "2"), tmdbCand("Shared", 2000, "3"), tmdbCand("Shared", 2000, "4")},
+			wantWinner: true, wantTMDB: "4", wantCalls: 4,
+		},
+		{
+			name:     "validates cross-provider exact-year alias",
+			episodes: map[string][]EpisodeResult{"show": {ep(1, 1, "The Beginning"), ep(1, 2, "The Journey")}},
+			hints: hints("Bunny Drop", 2011,
+				"/tv/Bunny Drop/Bunny Drop - S01E01 - The Beginning.mkv",
+				"/tv/Bunny Drop/Bunny Drop - S01E02 - The Journey.mkv"),
+			candidates: []MatchCandidate{matchCand("Usagi Drop", 2011, "series", map[string]string{"tmdb": "show", "tvdb": "123"}, "tmdb", "tvdb")},
+			wantWinner: true, wantTMDB: "show", checkErrs: true,
+		},
+		{
+			name:       "accepts distinctive sole episode",
+			episodes:   map[string][]EpisodeResult{"232926": {ep(1, 1, "The Fiancé Who Killed Me")}},
+			hints:      hints("7th Time Loop", 0, "/tv/7th Time Loop/Season 1/7th Time Loop - S01E01 - The Fiance Who Killed Me[WEBDL-1080p].mkv"),
+			candidates: []MatchCandidate{tmdbCand("7th Time Loop", 2024, "232926")},
+			wantWinner: true,
+		},
+		{
+			// A 404 for the rival's season is evaluated evidence, not an error.
+			name:       "treats missing rival season as zero evidence",
+			episodes:   crimsEpisodes,
+			errors:     map[string]error{"rival": errors.New("tmdb: HTTP 404: season not found")},
+			hints:      hints("Crims", 0, crimsPaths...),
+			candidates: crimsCandidates,
+			wantWinner: true, wantTMDB: "correct", checkErrs: true,
+		},
+		{
+			name:       "operational rival error blocks promotion",
+			episodes:   crimsEpisodes,
+			errors:     map[string]error{"rival": errors.New("tmdb: HTTP 503: unavailable")},
+			hints:      hints("Crims", 0, crimsPaths...),
+			candidates: crimsCandidates,
+			checkErrs:  true, wantErrs: 1,
+		},
+		{
+			name:       "accepts multi-source coordinate corroboration",
+			episodes:   weakEpisodes,
+			hints:      hints("Shared", 0, weakPaths...),
+			candidates: []MatchCandidate{matchCand("Shared", 0, "series", map[string]string{"tmdb": "show", "tvdb": "other"}, "tmdb", "tvdb")},
+			wantWinner: true, wantReason: coordinates3of3, checkErrs: true,
+		},
+		{
+			// Weak S01E01-E03 coordinates from one source stay unmatched.
+			name:       "rejects weak single-source coordinates",
+			episodes:   weakEpisodes,
+			hints:      hints("Shared", 0, weakPaths...),
+			candidates: []MatchCandidate{tmdbCand("Shared", 0, "show")},
+		},
+		{
+			name:       "accepts distinctive single-source coordinates",
+			episodes:   map[string][]EpisodeResult{"show": distinctiveEpisodes},
+			hints:      hints("Shared", 0, distinctivePaths...),
+			candidates: []MatchCandidate{tmdbCand("Shared", 0, "show")},
+			wantWinner: true, wantReason: coordinates3of3,
+		},
+		{
+			// Coordinates alone must not choose between exact-title candidates.
+			name:       "rejects coordinate-only choice between exact titles",
+			episodes:   map[string][]EpisodeResult{"first": distinctiveEpisodes, "second": {ep(2, 1, "Episode 1")}},
+			hints:      hints("Shared", 0, distinctivePaths...),
+			candidates: []MatchCandidate{tmdbCand("Shared", 0, "first"), tmdbCand("Shared", 0, "second")},
+		},
+		{
+			name: "accepts unique multi-season shape",
+			episodes: map[string][]EpisodeResult{
+				"original": {ep(1, 10, "Episode 10"), ep(2, 8, "Episode 8"), ep(4, 6, "Episode 6")},
+				"remake":   {ep(1, 10, "Episode 10"), ep(2, 8, "Episode 8")},
+			},
+			hints: hints("Shared", 0,
+				"/tv/Shared/Season 1/Shared - S01E10.mkv",
+				"/tv/Shared/Season 2/Shared - S02E08.mkv",
+				"/tv/Shared/Season 4/Shared - S04E06.mkv"),
+			candidates: []MatchCandidate{tmdbCand("Shared", 0, "remake"), tmdbCand("Shared", 0, "original")},
+			wantWinner: true, wantTMDB: "original", wantReason: coordinates3of3, checkErrs: true,
+		},
+		{
+			// Two coordinates from one season are insufficient shape evidence.
+			name:       "rejects two-coordinate single-season shape",
+			episodes:   map[string][]EpisodeResult{"candidate": {ep(2, 1, "Episode 1"), ep(2, 8, "Episode 8")}},
+			hints:      hints("Shared", 0, "/tv/Shared/Season 2/Shared - S02E01.mkv", "/tv/Shared/Season 2/Shared - S02E08.mkv"),
+			candidates: []MatchCandidate{tmdbCand("Shared", 0, "candidate")},
+			checkErrs:  true,
 		},
 	}
-	candidates := make([]MatchCandidate, 0, 4)
-	for _, id := range []string{"1", "2", "3", "4"} {
-		candidates = append(candidates, MatchCandidate{
-			Title: "Shared", Year: 2000, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": id},
-		})
-	}
+}()
 
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner == nil || winner.ProviderIDs["tmdb"] != "4" {
-		t.Fatalf("winner = %+v, want corroborated fourth candidate", winner)
-	}
-	if got := provider.callCount(); got != len(candidates) {
-		t.Fatalf("provider calls = %d, want %d", got, len(candidates))
+// TestValidateSeriesMatchByEpisodes_Decisions holds the single-provider
+// validation cases that differ only in the provider's episodes, the local
+// files and the candidates.
+func TestValidateSeriesMatchByEpisodes_Decisions(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range validateSeriesMatchByEpisodesDecisionsCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &episodeValidationStubProvider{episodes: tt.episodes, errors: tt.errors}
+			winner, errs := validateSeriesMatchByEpisodes(context.Background(), tt.hints, tt.candidates, []Provider{provider}, "en")
+			if tt.checkErrs && len(errs) != tt.wantErrs {
+				t.Fatalf("validation errors = %v, want %d", errs, tt.wantErrs)
+			}
+			if !tt.wantWinner {
+				if winner != nil {
+					t.Fatalf("winner = %+v, want unmatched", winner)
+				}
+				return
+			}
+			if winner == nil {
+				t.Fatal("winner = nil, want a corroborated candidate")
+			}
+			if tt.wantTMDB != "" && winner.ProviderIDs["tmdb"] != tt.wantTMDB {
+				t.Fatalf("winner = %+v, want tmdb %s", winner, tt.wantTMDB)
+			}
+			if tt.wantReason != "" && !containsString(winner.MatchReasons, tt.wantReason) {
+				t.Fatalf("winner reasons = %v, want %s", winner.MatchReasons, tt.wantReason)
+			}
+			if tt.wantCalls != 0 && provider.callCount() != tt.wantCalls {
+				t.Fatalf("provider calls = %d, want %d", provider.callCount(), tt.wantCalls)
+			}
+		})
 	}
 }
 
@@ -187,53 +305,6 @@ func TestValidateSeriesMatchByEpisodes_BoundsCandidateFetches(t *testing.T) {
 	validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
 	if got := provider.callCount(); got != maxEpisodeValidationCandidates {
 		t.Fatalf("provider calls = %d, want bounded %d", got, maxEpisodeValidationCandidates)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_ValidatesCrossProviderExactYearAlias(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"show": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "The Beginning"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "The Journey"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Bunny Drop", Year: 2011, Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Bunny Drop/Bunny Drop - S01E01 - The Beginning.mkv",
-			"/tv/Bunny Drop/Bunny Drop - S01E02 - The Journey.mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "Usagi Drop", Year: 2011, ContentType: "series", Sources: []string{"tmdb", "tvdb"},
-		ProviderIDs: map[string]string{"tmdb": "show", "tvdb": "123"},
-	}}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 || winner == nil || winner.ProviderIDs["tmdb"] != "show" {
-		t.Fatalf("winner = %+v errors = %v, want exact-year alias corroborated", winner, errs)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_AcceptsDistinctiveSoleEpisode(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"232926": {{SeasonNumber: 1, EpisodeNumber: 1, Title: "The Fiancé Who Killed Me"}},
-	}}
-	hints := &MatchHints{
-		Title: "7th Time Loop", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/7th Time Loop/Season 1/7th Time Loop - S01E01 - The Fiance Who Killed Me[WEBDL-1080p].mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "7th Time Loop", Year: 2024, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "232926"},
-	}}
-
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner == nil {
-		t.Fatal("distinctive exact episode title should corroborate the sole candidate")
 	}
 }
 
@@ -275,186 +346,6 @@ func TestValidateSeriesMatchByEpisodes_FallsBackWhenPreferredProviderHasGenericT
 	}
 }
 
-func TestValidateSeriesMatchByEpisodes_TreatsMissingRivalSeasonAsZeroEvidence(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{
-		episodes: map[string][]EpisodeResult{
-			"correct": {
-				{SeasonNumber: 1, EpisodeNumber: 1, Title: "Day One"},
-				{SeasonNumber: 1, EpisodeNumber: 2, Title: "Day Thirty-Six"},
-			},
-		},
-		errors: map[string]error{"rival": errors.New("tmdb: HTTP 404: season not found")},
-	}
-	hints := &MatchHints{
-		Title: "Crims", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Crims/Crims - S01E01 - Day One.mkv",
-			"/tv/Crims/Crims - S01E02 - Day Thirty-Six.mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Crims", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "rival"}},
-		{Title: "Crims", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "correct"}},
-	}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 {
-		t.Fatalf("validation errors = %v, want missing season treated as evaluated evidence", errs)
-	}
-	if winner == nil || winner.ProviderIDs["tmdb"] != "correct" {
-		t.Fatalf("winner = %+v, want corroborated candidate", winner)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_OperationalRivalErrorBlocksPromotion(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{
-		episodes: map[string][]EpisodeResult{
-			"correct": {
-				{SeasonNumber: 1, EpisodeNumber: 1, Title: "Day One"},
-				{SeasonNumber: 1, EpisodeNumber: 2, Title: "Day Thirty-Six"},
-			},
-		},
-		errors: map[string]error{"rival": errors.New("tmdb: HTTP 503: unavailable")},
-	}
-	hints := &MatchHints{
-		Title: "Crims", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Crims/Crims - S01E01 - Day One.mkv",
-			"/tv/Crims/Crims - S01E02 - Day Thirty-Six.mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Crims", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "rival"}},
-		{Title: "Crims", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "correct"}},
-	}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner != nil {
-		t.Fatalf("winner = %+v, want operationally unavailable rival to block promotion", winner)
-	}
-	if len(errs) != 1 {
-		t.Fatalf("validation errors = %v, want one operational error", errs)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_AcceptsMultiSourceCoordinateCorroboration(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"show": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Episode 1"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"},
-			{SeasonNumber: 1, EpisodeNumber: 3, Title: "Episode 3"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Shared - S01E01.mkv",
-			"/tv/Shared/Shared - S01E02.mkv",
-			"/tv/Shared/Shared - S01E03.mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "Shared", ContentType: "series", Sources: []string{"tmdb", "tvdb"},
-		ProviderIDs: map[string]string{"tmdb": "show", "tvdb": "other"},
-	}}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 {
-		t.Fatalf("validation errors = %v", errs)
-	}
-	if winner == nil || !containsString(winner.MatchReasons, "episode_coordinate_corroboration:3_of_3") {
-		t.Fatalf("winner = %+v, want coordinate corroboration", winner)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_RejectsWeakSingleSourceCoordinates(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"show": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Episode 1"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"},
-			{SeasonNumber: 1, EpisodeNumber: 3, Title: "Episode 3"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Shared - S01E01.mkv",
-			"/tv/Shared/Shared - S01E02.mkv",
-			"/tv/Shared/Shared - S01E03.mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "show"},
-	}}
-
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner != nil {
-		t.Fatalf("winner = %+v, weak S01E01-E03 coordinates from one source must stay unmatched", winner)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_AcceptsDistinctiveSingleSourceCoordinates(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"show": {
-			{SeasonNumber: 2, EpisodeNumber: 1, Title: "Episode 1"},
-			{SeasonNumber: 2, EpisodeNumber: 4, Title: "Episode 4"},
-			{SeasonNumber: 2, EpisodeNumber: 8, Title: "Episode 8"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Shared - S02E01.mkv",
-			"/tv/Shared/Shared - S02E04.mkv",
-			"/tv/Shared/Shared - S02E08.mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "show"},
-	}}
-
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner == nil || !containsString(winner.MatchReasons, "episode_coordinate_corroboration:3_of_3") {
-		t.Fatalf("winner = %+v, want distinctive coordinate corroboration", winner)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_RejectsCoordinateOnlyChoiceBetweenExactTitles(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"first": {
-			{SeasonNumber: 2, EpisodeNumber: 1, Title: "Episode 1"},
-			{SeasonNumber: 2, EpisodeNumber: 4, Title: "Episode 4"},
-			{SeasonNumber: 2, EpisodeNumber: 8, Title: "Episode 8"},
-		},
-		"second": {
-			{SeasonNumber: 2, EpisodeNumber: 1, Title: "Episode 1"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Shared - S02E01.mkv",
-			"/tv/Shared/Shared - S02E04.mkv",
-			"/tv/Shared/Shared - S02E08.mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "first"}},
-		{Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "second"}},
-	}
-
-	winner, _ := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if winner != nil {
-		t.Fatalf("winner = %+v, coordinates alone must not choose between exact-title candidates", winner)
-	}
-}
-
 func TestSelectLocalEpisodeCoordinateHints_SamplesLastEpisodeAcrossSeasons(t *testing.T) {
 	t.Parallel()
 
@@ -478,73 +369,6 @@ func TestSelectLocalEpisodeCoordinateHints_SamplesLastEpisodeAcrossSeasons(t *te
 		if hints[i].SeasonNumber != want[i].SeasonNumber || hints[i].EpisodeNumber != want[i].EpisodeNumber {
 			t.Fatalf("hints = %+v, want %+v", hints, want)
 		}
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_AcceptsUniqueMultiSeasonShape(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"original": {
-			{SeasonNumber: 1, EpisodeNumber: 10, Title: "Episode 10"},
-			{SeasonNumber: 2, EpisodeNumber: 8, Title: "Episode 8"},
-			{SeasonNumber: 4, EpisodeNumber: 6, Title: "Episode 6"},
-		},
-		"remake": {
-			{SeasonNumber: 1, EpisodeNumber: 10, Title: "Episode 10"},
-			{SeasonNumber: 2, EpisodeNumber: 8, Title: "Episode 8"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Season 1/Shared - S01E10.mkv",
-			"/tv/Shared/Season 2/Shared - S02E08.mkv",
-			"/tv/Shared/Season 4/Shared - S04E06.mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "remake"}},
-		{Title: "Shared", ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "original"}},
-	}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 {
-		t.Fatalf("validation errors = %v", errs)
-	}
-	if winner == nil || winner.ProviderIDs["tmdb"] != "original" {
-		t.Fatalf("winner = %+v, want original multi-season shape", winner)
-	}
-	if !containsString(winner.MatchReasons, "episode_coordinate_corroboration:3_of_3") {
-		t.Fatalf("winner reasons = %v", winner.MatchReasons)
-	}
-}
-
-func TestValidateSeriesMatchByEpisodes_RejectsTwoCoordinateSingleSeasonShape(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"candidate": {
-			{SeasonNumber: 2, EpisodeNumber: 1, Title: "Episode 1"},
-			{SeasonNumber: 2, EpisodeNumber: 8, Title: "Episode 8"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Shared", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Shared/Season 2/Shared - S02E01.mkv",
-			"/tv/Shared/Season 2/Shared - S02E08.mkv",
-		},
-	}
-	candidates := []MatchCandidate{{
-		Title: "Shared", ContentType: "series", Sources: []string{"tmdb"},
-		ProviderIDs: map[string]string{"tmdb": "candidate"},
-	}}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 {
-		t.Fatalf("validation errors = %v", errs)
-	}
-	if winner != nil {
-		t.Fatalf("winner = %+v, two coordinates from one season are insufficient shape evidence", winner)
 	}
 }
 
@@ -630,47 +454,6 @@ func TestInitialMatchPipelineUsesEpisodeCorroboration(t *testing.T) {
 	}
 	if !foundReason {
 		t.Fatalf("decision = %+v, want episode corroboration reason on selected candidate", result.Decision)
-	}
-}
-
-func TestInitialMatchPipelineDoesNotAddEpisodeValidationFetchForDecisiveMatch(t *testing.T) {
-	t.Parallel()
-	harness := newTestHarness()
-	harness.service.seasonRepo = newFakeSeasonRepo()
-	harness.service.episodeRepo = newFakeEpisodeRepo()
-	provider := &episodeValidationPipelineProvider{
-		episodeValidationStubProvider: &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-			"2015": {
-				{SeasonNumber: 1, EpisodeNumber: 1, Title: "Day One"},
-				{SeasonNumber: 1, EpisodeNumber: 2, Title: "Crime and Punishment"},
-			},
-		}},
-		searchResults: []SearchResult{
-			{Name: "Crims", Year: 2015, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "2015"}},
-		},
-	}
-
-	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{
-			Title: "Crims", Year: 2015, Type: "series",
-			AllGroupFilePaths: []string{
-				"/tv/Crims/Season 1/Crims - S01E01 - Day One.mkv",
-				"/tv/Crims/Season 1/Crims - S01E02 - Crime and Punishment.mkv",
-			},
-		},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders() error = %v", err)
-	}
-	if result == nil || result.Decision == nil || result.Decision.Outcome != "matched" {
-		t.Fatalf("result = %#v, want decisive match", result)
-	}
-	// The single call is the normal post-match episode enrichment. An episode
-	// validation fallback would add a second provider fetch before enrichment.
-	if calls := provider.callCount(); calls != 1 {
-		t.Fatalf("episode provider calls = %d, want only the normal enrichment fetch", calls)
 	}
 }
 

@@ -12,7 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
-import { COLLECTION_MAX_ITEMS } from "@/lib/collectionTemplates";
 import {
   COLLECTION_SOURCE_ORDER,
   collectionDefaultSortOptions,
@@ -88,8 +87,6 @@ export type OrderBlockProps =
       onSortChange: (sortConfig: Record<string, unknown>) => void;
       onLimitChange: (limit: number | undefined) => void;
       allowPersonalized: boolean;
-      /** Max titles shown but fixed, as on a legacy Trakt list. */
-      limitLocked?: boolean;
     }
   | {
       mode: "smart";
@@ -221,29 +218,23 @@ function SmartOrder({
 function MaxTitlesInput({
   limit,
   placeholder,
-  max,
-  disabled,
   onCommit,
 }: {
   limit: number | undefined;
   placeholder: string;
-  max?: number;
-  disabled?: boolean;
   onCommit: (input: HTMLInputElement) => void;
 }) {
   return (
-    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-50">
+    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
         key={limit ?? ""}
         type="number"
         min={1}
-        max={max}
         step={1}
         aria-label="Max titles"
         placeholder={placeholder}
         defaultValue={limit ?? ""}
-        disabled={disabled}
-        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 disabled:opacity-100"
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
@@ -265,7 +256,6 @@ function SyncedOrder({
   onSortChange,
   onLimitChange,
   allowPersonalized,
-  limitLocked,
 }: Extract<OrderBlockProps, { mode: "synced" }>) {
   const id = useId();
   const shownRatingSources = useShownRatingSources();
@@ -277,8 +267,7 @@ function SyncedOrder({
   );
 
   function commitLimit(input: HTMLInputElement) {
-    const typed = parsedLimit(input.value, limit);
-    const next = typed === undefined ? undefined : Math.min(typed, COLLECTION_MAX_ITEMS);
+    const next = parsedLimit(input.value, limit);
     input.value = next === undefined ? "" : String(next);
     if (next !== limit) onLimitChange(next);
   }
@@ -304,13 +293,7 @@ function SyncedOrder({
             ))}
           </SelectContent>
         </Select>
-        <MaxTitlesInput
-          limit={limit}
-          placeholder="Whole list"
-          max={COLLECTION_MAX_ITEMS}
-          disabled={limitLocked}
-          onCommit={commitLimit}
-        />
+        <MaxTitlesInput limit={limit} placeholder="Whole list" onCommit={commitLimit} />
       </div>
       <p className="text-muted-foreground text-[13px]">
         {SYNCED_ORDER_HELP} {ORDER_HELP}

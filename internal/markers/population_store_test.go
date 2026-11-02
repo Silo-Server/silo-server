@@ -2,90 +2,91 @@ package markers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestPopulationStoreLeasesFreshnessAndQuota(t *testing.T) {
+// An abandoned request hands its claim back without touching what earlier
+// requests recorded, and never leaves a new identity waiting out an old
+// result's freshness with nothing cached.
+func TestPopulationStoreReleaseKeepsFetchState(t *testing.T) {
 	fixture := newContributionStoreFixture(t)
 	store := NewPopulationStore(fixture.pool)
 	ctx := t.Context()
-	provider := fixture.provider
-	t.Cleanup(func() {
-		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM marker_provider_cooldowns WHERE provider=$1`, provider)
-	})
-	if _, err := fixture.pool.Exec(ctx, `UPDATE media_files SET duration=1000 WHERE id=ANY($1)`, fixture.fileIDs[:]); err != nil {
-		t.Fatal(err)
+	fileID, provider := fixture.fileIDs[0], fixture.provider
+	type fetchState struct {
+		outcome, lastError, result string
+		failures                   int
+		retryAt                    time.Time
+		leased                     bool
 	}
-	if _, err := fixture.pool.Exec(ctx, `UPDATE media_folders SET type=' TV ',enabled=true WHERE id=(SELECT media_folder_id FROM media_files WHERE id=$1)`, fixture.fileIDs[0]); err != nil {
-		t.Fatal(err)
+	read := func() fetchState {
+		t.Helper()
+		var state fetchState
+		if err := fixture.pool.QueryRow(ctx, `SELECT outcome,COALESCE(last_error,''),COALESCE(result::text,''),failures,retry_at,lease_token IS NOT NULL
+			FROM marker_fetch_state WHERE media_file_id=$1 AND provider=$2`, fileID, provider).
+			Scan(&state.outcome, &state.lastError, &state.result, &state.failures, &state.retryAt, &state.leased); err != nil {
+			t.Fatal(err)
+		}
+		return state
 	}
-	if eligible, err := store.Eligible(ctx, fixture.fileIDs[0]); err != nil || !eligible {
-		t.Fatalf("normalized TV eligibility=%v err=%v", eligible, err)
+	claim := func(identity string, force bool) FetchClaim {
+		t.Helper()
+		c, claimed, err := store.Claim(ctx, fileID, provider, identity, "rev1", force)
+		if err != nil || !claimed {
+			t.Fatalf("claim %s: claimed=%v err=%v", identity, claimed, err)
+		}
+		return c
 	}
 
-	var wg sync.WaitGroup
-	claims := make(chan FetchClaim, 8)
-	errors := make(chan error, 8)
-	for range 8 {
-		wg.Go(func() {
-			claim, claimed, err := store.Claim(ctx, fixture.fileIDs[0], provider, "identity", "rev1", false)
-			if err != nil {
-				errors <- err
-			} else if claimed {
-				claims <- claim
-			}
-		})
-	}
-	wg.Wait()
-	close(claims)
-	close(errors)
-	for err := range errors {
+	// A cached answer, then a failed request whose backoff has run out.
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "hit", RetryAt: time.Now().Add(-time.Second), Result: &Result{ProviderID: "cached"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 {
-		t.Fatalf("concurrent request claims=%d, want 1", len(claims))
-	}
-	first := <-claims
-	if err := store.Complete(ctx, first, FetchCompletion{Outcome: "miss", RetryAt: time.Now().Add(time.Hour), Result: &Result{}}); err != nil {
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "error", RetryAt: time.Now().Add(-time.Second), Error: "provider down"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, claimed, err := store.Claim(ctx, fixture.fileIDs[0], provider, "identity", "rev1", false); err != nil || claimed {
-		t.Fatalf("cached miss refetched: claimed=%v err=%v", claimed, err)
+	before := read()
+	abandoned := claim("identity", false)
+	if abandoned.Failures != 1 {
+		t.Fatalf("claim failures=%d, want 1", abandoned.Failures)
 	}
-	second, claimed, err := store.Claim(ctx, fixture.fileIDs[0], provider, "identity", "rev1", true)
-	if err != nil || !claimed {
-		t.Fatalf("explicit refresh: claimed=%v err=%v", claimed, err)
-	}
-	if err := store.Complete(ctx, first, FetchCompletion{Outcome: "hit", RetryAt: time.Now().Add(7 * 24 * time.Hour), Result: &Result{ProviderID: "stale"}}); err != nil {
+	stale := abandoned
+	stale.Token = "00000000-0000-0000-0000-000000000000"
+	if err := store.Release(ctx, stale); err != nil {
 		t.Fatal(err)
 	}
-	var token string
-	if err := fixture.pool.QueryRow(ctx, `SELECT lease_token::text FROM marker_fetch_state WHERE media_file_id=$1 AND provider=$2`, fixture.fileIDs[0], provider).Scan(&token); err != nil || token != second.Token {
-		t.Fatalf("stale completion consumed a newer claim: %q err=%v", token, err)
+	if !read().leased {
+		t.Fatal("release with another token freed the lease")
 	}
-	if err := store.Complete(ctx, second, FetchCompletion{Outcome: "error", RetryAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := store.Release(ctx, abandoned); err != nil {
 		t.Fatal(err)
 	}
-	if _, claimed, err := store.Claim(ctx, fixture.fileIDs[0], provider, "identity", "rev1", true); err != nil || claimed {
-		t.Fatalf("refresh bypassed failure backoff: claimed=%v err=%v", claimed, err)
+	after := read()
+	if after.leased || after.outcome != before.outcome || after.lastError != before.lastError || after.result != before.result ||
+		after.failures != before.failures || !after.retryAt.Equal(before.retryAt) {
+		t.Fatalf("release changed fetch state:\nbefore %+v\nafter  %+v", before, after)
 	}
-	if err := store.Cooldown(ctx, provider, "rev1", time.Now().Add(time.Hour)); err != nil {
+
+	// A fresh answer for the current identity, then an abandoned request for
+	// a new one: the new identity must be asked again at once.
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "hit", RetryAt: time.Now().Add(24 * time.Hour), Result: &Result{ProviderID: "cached"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, claimed, err := store.Claim(ctx, fixture.fileIDs[1], provider, "different-file", "rev1", true); err != nil || claimed {
-		t.Fatalf("quota not shared between files: claimed=%v err=%v", claimed, err)
+	if err := store.Release(ctx, claim("new-identity", false)); err != nil {
+		t.Fatal(err)
 	}
-	if _, claimed, err := store.Claim(ctx, fixture.fileIDs[1], provider, "new-identity", "rev2", false); err != nil || !claimed {
-		t.Fatalf("new credentials retained old cooldown: claimed=%v err=%v", claimed, err)
+	var due bool
+	if err := fixture.pool.QueryRow(ctx, `SELECT result IS NULL AND retry_at<=now() FROM marker_fetch_state WHERE media_file_id=$1 AND provider=$2`,
+		fileID, provider).Scan(&due); err != nil || !due {
+		t.Fatalf("released new identity kept the old freshness: %+v err=%v", read(), err)
 	}
+	claim("new-identity", false)
 }
 
 // seedMovieFiles adds a third file to the fixture, attaches all three to one
@@ -115,87 +116,6 @@ func (f contributionStoreFixture) seedMovieFiles(t *testing.T) (string, []int) {
 		t.Fatal(err)
 	}
 	return itemID, fileIDs
-}
-
-func TestPopulationCandidatesPrioritizeNewFilesAndCredentialChanges(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	store := NewPopulationStore(fixture.pool)
-	ctx := t.Context()
-	_, fileIDs := fixture.seedMovieFiles(t)
-	providers := map[string]string{fixture.provider: "rev1"}
-	first, claimed, err := store.Claim(ctx, fileIDs[0], fixture.provider, "identity", "rev1", false)
-	if err != nil || !claimed {
-		t.Fatalf("claim: %v %v", claimed, err)
-	}
-	if err := store.Complete(ctx, first, FetchCompletion{Outcome: "miss", RetryAt: time.Now().Add(time.Hour), Result: &Result{}}); err != nil {
-		t.Fatal(err)
-	}
-	candidates := func() []int {
-		t.Helper()
-		return allCandidates(t, store, providers, fileIDs)
-	}
-	if ids := candidates(); !slices.Equal(ids, fileIDs[1:]) {
-		t.Fatalf("candidates with a fresh miss=%v, want only the unqueried files", ids)
-	}
-	if _, err := fixture.pool.Exec(ctx, `UPDATE marker_fetch_state SET retry_at=now()-interval '1 second' WHERE media_file_id=$1 AND provider=$2`, fileIDs[0], fixture.provider); err != nil {
-		t.Fatal(err)
-	}
-	if ids := candidates(); !slices.Equal(ids, []int{fileIDs[1], fileIDs[2], fileIDs[0]}) {
-		t.Fatalf("candidates with a due miss=%v, want the unqueried files first", ids)
-	}
-	if _, err := fixture.pool.Exec(ctx, `UPDATE marker_fetch_state SET retry_at=now()+interval '1 hour' WHERE media_file_id=$1 AND provider=$2`, fileIDs[0], fixture.provider); err != nil {
-		t.Fatal(err)
-	}
-	providers[fixture.provider] = "rev2"
-	if ids := candidates(); !slices.Contains(ids, fileIDs[0]) {
-		t.Fatalf("credential change candidates=%v", ids)
-	}
-}
-
-// allCandidates keeps the fixture's files, in order; other rows in a shared
-// test database may also be due.
-func allCandidates(t *testing.T, store *DBPopulationStore, providers map[string]string, fileIDs []int) []int {
-	t.Helper()
-	all, err := store.Candidates(t.Context(), providers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ids []int
-	for _, id := range all {
-		if slices.Contains(fileIDs, id) {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	ctx := t.Context()
-	seriesID := strconv.FormatInt(time.Now().UnixNano(), 10)
-	episodeID := strconv.FormatInt(time.Now().UnixNano()+1, 10)
-	if _, err := fixture.pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,imdb_id) VALUES($1,'series','Marker identity fixture','tt42')`, seriesID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id=$1`, episodeID)
-		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
-	})
-	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,imdb_id,tvdb_id,air_date)
-		VALUES($1,$2,0,2,'88','tt99','99','2026-09-30')`, episodeID, seriesID); err != nil {
-		t.Fatal(err)
-	}
-	resolver := NewDBExternalIDResolver(fixture.pool)
-	ids, err := resolver.ResolveForFile(ctx, &models.MediaFile{ID: fixture.fileIDs[0], EpisodeID: episodeID, SeasonNumber: 9, EpisodeNumber: 9})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids.TmdbID != "" || ids.TvdbID != "" || ids.ImdbID != "tt42" || ids.SeasonNumber != 0 || ids.EpisodeNumber != 2 {
-		t.Fatalf("episode identity leaked into show lookup: %+v", ids)
-	}
-	if !ids.Released.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("released=%v, want the episode air date", ids.Released)
-	}
 }
 
 // quotaSync runs Sync over the fixture's movie files with a provider that
@@ -300,68 +220,6 @@ func TestPopulationSyncResumesAfterQuotaAcrossRuns(t *testing.T) {
 	slices.Sort(refreshed)
 	if !slices.Equal(refreshed, q.fileIDs) {
 		t.Fatalf("quota-limited runs refreshed %v, want each of %v once", refreshed, q.fileIDs)
-	}
-}
-
-// A short rate limit pauses the run; the files after it are still fetched.
-func TestPopulationSyncWaitsOutShortRateLimit(t *testing.T) {
-	q := newQuotaSync(t)
-	q.limit, q.refill = 200*time.Millisecond, len(q.fileIDs)
-	if _, got := q.run(t, 1); !slices.Equal(got, []int{q.fileIDs[0], q.fileIDs[2]}) {
-		t.Fatalf("sync fetched %v, want every file but the rate-limited one", got)
-	}
-	// A cooldown left by another lookup must not end the next run before it starts.
-	q.nextDay(t)
-	if err := NewPopulationStore(q.fixture.pool).Cooldown(t.Context(), q.fixture.provider, "rev1", time.Now().Add(200*time.Millisecond)); err != nil {
-		t.Fatal(err)
-	}
-	_, got := q.run(t, len(q.fileIDs))
-	if slices.Sort(got); !slices.Equal(got, q.fileIDs) {
-		t.Fatalf("sync after an existing cooldown fetched %v, want %v", got, q.fileIDs)
-	}
-}
-
-// A metadata refresh that leaves a file's IDs unchanged must not keep the file
-// in every daily sync until its cached result expires.
-func TestPopulationSyncClearsUnchangedMetadataEdits(t *testing.T) {
-	q := newQuotaSync(t)
-	store := NewPopulationStore(q.fixture.pool)
-	providers := map[string]string{q.fixture.provider: "rev1"}
-	q.run(t, len(q.fileIDs))
-	if _, err := q.fixture.pool.Exec(t.Context(), `UPDATE media_items SET updated_at=now()
-		WHERE content_id=(SELECT content_id FROM media_files WHERE id=$1)`, q.fileIDs[0]); err != nil {
-		t.Fatal(err)
-	}
-	if ids := allCandidates(t, store, providers, q.fileIDs); !slices.Equal(ids, q.fileIDs) {
-		t.Fatalf("candidates after a metadata edit=%v, want %v", ids, q.fileIDs)
-	}
-	// A pass that could not store the markers has not finished the check.
-	q.write = func() error { return errors.New("write unavailable") }
-	q.run(t, len(q.fileIDs))
-	if ids := allCandidates(t, store, providers, q.fileIDs); !slices.Equal(ids, q.fileIDs) {
-		t.Fatalf("candidates after a failed check=%v, want %v", ids, q.fileIDs)
-	}
-	q.write = nil
-	if _, got := q.run(t, len(q.fileIDs)); len(got) != 0 {
-		t.Fatalf("unchanged identities were refetched: %v", got)
-	}
-	if ids := allCandidates(t, store, providers, q.fileIDs); len(ids) != 0 {
-		t.Fatalf("candidates after the identity check=%v, want none", ids)
-	}
-	// An edit that lands while a pass is checking the file stays due.
-	edit := func() error {
-		_, err := q.fixture.pool.Exec(t.Context(), `UPDATE media_items SET updated_at=now()
-			WHERE content_id=(SELECT content_id FROM media_files WHERE id=$1)`, q.fileIDs[0])
-		return err
-	}
-	if err := edit(); err != nil {
-		t.Fatal(err)
-	}
-	q.write = edit
-	q.run(t, len(q.fileIDs))
-	// Each file's own check saw the edit made while it ran, the last file's included.
-	if ids := allCandidates(t, store, providers, q.fileIDs); !slices.Equal(ids, q.fileIDs) {
-		t.Fatalf("candidates after edits during the identity check=%v, want %v", ids, q.fileIDs)
 	}
 }
 

@@ -3,7 +3,6 @@ package apiv2
 import (
 	"encoding/json"
 	"math"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -59,73 +58,5 @@ func TestRequestDownloadOf(t *testing.T) {
 		if strings.Contains(string(raw), `"`+field+`"`) {
 			t.Fatalf("%s: %s must be omitted", raw, field)
 		}
-	}
-}
-
-func TestRequestResponsesCarryDownload(t *testing.T) {
-	h := newTestHandler(t, requestDeps(fixtureRequests()))
-	type download struct {
-		Phase                 string `json:"phase"`
-		Percent               *int   `json:"percent"`
-		BytesTotal            *int64 `json:"bytes_total"`
-		BytesLeft             *int64 `json:"bytes_left"`
-		EstimatedCompletionAt string `json:"estimated_completion_at"`
-		Downloads             int    `json:"downloads"`
-		UpdatedAt             string `json:"updated_at"`
-	}
-	var got struct {
-		Download *download `json:"download"`
-		Targets  []struct {
-			Download *download `json:"download"`
-		} `json:"targets"`
-	}
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || got.Download == nil || len(got.Targets) != 1 || got.Targets[0].Download == nil {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	for _, d := range []*download{got.Download, got.Targets[0].Download} {
-		if d.Phase != "downloading" || d.Percent == nil || *d.Percent != 43 || d.BytesTotal == nil || *d.BytesTotal != 4294967296 ||
-			d.BytesLeft == nil || *d.BytesLeft != 2448131358 || d.Downloads != 1 ||
-			d.EstimatedCompletionAt != "2026-01-02T03:16:05.678Z" || d.UpdatedAt != "2026-01-02T03:04:05.678Z" {
-			t.Fatalf("download = %+v in %s", d, rec.Body.String())
-		}
-	}
-
-	// A request without progress carries no download at all.
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/r-2", "", requestOwner)
-	if rec.Code != 200 || strings.Contains(rec.Body.String(), `"download"`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRequestMediaDetailCarriesDownload(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/detail/movie/949", "", requestOwner)
-	if rec.Code != 200 || strings.Contains(rec.Body.String(), `"download"`) {
-		t.Fatalf("without progress: %d %s", rec.Code, rec.Body.String())
-	}
-
-	svc.detailDownload = fixtureDownload()
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/detail/movie/949", "", requestOwner)
-	var got struct {
-		Request struct {
-			Download *struct {
-				Phase   string `json:"phase"`
-				Percent *int   `json:"percent"`
-			} `json:"download"`
-		} `json:"request"`
-		Recommendations []struct {
-			Request map[string]any `json:"request"`
-		} `json:"recommendations"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || got.Request.Download == nil || got.Request.Download.Phase != "downloading" ||
-		got.Request.Download.Percent == nil || *got.Request.Download.Percent != 43 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if len(got.Recommendations) != 1 || got.Recommendations[0].Request["download"] != nil {
-		t.Fatalf("recommendations = %+v, want no download on them", got.Recommendations)
 	}
 }

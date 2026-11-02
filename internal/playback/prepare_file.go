@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -241,6 +241,18 @@ func h264LevelFor(width, height int, frameRate float64, kbps int) int {
 	return 60
 }
 
+// H264LevelFor is h264LevelFor for callers outside this package.
+func H264LevelFor(width, height int, frameRate float64, kbps int) int {
+	return h264LevelFor(width, height, frameRate, kbps)
+}
+
+// EncodeEquivalentKbps is the rate an encode to targetCodec of a source at
+// sourceKbps in sourceCodec needs for the same quality (sourceEquivalentKbps),
+// or 0 when the source's rate is unknown.
+func EncodeEquivalentKbps(sourceKbps int, sourceCodec, targetCodec string) int {
+	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, targetCodec)
+}
+
 // h264LevelBitrateKbps is the highest cap whose rate and doubled buffer fit
 // the given level; 0 for an unknown level.
 func h264LevelBitrateKbps(idc int) int {
@@ -254,6 +266,9 @@ func h264LevelBitrateKbps(idc int) int {
 
 // h264HighProfileV3 is the profile every H.264 encode here produces.
 const h264HighProfileV3 = "high"
+
+// H264EncodeProfile is h264HighProfileV3 for callers outside this package.
+const H264EncodeProfile = h264HighProfileV3
 
 // downloadDecoder is the decoder bound a download encode must fit. Zero
 // fields are unbounded.
@@ -381,7 +396,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			bin = ffmpegBinary()
 		}
 
-		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd := fspath.CommandContext(ctx, bin, args...)
 		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 		cmd.Stderr = stderr
 		if logs != nil {

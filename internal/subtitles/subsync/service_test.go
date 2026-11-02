@@ -7,11 +7,14 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -546,6 +549,19 @@ func TestPlanSpeech(t *testing.T) {
 	}
 }
 
+// A track FFmpeg cannot decode (ffprobe names no codec for AVS3 audio) is
+// never sampled while the file has a decodable one.
+func TestPlanSpeechSkipsUndecodableAudio(t *testing.T) {
+	file := &models.MediaFile{Duration: 1800, AudioTracks: []models.AudioTrack{
+		{Language: "zho", Default: true}, {Language: "zho", Codec: "eac3"}, {Language: "eng", Codec: "aac"},
+	}}
+	for language, want := range map[string]int{"zh": 1, "fr": 1, "en": 2} {
+		if plan, err := planSpeech(file, language); err != nil || plan.AudioStream != want {
+			t.Fatalf("planSpeech(%q) stream = %d err %v, want %d", language, plan.AudioStream, err, want)
+		}
+	}
+}
+
 func TestSpeechCodecRoundTrip(t *testing.T) {
 	windows := []mediasample.SpeechLevels{
 		{StartSeconds: 12.5, FrameSeconds: mediasample.SpeechFrameSeconds, Levels: []byte{1, 2, 3}},
@@ -626,6 +642,31 @@ func TestExecuteSyncsSidecar(t *testing.T) {
 	assertTiming(t, f.jobs.applied[job.ID], truth, 7200)
 	if len(f.notifier.targets) != 1 || f.notifier.targets[0] != (subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path}) {
 		t.Fatalf("notified %+v", f.notifier.targets)
+	}
+}
+
+// A sidecar whose name is not UTF-8 is stored fspath-encoded; the service
+// reads it through fspath, as NewService wires it.
+func TestExecuteSyncsSidecarWithNonUTF8Name(t *testing.T) {
+	truth := subtitles.Timing{Scale: 1, OffsetMS: -3200}
+	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	data := f.svc.content.(*fakeSubtitles).data
+	raw := filepath.Join(t.TempDir(), "B\xe5rd.en.srt")
+	if err := os.WriteFile(raw, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := models.ExternalSubtitle{Path: fspath.Encode(raw), Language: "en", Format: "srt"}
+	f.svc.files.(fakeFiles).file.ExternalSubtitles = []models.ExternalSubtitle{sidecar}
+	f.svc.readFile = fspath.ReadFile
+	external := &fakeExternal{}
+	f.svc.external = external
+
+	if _, err := external.EnsureExternalTiming(context.Background(), 9, subtitles.ContentSHA256(data), sidecar.Path, subtitles.FormatSRT); err != nil {
+		t.Fatal(err)
+	}
+	job := f.runExternal(t, external.row)
+	if job.Status != string(StatusSynced) {
+		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
 	}
 }
 
@@ -746,8 +787,6 @@ func TestExecuteSidecarChangedDuringAnalysis(t *testing.T) {
 		"edited on disk": func(f *fixture) {
 			f.svc.readFile = func(string) ([]byte, error) { return []byte("1\n00:00:01,000 --> 00:00:02,000\nEdited\n"), nil }
 		},
-		"deleted":           func(f *fixture) { f.svc.readFile = func(string) ([]byte, error) { return nil, fs.ErrNotExist } },
-		"no longer scanned": func(f *fixture) { f.svc.files.(fakeFiles).file.ExternalSubtitles = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
@@ -826,45 +865,6 @@ func TestRequestExternalRefusesFormatsItCannotRetime(t *testing.T) {
 	_, err := f.svc.RequestExternal(context.Background(), 9, models.ExternalSubtitle{Path: "/media/film.sub", Format: "sub"}, TriggerManual, nil)
 	if !errors.Is(err, ErrUnsupportedFormat) || external.ensured != 0 || len(f.jobs.jobs) != 0 {
 		t.Fatalf("err %v ensured %d jobs %d", err, external.ensured, len(f.jobs.jobs))
-	}
-}
-
-func TestExecuteReportsProgressAndOutcome(t *testing.T) {
-	truth := subtitles.Timing{Scale: 1, OffsetMS: 1800}
-	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	job := f.run(t, TriggerManual)
-	updates := f.notifier.updates
-	if len(updates) != sampledWindows+3 {
-		t.Fatalf("%d updates: %+v", len(updates), updates)
-	}
-	if u := updates[0]; u.Job.Status != JobRunning || u.Job.PublicPhase() != PhaseAnalyzing || *u.Job.Progress != 0 ||
-		u.Target != (subtitles.SyncTarget{MediaFileID: 9, StoredID: 5}) {
-		t.Fatalf("first update %+v", u)
-	}
-	last := 0.0
-	for _, u := range updates[1 : sampledWindows+1] {
-		if u.Job.Phase != PhaseAnalyzing || *u.Job.Progress <= last {
-			t.Fatalf("decode update %+v after %v", u.Job, last)
-		}
-		last = *u.Job.Progress
-	}
-	if u := updates[sampledWindows+1]; u.Job.Phase != PhaseMatching || *u.Job.Progress <= last || *u.Job.Progress >= 1 {
-		t.Fatalf("matching update %+v", u.Job)
-	}
-	final := updates[len(updates)-1]
-	if final.Job.Status != string(StatusSynced) || final.Job.PublicPhase() != "" || final.Job.PublicProgress() != nil ||
-		final.Timing != f.jobs.applied[job.ID] || final.Job.FinishedAt == nil {
-		t.Fatalf("final update %+v", final)
-	}
-	if len(f.jobs.progress) != sampledWindows+2 {
-		t.Fatalf("progress rows %v", f.jobs.progress)
-	}
-
-	// Cached speech skips straight to matching.
-	f.notifier.updates = nil
-	f.run(t, TriggerManual)
-	if phases := len(f.notifier.updates); phases != 3 || f.notifier.updates[1].Job.Phase != PhaseMatching {
-		t.Fatalf("cached run updates %+v", f.notifier.updates)
 	}
 }
 

@@ -8,255 +8,66 @@ import (
 	"testing"
 )
 
-func TestDurationFromProbeMetadataUsesReasonableVideoDuration(t *testing.T) {
+func TestDurationFromProbeMetadata(t *testing.T) {
 	t.Parallel()
 
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{Duration: "1745764.949333"},
-		Streams: []ffprobeStream{
-			{CodecType: "video", Duration: "4077.708452"},
-			{CodecType: "audio", Duration: "1745764.949333"},
-		},
+	const large = "77507139196"
+	video := func(start, duration string) ffprobeStream {
+		return ffprobeStream{CodecType: "video", StartTime: start, Duration: duration}
 	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 4077 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 4077, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataRemovesAbsoluteTimestampOffset(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "1514891.405000",
-			Duration:  "1520667.605000",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "1514891.405000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 5776 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 5776, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataRejectsImplausiblyShortLargeVideo(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			Duration: "3.022000",
-			Size:     "2022705152",
-		},
-		Streams: []ffprobeStream{{
-			CodecType:    "video",
-			AvgFrameRate: "30/1",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataKeepsLongAudioDurationInSeconds(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format:  ffprobeFormat{Duration: "108000.000000"},
-		Streams: []ffprobeStream{{CodecType: "audio"}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 108000 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 108000, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoWithOrdinaryStartTime(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "30.000000",
-			Duration:  "182930.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "30.000000",
-			Duration:  "182930.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 182930 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 182930, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoWithMaterialStartTime(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "300.000000",
-			Duration:  "182930.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "300.000000",
-			Duration:  "182930.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 182930 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 182930, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataNormalizesOffsetBeforeCorroboratingLongVideo(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "180000.000000",
-			Duration:  "182930.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "180000.000000",
-			Duration:  "182930.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 2930 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 2930, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataNormalizesCorroboratedLongOffsetSpan(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "180000.000000",
-			Duration:  "350000.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "200000.000000",
-			Duration:  "370000.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 170000 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 170000, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataNormalizesMatchingLongAbsoluteEndTimestamps(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "180000.000000",
-			Duration:  "350000.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "180000.000000",
-			Duration:  "350000.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 170000 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 170000, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataRejectsDisagreeingAbsoluteEndSpans(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			StartTime: "180000.000000",
-			Duration:  "350000.275000",
-			Size:      "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "180000.000000",
-			Duration:  "350300.196000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataRejectsUncorroboratedLongVideoDuration(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
-		name           string
-		formatDuration string
-		streamDuration string
+		name    string
+		format  ffprobeFormat
+		streams []ffprobeStream
+		want    int
 	}{
-		{name: "missing stream duration", formatDuration: "182930.275000"},
-		{name: "disagreeing durations", formatDuration: "182930.275000", streamDuration: "150000.000000"},
-		{name: "beyond validated limit", formatDuration: "1000001.000000", streamDuration: "1000001.000000"},
+		{"uses reasonable video duration", ffprobeFormat{Duration: "1745764.949333"},
+			[]ffprobeStream{video("", "4077.708452"), {CodecType: "audio", Duration: "1745764.949333"}}, 4077},
+		{"removes absolute timestamp offset", ffprobeFormat{StartTime: "1514891.405000", Duration: "1520667.605000"},
+			[]ffprobeStream{video("1514891.405000", "")}, 5776},
+		{"rejects implausibly short large video", ffprobeFormat{Duration: "3.022000", Size: "2022705152"},
+			[]ffprobeStream{{CodecType: "video", AvgFrameRate: "30/1"}}, 0},
+		{"keeps long audio duration in seconds", ffprobeFormat{Duration: "108000.000000"},
+			[]ffprobeStream{{CodecType: "audio"}}, 108000},
+		{"keeps corroborated long video with ordinary start time", ffprobeFormat{StartTime: "30.000000", Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("30.000000", "182930.196000")}, 182930},
+		{"keeps corroborated long video with material start time", ffprobeFormat{StartTime: "300.000000", Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("300.000000", "182930.196000")}, 182930},
+		{"normalizes offset before corroborating long video", ffprobeFormat{StartTime: "180000.000000", Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("180000.000000", "182930.196000")}, 2930},
+		{"normalizes corroborated long offset span", ffprobeFormat{StartTime: "180000.000000", Duration: "350000.275000", Size: large},
+			[]ffprobeStream{video("200000.000000", "370000.196000")}, 170000},
+		{"normalizes matching long absolute end timestamps", ffprobeFormat{StartTime: "180000.000000", Duration: "350000.275000", Size: large},
+			[]ffprobeStream{video("180000.000000", "350000.196000")}, 170000},
+		{"rejects disagreeing absolute end spans", ffprobeFormat{StartTime: "180000.000000", Duration: "350000.275000", Size: large},
+			[]ffprobeStream{video("180000.000000", "350300.196000")}, 0},
+		{"rejects long video missing stream duration", ffprobeFormat{Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("", "")}, 0},
+		{"rejects long video with disagreeing durations", ffprobeFormat{Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("", "150000.000000")}, 0},
+		{"rejects long video beyond validated limit", ffprobeFormat{Duration: "1000001.000000", Size: large},
+			[]ffprobeStream{video("", "1000001.000000")}, 0},
+		{"does not use secondary video for corroboration", ffprobeFormat{Duration: "182930.275000", Size: large},
+			[]ffprobeStream{video("", "150000.000000"), video("", "182930.196000")}, 0},
+		// Embedded cover art is reported by ffprobe as a video stream; it must
+		// not route audiobooks and music through the video duration gauntlet.
+		{"ignores cover art video stream", ffprobeFormat{Duration: "108000.000000"},
+			[]ffprobeStream{{CodecType: "audio"}, {CodecType: "video", CodecName: "mjpeg", Disposition: ffprobeDisp{AttachedPic: 1}}}, 108000},
+		{"rejects absurd audio duration", ffprobeFormat{Duration: "4298357.248000"},
+			[]ffprobeStream{{CodecType: "audio"}}, 0},
+		// The end-minus-start fallbacks apply the same plausibility guard as the
+		// direct duration paths.
+		{"rejects collapsed timestamp span for large video", ffprobeFormat{Size: "2022705152"},
+			[]ffprobeStream{video("1514891.405000", "1514894.405000")}, 0},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			raw := &ffprobeOutput{
-				Format: ffprobeFormat{Duration: tc.formatDuration, Size: "77507139196"},
-				Streams: []ffprobeStream{{
-					CodecType: "video",
-					Duration:  tc.streamDuration,
-				}},
-			}
-
-			got, ok := durationFromProbeMetadata(raw)
-			if ok || got != 0 {
-				t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
+			got, ok := durationFromProbeMetadata(&ffprobeOutput{Format: tc.format, Streams: tc.streams})
+			if got != tc.want || ok != (tc.want != 0) {
+				t.Fatalf("durationFromProbeMetadata() = %d, %v; want %d, %v", got, ok, tc.want, tc.want != 0)
 			}
 		})
-	}
-}
-
-func TestDurationFromProbeMetadataDoesNotUseSecondaryVideoForCorroboration(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{Duration: "182930.275000", Size: "77507139196"},
-		Streams: []ffprobeStream{
-			{CodecType: "video", Duration: "150000.000000"},
-			{CodecType: "video", Duration: "182930.196000"},
-		},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
 	}
 }
 
@@ -291,79 +102,29 @@ esac
 	}
 }
 
-func TestEstimateVideoPacketDurationUsesPacketSpan(t *testing.T) {
+func TestEstimateVideoPacketDuration(t *testing.T) {
 	t.Parallel()
 
-	packets := strings.NewReader("1514891.405000\n1515000.000000\n1520667.605000\n")
-	got := estimateVideoPacketDuration(packets, "30000/1001")
-	if got != 5776 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 5776", got)
+	repeat := func(first string, line string, n int, last string) string {
+		return first + strings.Repeat(line, n) + last
 	}
-}
-
-func TestEstimateVideoPacketDurationKeepsValidatedLongDuration(t *testing.T) {
-	t.Parallel()
-
-	packets := strings.NewReader("0.000000\n182930.196000\n")
-	got := estimateVideoPacketDuration(packets, "")
-	if got != 182930 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 182930", got)
+	tests := []struct {
+		name      string
+		packets   string
+		frameRate string
+		want      int
+	}{
+		{"uses packet span", "1514891.405000\n1515000.000000\n1520667.605000\n", "30000/1001", 5776},
+		{"keeps validated long duration", "0.000000\n182930.196000\n", "", 182930},
+		{"rejects duration beyond validated limit", "0.000000\n1000001.000000\n", "", 0},
+		{"keeps ordinary cap for frame rate estimate", repeat("", "3.022000\n", 900, ""), "1/1000", 0},
+		{"ignores unusable frame estimate for long span", repeat("0.000000\n", "5.000000\n", 898, "182930.196000\n"), "1/1000", 182930},
+		{"rejects outlier span when frame count disagrees", repeat("0.000000\n", "5.000000\n", 298, "500000.000000\n"), "30/1", 10},
 	}
-}
-
-func TestEstimateVideoPacketDurationRejectsDurationBeyondValidatedLimit(t *testing.T) {
-	t.Parallel()
-
-	packets := strings.NewReader("0.000000\n1000001.000000\n")
-	got := estimateVideoPacketDuration(packets, "")
-	if got != 0 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 0", got)
-	}
-}
-
-func TestEstimateVideoPacketDurationKeepsOrdinaryCapForFrameRateEstimate(t *testing.T) {
-	t.Parallel()
-
-	var packets strings.Builder
-	for range 900 {
-		packets.WriteString("3.022000\n")
-	}
-
-	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "1/1000")
-	if got != 0 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 0", got)
-	}
-}
-
-func TestEstimateVideoPacketDurationIgnoresUnusableFrameEstimateForLongSpan(t *testing.T) {
-	t.Parallel()
-
-	var packets strings.Builder
-	packets.WriteString("0.000000\n")
-	for range 898 {
-		packets.WriteString("5.000000\n")
-	}
-	packets.WriteString("182930.196000\n")
-
-	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "1/1000")
-	if got != 182930 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 182930", got)
-	}
-}
-
-func TestEstimateVideoPacketDurationRejectsOutlierSpanWhenFrameCountDisagrees(t *testing.T) {
-	t.Parallel()
-
-	var packets strings.Builder
-	packets.WriteString("0.000000\n")
-	for range 298 {
-		packets.WriteString("5.000000\n")
-	}
-	packets.WriteString("500000.000000\n")
-
-	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "30/1")
-	if got != 10 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 10", got)
+	for _, tc := range tests {
+		if got := estimateVideoPacketDuration(strings.NewReader(tc.packets), tc.frameRate); got != tc.want {
+			t.Errorf("%s: estimateVideoPacketDuration() = %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -424,105 +185,6 @@ esac
 	}
 	if probe.CodecVideo != "h264" {
 		t.Fatalf("ProbeFile() codec = %q, want parsed metadata to survive the failed fallback", probe.CodecVideo)
-	}
-}
-
-// Embedded cover art is reported by ffprobe as a video stream; it must not
-// route audiobooks and music through the video duration gauntlet.
-func TestDurationFromProbeMetadataIgnoresCoverArtVideoStream(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{Duration: "108000.000000"},
-		Streams: []ffprobeStream{
-			{CodecType: "audio"},
-			{CodecType: "video", CodecName: "mjpeg", Disposition: ffprobeDisp{AttachedPic: 1}},
-		},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 108000 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 108000, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataRejectsAbsurdAudioDuration(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format:  ffprobeFormat{Duration: "4298357.248000"},
-		Streams: []ffprobeStream{{CodecType: "audio"}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
-// The end-minus-start fallbacks must apply the same plausibility guard as the
-// direct duration paths: a multi-GB video whose absolute timestamps collapse
-// to a few seconds needs the packet fallback, not a persisted 3s duration.
-func TestDurationFromProbeMetadataRejectsCollapsedTimestampSpanForLargeVideo(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{Size: "2022705152"},
-		Streams: []ffprobeStream{{
-			CodecType: "video",
-			StartTime: "1514891.405000",
-			Duration:  "1514894.405000",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
-// A feature film that probes far short of its real runtime clears the absolute
-// floor but implies an impossible bitrate. This is the case that reached
-// clients as a 90-minute movie displayed as ~1 minute.
-func TestDurationFromProbeMetadataRejectsImpossibleImpliedBitrate(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			Duration: "61.000000",
-			Size:     "107374182400", // 100 GiB => ~14 Gbps at 61s
-		},
-		Streams: []ffprobeStream{{
-			CodecType:    "video",
-			AvgFrameRate: "24/1",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
-// The implied-bitrate rule must not reject genuinely short clips. A 30-second
-// 4K clip at 100 MiB implies ~28 Mbps, which is ordinary.
-func TestDurationFromProbeMetadataKeepsGenuineShortHighBitrateClip(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			Duration: "30.000000",
-			Size:     "104857600",
-		},
-		Streams: []ffprobeStream{{
-			CodecType:    "video",
-			AvgFrameRate: "60/1",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 30 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 30, true", got, ok)
 	}
 }
 

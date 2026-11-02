@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -21,8 +22,8 @@ func TestHTTPPreparerSendsAuthenticatedRecipe(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/downloads/prepare" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if auth := r.Header.Get("Authorization"); auth != "Bearer secret" {
-			t.Fatalf("Authorization = %q", auth)
+		if !nodeauthtest.Signed(r, "secret") {
+			t.Fatalf("request is not signed: Authorization = %q", r.Header.Get("Authorization"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatal(err)
@@ -304,8 +305,8 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 		if r.URL.Path != "/downloads/artifacts/artifact-1" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+		if !nodeauthtest.Signed(r, "secret") {
+			t.Fatalf("request is not signed: Authorization = %q", r.Header.Get("Authorization"))
 		}
 		switch r.Method {
 		case http.MethodHead:
@@ -327,6 +328,35 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}
 	if err := client.Delete(context.Background(), server.URL, "secret", "artifact-1"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A node URL that request() normalizes (an escaped path prefix, surrounding
+// whitespace) must be signed in its normalized form, or the worker behind a
+// prefix-stripping reverse proxy refuses the request.
+func TestHTTPPreparerSignsNormalizedNodeURLPrefix(t *testing.T) {
+	worker := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !nodeauthtest.Signed(r, "secret") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Length", "42")
+	})
+	for _, tc := range []struct {
+		name, strip, prefix, pad string
+	}{
+		{name: "escaped prefix", strip: "/worker", prefix: "/%77orker"},
+		{name: "padded URL", strip: "/node1", prefix: "/node1", pad: " "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.StripPrefix(tc.strip, worker))
+			defer server.Close()
+			nodeURL := tc.pad + server.URL + tc.prefix + tc.pad
+			result, err := HTTPPreparer{}.Stat(t.Context(), nodeURL, "secret", "artifact-1")
+			if err != nil || result.FileSize != 42 {
+				t.Fatalf("Stat = (%+v, %v), want a signed request the worker accepts", result, err)
+			}
+		})
 	}
 }
 
@@ -534,7 +564,7 @@ func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
 
 func TestHTTPPreparerProgress(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer secret" {
+		if !nodeauthtest.Signed(r, "secret") {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

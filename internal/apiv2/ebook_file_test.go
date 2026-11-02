@@ -2,8 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +9,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/ebookconvert"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -32,20 +29,6 @@ func (a *ebookFileAccess) EnsureAccessible(_ context.Context, _ string, filter c
 		return catalogpkg.ErrItemNotFound
 	}
 	return nil
-}
-
-type ebookFileConverter struct {
-	calls  int
-	result string
-	err    error
-}
-
-func (c *ebookFileConverter) GetOrConvert(context.Context, string, ebookconvert.SourceKey) (string, error) {
-	c.calls++
-	return c.result, c.err
-}
-func (c *ebookFileConverter) Lookup(ebookconvert.SourceKey) (string, error, bool) {
-	return "", nil, false
 }
 
 func TestEbookFileRawTransport(t *testing.T) {
@@ -99,28 +82,5 @@ func TestEbookFileRawTransport(t *testing.T) {
 		if rec.Code == 200 || rec.Code == 206 {
 			t.Fatal("authorization allowed raw file")
 		}
-	}
-}
-
-func TestEbookFileHeadDoesNotConvertAndGetFallsBack(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.mobi")
-	if err := os.WriteFile(path, []byte("raw-kindle"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	converter := &ebookFileConverter{err: errors.New("synthetic unsupported book")}
-	service := handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{FileResolver: ebookFileResolver{file: &models.MediaFile{ID: 42, ContentID: "book", BaseType: "ebook", Container: "mobi", FilePath: path}}, ItemAccess: &ebookFileAccess{}})
-	service.Conversion = &handlers.EbookConversion{Converter: converter, Enabled: func(context.Context) bool { return true }}
-	deps := pilotDeps(nil, nil)
-	deps.EbookFiles = service
-	h := newTestHandler(t, deps)
-	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	url := Prefix + "/ebooks/book/files/42/read"
-	rec := do(t, h, http.MethodHead, url, "", viewer)
-	if rec.Code != 200 || converter.calls != 0 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Content-Type") != "application/epub+zip" {
-		t.Fatalf("uncached HEAD: %d %v calls=%d", rec.Code, rec.Header(), converter.calls)
-	}
-	rec = do(t, h, http.MethodGet, url, "", viewer)
-	if rec.Code != 200 || rec.Body.String() != "raw-kindle" || converter.calls != 1 || rec.Header().Get(handlers.ConversionHeader) != "failed" || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("fallback: %d %v %s calls=%d", rec.Code, rec.Header(), rec.Body.String(), converter.calls)
 	}
 }

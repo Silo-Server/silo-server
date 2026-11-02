@@ -358,6 +358,12 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 			deleted, delErr := s.store.Delete(ctx, doomed)
 			stats.Deleted += deleted
 			if delErr != nil {
+				// Move the cursor past this page anyway. The objects stay
+				// unreferenced, so the next pass over this prefix retries them;
+				// resuming at this page would fail on the same objects every
+				// run and never reach the rest of the prefix or the ones after.
+				stats.NextToken = next
+				stats.PrefixDone = next == ""
 				return stats, fmt.Errorf("artwork storage sweep: delete: %w", delErr)
 			}
 			if deleted != len(doomed) {

@@ -51,7 +51,7 @@ func (s *viewerDeleteObjects) Delete(context.Context, string) error {
 }
 
 func TestViewerSubtitleDeletionAuthorityAndCAS(t *testing.T) {
-	for _, kind := range []string{"owner", "other", "unowned", "admin", "admin_denied_file", "denied_file", "no_claims", "changed_owner", "stale", "cas_race", "uncertain"} {
+	for _, kind := range []string{"owner", "other", "unowned", "admin", "admin_child_profile", "admin_denied_file", "denied_file", "no_claims", "changed_owner", "stale", "cas_race", "uncertain"} {
 		t.Run(kind, func(t *testing.T) {
 			repo := &viewerDeleteRepo{handlerMockSubtitleRepo: newMockSubtitleRepoForHandler()}
 			repo.subtitles[9] = &subtitles.DownloadedSubtitle{ID: 9, MediaFileID: 42, DownloadedBy: new(1), Revision: 3, S3Key: "owned"}
@@ -63,7 +63,7 @@ func TestViewerSubtitleDeletionAuthorityAndCAS(t *testing.T) {
 			}
 			h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: checker}
 			claims := &auth.Claims{UserID: 1, Role: "user"}
-			if kind == "admin" || kind == "admin_denied_file" {
+			if kind == "admin" || kind == "admin_child_profile" || kind == "admin_denied_file" {
 				claims.Role = "admin"
 				repo.subtitles[9].DownloadedBy = new(2)
 			}
@@ -74,12 +74,17 @@ func TestViewerSubtitleDeletionAuthorityAndCAS(t *testing.T) {
 				repo.subtitles[9].DownloadedBy = nil
 			}
 			ctx := apimw.SetClaims(t.Context(), claims)
+			// The admin account acts through its primary profile, except in
+			// the child-profile case.
+			ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) {
+				return kind != "admin_child_profile", nil
+			})
 			if kind == "no_claims" {
 				ctx = t.Context()
 			}
 			access := catalog.AccessFilter{UserID: 1}
 			_, err := h.GetViewerSubtitleForDeletion(ctx, access, 9)
-			denied := kind == "other" || kind == "unowned" || kind == "denied_file" || kind == "admin_denied_file" || kind == "no_claims"
+			denied := kind == "other" || kind == "unowned" || kind == "admin_child_profile" || kind == "denied_file" || kind == "admin_denied_file" || kind == "no_claims"
 			if denied {
 				if err == nil {
 					t.Fatal("unauthorized metadata")

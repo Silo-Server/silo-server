@@ -69,92 +69,37 @@ describe("realtime protocol", () => {
     expect(command).toBeNull();
   });
 
-  it("parses chapter thumbnail events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "chapter_thumbnail_ready",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          chapter_index: 3,
-          thumbnail_url: "https://example.com/thumb.jpg",
-          thumbnail_thumbhash: "thumbhash",
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "chapter_thumbnail_ready",
-      payload: {
+  it.each([
+    [
+      "chapter_thumbnail_ready",
+      {
         session_id: "session-1",
         file_id: 42,
         chapter_index: 3,
         thumbnail_url: "https://example.com/thumb.jpg",
         thumbnail_thumbhash: "thumbhash",
       },
-    });
-  });
-
-  it("parses marker update events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "markers_updated",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          intro: { start: 12, end: 75 },
-          credits: null,
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "markers_updated",
-      payload: {
-        session_id: "session-1",
-        file_id: 42,
-        intro: { start: 12, end: 75 },
-        credits: null,
-      },
-    });
-  });
-
-  it("parses subtitle ready events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "subtitle_ready",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          subtitle_id: 7,
-          language: "es",
-          label: "English → Spanish (AI)",
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "subtitle_ready",
-      payload: {
+    ],
+    [
+      "markers_updated",
+      { session_id: "session-1", file_id: 42, intro: { start: 12, end: 75 }, credits: null },
+    ],
+    [
+      "subtitle_ready",
+      {
         session_id: "session-1",
         file_id: 42,
         subtitle_id: 7,
         language: "es",
         label: "English → Spanish (AI)",
       },
-    });
+    ],
+  ])("parses %s events", (name, payload) => {
+    const event = parsePlaybackRealtimeMessage(
+      JSON.stringify({ type: "event", session_id: "session-1", name, payload }),
+    );
+
+    expect(event).toEqual({ type: "event", session_id: "session-1", name, payload });
   });
 
   it("rejects subtitle ready events missing the subtitle id", () => {
@@ -441,4 +386,36 @@ describe("realtime protocol", () => {
       error: "unsupported",
     });
   });
+});
+
+it("validates marker preview identity and captured source time", () => {
+  const event = {
+    type: "event",
+    session_id: "s",
+    name: "marker_thumbnail_ready",
+    payload: {
+      session_id: "s",
+      file_id: 7,
+      kind: "intro",
+      start_seconds: 6,
+      end_seconds: 9,
+      thumbnail_url: "/yellow.webp",
+      thumbnail_capture_seconds: 6,
+    },
+  };
+  expect(parsePlaybackRealtimeMessage(JSON.stringify(event))).toMatchObject(event);
+  for (const patch of [
+    { kind: "other" },
+    { end_seconds: 5 },
+    { thumbnail_capture_seconds: 9 },
+    { file_id: -1 },
+    { thumbnail_url: "" },
+    { thumbnail_thumbhash: 42 },
+  ]) {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({ ...event, payload: { ...event.payload, ...patch } }),
+      ),
+    ).toBeNull();
+  }
 });
