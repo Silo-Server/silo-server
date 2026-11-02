@@ -1250,10 +1250,19 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 
 // localFileIOError reports whether err is the operating system failing a
 // call on storage, such as a share that stopped answering, rather than a path
-// that is missing, forbidden, or refused for leaving an opened folder.
+// that is missing, forbidden, refused for leaving an opened folder, or no
+// longer shaped as cataloged (a file where a folder was, a link loop, a name
+// too long).
 func localFileIOError(err error) bool {
 	var errno syscall.Errno
-	return errors.As(err, &errno) && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrPermission)
+	if !errors.As(err, &errno) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+	switch errno {
+	case syscall.ENOTDIR, syscall.ELOOP, syscall.ENAMETOOLONG:
+		return false
+	}
+	return true
 }
 
 // readLocalImageBesideCatalogedFile opens dir, which resolves to

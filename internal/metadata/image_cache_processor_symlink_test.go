@@ -314,8 +314,10 @@ func TestLocalFileIOErrorSeparatesStorageFailuresFromPathAnswers(t *testing.T) {
 	if !localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.EIO}) {
 		t.Fatal("EIO is a storage failure")
 	}
-	if localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.ENOENT}) || localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.EACCES}) {
-		t.Fatal("a missing or forbidden path is not a storage failure")
+	for _, errno := range []syscall.Errno{syscall.ENOENT, syscall.EACCES, syscall.ENOTDIR, syscall.ELOOP, syscall.ENAMETOOLONG} {
+		if localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: errno}) {
+			t.Fatalf("%v is an answer about the path, not a storage failure", errno)
+		}
 	}
 	dir := t.TempDir()
 	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "out")); err != nil {
