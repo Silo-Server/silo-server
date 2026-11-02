@@ -544,6 +544,8 @@ export interface SubtitleInventoryItemV3 {
    * downloaded tracks whose timing the server can correct.
    */
   sync_key?: string;
+  /** Stored row identity, independent of timing support and delivery. */
+  stored_subtitle_id?: number;
 }
 
 export interface SubtitleDecisionV3 {

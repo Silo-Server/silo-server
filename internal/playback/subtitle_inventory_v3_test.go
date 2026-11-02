@@ -108,7 +108,9 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		},
 	}
 
-	items := SubtitleInventoryV3("sess-1", file, nil)
+	items := SubtitleInventoryV3("sess-1", file, []SubtitleInventoryEntryV3{
+		{Codec: "sub", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71},
+	})
 
 	cases := []struct {
 		index         int
@@ -119,6 +121,7 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		{1, "/stream/sess-1/subtitles/1.ass?file_id=44&embedded_stream_index=1", "/stream/sess-1/subtitles/1/fonts?file_id=44&embedded_stream_index=1"},
 		{2, "/stream/sess-1/subtitles/2.sup?file_id=44&embedded_stream_index=2", ""},
 		{3, "", ""},
+		{4, "", ""},
 	}
 	for _, tc := range cases {
 		got := items[tc.index]
@@ -129,6 +132,23 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 			t.Errorf("item %d font_bundle_url = %q, want %q", tc.index, got.FontBundleURL, tc.fontBundleURL)
 		}
 	}
+	// A stored track without a URL or timing key must still be identifiable
+	// after a plan refresh, so a readiness event cannot auto-select it.
+	raw, err := json.Marshal(items[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		StoredID int    `json:"stored_subtitle_id"`
+		SyncKey  string `json:"sync_key"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.StoredID != 71 || wire.SyncKey != "" {
+		t.Fatalf("stored identity or timing support changed: %s", raw)
+	}
+
 }
 
 func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {

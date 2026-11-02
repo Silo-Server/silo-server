@@ -66,6 +66,7 @@ type SubtitleSearchHandler struct {
 	FileAuthorizer *MediaFileAuthorizer
 	sync           SubtitleSyncService
 	external       ExternalTimingStore
+	ready          SubtitleReadyAnnouncer
 }
 
 // NewSubtitleSearchHandler creates a new SubtitleSearchHandler.

@@ -32757,6 +32757,11 @@ export interface components {
       source: string;
       /**
        * Format: int64
+       * @description Stored subtitle row ID, matching subtitle_ready.subtitle_id. Present for downloaded, uploaded and generated tracks, including tracks without a URL or sync_key. Stable across inventory reordering; selection still uses combined_index.
+       */
+      stored_subtitle_id?: number;
+      /**
+       * Format: int64
        * @description Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index
        */
       stream_index?: number;

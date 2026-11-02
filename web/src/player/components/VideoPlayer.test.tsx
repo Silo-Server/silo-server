@@ -6,7 +6,7 @@ import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfig
 import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
-import { fixturePlanV3 } from "../protocol-v3.fixtures";
+import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type { AvailableQualityV3, PlanV3 } from "../protocol-v3";
 import type {
   PlaybackRealtimeCommandEnvelope,
@@ -5095,6 +5095,111 @@ describe("VideoPlayer translation handoff", () => {
     expect(controls.current?.activeSubtitleIndex).toBe(4);
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
   });
+
+  // Someone else's download or upload reaches every viewer of the file. The
+  // new track is offered, never chosen for this viewer.
+  it.each([
+    { selection: "no subtitle", initial: [], expected: null, withTrack: true },
+    {
+      selection: "a new session receiving an old session event",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      staleSession: true,
+    },
+    {
+      selection: "no subtitle for a track without a URL",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      withoutUrl: true,
+    },
+    {
+      selection: "no subtitle after a refresh without a URL",
+      initial: [],
+      expected: null,
+      withTrack: false,
+      withoutUrl: true,
+    },
+    {
+      selection: "an SDH track",
+      initial: [
+        {
+          index: 0,
+          media_file_id: 7,
+          language: "en",
+          label: "English SDH",
+          hearing_impaired: true,
+          source: "embedded" as const,
+          url: "/sdh.vtt",
+        },
+      ],
+      expected: 0,
+      withTrack: false,
+    },
+  ])(
+    "preserves automatic subtitle selection for $selection",
+    async ({ initial, expected, withTrack, withoutUrl, staleSession }) => {
+      const onSubtitleTrackChange = vi.fn();
+      const onApplySubtitleTrack = vi.fn();
+      const onRefreshSubtitles = vi.fn();
+      const { rerenderPlayer } = renderPlayer({
+        subtitleUrls: initial,
+        subtitleMode: "always",
+        preferredSubtitleLanguage: "en",
+        onSubtitleTrackChange,
+        onApplySubtitleTrack,
+        onRefreshSubtitles,
+      });
+      await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(expected));
+
+      const added: PlayerSubtitleInfo = {
+        index: initial.length,
+        media_file_id: 7,
+        language: "en",
+        label: "English",
+        source: "downloaded",
+        stored_subtitle_id: withoutUrl ? 44 : undefined,
+        codec: withoutUrl ? "sub" : "srt",
+        burn_in_only: withoutUrl,
+        sync_key: withoutUrl ? undefined : "stored-44",
+        url: withoutUrl ? "" : "/en.vtt",
+      };
+      act(() => {
+        realtimeOptions.current?.onEvent?.({
+          type: "event",
+          session_id: staleSession ? "previous-session" : "session-1",
+          name: "subtitle_ready",
+          payload: {
+            session_id: staleSession ? "previous-session" : "session-1",
+            file_id: 7,
+            subtitle_id: 44,
+            language: "en",
+            label: "Movie.EN",
+            ...(withTrack && {
+              track: fixtureSubtitleInventoryItemV3({
+                combined_index: added.index,
+                source: "downloaded",
+                language: "en",
+              }),
+            }),
+          },
+        });
+      });
+      rerenderPlayer({ subtitleUrls: [...initial, added] });
+
+      await act(async () => Promise.resolve());
+      expect(controls.current?.subtitleTracks).toContainEqual(added);
+      expect(controls.current?.activeSubtitleIndex).toBe(staleSession ? added.index : expected);
+      if (staleSession) {
+        expect(onApplySubtitleTrack).not.toHaveBeenCalled();
+        expect(onRefreshSubtitles).not.toHaveBeenCalled();
+      } else {
+        expect(withTrack ? onApplySubtitleTrack : onRefreshSubtitles).toHaveBeenCalledOnce();
+        expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(added.index, expect.any(Number));
+      }
+    },
+  );
 
   it.each(["missing", "rejecting"])(
     "falls back to webkitEnterFullscreen when requestFullscreen is %s",

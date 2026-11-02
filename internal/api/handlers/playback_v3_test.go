@@ -6641,4 +6641,36 @@ func TestAttachSubtitleArtifactV3UsesFrozenDownloadedIdentityWithoutOrdinalLooku
 	if plan.Subtitle.Artifact == nil || !strings.Contains(plan.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") {
 		t.Fatalf("artifact = %#v, want frozen downloaded subtitle 71", plan.Subtitle.Artifact)
 	}
+	t.Run("restored inventory includes a newly added stored track", func(t *testing.T) {
+		repo.listErr = nil
+		repo.list = []subtitles.DownloadedSubtitle{
+			*repo.subtitles[71],
+			{ID: 72, MediaFileID: file.ID, Format: subtitles.FormatSRT},
+		}
+		before := playback.PlanV3{
+			Subtitle: playback.SubtitleDecisionV3{
+				Mode:      playback.SubtitleRenderV3,
+				Inventory: playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, repo.list[:1])),
+			},
+			Timeline: playback.TimelineV3{StreamOriginSeconds: 321},
+		}
+		raw, err := json.Marshal(before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored playback.PlanV3
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := handler.attachSubtitleArtifactV3(t.Context(), "session-frozen-subtitle", file, &restored, selectedIndex, &recipe, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(restored.Subtitle.Inventory) != 2 || !strings.Contains(restored.Subtitle.Inventory[1].URL, "downloaded_subtitle_id=72") {
+			t.Fatalf("restored menu lost newly added subtitle 72: %+v", restored.Subtitle.Inventory)
+		}
+		if restored.Subtitle.Artifact == nil || !strings.Contains(restored.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") || restored.Subtitle.Mode != before.Subtitle.Mode || restored.Timeline != before.Timeline {
+			t.Fatalf("restoring the menu changed the selected recipe: %+v", restored)
+		}
+	})
+
 }

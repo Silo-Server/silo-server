@@ -194,6 +194,19 @@ uncertain response must not trigger automatic retry or authentication replay.
 The immutable object publication rules and best-effort cleanup limits are
 specified in [subtitle storage](architecture/subtitle-storage.md).
 
+### Announcing an added subtitle
+
+After a provider download or an upload succeeds, on v2 or the v1 bridge, every
+playback session of the file on any API server receives the playback-socket
+`subtitle_ready` event that generated tracks already use. Its payload carries
+`file_id`, `subtitle_id`, `language`, `label` (the release name), and, when the
+server can resolve it, the new `track` at its frozen combined ordinal; without
+`track` the player refetches its plan. Players add the track to their list and
+must not select it. Only the session that requested the download may select the
+track it asked for, so another viewer's current subtitle never changes. The
+event is also sent when deduplication returned an existing row. API servers
+that predate the event ignore it on the cluster bus.
+
 The bridge download retains its existing request and response contract. This
 operation does not change Jellyfin subtitle delivery. Both native clients must
 adopt the new download operation separately; AI creation/cancellation and user
@@ -515,6 +528,14 @@ algorithm and job model. Anyone with access to the file may sync a subtitle or
 set its timing; demo mode refuses both.
 
 ### Finding a subtitle to sync
+
+Downloaded, uploaded and generated playback inventory tracks carry
+`stored_subtitle_id`, matching the `subtitle_ready` event's `subtitle_id`.
+This identifies the stored row even when the track has no sidecar URL or
+supports no timing correction. Clients still select by `combined_index`;
+`stored_subtitle_id` correlates announcements with refreshed inventory entries.
+Older plans may omit it. The web player uses it to keep newly announced tracks
+out of automatic selection and falls back to the timing key on older servers.
 
 Each playback inventory track that can be synced carries a `sync_key`
 (external and downloaded SRT, WebVTT, ASS, and SSA tracks): `stored-{id}` for a
