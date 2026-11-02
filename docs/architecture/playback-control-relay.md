@@ -67,6 +67,8 @@ run on the owner, and so may one whose publish failed, because Redis can
 deliver a `PUBLISH` whose answer the client never read. The receiving replica
 therefore does not simply repeat it. The wait covers one lane write, which has
 a 5 second socket write deadline, and the session stop that a terminate runs.
+The owner finishes a request even after the caller stops waiting, so a slow
+terminate still writes its watch history and stop receipt.
 
 - A command answers `503`. A retry is safe only with the same command id and
   sequence: when it reaches the owner, it gets the recorded receipt back. A new

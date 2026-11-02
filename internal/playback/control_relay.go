@@ -67,6 +67,11 @@ const (
 	// owner's work is one bounded lane write (5 s socket write deadline) plus,
 	// for a terminate, the session stop; the margin covers the bus.
 	controlRelayReplyTimeout = 8 * time.Second
+	// controlRelayHandlerTimeout bounds a relayed request on the owner. It is
+	// longer than the reply wait because a request served there is not
+	// abandoned when its caller stops waiting, as a local administrator
+	// request runs until its HTTP response is written.
+	controlRelayHandlerTimeout = 2 * time.Minute
 	// controlRelayRedisTimeout bounds one ownership read or write.
 	controlRelayRedisTimeout = time.Second
 	// controlRelayQueueSize bounds pending lane open/close notifications; an
@@ -314,18 +319,23 @@ func (r *ControlRelay) serve(request controlRelayMessage) {
 		To:        request.From,
 		SessionID: request.SessionID,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
-	defer cancel()
 	// Only the lane holder executes. A claim that outlived its lane answers
 	// at once so the caller falls back without waiting out the timeout.
 	if handler != nil && r.hub.HasLane(request.SessionID) {
-		reply.Body = handler(ctx, request.SessionID, request.Op, request.Body)
+		// The request runs to completion even when the caller stops waiting
+		// for the reply: a terminate's history and stop receipt are written
+		// after its transport cleanup, which can outlast the reply wait.
+		handlerCtx, cancelHandler := context.WithTimeout(context.Background(), controlRelayHandlerTimeout)
+		reply.Body = handler(handlerCtx, request.SessionID, request.Op, request.Body)
+		cancelHandler()
 		reply.Handled = true
 	}
 	payload, err := json.Marshal(reply)
 	if err != nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
+	defer cancel()
 	if err := publish(ctx, string(payload)); err != nil {
 		slog.WarnContext(ctx, "playback control relay: reply publish failed", "component", "playback", "playback_session_id", request.SessionID, "op", request.Op, "error", err)
 	}

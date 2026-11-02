@@ -207,6 +207,35 @@ func TestControlRelayReportsNoReplyOnceRequestWasPublished(t *testing.T) {
 	}
 }
 
+// TestControlRelayOwnerFinishesARequestItsCallerStoppedWaitingFor: the owner
+// does not abandon a request when the reply wait ends, so a slow terminate
+// still writes its history and stop receipt.
+func TestControlRelayOwnerFinishesARequestItsCallerStoppedWaitingFor(t *testing.T) {
+	bus, owners := &relayTestBus{}, newRelayTestOwners()
+	a := startRelayTestReplica(t, bus, owners)
+	b := startRelayTestReplica(t, bus, owners)
+	a.relay.replyTimeout = 50 * time.Millisecond
+	b.relay.replyTimeout = 50 * time.Millisecond
+
+	release, ctxErr := make(chan struct{}), make(chan error, 1)
+	a.relay.Handle(func(ctx context.Context, _, _ string, _ json.RawMessage) json.RawMessage {
+		<-release
+		ctxErr <- ctx.Err()
+		return nil
+	})
+	reg := a.hub.Register("s1", registrationTestConn{})
+	t.Cleanup(func() { a.hub.Unregister(reg) })
+	waitForRelayOwner(t, owners, "s1", a.relay.id)
+
+	if _, outcome := b.relay.Forward(context.Background(), "s1", "terminate", nil); outcome != ControlRelayNoReply {
+		t.Fatalf("slow owner = %v, want no reply", outcome)
+	}
+	close(release)
+	if err := <-ctxErr; err != nil {
+		t.Fatalf("the owner's request context ended with the reply wait: %v", err)
+	}
+}
+
 func TestControlRelayLaneOwnershipFollowsTheNewestConnection(t *testing.T) {
 	bus, owners := &relayTestBus{}, newRelayTestOwners()
 	a := startRelayTestReplica(t, bus, owners)
