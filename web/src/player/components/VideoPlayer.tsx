@@ -751,6 +751,10 @@ export function VideoPlayer({
   );
   const lastSubtitleIndexRef = useRef<number | null>(null);
   const subtitleSelectionWasManualRef = useRef(false);
+  // Sync keys of the stored subtitles someone added while this session plays.
+  // Auto-selection never picks them, so another viewer's download or upload
+  // can't change this viewer's subtitle.
+  const announcedSubtitleKeysRef = useRef(new Set<string>());
   // Subtitle delay in ms; positive shows later. It is the profile's timing
   // offset, so a change here follows the profile to every device.
   const [subtitleDelayMs, setSubtitleDelayMs] = useSubtitleDelay();
@@ -2096,11 +2100,13 @@ export function VideoPlayer({
       };
       switch (event.name) {
         case "subtitle_ready": {
-          // Broadcast to every viewer of the file when a generated track is
-          // persisted. The payload carries the server-assigned ordinal, so the
-          // track is folded in at that ordinal without a round trip; only a
-          // payload the server could not resolve falls back to a replan.
+          // Broadcast to every viewer of the file when a stored track is
+          // added: generated, downloaded or uploaded. The payload carries the
+          // server-assigned ordinal, so the track is folded in at that ordinal
+          // without a round trip; only a payload the server could not resolve
+          // falls back to a replan. The track is offered, never auto-selected.
           if (event.payload.file_id === activeFileId) {
+            announcedSubtitleKeysRef.current.add(`stored-${event.payload.subtitle_id}`);
             if (event.payload.track) {
               onApplySubtitleTrack?.(event.payload.track);
             } else {
@@ -3814,6 +3820,7 @@ export function VideoPlayer({
   const grantedSubtitleIndexRef = useRef<number | null>(null);
   grantedSubtitleIndexRef.current = plan.selected_tracks.subtitle?.index ?? null;
   useEffect(() => {
+    announcedSubtitleKeysRef.current = new Set();
     const reconnectFrom = reconnectFromSessionRef.current;
     if (reconnectFrom !== null && reconnectFrom !== sessionId) {
       reconnectFromSessionRef.current = null;
@@ -3836,7 +3843,13 @@ export function VideoPlayer({
       subtitleSelectionWasManualRef.current = false;
     }
 
-    if (effectiveSubtitleTracks.length === 0) {
+    const announced = announcedSubtitleKeysRef.current;
+    const candidateTracks = effectiveSubtitleTracks.filter((track) => {
+      if (track.index === activeSubtitleIndex) return true;
+      const key = syncKeyOf(track);
+      return key === null || !announced.has(key);
+    });
+    if (candidateTracks.length === 0) {
       setActiveSubtitleIndex(null);
       lastSubtitleIndexRef.current = null;
       return;
@@ -3849,7 +3862,7 @@ export function VideoPlayer({
 
     const match = resolveSubtitleAutoSelect({
       mode: effectiveMode,
-      tracks: effectiveSubtitleTracks,
+      tracks: candidateTracks,
       preferredLanguage: preferredSubtitleLanguage ?? null,
       preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
       audioLanguage: audioLang,
