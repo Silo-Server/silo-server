@@ -72,6 +72,9 @@ type fixtureBlock struct {
 	// corruptAt overwrites the block's first byte, so its cue points at
 	// garbage.
 	corrupt bool
+	// addition, when not nil, is written as the BlockAdditional of a
+	// BlockMore with BlockAddID 1.
+	addition []byte
 }
 
 type fixtureCluster struct {
@@ -293,6 +296,10 @@ func (b fixtureBlock) element() []byte {
 	}
 	if b.references {
 		parts = append(parts, el(matroska.IDReferenceBlock, []byte{0xFF}))
+	}
+	if b.addition != nil {
+		parts = append(parts, el(matroska.IDBlockAdditions, el(matroska.IDBlockMore,
+			uintEl(matroska.IDBlockAddID, 1), el(matroska.IDBlockAdditional, b.addition))))
 	}
 	return el(matroska.IDBlockGroup, parts...)
 }
