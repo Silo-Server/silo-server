@@ -275,6 +275,7 @@ func TestManualRefresh_CorrectedNFOReplacesDurableOnlyIDs(t *testing.T) {
 		t.Errorf("manual refresh fetched with the wrong film's imdb id %q", got)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+	assertHomeReleaseDatesKept(t, h, contentID, false)
 }
 
 func TestProcess_IdentifyReplacesDivergentStoredIDs(t *testing.T) {

@@ -2843,6 +2843,9 @@ func (s *MetadataService) mergeAndPersist(
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
+	// The identity the item being written holds, before a correction's
+	// rejected IDs leave it: they are what shows the item is the wrong match.
+	writtenIdentity := storedItemIdentity(existingItem, durableIDs)
 	suppressProviderIDValues(durableIDs, accumulator.rejectedIdentityProviderIDs)
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
@@ -2943,7 +2946,7 @@ func (s *MetadataService) mergeAndPersist(
 			// correction that merged onto an item already holding the new
 			// identity keeps that item's own dates.
 			corrected := req.identityCorrection && identityChoiceCorrects(
-				canonicalIdentityProviderIDs(accumulator.ProviderIDs), storedItemIdentity(existingItem, durableIDs))
+				canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
 			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, corrected)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
