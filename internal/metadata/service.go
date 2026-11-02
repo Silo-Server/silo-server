@@ -2939,8 +2939,12 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if !req.enrichmentOnly {
 			// One enrichment provider's dates only fill empty ones (above);
-			// the provider chain's current dates are a refresh's to apply.
-			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.identityCorrection)
+			// the provider chain's current dates are a refresh's to apply. A
+			// correction that merged onto an item already holding the new
+			// identity keeps that item's own dates.
+			corrected := req.identityCorrection && identityChoiceCorrects(
+				canonicalIdentityProviderIDs(accumulator.ProviderIDs), storedItemIdentity(existingItem, durableIDs))
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, corrected)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
