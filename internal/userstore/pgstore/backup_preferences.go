@@ -758,21 +758,18 @@ func (s seriesPreference) localFileID(target userdata.Target) *int64 {
 	return s.FileID
 }
 
-// localCollection is the sort's collection id here: a library's id is
-// mapped, false when it has no library here.
-func (c collectionSort) localCollection(target userdata.Target) (string, bool) {
+// localCollection is the sort's collection id here. A library-kind sort
+// names an admin collection (a library_collections row, as the sort write
+// path checks), mapped through the restore's collection mapper; false when
+// it has none here.
+func (c collectionSort) localCollection(ctx context.Context, target userdata.Target) (string, bool, error) {
 	if c.Kind != scopeLibrary {
-		return c.Collection, true
+		return c.Collection, true, nil
 	}
-	source, err := strconv.Atoi(c.Collection)
-	if err != nil {
-		return "", false
+	if target.Collection == nil {
+		return "", false, nil
 	}
-	local, ok := target.MapLibrary(source)
-	if !ok {
-		return "", false
-	}
-	return strconv.Itoa(local), true
+	return target.Collection(ctx, userdata.LibraryCollectionField, c.Collection)
 }
 
 func importAudioPreferences(ctx context.Context, tx pgx.Tx, target userdata.Target, entries []audioPreference, res *userdata.Result) error {
@@ -880,7 +877,10 @@ func importSeriesPreferences(ctx context.Context, tx pgx.Tx, target userdata.Tar
 
 func importCollectionSorts(ctx context.Context, tx pgx.Tx, target userdata.Target, entries []collectionSort, res *userdata.Result) error {
 	for _, c := range entries {
-		collection, ok := c.localCollection(target)
+		collection, ok, err := c.localCollection(ctx, target)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			res.LeftOut++
 			continue
