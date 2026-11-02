@@ -137,12 +137,16 @@ func TestParsePodcastShowSkipsAFileStillChanging(t *testing.T) {
 	dir := t.TempDir()
 	ffprobePath := filepath.Join(dir, "ffprobe")
 	// Prints the probe stored in the file, then grows a "-grow" file, as a
-	// download still being written would.
+	// download still being written would. A "-partial" file grows too, but
+	// can't be probed yet, like an M4A whose index isn't written.
 	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
-		"case \"$last\" in *-grow.mp3) printf ' ' >> \"$last\";; esac\n")
+		"case \"$last\" in *-grow.mp3) printf ' ' >> \"$last\";; *-partial.mp3) printf ' ' >> \"$last\"; exit 1;; esac\n")
 	showDir, stable := podcastProbeFixture(t, dir, "61")
 	if err := os.WriteFile(filepath.Join(showDir, "02-grow.mp3"), []byte(podcastProbeJSON("62")), 0o644); err != nil {
 		t.Fatalf("write growing episode: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "03-partial.mp3"), []byte(podcastProbeJSON("63")), 0o644); err != nil {
+		t.Fatalf("write partial episode: %v", err)
 	}
 
 	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)

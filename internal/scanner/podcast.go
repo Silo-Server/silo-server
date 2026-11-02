@@ -112,22 +112,26 @@ var errPodcastFileChanging = errors.New("podcast file changed while it was probe
 // probed once more, and a file still changing is reported as
 // errPodcastFileChanging so the next scan reads it again. Without this, the
 // probe of one file could be recorded under another file's size and mtime and
-// look current.
+// look current. A failed probe of a file that changed under it counts as a
+// change too: a download still being written often can't be probed yet.
 func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*ProbeData, os.FileInfo, error) {
 	for attempt := 1; ; attempt++ {
 		before, err := fspath.Stat(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
 		}
-		probed, err := ProbeFile(ctx, ffprobePath, path)
-		if err != nil {
-			return nil, nil, fmt.Errorf("probe podcast file %s: %w", path, err)
+		probed, probeErr := ProbeFile(ctx, ffprobePath, path)
+		if probeErr != nil && ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("probe podcast file %s: %w", path, probeErr)
 		}
 		after, err := fspath.Stat(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
 		}
 		if fspath.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) {
+			if probeErr != nil {
+				return nil, nil, fmt.Errorf("probe podcast file %s: %w", path, probeErr)
+			}
 			return probed, before, nil
 		}
 		if attempt == 2 {
