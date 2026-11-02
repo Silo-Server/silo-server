@@ -323,9 +323,13 @@ func (r *ControlRelay) serve(request controlRelayMessage) {
 		To:        request.From,
 		SessionID: request.SessionID,
 	}
-	// Only the lane holder executes. A claim that outlived its lane answers
-	// at once so the caller falls back without waiting out the timeout.
-	if handler != nil && r.hub.HasLane(request.SessionID) {
+	// A request may arrive after a newer lane took ownership while this
+	// replica's old socket remains open. Recheck the claim before executing;
+	// a rejected request retains the existing local-fallback behavior.
+	ownerCtx, cancelOwner := context.WithTimeout(context.Background(), controlRelayRedisTimeout)
+	owner, ownerErr := r.owners.Owner(ownerCtx, request.SessionID)
+	cancelOwner()
+	if handler != nil && ownerErr == nil && owner == r.id && r.hub.HasLane(request.SessionID) {
 		// The request runs to completion even when the caller stops waiting
 		// for the reply: a terminate's history and stop receipt are written
 		// after its transport cleanup, which can outlast the reply wait.

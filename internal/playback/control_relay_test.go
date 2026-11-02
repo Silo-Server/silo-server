@@ -250,6 +250,16 @@ func TestControlRelayLaneOwnershipFollowsTheNewestConnection(t *testing.T) {
 	regB := b.hub.Register("s1", registrationTestConn{})
 	waitForRelayOwner(t, owners, "s1", b.relay.id)
 
+	// A request addressed before the takeover can arrive while A's old
+	// socket is still open. It must not execute on that obsolete lane.
+	a.relay.serve(controlRelayMessage{
+		Kind: controlRelayKindRequest, RequestID: "before-takeover",
+		From: b.relay.id, To: a.relay.id, SessionID: "s1", Op: "pause",
+	})
+	if a.calls.Load() != 0 {
+		t.Fatal("a delayed request executed on the previous lane owner")
+	}
+
 	// A's refresh, or its open notification arriving late, must not take
 	// the session back, and A closing its stale lane must not delete B's
 	// claim.
