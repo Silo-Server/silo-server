@@ -814,7 +814,8 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 // or a missing parent above the book, stays an unreadable path.
 func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
 	library := t.TempDir()
-	author := filepath.Join(library, "Author")
+	// The encoded scope must also decode its parent before checking it.
+	author := filepath.Join(library, "A\xe5thor")
 	if err := os.MkdirAll(author, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +833,7 @@ func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) 
 		libRoot    string
 		wantFailed bool
 	}{
-		{"deleted book folder", filepath.Join(author, "Gone Book"), library, false},
+		{"deleted book folder below encoded parent", fspath.Encode(filepath.Join(author, "Gone Book")), library, false},
 		{"deleted author and book folders", filepath.Join(library, "Gone Author", "Gone Book"), library, true},
 		{"missing library root", missingLibrary, missingLibrary, true},
 		{"dangling legacy-named book symlink", fspath.Encode(danglingLegacy), library, true},
