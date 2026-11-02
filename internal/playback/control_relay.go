@@ -187,7 +187,9 @@ func (r *ControlRelay) Handle(handler ControlRelayHandler) {
 // Start subscribes to the control channel, starts tracking this replica's
 // lanes and claims those already open. Call it once with the server lifetime
 // context; publish and subscribe carry one payload on
-// cache.ChannelPlaybackControl. On ctx's end the replica releases its claims.
+// cache.ChannelPlaybackControl. An initial subscription error is returned, but
+// startup keeps retrying until it succeeds or ctx ends. Until then commands
+// use the local path. On ctx's end the replica releases its claims.
 func (r *ControlRelay) Start(
 	ctx context.Context,
 	publish func(context.Context, string) error,
@@ -200,18 +202,57 @@ func (r *ControlRelay) Start(
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.started {
+		r.mu.Unlock()
 		return nil
 	}
+	// Own startup, including retries, so another Start cannot subscribe twice.
+	r.started = true
+	r.mu.Unlock()
 	if err := subscribe(ctx, r.receive); err != nil {
+		go r.retrySubscription(ctx, publish, subscribe)
 		return err
 	}
+	r.startSubscribed(ctx, publish)
+	return nil
+}
+
+func (r *ControlRelay) retrySubscription(
+	ctx context.Context,
+	publish func(context.Context, string) error,
+	subscribe func(context.Context, func(string)) error,
+) {
+	for delay := time.Second; ; delay = min(delay*2, 30*time.Second) {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if err := subscribe(ctx, r.receive); err != nil {
+			if ctx.Err() == nil {
+				slog.WarnContext(ctx, "playback control relay subscription failed; retrying", "component", "playback", "error", err)
+			}
+			continue
+		}
+		r.startSubscribed(ctx, publish)
+		return
+	}
+}
+
+func (r *ControlRelay) startSubscribed(ctx context.Context, publish func(context.Context, string) error) {
+	if ctx.Err() != nil {
+		return
+	}
+	r.mu.Lock()
 	r.publish = publish
-	r.started = true
+	r.mu.Unlock()
 	r.hub.SetLaneObserver(r.observeLane)
 	go r.run(ctx)
-	return nil
 }
 
 // Forward runs op for sessionID on the replica holding the session's newest
@@ -396,9 +437,9 @@ func (r *ControlRelay) applyLaneEvent(ctx context.Context, sessionID string) {
 
 // refresh re-asserts the claim of every open lane. The claims go out in
 // concurrent batches, and lane events that queued meanwhile are applied
-// between batches: a sweep over many lanes does not outlast the TTL at a slow
-// round trip or hold back the first claim of a lane that just opened, and a
-// session's refresh claim never overlaps its own open or close event.
+// between batches to reduce renewal delays and avoid holding a new lane's first
+// claim until the sweep ends. Renewal within the TTL still depends on load and
+// Redis latency. A session's refresh claim never overlaps its own lane event.
 func (r *ControlRelay) refresh(ctx context.Context) {
 	sessionIDs := r.hub.LaneSessionIDs()
 	for start := 0; start < len(sessionIDs); start += controlRelayRefreshBatch {

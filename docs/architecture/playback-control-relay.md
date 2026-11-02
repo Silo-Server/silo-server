@@ -21,9 +21,10 @@ to the lane holder. The administrator command code in
   microseconds) and the holding process's relay id. A replica claims the key
   when a lane opens or a new connection takes over the lane, and claims it
   again every 10 seconds while the lane stays open. The refresh sends eight
-  claims at a time and applies lane open and close events between batches, so
-  a large replica renews its claims well inside the expiry and a new lane is
-  not claimed only after every other lane. A claim never replaces one
+  claims at a time and applies lane open and close events between batches,
+  reducing renewal delays and letting a new lane claim before the sweep ends.
+  This does not guarantee renewal within the expiry at every load or Redis
+  latency. A claim never replaces one
   for a newer connection (equal times go to the greater relay id), so the
   newest connection wins whatever order the replicas write in, and a dropped
   lane notification is repaired by the next refresh. When the lane closes, the
@@ -98,6 +99,11 @@ connection. A replica that shuts down cleanly deletes its claims first.
 
 Without Redis there is no relay, and every request runs locally. A single
 replica needs nothing more.
+
+If the initial control-channel subscription fails, commands run locally while
+the relay retries. Retries start after one second and double to a maximum
+30-second delay, stopping when the server context ends. Once subscribed, the
+relay claims existing lanes and tracks new ones without requiring a restart.
 
 ## Invariants
 

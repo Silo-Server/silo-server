@@ -148,8 +148,12 @@ export function AdminSessionActions({
         profileContext,
       );
       if (receipt.outcome === "replayed") {
+        const fallback =
+          receipt.delivery === "fallback_scheduled"
+            ? " Silo could not reach the player and scheduled the session to end."
+            : "";
         toast.success(
-          `Your earlier ${action} request was already accepted. Choose ${action} again to send a new command.`,
+          `Your earlier ${action} request was already accepted.${fallback} Choose ${action} again to send a new command.`,
         );
         return;
       }

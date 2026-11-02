@@ -353,6 +353,7 @@ func (r *RedisEventBus) Subscribe(ctx context.Context, channel string, handler E
 	// Wait for the subscription to be confirmed.
 	if _, err := pubsub.Receive(subCtx); err != nil {
 		cancel()
+		_ = pubsub.Close()
 		return err
 	}
 

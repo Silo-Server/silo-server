@@ -1672,7 +1672,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			adminPlaybackControlHandler.UseControlRelay(relay)
 			if err := relay.Start(relayCtx, publish, subscribe); err != nil {
-				slog.Warn("playback control relay unavailable; administrator commands reach only sessions on this replica", "component", "api", "error", err)
+				slog.Warn("playback control relay unavailable; retrying subscription; administrator commands reach only sessions on this replica", "component", "api", "error", err)
 			}
 		}
 

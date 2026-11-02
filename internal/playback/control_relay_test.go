@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -126,6 +127,40 @@ func waitForRelayOwner(t *testing.T, owners *relayTestOwners, sessionID, want st
 		//nolint:forbidigo // Polls observable state: the relay claims lanes on its own goroutine.
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// A transient subscription failure at startup must not leave the replica
+// serving commands locally after the bus has recovered.
+func TestControlRelayRecoversFromStartupSubscriptionFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bus, owners := &relayTestBus{}, newRelayTestOwners()
+		hub := NewRealtimeHub()
+		hub.Register("recovering-session", registrationTestConn{})
+		relay := NewControlRelayWithOwners(hub, owners)
+		var calls atomic.Int64
+		relay.Handle(func(context.Context, string, string, json.RawMessage) json.RawMessage {
+			calls.Add(1)
+			return json.RawMessage(`{"recovered":true}`)
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		var attempts atomic.Int64
+		subscribe := func(ctx context.Context, handler func(string)) error {
+			if attempts.Add(1) == 1 {
+				return errors.New("subscription unavailable during startup")
+			}
+			return bus.subscribe(ctx, handler)
+		}
+		if err := relay.Start(ctx, bus.publish, subscribe); err == nil {
+			t.Fatal("initial subscription failure was not reported")
+		}
+		other := startRelayTestReplica(t, bus, owners)
+		waitForRelayOwner(t, owners, "recovering-session", relay.id)
+		_, outcome := other.relay.Forward(ctx, "recovering-session", "pause", nil)
+		if outcome != ControlRelayHandled || calls.Load() != 1 {
+			t.Fatalf("command after recovery: outcome=%v handler calls=%d", outcome, calls.Load())
+		}
+	})
 }
 
 func TestControlRelayForwardsToTheLaneOwner(t *testing.T) {
