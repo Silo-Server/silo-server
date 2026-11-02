@@ -396,7 +396,11 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 	// hand its session to the person who reset this one.
 	if loggedIn == nil || loggedIn.ID != user.ID {
 		if pair != nil && pair.SessionID != "" {
-			if err := s.sessions.Logout(ctx, pair.SessionID); err != nil {
+			// The session exists already: revoke it even if the caller has
+			// gone, but do not wait forever.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.sessions.Logout(cleanupCtx, pair.SessionID); err != nil {
 				return nil, user, errors.Join(ErrSessionStart, err)
 			}
 		}
