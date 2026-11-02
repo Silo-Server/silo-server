@@ -15059,7 +15059,7 @@
             "type": "integer"
           },
           "state": {
-            "description": "Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed",
+            "description": "Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed, or whose files can't be restored from its stored archive, on the answering server",
             "enum": [
               "stopped",
               "starting",
