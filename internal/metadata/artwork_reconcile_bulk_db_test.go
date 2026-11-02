@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
@@ -129,6 +131,98 @@ func TestArtworkReconcileBulkResetVerifiesUploadsDB(t *testing.T) {
 			t.Errorf("%s poster_path = %q, want %q", id, got, path)
 		}
 	}
+}
+
+// Catalog reads trust the publication manifest, so the verify sweep checks every
+// size a revision published, not only the stored key. A provider poster missing
+// one size is queued for repair and keeps its pointer; an uploaded one keeps its
+// row, since only its source could make the size again.
+func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
+	pool := catalogCopyTestPool(t, "media_items", "media_item_localizations", "seasons", "season_localizations",
+		"episodes", "people", "metadata_image_cache_jobs", "artwork_revision_gc_candidates")
+	ctx := t.Context()
+	const (
+		provider = "tmdb/movies/9/poster/original.r1.webp"
+		uploaded = "local/movies/up/1a2b3c4d/poster/original.r1.webp"
+	)
+	providerSize, uploadedSize := variantKey(provider, "w500"), variantKey(uploaded, "w500")
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, locked_fields, poster_path, poster_source_path) VALUES
+		('provider', 'movie', 'Provider', '{}', $1, 'tmdb://poster/p.jpg'),
+		('uploaded', 'movie', 'Uploaded', '{10}', $2, 'upload://sha256:aa')`, provider, uploaded); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, published_keys, not_before)
+		VALUES ($1, 'poster', $2, $2, NOW()), ($3, 'poster', $4, $4, NOW())`,
+		provider, []string{provider, providerSize}, uploaded, []string{uploaded, uploadedSize}); err != nil {
+		t.Fatal(err)
+	}
+	var surface artworkSweepSurface
+	for _, s := range artworkSweepSurfaces() {
+		if s.name == "item posters" {
+			surface = s
+		}
+	}
+	// Both originals survive; both w500 sizes were deleted outside Silo.
+	r := &ArtworkCacheReconciler{pool: pool, s3: presentObjects{provider: true, uploaded: true}}
+	var stats ArtworkReconcileStats
+	if err := r.sweepSurface(ctx, surface, &stats, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Checked != 2 || stats.Repaired != 1 || stats.Requeued != 0 || stats.Cleared != 0 {
+		t.Fatalf("stats = %#v, want the provider poster queued for repair and nothing reset", stats)
+	}
+	for id, path := range map[string]string{"provider": provider, "uploaded": uploaded} {
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != path {
+			t.Errorf("%s poster_path = %q, want it kept as %q", id, got, path)
+		}
+	}
+	var jobs int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM metadata_image_cache_jobs WHERE target_content_id = 'provider'`).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 1 {
+		t.Fatalf("repair jobs for the provider poster = %d, want 1", jobs)
+	}
+}
+
+// catalogCopyTestPool returns a pool on a new schema holding empty copies of the
+// named public tables, so a sweep sees only the rows a test inserts.
+func catalogCopyTestPool(t *testing.T, tables ...string) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	schema := fmt.Sprintf("artwork_reconcile_test_%d", time.Now().UnixNano())
+	admin, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admin.Close)
+	if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	for _, table := range tables {
+		if _, err := admin.Exec(t.Context(), fmt.Sprintf("CREATE TABLE %s.%s (LIKE public.%s INCLUDING ALL)", schema, table, table)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 // A collection created from a built-in template can keep its bundled poster

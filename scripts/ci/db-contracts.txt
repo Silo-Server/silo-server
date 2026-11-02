@@ -252,6 +252,7 @@
 # A storage reconcile's bulk reset keeps an uploaded image whose object
 # survived; nothing could fetch it again.
 ./internal/metadata TestArtworkReconcileBulkResetVerifiesUploadsDB
+./internal/metadata TestArtworkReconcileFindsMissingPublishedSizeDB
 
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
