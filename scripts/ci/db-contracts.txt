@@ -276,8 +276,8 @@
 ./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
-./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
-./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
+./internal/metadata TestArtworkPublicationSelectsWidestPublishedRungDB
+./internal/metadata TestArtworkPublicationLifecycleDB
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
 ./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
 ./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState
