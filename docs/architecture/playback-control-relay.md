@@ -35,8 +35,12 @@ to the lane holder. The administrator command code in
   lane: a player that reconnected elsewhere can leave an old lane open here
   until its socket closes. When another replica owns the key, the request is
   published on `silo:playback:control`, addressed to the owner. The owner
-  checks that it still holds the lane, runs the request through the same code
-  a local request uses, and publishes the reply addressed back. Errors cross the hop as codes
+  reads the key again and checks that it still names this owner and that the
+  owner still holds the lane, so a request queued while a newer connection
+  took the lane elsewhere is refused even though the old socket is still open.
+  It then runs the request through the same code a local request uses and
+  publishes the reply addressed back. The recheck is not a fence: ownership
+  that moves between the check and the run is not detected. Errors cross the hop as codes
   and come back as the same errors, so the HTTP answer does not depend on which
   replica received the request.
 - While the lane stays on one holder and the ownership read succeeds, every
@@ -97,7 +101,8 @@ replica needs nothing more.
 
 ## Invariants
 
-- Only the replica that holds the lane runs a relayed request. The receiving
+- Only the replica that holds the lane and still owns the key when the request
+  arrives runs a relayed request. A failed ownership read refuses it. The receiving
   replica falls back to the local path only when the owner never ran the
   request, apart from the terminate revocation described above. A claim that
   outlived its lane gets an immediate "not handled" reply, so the caller does

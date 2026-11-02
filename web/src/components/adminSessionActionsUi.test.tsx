@@ -19,10 +19,6 @@ vi.mock("@/api/client", () => ({
 }));
 
 vi.mock("@/api/v2/adminPlaybackCommands", () => ({
-  allocateAdminPlaybackCommand: (sessionId: string) => ({
-    command_id: `cmd-for-${sessionId}`,
-    sequence: 42,
-  }),
   captureAdminPlaybackCommandAuthority: () => ({ profileId: "owner" }),
   sendAdminPlaybackCommand: (...args: unknown[]) => mocks.sendCommand(...args),
   terminateAdminPlaybackSession: (...args: unknown[]) => mocks.terminate(...args),
@@ -202,7 +198,6 @@ describe("AdminSessionActions", () => {
       {
         sessionId: "session-1",
         action: "pause",
-        identity: { command_id: "cmd-for-session-1", sequence: 42 },
       },
       { profileId: "owner" },
     );
@@ -302,7 +297,6 @@ describe("AdminSessionActions", () => {
       {
         sessionId: "session-1",
         action: "stop",
-        identity: { command_id: "cmd-for-session-1", sequence: 42 },
       },
       { profileId: "owner" },
     );

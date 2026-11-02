@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { StaleApiRequestContextError } from "@/api/client";
 import type { AdminSession } from "@/api/types";
 import {
-  allocateAdminPlaybackCommand,
   captureAdminPlaybackCommandAuthority,
   sendAdminPlaybackCommand,
   terminateAdminPlaybackSession,
@@ -62,9 +61,10 @@ const unsupportedPlaybackControlCopy =
 
 const staleAuthorityCopy = "Your session changed. Reload and try again.";
 
-// Pause, resume, stop and message travel on the sequenced v2 commands: the
-// identity is allocated once per click and the server applies it once, so a
-// stale refusal means a newer command already won and the list should refresh.
+// Pause, resume, stop and message travel on the sequenced v2 commands: each
+// click is a new command unless the last answer for the same command left its
+// outcome unknown, which repeats it with the same identity so the server
+// applies it once. A stale refusal means a newer command already won.
 function describeTerminateReceipt(receipt: {
   authority_revoked: boolean;
   already_revoked: boolean;
@@ -93,7 +93,7 @@ function describeCommandFailure(
     }
     if (error.problemType === "not_found") return "This playback session has already ended.";
     if (error.problemType === "dependency_unavailable")
-      return "Playback control is unavailable on this server.";
+      return error.problem.detail || "Playback control is unavailable on this server.";
     return error.problem.detail ?? error.message;
   }
   return error instanceof Error ? error.message : "Failed to send session command";
@@ -143,9 +143,8 @@ export function AdminSessionActions({
         toast.success(describeTerminateReceipt(receipt));
         return;
       }
-      const identity = allocateAdminPlaybackCommand(session.session_id);
       const receipt = await sendAdminPlaybackCommand(
-        { sessionId: session.session_id, action, identity },
+        { sessionId: session.session_id, action },
         profileContext,
       );
       if (receipt.delivery === "dispatched" && action === "pause") {
@@ -175,9 +174,8 @@ export function AdminSessionActions({
     setPendingAction("message");
     try {
       const profileContext = captureAdminPlaybackCommandAuthority();
-      const identity = allocateAdminPlaybackCommand(session.session_id);
       await sendAdminPlaybackCommand(
-        { sessionId: session.session_id, action: "message", identity, message: trimmed },
+        { sessionId: session.session_id, action: "message", message: trimmed },
         profileContext,
       );
       toast.success("Message sent");

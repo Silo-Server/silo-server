@@ -25,6 +25,15 @@ import { v2, V2ProblemError, type V2Result } from "./request";
  * as stale. The refusal carries that sequence (`X-Silo-Latest-Sequence`), and
  * `sendAdminPlaybackCommand` records it so the next allocation for the session
  * lands above it; one refused click, then the UI works again.
+ *
+ * An answer that leaves a command's outcome unknown (a 5xx, such as the 503 a
+ * replica answers when the replica holding the session's lane did not reply,
+ * or no response at all) does not release its identity: when the
+ * administrator repeats the same command on the same session under the same
+ * signed-in profile, the same identity is sent again, so the server replays
+ * the receipt instead of applying the command twice. Any other answer, a
+ * different command for the session, or another profile or account allocates
+ * a fresh identity.
  */
 
 export type AdminPlaybackCommandAction = "pause" | "resume" | "stop" | "message";
@@ -47,6 +56,12 @@ const sequencedActions: ReadonlySet<AdminPlaybackCommandAction> = new Set([
 
 const lastSequenceBySession = new Map<string, number>();
 
+/** The command per session whose answer left its outcome unknown, with the intent it was sent for. */
+const unsettledBySession = new Map<
+  string,
+  { intent: string; identity: AdminPlaybackCommandIdentity }
+>();
+
 /**
  * The largest sequence the contract accepts (2^53-1): every client, including
  * this one working in JavaScript numbers, can represent the latest applied
@@ -66,7 +81,16 @@ export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCo
     throw new Error("The session's command sequence is exhausted.");
   }
   lastSequenceBySession.set(sessionId, sequence);
+  // A newer command supersedes one whose outcome is unknown.
+  unsettledBySession.delete(sessionId);
   return { command_id: randomUUID(), sequence };
+}
+
+/** Whether an error leaves open whether the server applied the command. */
+function outcomeUnknown(error: unknown): boolean {
+  if (error instanceof StaleApiRequestContextError) return false;
+  if (error instanceof V2ProblemError) return error.status >= 500;
+  return true;
 }
 
 /**
@@ -103,7 +127,11 @@ function requireAuthority(context: ProfileRequestContextSnapshot) {
 export type AdminPlaybackCommandRequest = {
   sessionId: string;
   action: AdminPlaybackCommandAction;
-  identity: AdminPlaybackCommandIdentity;
+  /**
+   * Omit to reuse the identity of the same command whose outcome is still
+   * unknown, or else allocate a fresh one.
+   */
+  identity?: AdminPlaybackCommandIdentity;
   reason?: string;
   deadlineMs?: number;
   /** Required for `message`; ignored for the other actions. */
@@ -114,7 +142,8 @@ export type AdminPlaybackCommandRequest = {
 /**
  * Send one sequenced command under the captured administrator authority. The
  * request is never retried automatically after an uncertain response; a caller
- * that retries must pass the same identity so the server replays the receipt.
+ * that repeats it either passes the same identity or omits it, so the server
+ * replays the receipt.
  */
 export async function sendAdminPlaybackCommand(
   request: AdminPlaybackCommandRequest,
@@ -123,17 +152,34 @@ export async function sendAdminPlaybackCommand(
   if (!sequencedActions.has(request.action)) {
     throw new Error(`Unsupported session command: ${request.action}`);
   }
+  const message = request.message?.trim() ?? "";
+  if (request.action === "message" && !message) throw new Error("Message is required");
+  requireAuthority(profileContext);
+  const intent = JSON.stringify([
+    profileContext.serverOrigin,
+    profileContext.authContextVersion,
+    profileContext.profileId,
+    request.action,
+    request.reason ?? "",
+    request.deadlineMs ?? 0,
+    request.action === "message" ? [request.title ?? "", message] : null,
+  ]);
+  const unsettled = unsettledBySession.get(request.sessionId);
+  const commandIdentity =
+    request.identity ??
+    (unsettled?.intent === intent
+      ? unsettled.identity
+      : allocateAdminPlaybackCommand(request.sessionId));
   if (
-    !Number.isSafeInteger(request.identity.sequence) ||
-    request.identity.sequence < 1 ||
-    request.identity.sequence > MAX_ADMIN_PLAYBACK_SEQUENCE
+    !Number.isSafeInteger(commandIdentity.sequence) ||
+    commandIdentity.sequence < 1 ||
+    commandIdentity.sequence > MAX_ADMIN_PLAYBACK_SEQUENCE
   ) {
     throw new Error("A command sequence must be a positive integer within the contract bound.");
   }
-  requireAuthority(profileContext);
   const identity = {
-    command_id: request.identity.command_id,
-    sequence: request.identity.sequence,
+    command_id: commandIdentity.command_id,
+    sequence: commandIdentity.sequence,
     ...(request.reason ? { reason: request.reason } : {}),
     ...(request.deadlineMs ? { deadline_ms: request.deadlineMs } : {}),
   };
@@ -161,8 +207,6 @@ export async function sendAdminPlaybackCommand(
         });
         break;
       case "message": {
-        const message = request.message?.trim() ?? "";
-        if (!message) throw new Error("Message is required");
         receipt = await v2("POST /api/v2/admin/sessions/{session_id}/message", {
           ...options,
           body: { ...identity, message, ...(request.title ? { title: request.title } : {}) },
@@ -171,17 +215,30 @@ export async function sendAdminPlaybackCommand(
       }
     }
   } catch (error) {
+    if (outcomeUnknown(error)) {
+      unsettledBySession.set(request.sessionId, { intent, identity: commandIdentity });
+    } else {
+      settle(request.sessionId, commandIdentity);
+    }
     // A stale refusal names the sequence that won; raise this browser's
     // floor so the next click allocates above it instead of failing again.
     const latest = latestSequenceOf(error);
     if (latest !== null) observeAdminPlaybackSequence(request.sessionId, latest);
     throw error;
   }
+  settle(request.sessionId, commandIdentity);
   requireAuthority(profileContext);
-  if (receipt.command_id !== request.identity.command_id) {
+  if (receipt.command_id !== commandIdentity.command_id) {
     throw new Error("The server answered a different command identity.");
   }
   return receipt;
+}
+
+/** Forget a command whose outcome the server has now answered. */
+function settle(sessionId: string, identity: AdminPlaybackCommandIdentity): void {
+  if (unsettledBySession.get(sessionId)?.identity.command_id === identity.command_id) {
+    unsettledBySession.delete(sessionId);
+  }
 }
 
 export async function getAdminPlaybackCommandCapabilities(
