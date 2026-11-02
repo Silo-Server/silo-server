@@ -26,10 +26,13 @@ ALTER TABLE artwork_revision_gc_candidates
     ADD COLUMN IF NOT EXISTS delivery_next_check timestamptz NOT NULL DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS delivery_lease text NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS delivery_failures integer NOT NULL DEFAULT 0;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS artwork_delivery_due_idx
+-- A failed concurrent build leaves an invalid index, so drop before building.
+DROP INDEX CONCURRENTLY IF EXISTS artwork_delivery_due_idx;
+CREATE INDEX CONCURRENTLY artwork_delivery_due_idx
 ON artwork_revision_gc_candidates (delivery_next_check, id)
 WHERE deleted_at IS NULL AND cardinality(coalesce(published_keys, object_keys)) > 0;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS artwork_delivery_pending_idx
+DROP INDEX CONCURRENTLY IF EXISTS artwork_delivery_pending_idx;
+CREATE INDEX CONCURRENTLY artwork_delivery_pending_idx
 ON artwork_revision_gc_candidates (delivery_next_check, id)
 WHERE deleted_at IS NULL AND cardinality(coalesce(published_keys, object_keys)) > 0
   AND delivery_checked_at IS NULL;
