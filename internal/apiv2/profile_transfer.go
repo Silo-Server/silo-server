@@ -115,7 +115,7 @@ func registerProfileTransfer(reg *Registry) {
 
 	imp := humaOp(http.MethodPost, Prefix+"/profile/import", "importProfile", "profiles",
 		"Merge a silo-profile-export document into the acting profile: newer progress and history win, ratings, favorites, and dismissals are added where the profile has none, collections gain missing items, and preferences are overwritten. Nothing is deleted, and importing the same document again changes nothing. The target is always the acting profile; a document carrying account or access fields is refused, and items the profile cannot see are left out. A PIN-protected profile needs its PIN-verified session.")
-	imp.Errors = []int{http.StatusForbidden}
+	imp.Errors = []int{http.StatusForbidden, http.StatusConflict}
 	Register(reg, Operation{Operation: imp, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true,
 		RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: backup.MaxProfileImportBytes},
 		func(ctx context.Context, in *ProfileImportInput) (*ProfileImportOutput, error) {
@@ -152,6 +152,8 @@ func profileTransferProblem(err error) error {
 		return NewProblem(TypeValidationFailed, err.Error())
 	case errors.Is(err, backup.ErrProfileImportTooLarge):
 		return NewProblem(TypePayloadTooLarge, err.Error())
+	case errors.Is(err, backup.ErrProfileImportBusy):
+		return NewProblem(TypeConflict, "Another profile import is running. Try again when it finishes.")
 	}
 	if invalid, ok := errors.AsType[*backup.InvalidProfileExportError](err); ok {
 		return NewProblem(TypeValidationFailed, invalid.Error())

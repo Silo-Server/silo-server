@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -82,11 +83,49 @@ type ProfileTransfer struct {
 	pool     *pgxpool.Pool
 	serverID func(context.Context) (string, error)
 	now      func() time.Time
+	// imports admits imports before they take a pool connection: at most
+	// maxConcurrentImports on this server, and one per account.
+	imports   chan struct{}
+	mu        sync.Mutex
+	importing map[int]bool
 }
+
+// maxConcurrentImports bounds the profile imports one server runs at once.
+// An import holds a pool connection for its whole transaction, so imports
+// arriving together must not take the pool other requests need.
+const maxConcurrentImports = 2
+
+// ErrProfileImportBusy refuses an import while another runs for the same
+// account, or while this server already runs maxConcurrentImports.
+var ErrProfileImportBusy = errors.New("another profile import is running; try again when it finishes")
 
 // NewProfileTransfer serves profile export and import over pool.
 func NewProfileTransfer(pool *pgxpool.Pool, serverID func(context.Context) (string, error)) *ProfileTransfer {
-	return &ProfileTransfer{pool: pool, serverID: serverID, now: time.Now}
+	return &ProfileTransfer{pool: pool, serverID: serverID, now: time.Now,
+		imports: make(chan struct{}, maxConcurrentImports), importing: map[int]bool{}}
+}
+
+// admit takes an import slot for userID without waiting, or refuses with
+// ErrProfileImportBusy. release gives it back.
+func (t *ProfileTransfer) admit(userID int) (release func(), err error) {
+	select {
+	case t.imports <- struct{}{}:
+	default:
+		return nil, ErrProfileImportBusy
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.importing[userID] {
+		<-t.imports
+		return nil, ErrProfileImportBusy
+	}
+	t.importing[userID] = true
+	return func() {
+		t.mu.Lock()
+		delete(t.importing, userID)
+		t.mu.Unlock()
+		<-t.imports
+	}, nil
 }
 
 // ProfileExportCapability describes profile export and import for clients.
@@ -303,6 +342,11 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	if err != nil {
 		return nil, err
 	}
+	release, err := t.admit(scope.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	tx, err := t.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
