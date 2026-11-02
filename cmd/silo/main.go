@@ -3914,6 +3914,9 @@ func main() {
 		)
 		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.SetStorageTransitionExecutor(storageTransitionSvc)
+		if deps.Backups != nil {
+			adminJobRunner.SetBackupRestoreExecutor(backupRestoreExecutor{svc: deps.Backups})
+		}
 		adminJobRunner.SetStorageTransitionCommitted(deps.RequestServerRestart)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()

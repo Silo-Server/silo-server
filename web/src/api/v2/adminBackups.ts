@@ -13,6 +13,8 @@ export type AdminBackupLastRun = NonNullable<AdminBackupList["last_run"]>;
 export type AdminBackupDownloadLink =
   V2Result<"POST /api/v2/admin/backups/{id}/download-links">["items"][number];
 export type AdminBackupDestination = AdminBackupList["destination"];
+/** full: every stored object as it is; restore-set: restore-set.tar alone. */
+export type AdminBackupDownloadScope = "full" | "restore-set";
 
 /** Runs `run` only while `context` is the active admin authority, and checks it again after. */
 export async function readAsAdmin<T>(
@@ -52,16 +54,20 @@ export function deleteAdminBackup(context: ProfileRequestContextSnapshot, id: st
   );
 }
 
-/** Links valid for 15 minutes to every stored object of the backup. */
+/**
+ * Links valid for 15 minutes: every stored object of the backup for `full`,
+ * or restore-set.tar alone for `restore-set`.
+ */
 export async function createAdminBackupDownloadLinks(
   context: ProfileRequestContextSnapshot,
   id: string,
+  scope: AdminBackupDownloadScope = "full",
 ): Promise<AdminBackupDownloadLink[]> {
   const result = await readAsAdmin(context, () =>
     v2("POST /api/v2/admin/backups/{id}/download-links", {
       profileContext: context,
       path: { id },
-      body: { scope: "full" },
+      body: { scope },
     }),
   );
   return result.items;

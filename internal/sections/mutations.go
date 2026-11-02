@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -227,24 +228,8 @@ func (r *Repository) attemptMutation(ctx context.Context, m sectionMutation, wri
 			return err
 		}
 	}
-	slices.SortFunc(surfaces, func(a, b sectionSurface) int {
-		if a.scope < b.scope {
-			return -1
-		}
-		if a.scope > b.scope {
-			return 1
-		}
-		return a.library - b.library
-	})
-	surfaces = slices.Compact(surfaces)
-	for _, surface := range surfaces {
-		if _, err := tx.Exec(ctx, `INSERT INTO page_section_scope_revisions(scope,library_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, surface.scope, surface.library); err != nil {
-			return err
-		}
-		var revision int64
-		if err := tx.QueryRow(ctx, `SELECT revision FROM page_section_scope_revisions WHERE scope=$1 AND library_id=$2 FOR UPDATE`, surface.scope, surface.library).Scan(&revision); err != nil {
-			return err
-		}
+	if err := lockSurfaces(ctx, tx, surfaces); err != nil {
+		return err
 	}
 	if err := write(context.WithValue(ctx, sectionTransactionKey{}, tx)); err != nil {
 		return err
@@ -397,4 +382,151 @@ func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 }
 func (r *Repository) DeleteGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int) error {
 	return r.mutate(ctx, scopeMutation("home", nil), func(ctx context.Context) error { return r.deleteGeneratedHomeLibraryRecentSections(ctx, libraryID) })
+}
+
+// insertSectionInTx inserts s under its id when that is set and free, else
+// under a new one.
+func insertSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection) error {
+	if s.ID != "" {
+		var taken bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM page_sections WHERE id = $1)`, s.ID).Scan(&taken); err != nil {
+			return err
+		}
+		if taken {
+			s.ID = ""
+		}
+	}
+	if s.ID == "" {
+		id, err := idgen.NextID()
+		if err != nil {
+			return fmt.Errorf("generate section id: %w", err)
+		}
+		s.ID = id
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())`,
+		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled); err != nil {
+		return fmt.Errorf("creating section: %w", err)
+	}
+	return nil
+}
+
+// WriteSectionInTx creates s (create) or replaces the stored section with
+// s's position, type, title, featured flag, item limit, configuration, and
+// enabled flag, in the caller's transaction. A created section keeps s.ID
+// when it is set and free, so a restore on the server that wrote it keeps
+// the id profile overrides name. The collection references are locked as
+// every section writer locks them, and a featured section is the only one
+// on its surface. Revisions advance through the table's triggers.
+func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create bool) error {
+	if s.Config == nil {
+		s.Config = json.RawMessage(`{}`)
+	}
+	// Locks are taken in Repository.attemptMutation's order, so an editor
+	// and this write cannot each hold one the other waits for: collection
+	// parents, then the section rows the write touches in id order, then
+	// the scope revisions of their surfaces.
+	var stored *PageSection
+	var previous []string
+	surfaces := []sectionSurface{surfaceOf(s.Scope, s.LibraryID)}
+	if !create {
+		var err error
+		if stored, err = scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1", s.ID)); err != nil {
+			return err
+		}
+		previous = referencesOf([]*PageSection{stored})
+		surfaces = append(surfaces, surfaceOf(stored.Scope, stored.LibraryID))
+	}
+	if err := catalog.LockLibraryCollectionReferences(ctx, tx, previous, referencesOf([]*PageSection{s})); err != nil {
+		return err
+	}
+	if err := lockWrittenRows(ctx, tx, s, create, previous); err != nil {
+		return err
+	}
+	if err := lockSurfaces(ctx, tx, surfaces); err != nil {
+		return err
+	}
+	r := &Repository{}
+	txCtx := context.WithValue(ctx, sectionTransactionKey{}, tx)
+	if create {
+		if err := insertSectionInTx(ctx, tx, s); err != nil {
+			return err
+		}
+	} else if err := r.update(txCtx, s); err != nil {
+		return err
+	}
+	if s.Featured {
+		return r.clearFeaturedForSurface(txCtx, s.Scope, s.LibraryID, s.ID)
+	}
+	return nil
+}
+
+// lockWrittenRows locks, in id order, the rows WriteSectionInTx writes:
+// the section itself unless it is new, and the sections a featured one
+// unfeatures on its surface. A collection the section came to reference
+// since previous was read is locked as well.
+func lockWrittenRows(ctx context.Context, tx pgx.Tx, s *PageSection, create bool, previous []string) error {
+	var ids []string
+	if !create {
+		ids = append(ids, s.ID)
+	}
+	if s.Featured {
+		rows, err := tx.Query(ctx, `SELECT id FROM page_sections WHERE scope = $1 AND library_id IS NOT DISTINCT FROM $2 AND featured AND id <> $3`,
+			s.Scope, surfaceOf(s.Scope, s.LibraryID).libraryArg(), s.ID)
+		if err != nil {
+			return err
+		}
+		featured, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		ids = append(ids, featured...)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = ANY($1) ORDER BY id FOR UPDATE", ids)
+	if err != nil {
+		return err
+	}
+	locked, err := scanSections(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, row := range locked {
+		if row.ID != s.ID {
+			continue
+		}
+		if current := referencesOf([]*PageSection{row}); !slices.Equal(current, previous) {
+			return catalog.LockLibraryCollectionReferences(ctx, tx, current, nil)
+		}
+	}
+	return nil
+}
+
+// lockSurfaces locks the scope revision rows of surfaces, in one sorted
+// order, creating any that do not exist yet.
+func lockSurfaces(ctx context.Context, tx pgx.Tx, surfaces []sectionSurface) error {
+	surfaces = slices.Clone(surfaces)
+	slices.SortFunc(surfaces, func(a, b sectionSurface) int {
+		if a.scope < b.scope {
+			return -1
+		}
+		if a.scope > b.scope {
+			return 1
+		}
+		return a.library - b.library
+	})
+	surfaces = slices.Compact(surfaces)
+	for _, surface := range surfaces {
+		if _, err := tx.Exec(ctx, `INSERT INTO page_section_scope_revisions(scope,library_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, surface.scope, surface.library); err != nil {
+			return err
+		}
+		var revision int64
+		if err := tx.QueryRow(ctx, `SELECT revision FROM page_section_scope_revisions WHERE scope=$1 AND library_id=$2 FOR UPDATE`, surface.scope, surface.library).Scan(&revision); err != nil {
+			return err
+		}
+	}
+	return nil
 }

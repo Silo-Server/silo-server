@@ -2,7 +2,6 @@ package backup
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -91,31 +90,5 @@ func TestRecentBackupWarning(t *testing.T) {
 	putPlainBackup(t, store, "server", FolderName(now.Add(-time.Hour), KindNightly))
 	if warned() {
 		t.Fatal("a warning with a recent backup here and no recorded success")
-	}
-}
-
-// putPlainBackup stores a complete backup at the destination.
-func putPlainBackup(t *testing.T, store blobstore.Store, serverID, id string) {
-	t.Helper()
-	ctx := t.Context()
-	m := validTestManifest()
-	m.ID, m.ServerID = id, serverID
-	m.CreatedAt, m.Kind, _ = ParseFolderName(id)
-	m.CompletedAt = m.CreatedAt
-	m.Objects = nil
-	for name, data := range map[string][]byte{DumpName: []byte("dump"), BlobsName: {}} {
-		if err := store.Put(ctx, objectKey(serverID, id, name), data); err != nil {
-			t.Fatal(err)
-		}
-		s := newSum()
-		_, _ = s.Write(data)
-		m.Objects = append(m.Objects, s.entry(name))
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Put(ctx, objectKey(serverID, id, ManifestName), data); err != nil {
-		t.Fatal(err)
 	}
 }

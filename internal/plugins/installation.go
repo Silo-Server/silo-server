@@ -95,11 +95,30 @@ type UpdateInstallationInput struct {
 }
 
 type InstallationStore struct {
-	pool *pgxpool.Pool
+	pool installationDB
+}
+
+// installationDB is a pool or a caller's transaction: Begin on a
+// transaction opens a savepoint, so the store's own multi-statement writes
+// stay atomic inside it.
+type installationDB interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
+	if pool == nil {
+		return &InstallationStore{}
+	}
 	return &InstallationStore{pool: pool}
+}
+
+// WithTx returns a store whose reads and writes run in tx, so an
+// installation commits or rolls back with the caller's other writes.
+func (s *InstallationStore) WithTx(tx pgx.Tx) *InstallationStore {
+	return &InstallationStore{pool: tx}
 }
 
 const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`

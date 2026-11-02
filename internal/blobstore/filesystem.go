@@ -133,7 +133,7 @@ func temporary(root *os.Root, dir, prefix string) (*os.File, string, error) {
 	return f, name, err
 }
 func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
-	return f.publish(ctx, key, func(w io.Writer) error {
+	return f.publish(ctx, key, false, func(w io.Writer) error {
 		_, err := w.Write(data)
 		return err
 	})
@@ -149,7 +149,18 @@ func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
 // renamed into place; the admin job runner's upload timeout would be inert for
 // exactly the large exports it exists to bound.
 func (f *Filesystem) PutStream(ctx context.Context, key string, r io.Reader, _ string) error {
-	return f.publish(ctx, key, func(w io.Writer) error {
+	return f.publish(ctx, key, false, func(w io.Writer) error {
+		_, err := io.Copy(w, &contextReader{ctx: ctx, r: r})
+		return err
+	})
+}
+
+// CreateExclusive publishes an object only when nothing is at key. The
+// synced temporary file is hard-linked into place, and link(2) fails when
+// the name exists, so a concurrent writer of the same key is never replaced
+// (a rename would replace it). It returns ErrExists then.
+func (f *Filesystem) CreateExclusive(ctx context.Context, key string, r io.Reader, _ string) error {
+	return f.publish(ctx, key, true, func(w io.Writer) error {
 		_, err := io.Copy(w, &contextReader{ctx: ctx, r: r})
 		return err
 	})
@@ -172,8 +183,9 @@ func (c *contextReader) Read(p []byte) (int, error) {
 
 // publish writes an object through a temporary file and renames it into place,
 // so a crash after it returns cannot leave a caller referencing a key the store
-// does not show. write fills the temporary file.
-func (f *Filesystem) publish(ctx context.Context, key string, write func(io.Writer) error) error {
+// does not show. write fills the temporary file. exclusive links it into place
+// instead, failing with ErrExists when the key exists.
+func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, write func(io.Writer) error) error {
 	if err := ValidateKey(key); err != nil {
 		return err
 	}
@@ -207,7 +219,7 @@ func (f *Filesystem) publish(ctx context.Context, key string, write func(io.Writ
 	if err != nil {
 		return err
 	}
-	if err = root.Rename(name, key); err != nil {
+	if err = place(root, name, key, exclusive); err != nil {
 		return err
 	}
 	// The data is durable once the file is synced, but the name is not until
@@ -225,6 +237,27 @@ func (f *Filesystem) publish(ctx context.Context, key string, write func(io.Writ
 		}
 	}
 	return nil
+}
+
+// place moves a synced temporary file to key: a rename, which replaces an
+// existing object, or for an exclusive create a hard link, which fails with
+// ErrExists when the name exists, and with ErrExclusiveUnsupported where the
+// filesystem has no hard links.
+func place(root *os.Root, name, key string, exclusive bool) error {
+	if !exclusive {
+		return root.Rename(name, key)
+	}
+	err := root.Link(name, key)
+	switch {
+	case errors.Is(err, fs.ErrExist):
+		return ErrExists
+	case errors.Is(err, unix.EPERM), errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EMLINK):
+		// The filesystem takes no hard links (exFAT, some SMB and FUSE
+		// mounts answer EPERM). It is not a permission problem: the
+		// temporary file was just created and written in this directory.
+		return fmt.Errorf("%w: %w", ErrExclusiveUnsupported, err)
+	}
+	return err
 }
 
 // mkdirAllTracked creates dir and any missing ancestors inside root and

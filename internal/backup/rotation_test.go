@@ -23,6 +23,7 @@ func TestPlanRotation(t *testing.T) {
 		name    string
 		folders []folder
 		keep    int
+		pinned  map[string]bool
 		want    []string
 	}{
 		{
@@ -51,10 +52,24 @@ func TestPlanRotation(t *testing.T) {
 			keep:    1,
 			want:    []string{id(KindNightly, 1), id(KindNightly, 2)},
 		},
+		{
+			name: "before-restore copies last seven days outside keep",
+			folders: []folder{backup(KindNightly, 0, clean), backup(KindBeforeRestore, 6, clean), backup(KindBeforeRestore, 8, clean),
+				backup(KindNightly, 1, clean)},
+			keep: 1,
+			want: []string{id(KindNightly, 1), id(KindBeforeRestore, 8)},
+		},
+		{
+			name:    "an active restore source is never deleted",
+			folders: []folder{backup(KindNightly, 0, clean), backup(KindNightly, 1, clean), backup(KindBeforeRestore, 9, clean)},
+			keep:    1,
+			pinned:  map[string]bool{id(KindNightly, 1): true, id(KindBeforeRestore, 9): true},
+			want:    nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := planRotation(tt.folders, tt.keep)
+			got := planRotation(tt.folders, tt.keep, now, tt.pinned)
 			slices.Sort(tt.want)
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("planRotation = %v, want %v", got, tt.want)

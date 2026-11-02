@@ -31,6 +31,7 @@ export function backupRowId(id: string) {
 export const BACKUP_KIND_LABELS: Record<AdminBackupKind, string> = {
   nightly: "Nightly",
   manual: "Manual",
+  "before-restore": "Taken before a restore",
 };
 
 export const BACKUP_STATUS_LABELS: Record<AdminBackupStatus, string> = {
@@ -47,6 +48,30 @@ export const BACKUP_STATUS_LABELS: Record<AdminBackupStatus, string> = {
 export function knownSiloVersion(version: string | null | undefined): string | null {
   const trimmed = version?.trim();
   return trimmed && trimmed.toLowerCase() !== "unavailable" ? trimmed : null;
+}
+
+/** The first block of a server id, for when the id is shown as a detail. */
+export function shortServerId(serverId: string): string {
+  return serverId.split("-")[0] || serverId;
+}
+
+/** A source server's name, or null when it has none (only its id). */
+export function sourceServerName(source: { server_name: string }): string | null {
+  return source.server_name.trim() || null;
+}
+
+/** Whether parts of a backup can be restored: it is finished and holds a restore set. */
+export function canRestoreParts(backup: AdminBackup): boolean {
+  return isFinished(backup) && backup.objects.some((object) => object.name === "restore-set.tar");
+}
+
+export function restorePath(backupId: string): string {
+  return `/admin/backups/${encodeURIComponent(backupId)}/restore`;
+}
+
+/** Where a running restore shows its progress, from the operation holding the lock. */
+export function activeRestorePath(active: AdminBackupActive): string | null {
+  return active.backup_id ? restorePath(active.backup_id) : null;
 }
 
 /** A backup with a manifest: one that can be downloaded and restored. */
@@ -264,7 +289,8 @@ export function lockBlocker(busy: boolean, active: AdminBackupActive | undefined
   if (!busy && !active) return null;
   if (active?.operation === "backup") return "A backup is running. Wait for it to finish.";
   if (active?.operation === "delete") return "A backup is being deleted. Wait for it to finish.";
-  return "Another backup is running. Wait for it to finish.";
+  if (active?.operation === "restore") return "A restore is running. Wait for it to finish.";
+  return "Another backup task is running. Wait for it to finish.";
 }
 
 /** Why "Back up now" is unavailable, or null when it can run. */

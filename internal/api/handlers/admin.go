@@ -93,6 +93,26 @@ func updateServerSettingsAtomically(
 	})
 }
 
+// updateServerSettingsWithTx runs update in tx when it is set, under the
+// settings lock taken there, and in a transaction of its own otherwise.
+func updateServerSettingsWithTx(
+	ctx context.Context,
+	store ServerSettingsStore,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if tx == nil {
+		return updateServerSettingsInTransaction(ctx, store, update)
+	}
+	updater, ok := store.(interface {
+		UpdateAtomicWithTx(context.Context, pgx.Tx, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support caller transactions")
+	}
+	return updater.UpdateAtomicWithTx(ctx, tx, update)
+}
+
 func updateServerSettingsInTransaction(
 	ctx context.Context,
 	store ServerSettingsStore,
@@ -2664,38 +2684,69 @@ func (h *AdminHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, error) {
+	result, publish, err := h.updateAdminSettings(ctx, nil, values, guard)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+	publish(ctx)
+	return result, nil
+}
+
+// codeInternalError is the API error code of a server-side failure.
+const codeInternalError = "internal_error"
+
+// ApplyAdminSettingsInTx writes values through the admin settings write path
+// (the same normalization, validation, and settings lock) inside the caller's
+// transaction. Nothing is published until the caller runs publish after its
+// transaction commits; a rollback leaves nothing to announce.
+func (h *AdminHandler) ApplyAdminSettingsInTx(ctx context.Context, tx pgx.Tx, values map[string]string) (AdminSettingsUpdateResult, func(context.Context), error) {
+	if tx == nil {
+		return AdminSettingsUpdateResult{}, nil, errors.New("a transaction is required")
+	}
+	return h.updateAdminSettings(ctx, tx, values, nil)
+}
+
+// updateAdminSettings validates and writes values, in tx when it is set and
+// in a transaction of its own otherwise. publish announces the committed
+// changes: events, the settings hook, and restart flags.
+//
+//nolint:funlen,gocyclo // UpdateAdminSettings' body, moved as is behind the caller-transaction entry points
+func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+	fail := func(err error) (AdminSettingsUpdateResult, func(context.Context), error) {
+		return AdminSettingsUpdateResult{}, nil, err
+	}
 	if h.SettingsRepo == nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: 500, Code: "internal_error", Message: "Settings store not configured"}
+		return fail(&APIError{Status: 500, Code: codeInternalError, Message: "Settings store not configured"})
 	}
 	req := updateSettingsRequest{Values: values}
 
 	if len(req.Values) == 0 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"})
 	}
 	if len(req.Values) > 250 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"})
 	}
 
 	if guard != nil {
 		stored, err := h.SettingsRepo.GetAll(ctx)
 		if err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 	}
 
 	keys := make([]string, 0, len(req.Values))
 	for key := range req.Values {
 		if strings.TrimSpace(key) == "" {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"})
 		}
 		if machineManagedSettingKeys[key] {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"})
 		}
 		if h.environmentRefusesSave(key, req.Values[key]) {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"})
 		}
 		keys = append(keys, key)
 	}
@@ -2705,18 +2756,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	for _, key := range keys {
 		value, code, err := h.normalizeBatchSetting(ctx, key, req.Values[key])
 		if err != nil {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()})
 		}
 		normalized[key] = value
 	}
 	checkedRedis, err := h.checkRedisSave(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	var (
@@ -2727,7 +2778,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsWithTx(ctx, h.SettingsRepo, tx,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2799,17 +2850,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			return writes, nil
 		})
 	if preconditionErr != nil {
-		return AdminSettingsUpdateResult{}, preconditionErr
+		return fail(preconditionErr)
 	}
 	if validationErr != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()})
 	}
 	if err != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to update settings"}
+		return fail(&APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Failed to update settings"})
 	}
 
 	responseValues := make(map[string]string, len(normalized))
 	restartKeys := make([]string, 0, len(normalized))
+	var changed []string
 	for _, key := range keys {
 		if !sensitiveSettingKeys[key] {
 			responseValues[key] = after[key]
@@ -2817,30 +2869,35 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if !effectiveChanges[key] {
 			continue
 		}
-		if h.EventBus != nil {
-			_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
-				cache.Event{Type: cache.EventSettingsChanged, Payload: key})
-		}
-		if h.OnServerSettingUpdated != nil {
-			h.OnServerSettingUpdated(ctx, key, after[key])
-		}
-		publishAdminDefaultEvent(ctx, h.EventsHub, key)
+		changed = append(changed, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
 	}
-	// Per-key reasons ("setting:<key>") so the admin UI can scope a pending
-	// restart to the subsystem the key belongs to instead of warning on every
-	// tile for any settings save.
-	for _, restartKey := range restartKeys {
-		h.markServerRestartRequired("setting:" + restartKey)
+	publish := func(ctx context.Context) {
+		for _, key := range changed {
+			if h.EventBus != nil {
+				_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
+					cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+			if h.OnServerSettingUpdated != nil {
+				h.OnServerSettingUpdated(ctx, key, after[key])
+			}
+			publishAdminDefaultEvent(ctx, h.EventsHub, key)
+		}
+		// Per-key reasons ("setting:<key>") so the admin UI can scope a
+		// pending restart to the subsystem the key belongs to instead of
+		// warning on every tile for any settings save.
+		for _, restartKey := range restartKeys {
+			h.markServerRestartRequired("setting:" + restartKey)
+		}
 	}
 	return updateSettingsResponse{
 		CommittedSnapshot:   committedSnapshot,
 		Values:              responseValues,
 		RestartRequired:     len(restartKeys) > 0,
 		RestartRequiredKeys: restartKeys,
-	}, nil
+	}, publish, nil
 }
 
 // HandleUpdateSetting handles PUT /admin/settings/{key}.

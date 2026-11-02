@@ -25,15 +25,33 @@ func downloadable(m *Manifest) []ObjectEntry {
 	return append(out, ObjectEntry{Name: ManifestName})
 }
 
-// DownloadLinks returns every stored object of a complete backup and its
-// manifest, presigned where the destination can presign.
-func (s *Service) DownloadLinks(ctx context.Context, id string, ttl time.Duration) ([]ObjectLink, error) {
+// Download scopes.
+const (
+	// ScopeFull is every stored object as it is, with the manifest.
+	ScopeFull = "full"
+	// ScopeRestoreSet is restore-set.tar alone: the file an upload on
+	// another server takes.
+	ScopeRestoreSet = "restore-set"
+)
+
+// DownloadLinks returns the objects of a complete backup in scope, presigned
+// where the destination can presign.
+func (s *Service) DownloadLinks(ctx context.Context, id, scope string, ttl time.Duration) ([]ObjectLink, error) {
 	b, err := s.completeBackup(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	m := b.manifest
+	objects := downloadable(m)
+	if scope == ScopeRestoreSet {
+		entry, ok := m.object(RestoreSetName)
+		if !ok {
+			return nil, ErrNoRestoreSet
+		}
+		objects = []ObjectEntry{entry}
+	}
 	var links []ObjectLink
-	for _, obj := range downloadable(b.manifest) {
+	for _, obj := range objects {
 		link := ObjectLink{Name: obj.Name, Size: obj.Size}
 		url, expires, ok, err := b.t.DownloadURL(ctx, objectKey(b.serverID, id, obj.Name), ttl)
 		if err != nil {
@@ -86,4 +104,15 @@ func (s *Service) completeBackup(ctx context.Context, id string) (storedBackup, 
 		return storedBackup{}, err
 	}
 	return storedBackup{t: t, serverID: serverID, id: id, manifest: m}, nil
+}
+
+// openPlain opens one object of a backup. The stored bytes are hashed as
+// they are read; the caller checks storedEntry against the manifest once it
+// has read through.
+func (s *Service) openPlain(ctx context.Context, b storedBackup, name string) (*storedReader, error) {
+	body, _, err := b.t.Open(ctx, objectKey(b.serverID, b.id, name))
+	if err != nil {
+		return nil, err
+	}
+	return openStored(body), nil
 }

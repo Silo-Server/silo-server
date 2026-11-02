@@ -40,6 +40,13 @@ func TestParseManifestRefusesWhatARestoreCouldNotCheck(t *testing.T) {
 		"applied migrations end elsewhere": func(m *Manifest) {
 			m.GooseVersion, m.AppliedMigrations = 9, []int64{1, 5}
 		},
+		"restore set summary without its object": func(m *Manifest) {
+			m.RestoreSet = &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{SectionSettings: 1}}
+		},
+		"unknown restore set section": func(m *Manifest) {
+			m.Objects = append(m.Objects, ObjectEntry{Name: RestoreSetName, SHA256: m.Objects[0].SHA256})
+			m.RestoreSet = &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{"../x": 1}}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -54,6 +61,8 @@ func TestParseManifestRefusesWhatARestoreCouldNotCheck(t *testing.T) {
 	good := validTestManifest()
 	good.GooseVersion, good.AppliedMigrations = 9, []int64{1, 5, 9}
 	good.Tables[0] = TableCount{Name: good.Tables[0].Name}
+	good.Objects = append(good.Objects, ObjectEntry{Name: RestoreSetName, SHA256: good.Objects[0].SHA256})
+	good.RestoreSet = &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{SectionSettings: 3, SectionPlugins: 0}}
 	data, _ := json.Marshal(good)
 	if _, err := ParseManifest(data); err != nil {
 		t.Fatalf("a valid manifest with an absent table was refused: %v", err)
