@@ -280,34 +280,49 @@ func (s ctxBoundPlanStoreV3) StopAttempt(ctx context.Context, sessionID, stopID 
 	return s.MemoryPlanStoreV3.StopAttempt(ctx, sessionID, stopID, final)
 }
 
-// TestAdminTerminateWithoutAReplyRevokesAfterTheCallerGivesUp: the wait for
-// an owner that never answers can outlast the caller (the admin closes the
-// page, a proxy times out). The terminate fallback still revokes the session
-// another replica holds instead of failing on the caller's dead context.
-func TestAdminTerminateWithoutAReplyRevokesAfterTheCallerGivesUp(t *testing.T) {
+// TestAdminTerminateWithoutAReplyRevokesAndLeavesDeliveryUnknown: the owner
+// is still stopping the session (its terminate lock is held) when the caller
+// gives up waiting. The receiving replica revokes the session under its own
+// context, but the owner then tells the player, so the answer must not be a
+// receipt saying no lane was reachable: it is unavailable, delivery unknown.
+func TestAdminTerminateWithoutAReplyRevokesAndLeavesDeliveryUnknown(t *testing.T) {
 	c := newRelayTestCluster(t)
 	store := ctxBoundPlanStoreV3{playback.NewMemoryPlanStoreV3()}
+	c.owner.playback.PlanStoreV3 = store
 	c.other.playback.PlanStoreV3 = store
 	if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
-		PlaybackAttemptID: "attempt-orphan",
-		SessionID:         "orphan",
+		PlaybackAttemptID: "attempt-" + c.session.ID,
+		SessionID:         c.session.ID,
 		ExpiresAt:         time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.owners.Claim(context.Background(), "orphan", "dead-replica", time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	unlockOwner := c.owner.terminateLock(c.session.ID)
 
 	// A caller already gone ends the wait at once, as it would mid-wait.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	view, err := c.other.Terminate(ctx, AdminTerminateInput{SessionID: "orphan", ActorID: 2})
-	if err != nil || !view.AuthorityRevoked {
-		t.Fatalf("terminate after the caller gave up = %+v, %v; want revoked", view, err)
+	view, err := c.other.Terminate(ctx, AdminTerminateInput{SessionID: c.session.ID, ActorID: 2})
+	if !errors.Is(err, ErrAdminTerminateNoReply) {
+		unlockOwner()
+		t.Fatalf("terminate while the owner is still stopping = %+v, %v; want unavailable with delivery unknown", view, err)
 	}
-	record, err := store.GetAttempt(context.Background(), "orphan")
+	record, err := store.GetAttempt(context.Background(), c.session.ID)
 	if err != nil || record.StoppedAt == nil || !attemptEndedByAdmin(record) {
+		unlockOwner()
 		t.Fatalf("attempt row = %+v, %v; want stopped by the administrator", record, err)
+	}
+
+	unlockOwner()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if sent := c.conn.sent(); len(sent) == 1 && sent[0].Name == playback.CommandTerminate {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the owner never told the player: lane received %+v", c.conn.sent())
+		}
+		//nolint:forbidigo // Polls observable state: the owner runs the relayed terminate on its own goroutine.
+		time.Sleep(5 * time.Millisecond)
 	}
 }

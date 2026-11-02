@@ -2352,9 +2352,10 @@ repeat observes the first outcome instead of racing it. With several API
 replicas, the terminate runs on the replica that holds the session's lane, which
 ends its live session and notifies the player. When no replica holds a lane, or
 its holder does not answer, the receiving replica revokes the session itself.
-If the holder did not answer and the session is already gone, which is what a
-holder that ran the terminate leaves behind, the answer is
-`503 dependency_unavailable` rather than `404`.
+When the holder did not answer, the answer is `503 dependency_unavailable`
+unless the receiving replica told the player itself: the holder may still be
+telling the player, or may already have ended the session, so whether the
+player was notified is unknown. Retrying the terminate is safe.
 
 The optional JSON body carries `reason`. The `200` receipt carries
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,

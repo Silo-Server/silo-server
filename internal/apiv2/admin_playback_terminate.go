@@ -60,7 +60,7 @@ func registerAdminPlaybackTerminate(reg *Registry) {
 func adminPlaybackTerminateProblem(err error) *Problem {
 	switch {
 	case errors.Is(err, handlers.ErrAdminTerminateNoReply):
-		return NewProblem(TypeDependencyUnavailable, "The server holding this playback session did not answer in time, and the session has already ended, possibly by this terminate.").WithRetryAfter(30)
+		return NewProblem(TypeDependencyUnavailable, "The server holding this playback session did not answer in time. Its playback authority is revoked, but whether the player was told to stop is unknown; retrying the terminate is safe.").WithRetryAfter(30)
 	case errors.Is(err, handlers.ErrAdminTerminateUnavailable):
 		return unavailable("administrator terminate")
 	case errors.Is(err, playback.ErrSessionNotFound):

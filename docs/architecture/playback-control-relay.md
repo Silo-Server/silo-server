@@ -20,7 +20,10 @@ to the lane holder. The administrator command code in
   whose value is the time the lane's connection took the lane (Unix
   microseconds) and the holding process's relay id. A replica claims the key
   when a lane opens or a new connection takes over the lane, and claims it
-  again every 10 seconds while the lane stays open. A claim never replaces one
+  again every 10 seconds while the lane stays open. The refresh sends eight
+  claims at a time and applies lane open and close events between batches, so
+  a large replica renews its claims well inside the expiry and a new lane is
+  not claimed only after every other lane. A claim never replaces one
   for a newer connection (equal times go to the greater relay id), so the
   newest connection wins whatever order the replicas write in, and a dropped
   lane notification is repaired by the next refresh. When the lane closes, the
@@ -72,14 +75,18 @@ terminate still writes its watch history and stop receipt.
 
 - A command answers `503`. A retry is safe only with the same command id and
   sequence: when it reaches the owner, it gets the recorded receipt back. A new
-  identity is a new command. The web admin allocates a new identity for each
-  click, so a second click after a `503` can apply the command twice.
+  identity is a new command. The web admin keeps a command's identity after an
+  answer that leaves it unknown (a `5xx` or no response) and reuses it when the
+  administrator repeats the same command on the same session; any other answer,
+  a different command, or a change of signed-in profile drops it.
 - A terminate revokes the session from the receiving replica, as it does for a
   session with no lane. Revocation is idempotent, and it must not wait for a
   dead owner's claim to expire. The revocation runs under its own bounded
-  context, so it still completes when the caller gave up during the wait. If
-  the session is already gone, which is what an owner that ran the terminate
-  leaves behind, it answers `503` rather than `404`.
+  context, so it still completes when the caller gave up during the wait. It
+  then answers `503` unless the receiving replica delivered the dismissal on a
+  lane of its own: the owner may still be telling the player, or may already
+  have ended the session, so neither a receipt saying the player had no lane
+  nor a `404` would be true. A retry is safe.
 
 A replica that dies leaves its claim behind until the claim expires or the
 player reconnects to a surviving replica, which claims the key with a newer

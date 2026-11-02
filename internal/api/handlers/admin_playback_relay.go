@@ -27,9 +27,10 @@ import (
 // (503): its sequence and command id make a retry safe, and a retry that
 // reaches the owner replays the recorded receipt. A terminate still revokes
 // from here, because revocation is idempotent and must not wait for a dead
-// owner's claim to expire; if the session is already gone, which is what an
-// owner that ran the terminate leaves behind, it answers unavailable rather
-// than 404.
+// owner's claim to expire. It then answers unavailable too, unless this
+// replica delivered the dismissal itself: the owner may still be telling the
+// player, or may already have ended the session, so neither a receipt saying
+// no lane was reachable nor a 404 would be true.
 
 const (
 	adminRelayOpCommand   = "admin_playback_command"
@@ -55,7 +56,8 @@ var errAdminRelayRemote = errors.New("playback control failed on the replica hol
 
 // ErrAdminPlaybackCommandNoReply and ErrAdminTerminateNoReply mean the
 // replica holding the session's lane was asked and did not answer in time,
-// so the request may have run there. They are the operation's unavailable
+// so the request may have run there. For a terminate, this replica has
+// revoked the session itself; only the player's notification is unknown. They are the operation's unavailable
 // error (503), told apart so the answer does not claim that this server has
 // no playback control.
 var (
@@ -150,7 +152,11 @@ func (h *AdminPlaybackControlHandler) relayTerminate(ctx context.Context, in Adm
 		fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminTerminateFallbackTimeout)
 		defer cancel()
 		view, err := h.terminateLocal(fallbackCtx, in)
-		if errors.Is(err, playback.ErrSessionNotFound) {
+		// The owner may still be ending the session and telling the player,
+		// so only a dismissal sent from here is a known delivery. Otherwise
+		// the revocation stands but whether the player was told is unknown,
+		// which a receipt with delivery "unavailable" would misstate.
+		if errors.Is(err, playback.ErrSessionNotFound) || (err == nil && view.Delivery != AdminTerminateDeliveryDispatched) {
 			return AdminTerminateView{}, true, ErrAdminTerminateNoReply
 		}
 		return view, true, err
