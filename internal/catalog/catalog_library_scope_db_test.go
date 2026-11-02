@@ -165,8 +165,8 @@ func TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB(t *testing.T) {
 // file was moved or renamed away: it has no library membership and is kept
 // only by the scanner's file removal grace. Counts and listings that name no
 // library leave it out for an unrestricted viewer, as its library page does:
-// collection item counts, a person's credit counts and search, and upcoming
-// episodes of a held series. A read by ID still opens a person credited only
+// collection item counts and member pages, a person's credit counts and
+// search, and upcoming episodes of a held series. A read by ID still opens a person credited only
 // on the held title, as it opens the title.
 func TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
@@ -224,6 +224,15 @@ func TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB(t *testing.T) {
 		}
 		if counts[personal] != 1 {
 			t.Fatalf("item count %d, want 1", counts[personal])
+		}
+	})
+	t.Run("collection member page", func(t *testing.T) {
+		items, err := NewItemRepository(pool).GetListedByIDsWithAccess(ctx, []string{member, held}, AccessFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 || items[0].ContentID != member {
+			t.Fatalf("listed %d members, want only %s", len(items), member)
 		}
 	})
 	t.Run("person credit counts", func(t *testing.T) {

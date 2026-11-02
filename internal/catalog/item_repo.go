@@ -904,13 +904,24 @@ func (r *ItemRepository) GetStatusByIDs(ctx context.Context, ids []string) (map[
 // (libraryAccessConditions), the same semantics EnsureAccessible and
 // EnsureAccessibleIDs enforce.
 func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter) ([]*models.MediaItem, error) {
+	return r.getByIDsWithAccess(ctx, contentIDs, access, itemAccessConditions)
+}
+
+// GetListedByIDsWithAccess is GetByIDsWithAccess for a listing built from
+// stored IDs, such as a collection's member page: it also leaves out items in
+// no library, as listedItemAccessConditions does.
+func (r *ItemRepository) GetListedByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter) ([]*models.MediaItem, error) {
+	return r.getByIDsWithAccess(ctx, contentIDs, access, listedItemAccessConditions)
+}
+
+func (r *ItemRepository) getByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter, conditions itemConditions) ([]*models.MediaItem, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, nil
 	}
 	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, nil
 	}
-	sql, args := r.buildGetByIDsWithAccessSQL(contentIDs, access)
+	sql, args := r.buildGetByIDsWithAccessSQL(contentIDs, access, conditions)
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fetching media items by IDs with access: %w", err)
@@ -919,14 +930,17 @@ func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []st
 	return scanItems(rows)
 }
 
-func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access AccessFilter) (string, []any) {
+// itemConditions renders access predicates over media_items mi.
+type itemConditions func(access AccessFilter, args *[]any, argIdx *int) []string
+
+func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access AccessFilter, conditions itemConditions) (string, []any) {
 	sql := `SELECT ` + itemColumns + `
             FROM media_items mi
             WHERE mi.content_id = ANY($1)`
 	args := []any{contentIDs}
 	argIdx := 2
 
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range conditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 

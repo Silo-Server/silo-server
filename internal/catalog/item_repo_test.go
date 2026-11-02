@@ -20,7 +20,7 @@ func TestItemRepo_GetByIDsWithAccess_SingleQueryWithLibraryFilter(t *testing.T) 
 	repo := &ItemRepository{}
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a", "b"}, AccessFilter{
 		AllowedLibraryIDs: []int{1, 2},
-	})
+	}, itemAccessConditions)
 	if !strings.Contains(sql, "content_id = ANY($1)") {
 		t.Fatalf("expected ANY for content IDs; got %s", sql)
 	}
@@ -48,7 +48,7 @@ func TestItemRepo_GetByIDsWithAccess_DisabledOnlyRequiresLibraryMembership(t *te
 	repo := &ItemRepository{}
 	sql, _ := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
 		DisabledLibraryIDs: []int{9},
-	})
+	}, itemAccessConditions)
 	// Positive-membership EXISTS must be present. It has no media_folder_id
 	// filter so the NOT EXISTS that follows is what enforces the disabled-list.
 	if strings.Count(sql, "EXISTS (") < 2 {
@@ -88,7 +88,7 @@ func TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause(t *testing
 	repo := &ItemRepository{}
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
 		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
-	})
+	}, itemAccessConditions)
 	if !strings.Contains(sql, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
 		t.Fatalf("expected stored-age ceiling clause; got %s", sql)
 	}
@@ -110,7 +110,7 @@ func TestItemRepo_GetByIDsWithAccess_CombinedClausesIndexCorrectly(t *testing.T)
 		AllowedLibraryIDs:  []int{1, 2},
 		DisabledLibraryIDs: []int{9},
 		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
-	})
+	}, itemAccessConditions)
 	// Expect: $1 = ids, $2 = allowed libs, $3 = disabled libs, $4 = ceiling age.
 	if !strings.Contains(sql, "media_folder_id = ANY($2)") {
 		t.Fatalf("expected AllowedLibraryIDs at $2; got %s", sql)
