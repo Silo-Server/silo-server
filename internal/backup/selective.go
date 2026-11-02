@@ -104,6 +104,10 @@ type RestoreTargets struct {
 	PluginInstalled func(ctx context.Context, installationID int) error
 	// ArtworkChanged announces artwork published for an item.
 	ArtworkChanged func(ctx context.Context, contentID, parentContentID string)
+	// TrackArtwork registers an artwork revision's objects with the
+	// revision collector (catalog.ArtworkRevisionTracker), as the image
+	// cache does around its uploads. Nil tracks nothing.
+	TrackArtwork func(ctx context.Context, originalPath, imageType string, objectKeys []string) error
 	// CheckFolder validates a library folder as the library editor does.
 	CheckFolder func(ctx context.Context, path string) error
 	// CreateJob queues the backup_restore admin job.

@@ -26,3 +26,27 @@ func TestCopyPosterDropsForeignKeys(t *testing.T) {
 		}
 	}
 }
+
+// An imported sync schedule is one the collection editor accepts, or none.
+func TestImportedScheduleKeepsOnlyAllowedCadences(t *testing.T) {
+	text := func(s string) *string { return &s }
+	cases := []struct {
+		kind     string
+		schedule *string
+		want     string
+		dropped  bool
+	}{
+		{"tmdb", text("30 4 * * 0"), AllowedSyncSchedules["weekly"], false},
+		{"mdblist", text(" 30  4 1 * * "), AllowedSyncSchedules["monthly"], false},
+		{"tmdb", text("* * * * *"), "", true},
+		{"smart", text(AllowedSyncSchedules["daily"]), "", true},
+		{"tmdb", nil, "", false},
+	}
+	for _, tc := range cases {
+		dropped := 0
+		got := importedSchedule(personalCollection{Type: tc.kind, SyncSchedule: tc.schedule}, &dropped)
+		if (got == nil && tc.want != "") || (got != nil && *got != tc.want) || (dropped == 1) != tc.dropped {
+			t.Errorf("importedSchedule(%s, %v) = %v, dropped %d", tc.kind, tc.schedule, got, dropped)
+		}
+	}
+}

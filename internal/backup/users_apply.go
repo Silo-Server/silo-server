@@ -316,8 +316,7 @@ func (r *accountRestore) visibleItems(ctx context.Context, profileID string) (*f
 	if !restricted {
 		libraries = nil
 	}
-	allowUnrated := r.a.s.opts.AllowUnratedContent != nil && r.a.s.opts.AllowUnratedContent(ctx)
-	return r.items.visibleTo(ctx, r.tx, contentFilter{libraries: libraries, limits: access.ProfileMaturity(profile, allowUnrated)})
+	return r.items.visibleTo(ctx, r.tx, contentFilter{libraries: libraries, limits: access.ProfileMaturity(profile, r.a.allowUnrated)})
 }
 
 // preparedDocs lists the documents the chosen profiles import, by type.
