@@ -3846,7 +3846,9 @@ export function VideoPlayer({
     const announced = announcedSubtitleKeysRef.current;
     const candidateTracks = effectiveSubtitleTracks.filter((track) => {
       if (track.index === activeSubtitleIndex) return true;
-      const key = syncKeyOf(track);
+      const key = track.stored_subtitle_id
+        ? `stored-${track.stored_subtitle_id}`
+        : syncKeyOf(track);
       return key === null || !announced.has(key);
     });
     if (candidateTracks.length === 0) {

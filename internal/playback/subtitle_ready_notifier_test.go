@@ -337,9 +337,12 @@ func TestSubtitleReadyDeliversAcrossReplicasOnce(t *testing.T) {
 		t.Cleanup(func() { hub.Unregister(reg) })
 		return NewSubtitleReadyNotifier(sessions, hub, nil), conn
 	}
+
 	bus := &subtitleTestBus{}
 	local, localConn := replica()
 	remote, remoteConn := replica()
+	observed := &observedSubtitleInventoryResolver{contexts: make(chan context.Context, 4)}
+	remote.inventory = observed
 	ctx := context.Background()
 	for _, n := range []*SubtitleReadyNotifier{local, remote} {
 		if err := n.UseEventBus(ctx, bus.publish, bus.subscribe); err != nil {
@@ -350,8 +353,24 @@ func TestSubtitleReadyDeliversAcrossReplicasOnce(t *testing.T) {
 	if len(bus.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(bus.events))
 	}
+	var dispatchCtx context.Context
+	select {
+	case dispatchCtx = <-observed.contexts:
+	case <-time.After(time.Second):
+		t.Fatal("remote dispatch did not start")
+	}
+	// The remote worker cancels its context when dispatch returns, after
+	// all sends. Observe that cleanup before checking the final count.
+	select {
+	case <-dispatchCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("remote dispatch did not finish")
+	}
 	for name, conn := range map[string]*dispatchTestConn{"local": localConn, "remote": remoteConn} {
-		messages := waitForMessages(t, conn, 1)
+		messages := conn.sent()
+		if len(messages) != 1 {
+			t.Fatalf("%s messages = %d, want 1", name, len(messages))
+		}
 		event := messages[0].(EventEnvelope)
 		var payload SubtitleReadyPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil || event.Name != RealtimeEventSubtitleReady ||
@@ -359,11 +378,18 @@ func TestSubtitleReadyDeliversAcrossReplicasOnce(t *testing.T) {
 			t.Fatalf("%s event %+v payload %+v err %v", name, event, payload, err)
 		}
 	}
-	// Remote delivery runs off the bus, so a duplicate would arrive late.
-	<-time.After(100 * time.Millisecond)
-	if n := len(remoteConn.sent()); n != 1 {
-		t.Fatalf("remote messages = %d, want 1", n)
-	}
+}
+
+// observedSubtitleInventoryResolver exposes the real dispatch lifetime through
+// the context passed to the inventory dependency.
+type observedSubtitleInventoryResolver struct {
+	stubSubtitleInventoryResolver
+	contexts chan context.Context
+}
+
+func (r *observedSubtitleInventoryResolver) MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error) {
+	r.contexts <- ctx
+	return r.stubSubtitleInventoryResolver.MediaFile(ctx, fileID)
 }
 
 // deadlineInventoryResolver spends the caller's deadline while it resolves a

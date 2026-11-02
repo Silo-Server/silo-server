@@ -343,7 +343,7 @@ func (n *SubtitleReadyNotifier) TranslationFailed(ctx context.Context, sessionID
 // subtitle row is already committed when these events fire, so the entry it
 // resolves to carries the same ordinal the next plan will publish.
 //
-// The row ID is server-private but retained on each inventory item, so match it
+// The stored row ID is retained on each inventory item, so match it
 // exactly. Language/label are presentation metadata and need not be unique.
 func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID string, fileID int, match func(SubtitleInventoryItemV3) bool) *SubtitleInventoryItemV3 {
 	if n == nil || n.inventory == nil || fileID <= 0 {
@@ -380,7 +380,7 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 // downloadedTrack matches the inventory entry of a stored subtitle row.
 func downloadedTrack(subtitleID int) func(SubtitleInventoryItemV3) bool {
 	return func(item SubtitleInventoryItemV3) bool {
-		return item.Source == SubtitleSourceDownloadedV3 && item.downloadedSubtitleID == subtitleID
+		return item.Source == SubtitleSourceDownloadedV3 && item.StoredSubtitleID == subtitleID
 	}
 }
 

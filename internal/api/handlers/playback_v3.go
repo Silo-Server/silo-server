@@ -5079,9 +5079,8 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		frozenDownloaded = selected
 	}
 	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory, clientFeatures)
-	// A plan restored from JSON no longer carries the server-only downloaded
-	// row IDs. Rebuild only in that case; a fresh plan stays on the exact
-	// planning snapshot instead of listing a mutable repository twice.
+	// Older stored plans lack downloaded row IDs. Rebuild only in that case;
+	// plans with identities stay on their original planning snapshot.
 	if playback.SubtitleInventoryNeedsDownloadedIdentityV3(plan.Subtitle.Inventory) {
 		if h == nil || h.SubtitleRepo == nil {
 			return errors.New("the downloaded subtitle inventory is unavailable")
@@ -7740,7 +7739,7 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 // written on the frozen /api/v1 surface: active_quality, the menu rungs
 // below 1.5 Mbps that Auto lowering added after the freeze, and the
 // embedded inventory rows' stream_index, container_track_id and
-// native_selectable.
+// native_selectable, plus the stored subtitle row identity.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if response.PlaybackPlan == nil {
 		return response
@@ -7754,6 +7753,7 @@ func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionR
 	for i := range plan.Subtitle.Inventory {
 		item := &plan.Subtitle.Inventory[i]
 		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable, item.HLSRendition = nil, "", false, nil
+		item.StoredSubtitleID = 0
 	}
 	if rendition := plan.Subtitle.HLSRendition; rendition != nil && rendition.Index != 0 {
 		frozen := *rendition

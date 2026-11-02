@@ -529,6 +529,14 @@ set its timing; demo mode refuses both.
 
 ### Finding a subtitle to sync
 
+Downloaded, uploaded and generated playback inventory tracks carry
+`stored_subtitle_id`, matching the `subtitle_ready` event's `subtitle_id`.
+This identifies the stored row even when the track has no sidecar URL or
+supports no timing correction. Clients still select by `combined_index`;
+`stored_subtitle_id` correlates announcements with refreshed inventory entries.
+Older plans may omit it. The web player uses it to keep newly announced tracks
+out of automatic selection and falls back to the timing key on older servers.
+
 Each playback inventory track that can be synced carries a `sync_key`
 (external and downloaded SRT, WebVTT, ASS, and SSA tracks): `stored-{id}` for a
 stored subtitle, `external-{hash}` for a sidecar. Treat it as opaque. The

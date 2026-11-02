@@ -5101,6 +5101,20 @@ describe("VideoPlayer translation handoff", () => {
   it.each([
     { selection: "no subtitle", initial: [], expected: null, withTrack: true },
     {
+      selection: "no subtitle for a track without a URL",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      withoutUrl: true,
+    },
+    {
+      selection: "no subtitle after a refresh without a URL",
+      initial: [],
+      expected: null,
+      withTrack: false,
+      withoutUrl: true,
+    },
+    {
       selection: "an SDH track",
       initial: [
         {
@@ -5118,7 +5132,7 @@ describe("VideoPlayer translation handoff", () => {
     },
   ])(
     "keeps an automatic choice of $selection when another viewer adds a track",
-    async ({ initial, expected, withTrack }) => {
+    async ({ initial, expected, withTrack, withoutUrl }) => {
       const onSubtitleTrackChange = vi.fn();
       const onApplySubtitleTrack = vi.fn();
       const onRefreshSubtitles = vi.fn();
@@ -5138,8 +5152,11 @@ describe("VideoPlayer translation handoff", () => {
         language: "en",
         label: "English",
         source: "downloaded",
-        sync_key: "stored-44",
-        url: "/en.vtt",
+        stored_subtitle_id: withoutUrl ? 44 : undefined,
+        codec: withoutUrl ? "sub" : "srt",
+        burn_in_only: withoutUrl,
+        sync_key: withoutUrl ? undefined : "stored-44",
+        url: withoutUrl ? "" : "/en.vtt",
       };
       act(() => {
         realtimeOptions.current?.onEvent?.({
