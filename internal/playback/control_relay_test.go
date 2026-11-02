@@ -273,6 +273,48 @@ func TestControlRelayOwnerFinishesARequestItsCallerStoppedWaitingFor(t *testing.
 	}
 }
 
+func TestControlRelayRetriesAChangedOwnerAfterDecline(t *testing.T) {
+	for _, movesAgain := range []bool{false, true} {
+		t.Run(fmt.Sprintf("moves_again=%t", movesAgain), func(t *testing.T) {
+			bus, owners := &relayTestBus{}, newRelayTestOwners()
+			a := startRelayTestReplica(t, bus, owners)
+			b := startRelayTestReplica(t, bus, owners)
+			a.hub.Register("s1", registrationTestConn{})
+			waitForRelayOwner(t, owners, "s1", a.relay.id)
+
+			caller := NewControlRelayWithOwners(NewRealtimeHub(), owners)
+			var requests int
+			publish := func(ctx context.Context, payload string) error {
+				requests++
+				// Move the lane after the caller's lookup, before the old
+				// owner's receive. Both replicas retain their old sockets.
+				if requests == 1 {
+					b.hub.Register("s1", registrationTestConn{})
+					waitForRelayOwner(t, owners, "s1", b.relay.id)
+				} else if movesAgain {
+					a.hub.Register("s1", registrationTestConn{})
+					waitForRelayOwner(t, owners, "s1", a.relay.id)
+				}
+				return bus.publish(ctx, payload)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			if err := caller.Start(ctx, publish, bus.subscribe); err != nil {
+				t.Fatal(err)
+			}
+			_, outcome := caller.Forward(ctx, "s1", "pause", map[string]int{"sequence": 7})
+			wantOutcome, wantCalls := ControlRelayHandled, int64(1)
+			if movesAgain {
+				wantOutcome, wantCalls = ControlRelayServeLocally, 0
+			}
+			if outcome != wantOutcome || b.calls.Load() != wantCalls || a.calls.Load() != 0 || requests != 2 {
+				t.Fatalf("outcome=%v, new owner calls=%d, old owner calls=%d, requests=%d; want %v, %d, 0, 2",
+					outcome, b.calls.Load(), a.calls.Load(), requests, wantOutcome, wantCalls)
+			}
+		})
+	}
+}
+
 func TestControlRelayLaneOwnershipFollowsTheNewestConnection(t *testing.T) {
 	bus, owners := &relayTestBus{}, newRelayTestOwners()
 	a := startRelayTestReplica(t, bus, owners)

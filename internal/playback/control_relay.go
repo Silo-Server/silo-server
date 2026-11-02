@@ -43,8 +43,10 @@ import (
 // Failure model. Forward reports ControlRelayServeLocally, and the caller
 // serves the request exactly as a single replica would, when this replica
 // owns the key, when no replica claims it, when the ownership read fails, or
-// when the owner answers that it no longer holds the lane: in each case the
-// owner never ran the request. Once Forward has tried to publish a request,
+// when the owner answers that it no longer holds the lane and one retry at a
+// changed owner also declines: in each case the owner never ran the request.
+// An unchanged or absent owner after a decline also uses the local path.
+// Once Forward has tried to publish a request,
 // Forward reports ControlRelayNoReply unless a reply arrives within
 // controlRelayReplyTimeout: the owner may still have run it, so the caller
 // must not assume it did not. That includes a publish that fails, because
@@ -257,8 +259,13 @@ func (r *ControlRelay) startSubscribed(ctx context.Context, publish func(context
 
 // Forward runs op for sessionID on the replica holding the session's newest
 // lane and returns its reply body (see the failure model above for the
-// outcomes).
+// outcomes). An explicit decline permits one retry at a changed owner within
+// the original reply deadline; a missing reply never permits a retry.
 func (r *ControlRelay) Forward(ctx context.Context, sessionID, op string, body any) (json.RawMessage, ControlRelayOutcome) {
+	return r.forward(ctx, sessionID, op, body, "")
+}
+
+func (r *ControlRelay) forward(ctx context.Context, sessionID, op string, body any, declinedOwner string) (json.RawMessage, ControlRelayOutcome) {
 	if r == nil || sessionID == "" {
 		return nil, ControlRelayServeLocally
 	}
@@ -276,7 +283,7 @@ func (r *ControlRelay) Forward(ctx context.Context, sessionID, op string, body a
 		slog.WarnContext(ctx, "playback control relay: owner lookup failed", "component", "playback", "playback_session_id", sessionID, "error", err)
 		return nil, ControlRelayServeLocally
 	}
-	if owner == "" || owner == r.id {
+	if owner == "" || owner == r.id || owner == declinedOwner {
 		return nil, ControlRelayServeLocally
 	}
 
@@ -317,6 +324,9 @@ func (r *ControlRelay) Forward(ctx context.Context, sessionID, op string, body a
 	select {
 	case msg := <-replies:
 		if !msg.Handled {
+			if declinedOwner == "" {
+				return r.forward(waitCtx, sessionID, op, body, owner)
+			}
 			return nil, ControlRelayServeLocally
 		}
 		return msg.Body, ControlRelayHandled
@@ -366,7 +376,7 @@ func (r *ControlRelay) serve(request controlRelayMessage) {
 	}
 	// A request may arrive after a newer lane took ownership while this
 	// replica's old socket remains open. Recheck the claim before executing;
-	// a rejected request retains the existing local-fallback behavior.
+	// a declined request lets the caller look for the new owner.
 	ownerCtx, cancelOwner := context.WithTimeout(context.Background(), controlRelayRedisTimeout)
 	owner, ownerErr := r.owners.Owner(ownerCtx, request.SessionID)
 	cancelOwner()

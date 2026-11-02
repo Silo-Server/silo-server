@@ -60,7 +60,14 @@ when no other replica ran it:
 - the key names this replica;
 - no replica claims the lane;
 - the Redis ownership read fails;
-- the claimed owner answers that it no longer holds the lane.
+- the claimed owner declines and a retry at a changed remote owner also
+  declines, or no changed remote owner is found.
+
+An explicit decline means the owner did not run the command. The receiving
+replica reads ownership again and retries once if a different remote owner
+now holds the lane. This covers a player reconnecting between lookup and
+delivery. The retry shares the original reply deadline. A failed publish or
+missing reply never triggers this retry, since the command may have run.
 
 The ownership reads and writes use a Redis client whose sockets honor the
 one-second deadline, so a stalled Redis sends the request down the local path
