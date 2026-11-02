@@ -59,6 +59,12 @@ func retryOnDeadlock(ctx context.Context, op func() error) error {
 	}
 }
 
+// RetryOnDeadlock is retryOnDeadlock for catalog writers outside this package.
+// op must run a whole transaction, so a retry starts it again.
+func RetryOnDeadlock(ctx context.Context, op func() error) error {
+	return retryOnDeadlock(ctx, op)
+}
+
 // deleteInBatches repeatedly runs deleteBatch (each a single autocommit
 // statement) until a batch removes fewer than batchSize rows. Each batch is
 // retried on deadlock. It returns the total number of rows deleted.

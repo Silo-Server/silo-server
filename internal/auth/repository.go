@@ -63,14 +63,33 @@ const allColumns = `id, email, username, password_hash, local_password_login_ena
 	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
 	download_transcode_allowed, requests_allowed, access_group_id, is_owner, break_glass, created_at, updated_at`
 
+// userLogin receives users.email, users.username, and users.password_hash,
+// all nullable: an account can have only one of a username and an email, and
+// no password hash. NULL reads as the model's empty value, which every lookup
+// by username or email ignores and no password matches.
+type userLogin struct{ email, username, passwordHash *string }
+
+func (l *userLogin) apply(u *models.User) {
+	u.Email, u.Username = derefString(l.email), derefString(l.username)
+	u.PasswordHash = derefString(l.passwordHash)
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
+	var login userLogin
 	err := row.Scan(
 		&u.ID,
-		&u.Email,
-		&u.Username,
-		&u.PasswordHash,
+		&login.email,
+		&login.username,
+		&login.passwordHash,
 		&u.LocalPasswordLoginEnabled,
 		&u.PasswordChangeRequired,
 		&u.Role,
@@ -101,6 +120,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		}
 		return nil, fmt.Errorf("scanning user: %w", err)
 	}
+	login.apply(&u)
 	return &u, nil
 }
 
@@ -109,11 +129,12 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 	var users []*models.User
 	for rows.Next() {
 		var u models.User
+		var login userLogin
 		err := rows.Scan(
 			&u.ID,
-			&u.Email,
-			&u.Username,
-			&u.PasswordHash,
+			&login.email,
+			&login.username,
+			&login.passwordHash,
 			&u.LocalPasswordLoginEnabled,
 			&u.PasswordChangeRequired,
 			&u.Role,
@@ -141,6 +162,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scanning user row: %w", err)
 		}
+		login.apply(&u)
 		users = append(users, &u)
 	}
 	if err := rows.Err(); err != nil {
