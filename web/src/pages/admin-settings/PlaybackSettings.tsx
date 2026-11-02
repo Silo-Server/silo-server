@@ -27,6 +27,7 @@ import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingFiel
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import { TrickplayStorageField } from "./TrickplayStorageField";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   IMAGE_EXECUTION_DEFAULT,
@@ -616,16 +617,7 @@ export default function PlaybackSettings() {
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
               />
             )}
-            {supportsTrickplay && (
-              <SettingField
-                label="Keep seek previews in the private bucket"
-                type="toggle"
-                description="Store seek previews in the private bucket set in Storage instead of the public one, and serve them through Silo. Useful when the public bucket charges per request. Does nothing without a private bucket. Changing it makes every seek preview again."
-                value={form.getValue("playback.trickplay_private_storage") || "false"}
-                onChange={(v) => form.setValue("playback.trickplay_private_storage", v)}
-                restartRequired={restartKeys.has("playback.trickplay_private_storage")}
-              />
-            )}
+            {supportsTrickplay && <TrickplayStorageField form={form} restartKeys={restartKeys} />}
             {!showPreviewPlacement && trickplayExecutionField}
             {/* internal/trickplay tone-maps every HDR seek preview, in
                 software when it has to; these two settings are read only by
