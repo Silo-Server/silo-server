@@ -431,17 +431,18 @@ func TestPlaybackInfoTranscodingURLNamesRefusedCopies(t *testing.T) {
 	}
 }
 
-// Jellyfin sets TranscodingUrl only when it chooses to transcode, and Swiftfin
-// plays any TranscodingUrl before the direct URL, so a source the client can
-// direct play or direct stream must not carry one.
-func TestMediaSourceDTOOmitsTranscodingURLOnDirectSources(t *testing.T) {
+// Swiftfin plays any TranscodingUrl before the direct URL, so a source it can
+// direct play must not carry one. A direct-stream-only source keeps it:
+// without it Swiftfin builds a Static=true URL and gets the original file
+// instead of the remux.
+func TestMediaSourceDTOOmitsTranscodingURLOnDirectPlaySources(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
 		directPlay, directStream bool
 		wantTranscodingURL       bool
 	}{
 		{"direct play", true, false, false},
-		{"direct stream", false, true, false},
+		{"direct stream only", false, true, true},
 		{"direct play and direct stream", true, true, false},
 		{"transcode only", false, false, true},
 	} {
@@ -455,7 +456,8 @@ func TestMediaSourceDTOOmitsTranscodingURLOnDirectSources(t *testing.T) {
 			if !tc.wantTranscodingURL && dto.TranscodingContainer != "" {
 				t.Fatalf("TranscodingContainer = %q on a source with no TranscodingURL", dto.TranscodingContainer)
 			}
-			if tc.wantTranscodingURL != (dto.TranscodingSubProtocol == compatStreamProtocolHLS) {
+			transcodeOnly := !tc.directPlay && !tc.directStream
+			if transcodeOnly != (dto.TranscodingSubProtocol == compatStreamProtocolHLS) {
 				t.Fatalf("TranscodingSubProtocol = %q, want hls only on a transcode-only source", dto.TranscodingSubProtocol)
 			}
 		})
