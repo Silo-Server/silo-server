@@ -299,6 +299,7 @@
 ./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/keptsub TestKeptTrackRowsAndGarbageDB
