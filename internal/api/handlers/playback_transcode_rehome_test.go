@@ -887,9 +887,11 @@ func TestRelayMovePreservesMandatoryAudio(t *testing.T) {
 				t.Fatal("rehome discarded mandatory audio selection")
 			}
 			if legacy {
-				if response.Code == http.StatusOK || node.stops.Load() == 0 {
-					t.Fatalf("unconfirmed rehome status=%d, cleanup=%d", response.Code, node.stops.Load())
+				if response.Code == http.StatusOK {
+					t.Fatalf("unconfirmed rehome status=%d", response.Code)
 				}
+				// A tokenless session's rollback sends the stop without waiting for it.
+				waitForCondition(t, func() bool { return node.stops.Load() > 0 }, "unconfirmed rehome never stopped the new transcode")
 				return
 			}
 			if response.Code != http.StatusOK {
