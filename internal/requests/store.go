@@ -47,6 +47,9 @@ type Store interface {
 	// ReopenFailed moves a failed request back to active + approved with a
 	// fresh submission budget, in one guarded write.
 	ReopenFailed(ctx context.Context, id string, actor Viewer) (*Request, error)
+	// DeleteFailed removes a failed request that delivered nothing, in one
+	// guarded write; otherwise it returns ErrInvalidState.
+	DeleteFailed(ctx context.Context, id string) error
 	// ClaimSubmission takes the right to submit an approved request: it
 	// succeeds for one caller at a time, only while the request is active,
 	// approved, not leased, and past its backoff, and it counts the attempt.

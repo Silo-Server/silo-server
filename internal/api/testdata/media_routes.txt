@@ -817,6 +817,7 @@ PUT /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
 GET /api/v2/requests/mine	non-media
 GET /api/v2/requests/search	non-media
 GET /api/v2/requests/status	non-media
+DELETE /api/v2/requests/{id}	non-media
 GET /api/v2/requests/{id}	non-media
 POST /api/v2/requests/{id}/cancel	non-media
 POST /api/v2/scan	non-media
@@ -2133,6 +2134,7 @@ PUT /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
 GET /api/v2/requests/mine	non-media
 GET /api/v2/requests/search	non-media
 GET /api/v2/requests/status	non-media
+DELETE /api/v2/requests/{id}	non-media
 GET /api/v2/requests/{id}	non-media
 POST /api/v2/requests/{id}/cancel	non-media
 POST /api/v2/scan	non-media
