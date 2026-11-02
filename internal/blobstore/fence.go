@@ -41,6 +41,21 @@ func (s *fencedStore) PutStream(ctx context.Context, key string, r io.Reader, co
 	return s.Store.PutStream(ctx, key, r, contentType)
 }
 
+// PutStreamParts is PutStream at partSize for a store that takes a part
+// size (S3), and PutStream for one that does not, under the same fence.
+func (s *fencedStore) PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error {
+	if err := s.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer s.mutations.Release(1)
+	if sized, ok := s.Store.(interface {
+		PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error
+	}); ok {
+		return sized.PutStreamParts(ctx, key, r, contentType, partSize)
+	}
+	return s.Store.PutStream(ctx, key, r, contentType)
+}
+
 func (s *fencedStore) Delete(ctx context.Context, keys []string) (int, error) {
 	if err := s.mutations.Acquire(ctx, 1); err != nil {
 		return 0, err

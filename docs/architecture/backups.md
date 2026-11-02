@@ -198,10 +198,13 @@ previous destination where they are: listing, rotation, deletion, previews,
 and downloads see only the current one, and the Backups page says so. Uploads
 always use the operational store, whatever the destination.
 
-An upload to either bucket is a multipart upload holding one part in memory. Parts are
-8 MiB, and a backup raises the part size when the previous backup's largest
-object could need more than 9,000 of them at twice its size (S3 allows
-10,000), so objects well beyond 80 GB work. Locations read
+An upload to either bucket is a multipart upload holding one part in memory.
+A backup sizes its parts from the previous complete backup at the
+destination: 8 MiB, or larger when that backup's largest object could need
+more than 9,000 of them at twice its size (S3 allows 10,000). With no
+complete earlier backup there (the first one, or the first after a
+destination change) parts are 64 MiB, about 640 GiB per object, which is
+then the most an upload holds in memory. Locations read
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>/`, the address
 `silo backup restore --from` takes.
 

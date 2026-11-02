@@ -77,6 +77,8 @@ export async function createAdminBackupDownloadLinks(
   return result.items;
 }
 
+const S3_TEST_TIMEOUT_MS = 60_000;
+
 /** Reaches a bucket and writes and deletes a test object in it. Saves nothing. */
 export function testAdminBackupS3(
   context: ProfileRequestContextSnapshot,
@@ -86,7 +88,9 @@ export function testAdminBackupS3(
     v2("POST /api/v2/admin/backups/s3/test", {
       profileContext: context,
       body,
-      retryAuthentication: false,
+      // The test reaches the bucket and writes to it; a bucket that never
+      // answers must not keep the dialog waiting.
+      timeoutMs: S3_TEST_TIMEOUT_MS,
     }),
   );
 }
@@ -100,7 +104,6 @@ export function acknowledgeAdminBackupKey(
     v2("POST /api/v2/admin/backups/s3/acknowledge-key", {
       profileContext: context,
       body: { key_check: keyCheck },
-      retryAuthentication: false,
     }),
   );
 }
