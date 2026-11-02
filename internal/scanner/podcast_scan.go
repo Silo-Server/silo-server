@@ -11,15 +11,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
-
-type podcastMediaItemReader interface {
-	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
-}
 
 // ScanPodcastFolder walks a podcasts-typed media folder and writes one
 // media_items row (type='podcast') per immediate subdirectory it can parse
@@ -264,34 +261,17 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	if s.fileRepo == nil {
 		return nil, errors.New("fileRepo not configured on Scanner")
 	}
-	// Scans of one library run side by side, on this node or another: a
-	// show folder scan next to a full scan, or scans of two folders inside
-	// one show. Each finds the show by its folder and creates it when none is
-	// found, so a scan holds this show's lock from that lookup until its files
-	// and membership commit. A second scan of the show waits, then finds the
-	// show the first one wrote instead of creating another.
-	tx, err := s.fileRepo.Pool().Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin podcast show transaction: %w", err)
-	}
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancelCleanup()
-	defer func() { _ = tx.Rollback(cleanupCtx) }()
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		fmt.Sprintf("podcast-show:%d:%s", folder.ID, folderPath),
-	); err != nil {
-		return nil, fmt.Errorf("lock podcast show %s: %w", folderPath, err)
-	}
-
-	showContentID, err := s.upsertPodcastMediaItem(ctx, folder.ID, folderPath, parsed)
-	if err != nil {
-		return nil, fmt.Errorf("upsert podcast item: %w", err)
-	}
-	if err := s.upsertPodcastEpisodesAndFiles(ctx, tx, folder, showContentID, folderPath, parsed); err != nil {
-		return nil, fmt.Errorf("upsert podcast episodes+files: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit podcast show transaction: %w", err)
+	// Writers that share this show's rows lock them in different orders:
+	// MarkMissing locks a file before its episode's catalog entry, and episode
+	// membership cleanup the other way round. A deadlock fails only one of
+	// them, so the show's transaction starts again, as the cleanup does.
+	var showContentID string
+	if err := catalog.RetryOnDeadlock(ctx, func() error {
+		var err error
+		showContentID, err = s.writePodcastShow(ctx, folder, folderPath, parsed)
+		return err
+	}); err != nil {
+		return nil, err
 	}
 
 	slog.InfoContext(ctx, "podcast scan: indexed", "component", "scanner",
@@ -308,56 +288,72 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	return episodePaths, nil
 }
 
-// upsertPodcastMediaItem reuses an item already linked to the same filesystem
-// root, or creates a new row. It intentionally avoids title/year-only dedupe
-// because filesystem podcasts can have duplicate titles and missing years.
-// Returns the content_id used.
-func (s *Scanner) upsertPodcastMediaItem(ctx context.Context, folderID int, folderPath string, show *parsedPodcastShow) (string, error) {
-	if s.itemRepo == nil {
-		return "", fmt.Errorf("itemRepo not configured on Scanner")
+// writePodcastShow finds or creates a show and writes its episodes, files and
+// membership in one transaction, and returns the show's content_id.
+func (s *Scanner) writePodcastShow(ctx context.Context, folder *models.MediaFolder, folderPath string, parsed *parsedPodcastShow) (string, error) {
+	// Scans of one library run side by side, on this node or another: a
+	// show folder scan next to a full scan, or scans of two folders inside
+	// one show. Each finds the show by its folder and creates it when none is
+	// found, so a scan holds this show's lock from that lookup until its files
+	// and membership commit. A second scan of the show waits, then finds the
+	// show the first one wrote instead of creating another.
+	//
+	// The show, its episodes, files and membership are written in this one
+	// transaction. A scan that stops before the commit leaves no show without
+	// files behind for the next scan to miss and create again, and the scan
+	// needs no second pool connection while it holds this one.
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin podcast show transaction: %w", err)
 	}
-	if s.fileRepo == nil {
-		return "", fmt.Errorf("fileRepo not configured on Scanner")
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("podcast-show:%d:%s", folder.ID, folderPath),
+	); err != nil {
+		return "", fmt.Errorf("lock podcast show %s: %w", folderPath, err)
 	}
-	return resolvePodcastMediaItem(ctx, s.fileRepo, s.itemRepo, folderID, folderPath, show)
+
+	showContentID, created, err := s.findOrCreatePodcastShowTx(ctx, tx, folder.ID, folderPath, parsed)
+	if err != nil {
+		return "", fmt.Errorf("upsert podcast item: %w", err)
+	}
+	if err := s.upsertPodcastEpisodesAndFiles(ctx, tx, folder, showContentID, folderPath, parsed); err != nil {
+		return "", fmt.Errorf("upsert podcast episodes+files: %w", err)
+	}
+	// Artwork publication locks an episode before its show, so an existing
+	// show is updated after its episodes, never before.
+	if !created {
+		if err := s.updatePodcastShowTx(ctx, tx, showContentID, parsed); err != nil {
+			return "", fmt.Errorf("upsert podcast item: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit podcast show transaction: %w", err)
+	}
+	return showContentID, nil
 }
 
-func resolvePodcastMediaItem(
-	ctx context.Context,
-	rootFinder filesystemRootContentFinder,
-	itemWriter filesystemMediaItemWriter,
-	folderID int,
-	folderPath string,
-	show *parsedPodcastShow,
-) (string, error) {
-	if rootFinder == nil {
-		return "", fmt.Errorf("root content finder not configured")
+// findOrCreatePodcastShowTx returns the content_id of the item already linked
+// to the same filesystem root, or creates a new row and reports that it did.
+// It intentionally avoids title/year-only dedupe because filesystem podcasts
+// can have duplicate titles and missing years.
+func (s *Scanner) findOrCreatePodcastShowTx(ctx context.Context, tx pgx.Tx, folderID int, folderPath string, show *parsedPodcastShow) (string, bool, error) {
+	if s.itemRepo == nil {
+		return "", false, errors.New("itemRepo not configured on Scanner")
 	}
-	if itemWriter == nil {
-		return "", fmt.Errorf("media item writer not configured")
-	}
-	existingID, err := rootFinder.FindContentIDByRootPath(ctx, folderID, folderPath, "podcast")
+	existingID, err := s.fileRepo.FindContentIDByRootPathTx(ctx, tx, folderID, folderPath, "podcast")
 	if err != nil {
-		return "", fmt.Errorf("find podcast by root path: %w", err)
+		return "", false, fmt.Errorf("find podcast by root path: %w", err)
 	}
 	if existingID != "" {
-		if reader, ok := itemWriter.(podcastMediaItemReader); ok {
-			existing, err := reader.GetByID(ctx, existingID)
-			if err != nil {
-				return "", fmt.Errorf("load existing podcast item %s: %w", existingID, err)
-			}
-			if applyPodcastShowMetadata(existing, show) {
-				if err := itemWriter.Upsert(ctx, existing); err != nil {
-					return "", fmt.Errorf("update podcast item %s: %w", existingID, err)
-				}
-			}
-		}
-		return existingID, nil
+		return existingID, false, nil
 	}
 
 	id, err := idgen.NextID()
 	if err != nil {
-		return "", fmt.Errorf("generate content_id: %w", err)
+		return "", false, fmt.Errorf("generate content_id: %w", err)
 	}
 	item := &models.MediaItem{
 		ContentID: id,
@@ -366,10 +362,25 @@ func resolvePodcastMediaItem(
 		SortTitle: titleutil.DeriveDefaultSortTitle(show.Title),
 		Year:      show.Year,
 	}
-	if err := itemWriter.Upsert(ctx, item); err != nil {
-		return "", err
+	if err := s.itemRepo.UpsertTx(ctx, tx, item); err != nil {
+		return "", false, err
 	}
-	return id, nil
+	return id, true, nil
+}
+
+// updatePodcastShowTx applies the parsed show's metadata to an existing item.
+func (s *Scanner) updatePodcastShowTx(ctx context.Context, tx pgx.Tx, contentID string, show *parsedPodcastShow) error {
+	existing, err := s.itemRepo.GetByIDTx(ctx, tx, contentID)
+	if err != nil {
+		return fmt.Errorf("load existing podcast item %s: %w", contentID, err)
+	}
+	if !applyPodcastShowMetadata(existing, show) {
+		return nil
+	}
+	if err := s.itemRepo.UpsertTx(ctx, tx, existing); err != nil {
+		return fmt.Errorf("update podcast item %s: %w", contentID, err)
+	}
+	return nil
 }
 
 func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) bool {
@@ -474,10 +485,10 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 // episode's content_id is linked back through media_files.episode_id so
 // playback and library queries can resolve it.
 //
-// The files and the membership go in the caller's transaction so they commit
-// together. Every scan of a library ends with a membership sweep that deletes
-// any item whose files have no membership, so a show committed file by file
-// could be deleted by another scan's sweep mid-write.
+// The episodes, files and membership go in the caller's transaction so they
+// commit together. Every scan of a library ends with a membership sweep that
+// deletes any item whose files have no membership, so a show committed file by
+// file could be deleted by another scan's sweep mid-write.
 //
 // Podcast episodes use season_number=0 (no season concept) and
 // episode_number=track.
@@ -491,6 +502,18 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 ) error {
 	if s.episodeRepo == nil {
 		return fmt.Errorf("episodeRepo not configured on Scanner")
+	}
+
+	// A file update locks its row before its trigger refreshes the episode's
+	// catalog entry, which an episode update also refreshes. Lock the show's
+	// files before writing its episodes, so this transaction takes them in the
+	// same order as MarkMissing does.
+	paths := make([]string, 0, len(show.Episodes))
+	for _, ep := range show.Episodes {
+		paths = append(paths, ep.Path)
+	}
+	if err := s.fileRepo.LockByPathsTx(ctx, tx, paths); err != nil {
+		return err
 	}
 
 	files := make([]models.MediaFile, 0, len(show.Episodes))
@@ -508,7 +531,7 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 			Title:         ep.Title,
 		}
 		// Upsert writes back the stored content_id (preserving existing on conflict).
-		if err := s.episodeRepo.Upsert(ctx, episode); err != nil {
+		if err := s.episodeRepo.UpsertTx(ctx, tx, episode); err != nil {
 			return fmt.Errorf("upsert episode %q: %w", ep.Title, err)
 		}
 

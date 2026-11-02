@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -419,9 +420,10 @@ func (h *membershipInsertHook) TraceQueryStart(ctx context.Context, _ *pgx.Conn,
 func (*membershipInsertHook) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 // scannerOnOwnPool returns a scanner on its own connection pool, named so the
-// test can find its sessions, with an optional query tracer. It stands in for
-// another scan of the same library, on this node or another.
-func (f *podcastSubtreeFixture) scannerOnOwnPool(t *testing.T, name string, tracer pgx.QueryTracer) *Scanner {
+// test can find its sessions, with an optional query tracer and pool size (0
+// keeps pgxpool's default). It stands in for another scan of the same library,
+// on this node or another.
+func (f *podcastSubtreeFixture) scannerOnOwnPool(t *testing.T, name string, tracer pgx.QueryTracer, maxConns int32) *Scanner {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
 	if err != nil {
@@ -429,6 +431,9 @@ func (f *podcastSubtreeFixture) scannerOnOwnPool(t *testing.T, name string, trac
 	}
 	cfg.ConnConfig.RuntimeParams["application_name"] = name
 	cfg.ConnConfig.Tracer = tracer
+	if maxConns > 0 {
+		cfg.MaxConns = maxConns
+	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("connect %s pool: %v", name, err)
@@ -478,7 +483,7 @@ func TestPodcastShowSurvivesConcurrentMembershipSweep(t *testing.T) {
 	scanning := f.scannerOnOwnPool(t, "podcast-sweep-race", &membershipInsertHook{run: func([]any) {
 		sweepRan = true
 		_, _, _, sweepErr = f.scanner.sweepMissingAndReconcile(ctx, f.folder, false)
-	}})
+	}}, 0)
 	if _, err := scanning.ScanSubtree(ctx, f.folder, filepath.Join(f.root, "Show B")); err != nil {
 		t.Fatalf("ScanSubtree(Show B) with a concurrent sweep: %v", err)
 	}
@@ -505,7 +510,7 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 	pilot := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Pilot", "1")
 	showB := filepath.Join(f.root, "Show B")
 
-	second := f.scannerOnOwnPool(t, "podcast-second-scan", nil)
+	second := f.scannerOnOwnPool(t, "podcast-second-scan", nil, 0)
 	secondFinished := make(chan struct{})
 	var secondErr error
 	var firstShowID string
@@ -538,7 +543,7 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 			}
 		}
 		t.Error("the second scan neither blocked nor finished")
-	}})
+	}}, 0)
 	if _, err := first.ScanSubtree(ctx, f.folder, showB); err != nil {
 		t.Fatalf("first ScanSubtree(Show B): %v", err)
 	}
@@ -570,6 +575,67 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 		t.Fatalf("library holds %d Show B items, want 1", shows)
 	}
 	f.requireOnlyPodcastItems(t)
+}
+
+// TestPodcastShowScanWritesTheShowInItsTransaction: a show scan finds or
+// creates the show and writes its episodes, files and membership in the show's
+// transaction. A scan that stops before the commit, such as a canceled scan
+// or a stopping node, leaves nothing behind, so the next scan creates the
+// show once. The scan needs no connection besides the transaction's, so a
+// one-connection pool is enough.
+func TestPodcastShowScanWritesTheShowInItsTransaction(t *testing.T) {
+	cases := []struct {
+		name               string
+		show               string
+		maxConns           int32
+		cancelBeforeCommit bool
+	}{
+		{name: "a scan canceled before the commit", show: "Interrupted Show", maxConns: 20, cancelBeforeCommit: true},
+		{name: "a one-connection pool", show: "Single Connection Show", maxConns: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPodcastSubtreeFixture(t)
+			pilot := f.addEpisode(t, tc.show, "Episode 1.mp3", tc.show, "Pilot", "1")
+			showDir := filepath.Join(f.root, tc.show)
+			t.Cleanup(func() {
+				_, _ = f.pool.Exec(context.Background(),
+					`DELETE FROM media_items WHERE type = 'podcast' AND title = $1`, tc.show)
+			})
+
+			// A scan waiting on a second connection fails at this deadline.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var tracer pgx.QueryTracer
+			if tc.cancelBeforeCommit {
+				tracer = &membershipInsertHook{run: func([]any) { cancel() }}
+			}
+			scanning := f.scannerOnOwnPool(t, "podcast-show-transaction", tracer, tc.maxConns)
+			_, err := scanning.ScanSubtree(ctx, f.folder, showDir)
+			if tc.cancelBeforeCommit {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("ScanSubtree(%s) canceled in its transaction: err=%v, want context.Canceled", tc.show, err)
+				}
+				f.scanSubtree(t, showDir)
+			} else if err != nil {
+				t.Fatalf("ScanSubtree(%s): %v", tc.show, err)
+			}
+
+			row := f.requireEpisodeOf(t, pilot, showDir, tc.show)
+			f.requireListed(t, row.contentID)
+			var shows, episodes int
+			if err := f.pool.QueryRow(context.Background(), `
+				SELECT count(DISTINCT mi.content_id), count(e.content_id)
+				FROM media_items mi
+				LEFT JOIN episodes e ON e.series_id = mi.content_id
+				WHERE mi.type = 'podcast' AND mi.title = $1`, tc.show).Scan(&shows, &episodes); err != nil {
+				t.Fatalf("count %s items: %v", tc.show, err)
+			}
+			if shows != 1 || episodes != 1 {
+				t.Fatalf("%s: %d show items with %d episodes, want 1 show with 1 episode", tc.show, shows, episodes)
+			}
+		})
+	}
 }
 
 // TestScanSubtreeCountsOnlyTheEpisodesItIndexed: an episode still being
