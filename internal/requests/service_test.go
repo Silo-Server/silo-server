@@ -2569,6 +2569,8 @@ type fakeRouterProvider struct {
 	testFails   bool
 	testMessage string
 	testErr     error
+	testCalls   int
+	gotTestConn ResolvedRouterConnection
 
 	// Validate behavior (default empty = valid).
 	validateFieldErrors   map[string]string
@@ -2661,7 +2663,11 @@ func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ strin
 	return f.options, nil
 }
 
-func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (bool, string, error) {
+func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, conn ResolvedRouterConnection) (bool, string, error) {
+	f.mu.Lock()
+	f.testCalls++
+	f.gotTestConn = conn
+	f.mu.Unlock()
 	if f.testErr != nil {
 		return false, "", f.testErr
 	}

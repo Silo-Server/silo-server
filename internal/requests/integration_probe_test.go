@@ -81,14 +81,18 @@ func TestLoadIntegrationOptionsClassifiesProbeFailures(t *testing.T) {
 	}
 }
 
-// The options probe behind the editor's Test button asks the router to test
-// the connection before loading options, since a router can answer an empty
-// option list for a server it cannot reach. A failed test is classified like
-// a failed options load; a router without the check is judged by its options.
+// The v2 options probe behind the editor's Test button asks the router to
+// test the connection before loading options, since a router can answer an
+// empty option list for a server it cannot reach. A failed test is classified
+// like a failed options load; a router without the check is judged by its
+// options. The test leaves out the plugin config being edited, so a stale
+// choice in it cannot block the options that replace it, and the frozen v1
+// route, which does not ask for the test, keeps loading options without it.
 func TestLoadIntegrationOptionsTestsTheConnection(t *testing.T) {
 	cases := []struct {
 		name        string
 		router      *fakeRouterProvider
+		v1          bool
 		wantOptions bool
 		detail      string
 	}{
@@ -97,6 +101,7 @@ func TestLoadIntegrationOptionsTestsTheConnection(t *testing.T) {
 		{name: "not connected without a message", router: &fakeRouterProvider{testFails: true}},
 		{name: "test call failed", router: &fakeRouterProvider{testErr: status.Error(codes.Unknown, "dial tcp: lookup seerr.invalid: no such host")}, detail: integrationNoSuchHost},
 		{name: "router without the check", router: &fakeRouterProvider{testErr: status.Error(codes.Unimplemented, "method TestConnection not implemented")}, wantOptions: true},
+		{name: "frozen v1 route", router: &fakeRouterProvider{testFails: true}, v1: true, wantOptions: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,7 +111,14 @@ func TestLoadIntegrationOptionsTestsTheConnection(t *testing.T) {
 			install := 1
 			options, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
 				ID: "new", CapabilityID: "seerr", InstallationID: &install, BaseURL: "http://10.0.0.5:5055", APIKeyRef: "key",
+				PluginConfig: map[string]any{"radarr_server": "7"}, TestConnection: !tc.v1,
 			})
+			if tc.v1 && tc.router.testCalls != 0 {
+				t.Fatalf("v1 route ran the connection test")
+			}
+			if !tc.v1 && tc.router.gotTestConn.Config != nil {
+				t.Fatalf("connection test got config %v, want none", tc.router.gotTestConn.Config)
+			}
 			if tc.wantOptions {
 				if err != nil || options == nil {
 					t.Fatalf("options = %v, err = %v; want the router's options", options, err)
