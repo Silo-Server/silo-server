@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { DatabaseBackup, LoaderCircle } from "lucide-react";
+import { DatabaseBackup, LoaderCircle, Upload } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import {
   useAdminBackups,
   useStartAdminBackup,
 } from "@/hooks/queries/admin/backups";
+import { useAdminBackupUploads } from "@/hooks/queries/admin/backupUploads";
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
 import { formatTime } from "@/lib/datetime";
@@ -29,6 +30,8 @@ import {
   type FullRestoreSource,
 } from "@/pages/admin-backups/BackupSettings";
 import { BackupTable } from "@/pages/admin-backups/BackupTable";
+import { UploadBackupDialog } from "@/pages/admin-backups/UploadBackupDialog";
+import { UploadedBackups } from "@/pages/admin-backups/UploadedBackups";
 import {
   BACKUP_ENABLED_KEY,
   BACKUP_KEEP_KEY,
@@ -81,8 +84,10 @@ function ActiveOperation({ active }: { active: AdminBackupActive }) {
         </>
       );
     }
+    case "upload":
+      return "Checking an uploaded backup.";
     default:
-      return "Deleting a backup.";
+      return active.upload_id ? "Deleting an uploaded backup." : "Deleting a backup.";
   }
 }
 
@@ -125,6 +130,9 @@ export default function AdminBackups() {
   const sqliteUserStore = warnings.some((warning) => warning.code === "sqlite_user_store");
   const configured = capabilities.data ? capabilities.data.state === "available" : true;
   const selectiveRestore = capabilities.data?.selective_restore === true;
+  const uploadAvailable = capabilities.data?.upload === true;
+  const uploads = useAdminBackupUploads(uploadAvailable);
+  const [uploading, setUploading] = useState(false);
   const destinations = capabilities.data?.destinations;
 
   // The status line and the strip describe what is saved, not a draft.
@@ -229,7 +237,15 @@ export default function AdminBackups() {
           className="mb-4"
           actions={
             <div className="flex flex-col items-end gap-1">
-              <div className="flex flex-wrap justify-end gap-2">{backUpNowButton}</div>
+              <div className="flex flex-wrap justify-end gap-2">
+                {uploadAvailable ? (
+                  <Button variant="outline" onClick={() => setUploading(true)}>
+                    <Upload data-icon="inline-start" aria-hidden="true" />
+                    Upload a backup
+                  </Button>
+                ) : null}
+                {backUpNowButton}
+              </div>
               {blocker ? (
                 <p id={blockerId} className="text-muted-foreground max-w-72 text-right text-xs">
                   {blocker}
@@ -345,6 +361,8 @@ export default function AdminBackups() {
         </section>
       )}
 
+      {uploads.data ? <UploadedBackups uploads={uploads.data} /> : null}
+
       {form.isLoading ? (
         <div className="space-y-4" role="status" aria-label="Loading settings">
           <Skeleton className="h-10 w-full" />
@@ -364,6 +382,14 @@ export default function AdminBackups() {
           {configured ? <RestoreCommandGroup command={command} source={commandSource} /> : null}
         </div>
       )}
+
+      {uploadAvailable && capabilities.data ? (
+        <UploadBackupDialog
+          open={uploading}
+          onOpenChange={setUploading}
+          maxBytes={capabilities.data.max_upload_bytes}
+        />
+      ) : null}
 
       <SaveBar
         dirtyCount={form.dirtyCount}

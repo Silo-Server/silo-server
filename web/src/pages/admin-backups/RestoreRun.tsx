@@ -179,7 +179,7 @@ function downloadReport(job: RestoreJob) {
   const anchor = document.createElement("a");
   anchor.href = url;
   const result = job.backup_restore_result;
-  anchor.download = `silo-restore-report-${result?.backup_id || job.id}.json`;
+  anchor.download = `silo-restore-report-${result?.backup_id || result?.upload_id || job.id}.json`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

@@ -69,8 +69,13 @@ export function restorePath(backupId: string): string {
   return `/admin/backups/${encodeURIComponent(backupId)}/restore`;
 }
 
+export function uploadRestorePath(uploadId: string): string {
+  return `/admin/backups/uploads/${encodeURIComponent(uploadId)}/restore`;
+}
+
 /** Where a running restore shows its progress, from the operation holding the lock. */
 export function activeRestorePath(active: AdminBackupActive): string | null {
+  if (active.upload_id) return uploadRestorePath(active.upload_id);
   return active.backup_id ? restorePath(active.backup_id) : null;
 }
 
@@ -288,7 +293,12 @@ export function visibleWarnings(
 export function lockBlocker(busy: boolean, active: AdminBackupActive | undefined): string | null {
   if (!busy && !active) return null;
   if (active?.operation === "backup") return "A backup is running. Wait for it to finish.";
-  if (active?.operation === "delete") return "A backup is being deleted. Wait for it to finish.";
+  if (active?.operation === "delete")
+    return active.upload_id
+      ? "An uploaded backup is being deleted. Wait for it to finish."
+      : "A backup is being deleted. Wait for it to finish.";
+  if (active?.operation === "upload")
+    return "An uploaded backup is being checked. Wait for it to finish.";
   if (active?.operation === "restore") return "A restore is running. Wait for it to finish.";
   return "Another backup task is running. Wait for it to finish.";
 }

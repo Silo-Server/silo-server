@@ -89,7 +89,12 @@ type Options struct {
 	Status StatusStore
 	// FindTools overrides tool discovery for tests.
 	FindTools func(context.Context) (Tools, error)
-	Now       func() time.Time
+	// UploadCheckTimeout overrides how long a completion may read an
+	// upload's parts.
+	UploadCheckTimeout time.Duration
+	// UploadPartWriteTimeout shortens a part's storage write deadline.
+	UploadPartWriteTimeout time.Duration
+	Now                    func() time.Time
 }
 
 // Service owns taking, listing, and deleting backups.
@@ -107,6 +112,10 @@ type Service struct {
 	targets RestoreTargets
 	// restoreSets shares validated restore sets among previews.
 	restoreSets restoreSetCache
+
+	// lastUploadSweep is when this server last swept upload objects.
+	uploadSweepMu   sync.Mutex
+	lastUploadSweep time.Time
 }
 
 // pendingRun hands a lock taken by StartManual to the task run it starts.
@@ -259,7 +268,7 @@ func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id strin
 	started := s.opts.Now()
 	prep, prepErr := s.prepareBackup(ctx, kind, id, started)
 	if prepErr == nil {
-		id = prep.id
+		id, prep.held = prep.id, held
 	} else if id == "" {
 		id = FolderName(started, kind)
 	}
@@ -288,6 +297,8 @@ type backupPrep struct {
 	serverID string
 	folders  []folder
 	id       string
+	// held is the subsystem lock the backup runs under.
+	held Held
 }
 
 // prepareBackup resolves the destination and reserves the backup's id under
@@ -458,7 +469,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	if restoreSet != nil {
 		result.Omitted = restoreSet.Omitted
 	}
-	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, t, serverID, pinned)
+	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, prep.held, t, serverID, pinned)
 	result.DurationMs = s.opts.Now().Sub(started).Milliseconds()
 	progress(100, "Backed up "+id)
 	return result, nil
@@ -631,12 +642,12 @@ func (s *Service) writeRestoreSet(ctx context.Context, t target, tx pgx.Tx, clos
 	return entry, build.summary(), nil
 }
 
-// rotate runs rotation and the incomplete-folder sweep after a manifest
-// landed, under the subsystem lock.
+// rotate runs rotation and the sweeps (incomplete folders, and expired and
+// orphaned uploads) after a manifest landed, under the subsystem lock.
 // pinned and the source of a queued or running restore are never rotated
 // away; when that restore cannot be read, nothing is. Failures are warnings:
 // the backup itself succeeded.
-func (s *Service) rotate(ctx context.Context, t target, serverID string, pinned map[string]bool) (rotated, swept, warnings []string) {
+func (s *Service) rotate(ctx context.Context, held Held, t target, serverID string, pinned map[string]bool) (rotated, swept, warnings []string) {
 	folders, err := s.folders(ctx, t, serverID)
 	if err != nil {
 		return nil, nil, []string{"rotation skipped: " + err.Error()}
@@ -673,6 +684,8 @@ func (s *Service) rotate(ctx context.Context, t target, serverID string, pinned 
 		}
 		swept = append(swept, id)
 	}
+	uploads, uploadWarnings := s.sweepUploads(ctx, true, held)
+	swept, warnings = append(swept, uploads...), append(warnings, uploadWarnings...)
 	for _, w := range warnings {
 		slog.WarnContext(ctx, "backup rotation", "component", "backup", "warning", w)
 	}

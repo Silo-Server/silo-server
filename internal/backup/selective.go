@@ -151,11 +151,13 @@ type PluginRestorer interface {
 // SetRestoreTargets wires selective restore.
 func (s *Service) SetRestoreTargets(t RestoreTargets) { s.targets = t }
 
-// RestoreRequest is a restore job's payload: the source backup of this
-// server, the digest its preview returned, and the chosen item ids by
-// section.
+// RestoreRequest is a restore job's payload: the source (a backup of this
+// server, or an uploaded restore set), the digest its preview returned, and
+// the chosen item ids by section.
 type RestoreRequest struct {
-	BackupID  string              `json:"backup_id"`
+	BackupID string `json:"backup_id"`
+	// UploadID names an uploaded restore set instead of a backup.
+	UploadID  string              `json:"upload_id,omitempty"`
 	Digest    string              `json:"digest"`
 	Selection map[string][]string `json:"selection"`
 	// Users are the chosen accounts of the users section, with their
@@ -185,17 +187,27 @@ type RestoreRun struct {
 	Published func(ctx context.Context)
 }
 
-// restoreSource names a restore set: a backup of this server.
-type restoreSource struct{ backupID string }
+// restoreSource names a restore set: a backup of this server, or an
+// uploaded restore set.
+type restoreSource struct{ backupID, uploadID string }
 
 func (r RestoreRequest) source() restoreSource {
-	return restoreSource{backupID: r.BackupID}
+	return restoreSource{backupID: r.BackupID, uploadID: r.UploadID}
 }
 
-// locate returns a source's digest, frozen in its manifest, and a function
-// that opens it. The digest is of the stored bytes; the opened reader hashes
-// them as it reads.
+// locate returns a source's digest, frozen in its manifest or at upload
+// completion, and a function that opens it. The digest is of the stored
+// bytes; the opened reader hashes them as it reads.
 func (s *Service) locate(ctx context.Context, src restoreSource) (string, func(context.Context) (*storedReader, error), error) {
+	if src.uploadID != "" {
+		digest, keys, err := s.completedUpload(ctx, src.uploadID)
+		if err != nil {
+			return "", nil, err
+		}
+		return digest, func(ctx context.Context) (*storedReader, error) {
+			return openUploaded(s.openParts(ctx, keys)), nil
+		}, nil
+	}
 	b, err := s.completeBackup(ctx, src.backupID)
 	if err != nil {
 		return "", nil, err
@@ -251,6 +263,9 @@ func (s *Service) openRestoreSet(ctx context.Context, src restoreSource, extract
 	}
 	if rs.Digest != digest {
 		rs.Cleanup()
+		if src.uploadID != "" {
+			return nil, errors.New("the uploaded restore set no longer matches the checksum taken when it was uploaded")
+		}
 		return nil, fmt.Errorf("%s does not match the checksum in its manifest", RestoreSetName)
 	}
 	return rs, nil
@@ -279,16 +294,16 @@ func (s *Service) previewSet(ctx context.Context, src restoreSource) (*RestoreSe
 // beyond the manifest: the job reads the restore set, under the lock.
 //
 // The source is checked again and the job created under the subsystem lock,
-// which backup deletion and rotation hold while they check the queued
-// restore's source: either they see the job, or the job's check sees the
-// source gone. The lock is released once the job is queued; its worker
-// takes it again.
+// which backup deletion, rotation, and upload deletion and expiry hold
+// while they check the queued restore's source: either they see the job, or
+// the job's check sees the source gone. The lock is released once the job
+// is queued; its worker takes it again.
 func (s *Service) StartRestore(ctx context.Context, userID int, req RestoreRequest) (*models.AdminJob, error) {
 	if s.targets.CreateJob == nil || s.opts.Locker == nil {
 		return nil, errors.New("selective restore is not available on this server")
 	}
-	if req.BackupID == "" {
-		return nil, &SelectionError{Message: "a restore names a backup"}
+	if (req.BackupID == "") == (req.UploadID == "") {
+		return nil, &SelectionError{Message: "a restore names one backup or one upload"}
 	}
 	total := len(req.Users)
 	if err := validateUserSelection(req.Users); err != nil {
@@ -370,6 +385,7 @@ func (e *SelectionError) Error() string { return e.Message }
 // what committed, even after an interruption.
 type SelectiveReport struct {
 	BackupID              string `json:"backup_id"`
+	UploadID              string `json:"upload_id,omitempty"`
 	Digest                string `json:"digest"`
 	BeforeRestoreBackupID string `json:"before_restore_backup_id,omitempty"`
 	// LibraryMap maps each backup library id to the library it is on this

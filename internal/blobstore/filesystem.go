@@ -209,14 +209,35 @@ func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, wr
 		return err
 	}
 	defer func() { _ = tmp.Close(); _ = root.Remove(name) }()
+	// A canceled write also closes the temporary file, so a write or sync
+	// stalled on the disk rather than on its reader fails at its next call
+	// instead of running on after the caller gave up; the deferred remove
+	// deletes it. Cancellation stays armed until the file is synced.
+	closed := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = tmp.Close()
+		close(closed)
+	})
 	if err = tmp.Chmod(0644); err == nil {
 		err = write(tmp)
 	}
 	if err == nil {
 		err = tmp.Sync()
 	}
-
+	if !stop() {
+		// The context ended: the file is closed, so report why, whatever
+		// the write or sync saw (often "file already closed").
+		<-closed
+		if err != nil {
+			return fmt.Errorf("%w: %w", context.Cause(ctx), err)
+		}
+		return context.Cause(ctx)
+	}
 	if err != nil {
+		return err
+	}
+	// Nothing is published once the caller gave up.
+	if err = ctx.Err(); err != nil {
 		return err
 	}
 	if err = place(root, name, key, exclusive); err != nil {
