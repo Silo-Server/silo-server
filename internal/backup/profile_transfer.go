@@ -281,7 +281,7 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	}
 	prepared := map[string][]userdata.Prepared{}
 	for id, raw := range doc.Data {
-		prepared[id] = []userdata.Prepared{{Owner: userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID}, Data: raw}}
+		prepared[id] = []userdata.Prepared{{Owner: userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID}, Data: raw, Untrusted: true}}
 	}
 	if err := prepareImport(ctx, tx, prepared); err != nil {
 		return nil, err
@@ -323,7 +323,8 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	target := userdata.Target{
 		Owner:      userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID},
 		SameServer: result.SameServer, Items: visible, Now: t.now().UTC(),
-		Library: func(id int) (int, bool) { return id, libraries[id] },
+		Library:   func(id int) (int, bool) { return id, libraries[id] },
+		Untrusted: true,
 	}
 	target.Collection = transferCollections(tx, target, doc.Data[userdata.Collections])
 	for _, dt := range userDataTypes {

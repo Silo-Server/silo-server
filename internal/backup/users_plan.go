@@ -482,6 +482,11 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 	// checks the count again before each one it creates, so choosing more
 	// than ProfileRoom leaves the rest out.
 	acct.ProfileRoom = max(plan.profileLimit-plan.existing, 0)
+	if plan.profileLimit <= 0 {
+		// No limit, as profile creation reads MaxProfiles 0: room for every
+		// profile the backup has.
+		acct.ProfileRoom = len(plan.profiles)
+	}
 	for i := range plan.profiles {
 		pp := &plan.profiles[i]
 		if pp.preview.Selectable && pp.localID == "" && acct.ProfileRoom == 0 {

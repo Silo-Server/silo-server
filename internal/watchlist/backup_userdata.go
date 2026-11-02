@@ -157,8 +157,12 @@ func (BackupData) Validate(data json.RawMessage) (userdata.Summary, error) {
 // connection writes the library watchlist entry; an import that wrote that
 // entry and then waited on the title would close a cycle across three
 // connections that Postgres cannot see.
+//
+// An untrusted document (a profile's own export) creates no title: its
+// titles are only locked where they exist (LockTitlesInTx).
 func (BackupData) Prepare(ctx context.Context, tx pgx.Tx, docs []userdata.Prepared) error {
 	var snaps []Snapshot
+	untrusted := false
 	now := time.Now().UTC()
 	for _, d := range docs {
 		doc, _, err := decodeFavorites(d.Data)
@@ -168,6 +172,10 @@ func (BackupData) Prepare(ctx context.Context, tx pgx.Tx, docs []userdata.Prepar
 		for _, w := range doc.Titles {
 			snaps = append(snaps, w.snapshot())
 		}
+		untrusted = untrusted || d.Untrusted
+	}
+	if untrusted {
+		return LockTitlesInTx(ctx, tx, snaps)
 	}
 	return EnsureTitlesInTx(ctx, tx, snaps, now)
 }
@@ -192,8 +200,20 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 }
 
 func importTitles(ctx context.Context, tx pgx.Tx, target userdata.Target, titles []watchedTitle, res *userdata.Result) error {
+	missing := 0
 	for _, w := range titles {
-		added, err := AddSnapshotInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+		var added bool
+		var err error
+		if target.Untrusted {
+			var found bool
+			found, added, err = LinkExistingTitleInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+			if err == nil && !found {
+				missing++
+				continue
+			}
+		} else {
+			added, err = AddSnapshotInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+		}
 		if err != nil {
 			return fmt.Errorf("restoring a watchlist title: %w", err)
 		}
@@ -202,6 +222,10 @@ func importTitles(ctx context.Context, tx pgx.Tx, target userdata.Target, titles
 		} else {
 			res.Unchanged++
 		}
+	}
+	if missing > 0 {
+		res.LeftOut += missing
+		res.Notes = append(res.Notes, fmt.Sprintf("%d watchlist titles this server has never listed were left out; add them again from search.", missing))
 	}
 	return nil
 }

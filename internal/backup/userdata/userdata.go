@@ -109,6 +109,10 @@ type Target struct {
 	Collection func(ctx context.Context, field, id string) (string, bool, error)
 	// Now stamps rows that need a time of their own.
 	Now time.Time
+	// Untrusted marks a profile's own export, which whoever holds it could
+	// have edited. Its import must not write rows other accounts read, such
+	// as shared watchlist titles, from the document.
+	Untrusted bool
 }
 
 // The configuration fields that name a collection.
@@ -234,6 +238,8 @@ func ResolveAll(ctx context.Context, items Items, ids []string) (map[string]stri
 type Prepared struct {
 	Owner Owner
 	Data  json.RawMessage
+	// Untrusted is as Target.Untrusted.
+	Untrusted bool
 }
 
 // Preparer is a Type that takes locks before any document of an import is

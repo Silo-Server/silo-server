@@ -718,7 +718,11 @@ row (`userdata.Preparer`, `internal/backup/users_locks.go`):
 2. each data type's own locks over every profile of the import: the
    profiles' history locks in profile id order (`watch_history`), then every
    watchlist title the import names, in media type and TMDB id order, created
-   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`);
+   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`). A
+   profile's own export (`userdata.Target.Untrusted`) creates no title and
+   writes none of its snapshot to one other accounts read: it only locks and
+   links titles this server already has (`watchlist.LockTitlesInTx`,
+   `LinkExistingTitleInTx`), and reports the rest as left out;
 3. the data rows.
 
 Ordinary writers take a subset of these in the same order (checked: profile
