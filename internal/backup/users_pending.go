@@ -33,6 +33,11 @@ type pendingItems struct {
 	filter  contentFilter
 	visible map[string]bool
 	p       *pendingCompare
+	// known is which of the account's ids this server holds, and their
+	// provider ids. unmatched counts ids it lacks that a restore would try
+	// to match by provider id (itemResolver.find), which a preview does not.
+	known     *itemResolver
+	unmatched int
 }
 
 func (p *pendingItems) Resolve(ctx context.Context, id string) (string, bool, error) {
@@ -61,6 +66,11 @@ func (p *pendingItems) ResolveAll(ctx context.Context, ids []string) (map[string
 		}
 		for id := range ok {
 			p.visible[id] = ok[id]
+		}
+		for _, id := range todo {
+			if _, matchable := matchRecord(p.known.refs[id]); !p.visible[id] && !p.known.present[id] && matchable {
+				p.unmatched++
+			}
 		}
 	}
 	out := make(map[string]string, len(ids))
@@ -147,6 +157,12 @@ type pendingCompare struct {
 func (u *userPlanner) planPending(ctx context.Context, plan *accountPlan) error {
 	p := u.pending
 	p.accounts++
+	started := time.Now()
+	known, err := newItemResolver(ctx, p.tx, plan.doc.Items, documentItems(plan.doc))
+	p.time("known_items", started)
+	if err != nil {
+		return err
+	}
 	profiles := map[string]string{}
 	for _, pp := range plan.profiles {
 		if pp.localID != "" {
@@ -158,9 +174,15 @@ func (u *userPlanner) planPending(ctx context.Context, plan *accountPlan) error 
 		if pp.localID == "" || !pp.preview.Selectable {
 			continue
 		}
-		total, err := u.profilePending(ctx, plan, pp, profiles)
+		total, unmatched, err := u.profilePending(ctx, plan, pp, profiles, known)
 		if err != nil {
 			return err
+		}
+		if total == 0 && unmatched > 0 {
+			// The restore may match these titles by provider id and merge
+			// them, so the profile stays selectable.
+			pp.preview.Message = "The profile is on this server and keeps its PIN and access. Some titles in its data have other ids here; restoring matches them by provider id and merges what differs."
+			continue
 		}
 		if total == 0 {
 			pp.preview.Status, pp.preview.Reason, pp.preview.Selectable = ItemOnThisServer, ReasonSame, false
@@ -184,17 +206,18 @@ func (u *userPlanner) planPending(ctx context.Context, plan *accountPlan) error 
 }
 
 // profilePending counts one matched profile's pending changes per data
-// type and returns their total.
-func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp *profilePlan, profiles map[string]string) (int, error) {
+// type and returns their total, and how many of the ids its data names this
+// server lacks but a restore would try to match by provider id.
+func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp *profilePlan, profiles map[string]string, known *itemResolver) (total, unmatched int, err error) {
 	p := u.pending
 	p.profiles++
 	started := time.Now()
 	profile, err := pgstore.ProfileInTransaction(ctx, p.tx, plan.localID, pp.localID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if profile == nil {
-		return 0, fmt.Errorf("profile %s is gone", pp.localID)
+		return 0, 0, fmt.Errorf("profile %s is gone", pp.localID)
 	}
 	libraries, restricted := access.ProfileLibraries(plan.effective.LibraryIDs, profile)
 	if !restricted {
@@ -202,7 +225,7 @@ func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp 
 	}
 	p.time("profiles", started)
 	items := &pendingItems{tx: p.tx, filter: contentFilter{libraries: libraries, limits: access.ProfileMaturity(profile, p.allowUnrated)},
-		visible: map[string]bool{}, p: p}
+		visible: map[string]bool{}, p: p, known: known}
 	target := userdata.Target{
 		Owner:      userdata.Owner{UserID: plan.localID, ProfileID: pp.localID},
 		SameServer: u.sameServer, Items: items, Now: p.now.UTC(),
@@ -210,7 +233,6 @@ func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp 
 		Profile: func(id string) (string, bool) { local, ok := profiles[id]; return local, ok },
 	}
 	target.Collection = newCollectionMap(p.planner, p.tx, u.libMap, u.sameServer, p.adminCollections, plan.doc).lookup(target)
-	total := 0
 	for j := range pp.preview.DataTypes {
 		dt := &pp.preview.DataTypes[j]
 		t, ok := userdata.Find(userDataTypes, dt.ID)
@@ -229,11 +251,11 @@ func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp 
 		}
 		p.time(dt.ID, started)
 		if err != nil {
-			return 0, fmt.Errorf("comparing %s of profile %s: %w", dt.ID, strings.TrimSpace(pp.entry.Name), err)
+			return 0, 0, fmt.Errorf("comparing %s of profile %s: %w", dt.ID, strings.TrimSpace(pp.entry.Name), err)
 		}
 		n := res.Changes()
 		dt.Pending = &n
 		total += n
 	}
-	return total, nil
+	return total, items.unmatched, nil
 }
