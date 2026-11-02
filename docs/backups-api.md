@@ -58,8 +58,8 @@ are `true` when available.
   groups of 4 (`1a2b-3c4d-5e6f-7a8b`). It names the key without revealing it;
   `silo secret check` prints the same value for a key.
 - `enabled`: whether nightly backups run.
-- `busy`: whether a backup or restore holds the cluster-wide backup lock now,
-  on any server.
+- `busy`: whether a backup, delete, or selective restore holds the
+  cluster-wide backup lock now, on any server.
 - `active`: the operation holding the lock, on whichever server runs it:
   `operation` (`backup`, `delete`, or `restore`), `backup_id` (for a restore,
   its source backup), `started_at`, `progress` (0–100),

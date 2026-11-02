@@ -81,6 +81,18 @@ const SET = {
         }),
       ],
     },
+    {
+      id: "home_sections",
+      count: 1,
+      items: [
+        item({
+          id: "section:5",
+          kind: "home_section",
+          label: "Saturday morning",
+          requires: ["collections:collection:9"],
+        }),
+      ],
+    },
   ],
 } satisfies RestoreSet;
 
@@ -90,6 +102,17 @@ describe("choosing items", () => {
   it("chooses the library a collection needs", () => {
     const change = chooseItems(index, new Set(), ["collections:collection:9"]);
     expect([...change.selection].sort()).toEqual(["collections:collection:9", "libraries:1"]);
+  });
+
+  it("chooses what a requirement itself requires", () => {
+    const change = chooseItems(index, new Set(), ["home_sections:section:5"]);
+    expect([...change.selection].sort()).toEqual([
+      "collections:collection:9",
+      "home_sections:section:5",
+      "libraries:1",
+    ]);
+    const unchosen = unchooseItems(index, change.selection, ["libraries:1"]);
+    expect(unchosen.selection.size).toBe(0);
   });
 
   it("refuses a collection whose library can't be restored", () => {
