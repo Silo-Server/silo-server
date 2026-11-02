@@ -2950,14 +2950,17 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		)
 	}
 	// Jellyfin Web and jellyfin-android play the direct URL whenever either
-	// direct flag is set, and Jellyfin Web picks hls.js from this field alone,
-	// so only a transcode-only source reports hls. Swiftfin plays any
-	// TranscodingUrl it gets and shows this field only as a label.
+	// direct flag is set, and Jellyfin Web picks hls.js from the sub-protocol
+	// alone, so only a transcode-only source reports hls. Swiftfin plays any
+	// TranscodingUrl before the direct URL and builds its own Static=true URL
+	// when there is none, so a source it can direct play carries no
+	// TranscodingUrl, while a direct-stream-only source keeps the HLS route:
+	// without it Swiftfin would fetch the original file instead of the remux.
 	dto.TranscodingSubProtocol = compatStreamProtocolHTTP
 	if source.SupportsTranscoding && !source.SupportsDirectPlay && !source.SupportsDirectStream {
 		dto.TranscodingSubProtocol = compatStreamProtocolHLS
 	}
-	if source.SupportsTranscoding {
+	if source.SupportsTranscoding && !source.SupportsDirectPlay {
 		basePath := compatVideoPath(routeItemID, false)
 		if routePathSegment := compatHLSRoutePathSegment(source); routePathSegment != "" {
 			basePath += "/" + routePathSegment
