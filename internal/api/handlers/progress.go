@@ -239,21 +239,19 @@ func (h *ProgressHandler) listProgressFrom(ctx context.Context, store userstore.
 // filterProgress drops the rows the viewer may not see, then the rows outside
 // the requested library.
 func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int) ([]userstore.WatchProgress, error) {
-	var err error
-	// Drop entries the viewer can't access before they reach the client.
-	// Without this, a library-restricted profile receives progress rows for
-	// items outside its scope (e.g. an XXX title) and the client then fans out
-	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
-	// runs for restricted profiles; unrestricted viewers are unaffected.
-	if scope, ok := access.GetScope(ctx); ok &&
-		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active()) {
-		if h.LibraryLookup == nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
-		}
-		entries, err = filterProgressEntriesByAccess(ctx, entries, scope, h.LibraryLookup)
-		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
-		}
+	// Drop entries the viewer can't open before they reach the client, or the
+	// client fans out per-item detail fetches that 404: a dead Continue
+	// Watching tile it cannot clear. That covers items outside a restricted
+	// profile's scope (e.g. an XXX title) and, for every viewer, removed
+	// titles: deleting an item leaves its progress rows behind. The sync and
+	// bootstrap paths apply the same check.
+	if h.LibraryLookup == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+	}
+	scope, _ := access.GetScope(ctx)
+	entries, err := filterProgressEntriesByAccess(ctx, entries, scope, h.LibraryLookup)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
 	}
 
 	if libraryID > 0 {

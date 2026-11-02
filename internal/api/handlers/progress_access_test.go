@@ -52,6 +52,38 @@ func ids(entries []userstore.WatchProgress) []string {
 	return out
 }
 
+type pageProgressStore struct {
+	userstore.UserStore
+	rows []userstore.WatchProgress
+}
+
+func (s *pageProgressStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
+	return s.rows, nil
+}
+
+func (s *pageProgressStore) ForUser(context.Context, int) (userstore.UserStore, error) {
+	return s, nil
+}
+
+func (s *pageProgressStore) Close() error { return nil }
+
+// A removed title's catalog item is gone but the profile's progress row is
+// not; the listing must leave it out for an unrestricted viewer too, as
+// syncProgress already answers it as not found.
+func TestListProgressPageDropsRemovedItemsForUnrestrictedViewer(t *testing.T) {
+	h := NewProgressHandler(&pageProgressStore{rows: entries("kept", "removed")})
+	h.LibraryLookup = &fakeProgressLookup{accessible: map[string]bool{"kept": true}}
+	ctx := access.SetScope(t.Context(), access.Scope{})
+
+	got, hasMore, err := h.ListProgressPage(ctx, 1, "p", "in_progress", 0, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ids(got), []string{"kept"}) || hasMore {
+		t.Fatalf("entries = %v has_more = %v, want [kept] false", ids(got), hasMore)
+	}
+}
+
 func TestFilterProgressEntriesByAccess(t *testing.T) {
 	// access.Scope sets DisabledLibraryIDs only when AllowedLibraryIDs is nil
 	// (see access.Scope docs), so the two restriction shapes are tested
