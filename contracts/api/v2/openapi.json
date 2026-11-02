@@ -3655,7 +3655,7 @@
             "description": "The operation holding the lock, started on any server"
           },
           "busy": {
-            "description": "Whether a backup or restore holds the cluster-wide backup lock now",
+            "description": "Whether a backup or delete holds the cluster-wide backup lock now",
             "type": "boolean"
           },
           "destination": {

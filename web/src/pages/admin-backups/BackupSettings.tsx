@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
 import { adminSettingsHref } from "@/lib/adminSettingsSearch";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 import {
@@ -169,7 +170,7 @@ export function RestoreCommandGroup({
   source: FullRestoreSource;
 }) {
   const copy = () =>
-    navigator.clipboard.writeText(command).then(
+    copyTextToClipboard(command).then(
       () => toast.success("Command copied"),
       () => toast.error("Couldn't copy the command. Select it and copy it by hand."),
     );

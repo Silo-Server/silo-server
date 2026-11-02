@@ -112,7 +112,16 @@ func (d StoreDestination) FreeBytes(context.Context) (uint64, bool, error) {
 	if err := unix.Statfs(root, &st); err != nil {
 		return 0, true, fmt.Errorf("reading free space at the backup destination: %w", err)
 	}
-	return uint64(st.Bavail) * uint64(st.Bsize), true, nil //nolint:unconvert // field widths differ by platform
+	return blockBytes(st.Bavail, st.Bsize), true, nil
+}
+
+// blockBytes is blocks times a Statfs block size, whose type differs by
+// platform (int64 on Linux, uint32 on macOS).
+func blockBytes[S ~int32 | ~int64 | ~uint32 | ~uint64](blocks uint64, size S) uint64 {
+	if size <= 0 {
+		return 0
+	}
+	return blocks * uint64(size)
 }
 
 func (d StoreDestination) DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, time.Time, bool, error) {

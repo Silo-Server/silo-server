@@ -14224,7 +14224,7 @@ export interface components {
     AdminBackupList: {
       /** @description The operation holding the lock, started on any server */
       active?: components["schemas"]["AdminBackupActive"];
-      /** @description Whether a backup or restore holds the cluster-wide backup lock now */
+      /** @description Whether a backup or delete holds the cluster-wide backup lock now */
       busy: boolean;
       /**
        * @description Where new backups go
