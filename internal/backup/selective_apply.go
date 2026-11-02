@@ -21,7 +21,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -80,7 +79,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 		return fail(ErrDigestMismatch)
 	}
 
-	a := &applier{s: s, rs: rs, run: run, report: report, total: 1 + len(req.Users), users: map[string]UserSelection{}}
+	a := &applier{s: s, rs: rs, run: run, report: report, total: 1 + len(req.Users), users: map[string]UserSelection{}, staged: map[string]error{}}
 	for _, ids := range req.Selection {
 		a.total += len(ids)
 	}
@@ -162,6 +161,14 @@ type applier struct {
 	// adminCollections caches how the accounts' data maps admin collection
 	// ids (collectionMap).
 	adminCollections map[string]string
+	// allowUnrated is access.unrated_content, read before each account's
+	// transaction: the policy reader takes a pool connection of its own,
+	// which the transaction may hold the last of.
+	allowUnrated bool
+	// staged holds, per artwork item, nil once stageArtwork wrote its
+	// objects, or why it could not; an item it did not write is absent,
+	// and applyArtwork never publishes one.
+	staged map[string]error
 }
 
 // applied is one item's outcome before its transaction commits.
@@ -206,6 +213,12 @@ func (a *applier) commit(ctx context.Context, next *SelectiveReport, message str
 // transaction; the restore continues with the next item.
 func (a *applier) apply(ctx context.Context, section, id string) error {
 	a.current++
+	switch {
+	case section == SectionUsers:
+		a.allowUnrated = a.s.opts.AllowUnratedContent != nil && a.s.opts.AllowUnratedContent(ctx)
+	case section == SectionCollections && strings.HasPrefix(id, "artwork:"):
+		a.stageArtwork(ctx, id)
+	}
 	var result applied
 	next := a.clone()
 	err := a.commit(ctx, next, "Restoring "+section, func(tx pgx.Tx) error {
@@ -880,86 +893,6 @@ func freeSlug(ctx context.Context, tx pgx.Tx, libraryID int, slug string) (strin
 		candidate = fmt.Sprintf("%s-%d", slug, n)
 	}
 	return "", fmt.Errorf("no free slug for %q", slug)
-}
-
-func (a *applier) applyArtwork(ctx context.Context, tx pgx.Tx, id string) (applied, error) {
-	item := ReportItem{Kind: KindItemArtwork, Label: id}
-	var entry *ItemArtworkEntry
-	for i := range a.rs.Collections.ItemArtwork {
-		if a.rs.Collections.ItemArtwork[i].itemID() == id {
-			entry = &a.rs.Collections.ItemArtwork[i]
-		}
-	}
-	if entry == nil {
-		return leftOut(item, ReasonNotInBackup, "The backup has no such image."), nil
-	}
-	plan, err := a.s.newPlanner(a.rs, tx).planArtwork(ctx, *entry)
-	if err != nil {
-		return applied{}, err
-	}
-	item.Label = plan.Label
-	if !plan.Selectable {
-		return leftOutFor(item, plan), nil
-	}
-	// Content ids, and so the image's keys, are the same on every server.
-	for _, key := range a.rs.blobFamily(entry.Path) {
-		if err := a.writeBlob(ctx, key, key); err != nil {
-			return applied{}, err
-		}
-	}
-	if err := catalog.PublishArtworkSelectionInTx(ctx, tx, catalog.ArtworkSelection{
-		TargetType: entry.TargetType, TargetContentID: entry.ContentID, ParentContentID: entry.ParentContentID,
-		ImageType: entry.ImageType, StoredPath: entry.Path, SourcePath: entry.Source, Thumbhash: entry.Thumbhash,
-		LockField: int(metadata.FieldImages),
-	}); err != nil {
-		return applied{}, err
-	}
-	item.Outcome = OutcomeRestored
-	announce, content, parent := a.s.targets.ArtworkChanged, entry.ContentID, entry.ParentContentID
-	return applied{item: item, after: func(ctx context.Context) {
-		if announce != nil {
-			announce(ctx, content, parent)
-		}
-	}}, nil
-}
-
-func (a *applier) applyBranding(ctx context.Context, tx pgx.Tx, id string) (applied, error) {
-	item := ReportItem{Kind: KindBranding, Label: id}
-	var entry *BrandingEntry
-	for i := range a.rs.Collections.Branding {
-		if a.rs.Collections.Branding[i].itemID() == id {
-			entry = &a.rs.Collections.Branding[i]
-		}
-	}
-	if entry == nil {
-		return leftOut(item, ReasonNotInBackup, "The backup has no such branding asset."), nil
-	}
-	item.Label = entry.Key
-	// The parser admitted it, but the setting this writes is decided here,
-	// so the check runs again where it matters.
-	if err := validBrandingEntry(*entry); err != nil {
-		return applied{}, err
-	}
-	stored, err := readStoredSettings(ctx, tx)
-	if err != nil {
-		return applied{}, err
-	}
-	plan := a.s.newPlanner(a.rs, tx).planBranding(stored, *entry)
-	if !plan.Selectable {
-		return leftOutFor(item, plan), nil
-	}
-	if a.s.targets.ApplySettings == nil {
-		return applied{}, errors.New("settings restore is not available on this server")
-	}
-	if err := a.writeBlob(ctx, entry.Blob, entry.Blob); err != nil {
-		return applied{}, err
-	}
-	_, after, err := a.s.targets.ApplySettings(ctx, tx, map[string]string{entry.Key: entry.Ref})
-	if err != nil {
-		return applied{}, err
-	}
-	item.Outcome = OutcomeRestored
-	return applied{item: item, after: after}, nil
 }
 
 // groupSortMode keeps a known group sort mode and falls back to manual.

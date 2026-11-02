@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,7 +49,9 @@ func (s *Service) DeleteUpload(ctx context.Context, id string) error {
 	}
 	op := s.beginOperation(ctx, held, ActiveOperation{Operation: OperationDelete, UploadID: id, StartedAt: s.opts.Now()})
 	defer op.end(ctx, nil)
-	tag, err := s.opts.Pool.Exec(ctx, `DELETE FROM backup_uploads WHERE id = $1`, id)
+	// On the lock's own session: after the lock is lost another server may
+	// be queueing a restore from this upload, and the delete must fail.
+	tag, err := held.Exec(ctx, `DELETE FROM backup_uploads WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -77,7 +80,7 @@ func (s *Service) sweepUploadsOften(ctx context.Context) {
 		s.lastUploadSweep = s.opts.Now()
 	}
 	s.uploadSweepMu.Unlock()
-	if _, warnings := s.sweepUploads(ctx, full, false); len(warnings) > 0 {
+	if _, warnings := s.sweepUploads(ctx, full, nil); len(warnings) > 0 {
 		slog.WarnContext(ctx, "sweeping uploads", "component", "backup", "warnings", warnings)
 	}
 }
@@ -98,11 +101,11 @@ func (s *Service) sweepUploadsOften(ctx context.Context) {
 // from being deleted when it was replaced, or the folder of a session that
 // is gone (a failed delete, or a full restore's database that no longer
 // knows it).
-func (s *Service) sweepUploads(ctx context.Context, full, locked bool) (swept, warnings []string) {
+func (s *Service) sweepUploads(ctx context.Context, full bool, held Held) (swept, warnings []string) {
 	if s.opts.Pool == nil || s.opts.Destination == nil {
 		return nil, nil
 	}
-	ids, warnings := s.deleteDueUploads(ctx, locked)
+	ids, warnings := s.deleteDueUploads(ctx, held)
 	for _, id := range ids {
 		if err := s.opts.Destination.DeletePrefix(ctx, uploadPrefix(id)); err != nil {
 			warnings = append(warnings, fmt.Sprintf("could not delete expired upload %s: %v", id, err))
@@ -117,46 +120,88 @@ func (s *Service) sweepUploads(ctx context.Context, full, locked bool) (swept, w
 	return append(swept, reclaimed...), append(warnings, more...)
 }
 
-// deleteDueUploads deletes the due session rows and returns their ids. A
-// lock it takes is released before the parts are deleted: with the rows
-// gone, nothing can name them.
-func (s *Service) deleteDueUploads(ctx context.Context, locked bool) (ids, warnings []string) {
-	quiet := locked
-	if !quiet && s.opts.Locker != nil {
-		held, err := s.lockForUploadSweep(ctx)
+// deleteDueUploads deletes the due session rows and returns their ids.
+// held is the subsystem lock when the caller holds it; otherwise a lock it
+// takes is released before the parts are deleted: with the rows gone,
+// nothing can name them.
+func (s *Service) deleteDueUploads(ctx context.Context, held Held) (ids, warnings []string) {
+	// Sessions unfinished or rejected too long need no lock.
+	rows, err := s.opts.Pool.Query(ctx, `DELETE FROM backup_uploads
+		WHERE status IN ('uploading', 'rejected') AND updated_at < now() - make_interval(secs => $1)
+		RETURNING id::text`, UploadExpiry.Seconds())
+	if err == nil {
+		ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	if err != nil {
+		return nil, []string{"sweeping uploads: " + err.Error()}
+	}
+	if held == nil && s.opts.Locker != nil {
+		taken, err := s.lockForUploadSweep(ctx)
 		if err != nil {
 			warnings = append(warnings, "sweeping checked uploads: "+err.Error())
 		}
-		if held != nil {
-			defer held.Release(context.WithoutCancel(ctx))
+		if taken != nil {
+			defer taken.Release(context.WithoutCancel(ctx))
 			var cancel context.CancelFunc
-			ctx, cancel = withLost(ctx, held)
+			ctx, cancel = withLost(ctx, taken)
 			defer cancel()
-			quiet = true
+			held = taken
 		}
 	}
-	keep := ""
-	if quiet {
-		active, err := s.activeRestoreSource(ctx)
-		if err != nil {
-			quiet = false
-			warnings = append(warnings, err.Error())
+	if held == nil {
+		return ids, warnings
+	}
+	checked, more := s.deleteDueCheckedUploads(ctx, held)
+	return append(ids, checked...), append(warnings, more...)
+}
+
+// deleteDueCheckedUploads deletes due checking and complete sessions, which
+// only the lock's holder may, on the lock's own session (held.Exec): once
+// the lock is lost another server may hold it and be queueing a restore
+// from one, so the delete then fails instead. The one an active restore
+// names is kept.
+func (s *Service) deleteDueCheckedUploads(ctx context.Context, held Held) (ids, warnings []string) {
+	active, err := s.activeRestoreSource(ctx)
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	const due = `((status = 'checking' AND updated_at < now() - make_interval(secs => $1))
+		OR (status = 'complete' AND updated_at < now() - make_interval(secs => $2) AND id::text <> $3))`
+	args := []any{UploadExpiry.Seconds(), CompletedUploadExpiry.Seconds(), active.uploadID}
+	candidates, err := s.uploadIDs(ctx, `SELECT id::text FROM backup_uploads WHERE `+due, args...)
+	if err != nil || len(candidates) == 0 {
+		return nil, errorWarnings("sweeping checked uploads", err)
+	}
+	if _, err := held.Exec(ctx, `DELETE FROM backup_uploads WHERE id::text = ANY($4) AND `+due, append(args, candidates)...); err != nil {
+		return nil, errorWarnings("sweeping checked uploads", err)
+	}
+	// Under the lock a deleted session cannot come back, so the candidates
+	// still there are the ones the delete kept.
+	kept, err := s.uploadIDs(ctx, `SELECT id::text FROM backup_uploads WHERE id::text = ANY($1)`, candidates)
+	if err != nil {
+		return nil, errorWarnings("sweeping checked uploads", err)
+	}
+	for _, id := range candidates {
+		if !slices.Contains(kept, id) {
+			ids = append(ids, id)
 		}
-		keep = active.uploadID
 	}
-	rows, err := s.opts.Pool.Query(ctx, `DELETE FROM backup_uploads WHERE
-			(status IN ('uploading', 'rejected') AND updated_at < now() - make_interval(secs => $1))
-			OR ($3 AND status = 'checking' AND updated_at < now() - make_interval(secs => $1))
-			OR ($3 AND status = 'complete' AND updated_at < now() - make_interval(secs => $2) AND id::text <> $4)
-		RETURNING id::text`, UploadExpiry.Seconds(), CompletedUploadExpiry.Seconds(), quiet, keep)
+	return ids, nil
+}
+
+func (s *Service) uploadIDs(ctx context.Context, sql string, args ...any) ([]string, error) {
+	rows, err := s.opts.Pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, append(warnings, "sweeping uploads: "+err.Error())
+		return nil, err
 	}
-	ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, append(warnings, "sweeping uploads: "+err.Error())
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func errorWarnings(what string, err error) []string {
+	if err == nil {
+		return nil
 	}
-	return ids, warnings
+	return []string{what + ": " + err.Error()}
 }
 
 // lockForUploadSweep takes the subsystem lock for a sweep that does not

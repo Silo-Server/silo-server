@@ -26,6 +26,7 @@
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestMatroskaTrackBackfillRecordsIndexOnlyWebVTT
 ./internal/scanner TestHDR10PlusBackfillRecordsFrameStatusDB
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
@@ -370,7 +371,7 @@
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
-./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
+./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
 
 # A resumed play's measured watch time survives repeated finalizations and is
 # what admin watch totals count.

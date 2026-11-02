@@ -115,12 +115,7 @@ var pgxOnlyParams = []string{"pool_", "statement_cache_capacity", "description_c
 // password moved out of the command line (where ps shows it) into PGPASSWORD.
 func libpqTarget(databaseURL, dbname string) (conn string, env []string, err error) {
 	if !strings.Contains(databaseURL, "://") {
-		// A key=value DSN. libpq reads it as is; a substituted name is
-		// appended, and libpq lets the last dbname win.
-		if dbname != "" {
-			databaseURL += " dbname=" + quoteDSNValue(dbname)
-		}
-		return databaseURL, nil, nil
+		return libpqKeyValueTarget(databaseURL, dbname)
 	}
 	u, err := url.Parse(databaseURL)
 	if err != nil {
@@ -133,11 +128,13 @@ func libpqTarget(databaseURL, dbname string) (conn string, env []string, err err
 		}
 	}
 	query := u.Query()
+	if query.Has("password") {
+		env = append(env, "PGPASSWORD="+query.Get("password"))
+		query.Del("password")
+	}
 	for key := range query {
-		for _, prefix := range pgxOnlyParams {
-			if strings.HasPrefix(key, prefix) {
-				query.Del(key)
-			}
+		if pgxOnlyParam(key) {
+			query.Del(key)
 		}
 	}
 	u.RawQuery = query.Encode()
@@ -147,6 +144,97 @@ func libpqTarget(databaseURL, dbname string) (conn string, env []string, err err
 	}
 	return u.String(), env, nil
 }
+
+// libpqKeyValueTarget is libpqTarget for a key=value DSN: it is rewritten
+// without the password and the pgx-only parameters, with dbname replaced
+// when one is given.
+func libpqKeyValueTarget(dsn, dbname string) (conn string, env []string, err error) {
+	pairs, err := parseKeyValueDSN(dsn)
+	if err != nil {
+		return "", nil, err
+	}
+	parts := make([]string, 0, len(pairs)+1)
+	for _, p := range pairs {
+		switch {
+		case p.key == "password":
+			env = append(env, "PGPASSWORD="+p.value)
+		case pgxOnlyParam(p.key), p.key == "dbname" && dbname != "":
+			// Dropped: libpq rejects the first, and the second is replaced.
+		default:
+			parts = append(parts, p.key+"="+quoteDSNValue(p.value))
+		}
+	}
+	if dbname != "" {
+		parts = append(parts, "dbname="+quoteDSNValue(dbname))
+	}
+	return strings.Join(parts, " "), env, nil
+}
+
+func pgxOnlyParam(key string) bool {
+	for _, prefix := range pgxOnlyParams {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+type dsnPair struct{ key, value string }
+
+// parseKeyValueDSN splits a libpq key=value connection string the way libpq
+// reads it: whitespace around = is allowed, and a value is either a run of
+// non-space characters or single-quoted, with \ escaping the next character
+// in both forms.
+func parseKeyValueDSN(dsn string) ([]dsnPair, error) {
+	malformed := errors.New("the database URL is not a valid key=value connection string")
+	var pairs []dsnPair
+	s := dsn
+	for {
+		s = strings.TrimLeft(s, dsnSpace)
+		if s == "" {
+			return pairs, nil
+		}
+		eq := strings.IndexByte(s, '=')
+		if eq < 0 {
+			return nil, malformed
+		}
+		key := strings.TrimRight(s[:eq], dsnSpace)
+		if key == "" || strings.ContainsAny(key, dsnSpace) {
+			return nil, malformed
+		}
+		s = strings.TrimLeft(s[eq+1:], dsnSpace)
+		quoted := strings.HasPrefix(s, "'")
+		if quoted {
+			s = s[1:]
+		}
+		var value strings.Builder
+		i, closed := 0, !quoted
+		for ; i < len(s); i++ {
+			c := s[i]
+			if c == '\\' && i+1 < len(s) {
+				i++
+				value.WriteByte(s[i])
+				continue
+			}
+			if quoted && c == '\'' {
+				closed = true
+				i++
+				break
+			}
+			if !quoted && strings.IndexByte(dsnSpace, c) >= 0 {
+				break
+			}
+			value.WriteByte(c)
+		}
+		if !closed {
+			return nil, malformed
+		}
+		s = s[i:]
+		pairs = append(pairs, dsnPair{key: key, value: value.String()})
+	}
+}
+
+const dsnSpace = " \t\n\r\f\v"
 
 // WithDatabase returns databaseURL pointing at another database on the same
 // server, for pgx connections.

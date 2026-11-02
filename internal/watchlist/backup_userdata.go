@@ -61,7 +61,7 @@ func (w watchedTitle) snapshot() Snapshot {
 		ReleaseDate: w.ReleaseDate, PosterPath: w.PosterPath, Certification: w.Certification, VoteAverage: w.VoteAverage}
 }
 
-func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner) ([]keyedEntry, error) {
+func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner, keep userdata.Keep) ([]keyedEntry, error) {
 	rows, err := tx.Query(ctx, sql, owner.UserID, owner.ProfileID)
 	if err != nil {
 		return nil, err
@@ -73,17 +73,20 @@ func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owne
 		if err := rows.Scan(&e.Item, &e.At); err != nil {
 			return nil, err
 		}
+		if !keep.Has(e.Item) {
+			continue
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
 }
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
-	favorites, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_favorites WHERE user_id = $1 AND profile_id = $2 ORDER BY added_at, media_item_id`, owner)
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
+	favorites, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_favorites WHERE user_id = $1 AND profile_id = $2 ORDER BY added_at, media_item_id`, owner, keep)
 	if err != nil {
 		return userdata.Export{}, fmt.Errorf("reading favorites: %w", err)
 	}
-	watchlist, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 ORDER BY sort_index NULLS LAST, added_at, media_item_id`, owner)
+	watchlist, err := exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 ORDER BY sort_index NULLS LAST, added_at, media_item_id`, owner, keep)
 	if err != nil {
 		return userdata.Export{}, fmt.Errorf("reading the watchlist: %w", err)
 	}
@@ -157,8 +160,12 @@ func (BackupData) Validate(data json.RawMessage) (userdata.Summary, error) {
 // connection writes the library watchlist entry; an import that wrote that
 // entry and then waited on the title would close a cycle across three
 // connections that Postgres cannot see.
+//
+// An untrusted document (a profile's own export) creates no title: its
+// titles are only locked where they exist (LockTitlesInTx).
 func (BackupData) Prepare(ctx context.Context, tx pgx.Tx, docs []userdata.Prepared) error {
 	var snaps []Snapshot
+	untrusted := false
 	now := time.Now().UTC()
 	for _, d := range docs {
 		doc, _, err := decodeFavorites(d.Data)
@@ -168,6 +175,10 @@ func (BackupData) Prepare(ctx context.Context, tx pgx.Tx, docs []userdata.Prepar
 		for _, w := range doc.Titles {
 			snaps = append(snaps, w.snapshot())
 		}
+		untrusted = untrusted || d.Untrusted
+	}
+	if untrusted {
+		return LockTitlesInTx(ctx, tx, snaps)
 	}
 	return EnsureTitlesInTx(ctx, tx, snaps, now)
 }
@@ -192,8 +203,20 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 }
 
 func importTitles(ctx context.Context, tx pgx.Tx, target userdata.Target, titles []watchedTitle, res *userdata.Result) error {
+	missing := 0
 	for _, w := range titles {
-		added, err := AddSnapshotInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+		var added bool
+		var err error
+		if target.Untrusted {
+			var found bool
+			found, added, err = LinkExistingTitleInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+			if err == nil && !found {
+				missing++
+				continue
+			}
+		} else {
+			added, err = AddSnapshotInTx(ctx, tx, target.UserID, target.ProfileID, w.snapshot(), w.AddedAt, target.Now)
+		}
 		if err != nil {
 			return fmt.Errorf("restoring a watchlist title: %w", err)
 		}
@@ -202,6 +225,10 @@ func importTitles(ctx context.Context, tx pgx.Tx, target userdata.Target, titles
 		} else {
 			res.Unchanged++
 		}
+	}
+	if missing > 0 {
+		res.LeftOut += missing
+		res.Notes = append(res.Notes, fmt.Sprintf("%d watchlist titles this server has never listed were left out; add them again from search.", missing))
 	}
 	return nil
 }

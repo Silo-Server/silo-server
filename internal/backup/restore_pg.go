@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // PGLoader restores dumps with pg_restore and reads databases with pgx.
@@ -62,6 +64,17 @@ func (l PGLoader) Inspect(ctx context.Context, dbURL string) (Inspection, error)
 	}
 	in.Tables, err = tableInventory(ctx, conn)
 	return in, err
+}
+
+func (l PGLoader) UnbindStorage(ctx context.Context, dbURL string) error {
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	_, err = conn.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`,
+		[]string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey})
+	return err
 }
 
 // PGControl is the swap's control connection to the maintenance database.

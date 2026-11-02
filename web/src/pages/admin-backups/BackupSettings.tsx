@@ -10,6 +10,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminBackupDestination as BackupDestination } from "@/api/v2/adminBackups";
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
 import { adminSettingsHref } from "@/lib/adminSettingsSearch";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 import {
@@ -313,7 +314,7 @@ export function RestoreCommandGroup({
   encrypted: boolean;
 }) {
   const copy = () =>
-    navigator.clipboard.writeText(command).then(
+    copyTextToClipboard(command).then(
       () => toast.success("Command copied"),
       () => toast.error("Couldn't copy the command. Select it and copy it by hand."),
     );

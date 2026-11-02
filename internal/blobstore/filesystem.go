@@ -262,14 +262,21 @@ func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, wr
 
 // place moves a synced temporary file to key: a rename, which replaces an
 // existing object, or for an exclusive create a hard link, which fails with
-// ErrExists when the name exists.
+// ErrExists when the name exists, and with ErrExclusiveUnsupported where the
+// filesystem has no hard links.
 func place(root *os.Root, name, key string, exclusive bool) error {
 	if !exclusive {
 		return root.Rename(name, key)
 	}
 	err := root.Link(name, key)
-	if errors.Is(err, fs.ErrExist) {
+	switch {
+	case errors.Is(err, fs.ErrExist):
 		return ErrExists
+	case errors.Is(err, unix.EPERM), errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EMLINK):
+		// The filesystem takes no hard links (exFAT, some SMB and FUSE
+		// mounts answer EPERM). It is not a permission problem: the
+		// temporary file was just created and written in this directory.
+		return fmt.Errorf("%w: %w", ErrExclusiveUnsupported, err)
 	}
 	return err
 }

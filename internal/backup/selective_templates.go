@@ -335,7 +335,7 @@ func (a *applier) applyTemplateCollection(ctx context.Context, tx pgx.Tx, id str
 		return applied{}, err
 	}
 	item.Outcome, item.Message = OutcomeRestored, "Created from its template; it syncs after the restore."
-	if plan.defaults.NeedsSetup {
+	if plan.defaults.NeedsSetup && catalog.TMDBCollectionSourceUnset(input.SourceConfig) {
 		item.Notes = append(item.Notes, "Its template needs a source set before it can sync.")
 	}
 	return applied{item: item, after: a.s.CompleteFollowUps}, nil

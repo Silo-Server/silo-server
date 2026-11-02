@@ -113,7 +113,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 	}
 	before := srv.Keys(testBucket, "")
 	srv.RefuseDeletes(true)
-	rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil)
+	rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil)
 	if len(rotated) != 0 || len(warnings) != 2 || !strings.Contains(warnings[0], "lifecycle rules") {
 		t.Fatalf("rotation against a refusing bucket = rotated %v, warnings %v", rotated, warnings)
 	}
@@ -121,7 +121,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 		t.Fatalf("a refused rotation removed objects: %d of %d left", len(after), len(before))
 	}
 	srv.RefuseDeletes(false)
-	if rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil); len(rotated) != 2 || len(warnings) != 0 {
+	if rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil); len(rotated) != 2 || len(warnings) != 0 {
 		t.Fatalf("rotation = rotated %v, warnings %v", rotated, warnings)
 	}
 }

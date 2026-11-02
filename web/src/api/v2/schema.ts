@@ -10588,7 +10588,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences. It carries no account fields, password or PIN hashes, or access fields. */
+    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields. */
     get: operations["exportProfile"];
     put?: never;
     post?: never;
@@ -14490,7 +14490,7 @@ export interface components {
     AdminBackupList: {
       /** @description The operation holding the lock, started on any server */
       active?: components["schemas"]["AdminBackupActive"];
-      /** @description Whether a backup or restore holds the cluster-wide backup lock now */
+      /** @description Whether a backup, delete, or selective restore holds the cluster-wide backup lock now */
       busy: boolean;
       /**
        * @description Where new backups go (backup.destination). Items lists only this destination's backups; copies at a previous destination stay there
@@ -34001,6 +34001,8 @@ export interface components {
       stream_index?: number;
       sync_key?: string;
       track_id: string;
+      /** @description No route can show this track: the server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable. */
+      unplayable?: boolean;
       /** Format: uri-reference */
       url?: string;
     };
@@ -129797,6 +129799,15 @@ export interface operations {
       };
       /** @description Request Timeout */
       408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

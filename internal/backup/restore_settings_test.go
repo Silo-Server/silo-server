@@ -37,6 +37,7 @@ func TestServerSpecificSettingsAreNeverOffered(t *testing.T) {
 		"server.identity_id", "server.public_url", "artwork.local_path", "s3.private_secret_key",
 		"catalog.search.meilisearch.api_key", "userdb.backend", "notifications.push_relay_api_key", "auth.jwt_secret",
 		"backup.keep", "storage.transition.target", "redis.url", "branding.mark_ref",
+		"recommendations.embedding_lock", "recommendations.policy_marked_generation",
 	} {
 		if _, offered := RestorableSetting(key); offered {
 			t.Errorf("%q is offered for restore", key)

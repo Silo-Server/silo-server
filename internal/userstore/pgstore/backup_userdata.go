@@ -21,7 +21,7 @@ type keyedEntry struct {
 	At   time.Time `json:"at"`
 }
 
-func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner) ([]keyedEntry, error) {
+func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owner, keep userdata.Keep) ([]keyedEntry, error) {
 	rows, err := tx.Query(ctx, sql, owner.UserID, owner.ProfileID)
 	if err != nil {
 		return nil, err
@@ -32,6 +32,9 @@ func exportKeyed(ctx context.Context, tx pgx.Tx, sql string, owner userdata.Owne
 		var e keyedEntry
 		if err := rows.Scan(&e.Item, &e.At); err != nil {
 			return nil, err
+		}
+		if !keep.Has(e.Item) {
+			continue
 		}
 		out = append(out, e)
 	}
@@ -125,7 +128,7 @@ type homeDismissal struct {
 	DismissedAt       time.Time  `json:"dismissed_at"`
 }
 
-func (DismissalsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (DismissalsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT surface, media_item_id, series_id, progress_updated_at, dismissed_at
 		FROM user_home_item_dismissals WHERE user_id = $1 AND profile_id = $2 ORDER BY surface, media_item_id`, owner.UserID, owner.ProfileID)
@@ -140,6 +143,9 @@ func (DismissalsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdat
 			rows.Close()
 			return userdata.Export{}, err
 		}
+		if !keep.Has(d.Item) || (d.Series != nil && !keep.Has(*d.Series)) {
+			continue
+		}
 		doc.Home = append(doc.Home, d)
 		items = append(items, d.Item)
 		if d.Series != nil {
@@ -150,10 +156,10 @@ func (DismissalsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdat
 	if err := rows.Err(); err != nil {
 		return userdata.Export{}, err
 	}
-	if doc.NotInterested, err = exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_not_interested WHERE user_id = $1 AND profile_id = $2 ORDER BY media_item_id`, owner); err != nil {
+	if doc.NotInterested, err = exportKeyed(ctx, tx, `SELECT media_item_id, added_at FROM user_not_interested WHERE user_id = $1 AND profile_id = $2 ORDER BY media_item_id`, owner, keep); err != nil {
 		return userdata.Export{}, fmt.Errorf("reading not interested: %w", err)
 	}
-	if doc.DroppedSeries, err = exportKeyed(ctx, tx, `SELECT series_id, dropped_at FROM user_dropped_series WHERE user_id = $1 AND profile_id = $2 ORDER BY series_id`, owner); err != nil {
+	if doc.DroppedSeries, err = exportKeyed(ctx, tx, `SELECT series_id, dropped_at FROM user_dropped_series WHERE user_id = $1 AND profile_id = $2 ORDER BY series_id`, owner, keep); err != nil {
 		return userdata.Export{}, fmt.Errorf("reading dropped series: %w", err)
 	}
 	items = append(items, keyedItems(doc.NotInterested, doc.DroppedSeries)...)

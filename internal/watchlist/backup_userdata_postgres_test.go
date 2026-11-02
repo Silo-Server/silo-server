@@ -101,4 +101,45 @@ func TestPrepareCreatesAndLocksTitlesDB(t *testing.T) {
 	if titles != 2 || entries != 2 {
 		t.Fatalf("titles %d entries %d, want 2 and 2", titles, entries)
 	}
+
+	checkUntrustedImport(t, pool, userdata.Owner{UserID: user, ProfileID: p2}, x, base+2)
+}
+
+// checkUntrustedImport: a profile's own export is untrusted. It links
+// titles this server has (x), writes none of its snapshot to them, and
+// creates none (z).
+func checkUntrustedImport(t *testing.T, pool *pgxpool.Pool, owner userdata.Owner, x, z int) {
+	t.Helper()
+	ctx := t.Context()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM watchlist_titles WHERE tmdb_id = $1`, z) })
+	forged, _ := json.Marshal(favoritesDocument{Favorites: []keyedEntry{}, Watchlist: []keyedEntry{}, Titles: []watchedTitle{
+		{MediaType: mediaTypeMovie, TMDBID: x, Title: "Forged", Certification: "G", AddedAt: time.Now()},
+		{MediaType: mediaTypeMovie, TMDBID: z, Title: "Invented", AddedAt: time.Now()},
+	}})
+	untrusted, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = untrusted.Rollback(context.Background()) }()
+	if err := (BackupData{}).Prepare(ctx, untrusted, []userdata.Prepared{{Owner: owner, Data: forged, Untrusted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := (BackupData{}).Import(ctx, untrusted, userdata.Target{Owner: owner, Items: sameItems{}, Now: time.Now(), Untrusted: true}, forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := untrusted.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var title, certification string
+	if err := pool.QueryRow(ctx, `SELECT title, certification FROM watchlist_titles WHERE tmdb_id = $1`, x).Scan(&title, &certification); err != nil {
+		t.Fatal(err)
+	}
+	var invented int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM watchlist_titles WHERE tmdb_id = $1`, z).Scan(&invented); err != nil {
+		t.Fatal(err)
+	}
+	if res.Added != 1 || res.LeftOut != 1 || title != "Soon" || certification != "" || invented != 0 {
+		t.Fatalf("untrusted import = %+v, title %q %q, invented titles %d", res, title, certification, invented)
+	}
 }

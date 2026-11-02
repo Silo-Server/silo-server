@@ -42,6 +42,11 @@ export function useRestoreSet(source: RestoreSource | null) {
     staleTime: 0,
     gcTime: 0,
     retry: false,
+    // The chooser and review work from this plan and its digest: a refetch on
+    // focus or reconnect could replace the plan under the admin, or turn a
+    // failed read into an error screen. It is read again only when asked.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 

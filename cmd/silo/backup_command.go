@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -290,7 +291,7 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = ctl.Close(context.WithoutCancel(ctx)) }()
+	defer closeControl(ctx, ctl)
 	workDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -305,6 +306,15 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	}
 	clearRedisAfterRestore(ctx, afterRedis, dialRedis, out)
 	return nil
+}
+
+// closeControl closes the control connection after the command's context
+// may have been canceled, with a bound so a stalled close cannot keep the
+// command from exiting.
+func closeControl(ctx context.Context, ctl *backup.PGControl) {
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = ctl.Close(closeCtx)
 }
 
 func runBackupRecover(ctx context.Context, stamp string, out io.Writer) error {
@@ -329,7 +339,7 @@ func runBackupRecover(ctx context.Context, stamp string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = ctl.Close(context.WithoutCancel(ctx)) }()
+	defer closeControl(ctx, ctl)
 	// Neither database is opened: the journal holds the storage
 	// configuration, and the control connection reads which database is
 	// which from pg_database.
