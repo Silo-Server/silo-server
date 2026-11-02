@@ -347,7 +347,7 @@ func TestUploadCompletionDeadlineDB(t *testing.T) {
 	}()
 	<-opened
 	dbExec(t, pool, `UPDATE backup_uploads SET updated_at = now() - interval '25 hours' WHERE id = $1`, u.ID)
-	b.sweepUploads(ctx, true, false)
+	b.sweepUploads(ctx, true, nil)
 	if status := uploadStatus(t, pool, u.ID); status != UploadChecking {
 		t.Fatalf("an upload being checked after the sweep = %s", status)
 	}
@@ -372,7 +372,7 @@ func TestUploadCompletionDeadlineDB(t *testing.T) {
 
 	// A checking upload left by a server that stopped, with the lock free.
 	dbExec(t, pool, `UPDATE backup_uploads SET status = 'checking', updated_at = now() - interval '25 hours' WHERE id = $1`, u.ID)
-	b.sweepUploads(ctx, false, false)
+	b.sweepUploads(ctx, false, nil)
 	if status := uploadStatus(t, pool, u.ID); status != statusGone {
 		t.Fatalf("an abandoned check after the sweep = %s", status)
 	}
