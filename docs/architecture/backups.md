@@ -424,8 +424,11 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   the search provider and its endpoint, key, and index, `database.*`,
   `redis.*`, `userdb.*`, `ratelimit.*`, `auth.jwt_secret`, push relay and web
   push keys, AI provider registry and bindings, local paths and hardware
-  (`playback.ffmpeg_path`, `playback.transcode_dir`, `playback.hw_*`), and
-  `backup.*`.
+  (`playback.ffmpeg_path`, `playback.transcode_dir`, `playback.hw_*`),
+  `backup.*`, and state the server writes for itself under an admin prefix:
+  sweep and cleanup checkpoints, `recommendations.embedding_lock` (the
+  stored vectors' model and dimensions), and
+  `recommendations.policy_marked_generation`.
 
 A key the table does not match is never offered. `TestEverySettingIsClassified`
 fails for any admin setting default, sensitive setting, or branding asset key
