@@ -85,7 +85,7 @@ func (r *APIKeyRepository) ListByUserAdmin(ctx context.Context, userID int) ([]*
 	return r.ListByUser(ctx, userID)
 }
 func (r *APIKeyRepository) ListAll(ctx context.Context) ([]*models.APIKeyMetadataWithUser, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id ORDER BY ak.created_at DESC,ak.id DESC`)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id ORDER BY ak.created_at DESC,ak.id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (r *APIKeyRepository) ListAllPage(ctx context.Context, after *APIKeyPageKey
 		stamp = &after.CreatedAt
 		id = after.ID
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ($1::timestamptz IS NULL OR (ak.created_at,ak.id)<($1,$2)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $3`, stamp, id, limit+1)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ($1::timestamptz IS NULL OR (ak.created_at,ak.id)<($1,$2)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $3`, stamp, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -240,7 +240,7 @@ func (r *APIKeyRepository) ListByUserAdminPage(ctx context.Context, userID int, 
 		stamp = &after.CreatedAt
 		id = after.ID
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

@@ -1,6 +1,7 @@
 {
-  "revision": "021627e60916f147b6bb80e8512f738e97b7c22cb1f30e20d5eed6abf506305a",
+  "revision": "88e8498c79e9d656ebc37ba282679ac0a839870436adc4a955ff1a9e7f338bbd",
   "state": "available",
   "allowed": false,
-  "registration_available": true
+  "registration_available": true,
+  "installation_reset_available": false
 }

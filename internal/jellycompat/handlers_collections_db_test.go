@@ -24,10 +24,12 @@ func (c *visibleLibrariesContent) ListUserLibraries(context.Context, *Session) (
 	return c.libraries, nil
 }
 
-// seedBoxSetPageCollection stores a seven-member collection in a visible
-// library. Curated position i holds the title "Title G" minus i, so SortName
+// seedBoxSetPageCollection stores an eight-member collection in a visible
+// library. Curated position i holds the title "Title H" minus i, so SortName
 // reverses the curated order. The member at position 2 lives only in a second
-// library and the one at position 4 is rated 18. It returns a handler whose
+// library, the one at position 4 is rated 18, and the one at position 7 is in
+// no library, as when the scanner's file removal grace holds a title whose
+// file was moved away. It returns a handler whose
 // viewer may see the first library up to PG-13, and the BoxSet's ParentId.
 func seedBoxSetPageCollection(t *testing.T) (*ItemsHandler, string) {
 	t.Helper()
@@ -47,12 +49,13 @@ func seedBoxSetPageCollection(t *testing.T) (*ItemsHandler, string) {
 		library   int
 		ratingAge int
 	}
-	members := make([]member, 7)
+	members := make([]member, 8)
 	for i := range members {
-		members[i] = member{id: fmt.Sprintf("jf-boxset-page-%d-m%d", suffix, i), title: fmt.Sprintf("Title %c", 'G'-i), library: visibleLib, ratingAge: 12}
+		members[i] = member{id: fmt.Sprintf("jf-boxset-page-%d-m%d", suffix, i), title: fmt.Sprintf("Title %c", 'H'-i), library: visibleLib, ratingAge: 12}
 	}
 	members[2].library = hiddenLib // hidden by library access
 	members[4].ratingAge = 18      // hidden by the rating ceiling
+	members[7].library = 0         // in no library
 	ids := make([]string, len(members))
 	for i, m := range members {
 		ids[i] = m.id
@@ -74,7 +77,9 @@ func seedBoxSetPageCollection(t *testing.T) (*ItemsHandler, string) {
 	items := make([]catalog.LibraryCollectionItemInput, 0, len(members))
 	for i, m := range members {
 		jellyfin12Exec(t, pool, `INSERT INTO media_items (content_id, type, title, sort_title, content_rating, content_rating_age) VALUES ($1, 'movie', $2, $2, 'PG', $3)`, m.id, m.title, m.ratingAge)
-		jellyfin12Exec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, m.id, m.library)
+		if m.library != 0 {
+			jellyfin12Exec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, m.id, m.library)
+		}
 		items = append(items, catalog.LibraryCollectionItemInput{MediaItemID: m.id, SourceRank: i})
 	}
 	if err := collections.ReplaceItems(ctx, collection.ID, items); err != nil {
@@ -129,15 +134,15 @@ func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"&StartIndex=0&Limit=3", []string{"Title G", "Title F", "Title D"}},
-		{"&StartIndex=3&Limit=3", []string{"Title B", "Title A"}},
-		{"&StartIndex=1&Limit=2", []string{"Title F", "Title D"}},
+		{"&StartIndex=0&Limit=3", []string{"Title H", "Title G", "Title E"}},
+		{"&StartIndex=3&Limit=3", []string{"Title C", "Title B"}},
+		{"&StartIndex=1&Limit=2", []string{"Title G", "Title E"}},
 		{"&StartIndex=5&Limit=3", []string{}},
 		{"&Limit=0", []string{}},
 		{"&StartIndex=2&Limit=0", []string{}},
-		{"", []string{"Title G", "Title F", "Title D", "Title B", "Title A"}},
-		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=0&Limit=3", []string{"Title A", "Title B", "Title D"}},
-		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=3&Limit=3", []string{"Title F", "Title G"}},
+		{"", []string{"Title H", "Title G", "Title E", "Title C", "Title B"}},
+		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=0&Limit=3", []string{"Title B", "Title C", "Title E"}},
+		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=3&Limit=3", []string{"Title G", "Title H"}},
 		{"&SortBy=SortName&SortOrder=Ascending&Limit=0", []string{}},
 	} {
 		names, total := page(tc.query)
@@ -146,10 +151,10 @@ func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 		}
 	}
 
-	// A viewer without restrictions sees every member.
+	// A viewer without restrictions sees every member in a library.
 	h.accessFilter = nil
 	h.content.(*visibleLibrariesContent).accessFilter = nil
-	if names, total := page("&StartIndex=0&Limit=10"); len(names) != 7 || total != 7 {
-		t.Errorf("unrestricted viewer: got %v (total %d), want all 7 members", names, total)
+	if names, total := page("&StartIndex=0&Limit=10"); len(names) != 7 || total != 7 || slices.Contains(names, "Title A") {
+		t.Errorf("unrestricted viewer: got %v (total %d), want the 7 members in a library", names, total)
 	}
 }

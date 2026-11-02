@@ -321,6 +321,14 @@ func (r *PushDeviceRepository) UpsertApple(ctx context.Context, registration App
 	if generation > 0 {
 		return nil, ErrPushLegacyWriter
 	}
+	// An installation reset by its owner stays reserved for that account.
+	var reservedFor int
+	if err := tx.QueryRow(ctx, `SELECT user_id FROM apple_push_installations WHERE device_id=$1`, registration.DeviceID).Scan(&reservedFor); err != nil {
+		return nil, err
+	}
+	if reservedFor != 0 && reservedFor != registration.UserID {
+		return nil, ErrPushGenerationConflict
+	}
 	if err := checkPushInstallationOwner(ctx, tx, registration.DeviceID, PushPlatformApple, registration.UserID); err != nil {
 		return nil, err
 	}

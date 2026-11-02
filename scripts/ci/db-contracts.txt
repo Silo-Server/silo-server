@@ -17,8 +17,10 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
+./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
+./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
@@ -102,6 +104,7 @@
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
+./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -190,6 +193,11 @@
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
+
+# The owning account resets an Apple installation whose key was lost; another
+# account is refused, and a registration queued behind the reset still binds.
+./internal/notifications TestApplePushInstallationResetDB
+./internal/notifications TestApplePushResetOrdersAgainstInFlightRegistrationDB
 
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
