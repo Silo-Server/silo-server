@@ -6,13 +6,15 @@
 
 The Backups page's operations under `/api/v2/admin/backups`. Each requires an
 acting administrator: an account with the server-wide `admin` role. A
-household's primary profile on a member account is not enough. The admin
+household's primary profile on a member account is not enough. The one
+exception is [profile export and import](#profile-export-and-import), which a
+signed-in profile uses for its own data. The admin
 [wire conventions](admin-api.md#wire-conventions) apply.
 [architecture/backups.md](architecture/backups.md) describes what a backup
 holds and how it is taken, rotated, and restored. Full restore is the offline
 `silo backup restore` command, not an API operation; selective restore of
-settings, plugins, libraries, collections and uploaded artwork, and home and
-library page sections runs as an admin job, from a backup of this server.
+settings, plugins, libraries, accounts and their profiles' data, collections
+and uploaded artwork runs as an admin job, from a backup of this server.
 
 Settings are written through the [admin settings API](admin-settings-api.md):
 `backup.enabled`, `backup.time`, `backup.keep` (1–60),
@@ -30,6 +32,9 @@ Settings are written through the [admin settings API](admin-settings-api.md):
 | `GET /admin/backups/{id}/objects/{name}` | Stream one object; authorized by the signed link, not a session |
 | `GET /admin/backups/{id}/restore-set` | Preview a backup's restore set against this server |
 | `POST /admin/backups/{id}/restore` | Restore chosen items as a `backup_restore` admin job |
+| `GET /capabilities/profile-export` | Profile export and import support, for any verified profile |
+| `GET /profile/export` | Download the acting profile's own data |
+| `POST /profile/import` | Merge a profile export into the acting profile |
 
 A backup `id` is its folder name: the UTC start time, to the millisecond, and
 the kind, for example `20261031T040000.123Z-nightly`. Ids written to the
@@ -77,7 +82,14 @@ are `true` when available.
   `created_at`, `completed_at`, `size_bytes`, `silo_version`, `location`
   (a filesystem path on this server's storage),
   `blob_count`,
-  `missing_blobs` (`store`, `key`, `source`),
+  `missing_blobs` (`store`, `key`, `source`), `restore_set_omitted` (items
+  the restore set could not carry: `section`, `id`, `label`, `reason` of
+  `too_large` or `export_failed`, `message`, and for `export_failed` in
+  restore sets of format 3 `cause`, what failed (the part being read, such
+  as a profile data type, and the step its error names:
+  `notifications: reading notification preferences`), stable across backups
+  so a client can group items without parsing `message`, and `error`, the
+  underlying error without ids; the dump still holds them),
   `objects` (`name`, `size_bytes`, and `sha256` of the stored bytes),
   `key_check` (the check value of the key the backup was taken with), and
   `key_matches` (whether that is this server's; settings and credentials the
@@ -92,7 +104,8 @@ are `true` when available.
 - `complete`: manifest written, checksums recorded, and the dump's table of
   contents readable. It does not claim the backup was restored.
 - `complete_with_warnings`: as complete, but some referenced files were
-  missing when copied (`missing_blobs` lists them).
+  missing when copied (`missing_blobs` lists them), or the restore set left
+  items out (`restore_set_omitted`).
 - `in_progress`: no manifest yet, and `active` is this backup.
 - `incomplete`: no manifest and nothing running. Deleted automatically after
   24 hours.
@@ -143,15 +156,17 @@ The answer carries `backup_id`, `digest` (the SHA-256 of `restore-set.tar`; a re
 request must send it back), the source (`server_id`, `server_name`,
 `silo_version`, `created_at`, `same_server`), `key_matches` (whether the
 backup was taken with this server's `SECRET_KEY`), `missing_blobs`,
+`omitted` (items the restore set left out, as in the list; they are in no
+section),
 `never_restored_settings` (the setting keys a restore never writes because
 they describe this server; an entry ending in `.` or `_` is a prefix),
 `library_map` (each backup library with `local_id` when a library here has
 the identical folder set), and `sections` in restore order: `libraries`,
-`plugins`, `settings`, `collections`, and `home_sections` (format 3 and
-later). Each section has `count` and `items`.
+`plugins`, `settings`, `collections`, `home_sections` (format 3 and later),
+`users` (format 2 and later). Each section has `count` and `items`.
 
 Every item has `id` (what a restore request names), `kind`
-(`library`, `plugin`, `settings_page`, `collection`,
+(`library`, `plugin`, `settings_page`, `account`, `collection`,
 `template_collection`, `item_artwork`, `branding`, `home_section`), `label`, `status`, `selectable`, and, when it applies,
 `reason`, `message`, `requires`, `restart_required`, `external_service`,
 and `missing_blobs`. A selectable item that writes files is
@@ -165,7 +180,7 @@ time (see the report's `failed` outcome), which a preview cannot detect.
 | `not_on_this_server` | Restoring creates it |
 | `differs` | Restoring changes or adds to what is here |
 | `folder_missing` | A library folder this server cannot open; not selectable |
-| `ambiguous` | More than one collection or section here matches; not selectable |
+| `ambiguous` | More than one collection here has its name, or an account or profile has more than one candidate; not selectable |
 | `needs_another_key` | Encrypted with another `SECRET_KEY`; not selectable |
 
 `reason` codes: `same`, `path_in_use` (a folder belongs to another library
@@ -174,7 +189,13 @@ here), `folder_missing`, `library_not_restorable`, `library_not_mapped`,
 that installs without its configuration and stays disabled),
 `other_version` (another version is installed: settings only),
 `item_not_on_this_server`, `file_missing` (its image was missing when the
-backup was taken), `not_in_backup`, `changed_since_preview`,
+backup was taken), `not_in_backup`, `changed_since_preview`, and for accounts
+and profiles `ambiguous_account`, `ambiguous_profile`, `policy_wider` (this
+server would grant a new account more than the backup did),
+`group_not_on_this_server` (no access group of the backup group's name),
+`login_taken` (another account here signs in with its username or email),
+`profile_limit` (the account has no room for another profile),
+`user_store_unsupported` (this server uses the SQLite user store),
 `template_not_available` (a template collection whose template this
 server's catalog does not have, or that does not suit the library), and
 `collection_not_mapped` (a page section showing a collection that is
@@ -225,6 +246,33 @@ Kind-specific details:
   `configuration`, and `N collection items` of the collection it manages). A
   chosen section replaces the configuration of the one here or is created; a
   section that manages a collection brings it.
+- `account`: `account` with `username`, `email`, `role`, `admin` (restoring
+  creates an administrator), `match` (`account_id`, `restored`,
+  `username_email`, or `new`), `target` (what the request sends back: the
+  local account id, or `new`), `local_id` and `local_username` of a matched
+  account, `group` (the backup's group name, which a new account joins here),
+  `policy_differences` (`{field, backup, here}` for each policy field this
+  server would grant a new account more of), `libraries_left_out` (library
+  entries with no library here, dropped), `profile_room` (how many new
+  profiles the account can take), and `profiles`. Each profile has `id`,
+  `name`, `status` (`not_on_this_server`, `differs` for a matched profile
+  a restore would change, `on_this_server` with reason `same` for one it
+  would not change, never selectable, or `ambiguous`), `selectable`, `reason`,
+  `message`, `match` (`profile_id`, `restored`, `name`, or `new`), `target`,
+  `local_id`, `is_primary`, `restricted`, `libraries_left_out`,
+  `no_library_access` (restricted with none of its libraries here),
+  `has_pin`, and `data_types` (`{id, count, pending}` for `watch_history`,
+  `ratings`, `favorites`, `collections`, `dismissals`, `preferences`,
+  `notifications`): `count` is the entries the backup holds, and `pending`,
+  for a matched profile only, how many of them a restore would add or
+  change by its merge rules. Items are matched by content id only for the
+  count, so an item a restore would match by provider ids counts as not
+  here.
+  A matched account stays as it is, gains the profiles it lacks, and merges
+  the chosen data. It is `differs` and selectable when a restore would
+  change something (a profile with pending changes, or one it can add), and
+  otherwise `on_this_server` with reason `same`, not selectable. The counts
+  reflect this server when the preview runs.
 
 ### Restore
 
@@ -235,9 +283,12 @@ a `Location` of `/api/v2/admin/jobs/{job_id}`, and `Retry-After: 5`.
 `settings` (settings page ids), `collections` (`collection:<id>`,
 `template:<id>`, `artwork:<content_id>:<image type>`, `branding:<setting
 key>`), and `home_sections` (`section:<id>`), each the `id`s the preview
-returned. The restore matches each item again and leaves out one whose
-mapping changed since the preview (`changed_since_preview`).
-`409 restore_set_changed` when the backup changed
+returned, and `users`: `[{account, target, profiles:
+[{profile, target, data_types}]}]` with the account and profile ids and the
+targets the preview showed. An account with no profiles is restored alone;
+a profile with no data types is created or kept without data. The restore
+matches each account and profile again and leaves out one whose target is
+no longer the mapping (`changed_since_preview`). `409 restore_set_changed` when the backup changed
 since the preview (the digest differs): preview it again. `409 conflict` when
 another backup or restore is running (a running restore's job is in
 `Location`) or the backup has no restore set. `422` for an empty or malformed
@@ -260,10 +311,16 @@ kept with the job when it completes, fails, is canceled, or is interrupted:
   added.
 - `library_map`: each backup library and the library it is on this server.
 - `items`: `{section, id, kind, label, outcome, reason, message, error,
-  restart_required, restart_keys, notes, missing_blobs}` for each item that
-  ran. `outcome` is `restored`, `unchanged` (already as in the backup),
+  restart_required, restart_keys, notes, missing_blobs, account}` for each
+  item that ran. `account` (users items) has `local_id`, `created`,
+  `unmatched` (titles of items not in this catalog, left out), `hidden`
+  (titles a restored profile's libraries, content rating, or advisory limits
+  hide here, left out), and
+  `profiles`, each `{id, label, local_id, created, outcome, reason, message,
+  notes, data}` with `data` as `{type, added, updated, unchanged, left_out,
+  notes}` per data type merged. `outcome` is `restored`, `unchanged` (already as in the backup),
   `left_out` (with a `reason`), or `failed` (with an `error`).
-  A restore writes files (artwork, branding, posters) only where
+  A restore writes files (artwork, branding, posters, avatars) only where
   none is, with a create the storage makes exclusive. Storage that cannot
   (an S3-compatible bucket that rejects conditional writes) fails each item
   that writes a file, with the error "this storage can't guarantee existing
@@ -287,3 +344,35 @@ the lock lets one back up and the others record a completed run whose result
 is `{"skipped": "skipped: another backup or restore is running"}`. A run's
 result data carries `id`, `kind`, `status`, `size_bytes`, `duration_ms`,
 `missing_blobs`, `rotated`, `swept`, and `warnings`.
+
+## Profile export and import
+
+A signed-in profile exports and imports its own data. These operations are
+profile scoped (`X-Profile-Id`, verified), not admin operations, and the
+target is always the acting profile: a document never chooses it.
+[architecture/backups.md](architecture/backups.md#profile-export) describes
+the format and rules.
+
+`GET /capabilities/profile-export` answers `state` (`available`, or
+`not_configured` on the SQLite user store), `format`
+(`silo-profile-export`), `version`, `max_import_bytes`, and `data_types`.
+
+`GET /profile/export` answers the `silo-profile-export` document as an
+attachment (`silo-profile.json`): watch history and progress, ratings,
+favorites and watchlist, personal collections, dismissals, preferences, and
+notification preferences, leaving out titles the profile may not see now.
+It holds no account fields, password or PIN hashes, or access fields.
+
+`POST /profile/import` takes that document (at most 64 MiB) and merges it
+into the acting profile in one transaction: newer progress wins, plays,
+ratings, favorites, and dismissals are added where missing, collections gain
+missing items, and preferences are overwritten. Nothing is deleted;
+importing the same document again changes nothing. The answer has
+`same_server`, `data` (`{type, added, updated, unchanged, left_out, notes}`
+per data type), `unmatched` (titles left out because they are not in this
+catalog or the profile may not see them, not told apart, so an import cannot
+probe what a hidden library holds), and `hidden`, always empty. `422
+validation_failed` for a document carrying account or access fields, from a
+newer version, or otherwise not a valid export; `403
+profile_verification_required` for a PIN-protected profile reached without
+its PIN, including through an API key.

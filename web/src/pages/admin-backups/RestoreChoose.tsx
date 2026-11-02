@@ -10,6 +10,7 @@ import {
 import { Lock } from "lucide-react";
 
 import type {
+  RestoreDataTypeId,
   RestoreItem,
   RestoreSection,
   RestoreSectionId,
@@ -21,11 +22,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { pendingCount } from "@/lib/profileDataTypes";
 import { prefersReducedMotion } from "@/hooks/useImmediateSidebarCollapse";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
+import { OmittedAccounts } from "./BackupWarningDetails";
 import { Disclosure } from "./Disclosure";
 import { ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
+import { AccountRow, DataTypesPanel } from "./RestoreUsers";
 import {
   FILTER_THRESHOLD,
   STATE_ORDER,
@@ -48,10 +52,14 @@ import {
 import {
   SECTION_TITLES,
   chooseItems,
+  chosenItems,
+  chosenProfiles,
   indexItems,
   itemKey,
   neverRestoredSettings,
+  profileKey,
   restorePlan,
+  toggleKeys,
   unchooseItems,
   type SelectionKeys,
 } from "./restoreModel";
@@ -159,6 +167,14 @@ function SectionIndex({
   );
 }
 
+/** Joined ids of an account's chosen profiles, the cheap prop AccountRow compares. */
+function chosenProfileIds(item: RestoreItem, selection: SelectionKeys): string {
+  return (item.account?.profiles ?? [])
+    .filter((profile) => selection.has(profileKey(item.id, profile.id)))
+    .map((profile) => profile.id)
+    .join("\u0000");
+}
+
 interface RowsProps {
   sectionId: RestoreSectionId;
   items: readonly RestoreItem[];
@@ -172,16 +188,26 @@ interface RowsProps {
 function Rows({ sectionId, items, selection, onToggle, names, withLibrary = false }: RowsProps) {
   return (
     <ul>
-      {items.map((item) => (
-        <ItemRow
-          key={item.id}
-          sectionId={sectionId}
-          item={item}
-          checked={selection.has(itemKey(sectionId, item.id))}
-          onToggle={onToggle}
-          secondary={rowSecondary(item, names, withLibrary)}
-        />
-      ))}
+      {items.map((item) =>
+        item.account ? (
+          <AccountRow
+            key={item.id}
+            item={item}
+            checked={selection.has(itemKey(sectionId, item.id))}
+            chosenProfiles={chosenProfileIds(item, selection)}
+            onToggle={onToggle}
+          />
+        ) : (
+          <ItemRow
+            key={item.id}
+            sectionId={sectionId}
+            item={item}
+            checked={selection.has(itemKey(sectionId, item.id))}
+            onToggle={onToggle}
+            secondary={rowSecondary(item, names, withLibrary)}
+          />
+        ),
+      )}
     </ul>
   );
 }
@@ -306,13 +332,16 @@ function SectionBlock({
   selection,
   onToggle,
   names,
+  top,
   bottom,
 }: {
   section: RestoreSection;
   selection: SelectionKeys;
   onToggle: ToggleKeys;
   names: LibraryNames;
-  /** Shown under the groups: the never-restored note. */
+  /** Shown above the rows: the data types panel. */
+  top?: ReactNode;
+  /** Shown under the groups: omitted accounts, the never-restored note. */
   bottom?: ReactNode;
 }) {
   const filterId = useId();
@@ -339,7 +368,7 @@ function SectionBlock({
   const rows = { sectionId: section.id, selection, onToggle, names };
 
   // "All" chooses what's shown: every restorable item, or those the filter left.
-  const allKeys = groups.restorable.map((item) => itemKey(section.id, item.id));
+  const allKeys = groups.restorable.flatMap((item) => toggleKeys(section.id, item));
   const chosenShown = groups.restorable.filter((item) =>
     selection.has(itemKey(section.id, item.id)),
   ).length;
@@ -389,6 +418,7 @@ function SectionBlock({
           ) : null}
           {expanded ? (
             <div id={sameListId}>
+              {top}
               {filterable ? (
                 <div className="py-2">
                   <Label htmlFor={filterId} className="sr-only">
@@ -399,7 +429,11 @@ function SectionBlock({
                     type="search"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Filter by name or library"
+                    placeholder={
+                      section.id === "users"
+                        ? "Filter by name, username, or email"
+                        : "Filter by name or library"
+                    }
                     className="border-muted-foreground/25 h-8 max-w-sm text-sm"
                   />
                 </div>
@@ -444,16 +478,25 @@ export interface RestoreChooseProps {
   set: RestoreSet;
   selection: SelectionKeys;
   onSelectionChange: (selection: Set<string>) => void;
+  dataTypes: ReadonlySet<RestoreDataTypeId>;
+  onDataTypesChange: (dataTypes: Set<RestoreDataTypeId>) => void;
   onReview: () => void;
 }
 
 /** Step 1: what differs, and what to bring back, with the plan so far beside it. */
-export function RestoreChoose({ set, selection, onSelectionChange, onReview }: RestoreChooseProps) {
+export function RestoreChoose({
+  set,
+  selection,
+  onSelectionChange,
+  dataTypes,
+  onDataTypesChange,
+  onReview,
+}: RestoreChooseProps) {
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
-  const plan = restorePlan(set, selection);
+  const plan = restorePlan(set, selection, dataTypes);
 
   // Rows get one toggle for the page's life, so a click re-renders only the
   // rows whose checkbox changed. It reads the latest selection from a ref.
@@ -473,6 +516,16 @@ export function RestoreChoose({ set, selection, onSelectionChange, onReview }: R
     [index, onSelectionChange],
   );
 
+  const chosenAccounts = chosenItems(set, selection).filter((entry) => entry.section === "users");
+  const dataCounts = new Map<RestoreDataTypeId, number>();
+  for (const entry of chosenAccounts) {
+    for (const profile of chosenProfiles(entry.item, selection)) {
+      for (const data of profile.data_types) {
+        dataCounts.set(data.id, (dataCounts.get(data.id) ?? 0) + pendingCount(data));
+      }
+    }
+  }
+
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <div className="min-w-0 space-y-5">
@@ -482,6 +535,15 @@ export function RestoreChoose({ set, selection, onSelectionChange, onReview }: R
             This backup was taken with a different SECRET_KEY. Encrypted settings and plugin
             settings in it can&apos;t be restored here.
           </SettingFieldStatus>
+        ) : null}
+        {set.omitted.length > 0 ? (
+          <div>
+            <SettingFieldStatus tone="warn">
+              {set.omitted.length === 1
+                ? "1 account isn't in this backup's restore set, so it can't be restored here. The Users section says why."
+                : `${set.omitted.length} accounts aren't in this backup's restore set, so they can't be restored here. The Users section says why.`}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {set.missing_blobs.length > 0 ? (
           <div>
@@ -499,8 +561,21 @@ export function RestoreChoose({ set, selection, onSelectionChange, onReview }: R
             selection={selection}
             onToggle={onToggle}
             names={names}
+            top={
+              section.id === "users" && chosenAccounts.length > 0 ? (
+                <DataTypesPanel
+                  dataTypes={dataTypes}
+                  onChange={onDataTypesChange}
+                  counts={dataCounts}
+                />
+              ) : undefined
+            }
             bottom={
-              section.id === "settings" ? (
+              section.id === "users" && set.omitted.length > 0 ? (
+                <div className="border-border/60 border-t py-2">
+                  <OmittedAccounts omitted={set.omitted} context="restore" />
+                </div>
+              ) : section.id === "settings" ? (
                 <NeverRestored keys={set.never_restored_settings} />
               ) : undefined
             }

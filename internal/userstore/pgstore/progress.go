@@ -1342,14 +1342,10 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 // LockHistoryCutoff serializes a profile's history imports, resets, and
 // cutoff-aware progress writes across API nodes. Read the cutoff in a separate
 // statement after acquiring this lock under READ COMMITTED, so a concurrent
-// reset's committed cutoff is visible. Hash collisions only serialize unrelated
-// profiles.
+// reset's committed cutoff is visible. It is userstore.LockImportedHistory,
+// which a restore's merge of plays and hides takes too.
 func LockHistoryCutoff(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::integer, hashtext('imported-history:' || $2))`, userID, profileID)
-	if err != nil {
-		return fmt.Errorf("lock imported history: %w", err)
-	}
-	return nil
+	return userstore.LockImportedHistory(ctx, tx, userID, profileID)
 }
 
 // historyListSelect lists plays from the history-listing cutoff, so a mark

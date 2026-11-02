@@ -109,6 +109,9 @@ type TitleKey struct {
 	TMDBID    int
 }
 
+// Key returns the snapshot's TMDB identity.
+func (s Snapshot) Key() TitleKey { return TitleKey{MediaType: s.MediaType, TMDBID: s.TMDBID} }
+
 // Snapshot is what a TMDB detail says about a title: its current IDs and the
 // fields a watchlist page displays.
 type Snapshot struct {

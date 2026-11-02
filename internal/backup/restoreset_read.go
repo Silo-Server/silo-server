@@ -54,6 +54,7 @@ type RestoreSet struct {
 	Settings    SettingsDocument
 	Libraries   LibrariesDocument
 	Plugins     []PluginDocument
+	Users       []UserDocument
 	Collections CollectionsDocument
 	// HomeSections is the home_sections section (version 3 and later).
 	HomeSections HomeSectionsDocument
@@ -279,6 +280,9 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 	if !validServerID(index.ServerID) {
 		return fmt.Errorf("%s: server id %q is not valid", restoreSetIndexName, index.ServerID)
 	}
+	if err := validateOmitted(index.Omitted); err != nil {
+		return fmt.Errorf("%s: %w", restoreSetIndexName, err)
+	}
 	p.index = &index
 	p.rs.Index = index
 	p.files = map[string]FileDigest{}
@@ -328,6 +332,19 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 					p.ladderDirs[dir] = spec
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func validateOmitted(list []OmittedItem) error {
+	if len(list) > maxRestoreSetEntries {
+		return errors.New("too many omitted items")
+	}
+	for _, o := range list {
+		if !validSectionID(o.Section) || len(o.ID) > 128 || len(o.Label) > maxAccountField || len(o.Reason) > 64 || len(o.Message) > maxOmittedText ||
+			len(o.Cause) > 256 || len(o.Error) > maxOmittedText {
+			return errors.New("an omitted item is not valid")
 		}
 	}
 	return nil
@@ -472,6 +489,8 @@ func (p *restoreSetParser) decodeSection(si SectionIndex) (int, error) {
 		return len(p.rs.HomeSections.Sections), validateHomeSections(p.rs.HomeSections)
 	case SectionPlugins:
 		return p.decodePlugins(spec)
+	case SectionUsers:
+		return p.decodeUsers(spec)
 	}
 	return 0, fmt.Errorf("no reader for section %q", si.ID)
 }

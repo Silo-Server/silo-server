@@ -39,6 +39,7 @@ type PreviewItem struct {
 	Plugin          *PreviewPlugin      `json:"plugin,omitempty"`
 	Library         *PreviewLibrary     `json:"library,omitempty"`
 	Collection      *PreviewCollected   `json:"collection,omitempty"`
+	Account         *PreviewAccount     `json:"account,omitempty"`
 	HomeSection     *PreviewHomeSection `json:"home_section,omitempty"`
 }
 
@@ -730,6 +731,8 @@ type RestorePreview struct {
 	SameServer    bool      `json:"same_server"`
 	KeyMatches    bool      `json:"key_matches"`
 	MissingBlobs  []string  `json:"missing_blobs"`
+	// Omitted lists items the backup could not carry.
+	Omitted []OmittedItem `json:"omitted"`
 	// NeverRestoredSettings are the server-specific keys and prefixes.
 	NeverRestoredSettings []string         `json:"never_restored_settings"`
 	Libraries             []LibraryMapping `json:"library_map"`
@@ -752,6 +755,7 @@ func (s *Service) preview(ctx context.Context, src restoreSource) (*RestorePrevi
 	out := &RestorePreview{BackupID: src.backupID, Digest: rs.Digest, FormatVersion: rs.Index.Version, ServerID: rs.Index.ServerID,
 		ServerName: rs.Index.ServerName, SiloVersion: rs.Index.SiloVersion, CreatedAt: rs.Index.CreatedAt,
 		SameServer: rs.Index.ServerID == serverID, KeyMatches: p.keyMatches, MissingBlobs: append([]string{}, rs.MissingBlobs...),
+		Omitted:               append([]OmittedItem{}, rs.Index.Omitted...),
 		NeverRestoredSettings: ServerSpecificSettings(),
 		Libraries:             []LibraryMapping{}, Sections: []PreviewSection{}}
 	libraries, err := p.planLibraries(ctx)
@@ -794,6 +798,14 @@ func (s *Service) preview(ctx context.Context, src restoreSource) (*RestorePrevi
 				return nil, err
 			}
 			section.Items = append(section.Items, settingsPageItems(plans)...)
+		case SectionUsers:
+			plans, err := s.previewUsers(ctx, rs, serverID, libMap)
+			if err != nil {
+				return nil, err
+			}
+			for _, plan := range plans {
+				section.Items = append(section.Items, plan.item)
+			}
 		case SectionCollections:
 			items, err := p.planCollectionsSection(ctx, libMap, restorable)
 			if err != nil {

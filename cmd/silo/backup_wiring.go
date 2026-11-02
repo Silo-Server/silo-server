@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,18 +30,29 @@ func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *
 		log.Fatalf("backup key check value: %v", err)
 	}
 	return backup.New(backup.Options{
-		Pool:             pool,
-		DatabaseURL:      bc.DatabaseURL,
-		Settings:         settings,
-		Stores:           deps.Blobs,
-		Destination:      backup.NewStoreDestination(deps.Blobs.Operational),
-		Locker:           backup.PostgresLocker{Pool: pool},
-		Status:           backup.PostgresStatus{Pool: pool},
-		ServerID:         serveridentity.New(settings).ServerID,
-		KeyCheck:         keyCheck,
-		Cipher:           deps.SecretCipher,
-		UserStoreBackend: func() string { return deps.CurrentConfig().UserDB.Backend },
+		Pool:                pool,
+		DatabaseURL:         bc.DatabaseURL,
+		Settings:            settings,
+		Stores:              deps.Blobs,
+		Destination:         backup.NewStoreDestination(deps.Blobs.Operational),
+		Locker:              backup.PostgresLocker{Pool: pool},
+		Status:              backup.PostgresStatus{Pool: pool},
+		ServerID:            serveridentity.New(settings).ServerID,
+		KeyCheck:            keyCheck,
+		Cipher:              deps.SecretCipher,
+		UserStoreBackend:    func() string { return deps.CurrentConfig().UserDB.Backend },
+		AllowUnratedContent: config.NewUnratedContentPolicy(settings).AllowUnratedContent,
 	})
+}
+
+// newProfileTransfer serves profile export and import, which read and write
+// the PostgreSQL user store; nil on the SQLite bridge backend, so the
+// capability reports not_configured there.
+func newProfileTransfer(pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, cfg *config.Config) *backup.ProfileTransfer {
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.UserDB.Backend), "sqlite") {
+		return nil
+	}
+	return backup.NewProfileTransfer(pool, serveridentity.New(settings).ServerID)
 }
 
 // backupRestoreExecutor runs backup_restore admin jobs on the backup

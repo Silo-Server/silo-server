@@ -641,6 +641,35 @@ func groupPolicyForUser(ctx context.Context, db interface {
 	return policy, nil
 }
 
+// GroupPolicyForUser reads a user's group policy through db, a pool or a
+// transaction; nil when the account has no group.
+func GroupPolicyForUser(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, userID int) (*GroupPolicy, error) {
+	return groupPolicyForUser(ctx, db, userID)
+}
+
+// GroupPolicyByName reads the policy and name of the group called name,
+// matched as the name's unique constraint does; nil when there is none. A
+// restore joins a restored account to its backup group's namesake here.
+func GroupPolicyByName(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, name string) (*GroupPolicy, error) {
+	policy, err := scanGroupPolicy(db.QueryRow(ctx, `
+		SELECT g.id, g.library_ids, g.max_playback_quality, g.download_allowed,
+			g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
+			g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
+			g.max_profiles, g.allowed_permissions, g.requests_allowed
+		FROM access_groups g WHERE g.name = $1`, name))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading access group %q: %w", name, err)
+	}
+	return policy, nil
+}
+
 func isGroupDuplicate(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

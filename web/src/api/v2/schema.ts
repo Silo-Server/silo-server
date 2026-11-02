@@ -6854,6 +6854,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/capabilities/profile-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover profile export and import: the document format and version, the import size limit, and the data types carried. */
+    get: operations["getProfileExportCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/capabilities/ratings": {
     parameters: {
       query?: never;
@@ -10421,6 +10438,40 @@ export interface paths {
     get: operations["getPolicyCapability"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profile/export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields. */
+    get: operations["exportProfile"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profile/import": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Merge a silo-profile-export document into the acting profile: newer progress and history win, ratings, favorites, and dismissals are added where the profile has none, collections gain missing items, and preferences are overwritten. Nothing is deleted, and importing the same document again changes nothing. The target is always the acting profile; a document carrying account or access fields is refused, and items the profile cannot see are left out. A PIN-protected profile needs its PIN-verified session. */
+    post: operations["importProfile"];
     delete?: never;
     options?: never;
     head?: never;
@@ -14168,11 +14219,13 @@ export interface components {
       location: string;
       missing_blobs: components["schemas"]["AdminBackupMissingBlob"][];
       objects: components["schemas"]["AdminBackupObject"][];
+      /** @description Items the restore set left out; the dump still holds them */
+      restore_set_omitted: components["schemas"]["AdminBackupOmitted"][];
       silo_version?: string;
       /** Format: int64 */
       size_bytes: number;
       /**
-       * @description complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied. in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours
+       * @description complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied, or the restore set left items out (restore_set_omitted). in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours
        * @enum {string}
        */
       status: "complete" | "complete_with_warnings" | "in_progress" | "incomplete";
@@ -14205,7 +14258,7 @@ export interface components {
       download: boolean;
       /** @description Opaque revision of this document */
       revision: string;
-      /** @description Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, collections and uploaded artwork, and home and library page sections */
+      /** @description Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, accounts and their profiles' data, collections and uploaded artwork */
       selective_restore: boolean;
       /**
        * @description Support and configuration state, not health
@@ -14327,6 +14380,59 @@ export interface components {
       /** Format: int64 */
       size_bytes: number;
     };
+    AdminBackupOmitted: {
+      /** @description What failed, stable across backups so items can be grouped: the part being read (a profile data type such as notifications, or profiles or items) and, when its error names one, the step that failed in it, such as notifications: reading notification preferences. Absent for too_large and for backups taken before restore set format 3 */
+      cause?: string;
+      /** @description The underlying error, without ids */
+      error?: string;
+      /** @description The item's id in its section, such as the account id */
+      id: string;
+      label: string;
+      message: string;
+      /**
+       * @description too_large: its document exceeds what a restore set may hold; export_failed: reading it failed
+       * @enum {string}
+       */
+      reason: "too_large" | "export_failed";
+      /** @enum {string} */
+      section: "users";
+    };
+    AdminBackupRestoreAccount: {
+      /** @description An administrator account: restoring it creates an administrator here */
+      admin: boolean;
+      email: string;
+      /** @description The account's access group in the backup; a new account joins the group of that name here */
+      group?: string;
+      /**
+       * Format: int64
+       * @description Library entries of the account's own library list with no library here; they are dropped, never widened
+       */
+      libraries_left_out: number;
+      /**
+       * @description The matched account here
+       * @example 1
+       */
+      local_id?: string;
+      local_username?: string;
+      /**
+       * @description account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it
+       * @enum {string}
+       */
+      match: "account_id" | "restored" | "username_email" | "new";
+      /** @description For a new account, what this server's policy would grant beyond the backup's; any difference makes it unselectable */
+      policy_differences: components["schemas"]["AdminBackupRestorePolicyDifference"][];
+      /**
+       * Format: int64
+       * @description How many new profiles the account can take here; a restore that chooses more leaves the rest out
+       */
+      profile_room: number;
+      profiles: components["schemas"]["AdminBackupRestoreProfile"][];
+      /** @enum {string} */
+      role: "admin" | "user";
+      /** @description What a restore selection names for this account: the local account id, or new */
+      target: string;
+      username: string;
+    };
     AdminBackupRestoreBody: {
       /** @description The digest the preview returned */
       digest: string;
@@ -14366,6 +14472,27 @@ export interface components {
       /** Format: int64 */
       unchanged: number;
     };
+    AdminBackupRestoreDataType: {
+      /**
+       * Format: int64
+       * @description Entries the backup holds
+       */
+      count: number;
+      /** @enum {string} */
+      id:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /**
+       * Format: int64
+       * @description For a profile matched here: how many entries restoring this data type would add or change, by the same merge rules a restore applies. Items are matched by content id only, so an item a restore would match by provider ids counts as not here. Absent for a profile a restore creates
+       */
+      pending?: number;
+    };
     AdminBackupRestoreHomeSection: {
       /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, configuration, and N collection items */
       changes?: string[];
@@ -14381,6 +14508,7 @@ export interface components {
       section_type: string;
     };
     AdminBackupRestoreItem: {
+      account?: components["schemas"]["AdminBackupRestoreAccount"];
       collection?: components["schemas"]["AdminBackupRestoreCollection"];
       /** @description A settings page whose differing settings connect to an outside service */
       external_service: boolean;
@@ -14396,7 +14524,8 @@ export interface components {
         | "template_collection"
         | "item_artwork"
         | "branding"
-        | "home_section";
+        | "home_section"
+        | "account";
       label: string;
       library?: components["schemas"]["AdminBackupRestoreLibrary"];
       /** @description What restoring the item does or why it cannot be chosen, for display */
@@ -14419,6 +14548,13 @@ export interface components {
         | "file_missing"
         | "not_in_backup"
         | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
         | "template_not_available"
         | "collection_not_mapped";
       /** @description Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request */
@@ -14457,6 +14593,75 @@ export interface components {
       installed_version?: string;
       version: string;
     };
+    AdminBackupRestorePolicyDifference: {
+      /** @description The value in the backup, as display text */
+      backup: string;
+      /** @enum {string} */
+      field:
+        | "library_ids"
+        | "max_playback_quality"
+        | "max_streams"
+        | "max_transcodes"
+        | "max_remote_stream_bitrate_kbps"
+        | "max_local_stream_bitrate_kbps"
+        | "max_profiles"
+        | "download_allowed"
+        | "download_transcode_allowed"
+        | "transcode_allowed"
+        | "audio_transcode_allowed"
+        | "requests_allowed"
+        | "permissions";
+      /** @description The value this server would give, as display text */
+      here: string;
+    };
+    AdminBackupRestoreProfile: {
+      /** @description The data the profile carries, in restore order */
+      data_types: components["schemas"]["AdminBackupRestoreDataType"][];
+      has_pin: boolean;
+      /** @description The id to choose this profile by in a restore request */
+      id: string;
+      is_primary: boolean;
+      /**
+       * Format: int64
+       * @description Allowed libraries with no library here; dropped, never widened
+       */
+      libraries_left_out: number;
+      local_id?: string;
+      /** @enum {string} */
+      match: "profile_id" | "restored" | "name" | "new";
+      message?: string;
+      name: string;
+      /** @description A restricted profile with none of its allowed libraries here: restored with no library access */
+      no_library_access: boolean;
+      /** @enum {string} */
+      reason?: "same" | "ambiguous_profile" | "profile_limit";
+      /** @description Library restrictions are on */
+      restricted: boolean;
+      selectable: boolean;
+      /**
+       * @description on_this_server: matched here, and restoring would change nothing in the data the backup has for it (data_types[].pending all 0); differs: matched, with pending changes
+       * @enum {string}
+       */
+      status: "on_this_server" | "not_on_this_server" | "differs" | "ambiguous";
+      /** @description What a restore selection names for this profile: the local profile id, or new */
+      target: string;
+    };
+    AdminBackupRestoreProfileSelection: {
+      /** @description Data types to merge; none restores or keeps the profile without data */
+      data_types?: (
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications"
+      )[];
+      /** @description The profile's id in the preview */
+      profile: string;
+      /** @description The target the preview showed: the local profile id, or new */
+      target: string;
+    };
     AdminBackupRestoreReport: {
       /** @description The backup restored from */
       backup_id?: string;
@@ -14480,7 +14685,44 @@ export interface components {
       items: components["schemas"]["AdminBackupRestoreReportItem"][];
       library_map: components["schemas"]["AdminBackupLibraryMapping"][];
     };
+    AdminBackupRestoreReportAccount: {
+      created: boolean;
+      /** @description Titles of items a restored profile's access here hides (its libraries, content rating, or advisory limits); their entries were left out */
+      hidden: string[];
+      /**
+       * @description The account here, created or matched
+       * @example 1
+       */
+      local_id?: string;
+      profiles: components["schemas"]["AdminBackupRestoreReportProfile"][];
+      /** @description Titles of items the account's data names that this server's catalog does not hold; their entries were left out */
+      unmatched: string[];
+    };
+    AdminBackupRestoreReportData: {
+      /** Format: int64 */
+      added: number;
+      /**
+       * Format: int64
+       * @description Entries left out: items not in this catalog, or references with nothing to map to
+       */
+      left_out: number;
+      notes: string[];
+      /** @enum {string} */
+      type:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /** Format: int64 */
+      unchanged: number;
+      /** Format: int64 */
+      updated: number;
+    };
     AdminBackupRestoreReportItem: {
+      account?: components["schemas"]["AdminBackupRestoreReportAccount"];
       /** @description Why a failed item failed */
       error?: string;
       id: string;
@@ -14493,7 +14735,8 @@ export interface components {
         | "template_collection"
         | "item_artwork"
         | "branding"
-        | "home_section";
+        | "home_section"
+        | "account";
       label: string;
       message?: string;
       missing_blobs: string[];
@@ -14518,12 +14761,54 @@ export interface components {
         | "file_missing"
         | "not_in_backup"
         | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
         | "template_not_available"
         | "collection_not_mapped";
       restart_keys: string[];
       restart_required: boolean;
       /** @enum {string} */
-      section: "libraries" | "plugins" | "settings" | "collections" | "home_sections";
+      section: "libraries" | "plugins" | "settings" | "collections" | "home_sections" | "users";
+    };
+    AdminBackupRestoreReportProfile: {
+      created: boolean;
+      data: components["schemas"]["AdminBackupRestoreReportData"][];
+      id: string;
+      label: string;
+      local_id?: string;
+      message?: string;
+      notes: string[];
+      /** @enum {string} */
+      outcome: "restored" | "unchanged" | "left_out";
+      /** @enum {string} */
+      reason?:
+        | "same"
+        | "path_in_use"
+        | "folder_missing"
+        | "library_not_restorable"
+        | "library_not_mapped"
+        | "ambiguous_name"
+        | "needs_another_key"
+        | "config_needs_another_key"
+        | "other_version"
+        | "item_not_on_this_server"
+        | "file_missing"
+        | "not_in_backup"
+        | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
+        | "template_not_available"
+        | "collection_not_mapped";
     };
     AdminBackupRestoreSection: {
       /**
@@ -14532,7 +14817,7 @@ export interface components {
        */
       count: number;
       /** @enum {string} */
-      id: "libraries" | "plugins" | "settings" | "collections" | "home_sections";
+      id: "libraries" | "plugins" | "settings" | "collections" | "home_sections" | "users";
       items: components["schemas"]["AdminBackupRestoreItem"][];
     };
     AdminBackupRestoreSelection: {
@@ -14546,6 +14831,8 @@ export interface components {
       plugins?: string[];
       /** @description Settings page ids */
       settings?: string[];
+      /** @description Accounts of the users section, each with the target the preview showed */
+      users?: components["schemas"]["AdminBackupRestoreUserSelection"][];
     };
     AdminBackupRestoreSet: {
       /** @description The backup previewed */
@@ -14565,6 +14852,8 @@ export interface components {
       missing_blobs: string[];
       /** @description Setting keys a restore never writes because they describe this server (its identity, storage, infrastructure, and credentials). An entry ending in . or _ is a key prefix. */
       never_restored_settings: string[];
+      /** @description Items the restore set left out (the dump still holds them), so they are not in any section */
+      omitted: components["schemas"]["AdminBackupOmitted"][];
       same_server: boolean;
       sections: components["schemas"]["AdminBackupRestoreSection"][];
       /** @description The server the backup was taken on */
@@ -14596,6 +14885,14 @@ export interface components {
     AdminBackupRestoreSource: {
       /** @description The backup restored from */
       backup_id?: string;
+    };
+    AdminBackupRestoreUserSelection: {
+      /** @description The account's id in the preview */
+      account: string;
+      /** @description Profiles to restore; none restores the account alone */
+      profiles?: components["schemas"]["AdminBackupRestoreProfileSelection"][];
+      /** @description The target the preview showed: the local account id, or new */
+      target: string;
     };
     AdminBackupStarted: {
       id: string;
@@ -31037,6 +31334,67 @@ export interface components {
        * @example auto
        */
       subtitle_mode?: string;
+    };
+    ProfileExportCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description The data types an export carries, in import order */
+      data_types: string[];
+      /**
+       * @description The document format exports carry and imports accept
+       * @example silo-profile-export
+       */
+      format: string;
+      /**
+       * Format: int64
+       * @description The largest document an import accepts
+       */
+      max_import_bytes: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * Format: int64
+       * @description The newest format version this server writes and reads
+       * @example 1
+       */
+      version: number;
+    };
+    ProfileImportData: {
+      /** Format: int64 */
+      added: number;
+      /**
+       * Format: int64
+       * @description Entries left out: items not in this catalog or that the profile cannot see, or references with nothing to map to
+       */
+      left_out: number;
+      notes: string[];
+      /** @enum {string} */
+      type:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /** Format: int64 */
+      unchanged: number;
+      /** Format: int64 */
+      updated: number;
+    };
+    ProfileImportResult: {
+      data: components["schemas"]["ProfileImportData"][];
+      /** @description Always empty: items the profile may not see are listed in unmatched, so an import cannot reveal what a hidden library holds */
+      hidden: string[];
+      /** @description The export came from this server; library references were kept only then */
+      same_server: boolean;
+      /** @description Titles of items left out: not in this server's catalog, or not available to this profile. The two are not told apart */
+      unmatched: string[];
     };
     ProfilePINCheck: {
       /**
@@ -95729,6 +96087,138 @@ export interface operations {
       };
     };
   };
+  getProfileExportCapability: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileExportCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getRatingsCapability: {
     parameters: {
       query?: never;
@@ -127603,6 +128093,263 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  exportProfile: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Content-Disposition"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  importProfile: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileImportResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

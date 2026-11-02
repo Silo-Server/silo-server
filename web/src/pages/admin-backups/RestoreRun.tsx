@@ -10,11 +10,16 @@ import {
 } from "lucide-react";
 
 import type { AdminBackup, AdminBackupActive } from "@/api/v2/adminBackups";
-import type { RestoreJob, RestoreReportItem } from "@/api/v2/adminBackupRestore";
+import type {
+  RestoreJob,
+  RestoreReportAccount,
+  RestoreReportItem,
+} from "@/api/v2/adminBackupRestore";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatTime } from "@/lib/datetime";
+import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -67,6 +72,9 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
             {detail}
           </p>
         ))}
+        {item.account ? (
+          <AccountReport account={item.account} described={Boolean(item.message)} />
+        ) : null}
       </div>
     </li>
   );
@@ -82,6 +90,84 @@ function ReportList({ label, items }: { label: string; items: readonly RestoreRe
         ))}
       </ul>
     </FieldGroup>
+  );
+}
+
+/** An account's report: whether it was created, each profile, and each data type's counts. */
+function AccountReport({
+  account,
+  described,
+}: {
+  account: RestoreReportAccount;
+  /** The item's own message already says what happened to the account. */
+  described: boolean;
+}) {
+  return (
+    <div className="mt-2 space-y-2">
+      {described ? null : (
+        <p className="text-[13px]">
+          {account.created ? "Created on this server." : "Merged into the account here."}
+        </p>
+      )}
+      {account.profiles.length > 0 ? (
+        <ul className="border-border/60 space-y-2 border-l pl-3">
+          {account.profiles.map((profile) => {
+            const outcome = OUTCOME[profile.outcome];
+            return (
+              <li key={profile.id}>
+                <p className="flex items-center gap-1.5 text-[13px]">
+                  <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
+                  <span className="font-medium">{profile.label}</span>
+                  <span className="text-muted-foreground">
+                    · {profile.created ? "Created" : outcome.label}
+                  </span>
+                </p>
+                {[
+                  profile.outcome === "left_out" && profile.reason
+                    ? REASON_SENTENCES[profile.reason]
+                    : null,
+                  profile.message ?? null,
+                  ...profile.notes,
+                ]
+                  .filter((line): line is string => Boolean(line))
+                  .map((line, position) => (
+                    <p key={position} className="text-muted-foreground text-xs break-words">
+                      {line}
+                    </p>
+                  ))}
+                {profile.data.length > 0 ? (
+                  <ul className="mt-1 space-y-0.5 text-xs">
+                    {profile.data.map((data) => (
+                      <li key={data.type}>
+                        <span>{DATA_TYPE_LABELS[data.type]}:</span>{" "}
+                        <span className="text-muted-foreground tabular-nums">
+                          {dataCountsPhrase(data)}
+                        </span>
+                        {data.notes.map((note, position) => (
+                          <span key={position} className="text-muted-foreground block">
+                            {note}
+                          </span>
+                        ))}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {account.unmatched.length > 0 ? (
+        <p className="text-muted-foreground text-xs break-words">
+          Not in this server&apos;s catalog, so left out: {titleList(account.unmatched)}.
+        </p>
+      ) : null}
+      {account.hidden.length > 0 ? (
+        <p className="text-muted-foreground text-xs break-words">
+          Not restored because this profile can&apos;t see them: {titleList(account.hidden)}.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

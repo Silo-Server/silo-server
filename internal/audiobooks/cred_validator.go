@@ -243,7 +243,7 @@ func (v *SiloCredValidator) ResolveUsername(ctx context.Context, userID, profile
 	}
 	var username string
 	if err := v.Pool.QueryRow(ctx,
-		`SELECT username FROM users WHERE id = $1`, uid,
+		`SELECT COALESCE(username, '') FROM users WHERE id = $1`, uid,
 	).Scan(&username); err == nil {
 		return username
 	}

@@ -102,6 +102,7 @@
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
+./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -744,8 +745,41 @@
 ./internal/backup TestSelectiveRestoreDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestIdentityTwinsRestoreOneToOneDB
+./internal/backup TestLayoutCollectionsMapAcrossServersDB
 ./internal/plugins TestRestoreInstallationDB
 ./internal/adminjob TestBackupRestoreFencingDB
 ./internal/api/handlers TestLibraryRestoredReportsFailedSetupDB
 ./internal/api/handlers TestRestoredLibraryChainNeedsItsProviderLookupDB
 ./internal/api/handlers TestRestoredPluginJoinsChainsOnlyFromItsManifestDB
+
+# Users restore: accounts and profiles restored on another server with every
+# data type, access never loosening, existing accounts unchanged, merge rules,
+# target revalidation, and an idempotent re-run; matching with exactly one
+# candidate and the policy comparison per group branch; every per-user table
+# claimed or excluded; profile export and import scoped to the profile and
+# its libraries and maturity limits; an account the restore set cannot carry
+# is reported; history hides keep -infinity and merge each cutoff; a
+# heartbeat during a progress merge wins; collection rules are remapped and
+# never widened; both import entrypoints take account locks before history
+# locks, as profile deletion does, and create and lock every watchlist title
+# before any watchlist row; provider-id matching reads in the importing
+# transaction, so it finishes on a one-connection pool.
+./internal/backup TestUserRestoreDB
+./internal/backup TestUserRestoreSameServerDB
+./internal/backup TestUserMatchingDB
+./internal/backup TestUserTablesCoveredDB
+./internal/backup TestProfileTransferDB
+./internal/backup TestOmittedAccountIsReportedDB
+./internal/backup TestEmailLessAccountRestoreDB
+./internal/backup TestItemMatchingInATransactionWithOnePoolConnectionDB
+./internal/backup TestPluginInstallationMapDB
+./internal/backup TestMatchedAccountPendingDB
+./internal/backup TestFreshBackupComparesSameDB
+./internal/backup TestProfileImportLockOrderDB
+./internal/backup TestRestoreLockOrderDB
+./internal/backup TestProfileImportAndDeleteLockOrderDB
+./internal/watchlist TestPrepareCreatesAndLocksTitlesDB
+./internal/watchstate TestHistoryHideMergeDB
+./internal/watchstate TestProgressMergeKeepsHeartbeatDB
+./internal/watchstate TestPluginSourcedPlaysDB
+./internal/usercollections TestCollectionImportRemapsLibrariesDB

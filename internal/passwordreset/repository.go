@@ -228,7 +228,7 @@ func (r *Repository) Withdraw(ctx context.Context, userID int, tokenHash string)
 // Lookup resolves a usable link to its account.
 func (r *Repository) Lookup(ctx context.Context, tokenHash string) (*Link, error) {
 	var link Link
-	err := r.pool.QueryRow(ctx, `SELECT u.id, u.username, t.expires_at`+usableLink("now()"), tokenHash).
+	err := r.pool.QueryRow(ctx, `SELECT u.id, COALESCE(u.username, ''), t.expires_at`+usableLink("now()"), tokenHash).
 		Scan(&link.UserID, &link.Username, &link.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

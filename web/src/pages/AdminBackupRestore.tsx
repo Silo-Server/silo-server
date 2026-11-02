@@ -4,7 +4,11 @@ import { Link, Navigate, useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { jobIdFromLocation, type RestoreJob } from "@/api/v2/adminBackupRestore";
+import {
+  jobIdFromLocation,
+  type RestoreDataTypeId,
+  type RestoreJob,
+} from "@/api/v2/adminBackupRestore";
 import { V2ProblemError } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -31,6 +35,7 @@ import {
   sourceServerName,
 } from "@/pages/admin-backups/backupPresentation";
 import {
+  DEFAULT_DATA_TYPES,
   entrySelectable,
   indexItems,
   selectionRequest,
@@ -142,6 +147,7 @@ export default function AdminBackupRestore() {
   const cancel = useCancelRestore();
   const [reviewing, setReviewing] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [dataTypes, setDataTypes] = useState<ReadonlySet<RestoreDataTypeId>>(DEFAULT_DATA_TYPES);
   const [refusal, setRefusal] = useState<RestoreRefusal | null>(null);
 
   const set = preview.data;
@@ -187,7 +193,7 @@ export default function AdminBackupRestore() {
     if (!set) return;
     setRefusal(null);
     start.mutate(
-      { digest: set.digest, selection: selectionRequest(set, selection) },
+      { digest: set.digest, selection: selectionRequest(set, selection, dataTypes) },
       {
         onSuccess: (started) => {
           setReviewing(false);
@@ -263,6 +269,7 @@ export default function AdminBackupRestore() {
       <RestoreReview
         set={set}
         selection={selection}
+        dataTypes={dataTypes}
         onBack={leaveReview}
         onRestore={restore}
         pending={start.isPending}
@@ -293,6 +300,8 @@ export default function AdminBackupRestore() {
           set={set}
           selection={selection}
           onSelectionChange={setChosen}
+          dataTypes={dataTypes}
+          onDataTypesChange={setDataTypes}
           onReview={() => setReviewing(true)}
         />
       </div>

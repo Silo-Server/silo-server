@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 )
 
 // mutate changes one thing about a valid restore set.
@@ -52,6 +54,8 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 		{ID: "s2", Scope: "library", LibraryID: &library, SectionType: "collection", Title: "Picks", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"m1"}`), Enabled: true,
 			Collection: &SectionCollectionEntry{CollectionEntry: CollectionEntry{ID: "m1", LibraryID: 3, Libraries: []CollectionLib{{LibraryID: 3}}, Title: "Picks", Items: []string{"m1"}}, ManagementKey: "s2"}},
 	}})
+	avatar := "profile-avatars/5/p1/original.webp"
+	users := mustJSON(testUserDocument(5, "upload:"+avatar))
 	digest := func(path string, data []byte) FileDigest {
 		sum := sha256.Sum256(data)
 		return FileDigest{Path: path, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
@@ -61,6 +65,7 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 			{ID: SectionLibraries, Count: 1, Files: []FileDigest{digest("libraries.json", libraries)}, Blobs: []string{"library-posters/3.jpg"}},
 			{ID: SectionPlugins, Count: 1, Files: []FileDigest{digest("plugins/tmdb/plugin.json", plugin), archiveDigest}, Blobs: []string{}},
 			{ID: SectionSettings, Count: 1, Files: []FileDigest{digest("settings.json", settings)}, Blobs: []string{}},
+			{ID: SectionUsers, Count: 1, Files: []FileDigest{digest("users/5.json", users)}, Blobs: []string{avatar}},
 			{ID: SectionCollections, Count: 2, Files: []FileDigest{digest("collections.json", collections)}, Blobs: []string{original}},
 			{ID: SectionHomeSections, Count: 2, Files: []FileDigest{digest(homeSectionsDocumentName, homeSections)}, Blobs: []string{}},
 		}}
@@ -69,13 +74,40 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 		{name: "plugins/tmdb/plugin.json", data: plugin},
 		{name: "plugins/tmdb/archive.bin", data: archive},
 		{name: "settings.json", data: settings},
+		{name: "users/5.json", data: users},
 		{name: "collections.json", data: collections},
 		{name: homeSectionsDocumentName, data: homeSections},
+		{name: "blobs/" + avatar, data: []byte("avatar")},
+		{name: "blobs/profile-avatars/5/p1/w256.webp", data: []byte("avatar small")},
 		{name: "blobs/library-posters/3.jpg", data: []byte("poster")},
 		{name: "blobs/" + original, data: []byte("original")},
 		{name: "blobs/collection-images/c1/poster/w300.abcd.jpg", data: []byte("variant")},
 	}
 	return index, entries
+}
+
+// testUserDocument is one account with one profile that has an avatar and
+// a rating.
+func testUserDocument(id int, avatar string) UserDocument {
+	return UserDocument{
+		Account: AccountEntry{ID: id, Username: "alice", Email: "alice@example.test", Role: "user", Permissions: []string{}},
+		Profiles: []ProfileEntry{{ID: "p1", Name: "Main", Avatar: avatar, IsPrimary: true, AllowedLibraryIDs: []int{},
+			Data: map[string]json.RawMessage{"ratings": json.RawMessage(`{"ratings":[{"item":"m1","rating":4,"rated_at":"2026-01-01T00:00:00Z"}]}`)}}},
+		Items: []ItemRef{{ContentID: "m1", Kind: "movie", Title: "One"}},
+	}
+}
+
+// userCase rewrites users/5.json.
+func userCase(fn func(*UserDocument)) func(*RestoreSetIndex, *[]testEntry) {
+	return func(_ *RestoreSetIndex, entries *[]testEntry) {
+		for i := range *entries {
+			if (*entries)[i].name == "users/5.json" {
+				doc := testUserDocument(5, "upload:profile-avatars/5/p1/original.webp")
+				fn(&doc)
+				(*entries)[i].data = mustJSON(doc)
+			}
+		}
+	}
 }
 
 func mustJSON(v any) []byte {
@@ -145,12 +177,15 @@ func TestReadRestoreSetAcceptsAValidArchive(t *testing.T) {
 		t.Fatal("digest is not the archive's SHA-256")
 	}
 	if len(rs.Plugins) != 1 || len(rs.Libraries.Libraries) != 1 || len(rs.Collections.Collections) != 1 || len(rs.Settings.Settings) != 1 || len(rs.Collections.Branding) != 1 ||
-		len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
+		len(rs.Users) != 1 || len(rs.Users[0].Profiles) != 1 || len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
 		rs.HomeSections.Sections[1].Collection == nil {
 		t.Fatalf("sections not decoded: %+v", rs)
 	}
 	if family := rs.blobFamily("collection-images/c1/poster/original.abcd.jpg"); len(family) != 2 {
 		t.Fatalf("artwork variants not kept with their original: %v", family)
+	}
+	if family := rs.blobFamily("profile-avatars/5/p1/original.webp"); len(family) != 2 {
+		t.Fatalf("avatar variants not kept with their original: %v", family)
 	}
 	if archive, err := rs.pluginArchive("tmdb"); err != nil || string(archive) != "PK-not-really-a-zip" {
 		t.Fatalf("plugin archive not extracted: %q %v", archive, err)
@@ -251,6 +286,35 @@ func refuseAll(t *testing.T, cases map[string]func(*RestoreSetIndex, *[]testEntr
 			}
 		})
 	}
+}
+
+// TestReadRestoreSetRefusesHostileUserDocuments: the users section carries
+// password and PIN hashes and access fields, so its documents get the same
+// checks, and a version 1 set may not hold it at all.
+func TestReadRestoreSetRefusesHostileUserDocuments(t *testing.T) {
+	replace := func(name string, fn func(*testEntry)) func(*RestoreSetIndex, *[]testEntry) {
+		return func(_ *RestoreSetIndex, entries *[]testEntry) {
+			for i := range *entries {
+				if (*entries)[i].name == name {
+					fn(&(*entries)[i])
+				}
+			}
+		}
+	}
+	refuseAll(t, map[string]func(*RestoreSetIndex, *[]testEntry){
+		"users in a version 1 set": func(i *RestoreSetIndex, _ *[]testEntry) { i.Version = 1 },
+		"user document of another account": replace("users/5.json", func(e *testEntry) {
+			e.data = mustJSON(testUserDocument(6, "upload:profile-avatars/5/p1/original.webp"))
+		}),
+		"an owner flag in a user document": replace("users/5.json", func(e *testEntry) {
+			e.data = bytes.Replace(e.data, []byte(`"role":"user"`), []byte(`"role":"user","is_owner":true`), 1)
+		}),
+		"an unknown role":            userCase(func(d *UserDocument) { d.Account.Role = "owner" }),
+		"unknown profile data":       userCase(func(d *UserDocument) { d.Profiles[0].Data["passwords"] = json.RawMessage(`{}`) }),
+		"repeated profile id":        userCase(func(d *UserDocument) { d.Profiles = append(d.Profiles, d.Profiles[0]) }),
+		"avatar not listed":          userCase(func(d *UserDocument) { d.Profiles[0].Avatar = "upload:profile-avatars/5/p9/original.webp" }),
+		"avatar outside the avatars": userCase(func(d *UserDocument) { d.Profiles[0].Avatar = "upload:library-posters/3.jpg" }),
+	})
 }
 
 // brandingCase puts one branding entry, its blob listed and present, into an
@@ -357,8 +421,9 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 			dropSection(i, e, SectionHomeSections)
 			dropTemplates(i, e)
 		}, true},
-		{"version 1 without them either", 1, func(i *RestoreSetIndex, e *[]testEntry) {
+		{"version 1 without users either", 1, func(i *RestoreSetIndex, e *[]testEntry) {
 			dropSection(i, e, SectionHomeSections)
+			dropSection(i, e, SectionUsers)
 			dropTemplates(i, e)
 		}, true},
 		{"version 2 with home sections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropTemplates(i, e) }, false},
@@ -400,5 +465,35 @@ func TestReadRestoreSetReportsMissingBlobs(t *testing.T) {
 	}
 	if len(rs.MissingBlobs) != 1 || rs.MissingBlobs[0] != "library-posters/3.jpg" {
 		t.Fatalf("missing = %v", rs.MissingBlobs)
+	}
+}
+
+// TestPendingDecodesFollowTheComparison: documents decoded ahead are handed
+// over in the comparison's order, those of skipped profiles are dropped
+// without stalling a single worker, a passed or undecodable-ahead document
+// falls back to Pending, and a decode error reaches the caller.
+func TestPendingDecodesFollowTheComparison(t *testing.T) {
+	good := json.RawMessage(`{"progress":[{"item":"mv-1","updated_at":"2025-01-01T00:00:00Z"}]}`)
+	bad := json.RawMessage(`{"progress":[{"item":"mv-1"}]}`)
+	profile := func(id string, history json.RawMessage) ProfileEntry {
+		return ProfileEntry{ID: id, Data: map[string]json.RawMessage{userdata.WatchHistory: history, userdata.Ratings: json.RawMessage(`[]`)}}
+	}
+	docs := []UserDocument{
+		{Profiles: []ProfileEntry{profile("a", good), profile("b", bad)}},
+		{Profiles: []ProfileEntry{profile("c", good), profile("d", bad)}},
+	}
+	d := startPendingDecodes(docs, 1)
+	defer d.stop()
+	if r, ok := d.take(&docs[1].Profiles[0], userdata.WatchHistory); !ok || r.err != nil || r.compare == nil {
+		t.Fatalf("c: compare %v, err %v, ok %v; want its decoded document", r.compare != nil, r.err, ok)
+	}
+	if _, ok := d.take(&docs[0].Profiles[0], userdata.WatchHistory); ok {
+		t.Fatal("a was passed; want a fallback to Pending")
+	}
+	if _, ok := d.take(&docs[1].Profiles[1], userdata.Ratings); ok {
+		t.Fatal("ratings are not decoded ahead; want a fallback to Pending")
+	}
+	if r, ok := d.take(&docs[1].Profiles[1], userdata.WatchHistory); !ok || r.err == nil {
+		t.Fatalf("d: err %v, ok %v; want its decode error", r.err, ok)
 	}
 }

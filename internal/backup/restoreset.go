@@ -18,13 +18,15 @@ import (
 //	libraries.json
 //	collections.json
 //	home-sections.json                version 3 and later
+//	users/<account id>.json           version 2 and later
 //	blobs/<object key>
 //
 // Readers accept every format version up to restoreSetVersion and refuse a
-// newer one with ErrRestoreSetTooNew. Version 3 added the home_sections
-// section and template-bundle collections in collections.json. A reader
-// refuses an unknown section and an unknown field, so any of those is a new
-// version, and an older set never holds them.
+// newer one with ErrRestoreSetTooNew. Version 2 added the users section;
+// version 3 the home_sections section, template-bundle collections in
+// collections.json, and an omitted item's cause and error. A reader refuses
+// an unknown section and an unknown field, so any of those is a new version,
+// and an older set never holds them.
 const (
 	restoreSetFormat  = "silo-restore-set"
 	restoreSetVersion = 3
@@ -32,6 +34,7 @@ const (
 	restoreSetIndexName = "restore-set.json"
 	restoreSetBlobDir   = "blobs/"
 	restoreSetPluginDir = "plugins/"
+	restoreSetUsersDir  = "users/"
 
 	pluginDocumentName = "plugin.json"
 	pluginArchiveName  = "archive.bin"
@@ -48,6 +51,7 @@ const (
 	SectionSettings    = "settings"
 	SectionPlugins     = "plugins"
 	SectionLibraries   = "libraries"
+	SectionUsers       = "users"
 	SectionCollections = "collections"
 	// SectionHomeSections holds the admin home and library page sections.
 	SectionHomeSections = "home_sections"
@@ -62,9 +66,11 @@ type sectionSpec struct {
 	// one item per directory.
 	document string
 	// itemDir is the per-item directory prefix ("plugins/"), whose entries
-	// are <itemDir><item id>/<name> with name in itemFiles.
+	// are <itemDir><item id>/<name> with name in itemFiles, or, with
+	// itemExt set, one file <itemDir><item id><itemExt> per item.
 	itemDir   string
 	itemFiles []string
+	itemExt   string
 	// minVersion is the first format version that may hold the section.
 	minVersion int
 	// blobPrefixes are the key prefixes this section's blobs may use, and
@@ -74,9 +80,10 @@ type sectionSpec struct {
 
 // restoreSections lists every section in the order a restore applies them:
 // libraries first, so later sections can map library ids, then plugins,
-// settings, collections (which home sections name), and home sections
-// (which carry the collections they manage). Nothing else in the reader or
-// writer lists sections.
+// settings, collections (which home sections name), home sections (which
+// carry the collections they manage), and users last, so a profile's page
+// layout resolves against the sections restored before it. Nothing else in
+// the reader or writer lists sections.
 var restoreSections = []sectionSpec{
 	{id: SectionLibraries, document: librariesDocumentName,
 		blobPrefixes: map[string]string{"library-posters/": storeAssets}},
@@ -85,6 +92,8 @@ var restoreSections = []sectionSpec{
 	{id: SectionCollections, document: collectionsDocumentName,
 		blobPrefixes: map[string]string{"collection-images/": storeAssets, "local/": storeAssets, "branding/": storeAssets}},
 	{id: SectionHomeSections, document: homeSectionsDocumentName, minVersion: 3},
+	{id: SectionUsers, itemDir: restoreSetUsersDir, itemExt: ".json", minVersion: 2,
+		blobPrefixes: map[string]string{"profile-avatars/": storeOperational, "user-collection-images/": storeAssets}},
 }
 
 func sectionByID(id string) (sectionSpec, bool) {
@@ -119,6 +128,13 @@ func (s sectionSpec) ownsFile(name string) (item string, ok bool) {
 	rest, found := strings.CutPrefix(name, s.itemDir)
 	if !found {
 		return "", false
+	}
+	if s.itemExt != "" {
+		item, found := strings.CutSuffix(rest, s.itemExt)
+		if !found || strings.Contains(item, "/") || !validItemSegment(item) {
+			return "", false
+		}
+		return item, true
 	}
 	item, file, found := strings.Cut(rest, "/")
 	if !found || !validItemSegment(item) || !slices.Contains(s.itemFiles, file) {
@@ -164,7 +180,33 @@ type RestoreSetIndex struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	KeyCheck    string         `json:"key_check"`
 	Sections    []SectionIndex `json:"sections"`
+	// Omitted lists items the backup could not carry (version 2 and
+	// later); the dump still holds them.
+	Omitted []OmittedItem `json:"omitted,omitempty"`
 }
+
+// OmittedItem is an item a restore set left out, with the reason.
+type OmittedItem struct {
+	Section string `json:"section"`
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	// Reason is OmittedTooLarge or OmittedExportFailed; Message says why.
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+	// Cause names what failed, stable across backups so a client can group
+	// omitted items: a data type and the step that failed in it
+	// ("notifications: reading notification preferences"). Error is the
+	// underlying error, without ids. Both are empty for OmittedTooLarge and
+	// in sets before version 3.
+	Cause string `json:"cause,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// Reasons a restore set leaves an item out.
+const (
+	OmittedTooLarge     = "too_large"
+	OmittedExportFailed = "export_failed"
+)
 
 // SectionIndex lists one section's files with their sizes and digests, and
 // the blob keys its documents reference. A referenced blob that was gone when

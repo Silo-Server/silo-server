@@ -17,10 +17,12 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
+	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // testFence stands in for the admin job's fenced transaction: it commits fn
@@ -515,10 +517,12 @@ type pagesSeed struct {
 	customized, plain, gone string
 	// featured shows customized on the home page, recent is a library page
 	// section, managed is a home section with the collection it manages,
-	// and layout is another home section.
+	// and layout is the home section a profile's override names.
 	featured, recent, managed, layout string
 	managedCollection                 string
 	items                             []string
+	account                           int
+	profile                           string
 }
 
 // wirePageTargets gives the fixture the template catalog and section checks
@@ -615,13 +619,19 @@ func seedPages(t *testing.T, f *selectiveFixture) pagesSeed {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM page_sections WHERE title LIKE $1`, "%"+s.suffix)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE library_id = $1`, s.library)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE username = $1`, "pages-"+s.suffix)
 	})
+	s.profile = "pp-" + s.suffix
+	s.account = testAccount(t, pool, "pages-"+s.suffix, "h", nil, nil)
+	testProfile(t, pool, s.account, s.profile, "Main", true, "")
+	home, _ := json.Marshal([]userstore.SectionOverride{{ID: "o1", ProfileID: s.profile, Scope: "home", SectionID: s.layout, Hidden: true}})
+	dbExec(t, pool, `INSERT INTO user_settings (user_id, key, value) VALUES ($1, 'section_overrides:home:', $2)`, s.account, string(home))
 	return s
 }
 
 // losePages deletes the customized template collection with the section
-// that shows it, the managed section with its collection, and the layout
-// section; renames the library page section; and changes
+// that shows it, the managed section with its collection, the layout
+// section, and the account; renames the library page section; and changes
 // the plain template collection after the backup: its title (not a change
 // the backup made, so a restore keeps it) and its description back to the
 // template's.
@@ -633,6 +643,7 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 	dbExec(t, f.pool, `DELETE FROM library_collections WHERE id = ANY($1)`, []string{s.customized, s.managedCollection})
 	dbExec(t, f.pool, `UPDATE page_sections SET title = 'Renamed', section_type = 'recently_released' WHERE id = $1`, s.recent)
 	dbExec(t, f.pool, `UPDATE library_collections SET title = 'Renamed later', description = '' WHERE id = $1`, s.plain)
+	dbExec(t, f.pool, `DELETE FROM users WHERE id = $1`, s.account)
 }
 
 // TestTemplateCollectionsAndHomeSectionsDB backs up template-bundle
@@ -651,6 +662,8 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 //     reference mapped to the recreated collection; a renamed and retyped
 //     library page section is replaced; a managed section comes back with
 //     its collection and items;
+//   - a profile's page layout restored in the same request names the
+//     section the request restored;
 //   - restoring again changes nothing.
 func TestTemplateCollectionsAndHomeSectionsDB(t *testing.T) {
 	f := newSelectiveFixture(t)
@@ -668,7 +681,8 @@ func TestTemplateCollectionsAndHomeSectionsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	selection := checkPagesPreview(t, preview, s)
-	req := RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Selection: selection}
+	req := RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Selection: selection,
+		Users: []UserSelection{{Account: strconv.Itoa(s.account), Target: TargetNew, Profiles: []ProfileSelection{{Profile: s.profile, Target: TargetNew, DataTypes: []string{userdata.Preferences}}}}}}
 	report := f.restoreRequest(t, req)
 	for _, id := range append(selection[SectionCollections], selection[SectionHomeSections]...) {
 		section := SectionCollections
@@ -679,7 +693,7 @@ func TestTemplateCollectionsAndHomeSectionsDB(t *testing.T) {
 			t.Fatalf("%s = %+v, want restored", id, got)
 		}
 	}
-	recreated := f.checkRestoredPages(t, s)
+	recreated := f.checkRestoredPages(t, s, report)
 	if n := countRows(t, f.pool, `SELECT count(*) FROM backup_restore_followups WHERE kind = 'collection_created' AND target_id::text = $1`, recreated); n != 1 {
 		t.Fatalf("a failed sync left %d follow-ups, want it kept", n)
 	}
@@ -694,8 +708,10 @@ func TestTemplateCollectionsAndHomeSectionsDB(t *testing.T) {
 // TestIdentityTwinsRestoreOneToOneDB: a backup with two library page
 // sections of one type and title and two collections of one name in one
 // library, restored on another server that lost them, creates each as its
-// own item (neither matches the other one the restore just created), and a
-// second preview finds all of them the same; a section or collection here
+// own item (neither matches the other one the restore just created), a
+// profile layout restored after them still names the section it customized
+// (by its id, which the title no longer identifies), and a second preview
+// finds all of them the same; a section or collection here
 // with that title that is neither makes the twins ambiguous instead of one
 // of them taking it.
 func TestIdentityTwinsRestoreOneToOneDB(t *testing.T) {
@@ -732,9 +748,17 @@ func TestIdentityTwinsRestoreOneToOneDB(t *testing.T) {
 	}
 	twinSections := []string{page(false, 12), page(true, 24)}
 	twinCollections := []string{collection("a-", items[0]), collection("b-", items[1])}
+	// A profile's layout of the library page customizes the first twin.
+	profile := "tw-" + suffix
+	account := testAccount(t, pool, "twins-"+suffix, "h", nil, nil)
+	testProfile(t, pool, account, profile, "Main", true, "")
+	layout, _ := json.Marshal([]userstore.SectionOverride{{ID: "o1", ProfileID: profile, Scope: pageScopeLibrary, LibraryID: strconv.Itoa(library),
+		SectionID: twinSections[0], Hidden: true}})
+	dbExec(t, pool, `INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)`, account, "section_overrides:library:"+strconv.Itoa(library), string(layout))
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM page_sections WHERE title = $1`, title)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE library_id = $1`, library)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE username = $1`, "twins-"+suffix)
 	})
 	source, err := backupUnderLock(t, f.svc, KindManual)
 	if err != nil {
@@ -742,6 +766,7 @@ func TestIdentityTwinsRestoreOneToOneDB(t *testing.T) {
 	}
 	dbExec(t, pool, `DELETE FROM page_sections WHERE id = ANY($1)`, twinSections)
 	dbExec(t, pool, `DELETE FROM library_collections WHERE id = ANY($1)`, twinCollections)
+	dbExec(t, pool, `DELETE FROM users WHERE id = $1`, account)
 	f.moveToAnotherServer(t, source.ID)
 	ids := map[string][]string{SectionHomeSections: {}, SectionCollections: {}}
 	for _, id := range twinSections {
@@ -771,6 +796,8 @@ func TestIdentityTwinsRestoreOneToOneDB(t *testing.T) {
 	dbExec(t, pool, `DELETE FROM page_sections WHERE id = $1`, strangers[0])
 	dbExec(t, pool, `DELETE FROM library_collections WHERE id = $1`, strangers[1])
 	preview := previewAll(ItemNotOnThisServer)
+	// The sections are restored first, the account after them in another
+	// run, as an admin may: its layout must still name the first twin.
 	report := f.restoreRequest(t, RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Selection: ids})
 	for section, list := range ids {
 		for _, id := range list {
@@ -786,7 +813,134 @@ func TestIdentityTwinsRestoreOneToOneDB(t *testing.T) {
 		WHERE c.title = $1 AND i.media_item_id = ANY($2)`, "Picks "+suffix, items); n != 2 {
 		t.Fatalf("%d twin collections here, want both", n)
 	}
-	previewAll(ItemOnThisServer)
+	f.restoreLayoutOfTwin(t, RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Users: []UserSelection{{Account: strconv.Itoa(account), Target: TargetNew,
+		Profiles: []ProfileSelection{{Profile: profile, Target: TargetNew, DataTypes: []string{userdata.Preferences}}}}}}, library, twinSections[0])
+	again := previewAll(ItemOnThisServer)
+	if got := previewItem(t, again, SectionUsers, strconv.Itoa(account)); got.Status != ItemOnThisServer {
+		t.Fatalf("restored account = %s %s, pending %v", got.Status, got.Reason, pendingOf(got.Account.Profiles[0]))
+	}
+}
+
+// restoreLayoutOfTwin restores an account whose library page layout
+// customizes one of two sections sharing a title, and checks the layout
+// names that section.
+func (f *selectiveFixture) restoreLayoutOfTwin(t *testing.T, req RestoreRequest, library int, section string) {
+	t.Helper()
+	restored := reportItem(t, f.restoreRequest(t, req), SectionUsers, req.Users[0].Account)
+	if restored.Account == nil || !restored.Account.Created {
+		t.Fatalf("account = %+v", restored)
+	}
+	var stored string
+	var overrides []userstore.SectionOverride
+	if err := f.pool.QueryRow(t.Context(), `SELECT value FROM user_settings WHERE user_id = $1 AND key = $2`, restored.Account.LocalID, "section_overrides:library:"+strconv.Itoa(library)).
+		Scan(&stored); err != nil || json.Unmarshal([]byte(stored), &overrides) != nil || len(overrides) != 1 || overrides[0].SectionID != section {
+		t.Fatalf("restored library layout %s, %v; want it to name section %s", stored, err, section)
+	}
+}
+
+// TestLayoutCollectionsMapAcrossServersDB: a profile's page layout names
+// collections by id. Restored on another server, a section naming an admin
+// template collection the restore recreated, and one naming the profile's
+// personal collection its import created, name those collections' new ids;
+// one naming an admin collection that is not here is left out rather than
+// written dangling; and a second preview finds the account the same.
+func TestLayoutCollectionsMapAcrossServersDB(t *testing.T) {
+	f := newSelectiveFixture(t)
+	ctx, pool := t.Context(), f.pool
+	wirePageTargets(f, new(bool), &[]string{})
+	suffix := randomHex(t, 4)
+	library := testLibrary(t, pool, "layouts-"+suffix)
+	testMovie(t, pool, "bkly-"+suffix, "Layout movie", "", library)
+	repo := catalog.NewLibraryCollectionRepository(pool)
+	defaults, err := f.svc.targets.TemplateCollection("core_defaults", "tmdb_popular_movies", library, "movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := repo.Create(ctx, defaults.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, err := repo.Create(ctx, catalog.CreateLibraryCollectionInput{LibraryID: library, Slug: "gone-" + suffix, Title: "Gone " + suffix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, personal := "ly-"+suffix, "pc-ly-"+suffix
+	account := testAccount(t, pool, "layouts-"+suffix, "h", nil, nil)
+	testProfile(t, pool, account, profile, "Main", true, "")
+	dbExec(t, pool, `INSERT INTO user_personal_collections (id, user_id, profile_id, creator_profile_id, name, native) VALUES ($1, $2, $3, $3, 'Mine', true)`,
+		personal, account, profile)
+	page := "section_overrides:library:" + strconv.Itoa(library)
+	added := func(title, config string) userstore.SectionOverride {
+		return userstore.SectionOverride{ID: title, ProfileID: profile, Scope: pageScopeLibrary, LibraryID: strconv.Itoa(library), IsUserAdded: true,
+			UserSectionType: "collection", UserTitle: title, UserConfig: config}
+	}
+	layout, _ := json.Marshal([]userstore.SectionOverride{
+		added("Popular", `{"library_collection_id":"`+template.ID+`"}`),
+		added("Mine", `{"user_collection_id":"`+personal+`"}`),
+		added("Gone", `{"library_collection_id":"`+gone.ID+`"}`),
+	})
+	dbExec(t, pool, `INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)`, account, page, string(layout))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE library_id = $1`, library)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE username = $1`, "layouts-"+suffix)
+	})
+	source, err := backupUnderLock(t, f.svc, KindManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbExec(t, pool, `DELETE FROM library_collections WHERE id = ANY($1)`, []string{template.ID, gone.ID})
+	dbExec(t, pool, `DELETE FROM users WHERE id = $1`, account)
+	f.moveToAnotherServer(t, source.ID)
+	preview, err := f.svc.Preview(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := f.restoreRequest(t, RestoreRequest{BackupID: source.ID, Digest: preview.Digest,
+		Selection: map[string][]string{SectionCollections: {templateCollectionItemID(template.ID)}},
+		Users: []UserSelection{{Account: strconv.Itoa(account), Target: TargetNew,
+			Profiles: []ProfileSelection{{Profile: profile, Target: TargetNew, DataTypes: []string{userdata.Collections, userdata.Preferences}}}}}})
+	restored := reportItem(t, report, SectionUsers, strconv.Itoa(account))
+	if restored.Account == nil || !restored.Account.Created {
+		t.Fatalf("account = %+v", restored)
+	}
+	local := restored.Account.LocalID
+	var newTemplate, newPersonal, stored string
+	if err := pool.QueryRow(ctx, `SELECT id FROM library_collections WHERE management_key = $1`, TemplateManagementKey("core_defaults", "tmdb_popular_movies", library)).Scan(&newTemplate); err != nil {
+		t.Fatalf("recreated template collection: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT id FROM user_personal_collections WHERE user_id = $1 AND name = 'Mine'`, local).Scan(&newPersonal); err != nil {
+		t.Fatalf("restored personal collection: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT value FROM user_settings WHERE user_id = $1 AND key = $2`, local, page).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var overrides []userstore.SectionOverride
+	if err := json.Unmarshal([]byte(stored), &overrides); err != nil || len(overrides) != 2 ||
+		configCollection(t, overrides, "Popular", userdata.LibraryCollectionField) != newTemplate || newTemplate == template.ID ||
+		configCollection(t, overrides, "Mine", userdata.UserCollectionField) != newPersonal || newPersonal == personal {
+		t.Fatalf("restored layout %s; want Popular on %s and Mine on %s, Gone left out", stored, newTemplate, newPersonal)
+	}
+	again, err := f.svc.Preview(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := previewItem(t, again, SectionUsers, strconv.Itoa(account)); got.Status != ItemOnThisServer {
+		t.Fatalf("restored account = %s %s, pending %v", got.Status, got.Reason, pendingOf(got.Account.Profiles[0]))
+	}
+}
+
+// configCollection is the collection a titled user-added override names in
+// field.
+func configCollection(t *testing.T, overrides []userstore.SectionOverride, title, field string) string {
+	t.Helper()
+	for _, o := range overrides {
+		if o.UserTitle == title {
+			var config map[string]string
+			_ = json.Unmarshal([]byte(o.UserConfig), &config)
+			return config[field]
+		}
+	}
+	return ""
 }
 
 func (f *selectiveFixture) restoreRequest(t *testing.T, req RestoreRequest) *SelectiveReport {
@@ -830,7 +984,7 @@ func checkPagesPreview(t *testing.T, p *RestorePreview, s pagesSeed) map[string]
 
 // checkRestoredPages checks what the restore wrote and returns the
 // recreated template collection's id.
-func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed) string {
+func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed, report *SelectiveReport) string {
 	t.Helper()
 	ctx, pool := t.Context(), f.pool
 	var id, title, visibility, slug string
@@ -869,94 +1023,15 @@ func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed) string 
 		countRows(t, pool, `SELECT count(*) FROM library_collection_items WHERE collection_id = $1`, managed) != len(s.items) {
 		t.Fatalf("managed section's collection %q, %v", managed, err)
 	}
+	account := reportItem(t, report, SectionUsers, strconv.Itoa(s.account))
+	if account.Account == nil || !account.Account.Created {
+		t.Fatalf("account = %+v", account)
+	}
+	var layout string
+	var overrides []userstore.SectionOverride
+	if err := pool.QueryRow(ctx, `SELECT value FROM user_settings WHERE user_id = $1 AND key = 'section_overrides:home:'`, account.Account.LocalID).Scan(&layout); err != nil ||
+		json.Unmarshal([]byte(layout), &overrides) != nil || len(overrides) != 1 || overrides[0].SectionID != s.layout {
+		t.Fatalf("restored home layout %s, %v; want it to name section %s", layout, err, s.layout)
+	}
 	return id
-}
-
-func dbExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
-	t.Helper()
-	if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
-		t.Fatalf("%s: %v", sql, err)
-	}
-}
-
-func testLibrary(t *testing.T, pool *pgxpool.Pool, name string) int {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	folder, err := catalog.NewFolderRepository(pool).Create(t.Context(), catalog.CreateFolderInput{Paths: []string{dir}, Type: "movies", Name: name})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folder.ID) })
-	return folder.ID
-}
-
-func testMovie(t *testing.T, pool *pgxpool.Pool, id, title, tmdb string, library int) {
-	t.Helper()
-	dbExec(t, pool, `INSERT INTO media_items (content_id, type, title, year, tmdb_id, status) VALUES ($1, 'movie', $2, 2001, $3, 'matched')`, id, title, tmdb)
-	if library > 0 {
-		dbExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id, library)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id) })
-}
-
-func countRows(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
-	t.Helper()
-	var n int
-	if err := pool.QueryRow(t.Context(), sql, args...).Scan(&n); err != nil {
-		t.Fatalf("%s: %v", sql, err)
-	}
-	return n
-}
-
-func reportItem(t *testing.T, r *SelectiveReport, section, id string) ReportItem {
-	t.Helper()
-	for _, item := range r.Items {
-		if item.Section == section && item.ID == id {
-			return item
-		}
-	}
-	t.Fatalf("report has no %s item %s: %+v", section, id, r.Items)
-	return ReportItem{}
-}
-
-// moveToAnotherServer gives the database another server id and puts the
-// backup where that server finds it, as a backup brought over from the
-// original server would be.
-func (f *selectiveFixture) moveToAnotherServer(t *testing.T, backupID string) {
-	t.Helper()
-	ctx := t.Context()
-	from := folderPrefix(f.serverID, backupID)
-	f.serverID = "elsewhere-" + randomHex(t, 4)
-	objects, _, err := f.store.List(ctx, from, "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, obj := range objects {
-		body, _, err := f.store.Get(ctx, obj.Key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(body)
-		_ = body.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := f.store.Put(ctx, folderPrefix(f.serverID, backupID)+strings.TrimPrefix(obj.Key, from), data); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-// checkChangesNothing requires a re-run's report to show nothing restored
-// or failed.
-func checkChangesNothing(t *testing.T, again *SelectiveReport) {
-	t.Helper()
-	for _, item := range again.Items {
-		if item.Outcome == OutcomeRestored || item.Outcome == OutcomeFailed {
-			t.Fatalf("restoring again: %s %s", item.ID, item.Outcome)
-		}
-	}
 }

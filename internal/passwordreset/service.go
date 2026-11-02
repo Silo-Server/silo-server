@@ -83,6 +83,7 @@ type userDirectory interface {
 // sessionStarter signs the account in after a reset. Satisfied by *auth.Service.
 type sessionStarter interface {
 	Login(ctx context.Context, username, password, deviceName, ip string) (*auth.TokenPair, *models.User, error)
+	Logout(ctx context.Context, sessionID string) error
 }
 
 // Service orchestrates issuing and completing reset links.
@@ -381,9 +382,29 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 	if s.sessionsRevoked != nil {
 		s.sessionsRevoked(ctx, user.ID)
 	}
-	pair, loggedIn, err := s.sessions.Login(ctx, user.Username, password, deviceName, ip)
+	// An account may have only an email; sign-in resolves either.
+	login := user.Username
+	if login == "" {
+		login = user.Email
+	}
+	pair, loggedIn, err := s.sessions.Login(ctx, login, password, deviceName, ip)
 	if err != nil {
 		return nil, user, errors.Join(ErrSessionStart, err)
+	}
+	// An email can still be another account's username when both predate the
+	// single identity space, so the sign-in may land on that account. Never
+	// hand its session to the person who reset this one.
+	if loggedIn == nil || loggedIn.ID != user.ID {
+		if pair != nil && pair.SessionID != "" {
+			// The session exists already: revoke it even if the caller has
+			// gone, but do not wait forever.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.sessions.Logout(cleanupCtx, pair.SessionID); err != nil {
+				return nil, user, errors.Join(ErrSessionStart, err)
+			}
+		}
+		return nil, user, ErrSessionStart
 	}
 	return pair, loggedIn, nil
 }

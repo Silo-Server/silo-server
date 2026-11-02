@@ -17,7 +17,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
-import { REASON_SENTENCES, displayLabel, itemKey } from "./restoreModel";
+import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -232,7 +232,7 @@ export const ItemRow = memo(function ItemRow({
           id={controlId}
           checked={checked}
           disabled={!item.selectable}
-          onCheckedChange={(value) => onToggle([itemKey(sectionId, item.id)], value === true)}
+          onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <Label

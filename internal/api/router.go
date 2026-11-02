@@ -307,6 +307,9 @@ type Dependencies struct {
 	// downloads. Nil when no database is wired.
 	Backups             *backup.Service
 	ServerRestartStatus *handlers.ServerRestartStatusTracker
+	// ProfileTransfer exports and imports a profile's own data; nil on the
+	// SQLite user store.
+	ProfileTransfer *backup.ProfileTransfer
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// MDBList) — the user-facing counterpart of CollectionService.
@@ -2930,6 +2933,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.StorageTransition != nil {
 		v2deps.AdminStorageTransition = deps.StorageTransition
+	}
+	if deps.ProfileTransfer != nil {
+		v2deps.ProfileTransfer = deps.ProfileTransfer
 	}
 	if deps.Backups != nil {
 		v2deps.AdminBackups = deps.Backups

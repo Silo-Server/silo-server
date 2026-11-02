@@ -79,11 +79,14 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 		return fail(ErrDigestMismatch)
 	}
 
-	a := &applier{s: s, rs: rs, run: run, report: report, total: 1, staged: map[string]error{}}
+	a := &applier{s: s, rs: rs, run: run, report: report, total: 1 + len(req.Users), users: map[string]UserSelection{}, staged: map[string]error{}}
 	for _, ids := range req.Selection {
 		a.total += len(ids)
 	}
-	if len(req.Selection[SectionHomeSections]) > 0 {
+	for _, u := range req.Users {
+		a.users[u.Account] = u
+	}
+	if len(req.Users) > 0 || len(req.Selection[SectionHomeSections]) > 0 {
 		if a.serverID, err = s.serverID(work); err != nil {
 			return fail(err)
 		}
@@ -108,7 +111,14 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	defer op.end(work, nil)
 
 	for _, spec := range restoreSections {
-		for _, id := range req.Selection[spec.id] {
+		ids := req.Selection[spec.id]
+		if spec.id == SectionUsers {
+			ids = nil
+			for _, u := range req.Users {
+				ids = append(ids, u.Account)
+			}
+		}
+		for _, id := range ids {
 			if err := ctx.Err(); err != nil {
 				return report, err
 			}
@@ -130,17 +140,26 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 type applier struct {
 	s  *Service
 	rs *RestoreSet
-	// serverID is this server's identity; home sections match by id only
-	// when the backup is this server's.
+	// serverID is this server's identity; users match by id only when the
+	// backup is this server's.
 	serverID string
-	run      RestoreRun
-	report   *SelectiveReport
+	// users are the chosen accounts by backup account id.
+	users  map[string]UserSelection
+	run    RestoreRun
+	report *SelectiveReport
 	// current and total count items for the job's progress; the
 	// before-restore backup is the first.
 	current, total int
 	// claimed maps "kind:local id" to the item that wrote it, so two items
 	// never write the same section or collection here.
 	claimed map[string]string
+	// adminCollections caches how the accounts' data maps admin collection
+	// ids (collectionMap).
+	adminCollections map[string]string
+	// allowUnrated is access.unrated_content, read before each account's
+	// transaction: the policy reader takes a pool connection of its own,
+	// which the transaction may hold the last of.
+	allowUnrated bool
 	// staged holds, per artwork item, nil once stageArtwork wrote its
 	// objects, or why it could not; an item it did not write is absent,
 	// and applyArtwork never publishes one.
@@ -189,7 +208,10 @@ func (a *applier) commit(ctx context.Context, next *SelectiveReport, message str
 // transaction; the restore continues with the next item.
 func (a *applier) apply(ctx context.Context, section, id string) error {
 	a.current++
-	if section == SectionCollections && strings.HasPrefix(id, "artwork:") {
+	switch {
+	case section == SectionUsers:
+		a.allowUnrated = a.s.opts.AllowUnratedContent != nil && a.s.opts.AllowUnratedContent(ctx)
+	case section == SectionCollections && strings.HasPrefix(id, "artwork:"):
 		a.stageArtwork(ctx, id)
 	}
 	var result applied
@@ -232,6 +254,8 @@ func (a *applier) applyItem(ctx context.Context, tx pgx.Tx, section, id string) 
 		return a.applyPlugin(ctx, tx, id)
 	case SectionSettings:
 		return a.applySettingsPage(ctx, tx, id)
+	case SectionUsers:
+		return a.applyAccount(ctx, tx, a.users[id])
 	case SectionCollections:
 		switch {
 		case strings.HasPrefix(id, "collection:"):
