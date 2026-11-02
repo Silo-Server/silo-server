@@ -556,30 +556,49 @@ func (s *Service) CompleteUpload(ctx context.Context, id string) (UploadSession,
 	parts := s.openParts(work, keys)
 	defer func() { _ = parts.Close() }()
 	rs, rejection, err := s.checkUpload(work, parts, u.declaredSHA256)
+	// Every outcome is written on the lock's own session (held.Exec), so it
+	// fails once the lock is lost: a server that took the lock since may be
+	// checking this upload itself. An upload left checking is recovered by
+	// the next completion (beginCheck).
 	if err != nil {
 		// The bytes could not be read: the upload stays, and completing it
 		// again checks it again.
-		if _, resetErr := s.opts.Pool.Exec(context.WithoutCancel(ctx), `UPDATE backup_uploads SET status = 'uploading', updated_at = now() WHERE id = $1 AND status = 'checking'`, id); resetErr != nil {
+		resetCtx, cancelReset := context.WithTimeout(context.WithoutCancel(ctx), uploadOutcomeTimeout)
+		defer cancelReset()
+		if _, resetErr := held.Exec(resetCtx, `UPDATE backup_uploads SET status = 'uploading', updated_at = now() WHERE id = $1 AND status = 'checking'`, id); resetErr != nil {
 			slog.WarnContext(ctx, "reopening an upload after a failed check failed", "component", "backup", "upload_id", id, "error", resetErr)
 		}
 		return UploadSession{}, fmt.Errorf("reading the upload: %w", err)
 	}
 	if rejection != nil {
-		if err := s.rejectUpload(ctx, id, *rejection); err != nil {
+		if err := s.rejectUpload(ctx, held, id, *rejection); err != nil {
 			return UploadSession{}, err
 		}
 		return s.Upload(ctx, id)
 	}
-	if _, err := s.opts.Pool.Exec(ctx, `UPDATE backup_uploads SET status = 'complete', digest = $2, completed_at = now(), updated_at = now(),
+	tag, err := held.Exec(ctx, `UPDATE backup_uploads SET status = 'complete', digest = $2, completed_at = now(), updated_at = now(),
 			source_server_id = $3, source_server_name = $4, source_silo_version = $5, source_created_at = $6, format_version = $7
 		WHERE id = $1 AND status = 'checking'`,
-		id, rs.Digest, rs.Index.ServerID, rs.Index.ServerName, rs.Index.SiloVersion, rs.Index.CreatedAt, rs.Index.Version); err != nil {
+		id, rs.Digest, rs.Index.ServerID, rs.Index.ServerName, rs.Index.SiloVersion, rs.Index.CreatedAt, rs.Index.Version)
+	if err != nil {
 		return UploadSession{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return UploadSession{}, ErrUploadCheckTakenOver
 	}
 	// The first preview needs exactly this read.
 	s.restoreSets.store(rs.Digest, rs)
 	return s.Upload(ctx, id)
 }
+
+// ErrUploadCheckTakenOver reports a check whose upload was no longer
+// checking when its outcome was written: the lock was lost and another
+// completion took the upload over.
+var ErrUploadCheckTakenOver = errors.New("the upload is no longer being checked here; complete it again")
+
+// uploadOutcomeTimeout bounds the write that reopens an upload after a check
+// that could not read it, which runs after the check's own deadline.
+const uploadOutcomeTimeout = 10 * time.Second
 
 // partWriteTimeout is partWriteTimeout, or a shorter test override; never
 // longer, so partAttemptLimit always outlasts a write.
@@ -690,21 +709,19 @@ func truncateRejection(message string) string {
 
 // rejectUpload records why an upload is unusable and deletes its parts.
 // The row stays until the sweep, so completing it again answers the same.
-func (s *Service) rejectUpload(ctx context.Context, id string, rejection UploadRejection) error {
-	tx, err := s.opts.Pool.Begin(ctx)
+func (s *Service) rejectUpload(ctx context.Context, held Held, id string, rejection UploadRejection) error {
+	// One statement on the lock's session, so it cannot land after the lock
+	// was lost. A checked upload has parts, so deleting none means the
+	// upload was no longer this check's to reject.
+	tag, err := held.Exec(ctx, `WITH rejected AS (
+			UPDATE backup_uploads SET status = 'rejected', rejected_reason = $2, rejected_message = $3, updated_at = now()
+			WHERE id = $1 AND status = 'checking' RETURNING id)
+		DELETE FROM backup_upload_parts WHERE upload_id IN (SELECT id FROM rejected)`, id, rejection.Reason, rejection.Message)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, `UPDATE backup_uploads SET status = 'rejected', rejected_reason = $2, rejected_message = $3, updated_at = now()
-		WHERE id = $1 AND status = 'checking'`, id, rejection.Reason, rejection.Message); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM backup_upload_parts WHERE upload_id = $1`, id); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
+	if tag.RowsAffected() == 0 {
+		return ErrUploadCheckTakenOver
 	}
 	if err := s.opts.Destination.DeletePrefix(ctx, uploadPrefix(id)); err != nil {
 		slog.WarnContext(ctx, "deleting a rejected upload's parts failed", "component", "backup", "upload_id", id, "error", err)

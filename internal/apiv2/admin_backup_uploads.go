@@ -135,6 +135,8 @@ func uploadProblem(err error) error {
 		return NewProblem(TypePayloadTooLarge, fmt.Sprintf("A restore set upload can be at most %d GiB.", backup.MaxUploadBytes>>30))
 	case errors.Is(err, backup.ErrTooManyUploads):
 		return NewProblem(TypeUploadLimitReached, fmt.Sprintf("%d uploads are already in progress on this server. Finish or delete one first; unfinished uploads are deleted after 24 hours.", backup.MaxActiveUploads))
+	case errors.Is(err, backup.ErrUploadCheckTakenOver):
+		return NewProblem(TypeConflict, "This upload's check stopped before it finished. Complete it again.")
 	case errors.Is(err, backup.ErrUploadNotOpen):
 		return NewProblem(TypeConflict, "This upload is being checked or is finished, so it takes no more parts.")
 	case errors.Is(err, backup.ErrUploadNotReady):
@@ -228,7 +230,10 @@ func registerAdminBackupUploads(reg *Registry, op func(method, path, id, summary
 		}
 		// Reading a large set back can outlast the listener's write timeout.
 		_ = http.NewResponseController(in.writer).SetWriteDeadline(time.Now().Add(uploadCheckWriteDeadline))
-		u, err := svc.CompleteUpload(ctx, in.UploadID)
+		// The check does not stop when the client goes away: a closed dialog
+		// would otherwise reopen a fully sent upload. Its read has its own
+		// deadline (uploadCheckTimeout), and the uploads list shows the result.
+		u, err := svc.CompleteUpload(context.WithoutCancel(ctx), in.UploadID)
 		if err != nil {
 			return nil, uploadProblem(err)
 		}

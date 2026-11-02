@@ -105,8 +105,8 @@ showing either key.
 3. Run `pg_dump --format=custom --compress=zstd:3 --snapshot=<id>` with
    `--exclude-table-data-and-children` for `activity_log`, `operational_logs`,
    `policy_decisions`, `catalog_search_index_events`, `backup_status` (its row
-   describes the backup being taken), `backup_uploads` and
-   `backup_upload_parts` (their parts are not in the backup), and, unless
+   describes the backup being taken), `backup_uploads`, `backup_upload_parts`,
+   and `backup_upload_attempts` (their parts are not in the backup), and, unless
    `backup.include_intro_fingerprints`, `media_intro_fingerprints`. The schema
    is always dumped. The password moves from the URL into `PGPASSWORD` so it
    never appears in a process listing.
@@ -976,8 +976,12 @@ and refuses bytes with another digest. A set that fails the reader is
 | `checksum_mismatch` | Other bytes than the SHA-256 declared at creation |
 
 A failure to read the destination rejects nothing: the session returns to
-`uploading`, and completing again checks it again. A session left
-`checking` by a server that stopped is checked again by the next
+`uploading`, and completing again checks it again. A check does not stop
+when its request's client disconnects. Every outcome (`complete`, `rejected`,
+back to `uploading`) is written on the lock's own session, so a check whose
+lock was lost writes nothing: another server may hold the lock and be
+checking the same session. A session left `checking` by a server that
+stopped, or by a check that lost the lock, is checked again by the next
 completion, which holds the lock, so no other check can be running. The
 validated set enters the preview cache under its digest, so the first
 preview does not read it again.

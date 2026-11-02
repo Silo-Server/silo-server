@@ -5,6 +5,8 @@ import { captureAdminAuthority } from "@/api/v2/adminAuthority";
 import { deleteBackupUpload, listBackupUploads } from "@/api/v2/adminBackupUpload";
 import { backupsRootKey } from "@/hooks/queries/admin/backups";
 
+const CHECKING_POLL_MS = 3_000;
+
 export function backupUploadsKey() {
   return [...backupsRootKey(), "uploads"] as const;
 }
@@ -17,6 +19,9 @@ export function useAdminBackupUploads(enabled: boolean) {
     queryFn: () => listBackupUploads(captureAdminAuthority()),
     enabled: context !== null && enabled,
     staleTime: 10_000,
+    // A check goes on after its dialog closes; read until it ends.
+    refetchInterval: (query) =>
+      query.state.data?.some((upload) => upload.status === "checking") ? CHECKING_POLL_MS : false,
   });
 }
 

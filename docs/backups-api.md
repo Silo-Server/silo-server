@@ -399,7 +399,11 @@ reading it), `complete`, or `rejected`.
   A rejected upload's parts are deleted at once. A complete or rejected
   upload answers as it is, so completing again is safe. `409 conflict` while
   parts are missing, or while another backup or restore holds the lock:
-  the parts stay, and completing it again later checks it.
+  the parts stay, and completing it again later checks it. The check runs to
+  its end when the client disconnects; `GET /admin/backups/uploads` shows the
+  upload `checking` until it does. A check whose server lost the lock before
+  writing its outcome answers `409 conflict`, and the upload stays `checking`
+  for the next completion to check again.
 - `GET /admin/backups/uploads` answers `{items}`, newest first, after
   deleting uploads unfinished or rejected for 24 hours and complete ones
   unused for 7 days. A complete upload's `expires_at` moves on each
