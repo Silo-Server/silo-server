@@ -121,9 +121,12 @@ file in a matched series that aired after the newest episode the series has in a
 matches no stored episode. Such a file shows the stored episode list is behind, so the sweep
 marks the series episode-incomplete and queues episode-incomplete debt on the series item. An
 unknown date inside that range does not count, and neither does a date after tomorrow (UTC),
-which has not aired anywhere yet. Existing episode-incomplete debt keeps its backoff. Parked
-debt restarts with no attempts only for a file that aired on or after the day of the debt's last attempt. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`
-covers these rules.
+which has not aired anywhere yet. Existing episode-incomplete debt keeps its backoff. Debt that
+has used up its attempts, on the episode reason or any other, restarts with no attempts only for a
+file that aired on or after the day of the debt's last attempt. The restart updates the row in
+place, so its other reasons stay queued and restart their backoff with it, and it skips a row that
+is due or leased. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes` and
+`TestRestartTerminalEpisodeDebtDB` cover these rules.
 
 ## A changed root waits for a rescan
 

@@ -1364,6 +1364,16 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 	claimed := *parked
 	claimed.LeaseExpiresAt = &leaseExpires
 	claimed.NextRefreshAt = time.Now().Add(-time.Minute).Truncate(time.Second)
+	// Series debt that exhausted its attempts on lasting core-metadata debt
+	// still holds a viewer's trailer request. The episode reason it gains,
+	// alone or next to an earlier one, must start from no attempts.
+	terminalCore := *parked
+	terminalCore.ReasonMask = RefreshDebtReasonCoreMetadataIncomplete | RefreshDebtReasonTrailersRequested
+	terminalCore.Priority = refreshDebtPriority(terminalCore.ReasonMask)
+	terminalCore.AttemptCount = 5
+	terminalCore.NextRefreshAt = time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	terminalMixed := terminalCore
+	terminalMixed.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
 	for _, tc := range []struct {
 		name           string
 		fileDate       string
@@ -1377,6 +1387,9 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		{name: "parked debt ignores a date that has not aired", fileDate: "2099-01-01", existing: parked},
 		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-05", existing: parked, wantIncomplete: true},
 		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt for another reason restarts with the episode reason", fileDate: "2024-05-06", existing: &terminalCore, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt with other reasons restarts its episode reason", fileDate: "2024-05-06", existing: &terminalMixed, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt with other reasons ignores a date its last attempt saw", fileDate: "2024-05-05", existing: &terminalMixed, wantIncomplete: true},
 		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
 		{name: "debt claimed after the sweep reads it is left to its claim", fileDate: "2024-05-06", existing: parked, claimAfterRead: true, wantIncomplete: true},
 	} {
@@ -1422,8 +1435,13 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 					t.Errorf("parked debt changed: %+v", debt)
 				}
 			case tc.wantDue:
-				if debt == nil || !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) || debt.NextRefreshAt.After(time.Now()) || debt.AttemptCount != 0 {
-					t.Errorf("series debt = %+v, want fresh episode-incomplete debt due now", debt)
+				var kept int64
+				if tc.existing != nil {
+					kept = tc.existing.ReasonMask
+				}
+				if debt == nil || !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) || debt.ReasonMask&kept != kept ||
+					debt.Priority != refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete) || debt.NextRefreshAt.After(time.Now()) || debt.AttemptCount != 0 {
+					t.Errorf("series debt = %+v, want fresh episode-incomplete debt due now that keeps reasons %d", debt, kept)
 				}
 			default:
 				if debt != nil {

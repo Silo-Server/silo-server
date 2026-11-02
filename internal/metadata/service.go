@@ -134,7 +134,7 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
-	DeleteParkedTargetDebt(ctx context.Context, targetType, contentID string, reasonMask int64, attemptCount int, nextRefreshAt time.Time) (bool, error)
+	RestartTerminalEpisodeDebt(ctx context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) (bool, error)
 	SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error)
 	DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error
 }
@@ -7160,43 +7160,43 @@ func (s *MetadataService) newestUnstoredFileAirDate(ctx context.Context, seriesI
 // provider never lists the episode backs off and parks like other episode debt
 // instead of being lifted back to due on every sweep.
 //
-// Parked debt restarts with no attempts for a file that aired on or after the
-// day of its last attempt, which may not have seen that episode yet. The new
-// episode then gets the whole backoff, as a new scanner_fallback episode gets a
-// debt row of its own, and one file the provider never lists does not hold
-// back every later episode of a daily series.
+// Terminal debt restarts with no attempts for a file that aired on or after the
+// day of its last attempt, which may not have seen that episode yet, whether
+// the row parks the episode reason or used up its attempts on another reason.
+// The new episode then gets the whole backoff, as a new scanner_fallback
+// episode gets a debt row of its own, and one file the provider never lists
+// does not hold back every later episode of a daily series. The restart keeps
+// the row's other reasons, whose backoff starts over with it.
 func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, seriesID, newestAirDate string, now time.Time) {
 	if s.refreshDebtRepo == nil {
 		return
 	}
 	debt, err := s.refreshDebtRepo.GetTarget(ctx, RefreshTargetItem, seriesID)
-	switch {
-	case err == nil && debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete):
-		airedSinceAttempt := debt.LastAttemptAt != nil && newestAirDate >= debt.LastAttemptAt.UTC().Format(time.DateOnly)
-		// A due or claimed row needs no restart: the scheduler refreshes it, or
-		// the refresh holding it settles it, and this sweep may be running
-		// inside that refresh.
-		dueOrClaimed := !debt.NextRefreshAt.After(now) ||
-			(debt.LeaseExpiresAt != nil && debt.LeaseExpiresAt.After(now))
-		if !isParkedEpisodeDebt(debt.ReasonMask, debt.AttemptCount) || !airedSinceAttempt || dueOrClaimed {
-			return
-		}
-		// Parked debt carries no other reason and, neither due nor leased, no
-		// claim, so dropping the row loses only its attempt count and last
-		// error. The delete holds only while the row is as read: a nudge that
-		// made it due or a refresh that claimed it since owns the row.
-		deleted, err := s.refreshDebtRepo.DeleteParkedTargetDebt(ctx, RefreshTargetItem, seriesID, debt.ReasonMask, debt.AttemptCount, debt.NextRefreshAt)
+	if errors.Is(err, ErrRefreshDebtNotFound) {
+		debt = nil
+	} else if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to read series refresh debt", "component", "metadata",
+			"series_id", seriesID, "error", err)
+		return
+	}
+	if debt != nil && debt.AttemptCount >= refreshDebtEpisodeTerminalAttempts {
+		// newestUnstoredFileAirDate returns a parsed date, so this cannot fail.
+		airDate, _ := time.Parse(time.DateOnly, newestAirDate)
+		// The restart leaves a due or claimed row alone: the scheduler
+		// refreshes it, or the refresh holding it settles it, and this sweep
+		// may be running inside that refresh. The statement checks the row as
+		// it stands, so a claim or nudge since the read above wins.
+		restarted, err := s.refreshDebtRepo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, seriesID, airDate.AddDate(0, 0, 1), now.UTC())
 		if err != nil {
-			slog.WarnContext(ctx, "metadata: failed to restart parked series refresh debt", "component", "metadata",
+			slog.WarnContext(ctx, "metadata: failed to restart terminal series refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)
 			return
 		}
-		if !deleted {
+		if restarted {
 			return
 		}
-	case err != nil && !errors.Is(err, ErrRefreshDebtNotFound):
-		slog.WarnContext(ctx, "metadata: failed to read series refresh debt", "component", "metadata",
-			"series_id", seriesID, "error", err)
+	}
+	if debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
 		return
 	}
 	reasonMask := RefreshDebtReasonEpisodeIncomplete

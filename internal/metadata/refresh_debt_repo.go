@@ -363,17 +363,18 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
-// DeleteParkedTargetDebt deletes a target's debt row only while it still has
-// the reasons, attempt count and schedule the caller read, is not due, and
-// holds no live lease, and reports whether it did. A row that a nudge made due,
-// a refresh claimed, or another writer added a reason to since that read
-// belongs to that writer and is kept.
-func (r *RefreshDebtRepository) DeleteParkedTargetDebt(
+// RestartTerminalEpisodeDebt gives a target's terminal debt the
+// episode-incomplete reason with no attempts and makes it due at nextRefreshAt,
+// keeping its other reasons, and reports whether it did. It applies only while
+// the row has at least refreshDebtEpisodeTerminalAttempts attempts, is not due,
+// holds no live lease, and was last attempted before attemptedBefore; the
+// statement checks the row as it stands, so a nudge, a claim or a settle that
+// lands after the caller's read keeps the row.
+func (r *RefreshDebtRepository) RestartTerminalEpisodeDebt(
 	ctx context.Context,
 	targetType string,
 	contentID string,
-	reasonMask int64,
-	attemptCount int,
+	attemptedBefore time.Time,
 	nextRefreshAt time.Time,
 ) (bool, error) {
 	if err := r.requireConfigured(); err != nil {
@@ -386,16 +387,21 @@ func (r *RefreshDebtRepository) DeleteParkedTargetDebt(
 	}
 
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM metadata_refresh_debt
+		UPDATE metadata_refresh_debt
+		SET reason_mask = reason_mask | $3,
+			priority = GREATEST(priority, $4),
+			attempt_count = 0,
+			next_refresh_at = $5,
+			updated_at = NOW()
 		WHERE target_type = $1 AND content_id = $2
-		  AND reason_mask = $3
-		  AND attempt_count = $4
-		  AND next_refresh_at = $5
+		  AND attempt_count >= $6
+		  AND last_attempt_at < $7
 		  AND next_refresh_at > NOW()
 		  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
-	`, targetType, contentID, reasonMask, attemptCount, nextRefreshAt.UTC())
+	`, targetType, contentID, RefreshDebtReasonEpisodeIncomplete, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		nextRefreshAt.UTC(), refreshDebtEpisodeTerminalAttempts, attemptedBefore.UTC())
 	if err != nil {
-		return false, fmt.Errorf("deleting parked metadata refresh debt: %w", err)
+		return false, fmt.Errorf("restarting terminal episode refresh debt: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }

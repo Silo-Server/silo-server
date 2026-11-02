@@ -525,17 +525,19 @@ func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
-func (r *fakeRefreshDebtRepo) DeleteParkedTargetDebt(_ context.Context, targetType, contentID string, reasonMask int64, attemptCount int, nextRefreshAt time.Time) (bool, error) {
+func (r *fakeRefreshDebtRepo) RestartTerminalEpisodeDebt(_ context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := fakeRefreshDebtKey(targetType, contentID)
-	debt, ok := r.debts[key]
+	debt, ok := r.debts[fakeRefreshDebtKey(targetType, contentID)]
 	now := time.Now()
-	if !ok || debt.ReasonMask != reasonMask || debt.AttemptCount != attemptCount || !debt.NextRefreshAt.Equal(nextRefreshAt) ||
+	if !ok || debt.AttemptCount < refreshDebtEpisodeTerminalAttempts || debt.LastAttemptAt == nil || !debt.LastAttemptAt.Before(attemptedBefore) ||
 		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
 		return false, nil
 	}
-	delete(r.debts, key)
+	debt.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
+	debt.Priority = max(debt.Priority, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete))
+	debt.AttemptCount = 0
+	debt.NextRefreshAt = nextRefreshAt
 	return true, nil
 }
 

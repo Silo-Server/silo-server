@@ -722,9 +722,9 @@
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
 
-# Restarting parked series refresh debt leaves a row that a nudge made due or a
-# refresh claimed after the read to that writer.
-./internal/metadata TestDeleteParkedTargetDebtOnlyWhenUnchangedDB
+# Restarting terminal series refresh debt for a newly aired by-date file keeps
+# the row's other reasons and leaves a due or leased row to its writer.
+./internal/metadata TestRestartTerminalEpisodeDebtDB
 
 # The artwork reconcile verify sweep and bulk reset leave bundled app-relative
 # collection posters alone: neither checks them against storage nor clears them.

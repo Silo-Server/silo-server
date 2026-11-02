@@ -2,7 +2,6 @@ package metadata
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -188,60 +187,73 @@ func TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync(t *
 	}
 }
 
-// TestDeleteParkedTargetDebtOnlyWhenUnchangedDB covers the parked-debt restart
-// racing a writer that makes the row due, claims it, or adds a reason after the
-// caller's read: the delete must leave such a row to that writer.
-func TestDeleteParkedTargetDebtOnlyWhenUnchangedDB(t *testing.T) {
+// TestRestartTerminalEpisodeDebtDB covers restarting terminal series debt for
+// a newly aired by-date file: the row keeps its other reasons and only
+// restarts while it is terminal, not due, unleased, and last attempted before
+// the file aired, as checked when the statement runs.
+func TestRestartTerminalEpisodeDebtDB(t *testing.T) {
 	pool, _ := episodeRefreshDebtTestPool(t)
 	repo := NewRefreshDebtRepository(pool)
 	ctx := t.Context()
+	pending := RefreshDebtReasonCoreMetadataIncomplete | RefreshDebtReasonTrailersRequested | RefreshDebtReasonProviderArtwork
 	for _, tc := range []struct {
-		name        string
-		dueIn       string
-		afterRead   string
-		wantDeleted bool
+		name          string
+		reasonMask    int64
+		attempts      int
+		set           string
+		attemptedDays int
+		wantRestarted bool
 	}{
-		{name: "unchanged parked row", wantDeleted: true},
-		{name: "already due at the read", dueIn: "-1 minute"},
-		{name: "reason added after the read", afterRead: `UPDATE metadata_refresh_debt SET reason_mask = reason_mask | 2`},
-		{name: "made due after the read", afterRead: `UPDATE metadata_refresh_debt SET next_refresh_at = NOW() - INTERVAL '1 minute'`},
-		{name: "claimed after the read", afterRead: `UPDATE metadata_refresh_debt SET next_refresh_at = NOW() - INTERVAL '1 minute', claimed_at = NOW(),
-			lease_expires_at = NOW() + INTERVAL '15 minutes', attempt_count = attempt_count + 1`},
-		{name: "leased without a new attempt", afterRead: `UPDATE metadata_refresh_debt SET lease_expires_at = NOW() + INTERVAL '15 minutes'`},
+		{name: "parked episode debt", reasonMask: RefreshDebtReasonEpisodeIncomplete, attempts: refreshDebtEpisodeTerminalAttempts, wantRestarted: true},
+		{name: "terminal debt for other reasons", reasonMask: pending, attempts: 5, wantRestarted: true},
+		{name: "attempts left", reasonMask: pending, attempts: refreshDebtEpisodeTerminalAttempts - 1},
+		{name: "due", reasonMask: pending, attempts: 5, set: `next_refresh_at = NOW() - INTERVAL '1 minute'`},
+		{name: "leased", reasonMask: pending, attempts: 5, set: `lease_expires_at = NOW() + INTERVAL '15 minutes'`},
+		{name: "attempted after the file aired", reasonMask: pending, attempts: 5, attemptedDays: -2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.dueIn == "" {
-				tc.dueIn = "7 days"
-			}
 			if _, err := pool.Exec(ctx, `DELETE FROM metadata_refresh_debt`); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
-				(target_type, content_id, reason_mask, next_refresh_at, last_attempt_at, attempt_count, last_error)
-				VALUES ('item', 'series-1', $1, NOW() + $3::interval, NOW() - INTERVAL '1 day', $2, 'not listed')`,
-				RefreshDebtReasonEpisodeIncomplete, refreshDebtEpisodeTerminalAttempts, tc.dueIn); err != nil {
+				(target_type, content_id, priority, reason_mask, next_refresh_at, last_attempt_at, attempt_count, last_error)
+				VALUES ('item', 'series-1', 50, $1, NOW() + INTERVAL '30 days', NOW() - INTERVAL '1 day', $2, 'not listed')`,
+				tc.reasonMask, tc.attempts); err != nil {
 				t.Fatal(err)
 			}
-			snapshot, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.afterRead != "" {
-				if _, err := pool.Exec(ctx, tc.afterRead); err != nil {
+			if tc.set != "" {
+				if _, err := pool.Exec(ctx, `UPDATE metadata_refresh_debt SET `+tc.set); err != nil {
 					t.Fatal(err)
 				}
 			}
-
-			deleted, err := repo.DeleteParkedTargetDebt(ctx, RefreshTargetItem, "series-1", snapshot.ReasonMask, snapshot.AttemptCount, snapshot.NextRefreshAt)
+			before, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if deleted != tc.wantDeleted {
-				t.Fatalf("deleted = %t, want %t", deleted, tc.wantDeleted)
+
+			now := time.Now()
+			restarted, err := repo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, "series-1", now.AddDate(0, 0, tc.attemptedDays), now)
+			if err != nil {
+				t.Fatal(err)
 			}
-			_, err = repo.GetTarget(ctx, RefreshTargetItem, "series-1")
-			if gone := errors.Is(err, ErrRefreshDebtNotFound); gone != tc.wantDeleted {
-				t.Fatalf("row gone = %t (err %v), want %t", gone, err, tc.wantDeleted)
+			if restarted != tc.wantRestarted {
+				t.Fatalf("restarted = %t, want %t", restarted, tc.wantRestarted)
+			}
+			after, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantRestarted {
+				if after.ReasonMask != before.ReasonMask || after.AttemptCount != before.AttemptCount ||
+					!after.NextRefreshAt.Equal(before.NextRefreshAt) || after.Priority != before.Priority {
+					t.Fatalf("row changed: %+v, was %+v", after, before)
+				}
+				return
+			}
+			if after.ReasonMask != tc.reasonMask|RefreshDebtReasonEpisodeIncomplete || after.AttemptCount != 0 ||
+				after.Priority != refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete) || after.NextRefreshAt.After(now) ||
+				after.LastError != "not listed" {
+				t.Fatalf("restarted row = %+v, want reasons %d due now with no attempts", after, tc.reasonMask|RefreshDebtReasonEpisodeIncomplete)
 			}
 		})
 	}
