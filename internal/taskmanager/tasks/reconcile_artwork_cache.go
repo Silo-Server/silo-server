@@ -293,14 +293,14 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 		"Verified %d cached images intact, reset %d for an optional manual backfill, cleared %d without a re-downloadable source",
 		stats.Verified, stats.Requeued, stats.Cleared,
 	)
-	if stats.Unrecovered > 0 {
-		message += fmt.Sprintf(", kept %d missing a size with no source to re-download (re-upload them)", stats.Unrecovered)
-	}
 	if stats.Mode == metadata.ArtworkReconcileModeBulkReset {
 		message = fmt.Sprintf(
 			"Storage probe found %d/%d sampled objects missing; reset all cached artwork (%d provider records ready for an optional manual backfill, cleared %d)",
 			stats.SampleMissing, stats.Sampled, stats.Requeued, stats.Cleared,
 		)
+	}
+	if stats.Unrecovered > 0 {
+		message += fmt.Sprintf(", kept %d missing a size with no source to re-download (re-upload them)", stats.Unrecovered)
 	}
 	if stats.Errors > 0 {
 		// SweepErrors is zero here (checked above), so these are probe or
