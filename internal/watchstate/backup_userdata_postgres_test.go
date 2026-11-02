@@ -253,7 +253,7 @@ func TestPluginSourcedPlaysDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exported, err := BackupData{}.Export(ctx, tx, source)
+	exported, err := BackupData{}.Export(ctx, tx, source, nil)
 	_ = tx.Rollback(ctx)
 	if err != nil {
 		t.Fatal(err)

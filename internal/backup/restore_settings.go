@@ -190,9 +190,13 @@ var settingRulesByPage = []struct {
 	}},
 	{"recommendations", map[string]SettingClass{
 		"recommendations.embedding_provider_id": SettingServerSpecific,
-		"recommendations.embedding_auth_token":  SettingExternalService,
-		"recommendations.openai_api_key":        SettingExternalService,
-		"recommendations.":                      SettingPortable,
+		// Written by the server, not an admin: the model and dimensions of
+		// the stored vectors, and the access-policy generation they reflect.
+		"recommendations.embedding_lock":           SettingServerSpecific,
+		"recommendations.policy_marked_generation": SettingServerSpecific,
+		"recommendations.embedding_auth_token":     SettingExternalService,
+		"recommendations.openai_api_key":           SettingExternalService,
+		"recommendations.":                         SettingPortable,
 	}},
 	{"nodes", map[string]SettingClass{
 		"playback.routing.": SettingPortable,

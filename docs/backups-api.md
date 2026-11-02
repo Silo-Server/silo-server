@@ -446,8 +446,8 @@ the format and rules.
 `GET /profile/export` answers the `silo-profile-export` document as an
 attachment (`silo-profile.json`): watch history and progress, ratings,
 favorites and watchlist, personal collections, dismissals, preferences, and
-notification preferences. It holds no account fields, password or PIN
-hashes, or access fields.
+notification preferences, leaving out titles the profile may not see now.
+It holds no account fields, password or PIN hashes, or access fields.
 
 `POST /profile/import` takes that document (at most 64 MiB) and merges it
 into the acting profile in one transaction: newer progress wins, plays,

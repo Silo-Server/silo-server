@@ -10554,7 +10554,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences. It carries no account fields, password or PIN hashes, or access fields. */
+    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields. */
     get: operations["exportProfile"];
     put?: never;
     post?: never;
@@ -129427,6 +129427,15 @@ export interface operations {
       };
       /** @description Request Timeout */
       408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

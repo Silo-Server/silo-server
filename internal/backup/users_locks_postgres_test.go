@@ -116,7 +116,7 @@ func TestProfileImportLockOrderDB(t *testing.T) {
 	dbExec(t, pool, `INSERT INTO user_watchlist_titles (user_id, profile_id, title_id) VALUES ($1, $2, $3)`, user, src, titleID)
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM watchlist_titles WHERE id = $1`, titleID) })
 	transfer := NewProfileTransfer(pool, func(context.Context) (string, error) { return "lock-server-" + sfx, nil })
-	data, err := transfer.Export(ctx, user, src)
+	data, err := transfer.Export(ctx, ProfileImportScope{UserID: user, ProfileID: src})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestProfileImportAndDeleteLockOrderDB(t *testing.T) {
 	dbExec(t, pool, `INSERT INTO user_personal_collections (id, user_id, profile_id, creator_profile_id, name, native) VALUES ($1, $2, $3, $3, 'Mine', true)`,
 		"dcol-"+sfx, user, other)
 	transfer := NewProfileTransfer(pool, func(context.Context) (string, error) { return "dlock-server-" + sfx, nil })
-	data, err := transfer.Export(ctx, user, src)
+	data, err := transfer.Export(ctx, ProfileImportScope{UserID: user, ProfileID: src})
 	if err != nil {
 		t.Fatal(err)
 	}

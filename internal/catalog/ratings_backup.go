@@ -29,7 +29,7 @@ type ratingEntry struct {
 	RatedAt time.Time `json:"rated_at"`
 }
 
-func (RatingsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (RatingsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	rows, err := tx.Query(ctx, `SELECT media_item_id, rating, rated_at FROM user_ratings WHERE user_id = $1 AND profile_id = $2 ORDER BY media_item_id`,
 		owner.UserID, owner.ProfileID)
 	if err != nil {
@@ -42,6 +42,9 @@ func (RatingsBackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.O
 		var e ratingEntry
 		if err := rows.Scan(&e.Item, &e.Rating, &e.RatedAt); err != nil {
 			return userdata.Export{}, err
+		}
+		if !keep.Has(e.Item) {
+			continue
 		}
 		doc.Ratings = append(doc.Ratings, e)
 		items = append(items, e.Item)

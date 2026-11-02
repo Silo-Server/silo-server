@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/backup"
 )
 
@@ -16,7 +17,7 @@ import (
 // data (docs/architecture/backups.md, "Profile export").
 type ProfileTransferService interface {
 	Capability() backup.ProfileExportCapability
-	Export(ctx context.Context, userID int, profileID string) ([]byte, error)
+	Export(ctx context.Context, scope backup.ProfileImportScope) ([]byte, error)
 	Import(ctx context.Context, scope backup.ProfileImportScope, data []byte) (*backup.ProfileImportResult, error)
 }
 
@@ -89,13 +90,19 @@ func registerProfileTransfer(reg *Registry) {
 		})
 
 	export := humaOp(http.MethodGet, Prefix+"/profile/export", "exportProfile", "profiles",
-		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences. It carries no account fields, password or PIN hashes, or access fields.")
+		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields.")
+	export.Errors = []int{http.StatusForbidden}
 	Register(reg, viewerOperation(export), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
 		svc := reg.deps.ProfileTransfer
 		if svc == nil {
 			return nil, unavailable("profile export")
 		}
-		data, err := svc.Export(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
+		// An export reads the profile's data as the profile may see it now.
+		scope, ok := scopeFrom(ctx)
+		if !ok || scope.ProfileID == "" || scope.ProfileID != profileFrom(ctx) {
+			return nil, NewProblem(TypeProfileVerificationRequired, "Choose a profile to export.")
+		}
+		data, err := svc.Export(ctx, profileTransferScope(claimsFrom(ctx).UserID, scope))
 		if err != nil {
 			return nil, profileTransferProblem(err)
 		}
@@ -108,7 +115,7 @@ func registerProfileTransfer(reg *Registry) {
 
 	imp := humaOp(http.MethodPost, Prefix+"/profile/import", "importProfile", "profiles",
 		"Merge a silo-profile-export document into the acting profile: newer progress and history win, ratings, favorites, and dismissals are added where the profile has none, collections gain missing items, and preferences are overwritten. Nothing is deleted, and importing the same document again changes nothing. The target is always the acting profile; a document carrying account or access fields is refused, and items the profile cannot see are left out. A PIN-protected profile needs its PIN-verified session.")
-	imp.Errors = []int{http.StatusForbidden}
+	imp.Errors = []int{http.StatusForbidden, http.StatusConflict}
 	Register(reg, Operation{Operation: imp, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true,
 		RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: backup.MaxProfileImportBytes},
 		func(ctx context.Context, in *ProfileImportInput) (*ProfileImportOutput, error) {
@@ -125,11 +132,7 @@ func registerProfileTransfer(reg *Registry) {
 			if !scope.ProfileVerified || scope.PINVerificationSkipped {
 				return nil, NewProblem(TypeProfileVerificationRequired, "Importing into a PIN-protected profile requires entering its PIN.")
 			}
-			target := backup.ProfileImportScope{UserID: claimsFrom(ctx).UserID, ProfileID: scope.ProfileID, Maturity: scope.MaturityLimits}
-			if scope.LibrariesRestricted {
-				target.AllowedLibraryIDs = append(append([]int{}, scope.AllowedLibraryIDs...), scope.HiddenLibraryIDs...)
-			}
-			res, err := svc.Import(ctx, target, in.RawBody)
+			res, err := svc.Import(ctx, profileTransferScope(claimsFrom(ctx).UserID, scope), in.RawBody)
 			if err != nil {
 				return nil, profileTransferProblem(err)
 			}
@@ -149,9 +152,21 @@ func profileTransferProblem(err error) error {
 		return NewProblem(TypeValidationFailed, err.Error())
 	case errors.Is(err, backup.ErrProfileImportTooLarge):
 		return NewProblem(TypePayloadTooLarge, err.Error())
+	case errors.Is(err, backup.ErrProfileImportBusy):
+		return NewProblem(TypeConflict, "Another profile import is running. Try again when it finishes.")
 	}
 	if invalid, ok := errors.AsType[*backup.InvalidProfileExportError](err); ok {
 		return NewProblem(TypeValidationFailed, invalid.Error())
 	}
 	return serviceProblem(err)
+}
+
+// profileTransferScope is the acting profile and what it may see, for an
+// export or an import of its own data.
+func profileTransferScope(userID int, scope access.Scope) backup.ProfileImportScope {
+	out := backup.ProfileImportScope{UserID: userID, ProfileID: scope.ProfileID, Maturity: scope.MaturityLimits}
+	if scope.LibrariesRestricted {
+		out.AllowedLibraryIDs = append(append([]int{}, scope.AllowedLibraryIDs...), scope.HiddenLibraryIDs...)
+	}
+	return out
 }

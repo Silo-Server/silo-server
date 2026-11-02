@@ -109,6 +109,10 @@ type Target struct {
 	Collection func(ctx context.Context, field, id string) (string, bool, error)
 	// Now stamps rows that need a time of their own.
 	Now time.Time
+	// Untrusted marks a profile's own export, which whoever holds it could
+	// have edited. Its import must not write rows other accounts read, such
+	// as shared watchlist titles, from the document.
+	Untrusted bool
 }
 
 // The configuration fields that name a collection.
@@ -179,7 +183,9 @@ type Type interface {
 	// Tables are the Postgres tables the type reads and writes, for the
 	// coverage test that every per-user table is claimed or excluded.
 	Tables() []string
-	Export(ctx context.Context, tx pgx.Tx, owner Owner) (Export, error)
+	// Export reads the owner's rows. keep leaves out every row about an
+	// item it rejects; nil keeps every row (a server backup).
+	Export(ctx context.Context, tx pgx.Tx, owner Owner, keep Keep) (Export, error)
 	// Validate decodes an untrusted document strictly and checks it.
 	Validate(data json.RawMessage) (Summary, error)
 	Import(ctx context.Context, tx pgx.Tx, target Target, data json.RawMessage) (Result, error)
@@ -231,9 +237,18 @@ func ResolveAll(ctx context.Context, items Items, ids []string) (map[string]stri
 }
 
 // Prepared is one profile's document of a type, before it is imported.
+// Keep reports whether an export keeps rows about an item: a profile's own
+// export keeps only what the profile may see now. Nil keeps everything.
+type Keep func(item string) bool
+
+// Has is keep(item); a nil Keep has every item.
+func (k Keep) Has(item string) bool { return k == nil || k(item) }
+
 type Prepared struct {
 	Owner Owner
 	Data  json.RawMessage
+	// Untrusted is as Target.Untrusted.
+	Untrusted bool
 }
 
 // Preparer is a Type that takes locks before any document of an import is

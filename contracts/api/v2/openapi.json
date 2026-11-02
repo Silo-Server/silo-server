@@ -198568,7 +198568,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences. It carries no account fields, password or PIN hashes, or access fields.",
+        "summary": "Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields.",
         "tags": [
           "profiles"
         ],
@@ -198687,6 +198687,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
             "content": {

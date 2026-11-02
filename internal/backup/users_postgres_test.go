@@ -795,11 +795,11 @@ func TestProfileTransferDB(t *testing.T) {
 	dbExec(t, pool, `INSERT INTO user_library_playback_preferences (user_id, profile_id, library_id, audio_language) VALUES ($1, $2, $3, 'de'), ($1, $2, $4, 'fr')`, user, src, lib1, lib2)
 
 	transfer := NewProfileTransfer(pool, func(context.Context) (string, error) { return "pt-server-" + sfx, nil })
-	data, err := transfer.Export(ctx, user, src)
+	data, err := transfer.Export(ctx, ProfileImportScope{UserID: user, ProfileID: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transfer.Export(ctx, other, src); !errors.Is(err, ErrProfileNotFound) {
+	if _, err := transfer.Export(ctx, ProfileImportScope{UserID: other, ProfileID: src}); !errors.Is(err, ErrProfileNotFound) {
 		t.Fatalf("exporting another account's profile = %v, want not found", err)
 	}
 	for _, field := range []string{`"password_hash"`, `"pin_hash"`, `"allowed_library_ids"`, `"username"`} {
@@ -849,6 +849,27 @@ func TestProfileTransferDB(t *testing.T) {
 	}
 	if _, err := transfer.Import(ctx, ProfileImportScope{UserID: other, ProfileID: dst}, data); !errors.Is(err, ErrProfileNotFound) {
 		t.Fatalf("importing into another account's profile = %v, want not found", err)
+	}
+	checkRestrictedExport(t, transfer, ProfileImportScope{UserID: user, ProfileID: src, AllowedLibraryIDs: []int{lib1},
+		Maturity: access.MaturityLimits{MaxContentRating: "PG"}}, m1, []string{m2, "Two " + sfx, m3, "Three " + sfx})
+}
+
+// checkRestrictedExport: a profile exports its data as it may see it now,
+// so titles outside its libraries or above its ceiling, and their names,
+// are not in the file.
+func checkRestrictedExport(t *testing.T, transfer *ProfileTransfer, scope ProfileImportScope, visible string, hidden []string) {
+	t.Helper()
+	data, err := transfer.Export(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), visible) {
+		t.Fatalf("a restricted export lost %s, which the profile can see", visible)
+	}
+	for _, s := range hidden {
+		if strings.Contains(string(data), s) {
+			t.Fatalf("a restricted export carries %q, which the profile cannot see", s)
+		}
 	}
 }
 

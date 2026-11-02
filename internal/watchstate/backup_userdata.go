@@ -85,7 +85,7 @@ func (e watchHiddenEntry) removedBefore() pgtype.Timestamptz {
 	return e.RemovedBefore
 }
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	doc := watchHistoryDocument{Progress: []watchProgressEntry{}, History: []watchPlayEntry{}, Hidden: []watchHiddenEntry{}}
 	items := map[string]bool{}
 	rows, err := tx.Query(ctx, `
@@ -101,6 +101,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 			&e.LastFileID, &e.LastResolution, &e.LastHDR, &e.LastCodecVideo, &e.LastEditionKey); err != nil {
 			rows.Close()
 			return userdata.Export{}, err
+		}
+		if !keep.Has(e.Item) {
+			continue
 		}
 		doc.Progress = append(doc.Progress, e)
 		items[e.Item] = true
@@ -130,6 +133,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 		if !validWatchSource(e.Source) {
 			e.Source = string(userstore.WatchHistorySourceImport)
 		}
+		if !keep.Has(e.Item) {
+			continue
+		}
 		doc.History = append(doc.History, e)
 		items[e.Item] = true
 	}
@@ -148,6 +154,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 		var e watchHiddenEntry
 		if err := rows.Scan(&e.Item, &e.HiddenBefore, &e.UpdatedAt, &e.RemovedBefore); err != nil {
 			return userdata.Export{}, err
+		}
+		if !keep.Has(e.Item) {
+			continue
 		}
 		doc.Hidden = append(doc.Hidden, e)
 		items[e.Item] = true

@@ -232,7 +232,7 @@ func (u *userPlanner) profilePending(ctx context.Context, plan *accountPlan, pp 
 		Library: mapIn(u.libMap),
 		Profile: func(id string) (string, bool) { local, ok := profiles[id]; return local, ok },
 	}
-	target.Collection = newCollectionMap(p.planner, p.tx, u.libMap, u.sameServer, p.adminCollections, plan.doc).lookup(target)
+	target.Collection = newCollectionMap(p.planner, p.tx, u.libMap, u.sameServer, p.adminCollections, plan.doc).previewLookup(target)
 	for j := range pp.preview.DataTypes {
 		dt := &pp.preview.DataTypes[j]
 		t, ok := userdata.Find(userDataTypes, dt.ID)
