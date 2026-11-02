@@ -63,6 +63,15 @@ const unsettledBySession = new Map<
 >();
 
 /**
+ * The command per session most recently sent, and whether any answer to it
+ * settled it. Several requests for one session can be in flight (the
+ * dashboard and the Activity page each have actions), so an answer only
+ * records an unknown outcome for the latest command, and never after another
+ * request for it was answered.
+ */
+const latestBySession = new Map<string, { commandId: string; settled: boolean }>();
+
+/**
  * The largest sequence the contract accepts (2^53-1): every client, including
  * this one working in JavaScript numbers, can represent the latest applied
  * sequence exactly and allocate above it. Reaching it would take a clock
@@ -177,6 +186,13 @@ export async function sendAdminPlaybackCommand(
   ) {
     throw new Error("A command sequence must be a positive integer within the contract bound.");
   }
+  const latest = latestBySession.get(request.sessionId);
+  if (latest?.commandId !== commandIdentity.command_id) {
+    latestBySession.set(request.sessionId, {
+      commandId: commandIdentity.command_id,
+      settled: false,
+    });
+  }
   const identity = {
     command_id: commandIdentity.command_id,
     sequence: commandIdentity.sequence,
@@ -215,8 +231,11 @@ export async function sendAdminPlaybackCommand(
       }
     }
   } catch (error) {
+    const current = latestBySession.get(request.sessionId);
     if (outcomeUnknown(error)) {
-      unsettledBySession.set(request.sessionId, { intent, identity: commandIdentity });
+      if (current?.commandId === commandIdentity.command_id && !current.settled) {
+        unsettledBySession.set(request.sessionId, { intent, identity: commandIdentity });
+      }
     } else {
       settle(request.sessionId, commandIdentity);
     }
@@ -236,6 +255,8 @@ export async function sendAdminPlaybackCommand(
 
 /** Forget a command whose outcome the server has now answered. */
 function settle(sessionId: string, identity: AdminPlaybackCommandIdentity): void {
+  const latest = latestBySession.get(sessionId);
+  if (latest?.commandId === identity.command_id) latest.settled = true;
   if (unsettledBySession.get(sessionId)?.identity.command_id === identity.command_id) {
     unsettledBySession.delete(sessionId);
   }

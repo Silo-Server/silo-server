@@ -414,10 +414,14 @@ func (r *ControlRelay) refresh(ctx context.Context) {
 	}
 }
 
-// applyQueuedLaneEvents applies the lane events already queued, without
-// waiting for more.
+// applyQueuedLaneEvents applies the lane events queued when it starts. Events
+// that arrive meanwhile wait for the next batch, so a steady stream of lane
+// changes cannot stall the renewal of every other claim.
 func (r *ControlRelay) applyQueuedLaneEvents(ctx context.Context) {
-	for {
+	for range len(r.events) {
+		if ctx.Err() != nil {
+			return
+		}
 		select {
 		case sessionID := <-r.events:
 			r.applyLaneEvent(ctx, sessionID)

@@ -187,6 +187,49 @@ it("repeats a command whose outcome is unknown with the same identity, and only 
   expect(bodies[5]!.command_id).not.toBe(bodies[4]!.command_id);
 });
 
+it("does not reopen a command that another request already settled", async () => {
+  const noReply = {
+    type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+    title: "Service Unavailable",
+    status: 503,
+  };
+  const bodies: Array<{ command_id: string; sequence: number }> = [];
+  let answerLate!: () => void;
+  const late = new Promise<void>((resolve) => (answerLate = resolve));
+  const plan = [
+    async () => response(noReply, 503),
+    // Two pages repeat the unknown pause at once: one is answered, then the
+    // other's 503 arrives late.
+    async () => {
+      await late;
+      return response(noReply, 503);
+    },
+    async (body: object) => response({ ...receipt, ...body }, 200),
+    async (body: object) => response({ ...receipt, ...body }, 202),
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof globalThis.fetch>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return plan.shift()!(body);
+    }),
+  );
+  const pause = { sessionId: "s-late", action: "pause" } as const;
+  const send = () => sendAdminPlaybackCommand(pause).catch((error: unknown) => error);
+
+  await send();
+  const lateRepeat = send();
+  await send();
+  answerLate();
+  await lateRepeat;
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(bodies[2]).toEqual(bodies[0]);
+
+  await send();
+  expect(bodies[3]!.command_id).not.toBe(bodies[0]!.command_id);
+});
+
 it("refuses a superseded authority before and after the request", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {
     setProfileId("someone-else");
