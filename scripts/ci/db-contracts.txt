@@ -82,11 +82,13 @@
 ./internal/catalog TestStaleMembershipRemovalLocksSeriesFirstDB
 
 # A subtree scan in a podcast library indexes the show folder with the podcast
-# scanner, keeps the show's content ID, and reconciles only that show; a show
-# being written survives another scan's membership sweep, two scans of the
-# same new show create it once, and a scan counts only the episodes it indexed.
+# scanner, keeps the show's content ID, and reconciles only that show, not a
+# library root nested inside it; a show being written survives another scan's
+# membership sweep, two scans of the same new show create it once, and a scan
+# counts only the episodes it indexed.
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
+./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
 ./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
 ./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 ./internal/scanner TestScanSubtreeCountsOnlyTheEpisodesItIndexed

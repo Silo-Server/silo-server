@@ -437,6 +437,30 @@ func (f *podcastSubtreeFixture) scannerOnOwnPool(t *testing.T, name string, trac
 	return NewScanner(NewFileRepository(pool), f.ffprobePath, nil, 2, false, 0)
 }
 
+// A library root nested inside a show folder holds shows of its own. A scan of
+// the enclosing show lists only that show's episodes, so it must not mark the
+// nested root's episodes missing.
+func TestPodcastShowScanLeavesANestedLibraryRootAlone(t *testing.T) {
+	f := newPodcastSubtreeFixture(t)
+	showA := filepath.Join(f.root, "Show A")
+	nestedRoot := filepath.Join(showA, "extra")
+	if _, err := f.pool.Exec(context.Background(),
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, f.folder.ID, nestedRoot,
+	); err != nil {
+		t.Fatalf("seed nested folder path: %v", err)
+	}
+	f.folder.Paths = append(f.folder.Paths, nestedRoot)
+
+	f.addEpisode(t, "Show A", "Episode 1.mp3", "Show A", "One", "1")
+	nestedEpisode := f.addEpisode(t, filepath.Join("Show A", "extra", "Show B"), "Episode 1.mp3", "Show B", "One", "1")
+	showB := filepath.Join(nestedRoot, "Show B")
+	f.scanFolder(t)
+	f.requireEpisodeOf(t, nestedEpisode, showB, "Show B")
+
+	requireCounts(t, "Show A", f.scanSubtree(t, showA), 0, 0, 1, 0)
+	f.requireEpisodeOf(t, nestedEpisode, showB, "Show B")
+}
+
 // TestPodcastShowSurvivesConcurrentMembershipSweep covers two scans of one
 // podcast library running side by side, as subtree scans of different shows
 // do. While one scan writes a new show, the other's folder-wide membership

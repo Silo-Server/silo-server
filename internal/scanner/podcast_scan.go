@@ -426,8 +426,14 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 		if err != nil {
 			return fmt.Errorf("listing existing podcast files for %q: %w", root, err)
 		}
+		owner := scopeLibraryRoot(root, folder.Paths)
 		for _, mf := range existing {
 			if mf == nil || seenPaths[mf.FilePath] {
+				continue
+			}
+			// A show scan sees only its own show. Files under a library root
+			// nested inside the show belong to that root's shows.
+			if !fullScan && scopeLibraryRoot(mf.FilePath, folder.Paths) != owner {
 				continue
 			}
 			if mf.MissingSince == nil {
