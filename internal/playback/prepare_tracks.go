@@ -119,7 +119,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 		})
 	}
 	for i, track := range file.SubtitleTracks {
-		if track.External || !PreparedSubtitleEmbeddable(track.Codec) {
+		// The prepared encode maps each track from the source, which FFmpeg
+		// can't demux for an index-only track.
+		if track.External || track.IndexOnly || !PreparedSubtitleEmbeddable(track.Codec) {
 			continue
 		}
 		plan.Subtitles = append(plan.Subtitles, PreparedSubtitleTrack{

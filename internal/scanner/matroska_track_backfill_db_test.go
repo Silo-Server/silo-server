@@ -258,3 +258,49 @@ func TestMatroskaTrackBackfillReadsEachFileOnce(t *testing.T) {
 		t.Fatalf("file %d with every ID is a candidate again", matched)
 	}
 }
+
+// A track FFprobe stored without a codec, which mkvmerge wrote as
+// S_TEXT/WEBVTT, gets its track number, codec and index-only flag, and the
+// element keeps every other field.
+func TestMatroskaTrackBackfillRecordsIndexOnlyWebVTT(t *testing.T) {
+	ctx := context.Background()
+	pool := newScannerTestPool(t)
+
+	fixture, err := os.ReadFile("testdata/webvtt.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "WebVTT (2020).mkv")
+	if err := os.WriteFile(path, fixture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := insertMatroskaBackfillRow(t, ctx, pool, path, info.Size(), new(info.ModTime()),
+		`[{"index":1,"codec":"","language":"en","forced":false,"default":false,"hearing_impaired":false,"external":false,"future_field":"kept"}]`)
+	// The fixture has no audio track.
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET audio_tracks = '[]' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	backfiller := NewMatroskaTrackBackfiller(NewFileRepository(pool))
+	if !backfillCandidateIDs(t, ctx, backfiller)[id] {
+		t.Fatalf("file %d with a track without a codec is not a candidate", id)
+	}
+	if _, err := backfiller.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	tracks := readBackfilledSubtitleTracks(t, ctx, pool, id)
+	if len(tracks) != 1 || tracks[0].ContainerTrackID != "2" || tracks[0].Codec != "webvtt" || !tracks[0].IndexOnly || tracks[0].Language != "en" {
+		t.Fatalf("tracks = %+v, want index-only WebVTT track 2", tracks)
+	}
+	var kept string
+	if err := pool.QueryRow(ctx, `SELECT subtitle_tracks->0->>'future_field' FROM media_files WHERE id = $1`, id).Scan(&kept); err != nil || kept != "kept" {
+		t.Fatalf("unknown subtitle field = %q (%v), want it preserved", kept, err)
+	}
+	if backfillCandidateIDs(t, ctx, backfiller)[id] {
+		t.Fatalf("file %d is still a candidate after its backfill", id)
+	}
+}
