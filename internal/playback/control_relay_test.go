@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -312,6 +314,63 @@ func TestControlRelayRefreshReclaimsAnExpiredClaim(t *testing.T) {
 	relay.refresh(context.Background())
 	if got := owners.get("s1"); got != relay.id {
 		t.Fatalf("refresh did not reclaim: owner %q", got)
+	}
+}
+
+// gatedRelayTestOwners holds every Claim until gate closes, standing in for a
+// slow Redis round trip, and records the order the claims completed in.
+type gatedRelayTestOwners struct {
+	*relayTestOwners
+	gate     chan struct{}
+	inFlight atomic.Int64
+	mu       sync.Mutex
+	claimed  []string
+}
+
+func (o *gatedRelayTestOwners) Claim(ctx context.Context, sessionID, owner string, connectedAt time.Time) error {
+	o.inFlight.Add(1)
+	<-o.gate
+	o.mu.Lock()
+	o.claimed = append(o.claimed, sessionID)
+	o.mu.Unlock()
+	return o.relayTestOwners.Claim(ctx, sessionID, owner, connectedAt)
+}
+
+// TestControlRelayRefreshDoesNotSerializeBehindTheRoundTrip: a sweep over
+// many lanes renews more than one claim per round trip, so it does not
+// outlast the TTL on a large replica, and a lane that opens during the sweep
+// is claimed between batches instead of after every other lane.
+func TestControlRelayRefreshDoesNotSerializeBehindTheRoundTrip(t *testing.T) {
+	owners := &gatedRelayTestOwners{relayTestOwners: newRelayTestOwners(), gate: make(chan struct{})}
+	hub := NewRealtimeHub()
+	relay := NewControlRelayWithOwners(hub, owners)
+	const lanes = 32
+	for i := range lanes {
+		hub.Register(fmt.Sprintf("s%d", i), registrationTestConn{})
+	}
+	bus := &relayTestBus{}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := relay.Start(ctx, bus.publish, bus.subscribe); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for owners.inFlight.Load() < 2 {
+		if time.Now().After(deadline) {
+			close(owners.gate)
+			t.Fatalf("refresh claims in flight = %d, want more than one round trip at a time", owners.inFlight.Load())
+		}
+		//nolint:forbidigo // Polls observable state: the sweep runs on the relay's goroutine.
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	hub.Register("opened-mid-sweep", registrationTestConn{})
+	close(owners.gate)
+	waitForRelayOwner(t, owners.relayTestOwners, "opened-mid-sweep", relay.id)
+	owners.mu.Lock()
+	defer owners.mu.Unlock()
+	if position := slices.Index(owners.claimed, "opened-mid-sweep"); position < 0 || position >= lanes {
+		t.Fatalf("the lane that opened mid-sweep was claimed at position %d of %v, after the whole sweep", position, owners.claimed)
 	}
 }
 

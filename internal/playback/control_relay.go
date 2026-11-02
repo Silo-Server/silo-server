@@ -74,6 +74,10 @@ const (
 	controlRelayHandlerTimeout = 2 * time.Minute
 	// controlRelayRedisTimeout bounds one ownership read or write.
 	controlRelayRedisTimeout = time.Second
+	// controlRelayRefreshBatch bounds the claims a refresh has in flight at
+	// once, so a sweep over many lanes takes lanes/batch round trips rather
+	// than one per lane, without taking much of the shared Redis pool.
+	controlRelayRefreshBatch = 8
 	// controlRelayQueueSize bounds pending lane open/close notifications; an
 	// overflow is repaired by the next refresh, which claims with the same
 	// connection time.
@@ -386,21 +390,50 @@ func (r *ControlRelay) applyLaneEvent(ctx context.Context, sessionID string) {
 	}
 }
 
+// refresh re-asserts the claim of every open lane. The claims go out in
+// concurrent batches, and lane events that queued meanwhile are applied
+// between batches: a sweep over many lanes does not outlast the TTL at a slow
+// round trip or hold back the first claim of a lane that just opened, and a
+// session's refresh claim never overlaps its own open or close event.
 func (r *ControlRelay) refresh(ctx context.Context) {
-	for _, sessionID := range r.hub.LaneSessionIDs() {
+	sessionIDs := r.hub.LaneSessionIDs()
+	for start := 0; start < len(sessionIDs); start += controlRelayRefreshBatch {
 		if ctx.Err() != nil {
 			return
 		}
-		connectedAt, open := r.hub.LaneConnectedAt(sessionID)
-		if !open {
-			continue
+		r.applyQueuedLaneEvents(ctx)
+		var wg sync.WaitGroup
+		for _, sessionID := range sessionIDs[start:min(start+controlRelayRefreshBatch, len(sessionIDs))] {
+			wg.Go(func() { r.reclaim(ctx, sessionID) })
 		}
-		opCtx, cancel := context.WithTimeout(ctx, controlRelayRedisTimeout)
-		err := r.owners.Claim(opCtx, sessionID, r.id, connectedAt)
-		cancel()
-		if err != nil && ctx.Err() == nil {
-			slog.WarnContext(ctx, "playback control relay: lane claim refresh failed", "component", "playback", "playback_session_id", sessionID, "error", err)
+		wg.Wait()
+	}
+}
+
+// applyQueuedLaneEvents applies the lane events already queued, without
+// waiting for more.
+func (r *ControlRelay) applyQueuedLaneEvents(ctx context.Context) {
+	for {
+		select {
+		case sessionID := <-r.events:
+			r.applyLaneEvent(ctx, sessionID)
+		default:
+			return
 		}
+	}
+}
+
+// reclaim re-asserts this replica's claim for a lane that is still open.
+func (r *ControlRelay) reclaim(ctx context.Context, sessionID string) {
+	connectedAt, open := r.hub.LaneConnectedAt(sessionID)
+	if !open {
+		return
+	}
+	opCtx, cancel := context.WithTimeout(ctx, controlRelayRedisTimeout)
+	err := r.owners.Claim(opCtx, sessionID, r.id, connectedAt)
+	cancel()
+	if err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "playback control relay: lane claim refresh failed", "component", "playback", "playback_session_id", sessionID, "error", err)
 	}
 }
 
