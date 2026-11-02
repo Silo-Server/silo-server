@@ -1456,6 +1456,12 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Jellyfin applies HidePlayedInLatest when the client doesn't send
+	// IsPlayed; Jellyfin Web's home Latest rows never send it.
+	if query.isPlayed == nil && h.hidePlayedInLatest(r.Context(), session) {
+		query.isPlayed = new(false)
+	}
+
 	// Jellyfin's /Items/Latest auto-infers item types from the parent
 	// library's collection type when no explicit IncludeItemTypes is given.
 	// Without this, clients like Infuse may not display "Latest Movies"
@@ -2562,6 +2568,20 @@ func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Sess
 		return false
 	}
 	return access.ResolveViewerPreferences(ctx, store, h.adminDefaults, session.ProfileID).NextUpNewReleasesFirst
+}
+
+// hidePlayedInLatest reads the profile's home.hide_watched_items, which
+// Jellyfin clients see as HidePlayedInLatest, so Latest hides watched items
+// the way Silo's Home does. Without a store, or when the read fails, it is off.
+func (h *ItemsHandler) hidePlayedInLatest(ctx context.Context, session *Session) bool {
+	if h.storeProvider == nil || session.ProfileID == "" {
+		return false
+	}
+	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return false
+	}
+	return sections.HideWatchedItemsFromHome(ctx, store, session.ProfileID)
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the
