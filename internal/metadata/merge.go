@@ -325,9 +325,10 @@ func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
 // a provider supplies them, so a stored date is never a manual correction a
 // fill-empty refresh must keep. The FieldReleaseDates lock still holds them.
 //
-// A refresh keeps a date the provider stops sending, but a rematch is a
-// different movie: its dates replace the stored ones even when empty, so the
-// wrong match's release cannot keep the item on the calendar.
+// A refresh keeps a date the provider stops sending, but a correction of the
+// item's match is a different movie: its dates replace the stored ones even
+// when empty, so the wrong match's release cannot keep the item on the
+// calendar.
 func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField, rematch bool) {
 	if isFieldLocked(locked, FieldReleaseDates) {
 		return

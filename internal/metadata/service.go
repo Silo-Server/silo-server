@@ -1859,7 +1859,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// rather than fetched and kept, and the providers re-supply the right
 		// ones. A choice that confirms or extends the match keeps them.
 		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
-		if stored := storedItemIdentity(existing, req.durableProviderIDs); identityChoiceCorrects(chosen, stored) {
+		req.identityCorrection = identityChoiceCorrects(chosen, storedItemIdentity(existing, req.durableProviderIDs))
+		if req.identityCorrection {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
@@ -1945,6 +1946,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		wonHints := applyLocalIdentityHints(ctx, localHints, accumulatedIDs, protectedKeys)
 		hinted := canonicalIdentityProviderIDs(wonHints)
 		if req.Mode == ModeManualRefresh && identityChoiceCorrects(hinted, stored) {
+			req.identityCorrection = true
 			// The stored IDs came from the match the corrected NFO overrides,
 			// so any the NFO doesn't restate are dropped, not re-fetched.
 			for _, key := range trustedSearchIDKeys {
@@ -2937,7 +2939,7 @@ func (s *MetadataService) mergeAndPersist(
 		if !req.enrichmentOnly {
 			// One enrichment provider's dates only fill empty ones (above);
 			// the provider chain's current dates are a refresh's to apply.
-			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.Mode == ModeIdentify)
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.identityCorrection)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)

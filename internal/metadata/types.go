@@ -79,6 +79,9 @@ type ProcessRequest struct {
 	// durableProviderIDs is the item's stored provider-ID rows as loaded,
 	// before any request IDs are merged with them.
 	durableProviderIDs map[string]string
+	// identityCorrection is set when an Identify, or an NFO on a manual
+	// refresh, corrects the item's stored match (identityChoiceCorrects).
+	identityCorrection bool
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.

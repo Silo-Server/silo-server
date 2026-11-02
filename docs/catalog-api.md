@@ -1003,8 +1003,8 @@ a value that is not a calendar date. The TMDB plugin derives them from TMDB's
 type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
 ones included, replaces a stored date with the one the provider sends now,
 because providers revise them. A date the provider stops sending is kept,
-except on Identify: a rematch is a different movie, so its dates replace the
-stored ones even when it has none.
+except when Identify, or an NFO on a manual refresh, corrects the item's match:
+the new movie's dates replace the stored ones even when it has none.
 Locking release dates on an item also locks them.
 
 ## Advisory age
