@@ -86,7 +86,8 @@
 # library root nested inside it; a show being written survives another scan's
 # membership sweep, two scans of the same new show create it once, a show scan
 # that stops before its commit leaves no show behind and needs one connection,
-# and a scan counts only the episodes it indexed.
+# a scan counts only the episodes it indexed, and a stale scan leaves an episode
+# another scan found new present and one it found removed missing.
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
 ./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
@@ -94,6 +95,7 @@
 ./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 ./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
 ./internal/scanner TestScanSubtreeCountsOnlyTheEpisodesItIndexed
+./internal/scanner TestStalePodcastScanLeavesNewerCatalogStateAlone
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB

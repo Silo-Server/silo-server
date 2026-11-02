@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -690,4 +691,163 @@ func TestScanSubtreeCountsOnlyTheEpisodesItIndexed(t *testing.T) {
 	requireCounts(t, show, f.scanSubtree(t, show), 1, 1, 1, 0)
 	f.requireEpisodeOf(t, returning, show, "Show A")
 	f.requireEpisodeOf(t, downloading, show, "Show A")
+}
+
+// probeGate holds one ffprobe run of the fixture's fake tool: the run for the
+// armed file writes gate/entered and waits for a line on gate/release.
+type probeGate string
+
+func (f *podcastSubtreeFixture) gateProbe(t *testing.T) probeGate {
+	t.Helper()
+	gate := filepath.Join(t.TempDir(), "gate")
+	g := probeGate(gate)
+	if err := os.Mkdir(gate, 0o755); err != nil {
+		t.Fatalf("mkdir gate: %v", err)
+	}
+	for _, fifo := range []string{"entered", "release"} {
+		if err := syscall.Mkfifo(filepath.Join(gate, fifo), 0o600); err != nil {
+			t.Fatalf("mkfifo %s: %v", fifo, err)
+		}
+	}
+	// A test that fails while the probe is held still lets it finish.
+	t.Cleanup(func() { _ = g.releaseIfHeld() })
+	writeFakeTool(t, f.ffprobePath, fmt.Sprintf("#!/bin/sh\nfor last; do :; done\nG=%q\n", gate)+
+		"if [ \"$last\" = \"$(cat \"$G/target\" 2>/dev/null)\" ] && mkdir \"$G/taken\" 2>/dev/null; then\n"+
+		"  echo entered > \"$G/entered\"\n  cat \"$G/release\" > /dev/null\nfi\n"+
+		"cat \"$last\"\n")
+	return g
+}
+
+func (g probeGate) arm(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(string(g), "target"), []byte(path), 0o600); err != nil {
+		t.Fatalf("arm probe gate: %v", err)
+	}
+}
+
+// waitHeld returns once the armed probe is held, and fails if the scan
+// finishes first.
+func (g probeGate) waitHeld(t *testing.T, scanDone <-chan error) {
+	t.Helper()
+	entered := make(chan error, 1)
+	go func() {
+		_, err := os.ReadFile(filepath.Join(string(g), "entered"))
+		entered <- err
+	}()
+	select {
+	case err := <-entered:
+		if err != nil {
+			t.Fatalf("wait for the held probe: %v", err)
+		}
+	case err := <-scanDone:
+		t.Fatalf("the scan finished before its probe was held: %v", err)
+	}
+}
+
+func (g probeGate) release(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(string(g), "release"), []byte("go\n"), 0o600); err != nil {
+		t.Fatalf("release the held probe: %v", err)
+	}
+}
+
+// releaseIfHeld releases a probe that is waiting, and returns at once when
+// none is.
+func (g probeGate) releaseIfHeld() error {
+	fifo, err := os.OpenFile(filepath.Join(string(g), "release"), os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	_, err = fifo.WriteString("go\n")
+	return errors.Join(err, fifo.Close())
+}
+
+// TestStalePodcastScanLeavesNewerCatalogStateAlone covers a scan that listed a
+// show and is still probing it while another scan of the show indexes a change
+// on disk, as a show folder scan next to a full scan does. When the stale scan
+// finishes, a new episode the other scan cataloged must stay present, and an
+// episode the other scan found removed must stay missing.
+func TestStalePodcastScanLeavesNewerCatalogStateAlone(t *testing.T) {
+	cases := []struct {
+		name      string
+		staleFull bool // the stale scan is a full library scan, not a show scan
+		// The show lies in a library root nested in another show, and the
+		// nested root is listed first.
+		nestedRoot bool
+		removed    bool // the other scan finds an episode removed, not a new one
+	}{
+		{name: "stale full scan, new episode", staleFull: true},
+		{name: "stale full scan, new episode under a nested root listed first", staleFull: true, nestedRoot: true},
+		{name: "stale show scan, new episode"},
+		{name: "stale show scan, removed episode", removed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPodcastSubtreeFixture(t)
+			ctx := context.Background()
+			gate := f.gateProbe(t)
+
+			showRel := "Show A"
+			if tc.nestedRoot {
+				nested := filepath.Join(f.root, "Show A", "extra")
+				if _, err := f.pool.Exec(ctx,
+					`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, f.folder.ID, nested,
+				); err != nil {
+					t.Fatalf("seed nested folder path: %v", err)
+				}
+				f.folder.Paths = []string{nested, f.root}
+				showRel = filepath.Join("Show A", "extra", "Show B")
+			}
+			showDir := filepath.Join(f.root, showRel)
+			e1 := f.addEpisode(t, showRel, "01.mp3", "Show", "One", "1")
+			e2 := f.addEpisode(t, showRel, "02.mp3", "Show", "Two", "2")
+			e3 := filepath.Join(showDir, "03.mp3")
+			if tc.removed {
+				f.addEpisode(t, showRel, "03.mp3", "Show", "Three", "3")
+			}
+			f.scanFolder(t)
+
+			// The stale scan stops on the last episode it lists, after
+			// probing the others.
+			last := e2
+			if tc.removed {
+				last = e3
+			}
+			gate.arm(t, last)
+			staleDone := make(chan error, 1)
+			go func() {
+				var err error
+				if tc.staleFull {
+					_, err = f.scanner.ScanFolder(ctx, f.folder)
+				} else {
+					_, err = f.scanner.ScanSubtree(ctx, f.folder, showDir)
+				}
+				staleDone <- err
+			}()
+			gate.waitHeld(t, staleDone)
+
+			if tc.removed {
+				if err := os.Remove(e2); err != nil {
+					t.Fatalf("remove episode: %v", err)
+				}
+			} else {
+				f.addEpisode(t, showRel, "03.mp3", "Show", "Three", "3")
+			}
+			f.scanSubtree(t, showDir)
+			gate.release(t)
+			if err := <-staleDone; err != nil {
+				t.Fatalf("stale scan: %v", err)
+			}
+
+			f.requireEpisodeOf(t, e1, showDir, "Show")
+			if tc.removed {
+				if !f.fileRow(t, e2).missing {
+					t.Fatalf("%s: present after the stale scan, want it to stay missing", e2)
+				}
+				return
+			}
+			f.requireEpisodeOf(t, e2, showDir, "Show")
+			f.requireEpisodeOf(t, e3, showDir, "Show")
+		})
+	}
 }
