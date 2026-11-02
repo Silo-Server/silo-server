@@ -446,6 +446,11 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 			return nil, corrupt("block at %d has timestamp %d", at, ticks)
 		}
 		p := Packet{PTS: pts, Data: data, pos: at, lace: n, laces: int(laces), nonKeyframe: !blk.keyframe || n > 0}
+		if n == 0 && blk.addition != nil && m.t.CodecID == matroska.CodecIDWebVTT {
+			if p.addition, err = m.copied(blk.addition); err != nil {
+				return nil, err
+			}
+		}
 		lace := duration*int64(n+1)/laces - duration*int64(n)/laces
 		switch {
 		case laces > 1:
@@ -465,13 +470,18 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 	return packets, nil
 }
 
+// copied returns b in its own memory, drawn from the read's budget.
+func (m *matroskaRead) copied(b []byte) ([]byte, error) {
+	if err := m.budget.take(len(b)); err != nil {
+		return nil, err
+	}
+	return bytes.Clone(b), nil
+}
+
 // payload returns a frame's data as the codec sees it, in its own memory.
 func (m *matroskaRead) payload(frame []byte) ([]byte, error) {
 	if m.t.Compression == nil {
-		if err := m.budget.take(len(frame)); err != nil {
-			return nil, err
-		}
-		return bytes.Clone(frame), nil
+		return m.copied(frame)
 	}
 	return decompressBudget(m.t.Compression, frame, m.budget)
 }

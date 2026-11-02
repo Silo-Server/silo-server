@@ -1370,9 +1370,12 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with source `playback`
-or `legacy` (the default for rows written without a source). Playback from Silo
-and Jellyfin clients both writes `playback` rows. Marking something watched is
+`plays` on both lists counts completed `user_watch_history` rows with source
+`playback` or `legacy` (the default for rows written without a source). Every
+playback stop writes a row, completed only past the watched threshold, so a
+title watched in several sittings is one play and a title abandoned partway is
+none; the time spent in those sittings still counts toward `total_seconds`.
+Playback from Silo and Jellyfin clients both writes `playback` rows. Marking something watched is
 not a play: `manual` rows from Silo clients and `jellycompat` rows from
 Jellyfin clients are all marks, and marking a series writes one row per
 episode, so both are excluded. Episodes are rolled up to their series, so a

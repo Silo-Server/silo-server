@@ -85,9 +85,12 @@ func TestAdminTopActivityProviderInvalidateClearsEveryVariant(t *testing.T) {
 	}
 }
 
-// Marking a series watched writes one history row per episode. Those rows, and
-// single-item marks from Silo or Jellyfin clients, are not plays (#1743).
-func TestAdminTopActivityCountsPlaybackNotMarks(t *testing.T) {
+// Only finished playback counts as a play. Marking a series watched writes one
+// history row per episode; those rows, and single-item marks from Silo or
+// Jellyfin clients, are not plays (#1743). Every playback stop writes a row, so
+// a title watched in several sittings has an incomplete row per sitting; only
+// the sitting that finished it is a play.
+func TestAdminTopActivityCountsFinishedPlayback(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -137,16 +140,22 @@ func TestAdminTopActivityCountsPlaybackNotMarks(t *testing.T) {
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, watched_at, completed, source)
-		SELECT gen_random_uuid()::text, $1, $2, item, now() - interval '1 hour', true, source
+		SELECT gen_random_uuid()::text, $1, $2, item, now() - interval '1 hour', completed, source
 		FROM (VALUES
-			('top-marks-s01e01', 'jellycompat'),
-			('top-marks-s01e02', 'jellycompat'),
-			('top-marks-s01e03', 'jellycompat'),
-			('top-marks-manual', 'manual'),
-			('top-marks-played', 'playback'),
-			('top-marks-played', 'playback'),
-			('top-marks-legacy', 'legacy')
-		) AS rows(item, source)`, userID, profileID); err != nil {
+			('top-marks-s01e01', 'jellycompat', true),
+			('top-marks-s01e02', 'jellycompat', true),
+			('top-marks-s01e03', 'jellycompat', true),
+			('top-marks-manual', 'manual', true),
+			('top-marks-played', 'playback', true),
+			('top-marks-played', 'playback', true),
+			('top-marks-resumed', 'playback', false),
+			('top-marks-resumed', 'playback', false),
+			('top-marks-resumed', 'playback', false),
+			('top-marks-resumed', 'playback', true),
+			('top-marks-abandoned', 'playback', false),
+			('top-marks-abandoned', 'playback', false),
+			('top-marks-legacy', 'legacy', true)
+		) AS rows(item, source, completed)`, userID, profileID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,10 +167,10 @@ func TestAdminTopActivityCountsPlaybackNotMarks(t *testing.T) {
 	for _, title := range activity.Titles {
 		titles = append(titles, fmt.Sprintf("%s=%d", title.MediaItemID, title.Plays))
 	}
-	if got, want := strings.Join(titles, ","), "top-marks-played=2,top-marks-legacy=1"; got != want {
-		t.Errorf("titles = %s, want %s; marks are not plays", got, want)
+	if got, want := strings.Join(titles, ","), "top-marks-played=2,top-marks-legacy=1,top-marks-resumed=1"; got != want {
+		t.Errorf("titles = %s, want %s; marks and unfinished sittings are not plays", got, want)
 	}
-	if len(activity.Profiles) != 1 || activity.Profiles[0].Plays != 3 {
-		t.Errorf("profiles = %+v, want one profile with 3 plays", activity.Profiles)
+	if len(activity.Profiles) != 1 || activity.Profiles[0].Plays != 4 {
+		t.Errorf("profiles = %+v, want one profile with 4 plays", activity.Profiles)
 	}
 }
