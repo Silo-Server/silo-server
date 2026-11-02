@@ -1,3 +1,6 @@
+// Keep default listeners on TCP to reduce CVE-2026-98432 exposure on Linux.
+//go:debug multipathtcp=0
+
 package main
 
 import (

@@ -1334,7 +1334,7 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 	conditions := []string{"mi.content_id = episodes.series_id", "mi.type = 'series'"}
 	args := []any{since}
 	index := 2
-	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	appendListedLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
 	applyAccessFilter("mi", filter, &conditions, &args, &index)
 	if libraryID > 0 {
 		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $%d)", index))

@@ -5,10 +5,14 @@ for episodes) exists while its item or episode has a present file in that
 library. Catalog reads hide anything without one, so removing a membership is
 how a title with no playable file leaves the library. That includes listings
 that name no library, for an administrator too: catalog browse, search, Home
-rows, and the unmatched-items list. Only a read by ID still opens such an
-item for a viewer whose library access is unrestricted. The scanner marks a
-vanished file `missing_since`; membership reconciliation then removes the
-memberships left without a present file, in the same pass.
+rows, the unmatched-items list, upcoming episodes, people, and collection
+members. Counts follow the same rule: collection item counts, a person's
+credit counts, and the admin dashboard totals count titles in a library, and
+the dashboard's file and storage totals count present files only. Only a read
+by ID still opens such an item (or a person credited only on it) for a viewer
+whose library access is unrestricted. The scanner marks a vanished file
+`missing_since`; membership reconciliation then removes the memberships left
+without a present file, in the same pass.
 
 The scanner's file removal grace (`scanner.file_removal_grace`, 24 hours by
 default) is how long a removal stays reversible. A replacement file, or the

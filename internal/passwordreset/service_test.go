@@ -95,13 +95,29 @@ type fakeSettings map[string]string
 
 func (f fakeSettings) Get(_ context.Context, key string) (string, error) { return f[key], nil }
 
-type fakeSessions struct{ err error }
+type fakeSessions struct {
+	err error
+	// userID is the account sign-in resolves to; 0 means 5.
+	userID    int
+	loggedOut *[]string
+}
 
 func (f fakeSessions) Login(context.Context, string, string, string, string) (*auth.TokenPair, *models.User, error) {
 	if f.err != nil {
 		return nil, nil, f.err
 	}
-	return &auth.TokenPair{AccessToken: "access"}, &models.User{ID: 5}, nil
+	id := f.userID
+	if id == 0 {
+		id = 5
+	}
+	return &auth.TokenPair{AccessToken: "access", SessionID: "sess"}, &models.User{ID: id}, nil
+}
+
+func (f fakeSessions) Logout(_ context.Context, sessionID string) error {
+	if f.loggedOut != nil {
+		*f.loggedOut = append(*f.loggedOut, sessionID)
+	}
+	return nil
 }
 
 func newTestService(repo *fakeRepo, sender *fakeMail, settings fakeSettings) *Service {
@@ -329,5 +345,14 @@ func TestCompleteValidatesFirstAndReportsCommittedReset(t *testing.T) {
 	pair, user, err := s.Complete(t.Context(), "tok", "long-enough", "", "")
 	if !errors.Is(err, ErrSessionStart) || pair != nil || user == nil {
 		t.Fatalf("sign-in failure after commit = %v, %v, %v", pair, user, err)
+	}
+
+	// Sign-in that resolves to a different account returns no session and
+	// revokes the one it created.
+	var loggedOut []string
+	s.sessions = fakeSessions{userID: 6, loggedOut: &loggedOut}
+	pair, user, err = s.Complete(t.Context(), "tok", "long-enough", "", "")
+	if !errors.Is(err, ErrSessionStart) || pair != nil || user == nil || user.ID != 5 || len(loggedOut) != 1 {
+		t.Fatalf("sign-in as another account = %v, %v, %v, revoked %v", pair, user, err, loggedOut)
 	}
 }
