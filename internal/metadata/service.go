@@ -2934,7 +2934,11 @@ func (s *MetadataService) mergeAndPersist(
 		} else {
 			MergeGlobalMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		}
-		refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.Mode == ModeIdentify)
+		if !req.enrichmentOnly {
+			// One enrichment provider's dates only fill empty ones (above);
+			// the provider chain's current dates are a refresh's to apply.
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.Mode == ModeIdentify)
+		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
 		}
