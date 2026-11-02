@@ -136,7 +136,11 @@ export function SeasonRail({ count, children }: { count: number; children: React
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport -mt-1 overflow-hidden pt-1 pb-5">
+        <div
+          ref={emblaRef}
+          data-nav-group
+          className="embla__viewport -mt-1 overflow-hidden pt-1 pb-5"
+        >
           <ul role="list" className="embla__container flex cursor-grab list-none gap-4">
             {children}
           </ul>

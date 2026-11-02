@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import {
@@ -62,6 +62,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   const progress = useOnboardingProgress();
   const navigate = useNavigate();
   const [saveFailed, setSaveFailed] = useState(false);
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const step = steps[index];
 
@@ -107,6 +108,14 @@ export function TourHost({ flow, onDone }: TourHostProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- finish is stable enough for this one-shot; re-running on step change is the point
   }, [step]);
+
+  // Saving disables the buttons, and a disabled button drops focus to <body>.
+  // Put it back on the primary action so a remote can keep pressing Enter.
+  useEffect(() => {
+    if (!progress.isPending && document.activeElement === document.body) {
+      primaryRef.current?.focus();
+    }
+  }, [progress.isPending, index]);
 
   if (saveFailed)
     return (
@@ -168,6 +177,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
               )}
               {step.kind === "handoff" ? (
                 <Button
+                  ref={primaryRef}
                   size="sm"
                   disabled={progress.isPending}
                   onClick={() => finish({ skipped: false, route: step.route })}
@@ -175,7 +185,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
                   {step.title ?? "Finish"}
                 </Button>
               ) : (
-                <Button size="sm" disabled={progress.isPending} onClick={advance}>
+                <Button ref={primaryRef} size="sm" disabled={progress.isPending} onClick={advance}>
                   {isLast ? "Done" : index === 0 ? "Show me" : "Next"}
                 </Button>
               )}
