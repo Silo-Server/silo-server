@@ -619,7 +619,8 @@ func validateHomeSections(d HomeSectionsDocument) error {
 		default:
 			return fmt.Errorf("section %q has no valid scope", e.ID)
 		}
-		if !validSectionID(e.SectionType) || strings.TrimSpace(e.Title) == "" || len(e.Title) > 512 || e.ItemLimit < 0 {
+		// An empty title is kept: bulk section creation persists one.
+		if !validSectionID(e.SectionType) || len(e.Title) > 512 || e.ItemLimit < 0 {
 			return fmt.Errorf("section %q has no valid type or title", e.ID)
 		}
 		if !validRawJSON(e.Config) {

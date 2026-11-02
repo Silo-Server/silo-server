@@ -47,7 +47,8 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 	})
 	library := 3
 	homeSections := mustJSON(HomeSectionsDocument{Sections: []HomeSectionEntry{
-		{ID: "s1", Scope: "home", SectionType: "collection", Title: "Favorites", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"c1"}`), Enabled: true},
+		// An untitled section, as bulk section creation stores one.
+		{ID: "s1", Scope: "home", SectionType: "collection", Title: "", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"c1"}`), Enabled: true},
 		{ID: "s2", Scope: "library", LibraryID: &library, SectionType: "collection", Title: "Picks", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"m1"}`), Enabled: true,
 			Collection: &SectionCollectionEntry{CollectionEntry: CollectionEntry{ID: "m1", LibraryID: 3, Libraries: []CollectionLib{{LibraryID: 3}}, Title: "Picks", Items: []string{"m1"}}, ManagementKey: "s2"}},
 	}})
