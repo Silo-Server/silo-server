@@ -2,6 +2,7 @@ package embeddedsub
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -49,10 +50,14 @@ func (idx *Index) StreamFormat() string {
 // already decompressed, so the stream has no ContentEncoding.
 //
 // The segment has an unknown size, so the stream is written in one pass.
+//
+// An S_TEXT/WEBVTT track, which FFmpeg doesn't recognize, is written as
+// D_WEBVTT/SUBTITLES, which it reads (mksCodecID, mksPackets).
 func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	if scale <= 0 {
 		return fmt.Errorf("embeddedsub: invalid timestamp scale %d", scale)
 	}
+	packets = mksPackets(t, packets)
 	bw := bufio.NewWriterSize(w, 64<<10)
 	if _, err := bw.Write(mksHead(t, scale)); err != nil {
 		return err
@@ -299,7 +304,7 @@ func mksTrackEntry(t *Track) []byte {
 	if t.LanguageBCP47 != "" {
 		e = matroska.AppendString(e, matroska.IDLanguageBCP47, t.LanguageBCP47)
 	}
-	e = matroska.AppendString(e, matroska.IDCodecID, t.CodecID)
+	e = matroska.AppendString(e, matroska.IDCodecID, mksCodecID(t))
 	if len(t.CodecPrivate) > 0 {
 		e = matroska.AppendElement(e, matroska.IDCodecPrivate, t.CodecPrivate)
 	}
@@ -311,4 +316,42 @@ func boolUint(b bool) uint64 {
 		return 1
 	}
 	return 0
+}
+
+// mksCodecID is the CodecID a stream of t is written with: an S_TEXT/WEBVTT
+// track is written as WebM's D_WEBVTT/SUBTITLES, the WebVTT layout FFmpeg's
+// Matroska demuxer reads.
+func mksCodecID(t *Track) string {
+	if t.CodecID == matroska.CodecIDWebVTT {
+		return matroska.CodecIDWebMWebVTT
+	}
+	return t.CodecID
+}
+
+// mksPackets returns the packets a stream of t holds. An S_TEXT/WEBVTT block
+// holds the cue's text, and its addition the cue's settings and then its
+// identifier, a line each; a D_WEBVTT/SUBTITLES block holds the identifier,
+// the settings and the text, in that order. The comments that may follow in
+// the addition have no place there and are dropped. So is a cue without
+// text: FFmpeg rejects that block, and its Matroska demuxer then skips ahead
+// to a later cluster, losing the cues in between.
+func mksPackets(t *Track, packets []Packet) []Packet {
+	if t.CodecID != matroska.CodecIDWebVTT {
+		return packets
+	}
+	out := make([]Packet, 0, len(packets))
+	for _, p := range packets {
+		if len(bytes.TrimRight(p.Data, "\r\n")) == 0 {
+			continue
+		}
+		settings, rest, _ := bytes.Cut(p.addition, []byte("\n"))
+		identifier, _, _ := bytes.Cut(rest, []byte("\n"))
+		settings, identifier = bytes.TrimRight(settings, "\r"), bytes.TrimRight(identifier, "\r")
+		data := make([]byte, 0, len(identifier)+len(settings)+len(p.Data)+2)
+		data = append(append(data, identifier...), '\n')
+		data = append(append(data, settings...), '\n')
+		p.Data, p.addition = append(data, p.Data...), nil
+		out = append(out, p)
+	}
+	return out
 }

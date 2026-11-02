@@ -79,9 +79,13 @@ export function useDeleteAdminBackup() {
 }
 
 export function useAdminBackupDownloadLinks() {
+  const invalidate = useInvalidateBackups();
   return useMutation({
     mutationFn: ({ id, scope = "full" }: { id: string; scope?: AdminBackupDownloadScope }) =>
       createAdminBackupDownloadLinks(captureAdminAuthority(), id, scope),
     retry: false,
+    // A backup deleted elsewhere answers 404; refresh the list so the row goes,
+    // without holding the error until the refetch finishes.
+    onError: () => void invalidate(),
   });
 }

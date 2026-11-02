@@ -199,6 +199,7 @@ type fakeLoader struct {
 }
 
 func (l fakeLoader) Empty(context.Context, string) (bool, error) { return true, nil }
+func (l fakeLoader) UnbindStorage(context.Context, string) error { return nil }
 func (l fakeLoader) Load(_ context.Context, dbURL, _ string) error {
 	name, err := databaseName(dbURL)
 	if err != nil {

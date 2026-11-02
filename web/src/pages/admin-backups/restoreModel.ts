@@ -256,9 +256,8 @@ export interface SelectionChange {
 }
 
 /**
- * Chooses items and what they require (a collection's library, a profile's
- * account). An item whose requirement cannot be chosen stays unchosen, and
- * the notice says why.
+ * Chooses items and everything they require, transitively (a section's collection and that collection's library, a
+ * profile's account). An item whose requirement cannot be chosen stays unchosen, and the notice says why.
  */
 export function chooseItems(
   index: Map<string, IndexEntry>,
@@ -271,22 +270,14 @@ export function chooseItems(
   for (const key of keys) {
     const entry = index.get(key);
     if (!entry || !entrySelectable(entry) || next.has(key)) continue;
-    const required = entryRequires(entry).map((requiredKey) => index.get(requiredKey));
-    const missing = required.some((dependency) => dependency === undefined);
-    const unavailable = required.find(
-      (dependency) => dependency !== undefined && !entrySelectable(dependency),
-    );
-    if (missing || unavailable) {
-      blocked.push(
-        unavailable
-          ? `${capitalize(itemName(entry))} needs ${itemName(unavailable)}, which can't be restored.`
-          : `${capitalize(itemName(entry))} needs a library that isn't in this backup.`,
-      );
+    const { required, problem } = requirementsOf(index, entry);
+    if (problem) {
+      blocked.push(problem);
       continue;
     }
     next.add(key);
     for (const dependency of required) {
-      if (dependency && !next.has(dependency.key)) {
+      if (!next.has(dependency.key)) {
         next.add(dependency.key);
         if (!keys.includes(dependency.key)) added.push(dependency);
       }
@@ -301,6 +292,37 @@ export function chooseItems(
   return { selection: next, notice: notices.length > 0 ? notices.join(" ") : null };
 }
 
+/** Everything an entry requires, transitively, or why one of them can't be chosen. */
+function requirementsOf(
+  index: Map<string, IndexEntry>,
+  entry: IndexEntry,
+): { required: IndexEntry[]; problem: string | null } {
+  const required: IndexEntry[] = [];
+  const seen = new Set([entry.key]);
+  const pending = [...entryRequires(entry)];
+  // for...of visits what the loop appends to pending.
+  for (const requiredKey of pending) {
+    if (seen.has(requiredKey)) continue;
+    seen.add(requiredKey);
+    const dependency = index.get(requiredKey);
+    if (!dependency) {
+      return {
+        required,
+        problem: `${capitalize(itemName(entry))} needs a library that isn't in this backup.`,
+      };
+    }
+    if (!entrySelectable(dependency)) {
+      return {
+        required,
+        problem: `${capitalize(itemName(entry))} needs ${itemName(dependency)}, which can't be restored.`,
+      };
+    }
+    required.push(dependency);
+    pending.push(...entryRequires(dependency));
+  }
+  return { required, problem: null };
+}
+
 /** Unchooses items and every chosen item that requires one of them. */
 export function unchooseItems(
   index: Map<string, IndexEntry>,
@@ -310,11 +332,16 @@ export function unchooseItems(
   const next = new Set(selection);
   for (const key of keys) next.delete(key);
   const dependents: IndexEntry[] = [];
-  for (const key of [...next]) {
-    const entry = index.get(key);
-    if (entry && entryRequires(entry).some((requiredKey) => !next.has(requiredKey))) {
-      next.delete(key);
-      if (!keys.includes(key)) dependents.push(entry);
+  // Repeat until nothing changes: unchoosing a collection also unchooses the sections that show it.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const key of [...next]) {
+      const entry = index.get(key);
+      if (entry && entryRequires(entry).some((requiredKey) => !next.has(requiredKey))) {
+        next.delete(key);
+        changed = true;
+        if (!keys.includes(key)) dependents.push(entry);
+      }
     }
   }
   if (dependents.length === 0) return { selection: next, notice: null };

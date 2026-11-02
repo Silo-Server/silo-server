@@ -60,7 +60,9 @@ func (h *LibraryCollectionHandler) TemplateCollectionRestored(ctx context.Contex
 			return err
 		}
 	}
-	if tmpl.NeedsSetup() {
+	// A restored source can carry the TMDB collection an administrator set
+	// on a placeholder template before the backup.
+	if tmpl.NeedsSetup() && catalog.TMDBCollectionSourceUnset(collection.SourceConfig) {
 		return nil
 	}
 	if h.service == nil {

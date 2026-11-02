@@ -1063,6 +1063,8 @@ func TestPlanPlaybackV3KeepsSidecarWithoutHLSSubtitleRendition(t *testing.T) {
 			in.SubtitleRenditionExecutable = func() bool { return false }
 		}},
 		{"unknown duration", "subrip", SubtitleFidelityCompatibleV3, func(in *PlannerInputV3) { in.EffectiveFile.Duration = 0 }},
+		// The pipeline rendition demuxes the track with the stream's FFmpeg.
+		{"index-only track", "webvtt", SubtitleFidelityCompatibleV3, func(in *PlannerInputV3) { in.EffectiveFile.SubtitleTracks[0].IndexOnly = true }},
 		{"ASS keeps its styling", "ass", SubtitleFidelityPreserveV3, func(in *PlannerInputV3) {
 			hls := in.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
 			hls.Subtitles.ASSStyling, hls.Subtitles.FontAttachments = true, true

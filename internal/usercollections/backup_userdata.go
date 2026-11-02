@@ -447,10 +447,18 @@ func regroup(ctx context.Context, tx pgx.Tx, userID int, collectionID string, g 
 
 // copyPoster returns the poster a new collection stores: an uploaded poster
 // copied under the new id, or dropped (and counted) when there is no file to
-// copy, or any other reference as it is.
+// copy; an image URL or a bundled path as it is. Any other value is dropped
+// and counted:
+// listings sign a bare key as a stored object (presignUserCollectionPoster),
+// so an imported document must not name one outside the collection images.
 func copyPoster(ctx context.Context, target userdata.Target, c personalCollection, id string, missing *int) (string, error) {
-	if !strings.HasPrefix(c.Poster, posterPrefix) {
+	switch {
+	case strings.HasPrefix(c.Poster, posterPrefix):
+	case strings.HasPrefix(c.Poster, "https://"), strings.HasPrefix(c.Poster, "http://"), strings.HasPrefix(c.Poster, "/"):
 		return c.Poster, nil
+	default:
+		*missing++
+		return "", nil
 	}
 	if target.WriteBlob == nil || target.HasBlob == nil || !target.HasBlob(c.Poster) {
 		*missing++

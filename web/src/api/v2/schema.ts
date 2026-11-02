@@ -14444,7 +14444,7 @@ export interface components {
     AdminBackupList: {
       /** @description The operation holding the lock, started on any server */
       active?: components["schemas"]["AdminBackupActive"];
-      /** @description Whether a backup or restore holds the cluster-wide backup lock now */
+      /** @description Whether a backup, delete, or selective restore holds the cluster-wide backup lock now */
       busy: boolean;
       /**
        * @description Where new backups go
@@ -33926,6 +33926,8 @@ export interface components {
       stream_index?: number;
       sync_key?: string;
       track_id: string;
+      /** @description No route can show this track: the server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable. */
+      unplayable?: boolean;
       /** Format: uri-reference */
       url?: string;
     };
