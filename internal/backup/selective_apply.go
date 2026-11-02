@@ -80,7 +80,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 		return fail(ErrDigestMismatch)
 	}
 
-	a := &applier{s: s, rs: rs, run: run, report: report, total: 1}
+	a := &applier{s: s, rs: rs, run: run, report: report, total: 1, staged: map[string]error{}}
 	for _, ids := range req.Selection {
 		a.total += len(ids)
 	}
@@ -142,6 +142,9 @@ type applier struct {
 	// claimed maps "kind:local id" to the item that wrote it, so two items
 	// never write the same section or collection here.
 	claimed map[string]string
+	// staged holds, per artwork item, whether stageArtwork wrote its
+	// objects (nil) or why it could not; an item it skipped is absent.
+	staged map[string]error
 }
 
 // applied is one item's outcome before its transaction commits.
@@ -186,6 +189,9 @@ func (a *applier) commit(ctx context.Context, next *SelectiveReport, message str
 // transaction; the restore continues with the next item.
 func (a *applier) apply(ctx context.Context, section, id string) error {
 	a.current++
+	if section == SectionCollections && strings.HasPrefix(id, "artwork:") {
+		a.staged[id] = a.stageArtwork(ctx, id)
+	}
 	var result applied
 	next := a.clone()
 	err := a.commit(ctx, next, "Restoring "+section, func(tx pgx.Tx) error {
@@ -860,14 +866,54 @@ func freeSlug(ctx context.Context, tx pgx.Tx, libraryID int, slug string) (strin
 	return "", fmt.Errorf("no free slug for %q", slug)
 }
 
-func (a *applier) applyArtwork(ctx context.Context, tx pgx.Tx, id string) (applied, error) {
-	item := ReportItem{Kind: KindItemArtwork, Label: id}
-	var entry *ItemArtworkEntry
+func (a *applier) artworkEntry(id string) *ItemArtworkEntry {
 	for i := range a.rs.Collections.ItemArtwork {
 		if a.rs.Collections.ItemArtwork[i].itemID() == id {
-			entry = &a.rs.Collections.ItemArtwork[i]
+			return &a.rs.Collections.ItemArtwork[i]
 		}
 	}
+	return nil
+}
+
+// stageArtwork writes an artwork item's objects before its transaction,
+// in the image cache's order: the revision is registered with the
+// collector, its objects written, and then their exact manifest recorded,
+// so the collector never reclaims objects a restore is about to publish.
+// It runs outside the item's transaction because the tracker writes on a
+// pool connection of its own, which must commit before the collector can
+// see it. Objects of an item the transaction then leaves out stay
+// registered, and the collector reclaims them.
+func (a *applier) stageArtwork(ctx context.Context, id string) error {
+	entry := a.artworkEntry(id)
+	if entry == nil {
+		return nil
+	}
+	plan, err := a.s.newPlanner(a.rs, a.s.opts.Pool).planArtwork(ctx, *entry)
+	if err != nil || !plan.Selectable {
+		return err
+	}
+	track := a.s.targets.TrackArtwork
+	if track != nil {
+		if err := track(ctx, entry.Path, entry.ImageType, nil); err != nil {
+			return err
+		}
+	}
+	// Content ids, and so the image's keys, are the same on every server.
+	keys := a.rs.blobFamily(entry.Path)
+	for _, key := range keys {
+		if err := a.writeBlob(ctx, key, key); err != nil {
+			return err
+		}
+	}
+	if track != nil {
+		return track(ctx, entry.Path, entry.ImageType, keys)
+	}
+	return nil
+}
+
+func (a *applier) applyArtwork(ctx context.Context, tx pgx.Tx, id string) (applied, error) {
+	item := ReportItem{Kind: KindItemArtwork, Label: id}
+	entry := a.artworkEntry(id)
 	if entry == nil {
 		return leftOut(item, ReasonNotInBackup, "The backup has no such image."), nil
 	}
@@ -879,11 +925,12 @@ func (a *applier) applyArtwork(ctx context.Context, tx pgx.Tx, id string) (appli
 	if !plan.Selectable {
 		return leftOutFor(item, plan), nil
 	}
-	// Content ids, and so the image's keys, are the same on every server.
-	for _, key := range a.rs.blobFamily(entry.Path) {
-		if err := a.writeBlob(ctx, key, key); err != nil {
-			return applied{}, err
-		}
+	stageErr, staged := a.staged[id]
+	if !staged {
+		return leftOut(item, ReasonChanged, "The image changed while the restore ran. Open the backup again."), nil
+	}
+	if stageErr != nil {
+		return applied{}, stageErr
 	}
 	if err := catalog.PublishArtworkSelectionInTx(ctx, tx, catalog.ArtworkSelection{
 		TargetType: entry.TargetType, TargetContentID: entry.ContentID, ParentContentID: entry.ParentContentID,

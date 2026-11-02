@@ -217,7 +217,8 @@ func newSelectiveFixture(t *testing.T) *selectiveFixture {
 		FindTools: func(context.Context) (Tools, error) { return tools, nil },
 	})
 	f.svc.SetRestoreTargets(RestoreTargets{
-		CheckFolder: func(_ context.Context, path string) error { _, err := os.Stat(path); return err },
+		CheckFolder:  func(_ context.Context, path string) error { _, err := os.Stat(path); return err },
+		TrackArtwork: catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision,
 		ApplySettings: func(ctx context.Context, tx pgx.Tx, values map[string]string) ([]string, func(context.Context), error) {
 			err := f.settings.UpdateAtomicWithTx(ctx, tx, func(map[string]string, pgx.Tx) (map[string]string, error) { return values, nil })
 			return nil, func(context.Context) {}, err
@@ -319,6 +320,11 @@ func (f *selectiveFixture) checkRestored(t *testing.T, seed selectiveSeed, repor
 		t.Fatalf("restored collection items = %d", items)
 	case !strings.HasPrefix(itemSource, "upload://"):
 		t.Fatalf("restored item artwork source = %q", itemSource)
+	}
+	// The restored artwork's objects are registered with the revision
+	// collector under their exact manifest.
+	if n := countRows(t, f.pool, `SELECT count(*) FROM artwork_revision_gc_candidates WHERE original_path = $1 AND $1 = ANY(object_keys)`, seed.artwork); n != 1 {
+		t.Fatalf("restored artwork has %d revision registrations with its manifest, want 1", n)
 	}
 	// Each library membership is back in its own group, through its mapped
 	// library.
