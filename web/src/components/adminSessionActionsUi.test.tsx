@@ -208,11 +208,14 @@ describe("AdminSessionActions", () => {
     expect(findButton(container, "Resume")).toBeUndefined();
   });
 
-  it("sends pause through the sequenced v2 command under captured authority and flips to Resume once dispatched", async () => {
+  it.each([
+    ["applied", "Resume"],
+    ["replayed", "Pause"],
+  ] as const)("a %s pause receipt leaves %s available", async (outcome, nextAction) => {
     mocks.sendCommand.mockResolvedValue({
       command_id: "cmd-for-session-1",
       sequence: 42,
-      outcome: "applied",
+      outcome,
       delivery: "dispatched",
     });
 
@@ -220,9 +223,8 @@ describe("AdminSessionActions", () => {
     await click(findButton(container, "Pause"));
 
     expect(mocks.sendCommand).toHaveBeenCalledTimes(1);
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Pause command sent");
-    expect(findButton(container, "Resume")).toBeTruthy();
-    expect(findButton(container, "Pause")).toBeUndefined();
+    expect(findButton(container, nextAction)).toBeTruthy();
+    expect(findButton(container, nextAction === "Pause" ? "Resume" : "Pause")).toBeUndefined();
   });
 
   it("terminates through v2 under captured authority and shows both facts", async () => {

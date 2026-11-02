@@ -147,6 +147,12 @@ export function AdminSessionActions({
         { sessionId: session.session_id, action },
         profileContext,
       );
+      if (receipt.outcome === "replayed") {
+        toast.success(
+          `Your earlier ${action} request was already accepted. Choose ${action} again to send a new command.`,
+        );
+        return;
+      }
       if (receipt.delivery === "dispatched" && action === "pause") {
         setOptimisticPaused(true);
       } else if (receipt.delivery === "dispatched" && action === "resume") {
@@ -174,10 +180,16 @@ export function AdminSessionActions({
     setPendingAction("message");
     try {
       const profileContext = captureAdminPlaybackCommandAuthority();
-      await sendAdminPlaybackCommand(
+      const receipt = await sendAdminPlaybackCommand(
         { sessionId: session.session_id, action: "message", message: trimmed },
         profileContext,
       );
+      if (receipt.outcome === "replayed") {
+        toast.success(
+          "Your earlier message request was already accepted. Send again to send a new message.",
+        );
+        return;
+      }
       toast.success("Message sent");
       setMessage("");
       setMessageOpen(false);
