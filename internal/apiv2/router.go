@@ -94,6 +94,7 @@ type Dependencies struct {
 	ViewerSubtitleDelete            ViewerSubtitleDeleteService
 	OrderedApplePush                OrderedApplePushService
 	ApplePushRetirement             ApplePushRetirementService
+	ApplePushReset                  ApplePushResetService
 	NotificationEmailVerification   NotificationEmailVerificationService
 	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
 	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
