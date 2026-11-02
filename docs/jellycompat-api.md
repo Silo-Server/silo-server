@@ -48,6 +48,13 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
+`datePlayed` and `LastPlayedDate` accept the compact Emby form `yyyyMMddHHmmss`,
+which Jellyfin accepts for `datePlayed`, and ISO 8601 forms: `YYYY-MM-DD` alone,
+or followed by `Thh:mm` or by `Thh:mm:ss` with an optional fraction of a second,
+each with an optional `Z`, `±hh:mm` or (with seconds) `±hhmm` offset. A space may
+replace the `T` before `hh:mm:ss` when there is no offset. A fraction needs
+seconds: `Thh:mm.f` returns 400. A value without an offset is read as UTC. Other
+values return 400.
 A `LastPlayedDate` or `datePlayed` more than two minutes ahead of the server
 clock is stored and reported as the server's current time, the same bound
 native progress sync applies, so a client with a wrong clock cannot block

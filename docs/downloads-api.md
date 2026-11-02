@@ -1054,7 +1054,9 @@ GET /api/v2/progress?cursor={cursor}
 
 `listProgress` requires `X-Profile-Id` and lists the acting profile's watch
 progress, newest change first. Optional `status` (`in_progress` or `completed`) and
-`library_id` narrow the result.
+`library_id` narrow the result. Entries the profile cannot open are left out: items
+outside its library access or rating ceiling, and items removed from the catalog, whose
+stored progress outlives them.
 
 Response:
 

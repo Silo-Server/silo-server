@@ -367,6 +367,32 @@ var episodeArtworkAssignments = lockedArtworkAssignments("episodes", seriesImage
 // (series_id, season_number, episode_number) natural key already exists. The
 // stored content ID is preserved on update and written back to ep.ContentID.
 func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) error {
+	return upsertEpisode(ctx, r.pool, ep, func(attempt func(pgx.Tx) error) error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, attempt)
+	})
+}
+
+// UpsertTx is Upsert within the caller's transaction, which must run at READ
+// COMMITTED, as pool transactions do by default, so the upsert statement takes
+// its snapshot after the artwork row lock. Each attempt runs in a savepoint, so
+// a retried attempt leaves nothing behind.
+func (r *EpisodeRepository) UpsertTx(ctx context.Context, tx pgx.Tx, ep *models.Episode) error {
+	return upsertEpisode(ctx, tx, ep, func(attempt func(pgx.Tx) error) error {
+		return pgx.BeginFunc(ctx, tx, attempt)
+	})
+}
+
+// episodeUpsertDB is a pool or a transaction.
+type episodeUpsertDB interface {
+	itemExecer
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// upsertEpisode runs Upsert on db. inAttempt runs each artwork-locked upsert
+// attempt in a transaction of its own, or a savepoint of db's.
+//
+//nolint:funlen // Upsert's body, moved as is so UpsertTx can share it
+func upsertEpisode(ctx context.Context, db episodeUpsertDB, ep *models.Episode, inAttempt func(func(pgx.Tx) error) error) error {
 	var seasonID *string
 	if ep.SeasonID != "" {
 		seasonID = &ep.SeasonID
@@ -384,7 +410,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		WHERE series_id = $1
 		  AND (season_number, episode_number) <> ($5, $6)
 		  AND (($2 <> '' AND imdb_id = $2) OR ($3 <> '' AND tmdb_id = $3) OR ($4 <> '' AND tvdb_id = $4))`
-	if _, err := r.pool.Exec(ctx, clearQuery,
+	if _, err := db.Exec(ctx, clearQuery,
 		ep.SeriesID,
 		ep.ImdbID,
 		ep.TmdbID,
@@ -432,7 +458,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	var storedContentID string
 	err := retryArtworkUpsert(func() error {
-		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+		return inAttempt(func(tx pgx.Tx) error {
 			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
 			SELECT content_id FROM episodes
 			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
@@ -476,7 +502,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+	if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		return refreshSeriesAirDates(ctx, tx, []string{ep.SeriesID})
 	}); err != nil {
 		return fmt.Errorf("update series air dates: %w", err)
