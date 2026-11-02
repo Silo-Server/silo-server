@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,7 +27,14 @@ type EmbeddedSubtitleRef struct {
 	// when the scanner recorded none.
 	ContainerTrackID string
 	Codec            string
+	// IndexOnly is models.SubtitleTrack.IndexOnly: the track can't be
+	// demuxed from the source, so a failed index read is the answer.
+	IndexOnly bool
 }
+
+// ErrSubtitleIndexOnly refuses to demux the source for a track FFmpeg can't
+// read there (models.SubtitleTrack.IndexOnly).
+var ErrSubtitleIndexOnly = errors.New("embedded subtitle track can only be read through the file's index")
 
 // EmbeddedSubtitleRefFor returns the ref of file's embedded subtitle track
 // at ordinal, or nil when there is none.
@@ -40,6 +48,7 @@ func EmbeddedSubtitleRefFor(file *models.MediaFile, ordinal int) *EmbeddedSubtit
 		StreamIndex:      track.Index,
 		ContainerTrackID: track.ContainerTrackID,
 		Codec:            track.Codec,
+		IndexOnly:        track.IndexOnly,
 	}
 }
 
@@ -154,6 +163,9 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if opts.Embedded.IndexOnly {
+			return fmt.Errorf("%w: %w", ErrSubtitleIndexOnly, err)
 		}
 		slog.InfoContext(ctx, "embedded subtitle track demuxed from the source", "component", "playback",
 			"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)

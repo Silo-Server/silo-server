@@ -547,16 +547,20 @@ func (s *Service) writeBlobs(ctx context.Context, t target, key string, refs []b
 		done <- err
 	}()
 	entry, putErr := t.put(ctx, key, pr)
-	_ = pr.CloseWithError(errors.New("blob upload ended"))
+	_ = pr.CloseWithError(errBlobUploadEnded)
 	copyErr := <-done
-	if copyErr != nil {
-		return ObjectEntry{}, copied, fmt.Errorf("copying blobs: %w", copyErr)
-	}
-	if putErr != nil {
+	switch {
+	case putErr != nil && (copyErr == nil || errors.Is(copyErr, errBlobUploadEnded)):
+		// The destination failed first and the copy only saw the closed pipe.
 		return ObjectEntry{}, copied, fmt.Errorf("writing blobs.tar: %w", putErr)
+	case copyErr != nil:
+		return ObjectEntry{}, copied, fmt.Errorf("copying blobs: %w", copyErr)
 	}
 	return entry, copied, nil
 }
+
+// errBlobUploadEnded is what the blob copy reads once the upload has returned.
+var errBlobUploadEnded = errors.New("blob upload ended")
 
 // folderTime is the backup's creation time: the time its id names.
 func folderTime(id string, started time.Time) time.Time {

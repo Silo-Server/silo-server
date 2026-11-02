@@ -41,6 +41,7 @@ func writeKeptMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	if scale <= 0 {
 		return fmt.Errorf("embeddedsub: invalid timestamp scale %d", scale)
 	}
+	packets = mksPackets(t, packets)
 	head := mksHead(t, scale)
 	var (
 		positions []int64 // each cluster's offset from the first
