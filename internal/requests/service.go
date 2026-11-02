@@ -1189,7 +1189,7 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 
 // RemoveFailed deletes a failed request for good. Owners can remove their
 // own; admins can remove any. Nothing is sent downstream: a failed request has
-// nothing in flight, and the guarded delete refuses one an admin has retried
+// nothing in flight, and the guarded delete refuses one an admin is retrying
 // or one that delivered a copy before failing.
 func (s *Service) RemoveFailed(ctx context.Context, viewer Viewer, id string) error {
 	req, err := s.ownedRequest(ctx, viewer, id)

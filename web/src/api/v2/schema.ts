@@ -10821,7 +10821,7 @@ export interface paths {
     get: operations["getRequest"];
     put?: never;
     post?: never;
-    /** Delete an accessible failed request that delivered nothing. Answers 409 once the request was retried, completed, or delivered a copy before failing. */
+    /** Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing. */
     delete: operations["removeFailedRequest"];
     options?: never;
     head?: never;

@@ -250,7 +250,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
 	})
-	remove := op(http.MethodDelete, "/requests/{id}", "removeFailedRequest", "Delete an accessible failed request that delivered nothing. Answers 409 once the request was retried, completed, or delivered a copy before failing.")
+	remove := op(http.MethodDelete, "/requests/{id}", "removeFailedRequest", "Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing.")
 	remove.DefaultStatus = http.StatusNoContent
 	Register(reg, remove, func(ctx context.Context, in *RequestRemoveInput) (*struct{}, error) {
 		if requests == nil {
