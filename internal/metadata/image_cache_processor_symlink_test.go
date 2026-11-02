@@ -334,13 +334,15 @@ func TestLocalFileIOErrorSeparatesStorageFailuresFromPathAnswers(t *testing.T) {
 }
 
 // A cataloged video that is itself a link to another file inside the title
-// folder, absolute or relative, still vouches for the folder; the link is
-// read, not followed, so a target outside it is never touched.
+// folder, absolute, relative, or through another link and "..", still
+// vouches for the folder; the link is read, not followed, so a target
+// outside it is never touched.
 func TestProcessLocalImageAcceptsCatalogedVideoLinkedInsideTheFolder(t *testing.T) {
-	for _, absolute := range []bool{true, false} {
-		t.Run(fmt.Sprintf("absolute=%v", absolute), func(t *testing.T) {
+	for _, link := range []string{"absolute", "relative", "through a link and .."} {
+		t.Run(link, func(t *testing.T) {
 			library, title := symlinkedTitle(t, map[string]string{
 				"payload/Example (2020).mkv": "video",
+				"payload/sub/keep":           "",
 				"poster.jpg":                 "poster-bytes",
 			})
 			store, err := filepath.EvalSymlinks(title)
@@ -348,8 +350,15 @@ func TestProcessLocalImageAcceptsCatalogedVideoLinkedInsideTheFolder(t *testing.
 				t.Fatal(err)
 			}
 			target := filepath.Join("payload", "Example (2020).mkv")
-			if absolute {
+			switch link {
+			case "absolute":
 				target = filepath.Join(store, target)
+			case "through a link and ..":
+				// alias/.. is payload, not the title folder, once alias is followed.
+				if err := os.Symlink(filepath.Join("payload", "sub"), filepath.Join(store, "alias")); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				target = "alias/../Example (2020).mkv"
 			}
 			if err := os.Symlink(target, filepath.Join(store, "Example (2020).mkv")); err != nil {
 				t.Skipf("symlinks unavailable: %v", err)
@@ -386,5 +395,11 @@ func TestPathInsideFolderStopsOnALinkLoop(t *testing.T) {
 	}
 	if _, inFolder, err := pathInsideFolder(resolvedDir, filepath.Join("out", "video.mkv")); inFolder || err != nil {
 		t.Fatalf("link out resolved inFolder=%v err=%v, want neither", inFolder, err)
+	}
+	if err := os.Symlink(filepath.Join("..", filepath.Base(outside)), filepath.Join(resolvedDir, "up")); err != nil {
+		t.Fatal(err)
+	}
+	if _, inFolder, err := pathInsideFolder(resolvedDir, filepath.Join("up", "video.mkv")); inFolder || err != nil {
+		t.Fatalf("link up and out resolved inFolder=%v err=%v, want neither", inFolder, err)
 	}
 }

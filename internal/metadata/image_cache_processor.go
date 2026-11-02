@@ -1327,10 +1327,12 @@ const maxFolderLinks = 40
 // pathInsideFolder resolves rel, a path under the folder at resolvedDir (a
 // path with no symlinks), one component at a time without leaving the folder.
 // A symlink is read, not followed: its target, absolute or relative, must lie
-// inside the folder, and resolution carries on from there. It returns the
-// link-free path relative to resolvedDir, or inFolder false when a link leads
-// out of the folder, a component is missing, or links loop; err is a failure
-// met on the way. Only paths inside the folder are ever looked at.
+// inside the folder, and resolution carries on from there. A ".." steps back
+// from the link-free path resolved so far, as the kernel does after following
+// a link, and never above the folder. It returns the link-free path relative
+// to resolvedDir, or inFolder false when a link leads out of the folder, a
+// component is missing, or links loop; err is a failure met on the way. Only
+// paths inside the folder are ever looked at.
 func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, err error) {
 	sep := string(filepath.Separator)
 	pending := strings.Split(filepath.Clean(rel), sep)
@@ -1341,10 +1343,16 @@ func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, 
 		if part == "" || part == "." {
 			continue
 		}
-		next := filepath.Join(resolved, part)
-		if !filepath.IsLocal(next) {
-			return "", false, nil
+		if part == ".." {
+			if resolved == "" {
+				return "", false, nil
+			}
+			if resolved = filepath.Dir(resolved); resolved == "." {
+				resolved = ""
+			}
+			continue
 		}
+		next := filepath.Join(resolved, part)
 		full := filepath.Join(resolvedDir, next)
 		info, err := fspath.Lstat(full)
 		if err != nil {
@@ -1361,15 +1369,19 @@ func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, 
 		if err != nil {
 			return "", false, err
 		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(resolvedDir, resolved, target)
+		// A relative target carries on from the link's folder, resolved so
+		// far; an absolute one from the folder's root, which it must name
+		// as written. Its components are not cleaned, so a ".." after a link
+		// in it applies to where that link leads.
+		if filepath.IsAbs(target) {
+			prefix := strings.TrimSuffix(resolvedDir, sep) + sep
+			if target != resolvedDir && !strings.HasPrefix(target, prefix) {
+				return "", false, nil
+			}
+			target = strings.TrimPrefix(strings.TrimPrefix(target, resolvedDir), sep)
+			resolved = ""
 		}
-		target = filepath.Clean(target)
-		if !localImagePathWithinRoots(target, []string{resolvedDir}) {
-			return "", false, nil
-		}
-		resolved = ""
-		pending = append(strings.Split(strings.TrimPrefix(target, resolvedDir), sep), pending...)
+		pending = append(strings.Split(target, sep), pending...)
 	}
 	return resolved, resolved != "", nil
 }
