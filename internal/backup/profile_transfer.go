@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -80,11 +83,49 @@ type ProfileTransfer struct {
 	pool     *pgxpool.Pool
 	serverID func(context.Context) (string, error)
 	now      func() time.Time
+	// imports admits imports before they take a pool connection: at most
+	// maxConcurrentImports on this server, and one per account.
+	imports   chan struct{}
+	mu        sync.Mutex
+	importing map[int]bool
 }
+
+// maxConcurrentImports bounds the profile imports one server runs at once.
+// An import holds a pool connection for its whole transaction, so imports
+// arriving together must not take the pool other requests need.
+const maxConcurrentImports = 2
+
+// ErrProfileImportBusy refuses an import while another runs for the same
+// account, or while this server already runs maxConcurrentImports.
+var ErrProfileImportBusy = errors.New("another profile import is running; try again when it finishes")
 
 // NewProfileTransfer serves profile export and import over pool.
 func NewProfileTransfer(pool *pgxpool.Pool, serverID func(context.Context) (string, error)) *ProfileTransfer {
-	return &ProfileTransfer{pool: pool, serverID: serverID, now: time.Now}
+	return &ProfileTransfer{pool: pool, serverID: serverID, now: time.Now,
+		imports: make(chan struct{}, maxConcurrentImports), importing: map[int]bool{}}
+}
+
+// admit takes an import slot for userID without waiting, or refuses with
+// ErrProfileImportBusy. release gives it back.
+func (t *ProfileTransfer) admit(userID int) (release func(), err error) {
+	select {
+	case t.imports <- struct{}{}:
+	default:
+		return nil, ErrProfileImportBusy
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.importing[userID] {
+		<-t.imports
+		return nil, ErrProfileImportBusy
+	}
+	t.importing[userID] = true
+	return func() {
+		t.mu.Lock()
+		delete(t.importing, userID)
+		t.mu.Unlock()
+		<-t.imports
+	}, nil
 }
 
 // ProfileExportCapability describes profile export and import for clients.
@@ -100,8 +141,11 @@ func (t *ProfileTransfer) Capability() ProfileExportCapability {
 	return ProfileExportCapability{Format: ProfileExportFormat, Version: ProfileExportVersion, MaxImportBytes: MaxProfileImportBytes, DataTypes: UserDataTypeIDs()}
 }
 
-// Export writes the profile's data, read in one snapshot.
-func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID string) ([]byte, error) {
+// Export writes the profile's data, read in one snapshot, as the profile
+// may see it now: rows about titles its library access or maturity limits
+// hide are left out, as every other read of its data leaves them out.
+func (t *ProfileTransfer) Export(ctx context.Context, scope ProfileImportScope) ([]byte, error) {
+	userID, profileID := scope.UserID, scope.ProfileID
 	serverID, err := t.serverID(ctx)
 	if err != nil {
 		return nil, err
@@ -120,9 +164,14 @@ func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID stri
 	if err != nil {
 		return nil, err
 	}
+	owner := userdata.Owner{UserID: userID, ProfileID: profileID}
+	keep, err := exportVisibility(ctx, tx, owner, scope)
+	if err != nil {
+		return nil, err
+	}
 	var items []string
 	for _, dt := range userDataTypes {
-		exp, err := dt.Export(ctx, tx, userdata.Owner{UserID: userID, ProfileID: profileID})
+		exp, err := dt.Export(ctx, tx, owner, keep)
 		if err != nil {
 			return nil, fmt.Errorf("exporting %s: %w", dt.ID(), err)
 		}
@@ -135,8 +184,39 @@ func (t *ProfileTransfer) Export(ctx context.Context, userID int, profileID stri
 	return json.Marshal(doc)
 }
 
-// ProfileImportScope is the signed-in profile an import writes to, from the
-// session, and what it may see.
+// exportVisibility is the Keep of a profile's export: every item the
+// profile's data names, read in the export's snapshot, checked once against
+// the catalog visibility the importer applies (contentFilter). The data is
+// read twice, first to learn which items it names.
+func exportVisibility(ctx context.Context, tx pgx.Tx, owner userdata.Owner, scope ProfileImportScope) (userdata.Keep, error) {
+	var ids []string
+	for _, dt := range userDataTypes {
+		exp, err := dt.Export(ctx, tx, owner, nil)
+		if err != nil {
+			return nil, fmt.Errorf("exporting %s: %w", dt.ID(), err)
+		}
+		ids = append(ids, exp.Items...)
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, scope.AllowedLibraryIDs, nil, scope.Maturity)
+	if err != nil {
+		return nil, fmt.Errorf("checking access to items: %w", err)
+	}
+	// An id the catalog no longer holds hides nothing: no read can show it,
+	// and the export keeps the profile's own record of it for another server.
+	known, err := newItemResolver(ctx, tx, nil, ids)
+	if err != nil {
+		return nil, err
+	}
+	return func(id string) bool { return visible[id] || !known.present[id] }, nil
+}
+
+// ProfileImportScope is the signed-in profile an import writes to or an
+// export reads, from the session, and what it may see.
 type ProfileImportScope struct {
 	UserID    int
 	ProfileID string
@@ -262,6 +342,11 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	if err != nil {
 		return nil, err
 	}
+	release, err := t.admit(scope.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	tx, err := t.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -281,7 +366,7 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	}
 	prepared := map[string][]userdata.Prepared{}
 	for id, raw := range doc.Data {
-		prepared[id] = []userdata.Prepared{{Owner: userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID}, Data: raw}}
+		prepared[id] = []userdata.Prepared{{Owner: userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID}, Data: raw, Untrusted: true}}
 	}
 	if err := prepareImport(ctx, tx, prepared); err != nil {
 		return nil, err
@@ -323,7 +408,8 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	target := userdata.Target{
 		Owner:      userdata.Owner{UserID: scope.UserID, ProfileID: scope.ProfileID},
 		SameServer: result.SameServer, Items: visible, Now: t.now().UTC(),
-		Library: func(id int) (int, bool) { return id, libraries[id] },
+		Library:   func(id int) (int, bool) { return id, libraries[id] },
+		Untrusted: true,
 	}
 	target.Collection = transferCollections(tx, target, doc.Data[userdata.Collections])
 	for _, dt := range userDataTypes {

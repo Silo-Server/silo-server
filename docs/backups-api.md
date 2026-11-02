@@ -96,8 +96,8 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 - `key_confirmed`: whether an admin confirmed keeping a copy of the key with
   this check value. Encrypted backups run only while it is `true`.
 - `enabled`: whether nightly backups run.
-- `busy`: whether a backup or restore holds the cluster-wide backup lock now,
-  on any server.
+- `busy`: whether a backup, delete, or selective restore holds the
+  cluster-wide backup lock now, on any server.
 - `active`: the operation holding the lock, on whichever server runs it:
   `operation` (`backup`, `delete`, `restore`, or `upload`, the check of a
   completed upload), `backup_id` (for a restore, its source backup),
@@ -206,10 +206,12 @@ access_key, secret_key, path_style}` tests a bucket the way backups use it:
 `HeadBucket`, then it writes and deletes a test object under
 `<key_prefix>/backups/`. It saves nothing and answers `200` with `{ok,
 step, message}`: `ok: true` and "Connected. Silo wrote and deleted a test
-file.", or `ok: false` with the `step` that failed (`endpoint`: the address
-cannot be reached; `credentials`: the keys were refused; `bucket`: no such
-bucket, or the wrong region; `permission`: the keys cannot write or delete
-under the folder) and what to check. The backend's own message is never
+file.", `ok: true` with a message saying old backups stay until the bucket's
+lifecycle rules remove them when the bucket refuses the delete, or `ok:
+false` with the `step` that failed (`endpoint`: the address cannot be
+reached; `credentials`: the keys were refused; `bucket`: no such bucket, or
+the wrong region; `permission`: the keys cannot write under the folder) and
+what to check. The backend's own message is never
 returned. An omitted `secret_key` uses the stored `backup.s3.secret_key`, but
 only when `endpoint` and `access_key` are the stored ones, so a test cannot
 send the stored secret elsewhere.
@@ -477,7 +479,11 @@ reading it), `complete`, or `rejected`.
   A rejected upload's parts are deleted at once. A complete or rejected
   upload answers as it is, so completing again is safe. `409 conflict` while
   parts are missing, or while another backup or restore holds the lock:
-  the parts stay, and completing it again later checks it.
+  the parts stay, and completing it again later checks it. The check runs to
+  its end when the client disconnects; `GET /admin/backups/uploads` shows the
+  upload `checking` until it does. A check whose server lost the lock before
+  writing its outcome answers `409 conflict`, and the upload stays `checking`
+  for the next completion to check again.
 - `GET /admin/backups/uploads` answers `{items}`, newest first, after
   deleting uploads unfinished or rejected for 24 hours and complete ones
   unused for 7 days. A complete upload's `expires_at` moves on each
@@ -520,8 +526,8 @@ the format and rules.
 `GET /profile/export` answers the `silo-profile-export` document as an
 attachment (`silo-profile.json`): watch history and progress, ratings,
 favorites and watchlist, personal collections, dismissals, preferences, and
-notification preferences. It holds no account fields, password or PIN
-hashes, or access fields.
+notification preferences, leaving out titles the profile may not see now.
+It holds no account fields, password or PIN hashes, or access fields.
 
 `POST /profile/import` takes that document (at most 64 MiB) and merges it
 into the acting profile in one transaction: newer progress wins, plays,

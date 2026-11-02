@@ -52,6 +52,28 @@ func (m *collectionMap) lookup(target userdata.Target) func(ctx context.Context,
 	}
 }
 
+// previewLookup is lookup for a preview, which writes nothing: a personal
+// collection the account's documents carry but this server does not have
+// yet maps to a stand-in, because the restore creates it (all profiles'
+// collections before any profile's other data) before anything names it.
+func (m *collectionMap) previewLookup(target userdata.Target) func(ctx context.Context, field, id string) (string, bool, error) {
+	lookup := m.lookup(target)
+	return func(ctx context.Context, field, id string) (string, bool, error) {
+		local, ok, err := lookup(ctx, field, id)
+		if err != nil || ok || field != userdata.UserCollectionField {
+			return local, ok, err
+		}
+		if _, carried := m.carried[id]; carried {
+			return pendingCollectionPrefix + id, true, nil
+		}
+		return "", false, nil
+	}
+}
+
+// pendingCollectionPrefix marks a preview's stand-in for a personal
+// collection the restore will create; no stored id has it.
+const pendingCollectionPrefix = "restore-pending:"
+
 // adminCollection maps an admin collection id as the restore's collections
 // and sections match it: a carried collection or template collection, a
 // section-managed collection through its section, and on the server that

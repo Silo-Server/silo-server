@@ -219,7 +219,8 @@ func newSelectiveFixture(t *testing.T) *selectiveFixture {
 		FindTools: func(context.Context) (Tools, error) { return tools, nil },
 	})
 	f.svc.SetRestoreTargets(RestoreTargets{
-		CheckFolder: func(_ context.Context, path string) error { _, err := os.Stat(path); return err },
+		CheckFolder:  func(_ context.Context, path string) error { _, err := os.Stat(path); return err },
+		TrackArtwork: catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision,
 		ApplySettings: func(ctx context.Context, tx pgx.Tx, values map[string]string) ([]string, func(context.Context), error) {
 			err := f.settings.UpdateAtomicWithTx(ctx, tx, func(map[string]string, pgx.Tx) (map[string]string, error) { return values, nil })
 			return nil, func(context.Context) {}, err
@@ -321,6 +322,11 @@ func (f *selectiveFixture) checkRestored(t *testing.T, seed selectiveSeed, repor
 		t.Fatalf("restored collection items = %d", items)
 	case !strings.HasPrefix(itemSource, "upload://"):
 		t.Fatalf("restored item artwork source = %q", itemSource)
+	}
+	// The restored artwork's objects are registered with the revision
+	// collector under their exact manifest.
+	if n := countRows(t, f.pool, `SELECT count(*) FROM artwork_revision_gc_candidates WHERE original_path = $1 AND $1 = ANY(object_keys)`, seed.artwork); n != 1 {
+		t.Fatalf("restored artwork has %d revision registrations with its manifest, want 1", n)
 	}
 	// Each library membership is back in its own group, through its mapped
 	// library.
@@ -635,7 +641,7 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 		dbExec(t, f.pool, `DELETE FROM page_sections WHERE id = $1`, id)
 	}
 	dbExec(t, f.pool, `DELETE FROM library_collections WHERE id = ANY($1)`, []string{s.customized, s.managedCollection})
-	dbExec(t, f.pool, `UPDATE page_sections SET title = 'Renamed' WHERE id = $1`, s.recent)
+	dbExec(t, f.pool, `UPDATE page_sections SET title = 'Renamed', section_type = 'recently_released' WHERE id = $1`, s.recent)
 	dbExec(t, f.pool, `UPDATE library_collections SET title = 'Renamed later', description = '' WHERE id = $1`, s.plain)
 	dbExec(t, f.pool, `DELETE FROM users WHERE id = $1`, s.account)
 }
@@ -653,9 +659,9 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 //     differ, never fields the admin changed since that the backup left at
 //     the template's default;
 //   - a deleted home section is created with its id and its collection
-//     reference mapped to the recreated collection; a renamed library page
-//     section is replaced; a managed section comes back with its
-//     collection and items;
+//     reference mapped to the recreated collection; a renamed and retyped
+//     library page section is replaced; a managed section comes back with
+//     its collection and items;
 //   - a profile's page layout restored in the same request names the
 //     section the request restored;
 //   - restoring again changes nothing.
@@ -967,8 +973,8 @@ func checkPagesPreview(t *testing.T, p *RestorePreview, s pagesSeed) map[string]
 		!slices.Equal(got.Requires, []string{SectionCollections + ":" + templateCollectionItemID(s.customized)}) {
 		t.Fatalf("section of a lost collection = %+v", got)
 	}
-	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"title"}) {
-		t.Fatalf("renamed library section = %+v %+v", got, got.HomeSection)
+	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"type", "title"}) {
+		t.Fatalf("renamed and retyped library section = %+v %+v", got, got.HomeSection)
 	}
 	return map[string][]string{
 		SectionCollections:  {templateCollectionItemID(s.customized), templateCollectionItemID(s.plain)},
@@ -1008,7 +1014,7 @@ func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed, report 
 	if err := pool.QueryRow(ctx, `SELECT config::text FROM page_sections WHERE id = $1`, s.featured).Scan(&config); err != nil || sectionCollectionID(json.RawMessage(config)) != id {
 		t.Fatalf("recreated home section config %s (%v), want collection %s", config, err, id)
 	}
-	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND title = $2`, s.recent, "Recent "+s.suffix); n != 1 {
+	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND title = $2 AND section_type = 'recently_added'`, s.recent, "Recent "+s.suffix); n != 1 {
 		t.Fatal("the renamed library section was not replaced")
 	}
 	var managed string

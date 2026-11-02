@@ -42,7 +42,7 @@ type mutedSeries struct {
 	MutedAt time.Time `json:"muted_at"`
 }
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	doc := notificationsDocument{Muted: []mutedSeries{}}
 	var p notificationPreferences
 	err := tx.QueryRow(ctx, `
@@ -66,6 +66,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 		var m mutedSeries
 		if err := rows.Scan(&m.Series, &m.MutedAt); err != nil {
 			return userdata.Export{}, err
+		}
+		if !keep.Has(m.Series) {
+			continue
 		}
 		doc.Muted = append(doc.Muted, m)
 		items = append(items, m.Series)

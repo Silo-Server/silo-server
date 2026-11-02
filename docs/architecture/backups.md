@@ -116,8 +116,8 @@ showing either key.
 3. Run `pg_dump --format=custom --compress=zstd:3 --snapshot=<id>` with
    `--exclude-table-data-and-children` for `activity_log`, `operational_logs`,
    `policy_decisions`, `catalog_search_index_events`, `backup_status` (its row
-   describes the backup being taken), `backup_uploads` and
-   `backup_upload_parts` (their parts are not in the backup), and, unless
+   describes the backup being taken), `backup_uploads`, `backup_upload_parts`,
+   and `backup_upload_attempts` (their parts are not in the backup), and, unless
    `backup.include_intro_fingerprints`, `media_intro_fingerprints`. The schema
    is always dumped. The password moves from the URL into `PGPASSWORD` so it
    never appears in a process listing.
@@ -211,9 +211,12 @@ other. On a local artwork backend that is the shared-volume requirement
 artwork already has in a multi-server deployment
 ([blob-storage.md](blob-storage.md)).
 
-Local backups hold the same data as the database, password hashes included,
-and sit in the data folder with the database's protection. Backups in any
-bucket are encrypted. Downloads are short-lived and scoped to one object: a presigned URL
+Local backups hold the same data as the database, password hashes included.
+The local destination writes them readable by the server's account only:
+`backups/` and every folder under it are 0700, each object 0600, where the
+store's own modes are 0755 and 0644. `backups/` is made private before an
+object is written, so a file is never readable by another account while it
+is written. Backups in any bucket are encrypted. Downloads are short-lived and scoped to one object: a presigned URL
 where the store can presign, or a link to
 `GET /api/v2/admin/backups/{id}/objects/{name}` signed under its own
 capability domain (`artworkurl.NewBackupObjectSigner`) where it cannot. A full
@@ -629,8 +632,11 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   the search provider and its endpoint, key, and index, `database.*`,
   `redis.*`, `userdb.*`, `ratelimit.*`, `auth.jwt_secret`, push relay and web
   push keys, AI provider registry and bindings, local paths and hardware
-  (`playback.ffmpeg_path`, `playback.transcode_dir`, `playback.hw_*`), and
-  `backup.*`.
+  (`playback.ffmpeg_path`, `playback.transcode_dir`, `playback.hw_*`),
+  `backup.*`, and state the server writes for itself under an admin prefix:
+  sweep and cleanup checkpoints, `recommendations.embedding_lock` (the
+  stored vectors' model and dimensions), and
+  `recommendations.policy_marked_generation`.
 
 A key the table does not match is never offered. `TestEverySettingIsClassified`
 fails for any admin setting default, sensitive setting, or branding asset key
@@ -915,7 +921,11 @@ row (`userdata.Preparer`, `internal/backup/users_locks.go`):
 2. each data type's own locks over every profile of the import: the
    profiles' history locks in profile id order (`watch_history`), then every
    watchlist title the import names, in media type and TMDB id order, created
-   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`);
+   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`). A
+   profile's own export (`userdata.Target.Untrusted`) creates no title and
+   writes none of its snapshot to one other accounts read: it only locks and
+   links titles this server already has (`watchlist.LockTitlesInTx`,
+   `LinkExistingTitleInTx`), and reports the rest as left out;
 3. the data rows.
 
 Ordinary writers take a subset of these in the same order (checked: profile
@@ -1067,7 +1077,12 @@ A signed-in profile downloads and imports its own data as a
 `format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
 data type's document, as in a user document), and `items`. It never holds
 account fields, password or PIN hashes, access fields, or allowed libraries.
-Personal collection posters are not carried.
+Personal collection posters are not carried. The export holds what the
+profile may see now, as every other read of its data does: rows about titles
+outside its libraries or above its content-rating or advisory limits are left
+out, and so are those titles' item references (`userdata.Keep`, checked once
+in the export's snapshot). A title the catalog no longer holds stays, since
+no read can show it. A server backup's user documents are not filtered.
 
 An import writes only the profile of the session, never one the document
 names, in one transaction, with the merge rules above. It refuses a document
@@ -1180,8 +1195,12 @@ and refuses bytes with another digest. A set that fails the reader is
 | `checksum_mismatch` | Other bytes than the SHA-256 declared at creation |
 
 A failure to read the destination rejects nothing: the session returns to
-`uploading`, and completing again checks it again. A session left
-`checking` by a server that stopped is checked again by the next
+`uploading`, and completing again checks it again. A check does not stop
+when its request's client disconnects. Every outcome (`complete`, `rejected`,
+back to `uploading`) is written on the lock's own session, so a check whose
+lock was lost writes nothing: another server may hold the lock and be
+checking the same session. A session left `checking` by a server that
+stopped, or by a check that lost the lock, is checked again by the next
 completion, which holds the lock, so no other check can be running. The
 validated set enters the preview cache under its digest, so the first
 preview does not read it again.
@@ -1289,9 +1308,13 @@ as a local store root, or a bucket under a key prefix (with the
 `SILO_BACKUP_S3_*` credentials), changing nothing in the live deployment. It needs no
 `CREATEDB` or rename privilege. After `pg_restore --exit-on-error
 --no-owner --no-privileges`, it verifies the schema version, the applied
-migrations, and the table inventory against the manifest. The target stays
-open for the operator to point `DATABASE_URL` and the artwork storage
-settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
+migrations, and the table inventory against the manifest. It then deletes
+the recorded storage identities (`artwork.storage_identity`,
+`storage.operational_identity`) from the target: they name the backed-up
+server's stores, so a server started on the copy would refuse the stores it
+is configured with. That server records its own on its first start or write.
+The target stays open for the operator to point `DATABASE_URL` and the
+artwork storage settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
 artwork, avatars, and branding will be missing. Separate mode clears no
 Redis: the live deployment may still be running on it, and which Redis a
 server on the restored database will use is not known here. The command

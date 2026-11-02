@@ -50,3 +50,30 @@ func TestParseProfileExportRefusesHostileDocuments(t *testing.T) {
 		})
 	}
 }
+
+// Imports are admitted before they take a pool connection: one per
+// account, and maxConcurrentImports on the server.
+func TestProfileImportAdmission(t *testing.T) {
+	transfer := NewProfileTransfer(nil, nil)
+	first, err := transfer.admit(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transfer.admit(1); !errors.Is(err, ErrProfileImportBusy) {
+		t.Fatalf("a second import for one account = %v, want busy", err)
+	}
+	second, err := transfer.admit(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transfer.admit(3); !errors.Is(err, ErrProfileImportBusy) {
+		t.Fatalf("an import past the server's limit = %v, want busy", err)
+	}
+	first()
+	third, err := transfer.admit(1)
+	if err != nil {
+		t.Fatalf("an import after the account's last ended = %v", err)
+	}
+	second()
+	third()
+}

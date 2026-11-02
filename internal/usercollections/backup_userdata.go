@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // BackupData is the personal collections a profile created
@@ -91,7 +92,7 @@ var collectionTypes = func() map[string]bool {
 	return out
 }()
 
-func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (userdata.Export, error) {
+func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, keep userdata.Keep) (userdata.Export, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT c.id, c.name, c.description, c.collection_type, c.is_shared, c.include_in_server_collections, c.query_definition::text,
 			COALESCE(c.display_query_definition::text, ''), c.sort_config::text, c.source_url, c.source_config::text, c.sync_schedule,
@@ -153,6 +154,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner) (
 		if err := rows.Scan(&id, &item); err != nil {
 			rows.Close()
 			return userdata.Export{}, err
+		}
+		if !keep.Has(item) {
+			continue
 		}
 		doc.Collections[index[id]].Items = append(doc.Collections[index[id]].Items, item)
 		items = append(items, item)
@@ -256,7 +260,7 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 		return userdata.Result{}, err
 	}
 	var res userdata.Result
-	unmatched, missingPosters := 0, 0
+	unmatched, missingPosters, droppedSchedules := 0, 0, 0
 	for _, c := range doc.Collections {
 		var items []string
 		for _, item := range c.Items {
@@ -276,7 +280,7 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 		}
 		switch len(existing) {
 		case 0:
-			created, err := createCollection(ctx, tx, target, c, items, &missingPosters)
+			created, err := createCollection(ctx, tx, target, c, items, &missingPosters, &droppedSchedules)
 			if err != nil {
 				return res, err
 			}
@@ -315,6 +319,9 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 	if missingPosters > 0 {
 		res.Notes = append(res.Notes, fmt.Sprintf("%d collection posters were not restored.", missingPosters))
 	}
+	if droppedSchedules > 0 {
+		res.Notes = append(res.Notes, fmt.Sprintf("%d collection sync schedules were not daily, weekly, or monthly, so those collections were created without one.", droppedSchedules))
+	}
 	return res, nil
 }
 
@@ -335,7 +342,7 @@ func collectionsNamed(ctx context.Context, tx pgx.Tx, owner userdata.Owner, name
 // uploaded poster is copied under the new id before the row that references
 // it (a rollback leaves an orphan for the orphan sweeps); with no file to
 // copy it is dropped. Any other poster reference is kept as it is.
-func createCollection(ctx context.Context, tx pgx.Tx, target userdata.Target, c personalCollection, items []string, missingPosters *int) (bool, error) {
+func createCollection(ctx context.Context, tx pgx.Tx, target userdata.Target, c personalCollection, items []string, missingPosters, droppedSchedules *int) (bool, error) {
 	query, display, source, ok := remapScopes(c, target)
 	if !ok {
 		return false, nil
@@ -353,6 +360,7 @@ func createCollection(ctx context.Context, tx pgx.Tx, target userdata.Target, c 
 	if poster == "" {
 		thumb = ""
 	}
+	schedule := importedSchedule(c, droppedSchedules)
 	orEmpty := func(raw json.RawMessage) string {
 		if len(raw) == 0 {
 			return "{}"
@@ -371,8 +379,8 @@ func createCollection(ctx context.Context, tx pgx.Tx, target userdata.Target, c 
 		VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13::jsonb, $14, $15, $16, $17, $18, $19, $20,
 			COALESCE((SELECT MAX(sort_order) + 1 FROM user_personal_collections WHERE user_id = $2 AND creator_profile_id = $3 AND native), 0), TRUE)`,
 		id, target.UserID, target.ProfileID, c.Name, c.Description, c.Type, c.IsShared, c.IncludeInServerCollections,
-		orEmpty(query), displayArg, orEmpty(c.SortConfig), c.SourceURL, orEmpty(source), c.SyncSchedule,
-		InitialNextSyncAt(c.SyncSchedule), c.WatchFilter, c.MediaFilter, poster, thumb, group); err != nil {
+		orEmpty(query), displayArg, orEmpty(c.SortConfig), c.SourceURL, orEmpty(source), schedule,
+		InitialNextSyncAt(schedule), c.WatchFilter, c.MediaFilter, poster, thumb, group); err != nil {
 		return false, fmt.Errorf("creating personal collection %q: %w", c.Name, err)
 	}
 	if _, err := addMissingItems(ctx, tx, target.UserID, id, items); err != nil {
@@ -445,12 +453,37 @@ func regroup(ctx context.Context, tx pgx.Tx, userID int, collectionID string, g 
 	return true, nil
 }
 
+// importedSchedule is the sync schedule a new collection stores: one of
+// AllowedSyncSchedules on a synced list, as the collection editor accepts
+// (ResolveSyncSchedule), or none. Any other expression is dropped and
+// counted.
+func importedSchedule(c personalCollection, dropped *int) *string {
+	if c.SyncSchedule == nil || strings.TrimSpace(*c.SyncSchedule) == "" {
+		return nil
+	}
+	cadence := CadenceOf(*c.SyncSchedule)
+	expr, ok := AllowedSyncSchedules[cadence]
+	if !ok || !catalog.IsSyncableType(c.Type) {
+		*dropped++
+		return nil
+	}
+	return &expr
+}
+
 // copyPoster returns the poster a new collection stores: an uploaded poster
 // copied under the new id, or dropped (and counted) when there is no file to
-// copy, or any other reference as it is.
+// copy; an image URL or a bundled path as it is. Any other value is dropped
+// and counted:
+// listings sign a bare key as a stored object (presignUserCollectionPoster),
+// so an imported document must not name one outside the collection images.
 func copyPoster(ctx context.Context, target userdata.Target, c personalCollection, id string, missing *int) (string, error) {
-	if !strings.HasPrefix(c.Poster, posterPrefix) {
+	switch {
+	case strings.HasPrefix(c.Poster, posterPrefix):
+	case strings.HasPrefix(c.Poster, "https://"), strings.HasPrefix(c.Poster, "http://"), strings.HasPrefix(c.Poster, "/"):
 		return c.Poster, nil
+	default:
+		*missing++
+		return "", nil
 	}
 	if target.WriteBlob == nil || target.HasBlob == nil || !target.HasBlob(c.Poster) {
 		*missing++

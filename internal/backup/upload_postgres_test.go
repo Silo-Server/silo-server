@@ -233,7 +233,7 @@ func TestUploadLimitAndSweepDB(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(root, filepath.FromSlash(uploadPrefix(old)+"00000.x")), past, past); err != nil {
 		t.Fatal(err)
 	}
-	swept, warnings := a.sweepUploads(ctx, true, false)
+	swept, warnings := a.sweepUploads(ctx, true, nil)
 	if len(warnings) != 0 || len(swept) != 1 || swept[0] != "uploads/"+old || len(uploadObjects(t, store, recent)) != 1 {
 		t.Fatalf("orphan sweep = %v %v", swept, warnings)
 	}
@@ -253,7 +253,7 @@ func TestUploadLimitAndSweepDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, warnings := a.sweepUploads(ctx, false, false); len(warnings) != 0 {
+	if _, warnings := a.sweepUploads(ctx, false, nil); len(warnings) != 0 {
 		t.Fatal(warnings)
 	}
 	if _, err := a.Upload(ctx, completed.ID); err != nil {
@@ -272,14 +272,14 @@ func TestUploadLimitAndSweepDB(t *testing.T) {
 		return queued, nil
 	}})
 	queued = &RestoreRequest{UploadID: completed.ID}
-	if _, warnings := a.sweepUploads(ctx, false, false); len(warnings) != 0 {
+	if _, warnings := a.sweepUploads(ctx, false, nil); len(warnings) != 0 {
 		t.Fatal(warnings)
 	}
 	if _, err := a.Upload(ctx, completed.ID); err != nil {
 		t.Fatalf("an expired upload a queued restore reads was swept: %v", err)
 	}
 	queued = nil
-	if swept, warnings := a.sweepUploads(ctx, false, false); len(warnings) != 0 || !slices.Contains(swept, "uploads/"+completed.ID) {
+	if swept, warnings := a.sweepUploads(ctx, false, nil); len(warnings) != 0 || !slices.Contains(swept, "uploads/"+completed.ID) {
 		t.Fatalf("expired upload sweep = %v, %v", swept, warnings)
 	}
 	if held, err := b.opts.Locker.TryLock(ctx); err != nil {

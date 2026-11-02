@@ -1,9 +1,14 @@
 import { useRef, useState } from "react";
 import { Download, LoaderCircle, Upload } from "lucide-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import {
   PROFILE_EXPORT_FILE_NAME,
   exportProfile,
@@ -103,6 +108,7 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
 /** Settings → Your Data: download this profile's own data, or merge a download back in. */
 export default function YourDataSettings() {
   const { profile, selectProfile, verifyProfilePin } = useAuth();
+  const queryClient = useQueryClient();
   const context = captureProfileRequestContext();
   const fileInput = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<ProfileImportResult | null>(null);
@@ -129,7 +135,9 @@ export default function YourDataSettings() {
   });
 
   const importData = useMutation({
-    mutationFn: async (file: File) => {
+    // target is the profile that chose the file, captured before the file is read: the
+    // import must not land on a profile switched to while it reads.
+    mutationFn: async ({ file, target }: { file: File; target: ProfileRequestContextSnapshot }) => {
       if (maxBytes > 0 && file.size > maxBytes) {
         throw new ImportFileError(
           `This file is ${formatFileSize(file.size)}. The largest export this server takes is ${sizeLimit(maxBytes)}.`,
@@ -144,16 +152,24 @@ export default function YourDataSettings() {
       if (typeof document !== "object" || document === null || Array.isArray(document)) {
         throw new ImportFileError(NOT_AN_EXPORT);
       }
-      return importProfile(requireContext(), document as Record<string, unknown>);
+      if (!isCapturedProfileAuthorityActive(target)) throw new StaleApiRequestContextError();
+      return importProfile(target, document as Record<string, unknown>);
     },
     retry: false,
     onMutate: () => {
       setResult(null);
       setImportError(null);
     },
-    onSuccess: (imported) => setResult(imported),
-    onError: (error, file) => {
-      if (needsPin(error)) setAfterPin(() => () => importData.mutate(file));
+    onSuccess: (imported) => {
+      setResult(imported);
+      // An import can change settings, history, ratings, lists, and collections
+      // at once, and the server publishes no event for it: refetch whatever
+      // this profile has loaded.
+      void queryClient.invalidateQueries();
+    },
+    onError: (error, { file }) => {
+      if (needsPin(error))
+        setAfterPin(() => () => importData.mutate({ file, target: requireContext() }));
       else setImportError(failureMessage(error));
     },
   });
@@ -223,7 +239,7 @@ export default function YourDataSettings() {
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
-              if (file) importData.mutate(file);
+              if (file) importData.mutate({ file, target: requireContext() });
             }}
           />
           <Button

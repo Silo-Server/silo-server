@@ -386,7 +386,8 @@ export function lockBlocker(busy: boolean, active: AdminBackupActive | undefined
       : "A backup is being deleted. Wait for it to finish.";
   if (active?.operation === "upload")
     return "An uploaded backup is being checked. Wait for it to finish.";
-  return "A restore is running. Wait for it to finish.";
+  if (active?.operation === "restore") return "A restore is running. Wait for it to finish.";
+  return "Another backup task is running. Wait for it to finish.";
 }
 
 /** Why "Back up now" is unavailable, or null when it can run. */
@@ -424,7 +425,7 @@ export function backupErrorMessage(error: unknown, { sqliteUserStore = false } =
   if (!(error instanceof V2ProblemError)) {
     return "The server didn't answer. Check that Silo is running, then try again.";
   }
-  if (error.status === 404) return "That backup no longer exists. The list has been refreshed.";
+  if (error.status === 404) return "That backup no longer exists. The list is refreshing.";
   if (error.status === 409 && error.problemType === "conflict" && !sqliteUserStore) {
     return `${error.message} Try again when it finishes.`;
   }

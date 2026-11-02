@@ -169,10 +169,8 @@ func (a *applier) applyAccount(ctx context.Context, tx pgx.Tx, sel UserSelection
 	if err := prepareImport(ctx, tx, r.preparedDocs(chosen)); err != nil {
 		return applied{}, err
 	}
-	for _, c := range chosen {
-		if err := r.importData(ctx, c); err != nil {
-			return applied{}, err
-		}
+	if err := r.importData(ctx, chosen); err != nil {
+		return applied{}, err
 	}
 	report.Unmatched, report.Hidden = r.items.unmatchedTitles(), r.items.hiddenTitles()
 	if len(report.Unmatched) > 0 {
@@ -316,8 +314,7 @@ func (r *accountRestore) visibleItems(ctx context.Context, profileID string) (*f
 	if !restricted {
 		libraries = nil
 	}
-	allowUnrated := r.a.s.opts.AllowUnratedContent != nil && r.a.s.opts.AllowUnratedContent(ctx)
-	return r.items.visibleTo(ctx, r.tx, contentFilter{libraries: libraries, limits: access.ProfileMaturity(profile, allowUnrated)})
+	return r.items.visibleTo(ctx, r.tx, contentFilter{libraries: libraries, limits: access.ProfileMaturity(profile, r.a.allowUnrated)})
 }
 
 // preparedDocs lists the documents the chosen profiles import, by type.
@@ -334,13 +331,51 @@ func (r *accountRestore) preparedDocs(chosen []chosenProfile) map[string][]userd
 	return out
 }
 
-// importData merges the chosen data types of one profile.
-func (r *accountRestore) importData(ctx context.Context, c chosenProfile) error {
-	rep := &r.report.Profiles[c.rep]
+// importData merges the chosen data types of the chosen profiles, one data
+// type at a time across all of them, so the order profiles were chosen in
+// changes nothing: every profile's collections exist before any profile's
+// page layout or other data names one another profile shares.
+func (r *accountRestore) importData(ctx context.Context, chosen []chosenProfile) error {
+	targets := make([]userdata.Target, len(chosen))
+	changed := make([]bool, len(chosen))
+	for i, c := range chosen {
+		target, err := r.importTarget(ctx, c)
+		if err != nil {
+			return err
+		}
+		targets[i], changed[i] = target, r.report.Profiles[c.rep].Created
+	}
+	for _, t := range userDataTypes {
+		for i, c := range chosen {
+			raw, ok := c.plan.entry.Data[t.ID()]
+			if !ok || !slices.Contains(c.sel.DataTypes, t.ID()) {
+				continue
+			}
+			res, err := t.Import(ctx, r.tx, targets[i], raw)
+			if err != nil {
+				return fmt.Errorf("profile %s %s: %w", c.plan.entry.Name, t.ID(), err)
+			}
+			rep := &r.report.Profiles[c.rep]
+			rep.Data = append(rep.Data, ReportData{Type: t.ID(), Result: res})
+			changed[i] = changed[i] || res.Changed()
+		}
+	}
+	for i, c := range chosen {
+		rep := &r.report.Profiles[c.rep]
+		rep.Outcome = OutcomeUnchanged
+		if changed[i] {
+			rep.Outcome, r.changed = OutcomeRestored, true
+		}
+	}
+	return nil
+}
+
+// importTarget is where one chosen profile's data is merged.
+func (r *accountRestore) importTarget(ctx context.Context, c chosenProfile) (userdata.Target, error) {
 	a := r.a
 	items, err := r.visibleItems(ctx, c.plan.localID)
 	if err != nil {
-		return err
+		return userdata.Target{}, err
 	}
 	target := userdata.Target{
 		Owner:      userdata.Owner{UserID: r.plan.localID, ProfileID: c.plan.localID},
@@ -357,24 +392,7 @@ func (r *accountRestore) importData(ctx context.Context, c chosenProfile) error 
 		a.adminCollections = map[string]string{}
 	}
 	target.Collection = newCollectionMap(a.planner(r.tx), r.tx, a.libraryMap(), r.sameServer, a.adminCollections, r.doc).lookup(target)
-	changed := rep.Created
-	for _, t := range userDataTypes {
-		raw, ok := c.plan.entry.Data[t.ID()]
-		if !ok || !slices.Contains(c.sel.DataTypes, t.ID()) {
-			continue
-		}
-		res, err := t.Import(ctx, r.tx, target, raw)
-		if err != nil {
-			return fmt.Errorf("profile %s %s: %w", c.plan.entry.Name, t.ID(), err)
-		}
-		rep.Data = append(rep.Data, ReportData{Type: t.ID(), Result: res})
-		changed = changed || res.Changed()
-	}
-	rep.Outcome = OutcomeUnchanged
-	if changed {
-		rep.Outcome, r.changed = OutcomeRestored, true
-	}
-	return nil
+	return target, nil
 }
 
 // sameTarget reports whether a selection's target is still the mapping: the

@@ -173,7 +173,10 @@ func pendingTrackPreferences(ctx context.Context, tx pgx.Tx, target userdata.Tar
 		}
 	}
 	for _, c := range doc.CollectionSort {
-		collection, ok := c.localCollection(target)
+		collection, ok, err := c.localCollection(ctx, target)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			res.LeftOut++
 			continue

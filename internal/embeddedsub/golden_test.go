@@ -510,3 +510,112 @@ func TestWindowConversionKeepsTimes(t *testing.T) {
 		})
 	}
 }
+
+// FFmpeg can't demux a Matroska S_TEXT/WEBVTT track, but read through the
+// index it converts to the bytes FFmpeg gives the same cues stored the WebM
+// way, both from WriteStream's stream and from a kept copy read back.
+func TestWebVTTTrackConvertsAsWebM(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	ctx := context.Background()
+	mkvData, webmData := embeddedsub.WebVTTFixtures()
+	dir := t.TempDir()
+	mkv, webm := filepath.Join(dir, "matroska.mkv"), filepath.Join(dir, "webm.mkv")
+	for path, data := range map[string][]byte{mkv: mkvData, webm: webmData} {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fromSource(ctx, ffmpeg, mkv, extract{codec: "webvtt"}); err == nil {
+		t.Fatal("FFmpeg demuxed the S_TEXT/WEBVTT source; the index route is no longer needed")
+	}
+
+	idx, err := embeddedsub.ReadIndex(ctx, mkv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, ok := idx.Track(2)
+	if !ok {
+		t.Fatal("no track 2")
+	}
+	if got := track.FFmpegCodec(); got != "webvtt" {
+		t.Fatalf("FFmpegCodec = %q, want webvtt", got)
+	}
+	res, err := embeddedsub.ReadPackets(ctx, mkv, idx, 2, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(dir, "kept.mks")
+	f, err := os.Create(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := embeddedsub.WriteKept(f, idx, track, res.Packets); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	keptIdx, err := embeddedsub.ReadIndex(ctx, kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptTrack := &keptIdx.Tracks[0]
+	keptRes, err := embeddedsub.ReadPackets(ctx, kept, keptIdx, keptTrack.Number, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := map[string]*playback.SubtitlePacketInput{
+		"stream":    {Index: idx, Track: track, Packets: res.Packets},
+		"kept copy": {Index: keptIdx, Track: keptTrack, Packets: keptRes.Packets},
+	}
+	for _, target := range []string{"", "srt", "ass"} {
+		x := extract{codec: "webvtt", target: target}
+		want, err := fromSource(ctx, ffmpeg, webm, x)
+		if err != nil || len(want) == 0 {
+			t.Fatalf("%s from the WebM source: %q, %v", cmp(target, "vtt"), want, err)
+		}
+		for name, in := range inputs {
+			t.Run(cmp(target, "vtt")+"/"+name, func(t *testing.T) {
+				got, err := fromPackets(ctx, ffmpeg, in, x)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Fatalf("output differs from the WebM track's\n%s", firstDifference(want, got))
+				}
+			})
+		}
+	}
+}
+
+// A WebVTT file mkvmerge muxed, with a cue identifier, cue settings and a
+// comment in its blocks' additions, converts through the index.
+func TestMkvmergeWebVTTTrackConverts(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	ctx := context.Background()
+	const path = "../scanner/testdata/webvtt.mkv"
+	idx, err := embeddedsub.ReadIndex(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, ok := idx.Track(2)
+	if !ok || track.CodecID != "S_TEXT/WEBVTT" || track.Completeness == embeddedsub.CompletenessNone {
+		t.Fatalf("track 2 = %+v", track)
+	}
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, 2, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := playback.SubtitleSourceStartTime(ctx, ffmpeg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := fromPackets(ctx, ffmpeg, &playback.SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: start}, extract{codec: "webvtt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "WEBVTT\n\n00:00.500 --> 00:01.500\nHello <b>world</b>.\n\n00:02.000 --> 00:02.800\nTwo lines\nof text\n"
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

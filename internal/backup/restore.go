@@ -220,7 +220,7 @@ func dirFreeBytes(dir string) (uint64, error) {
 	if err := unix.Statfs(dir, &st); err != nil {
 		return 0, fmt.Errorf("reading free space in %s: %w", dir, err)
 	}
-	return uint64(st.Bavail) * uint64(st.Bsize), nil //nolint:unconvert // field widths differ by platform
+	return blockBytes(st.Bavail, st.Bsize), nil
 }
 
 func fetchObject(ctx context.Context, objects Objects, entry ObjectEntry, key *ArchiveKey, path string) error {
@@ -403,6 +403,11 @@ type DatabaseLoader interface {
 	Load(ctx context.Context, dbURL, dumpPath string) error
 	// Inspect reads the applied migrations and the core table inventory.
 	Inspect(ctx context.Context, dbURL string) (Inspection, error)
+	// UnbindStorage deletes the recorded storage identities
+	// (blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey)
+	// from a restored database, so the server started on it binds the stores
+	// it is configured with instead of refusing them.
+	UnbindStorage(ctx context.Context, dbURL string) error
 }
 
 // Inspection is what DatabaseLoader.Inspect reads from a database.
@@ -508,6 +513,11 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	if err := loadAndVerify(ctx, src, loader, opts.Into, opts.Validate, out); err != nil {
 		return RestoreReport{}, err
+	}
+	// The restored settings name the backed-up server's stores, which are
+	// not where this copy's files go.
+	if err := loader.UnbindStorage(ctx, opts.Into); err != nil {
+		return RestoreReport{}, fmt.Errorf("clearing the restored storage identities: %w", err)
 	}
 	report := RestoreReport{Database: opts.Into, MissingBlobs: src.Manifest.MissingBlobs}
 	switch {

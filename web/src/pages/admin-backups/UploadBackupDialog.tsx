@@ -202,6 +202,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       void deleteBackupUpload(context, upload.id)
         .catch(() => undefined)
         .finally(refreshUploads);
+    } else if (phase.step === "checking") {
+      // The server finishes the check; the list shows it until it does.
+      refreshUploads();
     }
     close();
   };

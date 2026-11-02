@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/backup"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -52,6 +53,9 @@ func wireBackupRestore(deps Dependencies, admin *handlers.AdminHandler, librarie
 	}
 	if images != nil {
 		targets.ArtworkChanged = images.ArtworkRestored
+	}
+	if tracker := catalog.NewArtworkRevisionTracker(deps.DB); tracker != nil {
+		targets.TrackArtwork = tracker.TrackArtworkRevision
 	}
 	if collections != nil {
 		targets.TemplateTitle = collections.TemplateTitle

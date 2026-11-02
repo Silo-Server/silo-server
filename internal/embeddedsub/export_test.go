@@ -158,3 +158,50 @@ func GoldenFixtures(t testing.TB) []GoldenFixture {
 		{Name: "zlib ASS with a compressed header", Data: ass.build(), Track: 2, Codec: "ass"},
 	}
 }
+
+// WebVTTFixtures are the same cues as a Matroska S_TEXT/WEBVTT track, which
+// keeps a cue's settings and identifier in the block's addition, and as a
+// WebM D_WEBVTT/SUBTITLES track, which FFmpeg reads and keeps them in the
+// block. The Matroska track has a cue without text, which the WebM one
+// can't carry.
+func WebVTTFixtures() (matroskaFile, webmFile []byte) {
+	cues := []struct {
+		rel                    int16
+		duration               int64
+		identifier, settings   string
+		text                   string
+		addition, comment, raw bool
+	}{
+		{rel: 1000, duration: 2000, identifier: "hello", text: "Hello <b>world</b>.", addition: true},
+		{rel: 3500, duration: 1500, text: "Two lines\nof text"},
+		{rel: 5500, duration: 1000, settings: "line:10% align:start", text: "At the top", addition: true},
+		{rel: 7000, duration: 1000, identifier: "noted", text: "After a note", addition: true, comment: true},
+		{rel: 8000, duration: 500, raw: true},
+		{rel: 9000, duration: 800, text: "Last"},
+	}
+	var mkv, webm []fixtureBlock
+	for _, c := range cues {
+		b := textBlock(2, c.rel, c.duration, c.text)
+		if c.addition {
+			b.addition = []byte(c.settings + "\n" + c.identifier + "\n")
+			if c.comment {
+				b.addition = append(b.addition, "NOTE a comment\n"...)
+			}
+		}
+		mkv = append(mkv, b)
+		if !c.raw {
+			webm = append(webm, textBlock(2, c.rel, c.duration, c.identifier+"\n"+c.settings+"\n"+c.text))
+		}
+	}
+	build := func(codec string, blocks []fixtureBlock) []byte {
+		var cluster []fixtureBlock
+		for rel := int16(0); rel < 10_000; rel += 500 {
+			cluster = append(cluster, pcmBlock(rel))
+		}
+		return mkvFixture{
+			tracks:   []fixtureTrack{pcmTrackEntry, {number: 2, uid: 0x2002, codec: codec, private: []byte("WEBVTT")}},
+			clusters: []fixtureCluster{{ticks: 0, blocks: append(cluster, blocks...)}},
+		}.build()
+	}
+	return build(matroska.CodecIDWebVTT, mkv), build(matroska.CodecIDWebMWebVTT, webm)
+}

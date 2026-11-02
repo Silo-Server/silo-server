@@ -1,3 +1,53 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6684effe9a5d681041dc026186c944f8ef6f3cb6b66b6aa4ddf77fef9bf69943",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e036ac46cc16f7ea1f21cffe314056000892ee8810115b47435ca4c5bfeb77a0",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "83650defd7d988cb9d365c213c6deef946d92ef1f214b1779b290afb629ec465",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "listAdminBackupUploads",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "a14f750c8f539e25e52fac4f3ba5b5d44cc5d36bee6ca652dd70fc65b62c644d",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "createAdminBackupUpload",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2cb982d2eab7c96a8ed62350c643c6b6f0f6744966c9395ec9f05c11bc6925ff",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "completeAdminBackupUpload",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "aaac7cf1ea81f0107f2b7fbd5bc9a768d34ff7b3eef45a1f1f2a35f2efa8b292",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    },
+    {
+      "operation_id": "putAdminBackupUploadPart",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4a2ca9ab2f420a894fa4fc1646794638ebd4e6c0060411ac52cdf831a96defd4",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3401"
+    }
+  ]
 }

@@ -87,6 +87,8 @@ func TestPartSizeGrowsWithThePreviousBackup(t *testing.T) {
 	for _, c := range []struct{ previous, want int64 }{
 		{1 << 30, defaultPartSize},
 		{1 << 40, 234 << 20},
+		// No earlier backup: room for a large first one.
+		{0, unknownSizePartSize},
 	} {
 		// Twice the previous size must fit in fewer parts than S3 allows.
 		if got := partSizeFor(c.previous); got != c.want || got*s3client.MaxUploadParts < 2*c.previous {
@@ -113,7 +115,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 	}
 	before := srv.Keys(testBucket, "")
 	srv.RefuseDeletes(true)
-	rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil, true)
+	rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, true)
 	if len(rotated) != 0 || len(warnings) != 2 || !strings.Contains(warnings[0], "lifecycle rules") {
 		t.Fatalf("rotation against a refusing bucket = rotated %v, warnings %v", rotated, warnings)
 	}
@@ -121,7 +123,7 @@ func TestRotationRecordsRefusedDeletes(t *testing.T) {
 		t.Fatalf("a refused rotation removed objects: %d of %d left", len(after), len(before))
 	}
 	srv.RefuseDeletes(false)
-	if rotated, _, warnings := svc.rotate(ctx, tgt, "server", nil, true); len(rotated) != 2 || len(warnings) != 0 {
+	if rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, true); len(rotated) != 2 || len(warnings) != 0 {
 		t.Fatalf("rotation = rotated %v, warnings %v", rotated, warnings)
 	}
 }

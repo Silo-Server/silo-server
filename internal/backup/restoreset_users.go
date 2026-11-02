@@ -237,7 +237,7 @@ func (b *restoreSetBuild) omit(spec sectionSpec, account AccountEntry, reason, m
 // omitFailed records an account whose export failed, with what failed and
 // the underlying error as separate fields a client can group by.
 func (b *restoreSetBuild) omitFailed(spec sectionSpec, account AccountEntry, err error) {
-	b.omit(spec, account, OmittedExportFailed, "Its data could not be read: "+err.Error())
+	b.omit(spec, account, OmittedExportFailed, truncateText("Its data could not be read: "+err.Error(), maxOmittedText))
 	last := &b.index.Omitted[len(b.index.Omitted)-1]
 	last.Cause, last.Error = exportCause(err), truncateText(rootError(err).Error(), maxOmittedText)
 }
@@ -310,7 +310,19 @@ func exportUserIsolated(ctx context.Context, tx pgx.Tx, account AccountEntry) ([
 		return nil, nil, err
 	}
 	data, err := json.Marshal(doc)
-	return data, blobs, err
+	if err != nil {
+		return nil, nil, err
+	}
+	// A document the reader would refuse makes the whole set unreadable, so
+	// it is checked as the reader checks it and left out here instead.
+	var written UserDocument
+	if err := decodeStrict(data, &written); err != nil {
+		return nil, nil, err
+	}
+	if _, err := validateUserDocument(&written); err != nil {
+		return nil, nil, &exportError{part: "document", err: fmt.Errorf("the restore set reader would refuse it: %w", err)}
+	}
+	return data, blobs, nil
 }
 
 func readBackupAccounts(ctx context.Context, tx pgx.Tx) ([]AccountEntry, error) {
@@ -424,7 +436,7 @@ func exportUser(ctx context.Context, tx pgx.Tx, account AccountEntry) (UserDocum
 		}
 		p.Data = map[string]json.RawMessage{}
 		for _, t := range userDataTypes {
-			exp, err := t.Export(ctx, tx, userdata.Owner{UserID: account.ID, ProfileID: p.ID})
+			exp, err := t.Export(ctx, tx, userdata.Owner{UserID: account.ID, ProfileID: p.ID}, nil)
 			if err != nil {
 				return doc, nil, &exportError{part: t.ID(), profile: p.ID, err: err}
 			}
