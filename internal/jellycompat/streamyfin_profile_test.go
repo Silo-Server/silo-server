@@ -3,9 +3,12 @@ package jellycompat
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -62,6 +65,25 @@ func TestStreamyfinLowerQualityTranscodesOrReportsNoCompatibleStream(t *testing.
 		resp := postPlaybackInfo(t, handler, routeID, streamyfinPlaybackInfoBody(t, "streamyfin_mpv_android_av1_device_profile.json", 0))
 		if len(resp.MediaSources) != 1 || !resp.MediaSources[0].SupportsDirectPlay {
 			t.Fatalf("response = %+v, want direct play without a ceiling", resp)
+		}
+	})
+	t.Run("fMP4-only HLS under a higher server cap", func(t *testing.T) {
+		// The client's 4 Mbps limit, not the 20 Mbps cap, rules out direct
+		// play, so the cap isn't why nothing fits.
+		handler, routeID := newUnreadablePlaybackInfoHandler(t, streamyfinH264Version())
+		handler.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 20_000, MaxRemoteStreamBitrateKbps: 20_000}}
+		rec := servePlaybackInfo(handler, routeID, streamyfinPlaybackInfoBody(t, "streamyfin_mpv_android_av1_device_profile.json", 4_000_000))
+		assertNoCompatibleStream(t, handler, routeID, rec.Code, rec.Body.Bytes())
+	})
+	t.Run("fMP4-only HLS over the server cap", func(t *testing.T) {
+		// Without a client limit the file direct plays; only the 1 Mbps cap
+		// rules that out, so the answer names the cap.
+		handler, routeID := newUnreadablePlaybackInfoHandler(t, streamyfinH264Version())
+		handler.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 1_000, MaxRemoteStreamBitrateKbps: 1_000}}
+		rec := servePlaybackInfo(handler, routeID, streamyfinPlaybackInfoBody(t, "streamyfin_mpv_android_av1_device_profile.json", 0))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "PlaybackUnavailable") ||
+			!strings.Contains(rec.Body.String(), "exceeds the server bitrate limit") {
+			t.Fatalf("status = %d, body = %s; want 400 PlaybackUnavailable over the cap", rec.Code, rec.Body.String())
 		}
 	})
 }

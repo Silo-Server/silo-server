@@ -2503,8 +2503,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	if !slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
 		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
 	}) {
+		capRemovesRoutes := req.serverBitrateCapKbps > 0 &&
+			h.bitrateCapRemovesEveryRoute(r.Context(), routeItemID, playSessionID, sources, profile, req, allow4KTranscode, allowHEVCEncoding)
 		message := "No media source supports the requested playback constraints"
-		if req.serverBitrateCapKbps > 0 {
+		if capRemovesRoutes {
 			message = "This stream exceeds the server bitrate limit, and no compliant transcoding route is available"
 		}
 		// Clients rarely surface this body, so record why each version was
@@ -2522,7 +2524,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				"hls_transcoding_containers", hlsContainers, "hevc_encoding", allowHEVCEncoding,
 			)
 		}
-		if req.serverBitrateCapKbps > 0 {
+		if capRemovesRoutes {
 			writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
 			return
 		}
@@ -2654,6 +2656,27 @@ func (h *PlaybackHandler) storeDeviceProfile(r *http.Request, compatToken string
 		}
 	}
 	return h.deviceProfiles.PutForDevice(r.Context(), compatToken, deviceID, profile)
+}
+
+// bitrateCapRemovesEveryRoute reports whether the server's bitrate cap is what
+// leaves sources without a route: built again without it, some version plays.
+// When a lower client or profile limit, or a profile that takes no encode the
+// server makes, rules them out, they have no route either way (#3215).
+func (h *PlaybackHandler) bitrateCapRemovesEveryRoute(
+	ctx context.Context,
+	routeItemID, playSessionID string,
+	sources []PlaybackMediaSource,
+	profile DeviceProfile,
+	req playbackInfoRequest,
+	allow4KTranscode, allowHEVCEncoding bool,
+) bool {
+	uncapped := req
+	uncapped.serverBitrateCapKbps = 0
+	return slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
+		source = h.buildPlaybackSource(routeItemID, playSessionID, source.Version, profile, uncapped, allow4KTranscode, allowHEVCEncoding)
+		source = h.applyCompatDVStrip(ctx, routeItemID, playSessionID, source, profile, uncapped, allow4KTranscode)
+		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
+	})
 }
 
 func (h *PlaybackHandler) buildPlaybackSource(
