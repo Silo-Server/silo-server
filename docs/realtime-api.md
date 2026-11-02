@@ -23,6 +23,16 @@ capability response remains unchanged. Current first-party web, Apple, and
 Android callers do not consume this capability read; Jellyfin has no matching
 native realtime discovery operation.
 
+## Message compression
+
+Every realtime socket (events, playback control, Watch Together, admin logs,
+and the Jellyfin-compatible `/socket`) accepts the `permessage-deflate`
+extension (RFC 7692) when the client offers it, without context takeover in
+either direction. A client that does not offer it receives uncompressed frames.
+A socket's message size limit applies after decompression: a client message
+that inflates past it closes the connection with `1009` (message too big),
+as an oversize uncompressed message does.
+
 ## Session-bound socket handshake
 
 `POST /api/v2/events/ws-ticket` delegates a current access-token login session

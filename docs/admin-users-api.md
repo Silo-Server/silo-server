@@ -243,11 +243,16 @@ administrator invitations, which the new Owner can resend.
 
 Making an account an administrator deletes its API keys and its reset link. Any
 administrator may create those for an ordinary account, so after a promotion they
-would carry administrator authority that only the Owner grants.
+would carry administrator authority that only the Owner grants. Creating an API key
+for another account checks both accounts in the transaction that stores the key:
+the check sees a promotion or ownership transfer that commits first, and a later
+promotion of that account, or transfer of ownership to it, deletes the key with the
+account's other keys.
 
 These rules stop an administrator who deliberately tries to exceed its authority.
-They check the caller's standing when the request arrives; they do not order
-simultaneous requests around an ownership transfer, which a server sees rarely.
+They check the caller's standing when the request arrives; except for API key
+creation, above, they do not order simultaneous requests around an ownership
+transfer, which a server sees rarely.
 
 When the Owner account is lost or locked out, someone with shell access to a node
 and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`.

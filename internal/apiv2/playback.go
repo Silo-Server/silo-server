@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -353,10 +356,8 @@ func registerPlayback(reg *Registry) {
 		}
 		body := PlaybackCapabilities{InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}
 		if playback.HasFeatureV3(view.Features, playback.FeatureConnectionSpeedV1) {
-			// The origin the client reached, as a reverse proxy forwards it: r.Host
-			// behind a TLS-terminating proxy is the internal host the proxy dialed.
 			if r := requestFrom(ctx); r != nil {
-				body.BandwidthProbeURL = handlers.RequestBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
+				body.BandwidthProbeURL = reg.bandwidthProbeBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
 			}
 			body.BandwidthProbeAutomatic = new(view.BandwidthProbeAutomatic)
 			body.BandwidthProbeMaxAgeSeconds = new(view.BandwidthProbeMaxAgeSeconds)
@@ -588,4 +589,23 @@ func playbackBandwidthLimit(limit *playback.BandwidthLimitV3) *PlaybackBandwidth
 		return nil
 	}
 	return &PlaybackBandwidthLimit{Kbps: limit.Kbps, Source: limit.Source, ExpiresAt: limit.ExpiresAt}
+}
+
+// bandwidthProbeBaseURL is the origin the speed test URL names: the one the
+// client reached, as a reverse proxy forwards it, since r.Host behind a
+// TLS-terminating proxy is the internal host the proxy dialed. A client on
+// the server's own network keeps the LAN address it used. A proxy that
+// rewrites Host to a bare IP address and names no client host leaves only the
+// address it dialed, which a client elsewhere may not reach; then the URL is
+// on the configured public URL, when there is one. A network access
+// provider's path keeps Host, which can be an overlay IP, so it always keeps
+// the origin it reached.
+func (reg *Registry) bandwidthProbeBaseURL(r *http.Request) string {
+	_, err := netip.ParseAddr((&url.URL{Host: r.Host}).Hostname())
+	hostRewritten := err == nil && r.Header.Get("X-Forwarded-Host") == "" && clientip.HasForwardingHeaders(r.Header) &&
+		netaccess.PathFromContext(r.Context()).IsDefault()
+	if base := reg.publicBaseURL(); hostRewritten && base != "" {
+		return base
+	}
+	return handlers.RequestBaseURL(r)
 }

@@ -147,6 +147,31 @@ describe("useCatalogWindow", () => {
     },
   );
 
+  it("reads later pages with page 0's artwork widths, which its cursors are bound to", async () => {
+    // The widths artworkQuery would compute now differ from these (no images
+    // capability is stored), as after a resize or a late capability read.
+    const artwork = { poster_width: 342 };
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0), snapshot: "current-window", artwork },
+      isLoading: false,
+    });
+    mocks.useQueries.mockImplementation(({ queries }) => queries.map(() => ({ isLoading: true })));
+    mocks.v2.mockResolvedValue({ items: [], total: 0, page: { has_more: false } });
+    renderHook(() =>
+      useCatalogWindow(createCatalogSearchState("favorites"), { visibleRange: [60, 119] }),
+    );
+    await mocks.useQueries.mock.calls.at(-1)?.[0].queries[0].queryFn({
+      signal: new AbortController().signal,
+    });
+    expect(mocks.v2).toHaveBeenCalledExactlyOnceWith(
+      "POST /api/v2/catalog/query",
+      expect.objectContaining({
+        body: expect.objectContaining({ cursor: "current-window", seek: 60 }),
+        query: artwork,
+      }),
+    );
+  });
+
   it("separates filter edits and server-resolved sort from cached explicit-sort windows", () => {
     const state = createCatalogSearchState("favorites");
     mocks.useQuery.mockReturnValue({ data: undefined, isLoading: true });

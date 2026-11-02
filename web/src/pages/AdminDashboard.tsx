@@ -31,6 +31,7 @@ const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.playbackActivityRoot(),
   adminKeys.topActivityRoot(),
   adminKeys.downloadsStatsRoot(),
+  adminKeys.apiClientsRoot(),
   adminKeys.serverStatus(),
   adminKeys.systemResources(),
   adminKeys.nodes(),

@@ -480,6 +480,9 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// HasMore reports that a capped Home row read (SectionViewer.ItemLimitCap)
+	// answered fewer cards than the row holds. Only the v2 API carries it.
+	HasMore bool `json:"-"`
 }
 
 type homeSectionsResponse struct {

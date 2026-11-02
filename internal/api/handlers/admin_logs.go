@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 const auditFilterAction = "action"
@@ -303,6 +304,7 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 	})
 	defer unsubscribe()
 
+	conn.SetReadLimit(wsMaxClientMessageBytes)
 	conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))
@@ -312,7 +314,7 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 	go func() {
 		defer close(done)
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			if _, _, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes); err != nil {
 				return
 			}
 		}

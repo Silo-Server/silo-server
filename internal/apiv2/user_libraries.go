@@ -23,6 +23,8 @@ type UserLibrary struct {
 	Type      string `json:"type"`
 	SortOrder int    `json:"sort_order"`
 	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
+	// BoxSetsEnabled tells a client to browse the library with group=box_set.
+	BoxSetsEnabled bool `json:"box_sets_enabled" doc:"The library browses movies of one TMDB collection as a box set; request group=box_set when browsing it" example:"false"`
 }
 
 type UserLibraryListOutput struct{ Body Collection[UserLibrary] }
@@ -58,7 +60,7 @@ func registerUserLibraries(reg *Registry) {
 		}
 		items := make([]UserLibrary, 0, len(views))
 		for _, view := range views {
-			items = append(items, UserLibrary{ID: ID(strconv.Itoa(view.ID)), Name: view.Name, Type: view.Type, SortOrder: view.SortOrder, PosterURL: view.PosterURL})
+			items = append(items, UserLibrary{ID: ID(strconv.Itoa(view.ID)), Name: view.Name, Type: view.Type, SortOrder: view.SortOrder, PosterURL: view.PosterURL, BoxSetsEnabled: view.BoxSetsEnabled})
 		}
 		return &UserLibraryListOutput{Body: NewCollection(items)}, nil
 	})

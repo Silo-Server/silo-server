@@ -7,7 +7,8 @@ import {
 import { MobilePushPrivacyDisclosure } from "@/components/notifications/MobilePushPrivacyDisclosure";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
-import { EmbeddingProviderField, ModelField } from "@/pages/admin-settings/AIProviders";
+import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
+import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";

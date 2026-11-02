@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
   usePersonSearch: vi.fn(),
+  useBoxSetSearch: vi.fn(),
+  // Overrides the profile's search scope when set.
+  searchScope: null as null | "all" | "video" | "audiobook",
   // Most tests only check the props GlobalSearch passes; the wiring tests for
   // request rows need the real section.
   renderRealRequestSection: false,
@@ -46,6 +49,20 @@ vi.mock("@/hooks/queries/useRequests", () => ({
 vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: (...args: unknown[]) => mocks.usePersonSearch(...args),
 }));
+
+vi.mock("@/hooks/queries/boxSets", () => ({
+  useBoxSetSearch: (...args: unknown[]) => mocks.useBoxSetSearch(...args),
+}));
+vi.mock("@/hooks/useSearchMediaScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useSearchMediaScope")>();
+  return {
+    ...actual,
+    useSearchMediaScope: () =>
+      mocks.searchScope
+        ? { scope: mocks.searchScope, setScope: vi.fn() }
+        : actual.useSearchMediaScope(),
+  };
+});
 
 vi.mock("@/components/RequestToAddSection", async () => {
   const actual =
@@ -172,6 +189,8 @@ beforeEach(() => {
     isFetching: false,
     isError: false,
   });
+  mocks.useBoxSetSearch.mockReset();
+  mocks.useBoxSetSearch.mockReturnValue({ data: [] });
 });
 
 describe("GlobalSearch", () => {
@@ -386,6 +405,115 @@ describe("GlobalSearch", () => {
     // item page the surrounding row points at.
     expect(mocks.navigate).not.toHaveBeenCalled();
     expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("GlobalSearch box set results", () => {
+  const boxSetFixture = {
+    id: "1241",
+    library_id: "3",
+    title: "Harry Potter Collection",
+    movie_count: 8,
+    played_count: 0,
+    first_year: 2001,
+    last_year: 2011,
+  };
+
+  beforeEach(() => {
+    mocks.navigate.mockReset();
+    mocks.useQuery.mockReset();
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 1, has_more: false, items: [browseFixture] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
+    mocks.useBoxSetSearch.mockReturnValue({ data: [boxSetFixture] });
+  });
+
+  function renderOpen(initialQuery = "harry potter") {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch defaultOpen initialQuery={initialQuery} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const input = screen.getByRole("combobox", { name: "Search" });
+    input.focus();
+    return input;
+  }
+
+  it("leads with matching box sets, ahead of titles and people", () => {
+    renderOpen();
+
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Harry Potter Collection, Box set, 8 films · 2001 – 2011",
+      "Test Movie, 2020, Movie",
+      "Test Actor, Person",
+    ]);
+    const boxSets = screen.getByRole("group", { name: "Box sets" });
+    expect(boxSets).toContainElement(options[0]!);
+    expect(boxSets).not.toHaveClass("border-t");
+    expect(screen.getByRole("group", { name: "Titles" })).toHaveClass("border-t");
+  });
+
+  it("hides box sets an audiobook search still holds from before", () => {
+    mocks.searchScope = "audiobook";
+    try {
+      renderOpen();
+      expect(screen.queryByRole("group", { name: "Box sets" })).toBeNull();
+      expect(mocks.useBoxSetSearch).toHaveBeenLastCalledWith("harry potter", { enabled: false });
+    } finally {
+      mocks.searchScope = null;
+    }
+  });
+
+  it("waits for box sets before saying there are no matches", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
+    mocks.useBoxSetSearch.mockReturnValue({ data: undefined, isFetching: true });
+    renderOpen();
+    expect(screen.queryByText("No matches")).toBeNull();
+  });
+
+  it("opens the box set page from the keyboard", () => {
+    const input = renderOpen();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/box-sets/1241?library_id=3");
+  });
+
+  it("still opens titles after the box sets", () => {
+    const input = renderOpen();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-99");
+  });
+
+  it("asks for box sets only while the dialog is open", () => {
+    renderSearchMarkup({ defaultOpen: true, initialQuery: "harry" });
+    expect(mocks.useBoxSetSearch).toHaveBeenLastCalledWith("harry", { enabled: true });
+
+    renderSearchMarkup();
+    expect(mocks.useBoxSetSearch).toHaveBeenLastCalledWith("", { enabled: false });
   });
 });
 

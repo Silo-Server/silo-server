@@ -59,6 +59,7 @@ func TestExtractSubtitleFromZipPicksTargetEpisode(t *testing.T) {
 		{"movie takes the first subtitle", []string{"readme.txt", "movie.en.ass", "movie.fr.srt"}, DownloadTarget{}, "movie.en.ass"},
 		{"season pack", []string{"Show.S01/Show.S01E01.ar.srt", "Show.S01/Show.S01E02.ar.srt", "Show.S01/Show.S01E03.ar.srt"}, s01e02, "Show.S01/Show.S01E02.ar.srt"},
 		{"NxNN names", []string{"Show - 1x01.srt", "Show - 1x02.srt"}, s01e02, "Show - 1x02.srt"},
+		{"bracketed NxNN names", []string{"Show - [1x01].srt", "Show - [1x02].srt"}, s01e02, "Show - [1x02].srt"},
 		{"season must match", []string{"Show.S02E02.srt", "Show.S01E02.srt"}, s01e02, "Show.S01E02.srt"},
 		{"macOS resource forks are skipped", []string{"__MACOSX/._Show.S01E02.srt", "Show.S01E02.srt"}, s01e02, "Show.S01E02.srt"},
 		{"multi-episode file takes the range", []string{"Show.S01E01.srt", "Show.S01E01E02.srt"}, DownloadTarget{Season: 1, Episode: 1, EndEpisode: 2}, "Show.S01E01E02.srt"},

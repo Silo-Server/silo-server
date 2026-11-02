@@ -31,6 +31,7 @@ import (
 type Config struct {
 	AuthMode             string
 	ReasoningEffort      string
+	ServiceTier          string
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
 	ChatGPTPlanRejected  func(context.Context, string) error
@@ -50,6 +51,7 @@ type Config struct {
 
 const AuthModeChatGPT = "chatgpt"
 const chatJSONFormat = "json_object"
+const serviceTierUltrafast = "ultrafast"
 
 // ErrQuotaExhausted means the provider requires a billing or quota change;
 // waiting and retrying the same request cannot recover it.
@@ -112,6 +114,7 @@ type chatCompletionRequest struct {
 	Messages        []Message           `json:"messages"`
 	Temperature     *float32            `json:"temperature,omitempty"`
 	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+	ServiceTier     string              `json:"service_tier,omitempty"`
 	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -141,10 +144,14 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 	if cfg.AuthMode == AuthModeChatGPT {
 		return c.chatGPT(ctx, cfg, messages, jsonObject)
 	}
+	if cfg.ServiceTier == serviceTierUltrafast {
+		return c.apiResponses(ctx, cfg, messages, jsonObject)
+	}
 	reqBody := chatCompletionRequest{
 		Model:           cfg.ChatModel,
 		Messages:        messages,
 		ReasoningEffort: cfg.ReasoningEffort,
+		ServiceTier:     cfg.ServiceTier,
 	}
 	if !reasoning.OmitTemperature(cfg.ChatModel, cfg.ReasoningEffort) {
 		reqBody.Temperature = new(float32(0.2))
@@ -176,16 +183,17 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		func(respBody []byte) error {
 			var parsed chatCompletionResponse
 			if err := json.Unmarshal(respBody, &parsed); err != nil {
-				return fmt.Errorf("decode chat response: %w", err)
+				return fmt.Errorf("decode chat response: %w: %w", ErrUnusableResponse, err)
 			}
 			if parsed.Error != nil && parsed.Error.Message != "" {
-				// 200 with an upstream error object — transient on gateways.
-				return fmt.Errorf("chat API error: %s", parsed.Error.Message)
+				// 200 with an upstream error object — transient on gateways,
+				// so it reads as an unavailable upstream once retries run out.
+				return &HTTPError{StatusCode: http.StatusBadGateway, message: "chat API error: " + parsed.Error.Message}
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
 					"model", cfg.ChatModel, "response_bytes", len(respBody))
-				return fmt.Errorf("chat API returned no choices")
+				return fmt.Errorf("chat API returned no choices: %w", ErrUnusableResponse)
 			}
 			content = parsed.Choices[0].Message.Content
 			return nil

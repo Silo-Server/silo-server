@@ -211,3 +211,34 @@ func TestSeasonalEntriesFromMDBList(t *testing.T) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
 	}
 }
+
+// A shared seasonal row must not serve the last season's titles from cache
+// once the season changes, and must keep its entry while the season holds.
+func TestResolvedListKeyCarriesTheSeasonalPick(t *testing.T) {
+	row := ResolvedSection{ID: "row", SectionType: SectionSeasonalThemed, Config: json.RawMessage(`{"enabled_themes":["halloween","thanksgiving","christmas"]}`)}
+	key := func(at time.Time) string {
+		t.Helper()
+		k, err := (&Fetcher{Clock: fixedClock(at)}).resolvedListKey(context.Background(), row, nil, nil, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("resolvedListKey: %v", err)
+		}
+		return k
+	}
+	utc := func(month time.Month, day, hour int) time.Time {
+		return time.Date(2026, month, day, hour, 0, 0, 0, time.UTC)
+	}
+	cases := []struct {
+		name     string
+		from, to time.Time
+		same     bool
+	}{
+		{"same season", utc(time.October, 14, 12), utc(time.October, 20, 12), true},
+		{"season ends", utc(time.November, 1, 11), utc(time.November, 1, 13), false},
+		{"next season starts", utc(time.December, 1, 11), utc(time.December, 1, 13), false},
+	}
+	for _, tc := range cases {
+		if same := key(tc.from) == key(tc.to); same != tc.same {
+			t.Errorf("%s: keys equal = %v, want %v", tc.name, same, tc.same)
+		}
+	}
+}

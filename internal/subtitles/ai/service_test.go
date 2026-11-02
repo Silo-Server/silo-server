@@ -246,6 +246,7 @@ func (t *chunkedTranscriber) Transcribe(_ context.Context, req TranscribeJobRequ
 type recordingTranslator struct {
 	calls     []TranslateRequest
 	errOnCall int
+	err       error // returned on errOnCall; a generic error when nil
 	trace     *[]string
 }
 
@@ -258,6 +259,9 @@ func (t *recordingTranslator) Translate(_ context.Context, req TranslateRequest,
 	})
 	call := len(t.calls)
 	if t.errOnCall == call {
+		if t.err != nil {
+			return nil, t.err
+		}
 		return nil, errors.New("translator chunk failed")
 	}
 

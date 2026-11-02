@@ -50,6 +50,20 @@ install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
 # stack's root-run Silo, that Silo must be able to clean up.
 own_tree silo silo /tmp/silo-transcode
 own_tree silo silo /tmp/silo-download-artifacts
+# Silo turns off Kindle conversion when its cache dir is not private to it.
+# The cache is disposable, so one another account owns or could write is
+# removed, not adopted with whatever that account put inside.
+ebook_cache=/tmp/silo-ebook-epub
+if [[ -L "$ebook_cache" || ( -e "$ebook_cache" && ! -d "$ebook_cache" ) ]]; then
+  rm -f "$ebook_cache"
+elif [[ -d "$ebook_cache" ]]; then
+  read -r owner mode < <(stat -c '%U %a' "$ebook_cache")
+  if [[ "$owner" != silo ]] || (( 8#$mode & 8#022 )); then
+    # A mount point can't be removed, but emptying it is enough.
+    rm -rf "$ebook_cache" 2>/dev/null || [[ -z "$(ls -A "$ebook_cache")" ]]
+  fi
+fi
+install -d -o silo -g silo -m 0700 "$ebook_cache"
 
 # Proxy and transcode nodes run against the main server's PostgreSQL and
 # Redis and start none of the bundled services.

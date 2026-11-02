@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -199,6 +200,7 @@ func TestAdminRequestRoutesCreateReorderPreview(t *testing.T) {
 		},
 	}
 	f.preview.Facts.ContentRating = new("TV-14")
+	f.preview.Facts.SeriesStatus = new("ended")
 	var preview struct {
 		Facts AdminRequestRouteFacts         `json:"facts"`
 		Tiers []AdminRequestRoutePreviewTier `json:"tiers"`
@@ -207,7 +209,7 @@ func TestAdminRequestRoutesCreateReorderPreview(t *testing.T) {
 	rec = do(t, h, http.MethodPost, base+"/preview", `{"media_type":"movie","tmdb_id":129,"requester_user_id":"7"}`, actingRequestAdmin)
 	decodeBody(t, rec.Body, &preview)
 	if rec.Code != 200 || !preview.Facts.Anime || preview.Facts.GenreIDs == nil || len(preview.Tiers) != 2 ||
-		preview.Tiers[0].IntegrationName != "Radarr Anime" || preview.Tiers[1].Note == "" || preview.Facts.ContentRating != "TV-14" ||
+		preview.Tiers[0].IntegrationName != "Radarr Anime" || preview.Tiers[1].Note == "" || preview.Facts.ContentRating != "TV-14" || preview.Facts.SeriesStatus != "ended" ||
 		len(preview.Rules) != 2 || len(preview.Rules[0].Unmet) != 2 || preview.Rules[1].HD != "sends" || preview.Rules[1].UHD != "passes" {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -222,6 +224,17 @@ func TestAdminRequestRoutesCreateReorderPreview(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodPost, base+"/preview", `{"media_type":"movie","tmdb_id":129,"requester_user_id":"x"}`, actingRequestAdmin), TypeValidationFailed)
+
+	// A series rule matches statuses as the catalog spells them; TMDB's own
+	// spelling is refused.
+	requireProblem(t, do(t, h, http.MethodPost, base, `{"media_type":"series","name":"Ended","enabled":true,"conditions":{"series_statuses":["Canceled"]},"hd":{"integration_id":"sonarr-ended"},"uhd":{},"skip_uhd":false}`, actingRequestAdmin), TypeValidationFailed)
+	created = do(t, h, http.MethodPost, base, `{"media_type":"series","name":"Ended","enabled":true,"conditions":{"series_statuses":["ended","cancelled"],"exclude_series_statuses":["returning"]},"hd":{"integration_id":"sonarr-ended"},"uhd":{},"skip_uhd":false}`, actingRequestAdmin) //nolint:misspell // the catalog's show_status spelling
+	var series AdminRequestRoute
+	decodeBody(t, created.Body, &series)
+	if r := f.routes["r-new"]; created.Code != http.StatusCreated || !slices.Equal(r.Conditions.SeriesStatuses, []string{"ended", "cancelled"}) || //nolint:misspell // the catalog's show_status spelling
+		!slices.Equal(series.Conditions.ExcludeSeriesStatuses, []string{"returning"}) {
+		t.Fatalf("%d %s", created.Code, created.Body.String())
+	}
 }
 
 func TestAdminRequestRoutingMode(t *testing.T) {

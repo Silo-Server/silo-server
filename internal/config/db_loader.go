@@ -517,6 +517,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// validation refuses to store one.
 	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
+	cfg.AI.ServiceTier = ResolveAIServiceTier(m)
 	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
 	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
 	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-6-luna"))

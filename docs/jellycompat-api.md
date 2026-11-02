@@ -207,7 +207,8 @@ collection's playable leaves for Play all and Shuffle: movies and episodes, with
 member series expanded to the episodes that have a live file in a library the
 profile may access. Regular seasons come first, then specials. `SortBy=Random`
 shuffles the leaves; other sorts keep collection order. Other recursive
-requests list the members.
+requests list the members. For members and leaves alike, `Limit=0` returns no
+`Items`, only `TotalRecordCount`.
 
 `EnableImages=false`, `EnableImageTypes`, `ImageTypeLimit`, and
 `EnableUserData=false` control item response presentation. Fields requiring
@@ -779,10 +780,14 @@ profile sets on `VideoBitrate`, `Height` and `Width`, in its `Video` codec
 profiles for `h264` (those without a `Container` or `ApplyConditions`) and its
 HLS video transcoding profiles, instead of being refused for exceeding them:
 the video bitrate is capped and the frame is scaled to fit, keeping its aspect
-ratio. A stored device profile keeps `IsRequired: false`; a missing key reads
-back as `true`. A profile that lists transcoding profiles but no
-`DirectPlayProfiles` gets no direct play or direct stream, as in Jellyfin; Roku
-clients send one to ask for a remux after direct play fails.
+ratio. Unlike Jellyfin, the video bitrate also stops at the source's video
+rate, converted to the output codec's efficiency, so a client's generous
+`MaxStreamingBitrate` does not inflate the encode. The ceiling alone picks the
+frame size, so the source's rate never lowers it. A stored device profile keeps
+`IsRequired: false`; a missing key reads back as `true`. A profile that lists
+transcoding profiles but no `DirectPlayProfiles` gets no direct play or
+direct stream, as in Jellyfin; Roku clients send one to ask for a remux after
+direct play fails.
 
 ## Transcode reasons
 
@@ -803,7 +808,12 @@ documents, and Roku clients list their MPEG-TS transcoding profile first. A
 video-copy HLS stream for a client whose user agent starts with `Roku/` and
 whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 `remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
-keeps fMP4. Other clients are unchanged.
+keeps fMP4.
+
+Any other client that lists the source codecs for MPEG-TS HLS but not for fMP4
+also gets a video copy as MPEG-TS, unless it can take a progressive remux. This
+covers H.264 and HEVC with AAC, AC-3, E-AC-3, or MP3 audio; other audio converts
+to AAC when the profile accepts it.
 
 ## AAC encodes
 

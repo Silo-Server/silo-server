@@ -282,7 +282,7 @@ database; with the PostgreSQL service from
 running under the Compose defaults:
 
 ```sh
-docker compose -f docker-compose.dev.yml exec postgres createdb -U silo silo_pins
+docker compose -f dev/compose.yml exec postgres createdb -U silo silo_pins
 export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
 DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only
@@ -472,6 +472,18 @@ Maintainers may ask for a smaller change, a different implementation, decline
 work that no longer fits, or take the idea and implement it separately. Opening
 a pull request does not guarantee a merge. If scope is uncertain, ask before
 building.
+
+## Licensing of contributions
+
+Silo Server is licensed under `AGPL-3.0-or-later` with the platform library
+additional permission in [PLATFORM-EXCEPTION.md](PLATFORM-EXCEPTION.md).
+
+By submitting a contribution, you agree that it is licensed under those
+same terms, the AGPL *including* the additional permission. If you cannot
+agree to the additional permission, say so in your pull request before it
+is merged.
+
+You retain copyright in your contribution; no assignment is requested.
 
 ## Instructions for coding agents
 

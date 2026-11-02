@@ -2,12 +2,15 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAdminServerSettings: vi.fn(),
   useAdminSensitiveStatus: vi.fn(),
   useRecommendationsStatus: vi.fn(),
+  useAIProviderModels: vi.fn(),
   checkConnectionMutateAsync: vi.fn(),
   updateMutate: vi.fn(),
   updateMutateAsync: vi.fn(),
@@ -83,7 +86,7 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
       types: [],
     },
   }),
-  useAIProviderModels: () => ({ data: { success: true, message: "", models: [] } }),
+  useAIProviderModels: () => mocks.useAIProviderModels(),
   useRefreshAIProviders: () => vi.fn(),
 }));
 
@@ -162,6 +165,7 @@ describe("AdminRecommendations", () => {
     });
     mocks.useAdminSensitiveStatus.mockReturnValue({ data: { configured: [] } });
     mocks.useRecommendationsStatus.mockReturnValue({ data: undefined });
+    mocks.useAIProviderModels.mockReturnValue({ data: { models: [] } });
     mocks.checkConnectionMutateAsync.mockResolvedValue({
       success: true,
       message: "Embedding connection successful.",
@@ -185,7 +189,7 @@ describe("AdminRecommendations", () => {
   it("checks the current unsaved embedding draft", async () => {
     await render();
 
-    const modelInput = container.querySelector<HTMLInputElement>("input[list]");
+    const modelInput = within(container).getByLabelText<HTMLInputElement>("Model");
     expect(modelInput?.value).toBe("custom-model");
 
     await changeInput(modelInput, "draft-model");
@@ -204,6 +208,50 @@ describe("AdminRecommendations", () => {
       },
     });
   });
+
+  it.each([false, true])(
+    "saves one completed model edit when the picker is cancelled: %s",
+    async (cancel) => {
+      if (!HTMLElement.prototype.hasPointerCapture)
+        HTMLElement.prototype.hasPointerCapture = () => false;
+      if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {};
+      mocks.useAIProviderModels.mockReturnValue({
+        data: { models: [{ id: "listed-model", kind: "embeddings" }] },
+      });
+      let finishSave!: (result: {
+        values: Record<string, string>;
+        restart_required: boolean;
+      }) => void;
+      mocks.updateMutateAsync.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve;
+          }),
+      );
+      const user = userEvent.setup();
+      await render();
+      const field = within(container).getByLabelText<HTMLInputElement>("Model");
+      await user.clear(field);
+      await user.type(field, "typed-model");
+      await user.click(within(container).getByRole("combobox", { name: "Choose model" }));
+      if (cancel) await user.keyboard("{Escape}");
+      else await user.click(within(document.body).getByRole("option", { name: "listed-model" }));
+      expect(mocks.updateMutateAsync).not.toHaveBeenCalled();
+      expect(field).toHaveFocus();
+      const chosen = cancel ? "typed-model" : "listed-model";
+      expect(field).toHaveValue(chosen);
+      await user.tab();
+      await user.tab();
+      expect(mocks.updateMutateAsync).toHaveBeenCalledTimes(1);
+      await act(async () =>
+        finishSave({
+          values: { "recommendations.embedding_model": chosen },
+          restart_required: false,
+        }),
+      );
+      expect(field).toHaveValue(chosen);
+    },
+  );
 
   it("shows each job's last run, the newest cached row and a lock conflict", async () => {
     const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();

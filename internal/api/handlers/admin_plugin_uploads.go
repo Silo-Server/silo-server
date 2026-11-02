@@ -58,14 +58,11 @@ func (h *PluginHandler) InstallAdminPluginUpload(ctx context.Context, r *http.Re
 	}
 	tempPath := tempFile.Name()
 	defer func() { _ = os.Remove(tempPath) }()
+	defer func() { _ = tempFile.Close() }()
 	if _, err := io.Copy(tempFile, file); err != nil {
-		_ = tempFile.Close()
 		return PluginInstallationView{}, fmt.Errorf("write temp plugin upload file: %w", err)
 	}
-	if err := tempFile.Close(); err != nil {
-		return PluginInstallationView{}, fmt.Errorf("close temp plugin upload file: %w", err)
-	}
-	result, err := h.installUploadedPlugin(ctx, tempPath)
+	result, err := h.installUploadedPlugin(ctx, tempFile, tempPath)
 	if err != nil {
 		return PluginInstallationView{}, err
 	}
@@ -112,7 +109,7 @@ func (h *PluginHandler) CompleteAdminPluginUpload(ctx context.Context, uploadID 
 		return PluginInstallationView{}, err
 	}
 	defer upload.Cleanup()
-	result, err := h.installUploadedPlugin(ctx, upload.Path)
+	result, err := h.installUploadedPlugin(ctx, upload.File, upload.Path)
 	if err != nil {
 		return PluginInstallationView{}, err
 	}

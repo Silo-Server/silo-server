@@ -190,7 +190,7 @@ it rejects silently counts as "no NFO".
   `<writer>` (both writers, one credit per name), split on Kodi's ` / `
   separator. A show's `<studio>` also fills its networks; Kodi has no network
   element. `<tag>` is not split.
-- Shows: `<status>` through `NormalizeShowStatus`.
+- Shows: `<status>` through `showstatus.Normalize`.
 - Trailers: `<trailer>` as a YouTube or Vimeo video, from the YouTube add-on
   link Kodi's scrapers write (`plugin://plugin.video.youtube/...`) or a web
   link. A link to any other site is dropped: videos are stored as a site and a

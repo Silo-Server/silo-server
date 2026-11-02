@@ -13,6 +13,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type realtimeClientMessage struct {
@@ -105,7 +106,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
 
 	for {
-		_, data, err := conn.ReadMessage()
+		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			break
 		}
