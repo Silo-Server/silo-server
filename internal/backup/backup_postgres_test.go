@@ -178,6 +178,13 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := seedRoundTrip(t, pool, settings, store)
+	// The source's recorded stores, which a separate restore must not keep.
+	identities := []string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey}
+	for _, key := range identities {
+		if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'local|/elsewhere')`, key); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	serverID := "round-trip-" + randomHex(t, 4)
 	svc := New(Options{
@@ -218,8 +225,16 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, src.Manifest.Tables) {
-		t.Fatalf("restored inventory %d %+v, manifest %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, src.Manifest.Tables)
+	// Everything the manifest counts, less the storage identities the
+	// restore cleared.
+	want := slices.Clone(src.Manifest.Tables)
+	for i := range want {
+		if want[i].Name == "server_settings" {
+			want[i].Rows -= int64(len(identities))
+		}
+	}
+	if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {
+		t.Fatalf("restored inventory %d %+v, want %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, want)
 	}
 	if len(src.Manifest.AppliedMigrations) == 0 || !slices.Equal(in.Applied, src.Manifest.AppliedMigrations) {
 		t.Fatalf("restored applied migrations %v, manifest %v", in.Applied, src.Manifest.AppliedMigrations)

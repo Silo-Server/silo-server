@@ -318,9 +318,13 @@ restores into a pre-created empty database and a separate directory laid out
 as a local store root, changing nothing in the live deployment. It needs no
 `CREATEDB` or rename privilege. After `pg_restore --exit-on-error
 --no-owner --no-privileges`, it verifies the schema version, the applied
-migrations, and the table inventory against the manifest. The target stays
-open for the operator to point `DATABASE_URL` and the artwork storage
-settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
+migrations, and the table inventory against the manifest. It then deletes
+the recorded storage identities (`artwork.storage_identity`,
+`storage.operational_identity`) from the target: they name the backed-up
+server's stores, so a server started on the copy would refuse the stores it
+is configured with. That server records its own on its first start or write.
+The target stays open for the operator to point `DATABASE_URL` and the
+artwork storage settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
 artwork, avatars, and branding will be missing. Separate mode clears no
 Redis: the live deployment may still be running on it, and which Redis a
 server on the restored database will use is not known here. The command
