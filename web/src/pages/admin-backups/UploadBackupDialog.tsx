@@ -188,7 +188,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
   };
 
   /** Stops sending and deletes what arrived; the sweep removes it otherwise. */
-  const cancel = () => {
+  const discard = () => {
     abort.current?.abort();
     const upload =
       phase.step === "uploading" || phase.step === "checking" || phase.step === "failed"
@@ -206,6 +206,10 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       // The server finishes the check; the list shows it until it does.
       refreshUploads();
     }
+  };
+
+  const cancel = () => {
+    discard();
     close();
   };
 
@@ -321,7 +325,14 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
           {copy.resumable && upload ? (
             <Button onClick={() => void run(upload, from)}>Try again</Button>
           ) : (
-            <Button onClick={() => setPhase({ step: "choose" })}>Choose another file</Button>
+            <Button
+              onClick={() => {
+                discard();
+                setPhase({ step: "choose" });
+              }}
+            >
+              Choose another file
+            </Button>
           )}
         </>
       );
