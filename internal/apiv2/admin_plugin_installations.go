@@ -208,6 +208,15 @@ type AdminPluginRuntime struct {
 	NextRestartAt *Instant `json:"next_restart_at,omitempty" doc:"Scheduled automatic restart while in backoff"`
 }
 
+// AdminPluginUpdateFailure is the last automatic update Silo refused to
+// install. It is cleared when the installed version changes or a later
+// update check no longer fails.
+type AdminPluginUpdateFailure struct {
+	Version  string  `json:"version" doc:"The version Silo tried and failed to install"`
+	Reason   string  `json:"reason" doc:"Why the update was refused, written for the administrator; it names no URL or checksum"`
+	FailedAt Instant `json:"failed_at"`
+}
+
 // AdminPluginInstallation is one manageable installation with its redacted
 // configuration and bindings.
 type AdminPluginInstallation struct {
@@ -225,6 +234,7 @@ type AdminPluginInstallation struct {
 	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
 	UpdatesPaused      bool                      `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
+	UpdateFailure      *AdminPluginUpdateFailure `json:"update_failure,omitempty" doc:"The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
 	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
 	UserConfigSchema   []AdminPluginConfigSchema `json:"user_config_schema"`
@@ -393,6 +403,9 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 	}
 	if v.AvailableVersion != nil {
 		out.AvailableVersion = *v.AvailableVersion
+	}
+	if f := v.UpdateFailure; f != nil {
+		out.UpdateFailure = &AdminPluginUpdateFailure{Version: f.Version, Reason: f.Reason, FailedAt: NewInstant(f.FailedAt)}
 	}
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})
