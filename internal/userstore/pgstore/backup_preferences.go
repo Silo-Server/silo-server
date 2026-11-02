@@ -24,11 +24,14 @@ import (
 // Importing it overwrites each value that differs; values it does not carry
 // stay as they are.
 //
-// Never carried: device-scoped values (they belong to device registrations),
-// account-scoped values, and home section overrides (user_settings), which
-// name this server's sections. A value that names a library is remapped
-// through the library map; navigation documents that name libraries,
-// sections, and collections are kept only on the same server.
+// Never carried: device-scoped values (they belong to device registrations)
+// and account-scoped values. Home section overrides (user_settings) are
+// carried and mapped to this server's pages, sections, and collections; an
+// override with no counterpart here is left out (mapSectionPages), and an
+// import replaces the overrides of each page it carries. A value that names
+// a library is remapped through the library map; navigation documents that
+// name libraries, sections, and collections are kept only on the same
+// server.
 type PreferencesBackupData struct{}
 
 func (PreferencesBackupData) ID() string { return userdata.Preferences }

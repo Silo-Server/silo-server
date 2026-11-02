@@ -46516,7 +46516,7 @@
             "type": "array"
           },
           "hidden": {
-            "description": "Titles of items the profile may not see: outside its libraries, or above its content-rating or advisory limits",
+            "description": "Always empty: items the profile may not see are listed in unmatched, so an import cannot reveal what a hidden library holds",
             "items": {
               "type": "string"
             },
@@ -46527,7 +46527,7 @@
             "type": "boolean"
           },
           "unmatched": {
-            "description": "Titles of items this server's catalog does not hold",
+            "description": "Titles of items left out: not in this server's catalog, or not available to this profile. The two are not told apart",
             "items": {
               "type": "string"
             },
