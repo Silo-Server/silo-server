@@ -132,26 +132,29 @@ func TestArtworkReconcileBulkResetVerifiesUploadsDB(t *testing.T) {
 }
 
 // Catalog reads trust the publication manifest, so the verify sweep checks every
-// size a revision published, not only the stored key. A provider poster missing
-// one size is reset to its source like a missing stored key; an uploaded one
-// keeps its row, since only its source could make the size again.
+// size a revision published, not only the stored key. A poster missing one size
+// is reset or cleared like a missing stored key when something can make it
+// again: a provider poster is reset to its source and a sidecar one is cleared
+// for a refresh. An uploaded poster keeps its row, since nothing else can.
 func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
 	pool := storedArtworkReleaseTestPool(t)
 	ctx := t.Context()
 	const (
 		provider = "tmdb/movies/9/poster/original.r1.webp"
 		uploaded = "local/movies/up/1a2b3c4d/poster/original.r1.webp"
+		sidecar  = "local/movies/side/5e6f7a8b/poster/original.r1.webp"
 	)
-	providerSize, uploadedSize := variantKey(provider, "w500"), variantKey(uploaded, "w500")
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, locked_fields, poster_path, poster_source_path) VALUES
 		('provider', 'movie', '{}', $1, 'tmdb://poster/p.jpg'),
-		('uploaded', 'movie', '{10}', $2, 'upload://sha256:aa')`, provider, uploaded); err != nil {
+		('uploaded', 'movie', '{10}', $2, 'upload://sha256:aa'),
+		('sidecar', 'movie', '{}', $3, 'file:///m/poster.jpg?v=1-1')`, provider, uploaded, sidecar); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, published_keys, not_before)
-		VALUES ($1, 'poster', $2, $2, NOW()), ($3, 'poster', $4, $4, NOW())`,
-		provider, []string{provider, providerSize}, uploaded, []string{uploaded, uploadedSize}); err != nil {
-		t.Fatal(err)
+	for _, original := range []string{provider, uploaded, sidecar} {
+		if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, published_keys, not_before)
+			VALUES ($1, 'poster', $2, $2, NOW())`, original, []string{original, variantKey(original, "w500")}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var surface artworkSweepSurface
 	for _, s := range artworkSweepSurfaces() {
@@ -159,16 +162,16 @@ func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
 			surface = s
 		}
 	}
-	// Both originals survive; both w500 sizes were deleted outside Silo.
-	r := &ArtworkCacheReconciler{pool: pool, s3: presentObjects{provider: true, uploaded: true}}
+	// Every original survives; every w500 size was deleted outside Silo.
+	r := &ArtworkCacheReconciler{pool: pool, s3: presentObjects{provider: true, uploaded: true, sidecar: true}}
 	var stats ArtworkReconcileStats
 	if err := r.sweepSurface(ctx, surface, &stats, func(int) {}); err != nil {
 		t.Fatal(err)
 	}
-	if stats.Checked != 2 || stats.Requeued != 1 || stats.Unrecovered != 1 || stats.Verified != 0 || stats.Cleared != 0 {
-		t.Fatalf("stats = %#v, want the provider poster reset, the uploaded one reported, and nothing cleared", stats)
+	if stats.Checked != 3 || stats.Requeued != 1 || stats.Cleared != 1 || stats.Unrecovered != 1 || stats.Verified != 0 {
+		t.Fatalf("stats = %#v, want the provider poster reset, the sidecar one cleared, and the upload reported", stats)
 	}
-	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded} {
+	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded, "sidecar": ""} {
 		var got string
 		if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, id).Scan(&got); err != nil {
 			t.Fatal(err)

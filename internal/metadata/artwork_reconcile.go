@@ -117,8 +117,8 @@ type ArtworkReconcileStats struct {
 	// re-checked by the sweep — so callers deciding whether the reconcile
 	// fully covered the catalog must look here, not at Errors.
 	SweepErrors int `json:"sweep_errors"`
-	// Unrecovered counts rows kept with a published size missing and no
-	// re-downloadable source; only a new upload can make that size again.
+	// Unrecovered counts uploaded images kept with a published size missing;
+	// only a new upload can make that size again.
 	Unrecovered int `json:"unrecovered"`
 }
 
@@ -1013,6 +1013,9 @@ type sweptRow struct {
 	keys         []string
 	path         string
 	remoteSource bool
+	// uploadedSource marks an image an admin uploaded, which nothing can
+	// fetch or regenerate again.
+	uploadedSource bool
 }
 
 func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, onProgress func(done int)) error {
@@ -1073,7 +1076,7 @@ func (r *ArtworkCacheReconciler) fetchSweepBatch(ctx context.Context, s artworkS
 		for i := range row.keys {
 			dest = append(dest, &row.keys[i])
 		}
-		dest = append(dest, &row.path, &row.remoteSource)
+		dest = append(dest, &row.path, &row.remoteSource, &row.uploadedSource)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("artwork reconcile: scanning %s batch: %w", s.name, err)
 		}
@@ -1089,8 +1092,9 @@ func buildSweepBatchQuery(s artworkSweepSurface, cursor []string) (string, []any
 	var b strings.Builder
 	args := make([]any, 0, len(cursor)+1)
 	keyColumns := s.keyColumnNames()
-	fmt.Fprintf(&b, `SELECT %s, %s, (%s) FROM %s WHERE %s`,
-		strings.Join(s.keySelectExpressions(), ", "), s.pathCol, s.remoteSourcePredicate(), s.table, s.cachedPredicate())
+	fmt.Fprintf(&b, `SELECT %s, %s, (%s), (%s) FROM %s WHERE %s`,
+		strings.Join(s.keySelectExpressions(), ", "), s.pathCol, s.remoteSourcePredicate(), s.uploadedSourcePredicate(),
+		s.table, s.cachedPredicate())
 	if len(cursor) > 0 {
 		cursorArgs, err := s.parseKeys(cursor)
 		if err != nil {
@@ -1125,9 +1129,10 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			stats.SweepErrors++
 			slog.Warn("artwork reconcile: object check failed; leaving row untouched",
 				"surface", s.name, "key", batch[i].path, "error", v.err)
-		case v.missing, v.variantMissing && batch[i].remoteSource:
-			// A provider source can make every size again, so a missing size
-			// resets the row as a missing stored key does.
+		case v.missing, v.variantMissing && !batch[i].uploadedSource:
+			// A provider source, sidecar, or generator can make every size
+			// again, so a missing size resets or clears the row as a missing
+			// stored key does.
 			row := batch[i]
 			args := make([]any, 0, len(row.keys)+1)
 			parsedKeys, err := s.parseKeys(row.keys)
@@ -1148,9 +1153,9 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 				s.table, set, pkPredicate, s.pathCol, len(args)), args...)
 			remoteByQueued = append(remoteByQueued, row.remoteSource)
 		case v.variantMissing:
-			// Clearing the row would lose the stored original; only the
-			// source can make the missing size again.
-			slog.WarnContext(ctx, "artwork reconcile: cached size missing with no re-downloadable source; left in place",
+			// Clearing an upload would lose its stored original, and nothing
+			// else can make the missing size again.
+			slog.WarnContext(ctx, "artwork reconcile: uploaded image missing a cached size; left in place",
 				"surface", s.name, "key", batch[i].path, "row", strings.Join(batch[i].keys, "/"))
 			stats.Unrecovered++
 		default:
