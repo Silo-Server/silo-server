@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -44,8 +46,8 @@ func canManageHousehold(
 	store userstore.UserStore,
 	tokens *access.ProfileTokenService,
 ) (bool, error) {
-	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileTokenIn(r, store, tokens, profileID)
+	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, tokens, profile)
 	})
 }
 
@@ -66,33 +68,77 @@ func canManageHouseholdAs(
 	ctx context.Context,
 	store userstore.UserStore,
 	activeProfileID string,
-	verify func(profileID string) error,
+	verify func(profile *userstore.Profile) error,
 ) (bool, error) {
+	allowed, _, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	return allowed, err
+}
+
+// householdManagerAs also returns the authorized acting row, so profile writes
+// can check its revision under the transaction lock without repeating policy.
+// A profile-less admin has no PIN proof to bind and returns a nil row.
+func householdManagerAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	activeProfileID string,
+	verify func(*userstore.Profile) error,
+) (bool, *userstore.Profile, error) {
 	// A remote-playback handoff never manages the household, even when it is
 	// bound to the primary profile.
 	if apimw.GetClaims(ctx).IsRemotePlayback() {
-		return false, nil
+		return false, nil, nil
 	}
 	if activeProfileID == "" {
-		return profileLessAdminMayManage(ctx, store)
+		allowed, err := profileLessAdminMayManage(ctx, store)
+		return allowed, nil, err
 	}
 	active, err := store.GetProfile(ctx, activeProfileID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if active == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	if !active.IsPrimary {
-		return false, nil
+		return false, nil, nil
 	}
 	if active.PINHash == "" {
-		return true, nil
+		return true, active, nil
 	}
-	if err := verify(active.ID); err != nil {
-		return false, err
+	if verify == nil {
+		return false, nil, access.ErrProfileUnverified
 	}
-	return true, nil
+	if err := verify(active); err != nil {
+		return false, nil, err
+	}
+	return true, active, nil
+}
+
+// mayManageHouseholdOf is canManageHouseholdAs for a caller that holds only
+// the account ID: it opens that account's store first. It fails closed when
+// the stores are not wired or the account has no store, and a nil verify
+// treats a PIN-locked primary profile as unverified.
+func mayManageHouseholdOf(
+	ctx context.Context,
+	stores userstore.UserStoreProvider,
+	userID int,
+	activeProfileID string,
+	verify func(profile *userstore.Profile) error,
+) (bool, error) {
+	if stores == nil {
+		return false, nil
+	}
+	store, err := stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, nil
+	}
+	if verify == nil {
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	}
+	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
 }
 
 // profileLessAdminMayManage is the household rule for a request that names no
@@ -117,60 +163,53 @@ func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (
 	return !access.HouseholdRequiresProfile(profiles), nil
 }
 
-// verifyProfileToken checks the X-Profile-Token a PIN-locked profile must
-// present, reading the profile from the caller's own store. Missing
-// dependencies fail closed: a handler wired without a token service cannot
-// verify a PIN, and "cannot verify" is not "verified".
-func verifyProfileToken(
-	r *http.Request,
-	stores userstore.UserStoreProvider,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if stores == nil || tokens == nil {
+// verifyProfileTokenFor checks the X-Profile-Token a PIN-locked profile must
+// present against the profile row the household check just loaded, so the
+// token must match that row's current PIN revision (see
+// access.CheckProfileToken). A handler wired without a token service fails
+// closed: "cannot verify" is not "verified".
+func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, profile *userstore.Profile) error {
+	if tokens == nil {
 		return access.ErrProfileUnverified
 	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.SessionID == "" || claims.UserID == 0 {
 		return access.ErrProfileUnverified
 	}
-	store, err := stores.ForUser(r.Context(), userID)
-	if err != nil {
-		return fmt.Errorf("opening user store: %w", err)
-	}
-	return verifyProfileTokenIn(r, store, tokens, profileID)
+	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), claims.UserID, claims.SessionID, profile)
 }
 
-// verifyProfileTokenIn is verifyProfileToken against an already opened store
-// for the calling account. The token must match the profile's current PIN
-// revision (see access.CheckProfileToken).
-func verifyProfileTokenIn(
-	r *http.Request,
-	store userstore.UserStore,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if store == nil || tokens == nil {
-		return access.ErrProfileUnverified
-	}
+// maxHouseholdRequestBody bounds the JSON bodies readHouseholdRequestBody buffers.
+const maxHouseholdRequestBody = 1 << 20
 
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil || claims.SessionID == "" {
-		return access.ErrProfileUnverified
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-
-	profile, err := store.GetProfile(r.Context(), profileID)
+// readHouseholdRequestBody reads a v1 request's whole body before the handler
+// checks household authority. The check then sees the acting profile as it
+// stands once the body has arrived, so a client that holds its body open
+// cannot keep PIN proof that a PIN change made in the meantime revoked. v2
+// needs no equivalent: Huma reads the body before the handler runs. It writes
+// a 400 and returns false when the body cannot be read.
+func readHouseholdRequestBody(w http.ResponseWriter, r *http.Request) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHouseholdRequestBody))
 	if err != nil {
-		return fmt.Errorf("loading profile: %w", err)
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return false
 	}
-	if profile == nil {
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return true
+}
+
+// checkHouseholdPINRevision runs after the existing account transaction lock.
+// The row lock also serializes PIN writers that do not take the account lock.
+func checkHouseholdPINRevision(ctx context.Context, tx userstore.PreferenceSettingsWriter, active *userstore.Profile) error {
+	if active == nil {
+		return nil
+	}
+	matches, err := tx.CheckProfilePINRevision(ctx, active.ID, active.PINRevision)
+	if err != nil {
+		return err
+	}
+	if !matches {
 		return access.ErrProfileUnverified
 	}
-
-	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), userID, claims.SessionID, profile)
+	return nil
 }

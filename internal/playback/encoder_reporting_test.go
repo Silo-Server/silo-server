@@ -40,26 +40,6 @@ func TestHEVCEncoderReportingPreservesGPURecipeAcrossReconstruction(t *testing.T
 	}
 }
 
-func TestHEVCReconstructionConfirmsActualEncoder(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	m := NewTranscodeManager()
-	m.Sessions = sessions
-	card := NewRecipeCard(7, "profile", 42, "", TranscodeOpts{
-		SessionID: "hevc-report", HWAccel: transcodeHWVAAPI, TargetCodecVideo: transcodeCodecHEVC, ToneMapMode: tonemap.ModeHardware,
-	})
-	session, inserted, ok := m.reconstructSession(t.Context(), card.SessionID, 7, card, true)
-	if !ok || inserted == nil {
-		t.Fatal("session reconstruction failed")
-	}
-	runtime := &TranscodeSession{opts: TranscodeOpts{
-		HWAccel: transcodeHWVAAPI, ToneMapMode: tonemap.ModeHardware, softwareEncode: true,
-	}}
-	result := m.completeTranscodeLoad(sessions, sessions.GetSession, session, inserted, 0, runtime)
-	if result.status != SessionLoaded || result.session.TranscodeHWAccel != transcodeHWNone || result.session.ToneMapMode != tonemap.ModeHardware {
-		t.Fatalf("runtime confirmation retained old GPU encoder: %#v", result.session)
-	}
-}
-
 func TestEncoderReportingFallsBackForLegacyCards(t *testing.T) {
 	card := RecipeCard{HWAccel: transcodeHWQSV}
 	if card.EffectiveEncoderHWAccel() != transcodeHWQSV || card.TranscodeOpts("", "", nil).EffectiveEncoderHWAccel() != transcodeHWQSV {

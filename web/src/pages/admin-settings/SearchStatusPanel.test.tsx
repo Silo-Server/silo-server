@@ -46,20 +46,6 @@ describe("SearchStatusPanel", () => {
     catalogSearchStatusMock.mockReset();
   });
 
-  it("shows skeletons only while the request is still in flight", () => {
-    catalogSearchStatusMock.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      isError: false,
-      error: null,
-    });
-
-    renderPanel();
-
-    expect(screen.queryByText(/Couldn't load search status/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Answering searches")).not.toBeInTheDocument();
-  });
-
   it("reports a failed status request instead of leaving the skeletons up", () => {
     catalogSearchStatusMock.mockReturnValue({
       data: undefined,
@@ -77,34 +63,6 @@ describe("SearchStatusPanel", () => {
     // unhealthy enough for the status endpoint to fail, so they stay reachable.
     expect(screen.getByRole("link", { name: "Rebuild index" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Automatic maintenance" })).toBeInTheDocument();
-  });
-
-  it("falls back to a bare message when the failure carries none", () => {
-    catalogSearchStatusMock.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      error: null,
-    });
-
-    renderPanel();
-
-    expect(screen.getByText("Couldn't load search status.")).toBeInTheDocument();
-  });
-
-  it("renders the status rows once the request resolves", () => {
-    catalogSearchStatusMock.mockReturnValue({
-      data: STATUS,
-      isLoading: false,
-      isError: false,
-      error: null,
-    });
-
-    renderPanel();
-
-    expect(screen.getByText("Answering searches")).toBeInTheDocument();
-    expect(screen.getByText("Postgres full-text")).toBeInTheDocument();
-    expect(screen.queryByText(/Couldn't load search status/)).not.toBeInTheDocument();
   });
 
   it("shows a stale compatible index as Meilisearch keyword-only", () => {

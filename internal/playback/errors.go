@@ -17,6 +17,9 @@ var (
 	ErrTranscodeFailed    = errors.New("transcode process failed")
 	ErrSegmentNotFound    = errors.New("segment not found")
 	ErrManifestNotReady   = errors.New("manifest not ready")
+	// ErrManifestQueryTooLong rejects a playlist request whose query is longer
+	// than maxManifestQueryBytes.
+	ErrManifestQueryTooLong = errors.New("playlist request query too long")
 	// ErrToneMapSourceValidationUnavailable reports that the executor could not
 	// freshly probe the source metadata needed to validate a tone-map recipe.
 	// The failure is transient: callers may retry after the source or probe

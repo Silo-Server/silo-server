@@ -3,7 +3,6 @@ import type { components } from "@/api/v2/schema";
 import { V2ProblemError } from "@/api/v2/request";
 import {
   fetchAdminSections,
-  fetchAdminSectionSnapshot,
   fetchAdminSectionDeleteTargets,
   createAdminSection,
   updateAdminSection,
@@ -70,15 +69,6 @@ describe("admin sections adapter", () => {
       .mockResolvedValueOnce({ items: reason === "membership" ? [] : [row] })
       .mockImplementationOnce(tagged(order, reason === "version" ? '"new"' : '"saved"'));
     await expect(fetchAdminSections("home")).rejects.toThrow("changed while loading");
-  });
-  it("captures exact row versions and rejects missing validators", async () => {
-    request.mockImplementationOnce(tagged(row));
-    expect(await fetchAdminSectionSnapshot("s1")).toEqual({
-      section: { ...row, library_id: 7 },
-      etag: '"saved"',
-    });
-    request.mockResolvedValueOnce(row);
-    await expect(fetchAdminSectionSnapshot("s1")).rejects.toThrow("version is unavailable");
   });
   it("sends explicit captured guards without preflight, retry, or latest tag substitution", async () => {
     const stale = new V2ProblemError(

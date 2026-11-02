@@ -19,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -524,7 +525,7 @@ func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
 }
 
 func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.MediaFile) error {
-	f, err := os.Open(file.FilePath)
+	f, err := fspath.Open(file.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return catalog.ErrItemNotFound
@@ -539,7 +540,7 @@ func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.Media
 	}
 
 	w.Header().Set("Content-Type", ebookMimeType(file.FilePath, file.Container))
-	w.Header().Set("Content-Disposition", inlineContentDisposition(filepath.Base(file.FilePath)))
+	w.Header().Set("Content-Disposition", inlineContentDisposition(fspath.Display(filepath.Base(file.FilePath))))
 	// Ebook files are served inline on the API origin (and reachable via the
 	// ?token= query fallback), so browsers must never content-sniff them.
 	w.Header().Set("X-Content-Type-Options", "nosniff")

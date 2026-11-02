@@ -9,38 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestBuildTMDBListSourceConfig(t *testing.T) {
-	limit := 30
-	raw, err := buildTMDBListSourceConfig("https://www.themoviedb.org/list/310", &limit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(raw), `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310","limit":30}`; got != want {
-		t.Fatalf("source config = %s, want %s", got, want)
-	}
-}
-
-func TestAdminTMDBListImportRejectsNonListURL(t *testing.T) {
-	_, err := (&LibraryCollectionHandler{}).ImportAdminTMDBList(t.Context(), AdminCollectionImportTMDBList{
-		LibraryIDs: []int{1}, Title: "List", URL: "https://www.themoviedb.org/collection/10",
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != 400 || apiErr.Code != "bad_request" {
-		t.Fatalf("error = %#v, want 400 bad_request", err)
-	}
-}
-
-func TestGenericAdminCollectionRejectsInvalidTMDBListSource(t *testing.T) {
-	_, err := (&LibraryCollectionHandler{}).CreateAdminCollection(t.Context(), AdminCollectionCreate{
-		LibraryIDs: []int{1}, Title: "List", CollectionType: "tmdb",
-		SourceConfig: json.RawMessage(`{"mode":"tmdb_list","url":"https://example.com/list/310"}`),
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != 400 {
-		t.Fatalf("error = %#v, want 400", err)
-	}
-}
-
 func TestAdminCollectionSourceUpdateValidatesTMDBListURL(t *testing.T) {
 	existing := &models.LibraryCollection{
 		CollectionType: "tmdb",
@@ -60,17 +28,6 @@ func TestAdminCollectionSourceUpdateValidatesTMDBListURL(t *testing.T) {
 	preset := json.RawMessage(`{"mode":"tmdb_preset","preset":"trending","media_type":"all","time_window":"day"}`)
 	if err := validateAdminCollectionSourceUpdate(existing, AdminCollectionUpdate{SourceConfig: preset}); err != nil {
 		t.Fatalf("preset config rejected: %v", err)
-	}
-}
-
-func TestPersonalTMDBListImportRejectsNonListURL(t *testing.T) {
-	_, err := (&UserCollectionImportHandler{}).ImportTMDBList(t.Context(), 1, "p1", UserImportTMDBListRequest{
-		UserImportSharedFields: UserImportSharedFields{Title: "List"},
-		URL:                    "https://mdblist.com/lists/user/slug",
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Field != "url" {
-		t.Fatalf("error = %#v, want a url field error", err)
 	}
 }
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -114,7 +114,7 @@ func (r *UserRepository) EnableAccountLocalLogin(ctx context.Context, login, tem
 	}
 	var hash string
 	if temporaryPassword != "" {
-		raw, err := bcrypt.GenerateFromPassword([]byte(temporaryPassword), passwordHashCost)
+		raw, err := passwordhash.Generate(ctx, []byte(temporaryPassword), passwordHashCost)
 		if err != nil {
 			return nil, fmt.Errorf("hashing password: %w", err)
 		}

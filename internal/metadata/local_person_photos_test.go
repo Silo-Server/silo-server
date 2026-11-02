@@ -161,39 +161,17 @@ func TestLocalPersonPhotoJobs(t *testing.T) {
 	}
 }
 
-// Without the image cache queue, local photos are not used, like local
-// artwork; the zero repository below would panic if it were read.
-func TestApplyLocalPersonPhotosNeedsImageCache(t *testing.T) {
+// With metadata.cache_images off, local photos are not used at all, sidecar
+// or NFO-named: clients load provider artwork straight from the providers.
+// The zero repository would panic if it were read.
+func TestApplyLocalPersonPhotosSkippedWithCachingOff(t *testing.T) {
 	t.Parallel()
 
-	service := &MetadataService{personRepo: &catalog.PersonRepository{}}
+	service := &MetadataService{personRepo: &catalog.PersonRepository{}, imageCacheJobs: &capturingImageJobEnqueuer{}}
 	service.applyLocalPersonPhotos(context.Background(), "movie-1", []models.ItemPerson{
-		{Person: models.Person{ID: 1}, LocalPhotoSource: "file:///media/a.jpg"},
-	})
-}
-
-// With metadata.cache_images off, a photo URL an NFO names is dropped, since
-// only the image cache may fetch it, while a sidecar photo stays; the
-// caller's slice is left as it was.
-func TestUsableLocalPersonPhotosWithCachingOff(t *testing.T) {
-	t.Parallel()
-
-	service := &MetadataService{imageCacheJobs: &capturingImageJobEnqueuer{}}
-	people := []models.ItemPerson{
 		{Person: models.Person{ID: 1}, LocalPhotoSource: "file:///media/Film/.actors/Lead.jpg"},
 		{Person: models.Person{ID: 2}, LocalPhotoSource: "nfo+https://img.example.org/support.jpg"},
-	}
-	got := usableLocalPersonPhotos(people, service.localSourceUsable)
-	if got[0].LocalPhotoSource == "" || got[1].LocalPhotoSource != "" {
-		t.Fatalf("photos = %q, %q; want the sidecar kept and the NFO URL dropped", got[0].LocalPhotoSource, got[1].LocalPhotoSource)
-	}
-	if people[1].LocalPhotoSource == "" {
-		t.Fatal("changed the caller's slice")
-	}
-	service.SetAutoCacheImages(true)
-	if got := usableLocalPersonPhotos(people, service.localSourceUsable); got[1].LocalPhotoSource == "" {
-		t.Fatal("dropped the NFO URL with caching on")
-	}
+	})
 }
 
 // The NFO photo a credit names survives the merge with a remote provider's

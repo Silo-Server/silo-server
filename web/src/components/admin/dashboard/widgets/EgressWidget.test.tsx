@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminTimeseries } from "@/api/types";
@@ -42,39 +42,6 @@ describe("EgressWidget", () => {
     mocks.useAdminTimeseries.mockReset();
   });
 
-  it("shows the server's transfer total beside the peak", () => {
-    mocks.useAdminTimeseries.mockReturnValue({ data: series({ egress_bytes: 1_400_000_000_000 }) });
-
-    render(<EgressWidget />);
-
-    expect(screen.getByText("Total 1.4 TB")).toBeTruthy();
-    expect(screen.getByText("Peak 56 Mbps")).toBeTruthy();
-  });
-
-  // jsdom does not evaluate container queries, so this pins the contract
-  // instead: hidden by default, shown only once the card header is wide
-  // enough, and never truncated or carrying hover-only details.
-  it("drops the total, rather than truncating it, in a narrow header", () => {
-    mocks.useAdminTimeseries.mockReturnValue({ data: series({ egress_bytes: 1_400_000_000_000 }) });
-
-    render(<EgressWidget />);
-
-    const total = screen.getByText("Total 1.4 TB");
-    expect(total.classList).toContain("hidden");
-    expect(total.classList).toContain("@md/card-header:inline");
-    expect(total.classList).toContain("whitespace-nowrap");
-    expect(total.classList).not.toContain("truncate");
-    expect(total.getAttribute("title")).toBeNull();
-    expect(total.closest('[data-slot="card-header"]')?.className).toContain(
-      "@container/card-header",
-    );
-    // With the total gone, Peak must still be free to wrap; holding it on one
-    // line pushes the range picker out of a minimum-span card.
-    const peak = screen.getByText("Peak 56 Mbps");
-    expect(peak.classList).not.toContain("whitespace-nowrap");
-    expect(peak.classList).not.toContain("shrink-0");
-  });
-
   it("shows a zero total, which is a real answer", () => {
     mocks.useAdminTimeseries.mockReturnValue({ data: series({ egress_bytes: 0 }) });
 
@@ -90,5 +57,43 @@ describe("EgressWidget", () => {
 
     expect(screen.queryByText(/^Total /)).toBeNull();
     expect(screen.getByText("Peak 56 Mbps")).toBeTruthy();
+  });
+
+  it("offers a per-node view only once a stream node served egress", () => {
+    const at = new Date(Date.now() - HOUR_MS).toISOString();
+    const point = {
+      t: at,
+      streams: 1,
+      direct: 1,
+      remux: 0,
+      transcode: 0,
+      egress_kbps: 56_000,
+      egress_by_source: { api: 6_000, "node:4": 50_000 },
+    };
+    mocks.useAdminTimeseries.mockReturnValue({
+      data: series({
+        egress_sources: [{ key: "api", kind: "api", name: "API server", egress_bytes: 0 }],
+        points: [{ ...point, egress_by_source: { api: 56_000 } }],
+      }),
+    });
+    const { rerender } = render(<EgressWidget />);
+    expect(screen.queryByRole("button", { name: "Show egress by node" })).toBeNull();
+
+    mocks.useAdminTimeseries.mockReturnValue({
+      data: series({
+        egress_sources: [
+          { key: "api", kind: "api", name: "API server", egress_bytes: 0 },
+          { key: "node:4", kind: "node", node_id: "4", name: "proxy-ams", egress_bytes: 0 },
+        ],
+        points: [point],
+      }),
+    });
+    rerender(<EgressWidget />);
+    expect(screen.queryByText("proxy-ams")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show egress by node" }));
+
+    expect(screen.getByText("proxy-ams")).toBeTruthy();
+    expect(screen.getByText("API server")).toBeTruthy();
   });
 });

@@ -1,22 +1,15 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
-
-func TestConvertToVTTLeavesPlainSRTCuesUnchanged(t *testing.T) {
-	input := "1\n00:00:01,000 --> 00:00:02,500\n<i>First</i> line\nSecond line\n\n2\n00:00:03,000 --> 00:00:04,000\nThird\n"
-	want := "WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\n<i>First</i> line\nSecond line\n\n2\n00:00:03.000 --> 00:00:04.000\nThird\n\n"
-
-	got, err := ConvertToVTT([]byte(input), "srt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != want {
-		t.Fatalf("plain SRT changed in conversion:\ngot  %q\nwant %q", got, want)
-	}
-}
 
 // Every \an alignment must reach WebVTT as cue settings, never as cue text.
 func TestConvertToVTTMovesASSAlignmentOntoTheTimingLine(t *testing.T) {
@@ -47,21 +40,6 @@ func TestConvertToVTTMovesASSAlignmentOntoTheTimingLine(t *testing.T) {
 	}
 }
 
-// A right-to-left cue asking for the top of the frame, with the CRLF line
-// endings and BOM that Windows-authored SRT files often carry.
-func TestConvertToVTTHandlesCRLFBOMRightToLeftCue(t *testing.T) {
-	input := "\ufeff1\r\n00:00:01,000 --> 00:00:03,000\r\n{\\an8}(مرحبا)، هذا سطر\r\nسطر ثان\r\n\r\n"
-	want := "WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000 line:0\n(مرحبا)، هذا سطر\nسطر ثان\n\n\n"
-
-	got, err := ConvertToVTT([]byte(input), "srt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
 func TestConvertToVTTStripsOverrideBlocks(t *testing.T) {
 	for name, tc := range map[string]struct{ text, settings, want string }{
 		"mid-line block":         {`Hello {\i1}there{\i0}`, "", "Hello there\n"},
@@ -88,10 +66,21 @@ func TestConvertToVTTStripsOverrideBlocks(t *testing.T) {
 	}
 }
 
-// Real SRT files break the blank-line rule between cues in several ways. Each
-// cue must still come out as its own WebVTT cue.
-func TestConvertToVTTSeparatesCuesWithoutBlankLines(t *testing.T) {
+// TestConvertToVTTCueText converts whole SRT documents. Real SRT files break
+// the blank-line rule between cues in several ways; each cue must still come
+// out as its own WebVTT cue.
+func TestConvertToVTTCueText(t *testing.T) {
 	for name, tc := range map[string]struct{ input, want string }{
+		"plain cues unchanged": {
+			"1\n00:00:01,000 --> 00:00:02,500\n<i>First</i> line\nSecond line\n\n2\n00:00:03,000 --> 00:00:04,000\nThird\n",
+			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\n<i>First</i> line\nSecond line\n\n2\n00:00:03.000 --> 00:00:04.000\nThird\n\n",
+		},
+		// A right-to-left cue asking for the top of the frame, with the CRLF line
+		// endings and BOM that Windows-authored SRT files often carry.
+		"CRLF BOM right-to-left cue": {
+			"\ufeff1\r\n00:00:01,000 --> 00:00:03,000\r\n{\\an8}(مرحبا)، هذا سطر\r\nسطر ثان\r\n\r\n",
+			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000 line:0\n(مرحبا)، هذا سطر\nسطر ثان\n\n\n",
+		},
 		"numbered cue without a blank line": {
 			"1\n00:00:01,000 --> 00:00:02,000\nOne\n2\n00:00:03,000 --> 00:00:04,000\n{\\an8}Two\n",
 			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\nOne\n\n2\n00:00:03.000 --> 00:00:04.000 line:0\nTwo\n\n",
@@ -148,5 +137,43 @@ func TestSRTAlignmentTagForVTTCueSettingsInvertsTheConversion(t *testing.T) {
 	}
 	if got := SRTAlignmentTagForVTTCueSettings("position:10% size:50%"); got != "" {
 		t.Errorf("settings the conversion never writes must not become a tag, got %q", got)
+	}
+}
+
+// FFmpeg has no "sub" input format, so a stored .sub must reach it under the
+// demuxer its cues name, and a .sub with no text cues must not start FFmpeg.
+func TestConvertToVTTWithFFmpegPicksTheSUBDemuxer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string // "" when FFmpeg must not run
+	}{
+		{"microdvd", []byte("{1}{1}25\n{25}{50}Hello\n"), "microdvd"},
+		{"vobsub", []byte{0x00, 0x00, 0x01, 0xba, 0x44, 0x00, 0x04, 0x00}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			argvFile := filepath.Join(dir, "argv")
+			ffmpeg := filepath.Join(dir, "ffmpeg")
+			writeExecutable(t, ffmpeg, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argvFile+"'\ncat >/dev/null\nprintf 'WEBVTT\\n\\n'\n")
+
+			_, err := ConvertToVTTWithFFmpeg(t.Context(), tc.data, "sub", ffmpeg)
+			raw, readErr := os.ReadFile(argvFile)
+			if tc.want == "" {
+				if err == nil || !errors.Is(readErr, fs.ErrNotExist) {
+					t.Fatalf("ConvertToVTTWithFFmpeg = %v, ffmpeg argv %q; want an error before ffmpeg runs", err, raw)
+				}
+				return
+			}
+			if err != nil || readErr != nil {
+				t.Fatalf("ConvertToVTTWithFFmpeg = %v (read argv: %v)", err, readErr)
+			}
+			if !strings.Contains(string(raw), "-f\n"+tc.want+"\n-i\npipe:0\n") {
+				t.Fatalf("ffmpeg argv %q, want -f %s for the stdin input", raw, tc.want)
+			}
+		})
 	}
 }

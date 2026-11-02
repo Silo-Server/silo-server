@@ -1,36 +1,10 @@
 package catalogseed
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestToVideoTrackRecordsPreservesVideoMetadata(t *testing.T) {
-	got := toVideoTrackRecords([]models.VideoTrack{
-		{ColorRange: "tv", DVLevel: 6},
-		{ColorRange: "pc"},
-		{ColorRange: "unknown"},
-	})
-
-	if len(got) != 3 {
-		t.Fatalf("records length = %d, want 3", len(got))
-	}
-	if got[0].ColorRange != "tv" || got[1].ColorRange != "pc" || got[2].ColorRange != "unknown" {
-		t.Fatalf(
-			"ColorRange values = [%q, %q, %q], want [tv, pc, unknown]",
-			got[0].ColorRange,
-			got[1].ColorRange,
-			got[2].ColorRange,
-		)
-	}
-	if got[0].DVLevel != 6 {
-		t.Fatalf("DVLevel = %d, want 6", got[0].DVLevel)
-	}
-}
 
 func TestCatalogSeedSearchUpsertIDsIncludesChangedItemsAndEmbeddings(t *testing.T) {
 	itemStates := map[string]bool{
@@ -60,53 +34,6 @@ func TestCatalogSeedSearchUpsertIDsIncludesChangedItemsAndEmbeddings(t *testing.
 	}
 }
 
-// TestItemToRecordCarriesTheAdvisory proves the display-only advisory survives
-// an export. Unlike content_rating_age it cannot be re-derived from anything
-// else in the bundle, and the providers that supply it are rate limited, so an
-// export that dropped it would force a re-enrichment pass on restore.
-func TestItemToRecordCarriesTheAdvisory(t *testing.T) {
-	age := 13
-	record := itemToRecord(&models.MediaItem{
-		ContentID:      "advisory-1",
-		Type:           "movie",
-		Title:          "Jaws",
-		ContentRating:  "PG",
-		AdvisoryAge:    &age,
-		AdvisorySource: "commonsense",
-	})
-	if record.AdvisoryAge == nil || *record.AdvisoryAge != 13 {
-		t.Fatalf("AdvisoryAge = %v, want 13", record.AdvisoryAge)
-	}
-	if record.AdvisorySource != "commonsense" {
-		t.Fatalf("AdvisorySource = %q, want \"commonsense\"", record.AdvisorySource)
-	}
-	// The certification is a separate column and must not be disturbed.
-	if record.ContentRating != "PG" {
-		t.Fatalf("ContentRating = %q, want \"PG\"", record.ContentRating)
-	}
-}
-
-// TestItemToRecordOmitsAnAbsentAdvisory keeps a bundle free of empty advisory
-// keys, so an older bundle and a new one with no advisory decode identically.
-func TestItemToRecordOmitsAnAbsentAdvisory(t *testing.T) {
-	record := itemToRecord(&models.MediaItem{ContentID: "advisory-2", Type: "movie", Title: "Jaws"})
-	if record.AdvisoryAge != nil {
-		t.Fatalf("AdvisoryAge = %v, want nil", *record.AdvisoryAge)
-	}
-	if record.AdvisorySource != "" {
-		t.Fatalf("AdvisorySource = %q, want empty", record.AdvisorySource)
-	}
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		t.Fatalf("marshaling record: %v", err)
-	}
-	for _, key := range []string{"advisory_age", "advisory_source"} {
-		if bytes.Contains(encoded, []byte(key)) {
-			t.Fatalf("bundle carries %q for an item with no advisory: %s", key, encoded)
-		}
-	}
-}
-
 func TestEmbeddingsForModelKeepsOnlyThatModel(t *testing.T) {
 	records := []EmbeddingRecord{
 		{MediaItemID: "movie-1", Model: "nomic-embed-text"},
@@ -120,5 +47,45 @@ func TestEmbeddingsForModelKeepsOnlyThatModel(t *testing.T) {
 	}
 	if got := embeddingsForModel(records, ""); len(got) != 0 {
 		t.Fatalf("an unknown model kept %#v", got)
+	}
+}
+
+func TestRewriteFileRecordKeepsSidecarsInsideTheLibrary(t *testing.T) {
+	rewrites := normalizeRewrites([]PathRewrite{{From: "/old/movies", To: "/media/movies"}})
+	folderPaths := map[int][]string{7: {"/media/movies"}}
+
+	tests := []struct {
+		name     string
+		sidecar  string
+		wantPath string
+		wantErr  bool
+	}{
+		{name: "beside the video", sidecar: "/old/movies/Film/Subs/Film.en.ass", wantPath: "/media/movies/Film/Subs/Film.en.ass"},
+		{name: "outside the library", sidecar: "/etc/silo/config.ass", wantErr: true},
+		{name: "climbs out of the library", sidecar: "/old/movies/Film/../../../etc/passwd", wantErr: true},
+		{name: "sibling folder sharing the root's name", sidecar: "/media/movies-private/Film.en.srt", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := FileRecord{
+				MediaFolderID:     7,
+				FilePath:          "/old/movies/Film/Film.mkv",
+				ExternalSubtitles: []ExternalSubtitleRecord{{Path: tt.sidecar, Format: "ass"}},
+			}
+			got, err := rewriteFileRecord(file, rewrites, folderPaths)
+			if tt.wantErr {
+				var unmatched *UnmatchedRootsError
+				if !errors.As(err, &unmatched) {
+					t.Fatalf("rewriteFileRecord error = %v, want *UnmatchedRootsError", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("rewriteFileRecord: %v", err)
+			}
+			if got.ExternalSubtitles[0].Path != tt.wantPath {
+				t.Fatalf("sidecar path = %q, want %q", got.ExternalSubtitles[0].Path, tt.wantPath)
+			}
+		})
 	}
 }

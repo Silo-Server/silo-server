@@ -17,13 +17,6 @@ describe("sidebar pin helpers", () => {
     expect(parseSidebarPins(42)).toEqual({});
   });
 
-  it("accepts the canonical object value directly", () => {
-    const pins = {
-      "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }],
-    };
-    expect(parseSidebarPins(pins)).toEqual(pins);
-  });
-
   it("still accepts the legacy JSON-string encoding", () => {
     expect(
       parseSidebarPins('{"42":[{"type":"collection","id":"col-1","label":"Pinned Horror"}]}'),

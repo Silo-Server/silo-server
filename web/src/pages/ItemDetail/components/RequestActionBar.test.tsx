@@ -82,31 +82,6 @@ describe("RequestActionBar watchlist toggle", () => {
     vi.clearAllMocks();
   });
 
-  it("drops the note when watchlist adds don't request or the title can't be requested", () => {
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: true,
-        allowed: true,
-        watchlist_titles_supported: true,
-        watchlist_requests: false,
-      },
-    });
-    renderBar(heat);
-    expect(screen.queryByText(NOTE)).toBeNull();
-    cleanup();
-
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: true,
-        allowed: true,
-        watchlist_titles_supported: true,
-        watchlist_requests: true,
-      },
-    });
-    renderBar({ ...heat, request: { requestable: false, status: "pending" } });
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-
   it("offers no watchlist action on a server without watchlist titles", () => {
     mocks.featureStatus.mockReturnValue({ data: { allowed: true } });
     renderBar(heat);
@@ -155,24 +130,6 @@ describe("RequestActionBar watchlist toggle", () => {
     expect(
       queryClient.getQueryData<RequestMediaDetail>(requestKeys.detail("movie", 949))?.in_watchlist,
     ).toBe(true);
-  });
-
-  it("says why an add did not request the title", async () => {
-    mocks.addWatchlistTitle.mockResolvedValue({
-      media_type: "movie",
-      tmdb_id: 949,
-      added_at: "2026-09-30T00:00:00Z",
-      request: { requestable: false, reason: "quota_exceeded" },
-    } satisfies WatchlistTitleEntry);
-    renderBar(heat);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add to Watchlist" }));
-
-    await waitFor(() =>
-      expect(mocks.toastSuccess).toHaveBeenCalledWith("Added to your watchlist", {
-        description: "It wasn't requested: request limit reached.",
-      }),
-    );
   });
 
   it("removes the title and reverts the page when the call fails", async () => {

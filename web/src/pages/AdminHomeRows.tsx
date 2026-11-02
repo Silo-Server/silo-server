@@ -27,6 +27,7 @@ import {
 } from "@/api/adminSections";
 import { V2ProblemError } from "@/api/v2/request";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
+import { AdminNextUpDefaultsCard } from "@/components/homeRows/AdminNextUpDefaultsCard";
 import { DeleteRowDialog, DeleteRowsDialog } from "@/components/homeRows/DeleteRowDialog";
 import type { PageMoreMenuItem } from "@/components/calm/PageMoreMenu";
 import { RestoreDialog } from "@/components/homeRows/RestoreDialog";
@@ -49,7 +50,6 @@ function rowCount(count: number) {
 
 function batchFailureText({ title, reason, message }: BatchFailure) {
   if (reason === "changed") return `${title} changed since you opened this page.`;
-  if (reason === "legacy") return `${title} is a Trakt row, which can't be turned back on.`;
   return `${title}: ${message}`;
 }
 
@@ -511,6 +511,7 @@ export default function AdminHomeRows() {
           ) : null
         }
       >
+        <AdminNextUpDefaultsCard />
         <DeleteRowDialog
           rowTitle={confirmDeleteSection?.title ?? ""}
           pageLabel={currentPageLabel}

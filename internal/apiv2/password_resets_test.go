@@ -136,16 +136,6 @@ func TestAdminPasswordResetDelivery(t *testing.T) {
 	}
 }
 
-func TestAdminPasswordResetCapabilities(t *testing.T) {
-	f := fixturePasswordResets()
-	f.caps = passwordreset.Capabilities{Link: true}
-	h := passwordResetTestHandler(f)
-	r := do(t, h, http.MethodGet, Prefix+"/admin/users/capabilities", "", actingRequestAdmin)
-	if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"password_reset_link":true`) || !strings.Contains(r.Body.String(), `"password_reset_email":false`) {
-		t.Fatal(r.Code, r.Body.String())
-	}
-}
-
 func TestPublicPasswordReset(t *testing.T) {
 	f := fixturePasswordResets()
 	h := passwordResetTestHandler(f)

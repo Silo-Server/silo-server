@@ -22,7 +22,6 @@ import type {
   PageRef,
 } from "@/lib/homeRows/types";
 import { fetchRecipeCatalog, type RecipeCatalogResponse } from "@/lib/recipes";
-import { isTraktConfig } from "@/lib/sectionTypes";
 import { useProfileHomeRows } from "./useProfileHomeRows";
 import { useProfileRowCollections } from "./useRowCollectionOptions";
 
@@ -57,7 +56,6 @@ function toHomeRow(section: SettingsSectionEntry): HomeRow {
     hero: section.featured,
     shown: !section.hidden,
     own: section.is_custom,
-    legacyTrakt: isTraktConfig(section.config),
     renamedFrom: renamed ? section.default_title : undefined,
   };
 }

@@ -25,16 +25,16 @@ func TestArtResolverSource(t *testing.T) {
 
 	root := t.TempDir()
 	movieDir := filepath.Join(root, "Movies", "Film (2001)")
-	writeTestFile(t, filepath.Join(movieDir, "art", "poster.jpg"), "img")
-	writeTestFile(t, filepath.Join(movieDir, ".actors", "Lead.png"), "img")
-	writeTestFile(t, filepath.Join(movieDir, "notes.txt"), "text")
-	writeTestFile(t, filepath.Join(movieDir, "empty.jpg"), "")
-	writeTestFile(t, filepath.Join(root, "Movies", "outside.jpg"), "img")
+	writeFile(t, filepath.Join(movieDir, "art", "poster.jpg"), "img")
+	writeFile(t, filepath.Join(movieDir, ".actors", "Lead.png"), "img")
+	writeFile(t, filepath.Join(movieDir, "notes.txt"), "text")
+	writeFile(t, filepath.Join(movieDir, "empty.jpg"), "")
+	writeFile(t, filepath.Join(root, "Movies", "outside.jpg"), "img")
 	if err := os.Symlink(filepath.Join(root, "Movies", "outside.jpg"), filepath.Join(movieDir, "linked.jpg")); err != nil {
 		t.Fatalf("Symlink: %v", err)
 	}
 	// A symlinked directory inside the movie folder that leads out of it.
-	writeTestFile(t, filepath.Join(root, "Elsewhere", "poster.jpg"), "img")
+	writeFile(t, filepath.Join(root, "Elsewhere", "poster.jpg"), "img")
 	if err := os.Symlink(filepath.Join(root, "Elsewhere"), filepath.Join(movieDir, "escape")); err != nil {
 		t.Fatalf("Symlink dir: %v", err)
 	}
@@ -78,10 +78,10 @@ func TestGetImagesAddsNFOArtForEmptySlots(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "Film (2001)")
 	moviePath := filepath.Join(dir, "Film.mkv")
-	writeTestFile(t, moviePath, "video")
-	writeTestFile(t, filepath.Join(dir, "poster.jpg"), "sidecar")
-	writeTestFile(t, filepath.Join(dir, "extra", "backdrop-local.jpg"), "img")
-	writeTestFile(t, filepath.Join(dir, "Film.nfo"), `<movie>
+	writeFile(t, moviePath, "video")
+	writeFile(t, filepath.Join(dir, "poster.jpg"), "sidecar")
+	writeFile(t, filepath.Join(dir, "extra", "backdrop-local.jpg"), "img")
+	writeFile(t, filepath.Join(dir, "Film.nfo"), `<movie>
   <title>Film</title>
   <thumb aspect="poster">https://img.example.org/poster.jpg</thumb>
   <thumb aspect="clearlogo">http://192.168.1.2/logo.png</thumb>
@@ -133,10 +133,10 @@ func TestGetImagesNFOArtForSeriesAndSeasonGallery(t *testing.T) {
 
 	root := filepath.Join(t.TempDir(), "Show")
 	episode := filepath.Join(root, "Season 01", "Show S01E01.mkv")
-	writeTestFile(t, episode, "video")
-	writeTestFile(t, filepath.Join(root, "tvshow.nfo"),
+	writeFile(t, episode, "video")
+	writeFile(t, filepath.Join(root, "tvshow.nfo"),
 		`<tvshow><title>Show</title><thumb>folder-art.png</thumb></tvshow>`)
-	writeTestFile(t, filepath.Join(root, "folder-art.png"), "img")
+	writeFile(t, filepath.Join(root, "folder-art.png"), "img")
 
 	req := metadata.ImageRequest{
 		ContentType:               "series",
@@ -171,9 +171,9 @@ func TestGetMetadataResolvesActorPhotos(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "Film (2001)")
 	moviePath := filepath.Join(dir, "Film.mkv")
-	writeTestFile(t, moviePath, "video")
-	writeTestFile(t, filepath.Join(dir, ".actors", "Local_Lead.jpg"), "img")
-	writeTestFile(t, filepath.Join(dir, "movie.nfo"), `<movie>
+	writeFile(t, moviePath, "video")
+	writeFile(t, filepath.Join(dir, ".actors", "Local_Lead.jpg"), "img")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie>
   <title>Film</title>
   <actor><name>Local Lead</name><thumb>.actors/Local_Lead.jpg</thumb><tmdbid>500</tmdbid></actor>
   <actor><name>Remote</name><thumb>https://image.example.org/t/p/original/r.jpg</thumb></actor>
@@ -223,7 +223,7 @@ func TestGetMetadataMapsShowFields(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow>
+	writeFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow>
   <title>Show</title>
   <sorttitle>Show, The</sorttitle>
   <status>Returning Series</status>

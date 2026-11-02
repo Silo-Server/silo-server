@@ -117,6 +117,7 @@ export const LIST_CONDITION_FIELDS = {
   studio: ["company_ids", "exclude_company_ids"],
   requester: ["requester_user_ids", "exclude_requester_user_ids"],
   keyword: ["keyword_ids", "exclude_keyword_ids"],
+  status: ["series_statuses", "exclude_series_statuses"],
 } as const satisfies Record<
   string,
   readonly [keyof RequestRouteConditions, keyof RequestRouteConditions]
@@ -130,6 +131,8 @@ const STRING_LISTS: ReadonlySet<ListField> = new Set([
   "exclude_original_languages",
   "origin_countries",
   "exclude_origin_countries",
+  "series_statuses",
+  "exclude_series_statuses",
 ]);
 
 const LIST_FIELDS: readonly ListField[] = Object.values(LIST_CONDITION_FIELDS).flat();
@@ -193,6 +196,7 @@ const ROW_ORDER: readonly ConditionKind[] = [
   "language",
   "country",
   "year",
+  "status",
   "rating",
   "network",
   "studio",
@@ -317,6 +321,52 @@ function userNames(ids: readonly number[], names: RoutingNames): string[] {
   return ids.map((id) => names.users?.get(id) ?? `account ${id}`);
 }
 
+type SeriesStatus = NonNullable<RequestRouteConditions["series_statuses"]>[number];
+
+/** Each status's name; the schema's statuses must all be here. */
+const SERIES_STATUS_LABELS = {
+  returning: "Returning",
+  in_production: "In production",
+  upcoming: "Upcoming",
+  ended: "Ended",
+  cancelled: "Cancelled",
+} satisfies Record<SeriesStatus, string>;
+
+/** A series' statuses as the server stores them, in the order the editor offers them. */
+export const SERIES_STATUSES: readonly { value: string; label: string }[] = Object.entries(
+  SERIES_STATUS_LABELS,
+).map(([value, label]) => ({ value, label }));
+
+/**
+ * One-click status sets. A rule stores the statuses, not the set, so
+ * changing a set never changes a saved rule.
+ */
+export const SERIES_STATUS_PRESETS: readonly { label: string; values: readonly string[] }[] = [
+  { label: "Continuing or upcoming", values: ["returning", "in_production", "upcoming"] },
+  { label: "Ended or cancelled", values: ["ended", "cancelled"] },
+];
+
+/** "Ended"; a status newer than the editor reads as the server sent it. */
+export function seriesStatusLabel(status: string): string {
+  return SERIES_STATUSES.find((entry) => entry.value === status)?.label ?? status;
+}
+
+/** The preset a set of statuses is exactly, if any. */
+export function seriesStatusPreset(values: readonly string[]) {
+  return SERIES_STATUS_PRESETS.find(
+    (preset) =>
+      preset.values.length === values.length && preset.values.every((v) => values.includes(v)),
+  );
+}
+
+function statusNames(values: readonly string[]): string[] {
+  return values.map(seriesStatusLabel);
+}
+
+function lowerStatusNames(values: readonly string[]): string[] {
+  return statusNames(values).map((name) => name.toLowerCase());
+}
+
 /** The clauses of a rule's conditions, in reading order: "is anime", "is rated PG or lower". */
 function conditionClauses(
   conditions: RequestRouteConditions,
@@ -345,6 +395,10 @@ function conditionClauses(
   }
   const years = yearRangeLabel(c.year_from, c.year_to);
   if (years) out.push(`${mediaType === "series" ? "first aired" : "came out"} in ${years}`);
+  if (c.series_statuses?.length) out.push(`is ${orList(lowerStatusNames(c.series_statuses))}`);
+  if (c.exclude_series_statuses?.length) {
+    out.push(notOneOf(lowerStatusNames(c.exclude_series_statuses)));
+  }
   if (c.max_content_rating) out.push(`is rated ${c.max_content_rating} or lower`);
   if (c.network_ids?.length)
     out.push(`is on ${orList(brandNames(c.network_ids, "network", names))}`);
@@ -410,6 +464,14 @@ export function autoRuleName(
   }
   const years = yearRangeLabel(c.year_from, c.year_to);
   if (years) parts.push(years);
+  if (c.series_statuses?.length) {
+    parts.push(
+      seriesStatusPreset(c.series_statuses)?.label ?? orList(statusNames(c.series_statuses)),
+    );
+  }
+  if (c.exclude_series_statuses?.length) {
+    parts.push(`Not ${orList(statusNames(c.exclude_series_statuses))}`);
+  }
   if (c.max_content_rating) parts.push(`${c.max_content_rating} or lower`);
   if (c.network_ids?.length) parts.push(orList(brandNames(c.network_ids, "Network", names)));
   if (c.exclude_network_ids?.length) {
@@ -686,7 +748,7 @@ export function ratingLabel(rating: string): string {
   return match ? `${match[2]} (${match[1]!.toUpperCase()})` : rating;
 }
 
-/** "anime · Japanese · Japan · 2001 · Rated PG · Animation, Fantasy". */
+/** "anime · Japanese · Japan · 2001 · Ended · Rated PG · Animation, Fantasy". */
 export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteMediaType): string {
   return [
     facts.anime ? "anime" : null,
@@ -695,6 +757,11 @@ export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteM
       ? facts.origin_countries.map(routingCountryName).join(", ")
       : null,
     facts.year ? String(facts.year) : null,
+    mediaType === "series"
+      ? facts.series_status
+        ? seriesStatusLabel(facts.series_status)
+        : "Status unknown"
+      : null,
     facts.content_rating ? `Rated ${ratingLabel(facts.content_rating)}` : "No rating",
     facts.genre_ids.length > 0 ? genreNames(facts.genre_ids, mediaType).join(", ") : null,
   ]
@@ -749,6 +816,14 @@ function traceMissSentence(
     case "year_from":
     case "year_to":
       return `${facts.year ? `year is ${facts.year}` : "no year"} (wants ${yearRangeLabel(c.year_from, c.year_to)})`;
+    case "series_statuses":
+    case "exclude_series_statuses": {
+      const is = facts.series_status
+        ? `status is ${seriesStatusLabel(facts.series_status)}`
+        : "no status";
+      const wanted = orList(statusNames(c[key] ?? []));
+      return `${is} (wants ${key === "series_statuses" ? "" : "anything but "}${wanted})`;
+    }
     case "max_content_rating":
       return `${facts.content_rating ? `rated ${ratingLabel(facts.content_rating)}` : "no rating"} (wants ${c.max_content_rating} or lower)`;
     case "network_ids":

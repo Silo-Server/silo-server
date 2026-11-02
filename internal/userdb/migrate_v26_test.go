@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"testing"
 )
 
@@ -10,14 +9,7 @@ import (
 // gets the value the legacy fallback returned, stored rows win, and the legacy
 // rows stay.
 func TestMigrateToV26MaterializesRetiredSettingsFallbacks(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	if _, err := db.Exec(`
 INSERT INTO profiles (id, name, created_at, updated_at) VALUES
     ('p-new', 'New', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),

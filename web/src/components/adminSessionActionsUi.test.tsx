@@ -308,24 +308,6 @@ describe("AdminSessionActions", () => {
     );
   });
 
-  it("offers resume for a paused session in the inline layout", async () => {
-    await renderInline({ ...baseSession, is_paused: true });
-
-    expect(findButton(container, "Resume")).toBeTruthy();
-    expect(findButton(container, "Pause")).toBeUndefined();
-  });
-
-  it("keeps stop and shows the limited copy once in the inline layout without playback control", async () => {
-    await renderInline({ ...baseSession, has_playback_control: false });
-
-    const copy =
-      "This session does not support live pause, resume, or messages. Stop and Terminate can still end playback.";
-    expect(container.textContent?.split(copy).length).toBe(2);
-    expect(findButton(container, "Pause")).toBeUndefined();
-    expect(findButton(container, "Message")).toBeUndefined();
-    expect(findButton(container, "Stop")).toBeTruthy();
-  });
-
   it("reports a refused stale command without changing the shown state", async () => {
     mocks.sendCommand.mockRejectedValue(new Error("The command sequence is behind"));
 

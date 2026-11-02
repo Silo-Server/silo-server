@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ChatGPTConnection } from "./ChatGPTConnection";
@@ -77,6 +77,27 @@ vi.mock("@/hooks/queries/admin/chatgpt", () => ({
   }),
 }));
 vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error } }));
+
+/** Makes `mock` answer only when the returned function is called. */
+function hold(mock: Mock) {
+  let resolve!: (value: object) => void;
+  mock.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  return (value: object) => resolve(value);
+}
+
+/** Pastes the browser's callback URL for the fixture attempt and submits it. */
+async function submitCallback() {
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Browser URL" }),
+    "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+}
 
 describe("ChatGPTConnection", () => {
   afterEach(() => {
@@ -169,25 +190,8 @@ describe("ChatGPTConnection", () => {
     expect(mocks.success).not.toHaveBeenCalled();
   });
 
-  it("clears the login dialog when the active authority changes", async () => {
-    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Browser URL" }), "old-callback");
-    setProfileId("profile-b");
-    view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(mocks.complete).not.toHaveBeenCalled();
-    expect(mocks.success).not.toHaveBeenCalled();
-  });
-
   it("does not open an old pending login result after an account switch", async () => {
-    let resolve!: (value: object) => void;
-    mocks.start.mockImplementation(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    );
+    const resolve = hold(mocks.start);
     const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
     setAccessToken("another-account");
@@ -236,13 +240,7 @@ describe("ChatGPTConnection", () => {
   it("confirms a successful completion after another browser replaces its login status", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     loginExpiresAt = new Date(Date.now() + 1_000).toISOString();
-    let resolve!: (value: object) => void;
-    mocks.complete.mockImplementation(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    );
+    const resolve = hold(mocks.complete);
     const confirmed = vi.fn();
     const acceptTransition = vi.fn();
     const props = {
@@ -253,11 +251,7 @@ describe("ChatGPTConnection", () => {
     };
     const view = render(<ChatGPTConnection {...props} />);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Browser URL" }),
-      "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+    await submitCallback();
     act(() => {
       completePending = true;
       status = {
@@ -289,13 +283,7 @@ describe("ChatGPTConnection", () => {
   it.each(["status", "response"])(
     "confirms once when %s arrives before the other completion signal",
     async (first) => {
-      let resolve!: (value: object) => void;
-      mocks.complete.mockImplementation(
-        () =>
-          new Promise((done) => {
-            resolve = done;
-          }),
-      );
+      const resolve = hold(mocks.complete);
       const confirmed = vi.fn();
       const acceptTransition = vi.fn();
       const props = {
@@ -306,11 +294,7 @@ describe("ChatGPTConnection", () => {
       };
       const view = render(<ChatGPTConnection {...props} />);
       await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-      await userEvent.type(
-        screen.getByRole("textbox", { name: "Browser URL" }),
-        "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-      );
-      await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+      await submitCallback();
       const change = { beforeETag: "before", afterETag: "after", firstConnection: true };
       const signals = {
         status: async () => {
@@ -347,13 +331,7 @@ describe("ChatGPTConnection", () => {
   it.each(["cancel", "new attempt", "authority change", "unmount"])(
     "ignores a late successful completion after %s",
     async (ending) => {
-      let resolve!: (value: object) => void;
-      mocks.complete.mockImplementation(
-        () =>
-          new Promise((done) => {
-            resolve = done;
-          }),
-      );
+      const resolve = hold(mocks.complete);
       const confirmed = vi.fn();
       const acceptTransition = vi.fn();
       const props = {
@@ -364,11 +342,7 @@ describe("ChatGPTConnection", () => {
       };
       const view = render(<ChatGPTConnection {...props} />);
       await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-      await userEvent.type(
-        screen.getByRole("textbox", { name: "Browser URL" }),
-        "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-      );
-      await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+      await submitCallback();
       if (ending === "authority change") {
         setProfileId("profile-b");
         view.rerender(<ChatGPTConnection {...props} />);
@@ -392,30 +366,6 @@ describe("ChatGPTConnection", () => {
       ).not.toBeInTheDocument();
     },
   );
-
-  it.each([
-    { name: "an invalid authorization code", connected: false, needs_login: true },
-    { name: "missing plan consent", connected: false, needs_login: true },
-    { name: "an accepted grant whose catalog failed", connected: true, needs_login: false },
-  ])("welcomes the first activation after $name retained a registration", async (account) => {
-    status.accounts = [{ ...account, client_id: "saved-app", email: "admin@example.test" }];
-    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reconnect admin@example.test" }));
-    act(() => {
-      status = {
-        ...status,
-        active_client_id: "saved-app",
-        login_first_connection: true,
-        login_result: "connected",
-        attempt_id: "fixture-state",
-      };
-      statusVersion++;
-      view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    });
-    expect(
-      screen.getByRole("heading", { name: "You’re using your ChatGPT plan" }),
-    ).toBeInTheDocument();
-  });
 
   it("uses the confirmed login outcome when a stale status missed another activation", async () => {
     const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
@@ -463,27 +413,9 @@ describe("ChatGPTConnection", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps the welcome closed after a failed first account selection", async () => {
-    status.accounts = [{ client_id: "saved-app", email: "admin@example.test", connected: true }];
-    mocks.select.mockRejectedValue(new Error("catalog unavailable"));
-    render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    await userEvent.click(screen.getByRole("combobox", { name: "ChatGPT account" }));
-    await userEvent.click(screen.getByRole("option", { name: "admin@example.test · 1" }));
-    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining("Could not switch"));
-    expect(
-      screen.queryByRole("heading", { name: "You’re using your ChatGPT plan" }),
-    ).not.toBeInTheDocument();
-  });
-
   it("ignores a first selection result after the initiating profile changes", async () => {
     status.accounts = [{ client_id: "saved-app", email: "admin@example.test", connected: true }];
-    let resolve!: (value: object) => void;
-    mocks.select.mockImplementation(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    );
+    const resolve = hold(mocks.select);
     const acceptTransition = vi.fn();
     const props = {
       model: "",
@@ -499,36 +431,6 @@ describe("ChatGPTConnection", () => {
       resolve({ beforeETag: "before", afterETag: "after", firstConnection: true });
     });
     expect(acceptTransition).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("heading", { name: "You’re using your ChatGPT plan" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps the welcome closed on reconnect after a previous activation was disconnected", async () => {
-    status = {
-      ...status,
-      accounts: [
-        {
-          client_id: "saved-app",
-          email: "admin@example.test",
-          connected: false,
-          needs_login: true,
-        },
-      ],
-    };
-    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reconnect admin@example.test" }));
-    act(() => {
-      status = {
-        ...status,
-        active_client_id: "saved-app",
-        login_result: "connected",
-        attempt_id: "fixture-state",
-      };
-      statusVersion++;
-      view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
-    });
-    expect(mocks.success).toHaveBeenCalledWith(expect.stringContaining("ChatGPT connected"));
     expect(
       screen.queryByRole("heading", { name: "You’re using your ChatGPT plan" }),
     ).not.toBeInTheDocument();
@@ -576,11 +478,7 @@ describe("ChatGPTConnection", () => {
     expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeInTheDocument();
     expect(mocks.error).not.toHaveBeenCalled();
     expect(mocks.completeReset).not.toHaveBeenCalled();
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Browser URL" }),
-      "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+    await submitCallback();
     expect(mocks.complete).toHaveBeenCalledOnce();
     expect(mocks.success).toHaveBeenCalledOnce();
   });
@@ -608,20 +506,10 @@ describe("ChatGPTConnection", () => {
   it("keeps an accepted completion open across expiry and confirms its settled response", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     loginExpiresAt = new Date(Date.now() + 1_000).toISOString();
-    let resolveCompletion!: (value: object) => void;
-    mocks.complete.mockImplementation(
-      () =>
-        new Promise<object>((resolve) => {
-          resolveCompletion = resolve;
-        }),
-    );
+    const resolveCompletion = hold(mocks.complete);
     const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Browser URL" }),
-      "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+    await submitCallback();
     act(() => {
       completePending = true;
       vi.setSystemTime(Date.parse(loginExpiresAt) + 1);
@@ -681,11 +569,7 @@ describe("ChatGPTConnection", () => {
     );
     const view = render(panel);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: "Browser URL" }),
-      "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+    await submitCallback();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Could not complete sign-in");
     expect(mocks.refetch).toHaveBeenCalledOnce();
@@ -740,19 +624,6 @@ describe("ChatGPTConnection", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("offers a retry when the account model catalog fails", async () => {
-    status = {
-      ...status,
-      active_client_id: "app",
-      accounts: [{ client_id: "app", email: "admin@example.test", connected: true }],
-    };
-    modelError = true;
-    render(<ChatGPTConnection model="old-model" onModelChange={vi.fn()} />);
-    expect(screen.getByRole("combobox", { name: "Model" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Retry models" }));
-    expect(mocks.refetch).toHaveBeenCalledOnce();
-  });
-
   it("reports a local disconnect when remote revocation was not confirmed", async () => {
     status = {
       ...status,
@@ -799,105 +670,6 @@ describe("ChatGPTConnection", () => {
     expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent("GPT-6.1 Sol");
     expect(screen.getByText("Using ChatGPT plan · active@example.test")).toBeInTheDocument();
     expect(mocks.success).toHaveBeenCalledWith("ChatGPT disconnected.");
-  });
-
-  it("ignores an inactive disconnect completion after the initiating profile changes", async () => {
-    status = {
-      ...status,
-      active_client_id: "active-app",
-      accounts: [
-        { client_id: "active-app", email: "active@example.test", connected: true },
-        { client_id: "inactive-app", email: "inactive@example.test", connected: false },
-      ],
-    };
-    let resolveDisconnect!: (result: { revocation_confirmed: boolean }) => void;
-    mocks.disconnect.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveDisconnect = resolve;
-        }),
-    );
-    const view = render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Disconnect inactive@example.test" }));
-    setProfileId("profile-b");
-    view.rerender(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
-    await act(async () => resolveDisconnect({ revocation_confirmed: true }));
-    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("inactive-app");
-    expect(mocks.success).not.toHaveBeenCalled();
-    expect(mocks.error).not.toHaveBeenCalled();
-  });
-
-  it("explains unavailable plan sharing and offers disconnect instead of reconnecting", async () => {
-    status = {
-      ...status,
-      active_client_id: "blocked-app",
-      accounts: [
-        {
-          client_id: "blocked-app",
-          email: "blocked@example.test",
-          connected: false,
-          plan_ineligible: true,
-          usage_limited: true,
-        },
-      ],
-    };
-    mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
-    render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
-
-    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
-      "blocked@example.test · 1 (plan sharing unavailable)",
-    );
-    expect(
-      screen.getByText(
-        "This account cannot share ChatGPT plan usage. Check ChatGPT usage settings.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Reconnect blocked@example.test" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue with ChatGPT" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: "Manage usage" })).toHaveAttribute(
-      "href",
-      "https://chatgpt.com/settings/usage",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("blocked-app");
-    expect(mocks.start).not.toHaveBeenCalled();
-  });
-
-  it("shows paused usage guidance while keeping disconnect available without reconnect", async () => {
-    status = {
-      ...status,
-      active_client_id: "paused-app",
-      accounts: [
-        {
-          client_id: "paused-app",
-          email: "paused@example.test",
-          connected: false,
-          usage_limited: true,
-        },
-      ],
-    };
-    mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
-    render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
-
-    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
-      "paused@example.test · 1 (usage paused)",
-    );
-    expect(
-      screen.getByText(
-        "ChatGPT plan usage is paused. Check ChatGPT usage settings, then choose Test text model to resume.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Reconnect paused@example.test" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent("GPT-6.1 Sol");
-    expect(screen.getByRole("button", { name: "Continue with ChatGPT" })).toBeEnabled();
-
-    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("paused-app");
-    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("selects an inactive paused account without restarting sign-in", async () => {

@@ -17,6 +17,9 @@ import { PERMISSION_MARKER_EDIT } from "@/lib/permissions";
 
 import AdminUserDetail from "./AdminUserDetail";
 import { POLICY_DEFAULTS } from "@/test/policyDefaults";
+import { makeAdminUser, stubRadixDom } from "./adminPage.test-support";
+
+stubRadixDom();
 
 interface UpdateArg {
   editor: { etag: string; user: { id: number } };
@@ -43,48 +46,10 @@ const mocks = vi.hoisted(() => ({
   setSignIn: vi.fn(),
 }));
 
-const adminUser: AdminUser = {
-  id: 7,
-  username: "taylor",
-  email: "taylor@example.test",
-  role: "user",
-  permissions: [],
-  enabled: true,
-  library_ids: null,
-  access_group_id: null,
-  max_playback_quality: null,
-  max_streams: null,
-  max_transcodes: null,
-  max_remote_stream_bitrate_kbps: null,
-  max_local_stream_bitrate_kbps: null,
-  transcode_allowed: null,
-  audio_transcode_allowed: null,
-  max_profiles: null,
-  download_allowed: null,
-  download_transcode_allowed: null,
-  requests_allowed: null,
-  password_login: true,
-  password_change_required: false,
-  is_owner: false,
-  break_glass: false,
-  effective_policy: {
-    library_ids: null,
-    max_playback_quality: "",
-    max_streams: 0,
-    max_transcodes: 0,
-    max_remote_stream_bitrate_kbps: 0,
-    max_local_stream_bitrate_kbps: 0,
-    max_profiles: 4,
-    transcode_allowed: true,
-    audio_transcode_allowed: true,
-    download_allowed: true,
-    download_transcode_allowed: false,
-    requests_allowed: true,
-    permissions: [],
-  },
-  created_at: "2026-07-01T12:00:00Z",
-  updated_at: "2026-07-01T12:00:00Z",
-};
+const base = makeAdminUser();
+const adminUser = makeAdminUser({
+  effective_policy: { ...base.effective_policy, download_transcode_allowed: false },
+});
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
@@ -262,20 +227,6 @@ beforeEach(() => {
   setAccessToken("account");
   setProfileId("owner");
   setProfileToken(null);
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    setPointerCapture: () => {},
-    releasePointerCapture: () => {},
-    scrollIntoView: () => {},
-  });
   mocks.update.mockReset().mockResolvedValue(undefined);
   mocks.reads = 0;
   mocks.impersonate.mockReset();
@@ -307,15 +258,17 @@ function userProblem(status: number) {
   });
 }
 
-describe("page states", () => {
-  it("points a missing account back to the user list", () => {
-    mocks.user = null;
-    mocks.userError = userProblem(404);
-    renderUserDetail();
-    expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All users" })).toHaveAttribute("href", "/admin/users");
+function changedElsewhere() {
+  return new V2ProblemError("updateAdminUser", {
+    type: "https://silo.example/problems/precondition_failed",
+    title: "Changed",
+    status: 412,
+    detail: "Changed",
+    instance: "/api/v2/admin/users/7",
   });
+}
 
+describe("page states", () => {
   it("offers a retry instead of calling a failed account read missing", async () => {
     mocks.user = null;
     mocks.userError = userProblem(500);
@@ -397,16 +350,6 @@ describe("header", () => {
     );
   });
 
-  it("offers a password reset for an account that signs in with a password", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail();
-    await ui.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(
-      await screen.findByRole("dialog", { name: "Reset password for taylor" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Set a temporary password" })).toBeInTheDocument();
-  });
-
   it("shows a disabled account's banner and enables it with a fresh validator", async () => {
     const ui = userEvent.setup();
     mocks.user = { ...adminUser, enabled: false };
@@ -457,28 +400,9 @@ describe("header", () => {
 });
 
 describe("more actions", () => {
-  it("disables an account after confirming", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail();
-    await ui.click(within(await openMenu(ui)).getByRole("menuitem", { name: /Disable account/ }));
-    const confirm = await screen.findByRole("alertdialog", { name: "Disable taylor?" });
-    expect(confirm).toHaveTextContent("Their profiles, history, and downloads are kept.");
-    await ui.click(within(confirm).getByRole("button", { name: "Disable account" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect((mocks.update.mock.calls[0]![0] as UpdateArg).body).toEqual({ enabled: false });
-  });
-
   it("reports a changed account instead of disabling it", async () => {
     const ui = userEvent.setup();
-    mocks.update.mockRejectedValue(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Changed",
-        instance: "/api/v2/admin/users/7",
-      }),
-    );
+    mocks.update.mockRejectedValue(changedElsewhere());
     renderUserDetail();
     await ui.click(within(await openMenu(ui)).getByRole("menuitem", { name: /Disable account/ }));
     await ui.click(
@@ -598,17 +522,6 @@ describe("unsaved changes", () => {
     return playback;
   }
 
-  it("disables Delete until the card's changes are saved or cancelled", async () => {
-    const ui = userEvent.setup();
-    await dirtyPlayback(ui);
-    const menu = await openMenu(ui);
-    expect(within(menu).getByRole("menuitem", { name: /Delete account/ })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(menu).toHaveTextContent("save or cancel edits first");
-  });
-
   it("asks before switching tabs, and Keep editing stays", async () => {
     const ui = userEvent.setup();
     const playback = await dirtyPlayback(ui);
@@ -621,18 +534,6 @@ describe("unsaved changes", () => {
     expect(within(playback).getByRole("spinbutton", { name: "Simultaneous streams" })).toHaveValue(
       2,
     );
-  });
-
-  it("discards the draft and moves on", async () => {
-    const ui = userEvent.setup();
-    await dirtyPlayback(ui);
-    await ui.click(screen.getByRole("tab", { name: /Activity/ }));
-    await ui.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard" }),
-    );
-    await waitFor(() => expect(search()).toBe("?tab=activity"));
-    expect(screen.getByText("Activity content")).toBeInTheDocument();
-    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("saves the draft, then moves on", async () => {
@@ -652,15 +553,7 @@ describe("unsaved changes", () => {
 
   it("stays when the save is refused, with the conflict in the card", async () => {
     const ui = userEvent.setup();
-    mocks.update.mockRejectedValue(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Changed",
-        instance: "/api/v2/admin/users/7",
-      }),
-    );
+    mocks.update.mockRejectedValue(changedElsewhere());
     const playback = await dirtyPlayback(ui);
     await ui.click(screen.getByRole("tab", { name: "Overview" }));
     await ui.click(

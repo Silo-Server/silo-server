@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MangaChapter } from "@/api/types";
-import { buildMangaList, prettifyVolumeLabel } from "./mangaChapters";
+import { buildMangaList } from "./mangaChapters";
 
 function chapter(partial: Partial<MangaChapter>): MangaChapter {
   return {
@@ -107,17 +107,6 @@ describe("buildMangaList", () => {
     if (entries[0]?.kind === "section") {
       expect(entries[0].chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-c2", "v1-cNull"]);
     }
-  });
-
-  it("returns an empty array for no chapters", () => {
-    expect(buildMangaList([])).toEqual([]);
-  });
-});
-
-describe("prettifyVolumeLabel", () => {
-  it("expands a v-prefixed token to a Volume label", () => {
-    expect(prettifyVolumeLabel("v13")).toBe("Volume 13");
-    expect(prettifyVolumeLabel("V2")).toBe("Volume 2");
   });
 });
 

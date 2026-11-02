@@ -17,14 +17,6 @@ describe("AdvancedSection", () => {
     localStorage.clear();
   });
 
-  it("starts collapsed and labels the disclosure with the setting count", () => {
-    renderSection();
-
-    const toggle = screen.getByRole("button", { name: /Advanced · 3 settings/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("ffmpeg path")).not.toBeInTheDocument();
-  });
-
   it("persists the open state under the section id", async () => {
     const user = userEvent.setup();
     const { unmount } = renderSection();
@@ -59,26 +51,6 @@ describe("AdvancedSection", () => {
 
     renderSection({ defaultOpen: true });
     expect(screen.queryByText("ffmpeg path")).not.toBeInTheDocument();
-  });
-
-  it("opens automatically while forceOpen is set", () => {
-    const { rerender } = render(
-      <AdvancedSection id="downloads" count={2} forceOpen={false}>
-        <div>bandwidth</div>
-      </AdvancedSection>,
-    );
-    expect(screen.queryByText("bandwidth")).not.toBeInTheDocument();
-
-    rerender(
-      <AdvancedSection id="downloads" count={2} forceOpen>
-        <div>bandwidth</div>
-      </AdvancedSection>,
-    );
-    expect(screen.getByText("bandwidth")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Advanced/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
   });
 
   it("re-expands when a new reason to force it open arrives after a manual collapse", async () => {

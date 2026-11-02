@@ -1,0 +1,962 @@
+package playback
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
+)
+
+// An HLS subtitle rendition delivers the selected embedded text track inside
+// the HLS stream's own presentation instead of as a whole-file sidecar.
+//
+// The stream's ffmpeg process writes the track as one continuous WebVTT file
+// per generation (a second output beside the HLS mux, cues on the same -copyts
+// source clock as the video). The server cuts that file into segments, one per
+// video segment: subtitle segment N carries every cue overlapping the source
+// time video segment N covers, and its X-TIMESTAMP-MAP ties cue time zero to
+// the video segments' timestamp origin. That source time is O plus segment N's
+// offset from the generation's first segment K on the video playlist: (N-K)*d
+// on an encode's synthetic fixed grid, the summed durations of segments K..N-1
+// on a copy remux's keyframe plan or FFmpeg's own playlist. O is the
+// generation's first video frame: the source clock need not start at zero, and
+// an input seek counts from the container's start rather than the video's. O
+// is read from the generation's own first segment. Demuxing the subtitle as
+// part of the stream means a cue is on disk once the video covering it is, so
+// a subtitle segment is never slower than the video segment it accompanies.
+//
+// The rendition is served through the existing master.m3u8 and segment/
+// routes, so every relay (API, proxy token and grant routes, node) carries it
+// unchanged: master.m3u8 becomes a multivariant playlist whose variant and
+// subtitle playlists are master.m3u8 again, selected by SubtitleRenditionQueryParam.
+// The subtitle playlist lists the video playlist's segments with the same
+// durations, playlist type, and end tag, so the two always cover the same
+// timeline: a complete VOD playlist for an encode or a planned copy remux, an
+// EVENT playlist that grows with FFmpeg's for an unplanned one.
+
+// SubtitleRenditionQueryParam selects a playlist of a session that publishes
+// a subtitle rendition. Absent, master.m3u8 answers the multivariant playlist.
+const SubtitleRenditionQueryParam = "silo_rendition"
+
+// ErrSubtitleRenditionNotFound answers a playlist request that names a
+// rendition the session does not publish.
+var ErrSubtitleRenditionNotFound = errors.New("playback: no such subtitle rendition")
+
+const (
+	subtitleRenditionVideo     = "video"
+	subtitleRenditionSubtitles = "subtitles"
+	// SubtitleRenditionGroupID is the EXT-X-MEDIA GROUP-ID the variant names
+	// in its SUBTITLES attribute.
+	SubtitleRenditionGroupID = "subs"
+	// SubtitleRenditionName is the rendition's NAME. The plan's inventory
+	// already describes the track; the playlist only has to be valid.
+	SubtitleRenditionName   = "Subtitles"
+	subtitleSegmentPrefix   = "sub_"
+	subtitleSegmentExt      = ".vtt"
+	subtitleCuePollInterval = 100 * time.Millisecond
+	// maxSubtitleCuePollInterval caps the backoff of a long wait for cues.
+	maxSubtitleCuePollInterval = time.Second
+	// subtitleOriginProbeTimeout bounds one observation of a generation's
+	// origin; it reads a single local segment.
+	subtitleOriginProbeTimeout = 5 * time.Second
+	// subtitleOriginRetryAfter spaces out observations of a generation's
+	// origin after one fails, so a missing ffprobe or unreadable segment costs
+	// one subprocess per interval rather than one per subtitle request.
+	subtitleOriginRetryAfter = 5 * time.Second
+	// subtitleVideoStartReads is how many times a copy generation's recorded
+	// video start is looked for before its origin is taken without a shift.
+	subtitleVideoStartReads = 3
+	// subtitleSegmentProductionWait bounds the wait for a segment the live
+	// generation is about to produce, matching what its video segment gets
+	// after a seek restart. An empty answer is final for a VOD player, so a
+	// cue produced a moment later would never be shown.
+	subtitleSegmentProductionWait = 30 * time.Second
+	// The multivariant playlist needs a BANDWIDTH even for an uncapped
+	// encode; a single variant only uses it as a startup hint.
+	subtitleRenditionDefaultVideoKbps = 8000
+	subtitleRenditionDefaultAudioKbps = 192
+)
+
+// SubtitleRenditionCodecSupported reports whether ffmpeg can write a source
+// subtitle codec as WebVTT text: every text codec except CEA-608 captions,
+// which travel inside the video stream rather than as a subtitle stream.
+func SubtitleRenditionCodecSupported(codec string) bool {
+	return isTextSubtitleV3(codec) && !strings.Contains(normalizeCodecV3(codec), "608")
+}
+
+// SubtitleRenditionExecutable reports whether an HLS stream of this duration
+// can carry a subtitle rendition: its video playlist must list the whole media
+// within the synthetic playlist bound. An encode's synthetic VOD playlist and a
+// copy remux's keyframe plan are complete; a copy remux on FFmpeg's own
+// playlist is an append-only EVENT playlist only within the same bound (see
+// stabilizeCopyHLSRemountTimeline), so its subtitle playlist can follow it.
+func SubtitleRenditionExecutable(totalDuration float64, segmentDuration int) bool {
+	if segmentDuration <= 0 {
+		segmentDuration = defaultSegmentDuration
+	}
+	return totalDuration > 0 && CanGenerateSyntheticManifest(totalDuration, segmentDuration)
+}
+
+// subtitleRenditionActive is the single gate shared by the ffmpeg output, the
+// playlists, and segment serving, so they cannot disagree about a recipe. It
+// covers both the single pipeline rendition and on-demand renditions
+// (subtitleRenditionsOnDemand).
+func subtitleRenditionActive(opts TranscodeOpts) bool {
+	if !opts.SubtitleRendition || opts.SubtitleBurnIn || !SubtitleRenditionExecutable(opts.TotalDuration, opts.SegmentDuration) {
+		return false
+	}
+	return len(opts.SubtitleRenditionTracks) > 0 ||
+		opts.SubtitleTrackIndex >= 0 && SubtitleRenditionCodecSupported(opts.SubtitleCodec)
+}
+
+// subtitleRenditionsOnDemand reports whether an active rendition recipe lists
+// every text track as a rendition read through the source's index, so the
+// stream's ffmpeg writes no cues.
+func subtitleRenditionsOnDemand(opts TranscodeOpts) bool {
+	return len(opts.SubtitleRenditionTracks) > 0
+}
+
+// followsFFmpegPlaylist reports whether a session's video playlist is FFmpeg's
+// own: a copy remux without a keyframe plan. Its segment durations are known
+// only from the playlist each generation writes.
+func followsFFmpegPlaylist(opts TranscodeOpts, plan *copySegmentPlan) bool {
+	return plan == nil && strings.EqualFold(opts.TargetCodecVideo, "copy")
+}
+
+func subtitleCueFileName(generation uint64) string {
+	return fmt.Sprintf("subtitles_%d.vtt", generation)
+}
+
+// subtitleCueFileGeneration is the generation number in a cue file name.
+func subtitleCueFileGeneration(name string) (uint64, bool) {
+	digits, ok := strings.CutPrefix(name, "subtitles_")
+	if !ok {
+		return 0, false
+	}
+	digits, ok = strings.CutSuffix(digits, subtitleSegmentExt)
+	if !ok || digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
+	generation, err := strconv.ParseUint(digits, 10, 64)
+	return generation, err == nil
+}
+
+// appendSubtitleRenditionOutputArgs adds the WebVTT cue output after the HLS
+// output. -flush_packets writes every cue as soon as it is demuxed, which is
+// what lets a subtitle segment be served once the video around it exists.
+// -y lets it replace a cue file of the same name, one left by a span the
+// session no longer serves, instead of waiting at ffmpeg's overwrite prompt
+// on the open stdin pipe.
+func appendSubtitleRenditionOutputArgs(args []string, opts TranscodeOpts) []string {
+	if !subtitleRenditionActive(opts) {
+		return args
+	}
+	cueFile := opts.subtitleCueFile
+	if cueFile == "" {
+		cueFile = subtitleCueFileName(0)
+	}
+	onDemand := subtitleRenditionsOnDemand(opts)
+	if onDemand && !copyMuxShiftsVideo(opts) {
+		return args
+	}
+	args = append(args, "-y")
+	if !onDemand {
+		args = append(args,
+			"-map", fmt.Sprintf("0:s:%d", opts.SubtitleTrackIndex),
+			"-c:s", "webvtt",
+			"-flush_packets", "1",
+			"-f", "webvtt",
+			filepath.Join(opts.OutputDir, cueFile),
+		)
+	}
+	if !copyMuxShiftsVideo(opts) {
+		return args
+	}
+	// The generation's first video packet on the cues' clock, which the HLS
+	// mux shifts (copyMuxShiftsVideo) and this output does not. It is flushed
+	// at once, since FFmpeg keeps running. On-demand renditions write no cue
+	// file but still need it, under the name the generation's cue file would
+	// have had.
+	return append(args,
+		"-map", "0:v:0",
+		"-c:v", "copy",
+		"-frames:v", "1",
+		"-avoid_negative_ts", "disabled",
+		"-flush_packets", "1",
+		"-f", "framecrc",
+		filepath.Join(opts.OutputDir, subtitleVideoStartFileName(cueFile)),
+	)
+}
+
+// copyMuxShiftsVideo reports whether a remux's HLS output can put its video
+// later than the cue output's clock. A generation that starts at the clock's
+// zero has negative decode times from B-frames or AAC priming: fMP4's
+// -avoid_negative_ts make_non_negative (appendTimestampNormalizationArgs)
+// moves every HLS packet later by that lead, and MPEG-TS's timestamp offset
+// lands on the first decode time, so the video starts the lead after it. The
+// WebVTT output moves with neither. For a default x264 source that is two
+// frames. An encode's output timestamps are its own.
+func copyMuxShiftsVideo(opts TranscodeOpts) bool {
+	return strings.EqualFold(opts.TargetCodecVideo, "copy")
+}
+
+// subtitleVideoStartFileName names the file the generation writing cueFile
+// records its first video packet in (framecrc).
+func subtitleVideoStartFileName(cueFile string) string {
+	return strings.TrimSuffix(cueFile, subtitleSegmentExt) + "_video.crc"
+}
+
+// liveSubtitleFileLocked names the live generation's cue file, or "" between
+// a restart closing one span and starting the next. Callers hold s.mu.
+func (s *TranscodeSession) liveSubtitleFileLocked() string {
+	if n := len(s.subtitleSpans); n > 0 && s.subtitleSpans[n-1].end < 0 {
+		return s.subtitleSpans[n-1].file
+	}
+	return ""
+}
+
+// subtitleSegmentSource finds the newest generation whose cue file (a name in
+// the output directory) already holds every cue of segment segNum. waitable
+// reports that a running or restarting process may still produce it, and
+// imminent that it is about to: a restart is under way, or the live generation
+// started at or before segNum and its output is within reach of it, the window
+// in which a video request waits rather than restarts.
+func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready, waitable, imminent bool) {
+	s.mu.Lock()
+	sampledLive := s.liveSubtitleFileLocked()
+	s.mu.Unlock()
+	liveHead, liveOK := s.liveProducedHead()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.liveSubtitleFileLocked() != sampledLive {
+		// A restart replaced the live generation while its playlist was
+		// read: that head was the previous process's progress, not this one's.
+		liveOK = false
+	}
+	running := s.running
+	exited := !running && s.restarting == nil
+	waitable = running || s.restarting != nil
+	imminent = s.restarting != nil
+	for i := len(s.subtitleSpans) - 1; i >= 0; i-- {
+		span := s.subtitleSpans[i]
+		if segNum < span.start {
+			continue
+		}
+		if span.end < 0 && running {
+			head := span.start - 1
+			if liveOK {
+				head = max(head, liveHead)
+			}
+			// A planned copy runs on from the start to every planned segment
+			// and its video request waits for that (plannedSegmentWait).
+			imminent = imminent || segNum <= head+maxSequentialMissingSegments+1 || s.copyPlan != nil
+		}
+		covered := span.end >= 0 && segNum <= span.end
+		if span.end < 0 && liveOK {
+			// A running process has demuxed past a segment once the next one
+			// is complete. When it has exited, every listed segment is final.
+			covered = segNum < liveHead || exited && segNum <= liveHead
+		}
+		if covered {
+			return span.file, true, waitable, imminent
+		}
+	}
+	return "", false, waitable, imminent
+}
+
+// SubtitleSegmentVTT returns subtitle segment segNum. A segment whose cues are
+// not on disk yet is waited for while ffmpeg produces it, then answered as a
+// valid empty WebVTT document: a missing rendition segment must never hold up
+// player readiness the way a whole-file sidecar extraction did. The wait is
+// brief unless the live generation is about to reach the segment, when it is
+// as long as the matching video segment's. A keyframe-planned copy is the
+// exception: its video request for a segment FFmpeg has not reached waits and
+// then fails with ErrSegmentNotFound, so its subtitle segment does the same
+// rather than answer a final empty document the player would keep.
+func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) ([]byte, error) {
+	opts := s.Opts()
+	if subtitleRenditionsOnDemand(opts) {
+		// Every track has segments of its own (subtitleTrackSegmentVTT).
+		return nil, ErrSegmentNotFound
+	}
+	started := time.Now()
+	deadline := started.Add(segmentWaitTimeout(opts.SegmentDuration))
+	poll := subtitleCuePollInterval
+	for {
+		file, ready, waitable, imminent := s.subtitleSegmentSource(segNum)
+		if imminent {
+			deadline = started.Add(subtitleSegmentProductionWait)
+		}
+		if ready {
+			data, err := s.readOutputFile(file)
+			if err == nil {
+				window := s.subtitleSegmentWindow(ctx, file, segNum)
+				return subtitleSegmentDocument(opts, segNum, window, data), nil
+			}
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("read subtitle cues: %w", err)
+			}
+		}
+		if waitable && s.copyPlan != nil && !time.Now().Before(deadline) {
+			return nil, ErrSegmentNotFound
+		}
+		if !waitable || !time.Now().Before(deadline) {
+			return subtitleSegmentDocument(opts, segNum, subtitleCueWindow{}, nil), nil
+		}
+		if s.copyPlan != nil && segNum >= 0 && segNum < len(s.copyPlan.durations) {
+			// A player may fetch subtitles ahead of video: the wait counts
+			// toward the throttle as the video segment's does. A segment
+			// past the plan never comes, and as the throttle position it
+			// would stop the throttler from ever pausing FFmpeg.
+			s.notePlannedSegmentRequest(segNum)
+		}
+		// A long wait backs off so it does not re-read the playlist ten
+		// times a second.
+		timer := time.NewTimer(poll)
+		poll = min(2*poll, maxSubtitleCuePollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// subtitleCueWindow places a subtitle segment's window on the cue clock, in
+// seconds: it starts offset after origin, where the generation's first video
+// segment starts, and lasts duration, or runs on when open (the media's last
+// segment). An observed origin comes from MPEG-TS or fMP4 video timestamps;
+// without one, origin is the generation's expected start, which is right for
+// the common source whose clock starts at zero. A zero duration is the
+// session's fixed grid.
+type subtitleCueWindow struct {
+	origin, offset, duration float64
+	// muxShift is the span's observed muxShift, which the timestamp map adds.
+	muxShift       float64
+	observed, open bool
+	// restartGrid marks an encode's segment beyond the running generation's
+	// reach, whose video a seek restart on the grid will cut. Its window then
+	// starts no later than grid90k, the segment's start on that grid on the
+	// cue clock, so a cue on screen there is in it.
+	restartGrid bool
+	grid90k     int64
+}
+
+// subtitleSegmentWindow returns the window of segment segNum of the
+// generation that wrote cue file.
+func (s *TranscodeSession) subtitleSegmentWindow(ctx context.Context, file string, segNum int) subtitleCueWindow {
+	span := s.subtitleSpanOrigin(ctx, file, segNum)
+	window := s.subtitleSegmentPlacement(span, segNum)
+	window.origin = span.startTime
+	if span.originKnown {
+		window.origin, window.muxShift, window.observed = span.origin, span.muxShift, true
+	}
+	return window
+}
+
+// subtitleSegmentPlacement places segment segNum of span on the video
+// playlist's timeline, which the subtitle playlist shares: its offset after
+// the span's first segment, its duration, and whether it is open. Durations
+// come from the synthetic grid, the keyframe plan, or the playlist the span's
+// generation wrote. A segment whose duration is unknown takes the grid's.
+func (s *TranscodeSession) subtitleSegmentPlacement(span subtitleCueSpan, segNum int) subtitleCueWindow {
+	window, _ := s.subtitleSegmentPlacementKnown(span, segNum)
+	return window
+}
+
+// subtitleSegmentPlacementKnown is subtitleSegmentPlacement, also reporting
+// whether the segment's place is known rather than the grid's guess: always
+// on an encode's grid, and on a copy once its plan or playlist lists it.
+func (s *TranscodeSession) subtitleSegmentPlacementKnown(span subtitleCueSpan, segNum int) (subtitleCueWindow, bool) {
+	opts := s.Opts()
+	segDur := renditionSegmentDuration(opts)
+	grid := subtitleCueWindow{
+		offset: float64((segNum - span.start) * segDur), duration: float64(segDur),
+		open: !strings.EqualFold(opts.TargetCodecVideo, "copy") && segNum >= syntheticSegmentCount(opts.TotalDuration, segDur)-1,
+	}
+	var durations []float64
+	final := false
+	switch {
+	case s.copyPlan != nil:
+		durations, final = s.copyPlan.durations[min(span.start, len(s.copyPlan.durations)):], true
+	case !strings.EqualFold(opts.TargetCodecVideo, "copy"):
+		return grid, true
+	case span.end >= 0:
+		durations, final = span.durations, span.final
+	default:
+		if data, ok := s.liveGenerationPlaylist(); ok {
+			durations, final, _ = generationPlaylistTimeline(data, span.start)
+		}
+	}
+	i := segNum - span.start
+	if i < 0 || i >= len(durations) {
+		return grid, false
+	}
+	window := subtitleCueWindow{duration: durations[i], open: final && i == len(durations)-1}
+	for _, d := range durations[:i] {
+		window.offset += d
+	}
+	return window, true
+}
+
+// subtitleSpanOrigin returns the span that wrote cue file, with its origin and
+// mux shift once observed (originKnown). The origin is read once from the
+// generation's first video segment, or from segNum when retention already
+// pruned the first. A segment is read only while it is still the one that
+// generation wrote: no restart is under way, and no later generation has
+// rewritten it. Observations run one at a time per session, outside s.mu, and
+// each span keeps its result, so concurrent requests share one ffprobe run.
+func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, segNum int) subtitleCueSpan {
+	// lookup returns the span that wrote file, the session's options, and the
+	// segments of that span that may be read now; -1 marks one that may not.
+	lookup := func() (span subtitleCueSpan, opts TranscodeOpts, first, fallback int) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		i := slices.IndexFunc(s.subtitleSpans, func(candidate subtitleCueSpan) bool { return candidate.file == file })
+		if i < 0 {
+			return subtitleCueSpan{}, TranscodeOpts{}, -1, -1
+		}
+		span, opts, first, fallback = s.subtitleSpans[i], s.opts, -1, -1
+		if span.originKnown || s.restarting != nil ||
+			!span.originFailedAt.IsZero() && time.Since(span.originFailedAt) < subtitleOriginRetryAfter {
+			return span, opts, -1, -1
+		}
+		if !s.subtitleSegmentRewrittenLocked(i, span.start) {
+			first = span.start
+		}
+		if segNum > span.start && !s.subtitleSegmentRewrittenLocked(i, segNum) {
+			fallback = segNum
+		}
+		return span, opts, first, fallback
+	}
+	span, _, first, fallback := lookup()
+	if first < 0 && fallback < 0 {
+		return span
+	}
+	s.subtitleOriginMu.Lock()
+	defer s.subtitleOriginMu.Unlock()
+	span, opts, first, fallback := lookup()
+	if first < 0 && fallback < 0 {
+		return span
+	}
+	// A copy's mux shift needs the video start its generation recorded. It is
+	// read first, so a missing record costs no ffprobe run, and after
+	// subtitleVideoStartReads misses the origin is taken without a shift:
+	// cues may then show the lead early, but they are placed.
+	videoStart, shiftKnown := 0.0, false
+	if copyMuxShiftsVideo(opts) {
+		var err error
+		videoStart, err = s.generationVideoStart(file)
+		shiftKnown = err == nil
+		if !shiftKnown && !s.noteSubtitleVideoStartMiss(file, span.start, err) {
+			return span
+		}
+	}
+
+	// The observation outlives the request that started it: concurrent
+	// requests wait on it, and its result is kept for the generation.
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subtitleOriginProbeTimeout)
+	observed, err := first, os.ErrNotExist
+	var pts float64
+	if first >= 0 {
+		pts, err = probeSegmentVideoPTS(probeCtx, opts, s.outputDir, first)
+	}
+	if errors.Is(err, os.ErrNotExist) && fallback >= 0 {
+		observed = fallback
+		pts, err = probeSegmentVideoPTS(probeCtx, opts, s.outputDir, fallback)
+	}
+	origin := pts - float64(subtitleSegmentPTSOffset90k(opts))/90_000 - s.subtitleSegmentPlacement(span, observed).offset
+	muxShift := 0.0
+	if shiftKnown {
+		// The shift only ever delays; a negative difference is rounding.
+		muxShift = max(0, origin-videoStart)
+		origin -= muxShift
+	}
+	cancel()
+
+	s.mu.Lock()
+	i := slices.IndexFunc(s.subtitleSpans, func(candidate subtitleCueSpan) bool {
+		return candidate.file == file && candidate.start == span.start
+	})
+	if i < 0 || s.restarting != nil || s.subtitleSegmentRewrittenLocked(i, observed) {
+		// A restart began while the segment was read; it may not have been
+		// this generation's any more.
+		s.mu.Unlock()
+		return span
+	}
+	if err != nil {
+		s.subtitleSpans[i].originFailedAt = time.Now()
+		s.mu.Unlock()
+		return span
+	}
+	s.subtitleSpans[i].origin, s.subtitleSpans[i].originKnown, s.subtitleSpans[i].muxShift = origin, true, muxShift
+	span = s.subtitleSpans[i]
+	s.mu.Unlock()
+	s.saveSubtitleSpans()
+	return span
+}
+
+// generationVideoStart is the cues'-clock time of the first video packet of
+// the generation that writes cueFile, as it recorded it beside its cues. Its
+// muxed time less this is how much later the HLS mux put the video.
+func (s *TranscodeSession) generationVideoStart(cueFile string) (float64, error) {
+	data, err := s.readOutputFile(subtitleVideoStartFileName(cueFile))
+	if err != nil {
+		return 0, fmt.Errorf("read generation video start: %w", err)
+	}
+	start, ok := firstFramecrcTimestamp(data)
+	if !ok {
+		return 0, errors.New("generation video start not recorded")
+	}
+	return start, nil
+}
+
+// noteSubtitleVideoStartMiss counts a failed read of the video start of the
+// span starting at segment start that wrote cueFile. It reports whether the
+// origin should now be observed without a shift; until then the observation
+// waits subtitleOriginRetryAfter like a failed one.
+func (s *TranscodeSession) noteSubtitleVideoStartMiss(cueFile string, start int, err error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.subtitleSpans, func(candidate subtitleCueSpan) bool {
+		return candidate.file == cueFile && candidate.start == start
+	})
+	if i < 0 {
+		return false
+	}
+	span := &s.subtitleSpans[i]
+	span.videoStartMisses++
+	if span.videoStartMisses < subtitleVideoStartReads {
+		span.originFailedAt = time.Now()
+		return false
+	}
+	if span.videoStartMisses == subtitleVideoStartReads {
+		slog.Warn("copy remux subtitle cues placed without the mux shift", "component", "playback",
+			"playback_session_id", s.opts.SessionID, "cue_file", cueFile, "error", err)
+	}
+	return true
+}
+
+// subtitleSegmentRewrittenLocked reports whether a generation after span i
+// has replaced segment: a restart deletes its predecessors' output from its
+// own start onward. Callers hold s.mu.
+func (s *TranscodeSession) subtitleSegmentRewrittenLocked(i, segment int) bool {
+	for _, later := range s.subtitleSpans[i+1:] {
+		if later.start <= segment {
+			return true
+		}
+	}
+	return false
+}
+
+// readOutputFile reads a file the session's FFmpeg wrote, confined to its
+// output directory.
+func (s *TranscodeSession) readOutputFile(name string) ([]byte, error) {
+	root, err := os.OpenRoot(s.outputDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.ReadFile(name)
+}
+
+// ServeSubtitleSegment writes the subtitle segment name names: a segment of
+// the pipeline rendition (sub_00012.vtt) or of an on-demand track
+// (sub_3_00012.vtt).
+func (s *TranscodeSession) ServeSubtitleSegment(w http.ResponseWriter, r *http.Request, name string) {
+	var body []byte
+	err := ErrSegmentNotFound
+	name = filepath.Base(name)
+	if track, segNum, ok := parseSubtitleTrackSegment(name); ok {
+		body, err = s.subtitleTrackSegmentVTT(r.Context(), track, segNum)
+	} else if segNum, ok := ParseSubtitleSegmentNumber(name); ok {
+		body, err = s.SubtitleSegmentVTT(r.Context(), segNum)
+	}
+	if err != nil && r.Context().Err() != nil {
+		http.Error(w, "segment not found", http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, ErrSegmentNotFound) {
+		http.Error(w, "segment not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "subtitle segment unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(body)
+	}
+}
+
+// subtitleSegmentPTSOffset90k is the shift the video segments add to the
+// source clock (see HLSMPEGTSTimestampOffset90k); fMP4 keeps the source clock.
+func subtitleSegmentPTSOffset90k(opts TranscodeOpts) int64 {
+	if HLSOutputContainer(opts) == OutputContainerMPEGTS {
+		return HLSMPEGTSTimestampOffset90k
+	}
+	return 0
+}
+
+// renditionSegmentDuration is the session's segment duration in seconds.
+func renditionSegmentDuration(opts TranscodeOpts) int {
+	if opts.SegmentDuration <= 0 {
+		return defaultSegmentDuration
+	}
+	return opts.SegmentDuration
+}
+
+const (
+	// subtitleCueClockWrap90k is the MPEG-TS timestamp range.
+	subtitleCueClockWrap90k = int64(1) << 33
+	// subtitleEpochCueLead90k is how long before a generation's origin its
+	// first cue may start: a cue already showing at a seek point is written
+	// with its own start time.
+	subtitleEpochCueLead90k = int64(60 * 60 * 90_000)
+)
+
+// subtitleWindowEpoch moves a generation's origin observed from MPEG-TS video,
+// whose timestamps wrap at 2^33 ticks (about 26.5 h), onto the cue clock,
+// which does not wrap: a source whose clock passes the rollover (a broadcast
+// capture) keeps counting in its cue file while its video segments start
+// over. A generation starts no later than its first cue, give or take a cue
+// already showing, so the origin takes the latest epoch that keeps it there,
+// however long the first cue takes to arrive. The epoch is the origin's, so
+// every window of the generation keeps it.
+func subtitleWindowEpoch(origin90k, firstCue90k int64) int64 {
+	if ahead := firstCue90k + subtitleEpochCueLead90k - origin90k; ahead >= subtitleCueClockWrap90k {
+		origin90k += ahead / subtitleCueClockWrap90k * subtitleCueClockWrap90k
+	}
+	return origin90k
+}
+
+// subtitleRenditionCue is one complete cue of a generation's cue file.
+type subtitleRenditionCue struct {
+	from, to int64 // milliseconds
+	text     string
+}
+
+// parseSubtitleRenditionCues reads the complete cues of a cue file, skipping
+// the one ffmpeg may still be writing.
+func parseSubtitleRenditionCues(cues []byte) []subtitleRenditionCue {
+	text := strings.ReplaceAll(string(cues), "\r\n", "\n")
+	if !strings.HasSuffix(text, "\n") {
+		// The final cue is still being written.
+		if cut := strings.LastIndex(text, "\n\n"); cut >= 0 {
+			text = text[:cut]
+		} else {
+			text = ""
+		}
+	}
+	var parsed []subtitleRenditionCue
+	for block := range strings.SplitSeq(text, "\n\n") {
+		block = strings.Trim(block, "\n")
+		lines := strings.Split(block, "\n")
+		for i, line := range lines {
+			left, right, found := strings.Cut(line, " --> ")
+			if !found {
+				continue
+			}
+			fields := strings.Fields(right)
+			if len(fields) == 0 || i == len(lines)-1 {
+				break
+			}
+			from, err := subtitleCueTimestampMS(left)
+			if err != nil {
+				break
+			}
+			to, err := subtitleCueTimestampMS(fields[0])
+			if err != nil {
+				break
+			}
+			parsed = append(parsed, subtitleRenditionCue{from: from, to: to, text: strings.Join(lines[i:], "\n")})
+			break
+		}
+	}
+	return parsed
+}
+
+// subtitleSegmentDocument cuts one segment out of a generation's cue file:
+// every cue overlapping the window. Cues keep their absolute source times and
+// settings; a cue that spans segments is repeated in each, as HLS expects, and
+// players de-duplicate it.
+func subtitleSegmentDocument(opts TranscodeOpts, segNum int, window subtitleCueWindow, cues []byte) []byte {
+	parsed := parseSubtitleRenditionCues(cues)
+	// Without cues there is nothing to cut, so the epoch need not be chosen.
+	firstCue90k := int64(math.Round(window.origin * 90_000))
+	if len(parsed) > 0 {
+		firstCue90k = parsed[0].from * 90
+	}
+	start90k, end90k := subtitleWindowBounds(opts, segNum, window, firstCue90k)
+
+	var out bytes.Buffer
+	out.WriteString("WEBVTT\n")
+	mapPTS := subtitleSegmentPTSOffset90k(opts) + int64(math.Round(window.muxShift*90_000))
+	fmt.Fprintf(&out, "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:%d\n", mapPTS%(1<<33))
+	for _, cue := range parsed {
+		if cue.to*90 <= start90k || cue.from*90 >= end90k {
+			continue
+		}
+		out.WriteByte('\n')
+		out.WriteString(cue.text)
+		out.WriteByte('\n')
+	}
+	return out.Bytes()
+}
+
+// subtitleCueTimestampMS parses a WebVTT [HH:]MM:SS.mmm timestamp.
+func subtitleCueTimestampMS(value string) (int64, error) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 && len(parts) != 3 {
+		return 0, fmt.Errorf("invalid cue timestamp %q", value)
+	}
+	ms := int64(0)
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			seconds, err := strconv.ParseFloat(part, 64)
+			if err != nil || seconds < 0 {
+				return 0, fmt.Errorf("invalid cue timestamp %q", value)
+			}
+			return ms*60_000 + int64(math.Round(seconds*1000)), nil
+		}
+		unit, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || unit < 0 {
+			return 0, fmt.Errorf("invalid cue timestamp %q", value)
+		}
+		ms = ms*60 + unit
+	}
+	return ms, nil
+}
+
+// ParseSubtitleSegmentNumber reports the segment number of a subtitle
+// rendition segment name: the pipeline rendition's (sub_00012.vtt) or an
+// on-demand track's (sub_3_00012.vtt).
+func ParseSubtitleSegmentNumber(name string) (int, bool) {
+	name = filepath.Base(name)
+	if _, segNum, ok := parseSubtitleTrackSegment(name); ok {
+		return segNum, true
+	}
+	if !strings.HasPrefix(name, subtitleSegmentPrefix) || !strings.HasSuffix(name, subtitleSegmentExt) {
+		return 0, false
+	}
+	digits := strings.TrimSuffix(strings.TrimPrefix(name, subtitleSegmentPrefix), subtitleSegmentExt)
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
+	segNum, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, false
+	}
+	return segNum, true
+}
+
+// HasSubtitleRendition reports whether this session publishes a subtitle
+// rendition, so master.m3u8 is a multivariant playlist.
+func (s *TranscodeSession) HasSubtitleRendition() bool {
+	return subtitleRenditionActive(s.Opts())
+}
+
+// buildSubtitleRenditionPlaylist answers master.m3u8 for a session with a
+// subtitle rendition: the multivariant playlist, or the variant or subtitle
+// media playlist it points at.
+func (s *TranscodeSession) buildSubtitleRenditionPlaylist(segPrefix, rawQuery string) ([]byte, error) {
+	rendition, query := splitSubtitleRenditionQuery(rawQuery)
+	track, query := splitQueryParam(query, SubtitleRenditionTrackQueryParam)
+	opts := s.Opts()
+	switch {
+	case rendition == subtitleRenditionVideo:
+		return s.buildVideoPlaylist(segPrefix, query)
+	case rendition == "":
+		return subtitleRenditionMultivariantPlaylist(opts, query), nil
+	case rendition != subtitleRenditionSubtitles:
+		return nil, ErrSubtitleRenditionNotFound
+	case !subtitleRenditionsOnDemand(opts) && track == "":
+		return s.buildSubtitlePlaylist(segPrefix, query, subtitleSegmentPrefix)
+	}
+	if number, ok := parseSubtitleRenditionTrack(track); ok && subtitleRenditionsOnDemand(opts) {
+		if _, listed := renditionTrack(opts, number); listed {
+			return s.buildSubtitlePlaylist(segPrefix, query, subtitleTrackSegmentPrefix(number))
+		}
+	}
+	return nil, ErrSubtitleRenditionNotFound
+}
+
+// buildSubtitlePlaylist is a subtitle media playlist whose segments are named
+// namePrefix and their number: the synthetic grid for an encode, the video
+// playlist's segments for a copy remux.
+func (s *TranscodeSession) buildSubtitlePlaylist(segPrefix, query, namePrefix string) ([]byte, error) {
+	if !strings.EqualFold(s.Opts().TargetCodecVideo, "copy") {
+		return s.generateSyntheticPlaylist(segPrefix, query, namePrefix, subtitleSegmentExt, false), nil
+	}
+	video, err := s.buildVideoPlaylist(segPrefix, query)
+	if err != nil {
+		return nil, err
+	}
+	return subtitlePlaylistFromVideo(video, namePrefix), nil
+}
+
+// subtitlePlaylistFromVideo turns a copy remux's video media playlist into
+// its subtitle playlist: every segment URI names the subtitle segment of the
+// same number (seg_00012.m4s?q becomes sub_00012.vtt?q for namePrefix sub_)
+// and the initialization map goes. Every other line stays, so the two
+// playlists list the same segments with the same durations, media sequence,
+// playlist type, start, and end tag, whether the video playlist is the
+// complete keyframe plan or FFmpeg's growing EVENT playlist.
+func subtitlePlaylistFromVideo(video []byte, namePrefix string) []byte {
+	lines := bytes.Split(video, []byte("\n"))
+	out := make([][]byte, 0, len(lines))
+	for _, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if bytes.HasPrefix(trimmed, []byte("#EXT-X-MAP:")) {
+			continue
+		}
+		if len(trimmed) > 0 && trimmed[0] != '#' {
+			line = subtitleSegmentURI(trimmed, namePrefix)
+		}
+		out = append(out, line)
+	}
+	return bytes.Join(out, []byte("\n"))
+}
+
+// subtitleSegmentURI renames the segment a video segment URI names, keeping
+// its path prefix and query.
+func subtitleSegmentURI(uri []byte, namePrefix string) []byte {
+	path, query, hasQuery := bytes.Cut(uri, []byte("?"))
+	dir, name := path[:bytes.LastIndexByte(path, '/')+1], path[bytes.LastIndexByte(path, '/')+1:]
+	segNum, err := ParseSegmentNumber(string(name))
+	if err != nil {
+		return uri
+	}
+	renamed := fmt.Appendf(slices.Clone(dir), "%s%05d%s", namePrefix, segNum, subtitleSegmentExt)
+	if hasQuery {
+		renamed = append(append(renamed, '?'), query...)
+	}
+	return renamed
+}
+
+// subtitleRenditionMultivariantPlaylist lists the stream as one variant whose
+// SUBTITLES group holds the selected track, or every on-demand track
+// (subtitleRenditionsPlaylist). Every URI is master.m3u8 relative to itself,
+// so the playlist works behind every relay path.
+// A copy remux's variant names opts.VideoRange: HLS reads a variant that names
+// no VIDEO-RANGE as SDR.
+func subtitleRenditionMultivariantPlaylist(opts TranscodeOpts, query string) []byte {
+	uri := func(rendition string) string {
+		value := "master.m3u8?" + SubtitleRenditionQueryParam + "=" + rendition
+		if query != "" {
+			value += "&" + query
+		}
+		return value
+	}
+	videoKbps := opts.TargetBitrateKbps
+	if videoKbps <= 0 {
+		videoKbps = subtitleRenditionDefaultVideoKbps
+	}
+	audioKbps := opts.TargetAudioBitrateKbps
+	if audioKbps <= 0 {
+		audioKbps = subtitleRenditionDefaultAudioKbps
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("#EXTM3U\n")
+	buf.WriteString("#EXT-X-VERSION:3\n")
+	buf.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
+	if subtitleRenditionsOnDemand(opts) {
+		buf.Write(subtitleRenditionsPlaylist(opts, uri))
+	} else {
+		fmt.Fprintf(&buf, "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=%q,NAME=%q,DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI=%q\n",
+			SubtitleRenditionGroupID, SubtitleRenditionName, uri(subtitleRenditionSubtitles))
+	}
+	fmt.Fprintf(&buf, "#EXT-X-STREAM-INF:BANDWIDTH=%d", (videoKbps+audioKbps)*1000)
+	if opts.VideoRange != "" {
+		buf.WriteString(",VIDEO-RANGE=" + opts.VideoRange)
+	}
+	fmt.Fprintf(&buf, ",SUBTITLES=%q\n", SubtitleRenditionGroupID)
+	buf.WriteString(uri(subtitleRenditionVideo) + "\n")
+	return buf.Bytes()
+}
+
+// HLS VIDEO-RANGE values a copy remux can carry.
+const (
+	HLSVideoRangePQ  = "PQ"
+	HLSVideoRangeHLG = "HLG"
+)
+
+// ffprobeUnknownTransfer is how ffprobe names an unspecified transfer.
+const ffprobeUnknownTransfer = "unknown"
+
+// CopyHLSVideoRange is the HLS VIDEO-RANGE of a video stream copy whose source
+// track signals transfer (as ffprobe names it): PQ for SMPTE ST 2084, HLG for
+// ARIB STD-B67, and empty, which HLS reads as SDR, for any other signaled
+// transfer, such as a Dolby Vision 8.2 SDR base layer. A track that signals
+// none takes what the copy implies: the HDR10 base layer the Dolby Vision
+// strip keeps, and Dolby Vision in a dvh1 sample entry (profile 5), are PQ.
+// The planner fixes the range from scanned metadata, so every load of the
+// multivariant playlist names the same one without waiting for FFmpeg.
+func CopyHLSVideoRange(transfer, videoBitstreamFilter, videoSampleEntry string) string {
+	switch strings.ToLower(strings.TrimSpace(transfer)) {
+	case tonemap.ColorTransferPQ:
+		return HLSVideoRangePQ
+	case tonemap.ColorTransferHLG:
+		return HLSVideoRangeHLG
+	case "", ffprobeUnknownTransfer, "unspecified", "reserved":
+		if videoBitstreamFilter == DV7ToHDR10BitstreamFilter || videoSampleEntry == VideoSampleEntryDVH1 {
+			return HLSVideoRangePQ
+		}
+	}
+	return ""
+}
+
+// validCopyHLSVideoRange admits only a range CopyHLSVideoRange produces, on a
+// copy remux: it is written into the playlist verbatim.
+func validCopyHLSVideoRange(opts TranscodeOpts) bool {
+	switch opts.VideoRange {
+	case "":
+		return true
+	case HLSVideoRangePQ, HLSVideoRangeHLG:
+		return strings.EqualFold(opts.TargetCodecVideo, "copy")
+	}
+	return false
+}
+
+// splitSubtitleRenditionQuery removes SubtitleRenditionQueryParam from a raw
+// query, keeping every other parameter byte-for-byte.
+func splitSubtitleRenditionQuery(rawQuery string) (rendition, rest string) {
+	return splitQueryParam(rawQuery, SubtitleRenditionQueryParam)
+}
+
+// splitQueryParam removes parameter key from a raw query, keeping every other
+// parameter byte-for-byte, and returns its value.
+func splitQueryParam(rawQuery, key string) (value, rest string) {
+	if rawQuery == "" {
+		return "", ""
+	}
+	kept := make([]string, 0, strings.Count(rawQuery, "&")+1)
+	for part := range strings.SplitSeq(rawQuery, "&") {
+		if name, v, _ := strings.Cut(part, "="); name == key {
+			value = v
+			continue
+		}
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return value, strings.Join(kept, "&")
+}

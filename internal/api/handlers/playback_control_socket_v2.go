@@ -21,6 +21,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 // Playback control socket, v2 handshake.
@@ -193,9 +194,9 @@ type PlaybackControlSocketV2 struct {
 	lanes  map[string]*playbackControlLane
 }
 
-func NewPlaybackControlSocketV2(playbackHandler *PlaybackHandler, client *redis.Client, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *PlaybackControlSocketV2 {
+func NewPlaybackControlSocketV2(playbackHandler *PlaybackHandler, client *redis.Client, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *PlaybackControlSocketV2 {
 	h := &PlaybackControlSocketV2{Playback: playbackHandler, Tickets: NewPlaybackControlTicketStore(client), PublicOrigin: publicURL, lanes: map[string]*playbackControlLane{}}
-	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, primary)
+	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)
 	return h
 }
 
@@ -335,7 +336,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithDeadline(validated, deadline)
 	defer cancel()
 
-	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -372,6 +373,10 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	configureWebSocket(conn)
 	readCtx, cancelRead := context.WithCancel(ctx)
 	defer cancelRead()
+	// The read loop takes no context: close the socket when the deadline
+	// passes or a re-check cancels the read.
+	stopClose := context.AfterFunc(readCtx, func() { _ = conn.Close() })
+	defer stopClose()
 	startWebSocketPingLoop(readCtx, realtimeConn.WritePing)
 	// Re-check login authority and session ownership without extending the
 	// deadline; loss of either closes an otherwise healthy socket.
@@ -395,14 +400,13 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				stop()
 				if err != nil {
 					cancelRead()
-					_ = conn.Close()
 					return
 				}
 			}
 		}
 	}()
 	for {
-		_, data, err := conn.ReadMessage()
+		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
 		}

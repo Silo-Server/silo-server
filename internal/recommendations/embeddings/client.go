@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
@@ -26,13 +28,16 @@ type ClientConfig struct {
 
 // Client calls an embeddings API (OpenAI-compatible or Gemini).
 type Client struct {
-	cfg        ClientConfig
+	cfg ClientConfig
+	// apiKey replaces cfg.APIKey so a rotated provider key reaches later
+	// requests without rebuilding the client.
+	apiKey     atomic.Pointer[string]
 	httpClient *http.Client
 }
 
 // NewClient creates a new embedding client.
 func NewClient(cfg ClientConfig) *Client {
-	return &Client{
+	c := &Client{
 		cfg: cfg,
 		// A redirect is answered as the response, not followed: Go forwards
 		// headers it does not know to be credentials, such as Gemini's
@@ -41,6 +46,14 @@ func NewClient(cfg ClientConfig) *Client {
 			return http.ErrUseLastResponse
 		}},
 	}
+	c.SetAPIKey(cfg.APIKey)
+	return c
+}
+
+// SetAPIKey replaces the key later Embed calls send. A call in flight keeps
+// the key it started with.
+func (c *Client) SetAPIKey(key string) {
+	c.apiKey.Store(&key)
 }
 
 // isGemini returns true if the base URL points to the Google Generative AI API.
@@ -205,7 +218,13 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	url := c.cfg.BaseURL + "/v1/embeddings"
+	// Like the chat client, add /v1 only to a base URL that has no version:
+	// one AI provider at https://host/v1 serves both.
+	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/v1/embeddings"
+	if llm.HasAPIVersion(c.cfg.BaseURL) {
+		url = strings.TrimRight(c.cfg.BaseURL, "/") + "/embeddings"
+	}
+	apiKey := *c.apiKey.Load()
 
 	maxAttempts := 6
 	var resp *http.Response
@@ -215,8 +234,8 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 			return nil, fmt.Errorf("create request: %w", reqErr)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		if c.cfg.APIKey != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		if apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
 
 		resp, err = c.httpClient.Do(httpReq)
@@ -323,6 +342,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 	// The key travels in a header: a URL query parameter would surface in
 	// transport errors, which quote the request URL.
 	url := fmt.Sprintf("%s/v1beta/%s:batchEmbedContents", c.cfg.BaseURL, modelRef)
+	apiKey := *c.apiKey.Load()
 
 	maxAttempts := 6
 	var resp *http.Response
@@ -332,7 +352,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			return nil, fmt.Errorf("create request: %w", reqErr)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("x-goog-api-key", c.cfg.APIKey)
+		httpReq.Header.Set("x-goog-api-key", apiKey)
 
 		resp, err = c.httpClient.Do(httpReq)
 		if err != nil {

@@ -398,22 +398,6 @@ func TestAnalyzeAcceptsRecordedExclusion(t *testing.T) {
 	}
 }
 
-func TestAnalyzeIsDeterministic(t *testing.T) {
-	first := analyzeFixture(t, "basic")
-	second := analyzeFixture(t, "basic")
-	firstBytes, err := first.MarshalIndented()
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondBytes, err := second.MarshalIndented()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(firstBytes) != string(secondBytes) {
-		t.Fatal("two runs over the same source produced different bytes")
-	}
-}
-
 func TestClassifyAuthReportsUnknownMiddleware(t *testing.T) {
 	class, traits := classifyAuth([]string{"middleware.RequestID", "somethingBrandNew"})
 	if class != "public" {

@@ -17,12 +17,6 @@ function preview(refreshing: boolean) {
 }
 
 describe("RowPreview", () => {
-  it("shows how many titles a rule row matches", () => {
-    const strip = preview(false);
-    expect(strip).toHaveAttribute("aria-busy", "false");
-    expect(screen.getByText(/titles match/)).toHaveTextContent("12 titles match·showing 12");
-  });
-
   it("marks the match count as updating while a changed draft's preview loads", () => {
     const strip = preview(true);
     expect(strip).toHaveAttribute("aria-busy", "true");

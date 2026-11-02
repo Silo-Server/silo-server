@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
@@ -19,7 +20,9 @@ func TestPluginLaunchCookieCarriesValidatedProfile(t *testing.T) {
 	handler := NewAuthHandler(nil, jwt, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/plugin-launch", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-1"))
+	ctx := apimw.SetProfileID(req.Context(), "profile-1")
+	ctx = access.SetScope(ctx, access.Scope{UserID: 7, ProfileID: "profile-1", ProfileVerified: true, ProfilePINRevision: 3})
+	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
 	handler.HandlePluginLaunch(rec, req)
@@ -44,6 +47,11 @@ func TestPluginLaunchCookieCarriesValidatedProfile(t *testing.T) {
 	}
 	if claims.ProfileID != "profile-1" || claims.TokenType != auth.TokenTypePluginAccess {
 		t.Fatalf("plugin claims = %#v", claims)
+	}
+	// The verified profile's PIN revision is bound, so renewal can tell when
+	// the PIN changes.
+	if claims.ProfilePINRevision == nil || *claims.ProfilePINRevision != 3 {
+		t.Fatalf("profile_pin_revision = %v, want 3", claims.ProfilePINRevision)
 	}
 }
 

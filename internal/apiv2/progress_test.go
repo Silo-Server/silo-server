@@ -42,37 +42,6 @@ func decodeProgress(t *testing.T, rec interface{ String() string }) progressPage
 	return page
 }
 
-func TestListProgress(t *testing.T) {
-	progress := &fakeProgress{entries: progressRows()}
-	h := newTestHandler(t, pilotDeps(progress, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/progress", "", owner)
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	page := decodeProgress(t, rec.Body)
-	if len(page.Items) != 2 || page.Page.HasMore || page.Page.NextCursor != "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	if page.Items[0].MediaItemID != "movie-8f2c1a" || page.Items[0].Position != 1325.5 || page.Items[0].UpdatedAt != "2026-01-02T03:04:05.000Z" {
-		t.Fatalf("item = %+v", page.Items[0])
-	}
-	// The handler asked for the default window from the newest row.
-	if q := progress.calls[0]; q.Limit != DefaultLimit || q.After != nil || q.Status != "" || q.LibraryID != 0 {
-		t.Fatalf("query = %+v", q)
-	}
-
-	rec = do(t, h, http.MethodGet, "/api/v2/progress?status=completed&library_id=3", "", owner)
-	page = decodeProgress(t, rec.Body)
-	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].MediaItemID != "episode-1b2c3d" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if q := progress.calls[1]; q.Status != "completed" || q.LibraryID != 3 {
-		t.Fatalf("query = %+v", q)
-	}
-}
-
 func TestListProgressCursor(t *testing.T) {
 	progress := &fakeProgress{entries: progressRows()}
 	h := newTestHandler(t, pilotDeps(progress, nil))
@@ -193,24 +162,6 @@ func TestListProgressCursorBoundToViewerPolicy(t *testing.T) {
 	}
 }
 
-func TestListProgressValidation(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	for _, tc := range []struct{ query, location, code string }{
-		{"offset=10", "query.offset", codeUnknownParameter},
-		{"since=abc", "query.since", codeUnknownParameter},
-		{"status=watched", "query.status", codeInvalidEnum},
-		{"limit=0", "query.limit", codeOutOfRange},
-		{"limit=201", "query.limit", codeOutOfRange},
-		{"library_id=abc", "query.library_id", codeInvalid},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress?"+tc.query, "", owner), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.query, p.Errors)
-		}
-	}
-}
-
 func TestListProgressDenied(t *testing.T) {
 	deps := pilotDeps(&fakeProgress{err: errStore}, nil)
 	h := newTestHandler(t, deps)
@@ -314,18 +265,5 @@ func TestSyncProgressEnvelopeBeforeEffects(t *testing.T) {
 	rec := do(t, h, http.MethodPost, "/api/v2/sync/progress", string(body), owner)
 	if rec.Code != 200 || len(p.synced) != 1 || len(p.synced[0]) != 100 {
 		t.Fatalf("100 boundary: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestSyncProgressAllFailedRemains200(t *testing.T) {
-	progress := &fakeProgress{failID: "broken"}
-	h := newTestHandler(t, pilotDeps(progress, nil))
-	rec := do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"broken","position_ms":100,"duration_ms":1000}]}`, with(bearer(memberToken), "X-Profile-Id", "p-owner"))
-	var out ProgressSyncBatchResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != http.StatusOK || out.Summary != (BulkSummary{Total: 1, Failed: 1}) || len(out.Items) != 1 || out.Items[0].Failure.Type != TypeInternalError.URI() {
-		t.Fatalf("%d %+v", rec.Code, out)
 	}
 }

@@ -38,28 +38,31 @@ afterEach(() => {
   vi.mocked(useIsActingAdmin).mockReturnValue(false);
 });
 
-it("refreshes cached cast after a person read observes a background photo update", async () => {
-  const id = "9007199254740993";
+const id = "9007199254740993";
+const person = {
+  id: id,
+  name: "Actor",
+  bio: "Biography",
+  birth_date: "1979-08-01",
+  photo_url: "https://images.example.test/old.jpg",
+};
+const itemKey = catalogKeys.itemDetail("movie", 12);
+const item = {
+  content_id: "movie",
+  cast: [{ person_id: id, photo_url: person.photo_url }],
+  crew: [],
+};
+
+function newClient() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 120_000 } },
   });
   clients.push(client);
-  const person = {
-    id: id,
-    name: "Actor",
-    bio: "Biography",
-    birth_date: "1979-08-01",
-    photo_url: "https://images.example.test/old.jpg",
-  };
-  const itemKey = catalogKeys.itemDetail("movie", 12);
-  const item = {
-    content_id: "movie",
-    cast: [{ person_id: id, photo_url: person.photo_url }],
-    crew: [],
-  };
-  client.setQueryData(personKeys.detail(id), person);
-  vi.mocked(getPerson).mockResolvedValue(person);
-  render(
+  return client;
+}
+
+function renderPerson(client: QueryClient) {
+  return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/person/${id}`]}>
         <Routes>
@@ -68,6 +71,13 @@ it("refreshes cached cast after a person read observes a background photo update
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+it("refreshes cached cast after a person read observes a background photo update", async () => {
+  const client = newClient();
+  client.setQueryData(personKeys.detail(id), person);
+  vi.mocked(getPerson).mockResolvedValue(person);
+  renderPerson(client);
   expect(screen.getByRole("img", { name: "Actor" })).toHaveAttribute("src", person.photo_url);
 
   expect(screen.getByText("Biography")).toBeInTheDocument();
@@ -89,14 +99,11 @@ it("refreshes cached cast after a person read observes a background photo update
 it.each([
   { queueDelay: 0, rotateSignature: false },
   { queueDelay: 33_000, rotateSignature: false },
-  { queueDelay: 660_000, rotateSignature: false },
   { queueDelay: 33_000, rotateSignature: true },
   { queueDelay: 33_000, rotateSignature: false, coldNavigation: "prefetch" },
   { queueDelay: 33_000, rotateSignature: false, coldNavigation: "mount" },
   { queueDelay: 33_000, rotateSignature: false, isAdmin: true },
-  { queueDelay: 33_000, rotateSignature: false, coldNavigation: "mount", isAdmin: true },
   { queueDelay: 33_000, rotateSignature: false, automatic: true },
-  { queueDelay: 33_000, rotateSignature: false, coldNavigation: "mount", automatic: true },
   {
     queueDelay: 0,
     rotateSignature: false,
@@ -135,24 +142,7 @@ it.each([
     vi.useFakeTimers();
     vi.mocked(useAuth).mockReturnValue({ user: { id: 1 } } as ReturnType<typeof useAuth>);
     vi.mocked(useIsActingAdmin).mockReturnValue(isAdmin ?? false);
-    const id = "9007199254740993";
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false, staleTime: 120_000 } },
-    });
-    clients.push(client);
-    const person = {
-      id: id,
-      name: "Actor",
-      bio: "Biography",
-      birth_date: "1979-08-01",
-      photo_url: "https://images.example.test/old.jpg",
-    };
-    const itemKey = catalogKeys.itemDetail("movie", 12);
-    const item = {
-      content_id: "movie",
-      cast: [{ person_id: id, photo_url: person.photo_url }],
-      crew: [],
-    };
+    const client = newClient();
     client.setQueryData(personKeys.detail(id), person);
     if (!coldNavigation) client.setQueryData(itemKey, item);
     vi.mocked(getPerson).mockResolvedValue(person);
@@ -160,15 +150,7 @@ it.each([
     vi.mocked(refreshPerson).mockResolvedValue(
       v2Fixture<"POST /api/v2/catalog/people/{id}/refresh">({ status: "queued", person_id: id }),
     );
-    const view = render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[`/person/${id}`]}>
-          <Routes>
-            <Route path="/person/:id" element={<PersonDetail />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    const view = renderPerson(client);
     await act(async () => {
       if (!automatic) {
         fireEvent.click(

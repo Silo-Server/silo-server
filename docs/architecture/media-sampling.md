@@ -18,7 +18,7 @@ Out of scope:
 - GPU-encode argument builders in `playback` and `tonemap`. They keep frames
   on the GPU for encoding, and `mediasample` imports `tonemap`, so `tonemap`
   cannot import it back.
-- Media probing with ffprobe (`internal/scanner`).
+- Media probing with ffprobe (`internal/scanner`, `internal/mediaprobe`).
 
 ## Requests
 
@@ -40,9 +40,11 @@ it. Rules:
   caller's context ends or when `Runner.Fallback`, given the failed attempt,
   declines to move on; without a `Fallback` every attempt runs. A failed run
   returns an `*mediasample.Error` with a reason for each attempt (`canceled`,
-  `timeout`, `start`, `exit`, `args`; for images also `empty`, `unsupported`,
-  and `capabilities`, see [Images](#images); for sheets also `empty` and
-  `output`, see [Sheets](#sheets)) and a bounded tail of ffmpeg's log.
+  `timeout`, `start`, `exit`, `args`, and `unsupported` for a hardware attempt
+  refused before ffmpeg starts, see [Hardware decode](#hardware-decode); for
+  images also `empty`, `unsupported`, and `capabilities`, see [Images](#images);
+  for sheets also `empty`, `unsupported`, `capabilities`, and `output`, see
+  [Sheets](#sheets)) and a bounded tail of ffmpeg's log.
   The error message quotes only ffmpeg's last log line, cleaned so it can be
   stored in a text column.
 - `Classify` names a failed run's cause from its last attempt
@@ -66,7 +68,7 @@ Supported today:
 |---|---|
 | Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` or `Sheets`), `At` (the frame at a time; `Images` only) |
 | Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images), `Sheets` (JPEG sprite sheets of the samples) |
-| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images`, `Stats`, or `Sheets`); see [Hardware decode](#hardware-decode) |
+| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images`, `Stats`, or `Sheets`), and NVENC's CUDA decoder for `Sheets`; see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
 the audio output first and the statistics of the first video stream
@@ -143,7 +145,7 @@ keep `-loglevel warning`.
 stream (`AudioStream`, ffmpeg's `0:a:N`), optionally only its front-centre
 channel (`CenterChannel`, which fails on a stream without one), band-limits it
 to 200-3400 Hz, and resamples it to 8 kHz mono with
-`aresample=async=1:first_pts=0`, so a stream that starts after the window
+`aresample=8000:async=1:first_pts=0`, so a stream that starts after the window
 start is padded with silence and level `i` always covers window start plus
 `i` × 10 ms. ffmpeg writes raw samples to stdout and the runner reduces them
 to one level per frame as they arrive (whole dB above -100 dBFS), so no window
@@ -285,7 +287,10 @@ persists (`decode_invalid_data`, `tonemap_unsupported`, `ffmpeg_probe_failed`,
 own log rules rather than `Classify`, because those reasons decide per-file
 backoff. Its `Runner.Fallback` ends the run only after a hardware attempt
 that found invalid data or whose VideoToolbox software tone mapping was
-refused; every other failure moves on to the next planned attempt.
+refused; every other failure moves on to the next planned attempt. When a
+frame was extracted but encoding or storing its image fails, the chapter
+records `chapter_upload_failed` and backs off on its own; the file is not
+marked failed.
 
 ## Sheets
 
@@ -443,7 +448,11 @@ must use the returned height and reject chunks whose geometry differs.
   with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
   the decoder sees every reference picture, so its state stays whole, and
   the chain still gets only the keyframes. That read costs several
-  keyframes-only reads and runs only for files that fail without it. If the
+  keyframes-only reads and runs only for files that fail without it. Its
+  cost follows the span it decodes, not the sample count attempt timeouts
+  are sized for, so it runs on the attempt's deadline plus the sampled
+  span's playing time; `Request.AttemptSeconds` is that longest attempt,
+  which a caller waiting on another node adds up. If the
   window fails for any reason, the attempt reports the window's failure,
   whose reason and log describe the latest read, and after a list fallback
   its error names the list run's.
@@ -588,7 +597,9 @@ of new thumbnails.
 `LoadCapabilities` lists an ffmpeg binary's filters and muxers, and checks
 that the chromaprint muxer can write raw fingerprints. `Capabilities.Require`
 reports the first thing a request needs that the binary lacks: the
-chromaprint muxer for a fingerprint, `silencedetect` for silence, and
+chromaprint muxer for a fingerprint, `silencedetect` for silence,
+`highpass`, `lowpass`, and `aresample` (and `pan` with `CenterChannel`) for
+speech, a passing concat list check for `Samples` without `ReadThrough`, and
 `blackframe`, `signalstats`, and `metadata` for `Stats`, and `metadata`
 for `Sheets`. Images need no check up front; the runner reads the tone-map filters itself (see
 [Images](#images)).
@@ -631,10 +642,19 @@ work to another goroutine while it holds the main thread, and leaves the main
 thread's priority unchanged.
 
 Lowering priority needs no privileges. If it fails anyway (for example under
-a seccomp profile that blocks `ioprio_set`), the run continues at normal
-priority and the first failure is logged. Deadlines and the limiter still
+a seccomp profile that blocks `ioprio_set`), the run continues with whatever
+part took effect (there, nice 19 without the idle I/O class) and the first
+failure is logged. Deadlines and the limiter still
 bound background work. If the idle I/O class is seen to starve it on a disk
 that is never idle, switch to the lowest best-effort level (7) instead.
+
+On Unix every ffmpeg run, background or not, starts in a process group of
+its own through `internal/procgroup`, which every other ffmpeg and ffprobe
+run in Silo uses too (`fspath.CommandContext`, which runs the tools on media
+paths, builds its commands with it). A timeout or cancellation kills the whole group, so
+when the ffmpeg path is a wrapper script that runs the real ffmpeg as a
+child, the child dies with the wrapper instead of running on outside the
+limiter. Other platforms kill only the process Silo started.
 
 ## Artifact storage
 
@@ -673,8 +693,10 @@ Status rules, applied by `Artifact.State`:
 The retry delay starts at 12 hours and doubles for each consecutive failure on
 the same server and unchanged file, up to 7 days. A failure recorded inside
 the current delay (a forced run) does not extend it. A failure never replaces
-a `complete` or `unusable` row for the same file identity. A later success
-clears the failure.
+a `complete` or `unusable` row for the same file identity, except an
+`unusable` row whose `detail` the failure lists as replaceable: a verdict an
+earlier build stored that the kind no longer trusts and no current writer
+stores. A later success clears the failure.
 
 `unusable` and `failed` rows carry an empty payload and, for intro
 fingerprints, no Chromaprint format. Binaries that predate artifact statuses

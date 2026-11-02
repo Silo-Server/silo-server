@@ -108,19 +108,9 @@ func catalogSemanticCoverageByType(ctx context.Context, q coverageQuerier, itemT
 	if err != nil {
 		return nil, fmt.Errorf("query semantic coverage eligible counts: %w", err)
 	}
-	func() {
-		defer eligibleRows.Close()
-		for eligibleRows.Next() {
-			var mediaType string
-			var eligible int
-			if err = eligibleRows.Scan(&mediaType, &eligible); err != nil {
-				return
-			}
-			upsert(mediaType).Eligible = eligible
-		}
-		err = eligibleRows.Err()
-	}()
-	if err != nil {
+	if err := scanCoverageCounts(eligibleRows, func(mediaType string, eligible int) {
+		upsert(mediaType).Eligible = eligible
+	}); err != nil {
 		return nil, fmt.Errorf("scan semantic coverage eligible counts: %w", err)
 	}
 
@@ -128,19 +118,9 @@ func catalogSemanticCoverageByType(ctx context.Context, q coverageQuerier, itemT
 	if err != nil {
 		return nil, fmt.Errorf("query semantic coverage vectorized counts: %w", err)
 	}
-	func() {
-		defer vectorRows.Close()
-		for vectorRows.Next() {
-			var mediaType string
-			var vectorized int
-			if err = vectorRows.Scan(&mediaType, &vectorized); err != nil {
-				return
-			}
-			upsert(mediaType).Vectorized = vectorized
-		}
-		err = vectorRows.Err()
-	}()
-	if err != nil {
+	if err := scanCoverageCounts(vectorRows, func(mediaType string, vectorized int) {
+		upsert(mediaType).Vectorized = vectorized
+	}); err != nil {
 		return nil, fmt.Errorf("scan semantic coverage vectorized counts: %w", err)
 	}
 
@@ -149,6 +129,21 @@ func catalogSemanticCoverageByType(ctx context.Context, q coverageQuerier, itemT
 		out = append(out, *coverage[mediaType])
 	}
 	return out, nil
+}
+
+// scanCoverageCounts reads (type, count) rows into set, closes rows, and
+// returns the scan or iteration error.
+func scanCoverageCounts(rows pgx.Rows, set func(mediaType string, count int)) error {
+	defer rows.Close()
+	for rows.Next() {
+		var mediaType string
+		var count int
+		if err := rows.Scan(&mediaType, &count); err != nil {
+			return err
+		}
+		set(mediaType, count)
+	}
+	return rows.Err()
 }
 
 // semanticCoverageSnapshot is an immutable, point-in-time view of per-type

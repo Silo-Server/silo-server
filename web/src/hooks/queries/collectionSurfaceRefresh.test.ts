@@ -46,6 +46,7 @@ describe("invalidateLibraryCollectionQueries", () => {
     const queryClient = new QueryClient();
 
     queryClient.setQueryData(libraryCollectionKeys.list(7), []);
+    queryClient.setQueryData(collectionKeys.server(), []);
     queryClient.setQueryData(
       catalogKeys.list({
         source: "library_collection",
@@ -59,6 +60,7 @@ describe("invalidateLibraryCollectionQueries", () => {
     await invalidateLibraryCollectionQueries(queryClient);
 
     expect(queryClient.getQueryState(libraryCollectionKeys.list(7))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(collectionKeys.server())?.isInvalidated).toBe(true);
     expect(
       queryClient.getQueryState(
         catalogKeys.list({

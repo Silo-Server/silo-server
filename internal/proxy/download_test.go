@@ -33,11 +33,7 @@ func (r *recordingArtifactMissReporter) ReportRemoteArtifactMissing(_ context.Co
 
 func newDownloadProxyServer(t *testing.T, secret string) *Server {
 	t.Helper()
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = secret
-	w.SetConfigForTest(cfg)
-	return NewServer(w, nil)
+	return NewServer(testWatcher(secret), nil)
 }
 
 func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
@@ -47,7 +43,7 @@ func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
 	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:   "download-1",
 		MediaPath:   path,
 		PlayMethod:  streamtoken.PlayMethodDownload,
@@ -55,9 +51,6 @@ func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
 		ProfileID:   "profile-1",
 		MediaFileID: 42,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
 	req.Header.Set("Range", "bytes=2-5")
@@ -102,7 +95,7 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 		_, _ = io.WriteString(w, "2345")
 	}))
 	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:          "download-remote-1",
 		PlayMethod:         streamtoken.PlayMethodDownload,
 		TranscodeNode:      origin.URL,
@@ -110,9 +103,6 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 		DownloadFilename:   "Movie Final.mp4",
 		UserID:             7,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
 	req.Header.Set("Range", "bytes=2-5")
@@ -147,51 +137,17 @@ func TestProxyDownloadCORSAllowsConditionalHeaders(t *testing.T) {
 	}
 }
 
-func TestProxyDownloadRelaysNodeLocalArtifactPreconditionFailure(t *testing.T) {
-	const secret = "download-proxy-secret"
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("If-Match"); got != `"old-etag"` {
-			t.Errorf("origin If-Match = %q", got)
-			http.Error(w, "unexpected condition", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("ETag", `"new-etag"`)
-		w.WriteHeader(http.StatusPreconditionFailed)
-	}))
-	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:          "download-remote-412",
-		PlayMethod:         streamtoken.PlayMethodDownload,
-		TranscodeNode:      origin.URL,
-		DownloadArtifactID: "artifact-1",
-	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
-	req.Header.Set("If-Match", `"old-etag"`)
-	rr := httptest.NewRecorder()
-	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusPreconditionFailed || rr.Header().Get("ETag") != `"new-etag"` {
-		t.Fatalf("status=%d etag=%q body=%q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
-	}
-}
-
 func TestProxyDownloadReportsNodeLocalArtifactMissing(t *testing.T) {
 	const secret = "download-proxy-secret"
 	origin := httptest.NewServer(http.NotFoundHandler())
 	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:             "download-remote-missing",
 		PlayMethod:            streamtoken.PlayMethodDownload,
 		TranscodeNode:         origin.URL,
 		DownloadArtifactID:    "artifact-opaque",
 		DownloadArtifactRowID: "artifact-row",
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	reporter := &recordingArtifactMissReporter{}
 	server := newDownloadProxyServer(t, secret)
 	server.SetRemoteArtifactMissReporter(reporter)
@@ -212,13 +168,10 @@ func TestProxyDownloadToneMapTokenRequiresCompleteAttestation(t *testing.T) {
 		t.Error("incomplete token reached origin")
 	}))
 	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID: "download-attested", PlayMethod: streamtoken.PlayMethodToneMapDownload,
 		TranscodeNode: origin.URL, DownloadArtifactID: "artifact-1",
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rr := httptest.NewRecorder()
 	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
 	if rr.Code != http.StatusUnauthorized {
@@ -233,14 +186,11 @@ func TestProxyDownloadAcceptsCompleteToneMapAttestationToken(t *testing.T) {
 		_, _ = w.Write([]byte("bytes"))
 	}))
 	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID: "download-attested", PlayMethod: streamtoken.PlayMethodToneMapDownload,
 		TranscodeNode: origin.URL, DownloadArtifactID: "artifact-1",
 		DownloadArtifactSize: 5, DownloadExecutionFingerprint: "fingerprint",
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rr := httptest.NewRecorder()
 	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
 	if rr.Code != http.StatusOK || rr.Body.String() != "bytes" {
@@ -250,14 +200,11 @@ func TestProxyDownloadAcceptsCompleteToneMapAttestationToken(t *testing.T) {
 
 func TestProxyDownloadRejectsExpiredToken(t *testing.T) {
 	const secret = "download-proxy-secret"
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:  "download-expired",
 		MediaPath:  "/media/movie.mkv",
 		PlayMethod: streamtoken.PlayMethodDownload,
 	}, secret, -time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	req := httptest.NewRequest(http.MethodHead, "/downloads/file/"+token, nil)
 	rr := httptest.NewRecorder()
@@ -269,14 +216,11 @@ func TestProxyDownloadRejectsExpiredToken(t *testing.T) {
 
 func TestProxyDownloadReturnsNotFoundForMissingFile(t *testing.T) {
 	const secret = "download-proxy-secret"
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:  "download-missing",
 		MediaPath:  filepath.Join(t.TempDir(), "gone.mp4"),
 		PlayMethod: streamtoken.PlayMethodDownload,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
 	rr := httptest.NewRecorder()
@@ -307,16 +251,13 @@ func TestProxyDownloadArtifactRelayKeepsBoundedHeaderWait(t *testing.T) {
 		_, _ = io.WriteString(w, "0123")
 	}))
 	defer origin.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:          "download-remote-bounded",
 		PlayMethod:         streamtoken.PlayMethodDownload,
 		TranscodeNode:      origin.URL,
 		DownloadArtifactID: "artifact-1",
 		UserID:             7,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	server := newDownloadProxyServer(t, secret)
 	relay := &countingTransport{}
@@ -328,5 +269,29 @@ func TestProxyDownloadArtifactRelayKeepsBoundedHeaderWait(t *testing.T) {
 	}
 	if relay.requests != 0 {
 		t.Fatalf("artifact download sent %d request(s) through the unbounded node relay client", relay.requests)
+	}
+}
+
+func TestProxyDownloadBandwidthFollowsReloadedLimitsWithoutRedis(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	w.SetConfigForTest(&config.Config{})
+	srv := NewServer(w, nil)
+	srv.SetDownloadBandwidth(nil, nil)
+
+	src := strings.NewReader("payload")
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got != io.Reader(src) {
+		t.Fatal("unlimited startup config should return the raw reader")
+	}
+
+	limited := &config.Config{}
+	limited.Download.UserBandwidthBPS = 1_000_000
+	w.SetConfigForTest(limited)
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got == io.Reader(src) {
+		t.Fatal("a reloaded user limit should throttle new transfers")
+	}
+
+	w.SetConfigForTest(&config.Config{})
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got != io.Reader(src) {
+		t.Fatal("clearing the limits should stop throttling new transfers")
 	}
 }

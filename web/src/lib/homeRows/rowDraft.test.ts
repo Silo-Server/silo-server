@@ -58,7 +58,6 @@ function row(overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }
@@ -143,10 +142,12 @@ describe("row names", () => {
     expect(savedTitle({ ...blank, config: { window: "90d" } }, recipeCatalogFixture)).toBe(
       "Trending on this server",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, recipeCatalogFixture)).toBe(
-      "On Deck",
+    expect(
+      savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, recipeCatalogFixture),
+    ).toBe("Next in Series");
+    expect(savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, undefined)).toBe(
+      "Next in series",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, undefined)).toBe("On deck");
   });
 });
 
@@ -401,11 +402,8 @@ describe("rule rows", () => {
         },
       ],
       ["custom_filter", { ...rules, limit: 40, generated_source: "home" }],
-      [
-        "collection",
-        { library_collection_id: "lib-trakt", source_provider: "trakt", source_preset: "trending" },
-      ],
-      ["trending_discover", { source: "trakt", window: "week" }],
+      ["collection", { library_collection_id: "lib-1", source_provider: "mdblist" }],
+      ["trending_discover", { source: "tmdb", window: "week" }],
       ["award_winners", { award_type: "oscar" }],
       ["admin_curated_list", { item_ids: ["movie:a", "movie:b"] }],
       [

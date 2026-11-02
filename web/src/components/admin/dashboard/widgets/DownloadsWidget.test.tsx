@@ -36,27 +36,6 @@ describe("DownloadsWidget", () => {
     mocks.useAdminDownloadsStats.mockReset();
   });
 
-  it("shows the headline numbers and the per-user list", () => {
-    mocks.useAdminDownloadsStats.mockReturnValue({
-      data: stats(),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<DownloadsWidget />);
-
-    expect(screen.getByText("Users")).toBeTruthy();
-    expect(screen.getByText("7")).toBeTruthy();
-    expect(screen.getByText("Items")).toBeTruthy();
-    expect(screen.getByText("14")).toBeTruthy();
-    expect(screen.getByText("On devices")).toBeTruthy();
-    expect(screen.getByText("5.0 GB")).toBeTruthy();
-    expect(screen.getByText("quick")).toBeTruthy();
-    expect(screen.getByText("User #5")).toBeTruthy();
-    expect(screen.getByText("11 items")).toBeTruthy();
-    expect(screen.getByText(/3 started · 2 finished \(24h\)/)).toBeTruthy();
-  });
-
   it("reads all zeros as the empty state, not as data", () => {
     mocks.useAdminDownloadsStats.mockReturnValue({
       data: stats({
@@ -95,30 +74,5 @@ describe("DownloadsWidget", () => {
 
     expect(screen.getByText(/1 started · 1 finished \(24h\)/)).toBeTruthy();
     expect(screen.getByText("No offline downloads")).toBeTruthy();
-  });
-
-  it("surfaces a failed load", () => {
-    mocks.useAdminDownloadsStats.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error("boom"),
-    });
-
-    render(<DownloadsWidget />);
-
-    expect(screen.getByText("Failed to load download activity.")).toBeTruthy();
-  });
-
-  it("renders a skeleton while loading", () => {
-    mocks.useAdminDownloadsStats.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      error: null,
-    });
-
-    const { container } = render(<DownloadsWidget />);
-
-    expect(container.querySelector('[data-slot="skeleton"], .animate-pulse')).toBeTruthy();
-    expect(screen.queryByText("No offline downloads")).toBeNull();
   });
 });

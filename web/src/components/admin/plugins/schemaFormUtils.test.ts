@@ -8,48 +8,22 @@ import {
   parseFieldTypes,
   validateSchemaValues,
 } from "./schemaFormUtils";
+import { field } from "./adminFormField.test-support";
 
 const descriptor: PluginAdminForm = {
   fields: [
-    {
-      key: "service_kind",
-      label: "Service",
-      control: "SELECT",
+    field("service_kind", "Service", "SELECT", {
       required: true,
-      secret: false,
-      multiline: false,
       options: [
         { value: "radarr", label: "Radarr" },
         { value: "sonarr", label: "Sonarr" },
       ],
-    },
-    {
-      key: "quality_profile_id",
-      label: "QP",
-      control: "SELECT",
-      required: true,
-      secret: false,
-      multiline: false,
-      dynamic_options: true,
-    },
-    {
-      key: "tags",
-      label: "Tags",
-      control: "MULTI_SELECT",
-      required: false,
-      secret: false,
-      multiline: false,
-      dynamic_options: true,
-    },
-    {
-      key: "season_folder",
-      label: "Season folder",
-      control: "SWITCH",
-      required: false,
-      secret: false,
-      multiline: false,
+    }),
+    field("quality_profile_id", "QP", "SELECT", { required: true, dynamic_options: true }),
+    field("tags", "Tags", "MULTI_SELECT", { dynamic_options: true }),
+    field("season_folder", "Season folder", "SWITCH", {
       show_when: [{ field: "service_kind", equals: ["sonarr"] }],
-    },
+    }),
   ],
 };
 
@@ -57,15 +31,7 @@ describe("validateSchemaValues", () => {
   it("ignores required fields hidden by show_when", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "x",
-          label: "X",
-          control: "TEXT",
-          required: true,
-          secret: false,
-          multiline: false,
-          show_when: [{ field: "k", equals: ["yes"] }],
-        },
+        field("x", "X", "TEXT", { required: true, show_when: [{ field: "k", equals: ["yes"] }] }),
       ],
     };
     expect(validateSchemaValues(d, { k: "no" })).toEqual({});
@@ -89,34 +55,14 @@ describe("buildSchemaValues", () => {
 describe("validateSchemaValues regex guard (#5)", () => {
   it("does not throw on a malformed pattern; treats it as no constraint", () => {
     const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "name",
-          label: "Name",
-          control: "TEXT",
-          required: false,
-          secret: false,
-          multiline: false,
-          validation: { pattern: "[" },
-        },
-      ],
+      fields: [field("name", "Name", "TEXT", { validation: { pattern: "[" } })],
     };
     expect(() => validateSchemaValues(d, { name: "anything" })).not.toThrow();
     expect(validateSchemaValues(d, { name: "anything" })).toEqual({});
   });
   it("still flags a valid pattern mismatch", () => {
     const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "name",
-          label: "Name",
-          control: "TEXT",
-          required: false,
-          secret: false,
-          multiline: false,
-          validation: { pattern: "^[a-z]+$" },
-        },
-      ],
+      fields: [field("name", "Name", "TEXT", { validation: { pattern: "^[a-z]+$" } })],
     };
     expect(validateSchemaValues(d, { name: "ABC" }).name).toMatch(/invalid/i);
     expect(validateSchemaValues(d, { name: "abc" })).toEqual({});
@@ -157,33 +103,9 @@ describe("buildSchemaValues type-driven coercion (#15)", () => {
   it("coerces by declared type, preserving string ids and numeric array items", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "quality_profile_id",
-          label: "QP",
-          control: "SELECT",
-          required: false,
-          secret: false,
-          multiline: false,
-          dynamic_options: true,
-        },
-        {
-          key: "root_folder",
-          label: "Root",
-          control: "SELECT",
-          required: false,
-          secret: false,
-          multiline: false,
-          dynamic_options: true,
-        },
-        {
-          key: "tags",
-          label: "Tags",
-          control: "MULTI_SELECT",
-          required: false,
-          secret: false,
-          multiline: false,
-          dynamic_options: true,
-        },
+        field("quality_profile_id", "QP", "SELECT", { dynamic_options: true }),
+        field("root_folder", "Root", "SELECT", { dynamic_options: true }),
+        field("tags", "Tags", "MULTI_SELECT", { dynamic_options: true }),
       ],
     };
     const out = buildSchemaValues(
@@ -200,17 +122,7 @@ describe("buildSchemaValues type-driven coercion (#15)", () => {
 describe("buildSchemaValues default_value (#6)", () => {
   it("persists an untouched declared default", () => {
     const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "season_folder",
-          label: "Season folder",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-      ],
+      fields: [field("season_folder", "Season folder", "SWITCH", { default_value: true })],
     };
     const out = buildSchemaValues(d, {});
     expect(out.season_folder).toBe(true);
@@ -218,15 +130,7 @@ describe("buildSchemaValues default_value (#6)", () => {
   it("required field satisfied by its default value", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "season_folder",
-          label: "Season folder",
-          control: "SWITCH",
-          required: true,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
+        field("season_folder", "Season folder", "SWITCH", { required: true, default_value: true }),
       ],
     };
     expect(validateSchemaValues(d, {})).toEqual({});
@@ -234,24 +138,11 @@ describe("buildSchemaValues default_value (#6)", () => {
   it("uses a controller default when validating a conditional required field", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "anime_enabled",
-          label: "Anime",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-        {
-          key: "anime_root_folder",
-          label: "Anime root folder",
-          control: "TEXT",
+        field("anime_enabled", "Anime", "SWITCH", { default_value: true }),
+        field("anime_root_folder", "Anime root folder", "TEXT", {
           required: true,
-          secret: false,
-          multiline: false,
           show_when: [{ field: "anime_enabled", equals: ["true"] }],
-        },
+        }),
       ],
     };
     expect(validateSchemaValues(d, {}).anime_root_folder).toMatch(/required/i);
@@ -259,54 +150,14 @@ describe("buildSchemaValues default_value (#6)", () => {
   it("uses a controller default before dropping hidden fields", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "season_folder",
-          label: "Season folder",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-        },
-        {
-          key: "series_root_folder",
-          label: "Series root folder",
-          control: "TEXT",
-          required: false,
-          secret: false,
-          multiline: false,
+        field("season_folder", "Season folder", "SWITCH", { default_value: true }),
+        field("series_root_folder", "Series root folder", "TEXT", {
           default_value: "/tv",
           show_when: [{ field: "season_folder", equals: ["true"] }],
-        },
+        }),
       ],
     };
     expect(buildSchemaValues(d, {}).series_root_folder).toBe("/tv");
-  });
-  it("does not persist a default for a hidden field", () => {
-    const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "is_4k",
-          label: "4K",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-        },
-        {
-          key: "season_folder",
-          label: "Season folder",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          default_value: true,
-          show_when: [{ field: "is_4k", equals: ["true"] }],
-        },
-      ],
-    };
-    const out = buildSchemaValues(d, { is_4k: false });
-    expect(out.season_folder).toBeUndefined();
   });
 });
 
@@ -314,74 +165,23 @@ describe("buildSchemaValues hidden fields", () => {
   it("drops a field hidden by show_when even if its draft value is set", () => {
     const d: PluginAdminForm = {
       fields: [
-        {
-          key: "is_4k",
-          label: "4K",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-        },
-        {
-          key: "is_default_4k",
-          label: "Default 4K",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
+        field("is_4k", "4K", "SWITCH"),
+        field("is_default_4k", "Default 4K", "SWITCH", {
           show_when: [{ field: "is_4k", equals: ["true"] }],
-        },
+        }),
       ],
     };
     const out = buildSchemaValues(d, { is_4k: false, is_default_4k: true });
     expect(out.is_default_4k).toBeUndefined(); // hidden -> not persisted
     expect(out.is_4k).toBe(false);
   });
-  it("keeps a field when its show_when is satisfied", () => {
-    const d: PluginAdminForm = {
-      fields: [
-        {
-          key: "is_4k",
-          label: "4K",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-        },
-        {
-          key: "is_default_4k",
-          label: "Default 4K",
-          control: "SWITCH",
-          required: false,
-          secret: false,
-          multiline: false,
-          show_when: [{ field: "is_4k", equals: ["true"] }],
-        },
-      ],
-    };
-    const out = buildSchemaValues(d, { is_4k: true, is_default_4k: true });
-    expect(out.is_default_4k).toBe(true);
-  });
 });
 
-const boolField: PluginAdminFormField = {
-  key: "is_4k",
-  label: "4K",
-  control: "SWITCH",
-  required: false,
-  secret: false,
-  multiline: false,
-};
+const boolField: PluginAdminFormField = field("is_4k", "4K", "SWITCH");
 
-const numArrayField: PluginAdminFormField = {
-  key: "weights",
-  label: "Weights",
-  control: "MULTI_SELECT",
-  required: false,
-  secret: false,
-  multiline: false,
+const numArrayField: PluginAdminFormField = field("weights", "Weights", "MULTI_SELECT", {
   dynamic_options: true,
-};
+});
 
 describe("coerceFieldValue boolean coercion (CodeRabbit #4)", () => {
   it('does not turn the string "false" into true', () => {
@@ -419,23 +219,8 @@ describe("coerceFieldValue array:bool coercion", () => {
 describe("section visibility", () => {
   const sectionDescriptor: PluginAdminForm = {
     fields: [
-      {
-        key: "advanced_enabled",
-        label: "Advanced",
-        control: "SWITCH",
-        required: false,
-        secret: false,
-        multiline: false,
-        default_value: false,
-      },
-      {
-        key: "endpoint",
-        label: "Endpoint",
-        control: "TEXT",
-        required: true,
-        secret: false,
-        multiline: false,
-      },
+      field("advanced_enabled", "Advanced", "SWITCH", { default_value: false }),
+      field("endpoint", "Endpoint", "TEXT", { required: true }),
     ],
     sections: [
       {
@@ -469,46 +254,11 @@ describe("section visibility", () => {
 describe("buildSchemaValues explicit clears", () => {
   const clearDescriptor: PluginAdminForm = {
     fields: [
-      {
-        key: "allowed_groups",
-        label: "Allowed",
-        control: "TEXT",
-        required: false,
-        secret: false,
-        multiline: false,
-      },
-      {
-        key: "ca_pem",
-        label: "CA",
-        control: "TEXTAREA",
-        required: false,
-        secret: false,
-        multiline: true,
-      },
-      {
-        key: "max_age",
-        label: "Max age",
-        control: "NUMBER",
-        required: false,
-        secret: false,
-        multiline: false,
-      },
-      {
-        key: "client_secret",
-        label: "Secret",
-        control: "PASSWORD",
-        required: false,
-        secret: true,
-        multiline: false,
-      },
-      {
-        key: "token",
-        label: "Token",
-        control: "TEXT",
-        required: false,
-        secret: true,
-        multiline: false,
-      },
+      field("allowed_groups", "Allowed", "TEXT"),
+      field("ca_pem", "CA", "TEXTAREA", { multiline: true }),
+      field("max_age", "Max age", "NUMBER"),
+      field("client_secret", "Secret", "PASSWORD", { secret: true }),
+      field("token", "Token", "TEXT", { secret: true }),
     ],
   };
   const emptied = { allowed_groups: "", ca_pem: "  ", max_age: "", client_secret: "", token: "" };

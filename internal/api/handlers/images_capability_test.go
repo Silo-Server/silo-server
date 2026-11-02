@@ -67,8 +67,14 @@ func TestHandleImagesCapability(t *testing.T) {
 		}
 	}
 
-	if got.Widths["poster"].Large != 780 {
-		t.Errorf("poster large width = %d, want 780", got.Widths["poster"].Large)
+	if got.Widths["poster"].Large != 1000 {
+		t.Errorf("poster large width = %d, want 1000", got.Widths["poster"].Large)
+	}
+	if got.Widths["still"].Large != 1280 {
+		t.Errorf("still large width = %d, want 1280", got.Widths["still"].Large)
+	}
+	if got.Widths["backdrop"].Large != 2560 {
+		t.Errorf("backdrop large width = %d, want 2560", got.Widths["backdrop"].Large)
 	}
 	if got.Widths["logo"].Large != 1280 {
 		t.Errorf("logo large width = %d, want 1280", got.Widths["logo"].Large)

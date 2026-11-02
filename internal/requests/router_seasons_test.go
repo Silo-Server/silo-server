@@ -8,41 +8,6 @@ import (
 	"testing"
 )
 
-func TestRouterDescriptorCarriesSeasons(t *testing.T) {
-	got := routerDescriptor(Request{MediaType: MediaTypeSeries, Seasons: []int{0, 2}}).GetSeasons()
-	if !slices.Equal(got, []int32{0, 2}) {
-		t.Fatalf("series seasons = %v, want [0 2]", got)
-	}
-	if got := routerDescriptor(Request{MediaType: MediaTypeSeries}).GetSeasons(); len(got) != 0 {
-		t.Fatalf("whole-series seasons = %v, want none", got)
-	}
-	if got := routerDescriptor(Request{MediaType: MediaTypeMovie, Seasons: []int{1}}).GetSeasons(); len(got) != 0 {
-		t.Fatalf("movie seasons = %v, want none", got)
-	}
-}
-
-type featureResolver struct {
-	fakeRouterResolver
-	features RouterFeatures
-}
-
-func (r featureResolver) RouterFeatures(context.Context, int, string) (RouterFeatures, error) {
-	return r.features, nil
-}
-
-// The plugin provider reads features through a resolver that can, and reports
-// none, without launching a plugin, through one that cannot.
-func TestPluginRouterProviderRouterFeatures(t *testing.T) {
-	capable := NewPluginRouterProvider(featureResolver{features: RouterFeatures{SupportsSeasons: true}}).(RouterFeatureReader)
-	if got, err := capable.RouterFeatures(context.Background(), 1, "arr"); err != nil || !got.SupportsSeasons {
-		t.Fatalf("features = %+v, %v; want seasons", got, err)
-	}
-	plain := NewPluginRouterProvider(fakeRouterResolver{}).(RouterFeatureReader)
-	if got, err := plain.RouterFeatures(context.Background(), 1, "arr"); err != nil || got.SupportsSeasons {
-		t.Fatalf("features = %+v, %v; want none", got, err)
-	}
-}
-
 // seriesRouterInst is a Sonarr connection bound to the given installation.
 func seriesRouterInst(id string, installID int) Integration {
 	in := routerInstOn(id, installID)
@@ -110,17 +75,6 @@ func TestMissingSeasonsNotRequestableWithAnOldSeriesRouter(t *testing.T) {
 				t.Fatalf("err = %v, want ErrAlreadyAvailable", err)
 			}
 		})
-	}
-}
-
-// A feature read that fails is an error, not a silent "no".
-func TestMissingSeasonsRequestableReportsFeatureReadErrors(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{seriesRouterInst("sonarr", 1)}
-	svc := seasonService(store, severanceInLibrary())
-	svc.SetRouterProvider(&fakeRouterProvider{featuresErr: errors.New("db down")})
-	if _, err := svc.GetFeatureStatus(context.Background(), testViewer(1)); err == nil || !strings.Contains(err.Error(), "db down") {
-		t.Fatalf("err = %v, want the feature read error", err)
 	}
 }
 

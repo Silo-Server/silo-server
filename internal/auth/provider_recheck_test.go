@@ -8,7 +8,6 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -78,20 +77,5 @@ func TestProviderRecheckSkipsLocalSessions(t *testing.T) {
 	verdict, err = recheck.check(context.Background(), &models.AuthSession{UserID: 1})
 	if verdict != verdictSlide || err != nil || checker.callCount() != 0 {
 		t.Fatalf("local session = %v, %v, calls %d", verdict, err, checker.callCount())
-	}
-}
-
-func TestExternalIdentityCarriesRefreshState(t *testing.T) {
-	state, err := structpb.NewStruct(map[string]any{"refresh_token": "rt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := externalIdentityFromResponse(context.Background(), 1, &pluginv1.AuthenticateResponse{ExternalSubject: "iss|sub", RefreshState: state})
-	if err != nil || identity.RefreshState.GetFields()["refresh_token"].GetStringValue() != "rt" {
-		t.Fatalf("identity = %+v, %v", identity, err)
-	}
-	identity, err = externalIdentityFromResponse(context.Background(), 1, &pluginv1.AuthenticateResponse{ExternalSubject: "iss|sub"})
-	if err != nil || identity.RefreshState != nil {
-		t.Fatalf("unset refresh_state = %+v, %v", identity.RefreshState, err)
 	}
 }

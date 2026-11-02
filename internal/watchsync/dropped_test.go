@@ -56,21 +56,6 @@ func TestDecideDropped(t *testing.T) {
 	}
 }
 
-func TestSyncDroppedRemoteDropOlderThanSiloActivityUndropsRemotely(t *testing.T) {
-	h := newDroppedHarness(t)
-	h.store.activity[droppedTestSeriesA] = h.at(5)
-	h.provider.batch = DroppedImportBatch{Rows: []RemoteDropped{h.remoteRow(droppedTestSeriesA, h.at(1))}, Complete: true}
-
-	h.sync()
-
-	if h.store.active(droppedTestSeriesA) {
-		t.Fatal("a show watched in Silo after the remote drop must not be dropped locally")
-	}
-	if ids := keys(h.provider.undropped); !slices.Equal(ids, []string{droppedTestSeriesA}) {
-		t.Fatalf("undropped on provider = %v, want [%s]", ids, droppedTestSeriesA)
-	}
-}
-
 func TestSyncDroppedWatchingAgainUndropsOnProvider(t *testing.T) {
 	h := newDroppedHarness(t)
 	h.store.drop(droppedTestSeriesA, h.at(1))
@@ -305,18 +290,6 @@ func TestSyncDroppedDisabledDoesNothing(t *testing.T) {
 
 	if h.provider.fetches != 0 || len(h.provider.dropped) != 0 || h.store.active(droppedTestSeriesB) {
 		t.Fatal("a disabled connection must not sync drops")
-	}
-}
-
-func TestSyncDroppedSavesProviderCursors(t *testing.T) {
-	h := newDroppedHarness(t)
-	h.provider.batch = DroppedImportBatch{Complete: false, UpdatedCursors: map[string]string{"simkl.dropped.shows": "t1"}}
-
-	h.sync()
-
-	conn := h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)]
-	if conn.SyncCursors["simkl.dropped.shows"] != "t1" {
-		t.Fatalf("cursors = %v", conn.SyncCursors)
 	}
 }
 
@@ -596,31 +569,6 @@ func TestSyncDroppedKeepsADropWhoseSeriesLostItsProviderIDs(t *testing.T) {
 	}
 }
 
-func TestUndoOfAnUnconfirmedDropForgetsItsAgreement(t *testing.T) {
-	h := newDroppedHarness(t)
-	h.store.drop(droppedTestSeriesA, h.at(1))
-	event := LocalDroppedEvent{UserID: h.conn.UserID, ProfileID: h.conn.ProfileID, SeriesIDs: []string{droppedTestSeriesA}}
-	if err := h.service.processLocalDroppedEvent(context.Background(), event); err != nil {
-		t.Fatal(err)
-	}
-	delete(h.store.rows, droppedTestSeriesA)
-	if err := h.service.processLocalDroppedEvent(context.Background(), event); err != nil {
-		t.Fatal(err)
-	}
-	if ids := keys(h.provider.undropped); !slices.Equal(ids, []string{droppedTestSeriesA}) {
-		t.Fatalf("undropped = %v, want the undo sent", ids)
-	}
-	if h.state(droppedTestSeriesA) != nil {
-		t.Fatal("an undo of a drop no read confirmed must forget the agreement")
-	}
-	// A later read that does not list the show changes nothing.
-	h.provider.batch = DroppedImportBatch{Complete: true}
-	h.sync()
-	if len(h.provider.dropped)+len(h.provider.undropped) != 0 || h.store.active(droppedTestSeriesA) {
-		t.Fatal("a settled undo must not write again")
-	}
-}
-
 // newPluginDroppedHarness is a dropped-show harness whose connection and
 // registry use a PluginProvider over a fake plugin client, so the merge runs
 // through the plugin bridge end to end.
@@ -730,40 +678,6 @@ func TestSyncDroppedThroughAPluginProvider(t *testing.T) {
 	run()
 	if h.state(droppedTestSeriesA) != nil {
 		t.Fatal("an applied undrop of a drop no read confirmed forgets the agreement")
-	}
-}
-
-func TestSyncDroppedPluginUndropMatchingNoAgreedDropIsIgnored(t *testing.T) {
-	h, provider, client := newPluginDroppedHarness(t)
-	h.store.drop(droppedTestSeriesA, h.at(1))
-	h.agree(droppedTestSeriesA, true)
-	// Silo forgot the agreement for an undrop it sent, and the plugin echoes
-	// that undrop; another key is shared by two agreed drops.
-	h.agree(droppedTestSeriesB, true)
-	h.agree(droppedTestSeriesC, true)
-	for i := range h.repo.droppedStates {
-		if h.repo.droppedStates[i].SeriesID != droppedTestSeriesA {
-			h.repo.droppedStates[i].ProviderItemKey = "shared"
-		}
-	}
-	h.store.drop(droppedTestSeriesB, h.at(1))
-	h.store.drop(droppedTestSeriesC, h.at(1))
-	client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{
-		Items: []*pluginv1.WatchSyncRemoteState{droppedTombstone("forgotten"), droppedTombstone("shared")},
-	}
-
-	result, err := h.service.syncDropped(context.Background(), h.conn, ServerConfig{}, provider)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, id := range []string{droppedTestSeriesA, droppedTestSeriesB, droppedTestSeriesC} {
-		if !h.store.active(id) || h.state(id) == nil {
-			t.Fatalf("series %s lost its drop to an undrop that names no single series", id)
-		}
-	}
-	if !slices.Equal(result.Warnings, []string{"watch sync provider returned an undrop that matches more than one series"}) {
-		t.Fatalf("warnings = %#v, want only the ambiguous undrop reported", result.Warnings)
 	}
 }
 

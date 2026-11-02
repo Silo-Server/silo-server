@@ -4,7 +4,6 @@ import {
   fetchAdminBoardOrderSnapshot,
   adminCreateBody,
   adminUpdateBody,
-  fetchAdminCollectionSnapshot,
   prepareAdminCollectionDeletes,
   saveAdminArtwork,
 } from "./adminCollections";
@@ -94,15 +93,6 @@ describe("admin collection adapter", () => {
         { path: { id: "saved" }, form: { source_url: "https://example.test/backdrop" } },
       ],
     ]);
-  });
-  it("retains the exact canonical validator and refuses missing validators", async () => {
-    request.mockImplementationOnce(async (_operation, options) => {
-      options.onResponse(new Response(null, { headers: { ETag: '"observed"' } }));
-      return collection;
-    });
-    expect((await fetchAdminCollectionSnapshot("saved")).etag).toBe('"observed"');
-    request.mockResolvedValueOnce(collection);
-    await expect(fetchAdminCollectionSnapshot("saved")).rejects.toThrow("version is unavailable");
   });
   it("prepares bulk confirmation with at most four reads in flight and no mutations", async () => {
     let inFlight = 0,

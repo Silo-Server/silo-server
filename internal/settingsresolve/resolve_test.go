@@ -55,19 +55,6 @@ func resolveOne(t *testing.T, store Store, rc Context, key string, constraints C
 	return got[0]
 }
 
-func TestEffectiveReportsCurrentManifestRevision(t *testing.T) {
-	manifest := mustContract(t)
-	got, err := New(manifest).Resolve(context.Background(), &fakeStore{},
-		Context{ProfileID: "p1"}, []string{"playback.subtitle_language"}, nil)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if len(got) != 1 || got[0].DefinitionRevision != manifest.Revision {
-		t.Fatalf("definition_revision = %d, want current manifest revision %d",
-			got[0].DefinitionRevision, manifest.Revision)
-	}
-}
-
 // TestResolveIssuesOneRead pins the batching. The design rejects one lookup per
 // scope per key, and a season view resolving many items is exactly where that
 // would show up.

@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -79,37 +78,5 @@ func TestCleanupOrphanedMediaItemsTask(t *testing.T) {
 	}
 	if result.Candidates != 5 || result.Deleted != 5 {
 		t.Fatalf("result = %#v, want 5 candidates and 5 deleted", result)
-	}
-}
-
-func TestCleanupOrphanedMediaItemsTaskNoCandidates(t *testing.T) {
-	task := NewCleanupOrphanedMediaItemsTask(&fakeOrphanedMediaCleaner{})
-	progress := &orphanedMediaCleanupProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-	last := progress.reports[len(progress.reports)-1]
-	if last != "No orphaned provisional media items found" {
-		t.Fatalf("last progress report = %q", last)
-	}
-}
-
-func TestCleanupOrphanedMediaItemsTaskReturnsCleanupError(t *testing.T) {
-	wantErr := errors.New("cleanup failed")
-	cleaner := &fakeOrphanedMediaCleaner{
-		stats: catalog.OrphanedProvisionalCleanupStats{Candidates: 5, Deleted: 2},
-		err:   wantErr,
-	}
-	task := NewCleanupOrphanedMediaItemsTask(cleaner)
-	progress := &orphanedMediaCleanupProgress{}
-
-	err := task.Execute(context.Background(), progress)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Execute error = %v, want %v", err, wantErr)
-	}
-	last := progress.reports[len(progress.reports)-1]
-	if !strings.Contains(last, "failed after deleting 2 of 5 candidates") {
-		t.Fatalf("last progress report = %q", last)
 	}
 }

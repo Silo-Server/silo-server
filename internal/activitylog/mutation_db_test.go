@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/logstream"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func TestMutationCommitRollbackAndHistoryDB(t *testing.T) {
@@ -48,7 +49,7 @@ func TestMutationCommitRollbackAndHistoryDB(t *testing.T) {
 	ctx = SetLogContext(ctx, lc)
 	resolver := clientip.NewResolver(nil)
 	var scoped context.Context
-	clientip.Middleware(resolver)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { scoped = r.Context() })).ServeHTTP(httptest.NewRecorder(), lc.Request.WithContext(ctx))
+	clientip.Middleware(resolver)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { scoped = r.Context() })).ServeHTTP(httptest.NewRecorder(), lc.Request.WithContext(ctx)) //nolint:fatcontext // captures the one request context the middleware builds
 	ctx = scoped
 	conn, err := pool.Acquire(ctx)
 	if err != nil {

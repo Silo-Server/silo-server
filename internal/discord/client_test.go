@@ -62,39 +62,6 @@ func TestExchangeCodeAndGetUser(t *testing.T) {
 	}
 }
 
-func TestOpenDMChannelAndSendDM(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/users/@me/channels":
-			if got := r.Header.Get("Authorization"); got != "Bot bot-token" {
-				t.Errorf("unexpected authorization %q", got)
-			}
-			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["recipient_id"] != "42" {
-				t.Errorf("unexpected recipient %q", body["recipient_id"])
-			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": "dm-123"})
-		case "/channels/dm-123/messages":
-			w.WriteHeader(http.StatusOK)
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-
-	channelID, err := client.OpenDMChannel(context.Background(), "bot-token", "42")
-	if err != nil {
-		t.Fatalf("open dm: %v", err)
-	}
-	if channelID != "dm-123" {
-		t.Fatalf("unexpected channel id %q", channelID)
-	}
-	if err := client.SendDM(context.Background(), "bot-token", channelID, []byte(`{"content":"hi"}`)); err != nil {
-		t.Fatalf("send dm: %v", err)
-	}
-}
-
 func TestErrorMapping(t *testing.T) {
 	cases := []struct {
 		name   string

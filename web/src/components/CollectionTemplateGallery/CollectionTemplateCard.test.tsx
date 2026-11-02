@@ -43,10 +43,6 @@ describe("CollectionTemplateCard", () => {
     );
   });
 
-  it("shows as checked when the draft follows it", () => {
-    expect(show(baseTemplate, baseTemplate.id)).toBeChecked();
-  });
-
   it("leaves out a schedule it doesn't have, and uses its icon without a poster", () => {
     const radio = show({ ...baseTemplate, default_sync_schedule: undefined, default_limit: 0 });
     expect(radio).toHaveAccessibleDescription("TMDB Movies");

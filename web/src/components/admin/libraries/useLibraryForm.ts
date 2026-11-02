@@ -10,7 +10,7 @@ import {
 } from "@/hooks/queries/admin/libraries";
 import { PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 
-import { librarySettingSupport } from "./libraryTypes";
+import { DEFAULT_BOX_SET_MIN_MOVIES, librarySettingSupport } from "./libraryTypes";
 
 export type LevelChainItem = {
   plugin_installation_id: number;
@@ -180,6 +180,12 @@ export function useLibraryForm({
   );
   const savedTrickplay = library?.trickplay_enabled ?? false;
   const [trickplayEnabled, setTrickplayEnabled] = useState(savedTrickplay);
+  const savedBoxSets = library?.box_sets_enabled ?? false;
+  const savedBoxSetMinMovies = library?.box_set_min_movies ?? DEFAULT_BOX_SET_MIN_MOVIES;
+  const savedBoxSetsInSearch = library?.box_sets_in_search ?? true;
+  const [boxSetsEnabled, setBoxSetsEnabled] = useState(savedBoxSets);
+  const [boxSetMinMovies, setBoxSetMinMovies] = useState(savedBoxSetMinMovies);
+  const [boxSetsInSearch, setBoxSetsInSearch] = useState(savedBoxSetsInSearch);
   // A new library follows its type's default until the switch is set:
   // detection is on for series and mixed libraries and off for movies.
   const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
@@ -337,6 +343,17 @@ export function useLibraryForm({
     if (trickplay !== savedTrickplay) {
       body.trickplay_enabled = trickplay;
     }
+    // Sent only when they change, for the same reason.
+    const boxSets = settingSupport.boxSets && boxSetsEnabled;
+    if (boxSets !== savedBoxSets) {
+      body.box_sets_enabled = boxSets;
+    }
+    if (boxSets && boxSetMinMovies !== savedBoxSetMinMovies) {
+      body.box_set_min_movies = boxSetMinMovies;
+    }
+    if (boxSets && boxSetsInSearch !== savedBoxSetsInSearch) {
+      body.box_sets_in_search = boxSetsInSearch;
+    }
 
     if (library) {
       updateMutation.mutate(
@@ -400,6 +417,12 @@ export function useLibraryForm({
     setChapterThumbnailsEnabled,
     trickplayEnabled,
     setTrickplayEnabled,
+    boxSetsEnabled,
+    setBoxSetsEnabled,
+    boxSetMinMovies,
+    setBoxSetMinMovies,
+    boxSetsInSearch,
+    setBoxSetsInSearch,
     introDetectionEnabled,
     setIntroDetectionEnabled,
     trailerKinds,

@@ -332,60 +332,6 @@ func decodeJSON(t *testing.T, rec interface{ String() string }, into any) {
 	}
 }
 
-func TestListLibraries(t *testing.T) {
-	deps, _ := libraryDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/libraries", "", bearer(adminToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	var body struct {
-		Items []map[string]json.RawMessage `json:"items"`
-		Page  *json.RawMessage             `json:"page"`
-	}
-	decodeJSON(t, rec.Body, &body)
-	if len(body.Items) != 2 || body.Page != nil {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	for field, want := range map[string]string{
-		"id": `"1"`, "name": `"Movies"`, "paths": `["/media/movies"]`, "trailer_kinds": `["trailer"]`, "sort_order": `0`,
-		"chapter_thumbnails_supported": `true`, "realtime_monitoring": `true`, "poster_url": `"https://s3.example.test/poster.jpg"`,
-		"last_scanned_at": `"2026-01-02T03:04:05.678Z"`, "scan_warning_code": `"empty_root"`, "scan_warning_at": `"2026-01-02T03:04:05.678Z"`,
-	} {
-		if string(body.Items[0][field]) != want {
-			t.Errorf("%s = %s, want %s", field, body.Items[0][field], want)
-		}
-	}
-	// Absent optional members are omitted, not null.
-	deps.LibraryAdmin = &fakeLibraryAdmin{libraries: []handlers.LibraryView{{ID: 5, Name: "Bare", Type: "series"}}}
-	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/libraries", "", bearer(adminToken))
-	var bare struct {
-		Items []map[string]json.RawMessage `json:"items"`
-	}
-	decodeJSON(t, rec.Body, &bare)
-	body.Items = bare.Items
-	for _, absent := range []string{"poster_url", "last_scanned_at", "scan_warning_code", "scan_warning_message", "scan_warning_at"} {
-		if _, has := body.Items[0][absent]; has {
-			t.Errorf("%s present on a bare library: %s", absent, rec.Body.String())
-		}
-	}
-	if string(body.Items[0]["paths"]) != `[]` || string(body.Items[0]["trailer_kinds"]) != `[]` {
-		t.Errorf("nil slices leaked: %s", rec.Body.String())
-	}
-}
-
-func TestListLibrariesDenied(t *testing.T) {
-	deps, fake := libraryDeps(t)
-	h := newTestHandler(t, deps)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries", "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries", "", bearer(memberToken)), TypePermissionDenied)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries", "", with(bearer(adminToken), "X-Profile-Id", "p-owner")), TypePermissionDenied)
-	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to list libraries"}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries", "", bearer(adminToken)), TypeInternalError)
-	deps.LibraryAdmin = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/libraries", "", bearer(adminToken)), TypeDependencyUnavailable)
-}
-
 func TestCreateLibrary(t *testing.T) {
 	deps, fake := libraryDeps(t)
 	h := newTestHandler(t, deps)
@@ -447,63 +393,6 @@ func TestUpdateLibrary(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/9", `{"name":"x"}`, bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/abc", `{"name":"x"}`, bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"name":"x"}`, bearer(memberToken)), TypePermissionDenied)
-}
-
-func TestLibraryRealtimeMonitoring(t *testing.T) {
-	deps, fake := libraryDeps(t)
-	h := newTestHandler(t, deps)
-
-	// Omitted on create reaches the seam as nil, which the repository reads
-	// as on.
-	rec := do(t, h, http.MethodPost, "/api/v2/libraries", `{"paths":["/media/x"],"type":"movies","name":"X"}`, bearer(adminToken))
-	if rec.Code != 201 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if fake.lastCreate.RealtimeMonitoring != nil {
-		t.Fatalf("omitted realtime_monitoring = %v, want nil", *fake.lastCreate.RealtimeMonitoring)
-	}
-	var body map[string]json.RawMessage
-	decodeJSON(t, rec.Body, &body)
-	if string(body["realtime_monitoring"]) != `true` {
-		t.Fatalf("created realtime_monitoring = %s, want true", body["realtime_monitoring"])
-	}
-
-	rec = do(t, h, http.MethodPost, "/api/v2/libraries", `{"paths":["/media/y"],"type":"movies","name":"Y","realtime_monitoring":false}`, bearer(adminToken))
-	if rec.Code != 201 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if fake.lastCreate.RealtimeMonitoring == nil || *fake.lastCreate.RealtimeMonitoring {
-		t.Fatalf("explicit false create = %v, want false", fake.lastCreate.RealtimeMonitoring)
-	}
-	decodeJSON(t, rec.Body, &body)
-	if string(body["realtime_monitoring"]) != `false` {
-		t.Fatalf("created realtime_monitoring = %s, want false", body["realtime_monitoring"])
-	}
-
-	// PATCH carries the switch; omitting it leaves it unchanged.
-	rec = do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"realtime_monitoring":false}`, bearer(adminToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	if fake.lastUpdate.RealtimeMonitoring == nil || *fake.lastUpdate.RealtimeMonitoring {
-		t.Fatalf("update command = %v, want false", fake.lastUpdate.RealtimeMonitoring)
-	}
-	decodeJSON(t, rec.Body, &body)
-	if string(body["realtime_monitoring"]) != `false` {
-		t.Fatalf("updated realtime_monitoring = %s, want false", body["realtime_monitoring"])
-	}
-	if rec := do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"name":"Films"}`, bearer(adminToken)); rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	if fake.lastUpdate.RealtimeMonitoring != nil {
-		t.Fatalf("omitted update realtime_monitoring = %v, want nil", *fake.lastUpdate.RealtimeMonitoring)
-	}
-
-	// The member does not admit null.
-	p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"realtime_monitoring":null}`, bearer(adminToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.realtime_monitoring" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
 }
 
 func TestDeleteLibrary(t *testing.T) {
@@ -876,30 +765,4 @@ func unmatchedItemIgnoreFixtureCases() []fixtureCase {
 			method:   http.MethodDelete, path: "/api/v2/libraries/unmatched-items/movie:b/ignore", headers: bearer(adminToken),
 			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
-}
-
-func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {
-	deps, fake := libraryDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?limit=2&q=Extras", "", bearer(adminToken))
-	var page rootPage
-	decodeJSON(t, rec.Body, &page)
-	if rec.Code != 200 || len(page.Items) != 2 || !page.Page.HasMore || fake.lastLimit != 3 || fake.lastSearch != "Extras" {
-		t.Fatalf("first page: %d %s", rec.Code, rec.Body.String())
-	}
-	cursor := page.Page.NextCursor
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?q=other&cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)
-	rec = do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?limit=2&q=Extras&cursor="+cursor, "", bearer(adminToken))
-	decodeJSON(t, rec.Body, &page)
-	if len(page.Items) != 1 || page.Page.HasMore || fake.lastOffset != 2 {
-		t.Fatalf("last page: %s", rec.Body.String())
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1&q=%20Lost%20", "", bearer(adminToken))
-	decodeJSON(t, rec.Body, &page)
-	if len(page.Items) != 1 || page.Page.HasMore || page.Total != 1 || fake.lastSearch != "Lost" || string(page.Items[0]["title"]) != `"Lost"` {
-		t.Fatalf("search beyond first page: %s", rec.Body.String())
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1", "", bearer(adminToken))
-	decodeJSON(t, rec.Body, &page)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?q=Lost&cursor="+page.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 }

@@ -93,8 +93,7 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 	if !bounded {
 		end = snapCreditsEnd(end, duration)
 	}
-	length := end - start
-	if start < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
+	if limits.CheckCreditsPlacement(start, end, duration, nil) != nil {
 		return Segment{}, false
 	}
 	return Segment{

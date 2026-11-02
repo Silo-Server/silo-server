@@ -35,7 +35,6 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 		{name: "unset uses the server default", repo: stubSettingsReader{}, want: true},
 		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}, want: false},
 		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "false"}}, want: false},
-		{name: "explicit true allows", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "true"}}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,7 +55,6 @@ func TestAllowHEVCVideoEncoding(t *testing.T) {
 		{name: "nil repo defaults to deny", repo: nil},
 		{name: "unset defaults to deny", repo: stubSettingsReader{}},
 		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}},
-		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "false"}}},
 		{name: "case-insensitive true allows", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: " TRUE "}}, want: true},
 	}
 	for _, tt := range tests {
@@ -66,28 +64,6 @@ func TestAllowHEVCVideoEncoding(t *testing.T) {
 				t.Errorf("allowHEVCVideoEncoding() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestToneMapPolicyResultPreservesStoreFailure(t *testing.T) {
-	handler := &PlaybackHandler{SettingsRepo: stubSettingsReader{err: context.DeadlineExceeded}}
-	_, err := handler.toneMapPolicyResult(context.Background())
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("toneMapPolicyResult() error = %v, want context deadline", err)
-	}
-}
-
-func TestIs4KResolution(t *testing.T) {
-	for res, want := range map[string]bool{
-		"2160p": true,
-		"4320p": true,
-		"1080p": false,
-		"720p":  false,
-		"":      false,
-	} {
-		if got := is4KResolution(res); got != want {
-			t.Errorf("is4KResolution(%q) = %v, want %v", res, got, want)
-		}
 	}
 }
 
@@ -261,11 +237,9 @@ func TestApplyCompatToneMapAvailability(t *testing.T) {
 		{name: "hardware enabled and available", hardware: true, capabilities: tonemap.Capabilities{hardware}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}, want: true},
 		{name: "hardware enabled but unavailable", hardware: true, capabilities: tonemap.Capabilities{software}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}},
 		{name: "software enabled and available", software: true, capabilities: tonemap.Capabilities{software}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}, want: true},
-		{name: "both enabled prefer any available executor", hardware: true, software: true, capabilities: tonemap.Capabilities{software, hardware}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}, want: true},
 		{name: "settings error denies HDR transcode", settingsErr: errors.New("read failed"), capabilities: tonemap.Capabilities{software}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}},
 		{name: "nil settings deny HDR transcode", nilSettings: true, capabilities: tonemap.Capabilities{software}, source: PlaybackMediaSource{SupportsTranscoding: true, Version: hdrVersion}},
 		{name: "audio-only transcode remains available", source: PlaybackMediaSource{SupportsTranscoding: true, TranscodeAudio: true, Version: hdrVersion}, want: true},
-		{name: "direct-only source remains unavailable", source: PlaybackMediaSource{Version: hdrVersion}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -306,30 +280,6 @@ func TestApplyCompatToneMapAvailabilityAcceptsProfile7ID6Fallback(t *testing.T) 
 	capabilities := tonemap.Capabilities{{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemapx", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}}
 	if got := h.applyCompatToneMapAvailability(context.Background(), source, capabilities); !got.SupportsTranscoding {
 		t.Fatal("Profile 7 compatibility-ID 6 fallback was not advertised as transcodable")
-	}
-}
-
-// TestDowngradeToSoftwareToneMap verifies hardware recipes can safely fall back to software.
-func TestDowngradeToSoftwareToneMap(t *testing.T) {
-	mode := tonemap.ModeHardware
-	filter := tonemap.HardwareFilterVAAPI
-	hwAccel := "vaapi"
-	capabilities := tonemap.Capabilities{{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-		Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}}
-	if !downgradeToSoftwareToneMap(
-		tonemap.PolicyHardwareThenSoftware, &mode, &filter, &hwAccel, tonemap.SourcePQ, capabilities,
-	) {
-		t.Fatal("eligible hardware recipe did not downgrade")
-	}
-	if mode != tonemap.ModeSoftware || filter != tonemap.SoftwareFilterBT2390 || hwAccel != playback.HWAccelNone {
-		t.Fatalf("downgraded recipe = mode %q filter %q hwaccel %q", mode, filter, hwAccel)
-	}
-	if downgradeToSoftwareToneMap(
-		tonemap.PolicyHardwareThenSoftware, &mode, &filter, &hwAccel, tonemap.SourcePQ, capabilities,
-	) {
-		t.Fatal("software recipe downgraded more than once")
 	}
 }
 

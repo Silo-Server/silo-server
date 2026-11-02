@@ -17,16 +17,16 @@ func TestDecodeLimitedJSONRejectsBodiesPastTheLimit(t *testing.T) {
 	t.Parallel()
 
 	var out struct{ Name string }
-	if err := decodeLimitedJSON(strings.NewReader(`{"Name":"ok"}`), &out, nil, 64); err != nil || out.Name != "ok" {
+	if _, err := decodeLimitedJSON(strings.NewReader(`{"Name":"ok"}`), &out, 64); err != nil || out.Name != "ok" {
 		t.Fatalf("small body: err = %v, name = %q", err, out.Name)
 	}
 	body := `{"Name":"` + strings.Repeat("a", 100) + `"}`
-	if err := decodeLimitedJSON(strings.NewReader(body), &out, nil, 64); !errors.Is(err, ErrUpstreamResponseTooLarge) {
-		t.Fatalf("large body: err = %v, want ErrUpstreamResponseTooLarge", err)
+	if _, err := decodeLimitedJSON(strings.NewReader(body), &out, 64); !errors.Is(err, errUpstreamBytesLimit) {
+		t.Fatalf("large body: err = %v, want the byte limit", err)
 	}
 	// A body exactly at the limit is accepted.
 	exact := `{"Name":"` + strings.Repeat("b", 50) + `"}`
-	if err := decodeLimitedJSON(strings.NewReader(exact), &out, nil, int64(len(exact))); err != nil {
+	if _, err := decodeLimitedJSON(strings.NewReader(exact), &out, int64(len(exact))); err != nil {
 		t.Fatalf("body at the limit: err = %v", err)
 	}
 }
@@ -35,11 +35,8 @@ func TestListingBudgetCapsTotalBytes(t *testing.T) {
 	t.Parallel()
 
 	budget := listingBudget{bytes: maxListingBytes - 10}
-	if got := budget.responseLimit(); got != 10 {
-		t.Fatalf("responseLimit = %d, want the 10 bytes left", got)
-	}
 	var out struct{ Name string }
-	err := decodeUpstreamJSON(strings.NewReader(`{"Name":"more than ten bytes"}`), &out, &budget)
+	err := decodeUpstreamJSON(context.Background(), strings.NewReader(`{"Name":"more than ten bytes"}`), &out, &budget)
 	if !errors.Is(err, ErrUpstreamResponseTooLarge) || !strings.Contains(err.Error(), "listing exceeds") {
 		t.Fatalf("err = %v, want a listing size error", err)
 	}

@@ -406,7 +406,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		"connection_mode", run.ConnectionMode,
 	)
 
-	records, warnings, err := provider.Fetch(ctx)
+	// One budget covers every request the provider makes for this run, so a
+	// source cannot multiply the per-listing limits across lookups or sections.
+	records, warnings, err := provider.Fetch(withRunBudget(ctx))
 	if err != nil {
 		summary.Warnings = append(summary.Warnings, warnings...)
 		if cause := context.Cause(ctx); cause != nil {

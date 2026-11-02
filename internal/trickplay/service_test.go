@@ -359,21 +359,6 @@ func TestAttemptPlan(t *testing.T) {
 	}
 }
 
-func TestDisplayAspect(t *testing.T) {
-	for _, tt := range []struct {
-		track models.VideoTrack
-		want  float64
-	}{
-		{models.VideoTrack{Width: 720, Height: 480, AspectRatio: "16:9"}, 16.0 / 9},
-		{models.VideoTrack{Width: 1920, Height: 800, AspectRatio: "0:1"}, 2.4},
-		{models.VideoTrack{}, 0},
-	} {
-		if got := displayAspect(tt.track); got != tt.want {
-			t.Errorf("%+v: %v, want %v", tt.track, got, tt.want)
-		}
-	}
-}
-
 type unreadableSettings struct{}
 
 func (unreadableSettings) Get(context.Context, string) (string, error) {

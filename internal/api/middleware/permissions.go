@@ -73,7 +73,7 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 				return
 			}
 			if actingAdmin {
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), func(ctx context.Context, _ []int) error { return ctx.Err() })))
 				return
 			}
 		}
@@ -128,7 +128,13 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		authorize := func(ctx context.Context, libraries []int) error {
+			if len(libraries) == 0 || !metadataTargetWithinUserLibraries(effective.LibraryIDs, libraries) {
+				return access.ErrMetadataCurationScope
+			}
+			return ctx.Err()
+		}
+		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), authorize)))
 	})
 }
 

@@ -332,6 +332,9 @@ func buildLatestBrowseParams(query itemsQuery) url.Values {
 	// vs "created_at" which forces a full-library top-N heapsort.
 	params.Set("sort", "recently_added")
 	params.Set("order", "desc")
+	// Latest returns a bare array, so a total would be discarded. Counting it
+	// with an unplayed filter scanned the whole library: 27–42 s on a large one.
+	params.Set("include_total", "false")
 	return params
 }
 
@@ -682,6 +685,17 @@ func parseSort(sortBy, sortOrder string) (sort, order string) {
 func mapSortBy(raw string) string {
 	sort, _ := parseSort(raw, "")
 	return sort
+}
+
+// sortsBySortName reports whether the SortBy key parseSort selects is SortName
+// rather than Name; both map to the title sort.
+func sortsBySortName(sortBy string) bool {
+	for _, key := range strings.Split(sortBy, ",") {
+		if _, ok := sortKey(key); ok {
+			return strings.EqualFold(strings.TrimSpace(key), "SortName")
+		}
+	}
+	return false
 }
 
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the

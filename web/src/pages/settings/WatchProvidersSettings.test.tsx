@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/watchProviders", () => ({
   WatchProviderAuthMethod: { DeviceCode: "device_code", APIKey: "api_key" },
   useWatchProviders: () => ({
-    data: { providers: [{ key: "trakt", display_name: "Trakt" }] },
+    data: { providers: [{ key: "simkl", display_name: "Simkl" }] },
     isLoading: false,
   }),
   useWatchProviderConnection: () => ({
@@ -39,8 +39,8 @@ import WatchProvidersSettings from "./WatchProvidersSettings";
 function makeConnection(): WatchProviderConnection {
   return {
     etag: '"v1"',
-    provider: "trakt",
-    display_name: "Trakt",
+    provider: "simkl",
+    display_name: "Simkl",
     capabilities: {
       import_watched: true,
       import_progress: true,
@@ -107,7 +107,7 @@ function findButton(container: HTMLElement, label: string) {
 }
 
 function settingsPanel(container: HTMLElement) {
-  return container.querySelector("#watch-provider-trakt-settings");
+  return container.querySelector("#watch-provider-simkl-settings");
 }
 
 // React Query delivers observer updates on a zero-delay timer.
@@ -156,7 +156,7 @@ describe("WatchProvidersSettings", () => {
 
     act(() => toggle.click());
     act(() => {
-      (container.querySelector("#watch-provider-trakt-import-watched") as HTMLElement).click();
+      (container.querySelector("#watch-provider-simkl-import-watched") as HTMLElement).click();
     });
     await flush();
     expect(mocks.updateConnection).toHaveBeenCalledTimes(1);

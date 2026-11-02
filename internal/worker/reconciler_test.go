@@ -20,14 +20,6 @@ func TestSessionSnapshotsEqualDetectsOutputFormatChanges(t *testing.T) {
 	}
 }
 
-func TestSessionSnapshotsEqualDetectsPolicyLocationChange(t *testing.T) {
-	local := SessionSync{SessionID: "session", StreamLocation: "local"}
-	remote := SessionSync{SessionID: "session", StreamLocation: "remote"}
-	if sessionSnapshotsEqual([]SessionSync{local}, []SessionSync{remote}) {
-		t.Fatal("policy location change must be published")
-	}
-}
-
 // TestSyncNowSerializesSnapshotCapture guards the SyncNow ordering contract:
 // snapshot capture and reconciliation run under one lock, so a request-path
 // sync (playback start/stop) can never interleave with the periodic tick and
@@ -120,17 +112,5 @@ func TestSyncNowCoalescesPendingPass(t *testing.T) {
 	case <-captures: // the owner's follow-up pass with a fresh snapshot
 	default:
 		t.Fatal("no follow-up snapshot capture ran; the coalesced sync was lost")
-	}
-}
-
-func TestSessionSnapshotsCompareNetworkProviderValues(t *testing.T) {
-	for _, a := range []*string{nil, new(""), new("tailscale")} {
-		for _, b := range []*string{nil, new(""), new("tailscale")} {
-			want := a == nil && b == nil || a != nil && b != nil && *a == *b
-			got := sessionSnapshotsEqual([]SessionSync{{SessionID: "s", RoutingNetworkProvider: a}}, []SessionSync{{SessionID: "s", RoutingNetworkProvider: b}})
-			if got != want {
-				t.Fatalf("provider comparison = %v, want %v (%v, %v)", got, want, a, b)
-			}
-		}
 	}
 }

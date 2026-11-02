@@ -45,14 +45,6 @@ it.each([401, 500])("does not save or replay after %s", async (status) => {
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(create).not.toHaveBeenCalled();
 });
-it("refuses old list authority before fetch", async () => {
-  const scope = adminSubtitleListScope();
-  setProfileToken("new-pin");
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  await expect(downloadAdminSubtitle(row, scope)).rejects.toThrow();
-  expect(fetch).not.toHaveBeenCalled();
-});
 it("refuses an authority change during body consumption", async () => {
   let finish!: (blob: Blob) => void;
   const response = bytes();

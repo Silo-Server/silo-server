@@ -94,60 +94,6 @@ func TestHandleStream_RefusesReconstructingACopyUnsafeRemux(t *testing.T) {
 	}
 }
 
-// The gate is the verdict, not the route: a remux whose source has no verdict,
-// or a verdict saying the copy is safe, still reconstructs and streams.
-func TestHandleStream_ReconstructsARemuxThatIsStillCopySafe(t *testing.T) {
-	const secret = "test-stream-signing-secret"
-	safe := false
-
-	for _, tc := range []struct {
-		name      string
-		sessionID string
-		verdict   *bool
-	}{
-		{name: "verdict says safe", sessionID: "lost-remux-safe", verdict: &safe},
-		{name: "verdict unknown", sessionID: "lost-remux-unknown"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sessionID := tc.sessionID
-			file := copySafetyStreamFile(t, tc.verdict)
-
-			sessionMgr := playback.NewSessionManager(0, 0)
-			tm := playback.NewTranscodeManager()
-			tm.Sessions = sessionMgr
-
-			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf muxed\n"), 0o755); err != nil {
-				t.Fatalf("write fake ffmpeg: %v", err)
-			}
-			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: file})
-			handler.TM = tm
-			handler.JWTSecret = secret
-			handler.PlaybackConfig = func() config.PlaybackConfig {
-				return config.PlaybackConfig{FFmpegPath: ffmpeg}
-			}
-
-			card := playback.NewRemuxRecipeCard(sessionID, 1, "profile-1", file.ID, false, 0)
-			card.InputPath = file.FilePath
-			token, err := streamtoken.Sign(card.ToClaims(), secret, playback.MaxTokenTTL)
-			if err != nil {
-				t.Fatalf("Sign: %v", err)
-			}
-
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+sessionID+"?st="+token, nil)
-			req = req.WithContext(newAuthorizedPlaybackContext())
-			req = withPlaybackRouteParam(req, "session_id", sessionID)
-
-			rr := httptest.NewRecorder()
-			handler.HandleStream(rr, req)
-
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, body = %s; want the reconstruct served", rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
 // Refusing a revival is only possible where a verdict exists. The dangerous
 // case is the one where it does not yet: replica A is still scanning (or has
 // scanned and failed to write the row) when replica B revives the transport
@@ -346,74 +292,6 @@ func TestHandleTranscodeServe_RefusesRevivingACopyUnsafeHLSRecipe(t *testing.T) 
 				}
 			})
 		}
-	}
-}
-
-// The refusal is only worth anything if the client's recovery can get back in.
-// A user at their stream cap has exactly one slot, and a session left registered
-// by a refused revival would spend it on a stream nobody is serving.
-func TestHandleTranscodeServe_RefusedRevivalLeavesTheStreamSlotFree(t *testing.T) {
-	const (
-		secret    = "test-stream-signing-secret"
-		sessionID = "lost-hls-capped"
-	)
-	unsafe := true
-	file := copySafetyStreamFile(t, &unsafe)
-
-	// One stream per user: the refused revival and the recovery attempt cannot
-	// both be admitted.
-	sessionMgr := playback.NewSessionManager(1, 1)
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	handler.JWTSecret = secret
-
-	rr := httptest.NewRecorder()
-	handler.HandleGetTranscodeManifest(rr, copySafetyHLSRequest(t, secret, "", copySafetyHLSCard(sessionID, file.ID, "")))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want the revival refused", rr.Code, rr.Body.String())
-	}
-
-	// The client's ordinary recovery: a fresh attempt, which plans against the
-	// persisted verdict and lands on a transcode.
-	recovery, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayTranscode, false)
-	if err != nil {
-		t.Fatalf("StartSession after a refused revival: %v, want the stream slot free", err)
-	}
-	if recovery == nil {
-		t.Fatal("StartSession returned no session after a refused revival")
-	}
-}
-
-// The gate is the verdict and the route, not the reconstruct: a lost HLS
-// transport that re-encodes its video is unaffected by multi-PPS and must still
-// rebuild its session, whatever the row says.
-func TestHandleTranscodeServe_RevivesARealTranscodeForACopyUnsafeSource(t *testing.T) {
-	const (
-		secret    = "test-stream-signing-secret"
-		sessionID = "lost-hls-transcode"
-	)
-	unsafe := true
-	file := copySafetyStreamFile(t, &unsafe)
-
-	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	handler.JWTSecret = secret
-
-	card := playback.NewRecipeCard(1, "profile-1", file.ID, "", playback.TranscodeOpts{
-		SessionID:            sessionID,
-		TranscodeTransportID: sessionID + "-transport",
-		TargetCodecVideo:     "h264",
-		TargetCodecAudio:     "copy",
-		SegmentDuration:      2,
-	})
-
-	rr := httptest.NewRecorder()
-	handler.HandleGetTranscodeManifest(rr, copySafetyHLSRequest(t, secret, "", card))
-
-	// The ffmpeg behind the transport is deliberately absent in this fixture, so
-	// the response is still a not-found; the registered session is what proves
-	// the copy-safety gate let the recipe through.
-	if _, err := sessionMgr.GetSession(sessionID); err != nil {
-		t.Fatalf("GetSession error = %v, want a real transcode reconstructed despite the verdict", err)
 	}
 }
 

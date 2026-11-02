@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { adminSubtitleListScope, listAdminSubtitles } from "./adminSubtitles";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 
 const item = { id: "9007199254740993", media_file_id: "42", downloaded_by: "2" };
 const body = {
@@ -38,14 +39,7 @@ it("sends exact string filters and cursor through v2 and preserves large IDs", a
 it.each(["profile", "pin", "account"])(
   "rejects a late reply after %s authority changes",
   async (kind) => {
-    let finish!: (r: Response) => void;
-    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    vi.stubGlobal("fetch", fetch);
+    const { fetch, finish } = stubPendingFetch();
     const old = adminSubtitleListScope();
     const pending = listAdminSubtitles({}, old);
     if (kind === "profile") setProfileId("other");

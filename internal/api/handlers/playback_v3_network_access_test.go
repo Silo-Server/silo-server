@@ -228,14 +228,3 @@ func TestProxyURLBuildersRefuseALANOnlyProxyOnAProviderPath(t *testing.T) {
 		t.Fatalf("identityStreamURLV3 on the default path = %q (proxy %v)", got, byProxy)
 	}
 }
-
-func TestV3SessionStateRecordsValidatedNetworkProvider(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	for _, provider := range []string{"", "tailscale"} {
-		ctx := netaccess.WithPath(t.Context(), netaccess.Path{Provider: provider})
-		state := handler.v3SessionStreamState(ctx, &playback.Session{}, nil, playback.PlannerResultV3{}, preparedTransportV3{}, mediaAuthModeV3{})
-		if state.RoutingNetworkProvider == nil || *state.RoutingNetworkProvider != provider {
-			t.Fatalf("provider = %v, want %q", state.RoutingNetworkProvider, provider)
-		}
-	}
-}

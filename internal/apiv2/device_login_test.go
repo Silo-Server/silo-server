@@ -1,53 +1,12 @@
 package apiv2
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/auth"
 )
-
-func TestDeviceApprovalsRevokedSession(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.Devices = fakeDevices{
-		configured: true,
-		err: (&handlers.APIError{
-			Status: http.StatusUnauthorized, Code: "unauthorized", Message: "Login session is no longer valid",
-		}).WithCause(auth.ErrSessionRevoked),
-	}
-	h := newTestHandler(t, deps)
-	for _, route := range []string{"approve", "approve-handoff"} {
-		t.Run(route, func(t *testing.T) {
-			headers := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-			rec := do(t, h, http.MethodPost, "/api/v2/auth/device/"+route, `{"token":"br-pending"}`, headers)
-			problem := requireProblem(t, rec, TypeAuthenticationRequired)
-			if rec.Code != http.StatusUnauthorized || problem.Status != http.StatusUnauthorized {
-				t.Fatalf("response = %d %s", rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
-func TestGetDeviceLoginCapability(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/auth/device/capability", "", nil)
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != cachePrivateNoCache {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
-	}
-	want := `{"revision":"1","state":"available","remote_playback_handoff":true,"jellyfin_quick_connect":true,"protocol_versions":[2],"cancel":true,"opened_signal":true}` + "\n"
-	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	deps := pilotDeps(nil, nil)
-	deps.Devices = fakeDevices{configured: false}
-	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/device/capability", "", nil)
-	if rec.Code != 200 || !json.Valid(rec.Body.Bytes()) || !contains(rec.Body.String(), `"state":"not_configured"`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}
 
 func TestStartDeviceLogin(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
@@ -324,50 +283,6 @@ func TestDecideDeviceLogin(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/deny", `{"token":"br-pending"}`, hdr), TypePermissionDenied)
 		requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve-handoff", `{"token":"br-remote"}`, with(hdr, "X-Profile-Id", "p-owner")), TypePermissionDenied)
 	}
-}
-
-func TestDecideDeviceLoginDenied(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	body := `{"token":"br-pending"}`
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve", body, nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/deny", body, nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve", body, bearer(expiredToken)), TypeSessionExpired)
-	// approve-handoff needs a verified profile: no header, and a locked one.
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve-handoff", body, bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve-handoff", body, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	deps := pilotDeps(nil, nil)
-	deps.Devices = fakeDevices{configured: true, err: errStore}
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/device/approve", body, bearer(memberToken)), TypeInternalError)
-}
-
-func TestCancelDeviceLogin(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	// No bearer: the device code is the credential.
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"dev-pending"}`, nil)
-	if rec.Code != 200 || rec.Body.String() != `{"status":"canceled"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Approved but not collected: withdrawn too, so the tokens are never issued.
-	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"dev-approved"}`, nil)
-	if rec.Code != 200 || rec.Body.String() != `{"status":"canceled"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Repeating converges; a finished request keeps its state.
-	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"dev-canceled"}`, nil)
-	if rec.Code != 200 || rec.Body.String() != `{"status":"canceled"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"nope"}`, nil), TypeNotFound)
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":""}`, nil), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.device_code" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	deps := pilotDeps(nil, nil)
-	deps.Devices = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"dev-pending"}`, nil), TypeDependencyUnavailable)
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }

@@ -35,11 +35,11 @@ func (s *Service) TestConnection(ctx context.Context, c Connection) (ConnectionT
 	}
 	resolved, err := s.connres.Resolve(ctx, c)
 	if err != nil {
-		return ConnectionTestResult{OK: false, Err: err.Error()}, nil
+		return ConnectionTestResult{OK: false, Err: err.Error()}, nil //nolint:nilerr // a resolve failure is a probe outcome reported in the payload, per the contract above
 	}
 	version, err := probe.SystemStatus(ctx, resolved.BaseURL, resolved.APIKey)
 	if err != nil {
-		return ConnectionTestResult{OK: false, Err: err.Error()}, nil
+		return ConnectionTestResult{OK: false, Err: err.Error()}, nil //nolint:nilerr // an unreachable or rejected endpoint is a probe outcome reported in the payload
 	}
 	return ConnectionTestResult{OK: true, Version: version}, nil
 }

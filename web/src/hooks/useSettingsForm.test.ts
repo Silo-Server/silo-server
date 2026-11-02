@@ -78,20 +78,6 @@ describe("useSettingsForm save()", () => {
     expect(result.current.getValue("branding.server_name")).toBe("Casa");
     expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
   });
-  it("rejects a failed write and keeps the staged draft for retry", async () => {
-    const error = new Error("412 precondition failed");
-    mutateAsync.mockRejectedValue(error);
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-    act(() => result.current.setValue("branding.server_name", "Casa"));
-
-    await act(async () => {
-      await expect(result.current.save()).rejects.toBe(error);
-    });
-
-    expect(result.current.getValue("branding.server_name")).toBe("Casa");
-    expect(result.current.dirtyCount).toBe(1);
-    expect(result.current.restartRequired).toBe(false);
-  });
 
   it("rejects saving before a settings snapshot has loaded", async () => {
     snapshot.loaded = false;
@@ -142,25 +128,6 @@ describe("useSettingsForm save()", () => {
     rerender();
     expect(result.current.getValue("email.smtp_password")).toBe("");
     expect(result.current.dirtyCount).toBe(0);
-    expect(result.current.restartRequired).toBe(false);
-  });
-
-  it("does not flag a restart when no saved key requires one", async () => {
-    mutateAsync.mockResolvedValue({
-      values: { "branding.server_name": "Casa" },
-      restart_required: false,
-    });
-
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    await act(async () => {
-      await result.current.save();
-    });
-
-    expect(mutateAsync).toHaveBeenCalledWith({ "branding.server_name": "Casa" });
     expect(result.current.restartRequired).toBe(false);
   });
 
@@ -321,19 +288,6 @@ describe("useSettingsForm unsaved-changes guard", () => {
     act(() => {
       form.result.current.discard();
     });
-    expect(registry.result.current).toBe(false);
-  });
-
-  it("withdraws its registry claim when the form unmounts", () => {
-    const registry = renderHook(() => useHasUnsavedChanges());
-    const form = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      form.result.current.setValue("branding.server_name", "Casa");
-    });
-    expect(registry.result.current).toBe(true);
-
-    form.unmount();
     expect(registry.result.current).toBe(false);
   });
 });

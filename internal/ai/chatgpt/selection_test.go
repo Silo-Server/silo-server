@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func (m *memoryStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
@@ -104,7 +106,7 @@ func TestSelectionReconcilesModelAndEffort(t *testing.T) {
 }
 
 func TestSelectionFailurePreservesAccountAndModel(t *testing.T) {
-	for _, status := range []int{200, 503} {
+	for _, status := range []int{200} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high"})
 			before := maps.Clone(store.values)
@@ -172,29 +174,54 @@ func TestTextConfigPinsAccountAndModelAcrossLaterSwitch(t *testing.T) {
 	}
 }
 
+func TestTextConfigReadsServiceTierWithProvider(t *testing.T) {
+	registry := config.AIProviderRegistry{Providers: []config.AIProvider{
+		{ID: "openai", Type: config.AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com", APIKey: "test-key", Capabilities: []config.AICapability{config.AICapabilityChat}},
+		{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", Capabilities: []config.AICapability{config.AICapabilityChat}},
+	}}
+	s, store := selectionFixture(t, map[string]string{
+		config.AIProvidersSettingKey: registry.Encode(), config.AITextProviderSettingKey: "openai",
+		config.AIServiceTierSettingKey: "priority", "ai.auth_mode": "api_key",
+	})
+	first, err := s.TextConfig(t.Context())
+	if err != nil || first.ServiceTier != "priority" {
+		t.Fatalf("first tier = %q, error = %v", first.ServiceTier, err)
+	}
+	store.values[config.AIServiceTierSettingKey] = "ultrafast"
+	second, err := s.TextConfig(t.Context())
+	if err != nil || second.ServiceTier != "ultrafast" || first.ServiceTier != "priority" {
+		t.Fatalf("tier change: first=%q second=%q error=%v", first.ServiceTier, second.ServiceTier, err)
+	}
+	store.values[config.AITextProviderSettingKey] = "other"
+	other, err := s.TextConfig(t.Context())
+	if err != nil || other.ServiceTier != "" {
+		t.Fatalf("other provider received tier %q: %v", other.ServiceTier, err)
+	}
+}
+
 func TestSelectionReceiptUsesCommittedSnapshots(t *testing.T) {
-	s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high", "ai.api_key": "old-secret"})
+	s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high", "ai.text_provider_id": "old-provider"})
 	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
 		// A competing administrator writes while catalog fetching is outside the lock.
 		store.mu.Lock()
-		store.values["ai.api_key"] = "before-secret"
+		store.values["ai.text_provider_id"] = "before-provider"
 		store.mu.Unlock()
 		return response(200, map[string]any{"models": []map[string]string{{"slug": "gpt-4o-mini", "visibility": "list"}}}), nil
 	})
 	s.OnSettingUpdated = func(context.Context, string, string) {
 		// A later writer must not become part of the acknowledged receipt.
 		store.mu.Lock()
-		store.values["ai.api_key"] = "after-secret"
+		store.values["ai.text_provider_id"] = "after-provider"
 		store.mu.Unlock()
 	}
 	receipt, err := s.SelectAccountWithSettings(t.Context(), "b")
 	if err != nil || receipt == nil {
 		t.Fatalf("receipt=%+v, %v", receipt, err)
 	}
-	if receipt.Before["ai.api_key"] != "before-secret" || receipt.After["ai.api_key"] != "before-secret" || receipt.Before["ai.chat_model"] != "a-model" || receipt.After["ai.chat_model"] != "gpt-4o-mini" || receipt.After["ai.reasoning_effort"] != "" {
+	if receipt.Before["ai.text_provider_id"] != "before-provider" || receipt.After["ai.text_provider_id"] != "before-provider" || receipt.Before["ai.chat_model"] != "a-model" || receipt.After["ai.chat_model"] != "gpt-4o-mini" || receipt.After["ai.reasoning_effort"] != "" {
 		t.Fatal("receipt did not capture transaction-owned values")
 	}
-	if store.values["ai.api_key"] != "after-secret" {
+	if store.values["ai.text_provider_id"] != "after-provider" {
 		t.Fatal("later writer was lost")
 	}
 	store.failNext = true

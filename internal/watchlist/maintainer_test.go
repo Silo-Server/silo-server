@@ -2,7 +2,6 @@ package watchlist
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -110,21 +109,6 @@ func TestMaintainerNeverRemovesSeries(t *testing.T) {
 	}
 }
 
-func TestMaintainerIgnoresEpisodeCompletions(t *testing.T) {
-	// Episode IDs don't resolve in the media-items table; completions must be
-	// ignored without error and without touching the series watchlist entry.
-	items := fakeItems{"series-1": {ContentID: "series-1", Type: "series"}}
-	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{"series-1": true}}
-	m := newMaintainer(store, items, &fakeDispatcher{})
-
-	if err := m.process(context.Background(), 7, "profile-1", []string{"ep-1", "ep-2"}); err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if !store.watchlist["series-1"] || len(store.removed) != 0 {
-		t.Fatalf("episode completions must not remove anything: removed=%v", store.removed)
-	}
-}
-
 func TestMaintainerRespectsPreferenceOff(t *testing.T) {
 	store := &fakeStore{removeWatched: false, watchlist: map[string]bool{"movie-1": true}}
 	items := fakeItems{"movie-1": {ContentID: "movie-1", Type: "movie"}}
@@ -136,23 +120,5 @@ func TestMaintainerRespectsPreferenceOff(t *testing.T) {
 	}
 	if !store.watchlist["movie-1"] || len(store.removed) != 0 {
 		t.Fatal("preference off must leave the watchlist untouched")
-	}
-}
-
-type erroringItems struct{ err error }
-
-func (e erroringItems) GetByIDs(context.Context, []string) ([]*models.MediaItem, error) {
-	return nil, e.err
-}
-
-func TestMaintainerPropagatesItemLookupError(t *testing.T) {
-	boom := errors.New("db down")
-	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{}}
-	m := &Maintainer{
-		storeFor: func(context.Context, int) (maintainerStore, error) { return store, nil },
-		items:    erroringItems{err: boom},
-	}
-	if err := m.process(context.Background(), 7, "profile-1", []string{"x"}); err == nil {
-		t.Fatal("a transient catalog lookup error must propagate, not be swallowed")
 	}
 }

@@ -126,6 +126,7 @@ describe("EnginePlayer", () => {
       "seeking",
       "seeked",
       "ended",
+      "stalled",
     ]) {
       element.addEventListener(type, () => events.push(type));
     }
@@ -193,6 +194,16 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("reports a failed read from its source as a stalled media element does", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    events.length = 0;
+    worker.emit({ type: "read-failed" });
+    await settle();
+    expect(events).toEqual(["stalled"]);
+    player.destroy();
+  });
+
   it("plays on a wall clock without audio and presents frames as they come due", async () => {
     const { player, worker } = start();
     await open(worker);
@@ -208,6 +219,56 @@ describe("EnginePlayer", () => {
     // The first frame was replaced on screen and handed back to the worker.
     expect(first.close).toHaveBeenCalled();
     expect(worker.posted.some((m) => m.type === "frame-released")).toBe(true);
+    player.destroy();
+  });
+
+  it("starts at the speed it is given, as a media element at its default rate", async () => {
+    const player = new EnginePlayer({
+      source: { ...source },
+      surface: document.createElement("div"),
+      element,
+      volume: 1,
+      muted: false,
+      playbackRate: 2,
+      onFailure: vi.fn(),
+    });
+    player.load();
+    const worker = FakeWorker.last!;
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
+    await settle();
+    expect(player.playbackRate).toBe(2);
+    await player.play();
+    // Before the two pictures run out: 1x would read about 0.1 s.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(player.currentTime).toBeGreaterThan(0.17);
+    player.destroy();
+  });
+
+  // A hidden tab presents on a 100 ms timer; holding pictures for it would
+  // keep the decoder short of credits at fast speeds.
+  it("releases due pictures as they arrive while the tab is hidden", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    player.playbackRate = 3;
+    await player.play();
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    try {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(100);
+      const released = () => worker.posted.filter((m) => m.type === "frame-released").length;
+      const before = released();
+      for (const timestamp of [0.04, 0.08, 0.12, 0.16]) {
+        worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(timestamp) });
+      }
+      // Without waiting for the next tick.
+      expect(released()).toBeGreaterThanOrEqual(before + 3);
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+    }
     player.destroy();
   });
 
@@ -862,6 +923,28 @@ describe("EnginePlayer", () => {
     expect(onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ classification: "browser_engine_video_decode_failed" }),
     );
+    player.destroy();
+  });
+
+  it("reports a decoder restart as under way until the new run shows a picture", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    expect(player.decoderRecovering).toBe(false);
+    worker.emit({
+      type: "error",
+      generation: worker.generation,
+      classification: "browser_engine_video_decode_failed",
+      message: "Decoder failure",
+    });
+    expect(player.decoderRecovering).toBe(true);
+    await vi.advanceTimersByTimeAsync(DECODER_RESTART_DELAY_MS);
+    expect(player.decoderRecovering).toBe(true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(player.decoderRecovering).toBe(false);
     player.destroy();
   });
 

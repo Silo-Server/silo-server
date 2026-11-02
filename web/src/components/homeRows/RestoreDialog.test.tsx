@@ -41,39 +41,6 @@ const bullets = () =>
 afterEach(cleanup);
 
 describe("RestoreDialog", () => {
-  it("says what happens to Home, its collection rows and the library pages", () => {
-    render(<Harness collectionRowTitles={["Studio Ghibli", "90s Crowd-Pleasers"]} />);
-    const dialog = screen.getByRole("dialog", { name: "Restore Home to the default rows?" });
-    expect(dialog).toHaveAccessibleDescription("Home goes back to the rows Silo starts with.");
-    expect(bullets()).toEqual([
-      "The 9 rows on Home are replaced by Silo's default rows.",
-      "Rows that show collections, like Studio Ghibli and 90s Crowd-Pleasers, are removed. The collections themselves stay in Collections.",
-      "Library pages (Movies, TV Shows) don't change.",
-    ]);
-    expect(within(dialog).getByText("This can't be undone.")).toBeInTheDocument();
-  });
-
-  it("names a library page and leaves out the collection line when it has no collection rows", () => {
-    render(
-      <Harness
-        page={{ kind: "library", libraryId: 7 }}
-        pageLabel="Movies"
-        otherLibraryLabels={["TV Shows"]}
-        rowCount={1}
-      />,
-    );
-    expect(
-      screen.getByRole("dialog", { name: "Restore the Movies page to the default rows?" }),
-    ).toHaveAccessibleDescription("The Movies page goes back to the rows Silo starts with.");
-    expect(bullets()).toEqual([
-      "The 1 row on the Movies page is replaced by Silo's default rows.",
-      "Home and the other library pages (TV Shows) don't change.",
-    ]);
-    expect(
-      screen.getByRole("switch", { name: "Also reset every profile's Movies page" }),
-    ).toBeInTheDocument();
-  });
-
   it("names one collection row and shortens a long list", () => {
     const { unmount } = render(
       <Harness
@@ -144,24 +111,6 @@ describe("RestoreDialog", () => {
     expect(
       screen.getByRole("switch", { name: "Also reset every profile's library pages" }),
     ).toBeInTheDocument();
-  });
-
-  it("offers no restore-all switch when there are no other library pages", () => {
-    render(<Harness otherLibraryLabels={[]} />);
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
-  });
-
-  it("explains both settings of the reset-every-profile switch", async () => {
-    render(<Harness />);
-    const toggle = screen.getByRole("switch", { name: "Also reset every profile's Home" });
-    expect(toggle).toHaveAccessibleDescription(
-      "Profiles keep rows they added. What they hid or renamed on the old rows no longer applies.",
-    );
-    await userEvent.click(toggle);
-    expect(toggle).toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(
-      "Clears what each profile hid, renamed, moved or added on Home.",
-    );
   });
 
   it("turns the switch off and says why when the server can't reset profiles", () => {

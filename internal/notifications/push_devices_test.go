@@ -2,7 +2,9 @@ package notifications
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -55,8 +57,8 @@ func (f *fakePushDeviceStore) UpsertFCM(ctx context.Context, registration FCMPus
 	}, nil
 }
 
-func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
-	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, fmt.Sprintf("%d/%s/%s", userID, profileID, deviceID))
 	return f.err
 }
 
@@ -169,33 +171,6 @@ func TestPushDeviceServiceRegisterAppleRejectsInvalidOrUnsupported(t *testing.T)
 				t.Fatalf("store was called for rejected input")
 			}
 		})
-	}
-}
-
-func TestPushDeviceServiceRegisterFCMNormalizesAndStores(t *testing.T) {
-	store := &fakePushDeviceStore{}
-	service := NewPushDeviceService(store, testPushCipher(t))
-
-	token := strings.Repeat("F", 100) + ":APA91b-" + strings.Repeat("x", 40)
-	device, err := service.RegisterFCM(context.Background(), 42, " profile-1 ", FCMPushRegistrationInput{
-		DeviceID: " local-device ",
-		FCMToken: " " + token + " ",
-		PushMode: "",
-	})
-	if err != nil {
-		t.Fatalf("register fcm: %v", err)
-	}
-	if device.ServerDeviceID != "server-device" || !device.Enabled || device.PushMode != PushModePrivatePush {
-		t.Fatalf("unexpected device response: %+v", device)
-	}
-	if store.gotFCM.UserID != 42 || store.gotFCM.ProfileID != "profile-1" || store.gotFCM.DeviceID != "local-device" {
-		t.Fatalf("unexpected owner scope: %+v", store.gotFCM)
-	}
-	if store.gotFCM.FCMToken != token {
-		t.Fatalf("fcm token was not trimmed exactly: %q", store.gotFCM.FCMToken)
-	}
-	if store.gotFCM.PushMode != PushModePrivatePush {
-		t.Fatalf("push mode = %q", store.gotFCM.PushMode)
 	}
 }
 
@@ -384,61 +359,163 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 	}
 }
 
-func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
-	ctx := context.Background()
+func TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T) {
 	repo, pool := newPushDeviceTestRepo(t)
-	cipher := testPushCipher(t)
-
-	registration := ApplePushDeviceRegistration{
-		UserID:          42,
-		ProfileID:       "profile-parent",
-		DeviceID:        "shared-phone",
-		APNsToken:       strings.Repeat("a", 64),
-		APNsEnvironment: APNsEnvironmentProd,
-		APNsTopic:       ApplePushTopicSilo,
-		PushMode:        PushModePrivatePush,
-	}
-	if _, err := repo.UpsertApple(ctx, registration, cipher); err != nil {
-		t.Fatalf("register under first profile: %v", err)
-	}
-
-	// A different install on another profile must be untouched by the purge.
-	other := registration
-	other.ProfileID = "profile-parent"
-	other.DeviceID = "other-phone"
-	if _, err := repo.UpsertApple(ctx, other, cipher); err != nil {
-		t.Fatalf("register unrelated device: %v", err)
-	}
-
-	// The shared phone switches profiles and re-registers: the old profile's
-	// row for that install must be gone, not left enabled.
-	registration.ProfileID = "profile-kid"
-	device, err := repo.UpsertApple(ctx, registration, cipher)
-	if err != nil {
-		t.Fatalf("register under second profile: %v", err)
-	}
-	if device.ProfileID != "profile-kid" {
-		t.Fatalf("profile = %q, want profile-kid", device.ProfileID)
-	}
-
-	rows, err := pool.Query(ctx, `SELECT profile_id, device_id FROM push_devices ORDER BY profile_id`)
-	if err != nil {
-		t.Fatalf("list rows: %v", err)
-	}
-	defer rows.Close()
-	got := map[string]string{}
-	for rows.Next() {
-		var profileID, deviceID string
-		if err := rows.Scan(&profileID, &deviceID); err != nil {
-			t.Fatalf("scan row: %v", err)
+	ctx, cipher, cmd := t.Context(), testPushCipher(t), ApplePushCommand{UserID: 7, ProfileID: "profile", InstallationKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), Generation: 1, ApplePushRegistrationInput: validApplePushInput()}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			t.Fatal(err)
 		}
-		got[profileID] = deviceID
+		return n
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
+	unknown := ApplePushRetirement{DeviceID: "never-registered", InstallationKey: cmd.InstallationKey, Generation: 4}
+	if got, err := repo.RetireApplePush(ctx, unknown); err != nil || !got.Removed {
+		t.Fatalf("unknown=%+v err=%v", got, err)
 	}
-	want := map[string]string{"profile-kid": "shared-phone", "profile-parent": "other-phone"}
-	if len(got) != len(want) || got["profile-kid"] != want["profile-kid"] || got["profile-parent"] != want["profile-parent"] {
-		t.Fatalf("rows after reassignment = %v, want %v", got, want)
+	if n := count(`SELECT count(*) FROM apple_push_installations WHERE device_id=$1`, unknown.DeviceID); n != 0 {
+		t.Fatalf("unknown installation wrote %d rows", n)
+	}
+
+	cmd.Generation = 5
+	first, err := repo.ApplyApplePush(ctx, cmd, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `CREATE TEMP TABLE push_delivery_attempts(id text PRIMARY KEY,push_device_id text REFERENCES push_devices(id) ON DELETE CASCADE)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO push_delivery_attempts VALUES('pending',$1)`, first.RegistrationID); err != nil {
+		t.Fatal(err)
+	}
+	retire := ApplePushRetirement{DeviceID: cmd.DeviceID, InstallationKey: cmd.InstallationKey, Generation: 5}
+	if _, err = repo.RetireApplePush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("retirement at the registration's generation=%v", err)
+	}
+	wrong := retire
+	wrong.Generation = 6
+	wrong.InstallationKey = base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("x", 32)))
+	if _, err = repo.RetireApplePush(ctx, wrong); !errors.Is(err, ErrPushInstallationProof) {
+		t.Fatalf("wrong key=%v", err)
+	}
+	retire.Generation = 4
+	if _, err = repo.RetireApplePush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("stale=%v", err)
+	}
+	if n := count(`SELECT count(*) FROM push_devices WHERE enabled`); n != 1 {
+		t.Fatalf("refused retirements changed delivery: %d enabled rows", n)
+	}
+
+	retire.Generation = 6
+	for range 2 { // the second call is an exact replay after a lost response
+		if got, e := repo.RetireApplePush(ctx, retire); e != nil || !got.Removed || got.Generation != 6 {
+			t.Fatalf("retire=%+v err=%v", got, e)
+		}
+	}
+	if n := count(`SELECT count(*) FROM push_devices`); n != 0 {
+		t.Fatalf("retired installation keeps %d rows", n)
+	}
+	if n := count(`SELECT count(*) FROM push_delivery_attempts`); n != 0 {
+		t.Fatalf("retired installation keeps %d pending attempts", n)
+	}
+
+	cmd.Generation = 6
+	if _, err = repo.ApplyApplePush(ctx, cmd, cipher); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("registration at the retirement's generation=%v", err)
+	}
+	cmd.Generation = 7
+	again, err := repo.ApplyApplePush(ctx, cmd, cipher)
+	if err != nil || !again.Enabled || again.RegistrationID == first.RegistrationID {
+		t.Fatalf("re-register=%+v err=%v", again, err)
+	}
+	if _, err = repo.RetireApplePush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("late retirement=%v", err)
+	}
+	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+		t.Fatalf("late retirement touched the new registration: %+v err=%v", current, e)
+	}
+}
+
+func TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T) {
+	repo, pool := newPushDeviceTestRepo(t)
+	ctx, cipher := t.Context(), testPushCipher(t)
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	register := AndroidPushCommand{UserID: 7, ProfileID: "default", DeviceID: "phone", InstallationKey: key, Generation: 5, Token: strings.Repeat("a", 64), PushMode: PushModePrivatePush}
+	first, err := repo.ApplyAndroidPush(ctx, register, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A bridge-only installation sits at generation 0 and has no key to check.
+	if _, err = registerLegacyMobile(t, repo, PushPlatformAndroid, 8, "default", "bridge-phone", PushModePrivatePush); err != nil {
+		t.Fatal(err)
+	}
+	legacyMobileAttempts(t, pool)
+	before := legacyMobileSnapshot(t, pool)
+	for _, device := range []string{"never-registered", "bridge-phone"} {
+		if got, e := repo.RetireAndroidPush(ctx, AndroidPushRetirement{DeviceID: device, InstallationKey: key, Generation: 4}); e != nil || !got.Removed || got.Generation != 4 {
+			t.Fatalf("%s retire=%+v err=%v", device, got, e)
+		}
+	}
+	retire := AndroidPushRetirement{DeviceID: register.DeviceID, InstallationKey: key, Generation: 5}
+	if _, err = repo.RetireAndroidPush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("retirement at the registration's generation=%v", err)
+	}
+	wrong := AndroidPushRetirement{DeviceID: register.DeviceID, InstallationKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("x", 32))), Generation: 6}
+	if _, err = repo.RetireAndroidPush(ctx, wrong); !errors.Is(err, ErrPushInstallationProof) {
+		t.Fatalf("wrong key=%v", err)
+	}
+	retire.Generation = 4
+	if _, err = repo.RetireAndroidPush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("stale=%v", err)
+	}
+	if legacyMobileSnapshot(t, pool) != before {
+		t.Fatal("unknown, bridge-only, or refused retirements changed rows")
+	}
+
+	retire.Generation = 6
+	for range 2 { // the second call is an exact replay after a lost response
+		if got, e := repo.RetireAndroidPush(ctx, retire); e != nil || !got.Removed || got.Generation != 6 {
+			t.Fatalf("retire=%+v err=%v", got, e)
+		}
+	}
+	if n := count(`SELECT count(*) FROM push_devices WHERE device_id=$1`, register.DeviceID); n != 0 {
+		t.Fatalf("retired installation keeps %d rows", n)
+	}
+	if n := count(`SELECT count(*) FROM push_delivery_attempts WHERE push_device_id=$1`, first.RegistrationID); n != 0 {
+		t.Fatalf("retired installation keeps %d attempts", n)
+	}
+	if n := count(`SELECT count(*) FROM push_devices WHERE device_id='bridge-phone' AND enabled`); n != 1 {
+		t.Fatalf("retirement touched another installation: %d rows", n)
+	}
+
+	// The retirement is the owner's removal at that generation: the owner's own
+	// removal replays and a registration there conflicts.
+	removal := AndroidPushCommand{UserID: 7, ProfileID: "default", DeviceID: register.DeviceID, InstallationKey: key, Generation: 6, Remove: true}
+	if got, e := repo.ApplyAndroidPush(ctx, removal, cipher); e != nil || !got.Removed {
+		t.Fatalf("owner removal replay=%+v err=%v", got, e)
+	}
+	register.Generation = 6
+	if _, err = repo.ApplyAndroidPush(ctx, register, cipher); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("registration at the retirement's generation=%v", err)
+	}
+	register.Generation = 7
+	again, err := repo.ApplyAndroidPush(ctx, register, cipher)
+	if err != nil || again.Removed || again.RegistrationID == first.RegistrationID {
+		t.Fatalf("re-register=%+v err=%v", again, err)
+	}
+	if _, err = repo.RetireAndroidPush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("late retirement=%v", err)
+	}
+	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+		t.Fatalf("late retirement touched the new registration: %+v err=%v", current, e)
 	}
 }

@@ -16,14 +16,16 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type ebookSQLExecutor interface {
@@ -84,7 +86,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots, libraryRoot
 			continue
 		}
 		scan := ebookRootScan{root: cleanRoot}
-		info, statErr := os.Stat(cleanRoot)
+		info, statErr := fspath.Stat(cleanRoot)
 		switch {
 		case statErr != nil:
 			// Unmounted/missing/permission-broken root: failed, not empty.
@@ -102,7 +104,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots, libraryRoot
 			rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
 		}
 		if scan.rootErr == nil && !ignored {
-			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, rules, &scan.files, &scan.walkFailures, nil, os.ReadDir); err != nil {
+			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, rules, &scan.files, &scan.walkFailures, nil, fspath.ReadDir); err != nil {
 				return nil, err
 			}
 		}
@@ -478,7 +480,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
 					slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", mf.FilePath,
@@ -526,7 +528,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 }
 
 func (s *Scanner) reconcileEbookFileWithSkipState(ctx context.Context, folder *models.MediaFolder, filePath string, skipped *int64, groupLocks *ebookGroupLocks, skipState ebookSkipState) error {
-	info, err := os.Stat(filePath)
+	info, err := fspath.Stat(filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -536,7 +538,7 @@ func (s *Scanner) reconcileEbookFileWithSkipState(ctx context.Context, folder *m
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
 	if sidecarPath := ebookOPFSidecarPath(filePath); sidecarPath != "" {
-		if sidecarInfo, statErr := os.Stat(sidecarPath); statErr == nil {
+		if sidecarInfo, statErr := fspath.Stat(sidecarPath); statErr == nil {
 			sidecarModifiedAt := normalizeFileModifiedAt(sidecarInfo.ModTime())
 			if sidecarModifiedAt.After(modifiedAt) {
 				modifiedAt = sidecarModifiedAt
@@ -569,7 +571,7 @@ func (s *Scanner) reconcileEbookFileWithSkipState(ctx context.Context, folder *m
 		return fmt.Errorf("parse ebook file %s: %w", filePath, err)
 	}
 	if parsed.Title == "" {
-		parsed.Title = ebookTitleFromPath(filePath)
+		parsed.Title = ebookDisplayTitleFromPath(filePath)
 	}
 	if len(parsed.Authors) == 0 {
 		if author := ebookAuthorFromPath(filePath); author != "" {
@@ -794,7 +796,7 @@ func resolveEbookMediaItem(
 
 	cleanTitle := strings.TrimSpace(book.Title)
 	if cleanTitle == "" {
-		cleanTitle = ebookTitleFromPath(filePath)
+		cleanTitle = ebookDisplayTitleFromPath(filePath)
 	}
 	return createEbookMediaItem(ctx, itemWriter, book, cleanTitle)
 }
@@ -1002,7 +1004,7 @@ func ebookContentGroupKey(book *parsedEbook, filePath string) string {
 		authors = book.Authors
 	}
 	if title == "" {
-		title = ebookTitleFromPath(filePath)
+		title = ebookDisplayTitleFromPath(filePath)
 	}
 	normalizedTitle := normalizeEbookIdentityPart(title)
 	if normalizedTitle == "" {
@@ -1051,6 +1053,13 @@ func ebookTitleFromPath(filePath string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// ebookDisplayTitleFromPath is ebookTitleFromPath as text for people: a
+// non-UTF-8 file name reads through fspath.Display, so the title and the
+// group key built from it never hold reserved code points.
+func ebookDisplayTitleFromPath(filePath string) string {
+	return fspath.Display(ebookTitleFromPath(filePath))
+}
+
 // ebookAuthorFromPath recovers an author for libraries that shelve books as
 // ".../<Author>/<Title>/<Title> - <Author>.ext" but embed no author in the file
 // (common for PDF/MOBI/AZW3). It returns a value only when two independent path
@@ -1059,7 +1068,7 @@ func ebookTitleFromPath(filePath string) string {
 // satisfy neither or only one signal, so they never get a junk author that would
 // poison the enrichment search.
 func ebookAuthorFromPath(filePath string) string {
-	base := ebookTitleFromPath(filePath)
+	base := ebookDisplayTitleFromPath(filePath)
 	idx := strings.LastIndex(base, " - ")
 	if idx < 0 {
 		return ""
@@ -1068,7 +1077,7 @@ func ebookAuthorFromPath(filePath string) string {
 	if fromName == "" {
 		return ""
 	}
-	grandparent := strings.TrimSpace(filepath.Base(filepath.Dir(filepath.Dir(filePath))))
+	grandparent := strings.TrimSpace(fspath.Display(filepath.Base(filepath.Dir(filepath.Dir(filePath)))))
 	switch grandparent {
 	case "", ".", string(filepath.Separator):
 		return ""
@@ -1125,8 +1134,11 @@ func looksLikePersonName(value string) bool {
 	return hasUpper
 }
 
+// normalizeEbookIdentityPart folds value for identity comparison. value may
+// be an fspath-encoded path part; it is read through fspath.Display first so
+// escaped bytes count as letters instead of being dropped.
 func normalizeEbookIdentityPart(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ToLower(strings.TrimSpace(fspath.Display(value)))
 	var b strings.Builder
 	previousSpace := false
 	for _, r := range value {
@@ -1250,7 +1262,7 @@ func findSidecarBookCover(ebookFilePath string) (*parsedEbookCover, string, erro
 	if ebookFilePath == "" {
 		return nil, "", nil
 	}
-	entries, err := os.ReadDir(filepath.Dir(ebookFilePath))
+	entries, err := fspath.ReadDir(filepath.Dir(ebookFilePath))
 	if err != nil {
 		return nil, "", err
 	}
@@ -1297,7 +1309,7 @@ func findSidecarBookCover(ebookFilePath string) (*parsedEbookCover, string, erro
 }
 
 func readSidecarCover(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := fspath.Open(path)
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
@@ -34,6 +36,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -86,52 +89,57 @@ type Dependencies struct {
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
 
-	DirectDownloads                  *DirectDownloadHandlers
-	DirectDownloadLinks              DirectDownloadLinkService
-	ViewerSubtitleDelete             ViewerSubtitleDeleteService
-	OrderedApplePush                 OrderedApplePushService
-	NotificationEmailVerification    NotificationEmailVerificationService
-	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
-	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService
-	WatchTogetherSocket              WatchTogetherSocketService
-	WatchTogetherCreate              WatchTogetherCreateService
-	AdminAutoscanEvents              AdminAutoscanEventsService
-	AdminAutoscanScans               AdminAutoscanScansService
-	WatchTogetherSuggestionPromote   WatchTogetherSuggestionPromoteService
-	WatchTogetherSuggestionCreate    WatchTogetherSuggestionCreateService
-	AdminAutoscanConnectionDeletes   AdminAutoscanConnectionDeleteService
-	AdminAutoscanConnectionUpdate    AdminAutoscanConnectionUpdateService
-	AdminAutoscanConnectionCreation  AdminAutoscanConnectionCreationService
-	AdminAutoscanRewrites            AdminAutoscanRewritesService
-	AdminAutoscanAvailableSources    AdminAutoscanAvailableSourcesService
-	AdminAuditLogs                   AdminAuditLogsService
-	ExternalSignIn                   ExternalSignInService
-	AdminOperationalLogs             AdminOperationalLogsService
-	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
-	OrderedAndroidPush               OrderedAndroidPushService
-	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
-	WatchTogetherClose               WatchTogetherCloseService
-	WatchTogetherRoomRead            WatchTogetherRoomReadService
-	WatchTogetherPolicy              WatchTogetherPolicyService
-	WatchTogetherJoin                WatchTogetherJoinService
-	WatchTogetherSelection           WatchTogetherSelectionService
-	WatchTogetherSourceFallback      WatchTogetherSourceFallbackService
-	WatchTogetherStage               WatchTogetherStageService
-	WatchTogetherStart               WatchTogetherStartService
-	WatchTogetherStop                WatchTogetherStopService
-	WatchTogetherSelectionMode       WatchTogetherSelectionModeService
-	WatchTogetherMemberState         WatchTogetherMemberStateService
-	WatchTogetherPicker              WatchTogetherPickerService
-	WatchTogetherCapability          WatchTogetherCapabilityService
-	WatchTogetherSuggestions         WatchTogetherSuggestionService
-	AdminDashboardStats              AdminDashboardStatsService
-	AdminHardwareAcceleration        AdminHardwareAccelerationService
-	AdminDashboardLayout             AdminDashboardLayoutService
-	AdminDashboardLayoutResets       AdminDashboardLayoutResetService
-	AdminDashboardLayoutSaves        AdminDashboardLayoutSaveService
-	ScanControls                     ScanControlService
-	AuthProviderIconPublic           AuthProviderIconPublic
-	AdminPlaybackSessions            AdminPlaybackSessionService
+	DirectDownloads                 *DirectDownloadHandlers
+	DirectDownloadLinks             DirectDownloadLinkService
+	ViewerSubtitleDelete            ViewerSubtitleDeleteService
+	OrderedApplePush                OrderedApplePushService
+	ApplePushRetirement             ApplePushRetirementService
+	NotificationEmailVerification   NotificationEmailVerificationService
+	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
+	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
+	WatchTogetherSocket             WatchTogetherSocketService
+	WatchTogetherCreate             WatchTogetherCreateService
+	AdminAutoscanEvents             AdminAutoscanEventsService
+	AdminAutoscanScans              AdminAutoscanScansService
+	WatchTogetherSuggestionPromote  WatchTogetherSuggestionPromoteService
+	WatchTogetherSuggestionCreate   WatchTogetherSuggestionCreateService
+	AdminAutoscanConnectionDeletes  AdminAutoscanConnectionDeleteService
+	AdminAutoscanConnectionUpdate   AdminAutoscanConnectionUpdateService
+	AdminAutoscanConnectionCreation AdminAutoscanConnectionCreationService
+	AdminAutoscanRewrites           AdminAutoscanRewritesService
+	AdminAutoscanAvailableSources   AdminAutoscanAvailableSourcesService
+	AdminAuditLogs                  AdminAuditLogsService
+	ExternalSignIn                  ExternalSignInService
+	AdminOperationalLogs            AdminOperationalLogsService
+	AdminJellyfinCompatSettings     AdminJellyfinCompatSettingsService
+	OrderedAndroidPush              OrderedAndroidPushService
+	AndroidPushRetirement           AndroidPushRetirementService
+	WatchTogetherSuggestionDelete   WatchTogetherSuggestionDeleteService
+	WatchTogetherClose              WatchTogetherCloseService
+	WatchTogetherRoomRead           WatchTogetherRoomReadService
+	WatchTogetherPolicy             WatchTogetherPolicyService
+	WatchTogetherJoin               WatchTogetherJoinService
+	WatchTogetherSelection          WatchTogetherSelectionService
+	WatchTogetherSourceFallback     WatchTogetherSourceFallbackService
+	WatchTogetherStage              WatchTogetherStageService
+	WatchTogetherStart              WatchTogetherStartService
+	WatchTogetherStop               WatchTogetherStopService
+	WatchTogetherSelectionMode      WatchTogetherSelectionModeService
+	WatchTogetherMemberState        WatchTogetherMemberStateService
+	WatchTogetherPicker             WatchTogetherPickerService
+	WatchTogetherCapability         WatchTogetherCapabilityService
+	WatchTogetherSuggestions        WatchTogetherSuggestionService
+	AdminDashboardStats             AdminDashboardStatsService
+	AdminHardwareAcceleration       AdminHardwareAccelerationService
+	AdminDashboardLayout            AdminDashboardLayoutService
+	AdminDashboardLayoutResets      AdminDashboardLayoutResetService
+	AdminDashboardLayoutSaves       AdminDashboardLayoutSaveService
+	ScanControls                    ScanControlService
+	AuthProviderIconPublic          AuthProviderIconPublic
+	AdminPlaybackSessions           AdminPlaybackSessionService
+	// PlaybackLifecycleEvents reports that this server announces session.*
+	// lifecycle events on the admin sessions channel.
+	PlaybackLifecycleEvents          bool
 	AdminDownloadPreparations        AdminDownloadPreparationService
 	AdminDownloadPreparationControls AdminDownloadPreparationControlService
 	AdminDownloadStorage             AdminDownloadStorageService
@@ -165,6 +173,7 @@ type Dependencies struct {
 	ServerConnections             ServerConnections
 	NotificationDestinationCreate NotificationDestinationCreateService
 	AdminUnmatchedFiles           AdminUnmatchedFilesService
+	AdminCatalogItems             AdminCatalogItemsService
 	AdminCatalogImages            AdminCatalogImagesService
 	AdminCatalogMatch             AdminCatalogMatchService
 	AdminCatalogSplit             AdminCatalogSplitService
@@ -198,6 +207,7 @@ type Dependencies struct {
 	AdminJobArtifactSigner        *artworkurl.Signer
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminAPIClients               AdminAPIClientsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService
 	AdminNodeDrain                AdminNodeDrainService
@@ -224,6 +234,7 @@ type Dependencies struct {
 	AdminRecommendations          AdminRecommendationsService
 	AdminLiteraryWorks            AdminLiteraryWorkService
 	NotificationChannels          NotificationChannelService
+	NotificationDiscordManagement NotificationDiscordManagementService
 	NotificationRelay             NotificationRelayService
 	AdminNotificationPush         AdminNotificationPushService
 	NotificationInbox             NotificationInboxService
@@ -232,6 +243,7 @@ type Dependencies struct {
 	AdminCatalogSearch            AdminCatalogSearchService
 	AdminSettingsChecks           AdminSettingsCheckService
 	ChatGPT                       ChatGPTService
+	AdminAIProviders              AdminAIProviderService
 	AdminSettingsInspection       AdminSettingsInspectionService
 	AdminResourceSampler          AdminResourceSampler
 	AdminTaskJobs                 AdminTaskJobsService
@@ -389,6 +401,10 @@ type Dependencies struct {
 	HomeSections HomeSectionService
 	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
 	Recipes RecipeService
+	// SeasonalThemes is the holiday catalog listSeasonalThemes serves; nil
+	// serves recipes.SeasonalThemes. Contract fixtures pass their own so the
+	// committed bodies name no real list hosts.
+	SeasonalThemes []recipes.SeasonalTheme
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
@@ -467,6 +483,8 @@ type Dependencies struct {
 	People PeopleService
 	// LiteraryWorks answers literary works (*handlers.LiteraryWorkHandler).
 	LiteraryWorks LiteraryWorkService
+	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
+	BoxSets BoxSetService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -686,8 +704,10 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 //   - a panic anywhere, including Huma's own marshal failure after the status
 //     would already have been sent, becomes the internal_error problem with no
 //     detail leakage;
-//   - a success body is never written once the client has gone away (net/http
-//     cancels the request context on disconnect);
+//   - the operation's own status and body are written even once the request
+//     context is canceled, because net/http cancels it for a client that only
+//     half-closed as well as one that left; writing nothing would reach a
+//     reading client as net/http's empty 200;
 //   - a problem — including the 408 for a body-read timeout, which net/http
 //     also reports as a canceled context — is still delivered.
 //
@@ -704,7 +724,7 @@ func bufferStructuredResponse(ctx huma.Context, next func(huma.Context)) {
 
 func bufferResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bw := &bufferedWriter{w: w, ctx: r.Context(), retirement: make(http.Header)}
+		bw := &bufferedWriter{w: w, retirement: make(http.Header)}
 		r = r.WithContext(context.WithValue(r.Context(), retirementHeadersKey{}, bw.retirement))
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -727,7 +747,6 @@ func bufferResponse(next http.Handler) http.Handler {
 
 type bufferedWriter struct {
 	w          http.ResponseWriter
-	ctx        context.Context
 	status     int
 	body       bytes.Buffer
 	flushed    bool
@@ -767,6 +786,9 @@ func (b *bufferedWriter) discard() {
 	maps.Copy(h, b.retirement)
 }
 
+// flush writes the buffered response whether or not the request context has
+// ended (see bufferResponse). A client that has really gone never reads the
+// bounded body, and observe records the request by what was written.
 func (b *bufferedWriter) flush() {
 	if b.flushed {
 		return
@@ -774,10 +796,6 @@ func (b *bufferedWriter) flush() {
 	b.flushed = true
 	if b.status == 0 {
 		b.status = http.StatusOK
-	}
-	if b.ctx.Err() != nil && b.status < 400 {
-		// The client is gone; a success body has nobody to read it.
-		return
 	}
 	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
 		// No body travels with these statuses, so no representation header
@@ -787,6 +805,10 @@ func (b *bufferedWriter) flush() {
 		// so the listener leaves that to the server.
 		b.w.Header().Del("Content-Type")
 		b.body.Reset()
+	} else if b.w.Header().Get("Content-Length") == "" {
+		// The whole body is known, so it goes out unchunked, and the
+		// listener's compressor can leave a body too short to gain identity.
+		b.w.Header().Set("Content-Length", strconv.Itoa(b.body.Len()))
 	}
 	b.w.WriteHeader(b.status)
 	_, _ = b.w.Write(b.body.Bytes())
@@ -821,7 +843,7 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 type AccountService interface {
 	AccountPasswordCapability(context.Context, *auth.Claims, string) (handlers.AccountPasswordCapabilityView, error)
 	AuthorizePasswordChange(context.Context, *auth.Claims, string) error
-	ChangePassword(context.Context, *auth.Claims, string, string) error
+	ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string, signOutOtherSessions bool) error
 	NeedsSetup(ctx context.Context) (bool, error)
 	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
@@ -1026,6 +1048,12 @@ type PersonalListService interface {
 	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
 	AddToWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFromWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	// VisibleItemIDs reports which of the given catalog items the viewer
+	// may see, in one query.
+	VisibleItemIDs(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) (map[string]bool, error)
+	// ResolveCards answers the cards of the given catalog items the viewer
+	// may see, in the order given.
+	ResolveCards(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error)
 }
 
 // RatingService is the slice of *handlers.RatingsHandler the ratings
@@ -1069,8 +1097,8 @@ type RecommendationService interface {
 // handlers.RequestService) the profile-facing request operations use.
 type MediaRequestService interface {
 	Search(ctx context.Context, viewer mediarequests.Viewer, query string, mediaType mediarequests.MediaType, page int) (*mediarequests.MediaPage, error)
-	Discover(ctx context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error)
-	DiscoverAll(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error)
+	DiscoverRows(ctx context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error)
+	DiscoverRow(ctx context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error)
 	GetDetail(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error)
 	CreateRequest(ctx context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error)
 	ListMine(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)
@@ -1176,7 +1204,18 @@ func serviceProblem(err error) *Problem {
 		}
 		return p
 	}
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return passwordHashBusyProblem()
+	}
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
+}
+
+// passwordHashBusyProblem answers a password or PIN the server was too busy
+// to hash or check (passwordhash.ErrBusy): a capacity failure, retried after
+// the delay, never a wrong password.
+func passwordHashBusyProblem() *Problem {
+	return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").
+		WithRetryAfter(passwordhash.RetryAfterSeconds)
 }
 
 // externalSignInProblemTypes keeps the external sign-in codes a shared

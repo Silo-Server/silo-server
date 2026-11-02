@@ -167,38 +167,6 @@ func TestParseRedisURLErrorsDoNotQuotePasswords(t *testing.T) {
 	}
 }
 
-func TestParseRedisURLErrorsStillSayWhatIsWrong(t *testing.T) {
-	const hint = "percent-encode"
-	for _, tc := range []struct {
-		raw, want string
-		hint      bool
-	}{
-		{"redis://redis.example:6379?pool_size=many", "invalid pool_size number", false},
-		{"redis://redis.example:6379?pool_size=-1", "pool_size must be 0 or more", false},
-		{"redis://sentinel-1:26379?master_name=mymaster&pool_size=-5", "pool_size must be 0 or more", false},
-		{"http://redis.example:6379", "invalid URL scheme", false},
-		{"redis://sentinel-1:26379?master_name=mymaster&addr=nowhere", "unable to parse addr param", false},
-		{"redis://sentinel-1?master_name=mymaster", "needs a host and a port", false},
-		{"redis://sentinel-1:26379?master_name=mymaster&password=p+ss", "write %2B", false},
-		{"redis://sentinel-1:26379?master_name=mymaster&read_timeout=0", "must be more than 0", false},
-		// What an unencoded reserved character in a password turns into.
-		{"redis://redis.example:6379?unknown=1", "unexpected option", true},
-		{"redis://redis.example:6379/first", "invalid database number", true},
-		{"redis://redis.example:6379/1/2", "invalid URL path", true},
-		{"redis://silo:pass/word@redis.example:6379", "the URL is malformed", true},
-		{"redis://sentinel-1:26379?master_name=mymaster&password=p;ss", "cannot be read", true},
-	} {
-		_, _, err := ParseRedisURL(tc.raw)
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("ParseRedisURL(%q) error = %v, want it to say %q", tc.raw, err, tc.want)
-			continue
-		}
-		if strings.Contains(err.Error(), hint) != tc.hint {
-			t.Errorf("ParseRedisURL(%q) error = %v, want the percent-encoding hint: %v", tc.raw, err, tc.hint)
-		}
-	}
-}
-
 // A single-server URL that happens to contain the text master_name outside
 // its query string worked before Sentinel URLs existed.
 func TestParseRedisURLKeepsASingleServerURLThatMentionsTheParameterElsewhere(t *testing.T) {

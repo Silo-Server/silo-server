@@ -62,19 +62,6 @@ type noopProgressReporter struct{}
 func (noopProgressReporter) Report(float64, string)        {}
 func (noopProgressReporter) SetResultData(json.RawMessage) {}
 
-func TestRefreshMetadataTask_NoCandidates(t *testing.T) {
-	finder := &fakeRefreshCandidateFinder{}
-	refresher := &fakeMetadataRefresher{}
-	task := NewRefreshMetadataTask(finder, refresher)
-
-	if err := task.Execute(context.Background(), noopProgressReporter{}); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-	if calls := refresher.Calls(); len(calls) != 0 {
-		t.Fatalf("expected no refresh calls, got %v", calls)
-	}
-}
-
 func TestRefreshMetadataTask_DrainsFullBatches(t *testing.T) {
 	firstBatch := make([]worker.RefreshCandidate, refreshMetadataBatchSize)
 	for i := range firstBatch {

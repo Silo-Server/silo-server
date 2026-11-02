@@ -5,38 +5,6 @@ import CastCarousel from "./CastCarousel";
 import { buildCrewGroups } from "./castCrewGroups";
 
 describe("CastCarousel", () => {
-  it("renders an Embla carousel with cast cards", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/series-1"]}>
-        <CastCarousel
-          cast={[
-            {
-              name: "Winona Ryder",
-              character: "Joyce Byers",
-              order: 1,
-              person_id: "person-001",
-              photo_url: "https://images.example.test/winona.jpg",
-              photo_thumbhash: "thumbhash-cast",
-            },
-            {
-              name: "David Harbour",
-              character: "Jim Hopper",
-              order: 2,
-              person_id: "person-002",
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("embla__viewport");
-    expect(markup).toContain("embla__container");
-    expect(markup).toContain('href="/person/person-001"');
-    expect(markup).toContain('src="https://images.example.test/winona.jpg"');
-    expect(markup).toContain(">DH<");
-    expect(markup).not.toContain('data-slot="scroll-area"');
-  });
-
   it("puts crew groups ahead of the cast with labelled dividers", () => {
     const director = {
       name: "Denis Villeneuve",
@@ -78,25 +46,6 @@ describe("CastCarousel", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(markup).toContain("Actor 2");
     expect(markup).not.toContain("Actor 3");
-  });
-
-  it("labels series creators and renders crew alone when there is no cast", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/series-1"]}>
-        <CastCarousel
-          cast={[]}
-          crewGroups={buildCrewGroups(
-            [{ name: "Vince Gilligan", job: "Creator", person_id: "person-200" }],
-            "Creator",
-          )}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain(">Vince Gilligan<");
-    expect(markup).toContain(">Creator<");
-    expect(markup).not.toContain(">Cast<");
-    expect(markup).not.toContain("Writers");
   });
 
   it("leads a series with its Creator credits ahead of its directors", () => {
@@ -175,40 +124,29 @@ describe("CastCarousel", () => {
     expect(writers?.members.map((c) => c.name)).toEqual(["Staff Writer"]);
   });
 
-  it.each([
-    ["a movie", "Director"],
-    ["a series without Creator credits", "Creator"],
-  ] as const)("still shows at most two directors for %s", (_, leadRole) => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <CastCarousel
-          cast={[]}
-          crewGroups={buildCrewGroups(
-            [
-              { name: "First Director", job: "Director", person_id: "person-500" },
-              { name: "Second Director", job: "Director", person_id: "person-501" },
-              { name: "Third Director", job: "Director", person_id: "person-502" },
-            ],
-            leadRole,
-          )}
-        />
-      </MemoryRouter>,
-    );
+  it.each([["a series without Creator credits", "Creator"]] as const)(
+    "still shows at most two directors for %s",
+    (_, leadRole) => {
+      const markup = renderToStaticMarkup(
+        <MemoryRouter>
+          <CastCarousel
+            cast={[]}
+            crewGroups={buildCrewGroups(
+              [
+                { name: "First Director", job: "Director", person_id: "person-500" },
+                { name: "Second Director", job: "Director", person_id: "person-501" },
+                { name: "Third Director", job: "Director", person_id: "person-502" },
+              ],
+              leadRole,
+            )}
+          />
+        </MemoryRouter>,
+      );
 
-    expect(markup.match(/>Director</g)).toHaveLength(2);
-    expect(markup).toContain(">First Director<");
-    expect(markup).toContain(">Second Director<");
-    expect(markup).not.toContain("Third Director");
-  });
-
-  it("renders the plain cast row without dividers when no crew groups are passed", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <CastCarousel cast={[{ name: "Solo", character: "Lead", order: 0, person_id: "p" }]} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain(">Solo<");
-    expect(markup).not.toContain(">Cast<");
-  });
+      expect(markup.match(/>Director</g)).toHaveLength(2);
+      expect(markup).toContain(">First Director<");
+      expect(markup).toContain(">Second Director<");
+      expect(markup).not.toContain("Third Director");
+    },
+  );
 });

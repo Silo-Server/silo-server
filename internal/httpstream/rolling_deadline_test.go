@@ -82,13 +82,13 @@ func TestRollingDeadlineWriterAbortInterruptsBlockedWrite(t *testing.T) {
 // the server's absolute WriteTimeout when wrapped.
 func TestStreamSurvivesServerWriteTimeout(t *testing.T) {
 	const (
-		writeEvery = 50 * time.Millisecond
-		writes     = 60 // ~3s total, 3x the server WriteTimeout
+		writeEvery = 20 * time.Millisecond
+		writes     = 45 // ~0.9s total, 3x the server WriteTimeout
 		chunk      = "0123456789abcdef"
 	)
 
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := newRollingDeadlineWriter(w, 2*time.Second, 0 /* bump every write */)
+		sw := newRollingDeadlineWriter(w, time.Second, 0 /* bump every write */)
 		sw.WriteHeader(http.StatusOK)
 		for i := 0; i < writes; i++ {
 			if _, err := sw.Write([]byte(chunk)); err != nil {
@@ -98,7 +98,7 @@ func TestStreamSurvivesServerWriteTimeout(t *testing.T) {
 			time.Sleep(writeEvery)
 		}
 	}))
-	srv.Config.WriteTimeout = 1 * time.Second
+	srv.Config.WriteTimeout = 300 * time.Millisecond
 	srv.Start()
 	defer srv.Close()
 
@@ -220,31 +220,6 @@ func TestDisconnectedClientClassifiedClientGone(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("handler did not observe the client disconnect")
-	}
-}
-
-func TestWriteOutcomeCompletedAndCounted(t *testing.T) {
-	rr := httptest.NewRecorder()
-	sw := newRollingDeadlineWriter(rr, time.Second, 0)
-	sw.WriteHeader(http.StatusCreated)
-	const body = "completed body"
-	n, err := sw.Write([]byte(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != len(body) || sw.BytesWritten() != int64(len(body)) {
-		t.Fatalf("bytes = (%d, %d), want %d", n, sw.BytesWritten(), len(body))
-	}
-	if sw.StatusCode() != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", sw.StatusCode(), http.StatusCreated)
-	}
-	if outcome := sw.Outcome(context.Background()); outcome != OutcomeCompleted {
-		t.Fatalf("outcome = %q, want %q", outcome, OutcomeCompleted)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if outcome := sw.Outcome(ctx); outcome != OutcomeClientGone {
-		t.Fatalf("canceled outcome = %q, want %q", outcome, OutcomeClientGone)
 	}
 }
 

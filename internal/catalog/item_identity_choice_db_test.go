@@ -12,7 +12,7 @@ import (
 // An Identify mark survives later writes of the item row, and a content-id
 // rename carries it along.
 func TestIdentityChoiceSurvivesUpsertAndRenameDB(t *testing.T) {
-	pool := newAdvisoryAgeTestPool(t)
+	pool := newTestPool(t)
 	ctx := context.Background()
 	repo := NewItemRepository(pool)
 	contentID := fmt.Sprintf("identity-choice-%d", time.Now().UnixNano())

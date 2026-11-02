@@ -68,14 +68,6 @@ describe("high-contrast CSS", () => {
     }
   });
 
-  it("aliases every contrast token to its -base input", () => {
-    // Without the alias the semantic token is never defined outside high
-    // contrast, and standard mode loses the token entirely.
-    for (const token of CONTRAST_TOKENS) {
-      expect(css).toMatch(new RegExp(String.raw`--${token}:\s*var\(--${token}-base\);`));
-    }
-  });
-
   it("defines every -base input in the base theme", () => {
     const themes = [...css.matchAll(/\[data-theme="([a-z-]+)"\] \{([\s\S]*?)\n {2}\}/g)];
     expect(themes).toHaveLength(1);

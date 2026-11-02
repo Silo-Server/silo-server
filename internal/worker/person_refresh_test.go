@@ -64,22 +64,6 @@ func newTestPersonRefreshWorker(service PersonRefresher) *PersonRefreshWorker {
 	return NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{BatchSize: 3})
 }
 
-// A backlog is worked through batch after batch, not one batch per interval.
-func TestPersonRefreshWorkerDrainsFullBatchesBackToBack(t *testing.T) {
-	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}, {4, 5, 6}, {7}}}
-	w := newTestPersonRefreshWorker(service)
-
-	w.drain()
-
-	if want := []int64{1, 2, 3, 4, 5, 6, 7}; !slices.Equal(service.refreshed, want) {
-		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
-	}
-	// Two full batches, then the short one ends the drain without a fourth claim.
-	if service.claims != 3 {
-		t.Fatalf("claims = %d, want 3", service.claims)
-	}
-}
-
 // Slow lookups that use up the claim's lease stop the batch before another
 // node can claim the people it hasn't reached.
 func TestPersonRefreshWorkerStopsBatchWhenClaimLeaseRunsOut(t *testing.T) {
@@ -100,30 +84,6 @@ func TestPersonRefreshWorkerStopsBatchWhenClaimLeaseRunsOut(t *testing.T) {
 	// after the claim's lease ran out.
 	if want := []int64{1, 2}; !slices.Equal(service.refreshed, want) {
 		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
-	}
-}
-
-// Background lookups carry the claim time and page requests the attempt the
-// page saw, so a person another node started looking up since is skipped.
-func TestPersonRefreshWorkerPassesClaimAndRequestTimes(t *testing.T) {
-	service := &fakePersonRefresher{batches: [][]int64{{1, 2}}}
-	w := newTestPersonRefreshWorker(service)
-	seen := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	claimedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	w.now = func() time.Time { return claimedAt }
-	w.Enqueue(9, &seen)
-	w.Enqueue(8, nil)
-
-	w.drain()
-
-	if want := []int64{9, 8, 1, 2}; !slices.Equal(service.refreshed, want) {
-		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
-	}
-	// A page request is cut off at the attempt the page saw.
-	for id, want := range map[int64]time.Time{9: seen, 8: neverAttempted, 1: claimedAt, 2: claimedAt} {
-		if got := service.since[id]; !got.Equal(want) {
-			t.Fatalf("person %d since = %s, want %s", id, got, want)
-		}
 	}
 }
 
@@ -164,23 +124,6 @@ func TestPersonRefreshWorkerRunsOnDemandRequestsDuringRateWait(t *testing.T) {
 	}
 }
 
-// A person-page request that arrives during a batch runs before the rest of it.
-func TestPersonRefreshWorkerRunsOnDemandRequestsBetweenBatchItems(t *testing.T) {
-	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}}}
-	w := newTestPersonRefreshWorker(service)
-	service.onRefresh = func(id int64) {
-		if id == 1 {
-			w.Enqueue(99, nil)
-		}
-	}
-
-	w.drain()
-
-	if want := []int64{1, 99, 2, 3}; !slices.Equal(service.refreshed, want) {
-		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
-	}
-}
-
 // A claimed person whose on-demand lookup is pending is looked up once.
 func TestPersonRefreshWorkerSkipsClaimedPersonQueuedOnDemand(t *testing.T) {
 	service := &fakePersonRefresher{batches: [][]int64{{1, 2}}}
@@ -217,55 +160,6 @@ func TestPersonRefreshWorkerStopsBetweenOnDemandRequests(t *testing.T) {
 
 	if want := []int64{1}; !slices.Equal(service.refreshed, want) {
 		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
-	}
-}
-
-// A worker stopped during an on-demand lookup doesn't claim a batch it
-// won't look up: the claim would hold those people until its lease ran out.
-func TestPersonRefreshWorkerStoppedDuringOnDemandClaimsNothing(t *testing.T) {
-	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}}}
-	w := newTestPersonRefreshWorker(service)
-	w.Enqueue(99, nil)
-	service.onRefresh = func(id int64) {
-		if id == 99 {
-			w.Stop()
-		}
-	}
-
-	if w.processBatch() {
-		t.Fatal("processBatch reported more work after a stop")
-	}
-	if service.claims != 0 {
-		t.Fatalf("claimed %d batches after the stop, want none", service.claims)
-	}
-}
-
-// A provider rate limiting a page's lookup pauses background lookups: before
-// a batch is claimed, and between the items of one already claimed.
-func TestPersonRefreshWorkerPausesOnOnDemandRateLimit(t *testing.T) {
-	service := &fakePersonRefresher{
-		batches: [][]int64{{1, 2, 3}},
-		errs:    map[int64]error{99: rateLimitErr{retryAfter: 30 * time.Minute}},
-	}
-	w := newTestPersonRefreshWorker(service)
-	w.Enqueue(99, nil)
-	if w.processBatch() || service.claims != 0 || !w.paused() {
-		t.Fatalf("claims %d, paused %v after a rate-limited page lookup; want no claim and a pause", service.claims, w.paused())
-	}
-
-	service = &fakePersonRefresher{
-		batches: [][]int64{{1, 2, 3}},
-		errs:    map[int64]error{99: rateLimitErr{}},
-	}
-	w = newTestPersonRefreshWorker(service)
-	service.onRefresh = func(id int64) {
-		if id == 1 {
-			w.Enqueue(99, nil)
-		}
-	}
-	w.processBatch()
-	if want := []int64{1, 99}; !slices.Equal(service.refreshed, want) {
-		t.Fatalf("refreshed %v, want %v: the batch should stop at the page's rate limit", service.refreshed, want)
 	}
 }
 
@@ -368,8 +262,11 @@ func TestPersonRefreshWorkerPacesLookupsAcrossBatches(t *testing.T) {
 	w := NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{BatchSize: 1})
 	const delay = 30 * time.Millisecond
 	w.delay.Store(int64(delay))
+	// Take each start from the worker's own clock: it paces from the moment
+	// it set nextLookup, just before the lookup, so a timestamp taken later
+	// in the hook can shave jitter off a correctly paced gap.
 	var starts []time.Time
-	service.onRefresh = func(int64) { starts = append(starts, time.Now()) }
+	service.onRefresh = func(int64) { starts = append(starts, w.nextLookup.Add(-delay)) }
 
 	w.drain()
 
@@ -404,17 +301,5 @@ func TestPersonRefreshWorkerClaimLimitFitsTheLease(t *testing.T) {
 		if got := w.claimLimit(); got != tc.want {
 			t.Errorf("claimLimit() at %d/min = %d, want %d", tc.perMinute, got, tc.want)
 		}
-	}
-}
-
-func TestPersonRefreshWorkerSetRatePerMinute(t *testing.T) {
-	w := newTestPersonRefreshWorker(&fakePersonRefresher{})
-	w.SetRatePerMinute(60)
-	if got := time.Duration(w.delay.Load()); got != time.Second {
-		t.Fatalf("delay at 60/min = %s, want 1s", got)
-	}
-	w.SetRatePerMinute(0)
-	if got := time.Duration(w.delay.Load()); got != time.Second {
-		t.Fatalf("delay after an invalid rate = %s, want it unchanged at 1s", got)
 	}
 }

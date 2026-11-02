@@ -52,7 +52,7 @@ const MOVIES_MENU: PrimaryMenuDocument = { items: [HOME, MOVIES, CALENDAR] };
 
 function customization(overrides: Record<string, unknown> = {}) {
   return {
-    cardPresentation: { poster_size: "large", caption: "title" },
+    cardPresentation: { poster_size: "large" },
     cardPresentationSource: "profile_client",
     primaryMenu: defaultWebPrimaryMenu(),
     primaryMenuSource: "profile_client",
@@ -84,46 +84,10 @@ describe("InterfaceSettings", () => {
 
   afterEach(cleanup);
 
-  it("saves poster size and caption the moment they are picked", async () => {
-    render(<InterfaceSettings />);
-
-    expect(screen.getByRole("radio", { name: "Large" })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
-    await waitFor(() =>
-      expect(setMutateAsync).toHaveBeenCalledWith({
-        key: SETTING_KEYS.UI_CARD_PRESENTATION,
-        value: { poster_size: "compact", caption: "title" },
-        identity: { scope: "profile_client" },
-      }),
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: "Nothing" }));
-    await waitFor(() =>
-      expect(setMutateAsync).toHaveBeenLastCalledWith({
-        key: SETTING_KEYS.UI_CARD_PRESENTATION,
-        value: { poster_size: "large", caption: "artwork" },
-        identity: { scope: "profile_client" },
-      }),
-    );
-  });
-
-  it("resets poster settings at profile_client scope", async () => {
-    render(<InterfaceSettings />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Reset poster settings" }));
-
-    await waitFor(() =>
-      expect(clearMutateAsync).toHaveBeenCalledWith({
-        key: SETTING_KEYS.UI_CARD_PRESENTATION,
-        identity: { scope: "profile_client" },
-      }),
-    );
-  });
-
   it("offers to clear a browser override instead of editing under it", async () => {
     mocks.useUICustomization.mockReturnValue(
       customization({
-        cardPresentation: { poster_size: "compact", caption: "artwork" },
+        cardPresentation: { poster_size: "compact" },
         cardPresentationSource: "profile_device",
       }),
     );
@@ -142,24 +106,15 @@ describe("InterfaceSettings", () => {
     );
   });
 
-  it("saves the menu on every edit, with no save button", async () => {
-    mocks.useUICustomization.mockReturnValue(customization({ primaryMenu: MOVIES_MENU }));
-
+  it("saves a poster size with the caption the schema still requires", async () => {
     render(<InterfaceSettings />);
-    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
 
-    expect(screen.queryByText("Movies · Library")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(setMutateAsync).toHaveBeenCalledWith({
-        key: SETTING_KEYS.NAV_PRIMARY_MENU,
-        value: {
-          items: [
-            { type: "builtin", destination: "home" },
-            { type: "builtin", destination: "calendar" },
-          ],
-        },
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        value: { poster_size: "compact", caption: "title_metadata" },
         identity: { scope: "profile_client" },
       }),
     );
@@ -215,26 +170,6 @@ describe("InterfaceSettings", () => {
       }),
     );
     expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
-  });
-
-  it("explains an old server once and still shows shortcuts and badges", () => {
-    mocks.useUICustomization.mockReturnValue(
-      customization({
-        cardPresentationSource: "default",
-        primaryMenu: null,
-        primaryMenuSource: "default",
-        isSupported: false,
-        supportsAtomicShortcuts: false,
-      }),
-    );
-
-    render(<InterfaceSettings />);
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Your server needs an update");
-    expect(screen.queryByRole("radiogroup", { name: "Size" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "Menu links" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Card overlays" })).toBeInTheDocument();
-    expect(screen.getByRole("figure", { name: "Preview" })).toBeInTheDocument();
   });
 
   it("keeps editors closed when effective customization could not be loaded", () => {

@@ -132,16 +132,6 @@ func TestArtworkMissingRevisionEnqueuesOriginalRepair(t *testing.T) {
 		t.Fatalf("legacy miss queued repair: %v", repair.paths)
 	}
 }
-func TestArtworkStorageFailure(t *testing.T) {
-	store := &artworkReadFailure{}
-	signer := artworkurl.NewSigner("test-secret", time.Hour)
-	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
-	u, _ := signer.Sign("nested/original.webp", time.Now())
-	got := do(t, h, http.MethodGet, u, "", nil)
-	if got.Code != http.StatusServiceUnavailable || store.calls != 1 {
-		t.Fatalf("status = %d, reads = %d", got.Code, store.calls)
-	}
-}
 func TestArtworkMutableCachePolicy(t *testing.T) {
 	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {

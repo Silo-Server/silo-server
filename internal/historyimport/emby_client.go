@@ -92,6 +92,17 @@ type embyItem struct {
 	} `json:"UserData"`
 }
 
+func (item embyItem) retainedSize() int64 {
+	size := sizeOf[embyItem]() + stringBytes(item.ID, item.Name, item.Type, item.SeriesName, item.SeriesID) + stringMapBytes(item.ProviderIDs)
+	if item.UserData.LastPlayedDate != nil {
+		size += sizeOf[time.Time]()
+	}
+	if item.UserData.UnplayedItemCount != nil {
+		size += sizeOf[int]()
+	}
+	return size
+}
+
 type embyUser struct {
 	ID string `json:"Id"`
 }
@@ -257,6 +268,9 @@ func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoin
 		if err == nil {
 			err = budget.addItems(len(payload.Items))
 		}
+		if err == nil {
+			err = retainItems(ctx, payload.Items)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
@@ -294,7 +308,11 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
-		items = append(items, payload.Items...)
+		kept := keepRequested(payload.Items, chunk, func(item embyItem) string { return item.ID })
+		if err := retainItems(ctx, kept); err != nil {
+			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
+		}
+		items = append(items, kept...)
 	}
 	return items, nil
 }
@@ -338,7 +356,7 @@ func (c *EmbyClient) doJSONWithBudget(req *http.Request, out any, budget *listin
 		discardUpstreamBody(resp.Body)
 		return nil
 	}
-	return decodeUpstreamJSON(resp.Body, out, budget)
+	return decodeUpstreamJSON(req.Context(), resp.Body, out, budget)
 }
 
 type embyHTTPError struct {
@@ -370,8 +388,8 @@ func UpstreamHTTPStatus(err error) int {
 }
 
 func shouldTryAnotherBase(err error) bool {
-	httpErr, ok := err.(*embyHTTPError)
-	if !ok {
+	var httpErr *embyHTTPError
+	if !errors.As(err, &httpErr) {
 		return true
 	}
 	return httpErr.StatusCode == http.StatusNotFound

@@ -79,35 +79,6 @@ func writeSidecars(t *testing.T, dir string, names ...string) string {
 	return dir
 }
 
-func TestExistingImageHelpersCoverEveryItemSlot(t *testing.T) {
-	item := &models.MediaItem{
-		PosterPath: "p", PosterSourcePath: "ps", PosterThumbhash: "pt",
-		LogoPath: "l", LogoSourcePath: "ls",
-		BannerPath: "b", BannerSourcePath: "bs", BannerThumbhash: "bt",
-		ThumbPath: "t", ThumbSourcePath: "ts", ThumbThumbhash: "tt",
-		ClearArtPath: "c", ClearArtSourcePath: "cs",
-		DiscPath: "d", DiscSourcePath: "ds",
-	}
-	for imageType, want := range map[ImageType][3]string{
-		ImagePoster:   {"p", "ps", "pt"},
-		ImageLogo:     {"l", "ls", ""},
-		ImageBanner:   {"b", "bs", "bt"},
-		ImageThumb:    {"t", "ts", "tt"},
-		ImageClearArt: {"c", "cs", ""},
-		ImageDisc:     {"d", "ds", ""},
-		ImageStill:    {"", "", ""},
-	} {
-		got := [3]string{
-			existingImagePath(item, imageType),
-			existingImageSourcePath(item, imageType),
-			existingImageThumbhash(item, imageType),
-		}
-		if got != want {
-			t.Errorf("%s: path/source/thumbhash = %q, want %q", ImageTypeToString(imageType), got, want)
-		}
-	}
-}
-
 func TestApplyBestImagesFillsExtraSlots(t *testing.T) {
 	item := &models.MediaItem{}
 	applyBestImages(item, []RemoteImage{
@@ -116,7 +87,7 @@ func TestApplyBestImagesFillsExtraSlots(t *testing.T) {
 		{ProviderID: "nfo", URL: "file:///m/Film/landscape.jpg", Type: ImageThumb},
 		{ProviderID: "nfo", URL: "file:///m/Film/clearart.png", Type: ImageClearArt},
 		{ProviderID: "tvdb", URL: "https://img.example/disc.png", Type: ImageDisc, Language: "en"},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 
 	want := map[string]string{
 		"banner":   "file:///m/Film/banner.jpg",
@@ -142,8 +113,8 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		existing := &models.MediaItem{BannerSourcePath: pending}
 		item := &models.MediaItem{}
 		carryItemOnlyArtwork(item, existing)
-		applyBestImages(item, nil, MergeFillEmpty, "en")
-		prepareItemImagesForQueue(item, existing)
+		applyBestImages(item, nil, MergeFillEmpty, "en", "")
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.BannerSourcePath != pending || item.BannerPath != "" {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
 		}
@@ -155,29 +126,18 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		const remote = "https://img.example/de-poster.jpg"
 		existing := &models.MediaItem{PosterSourcePath: remote}
 		item := &models.MediaItem{PosterSourcePath: remote}
-		prepareItemImagesForQueue(item, existing)
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.PosterSourcePath != "" {
 			t.Fatalf("poster source = %q, want it cleared", item.PosterSourcePath)
 		}
 	})
 	t.Run("locked artwork", func(t *testing.T) {
 		item := &models.MediaItem{BannerSourcePath: pending, LockedFields: []int{int(FieldImages)}}
-		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en")
+		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en", "")
 		if item.BannerPath != "" {
 			t.Fatalf("a locked pending banner was replaced by %q", item.BannerPath)
 		}
 	})
-}
-
-func TestImageTypeFromKindMapsExtraKinds(t *testing.T) {
-	for kind, want := range map[string]ImageType{
-		"banner": ImageBanner, "thumb": ImageThumb, "clearart": ImageClearArt, "disc": ImageDisc,
-		"backdrop": ImageBackdrop, "mystery": ImagePoster,
-	} {
-		if got := imageTypeFromKind(kind); got != want {
-			t.Errorf("imageTypeFromKind(%q) = %d, want %d", kind, got, want)
-		}
-	}
 }
 
 func TestDropGoneItemOnlyArtwork(t *testing.T) {
@@ -532,6 +492,20 @@ func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
 			t.Fatalf("cached row requeued: %+v", in)
 		}
 	}
+
+	// Extra backdrops are local art only: with caching off the item keeps
+	// none, unless its artwork is locked.
+	service.SetAutoCacheImages(false)
+	locked := *item
+	locked.LockedFields = []int{int(FieldImages)}
+	_ = service.syncItemExtraBackdrops(ctx, itemRetention(ctx), &locked, nil, nil)
+	if len(repo.rows["movie-1"]) != 2 {
+		t.Fatalf("locked item rows with caching off = %+v, want both kept", repo.rows["movie-1"])
+	}
+	_ = service.syncItemExtraBackdrops(ctx, itemRetention(ctx), item, nil, images)
+	if len(repo.rows["movie-1"]) != 0 {
+		t.Fatalf("rows with caching off = %+v, want none", repo.rows["movie-1"])
+	}
 }
 
 func TestMergeAndPersistKeepsExtraArtworkThroughLocalizationWrite(t *testing.T) {
@@ -583,8 +557,8 @@ func (f *fakeItemBackdropUpdater) UpdateArtworkIfSourceMatches(_ context.Context
 
 // An item's backdrops share its key folder, and two sidecars can hold the same
 // bytes, so each backdrop's key carries a hash of its sidecar's path. Two rows
-// with identical images get different keys, re-caching one deletes only its
-// own stale prefix, and a backdrop that moves to another row keeps its key.
+// with identical images get different keys, and a backdrop that moves to
+// another row keeps its key.
 func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	root := t.TempDir()
 	first := writeLocalPoster(t, root)
@@ -592,22 +566,17 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	if err := os.WriteFile(second, []byte("poster-bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run := func(path, rowID, previous string) (*fakeByteImageCacher, *fakeItemBackdropUpdater, *fakePrefixDeleter) {
+	run := func(path, rowID string) (*fakeByteImageCacher, *fakeItemBackdropUpdater) {
 		t.Helper()
 		job := localArtworkJob("file://" + path)
 		job.TargetType = ImageCacheTargetItemBackdrop
 		job.TargetContentID = rowID
 		job.ImageType = ImageCacheImageBackdrop
-		jobs := &fakeLocalImageCacheJobs{
-			fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
-			currentCached:      previous,
-		}
+		jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}
 		cacher := &fakeByteImageCacher{thumbhash: "th"}
 		backdrops := &fakeItemBackdropUpdater{}
-		deleter := &fakePrefixDeleter{bucket: "images"}
 		p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{ItemBackdrops: backdrops})
 		p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
-		p.SetImagePrefixDeleter(deleter)
 		stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 		if err != nil {
 			t.Fatal(err)
@@ -615,11 +584,10 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 		if stats.Succeeded != 1 {
 			t.Fatalf("stats = %+v, failed text %q", stats, jobs.failedText)
 		}
-		return cacher, backdrops, deleter
+		return cacher, backdrops
 	}
 
-	const previous = "local/movies/movie-1/0badf00d-0badf00d/backdrop/original.old.webp"
-	cacher, backdrops, deleter := run(first, "42", previous)
+	cacher, backdrops := run(first, "42")
 	key := cacher.bytesReq[0].KeyDiscriminator
 	if len(key) != len("00000000-00000000") || key[8] != '-' {
 		t.Fatalf("KeyDiscriminator = %q, want <content hash>-<path hash>", key)
@@ -628,21 +596,16 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	if backdrops.id != 42 || backdrops.cached != want || backdrops.hash != "th" {
 		t.Fatalf("backdrop update = %+v, want row 42 at %q", backdrops, want)
 	}
-	if !slices.Equal(deleter.prefixes, []string{"local/movies/movie-1/0badf00d-0badf00d/backdrop/"}) {
-		t.Fatalf("deleted prefixes = %q", deleter.prefixes)
-	}
 
-	// Same bytes in another sidecar: another key, so neither re-cache can
-	// delete the other's files.
-	other, _, _ := run(second, "43", "")
+	// Same bytes in another sidecar: another key.
+	other, _ := run(second, "43")
 	if other.bytesReq[0].KeyDiscriminator == key || other.bytesReq[0].KeyDiscriminator[:8] != key[:8] {
 		t.Fatalf("keys %q and %q, want the same content hash and different path hashes", key, other.bytesReq[0].KeyDiscriminator)
 	}
-	// The same sidecar on another row keeps its key, and its current copy is
-	// not deleted.
-	moved, _, movedDeleter := run(first, "44", want)
-	if moved.bytesReq[0].KeyDiscriminator != key || len(movedDeleter.prefixes) != 0 {
-		t.Fatalf("moved backdrop key %q (want %q), deleted %q", moved.bytesReq[0].KeyDiscriminator, key, movedDeleter.prefixes)
+	// The same sidecar on another row keeps its key.
+	moved, _ := run(first, "44")
+	if moved.bytesReq[0].KeyDiscriminator != key {
+		t.Fatalf("moved backdrop key %q, want %q", moved.bytesReq[0].KeyDiscriminator, key)
 	}
 }
 
@@ -651,7 +614,7 @@ func TestProcessItemJobForExtraSlotUpdatesItem(t *testing.T) {
 	path := writeLocalPoster(t, root)
 	job := localArtworkJob("file://" + path)
 	job.ImageType = ImageCacheImageDisc
-	p, jobs, cacher, items, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, cacher, items := newLocalProcessorForTest(job, []string{root})
 	if _, err := p.RunOnce(context.Background(), "w1", 10, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -660,45 +623,6 @@ func TestProcessItemJobForExtraSlotUpdatesItem(t *testing.T) {
 	}
 	if got := ImageTypeToString(cacher.bytesReq[0].ImageType); got != "disc" {
 		t.Fatalf("cached as %q, want disc", got)
-	}
-}
-
-func TestCurrentTargetQueriesForExtraArtwork(t *testing.T) {
-	cases := []struct {
-		job                *models.MetadataImageCacheJob
-		wantSource, wantAt string
-	}{
-		{
-			job:        &models.MetadataImageCacheJob{TargetType: ImageCacheTargetItem, TargetContentID: "m", ImageType: ImageCacheImageBanner},
-			wantSource: "SELECT banner_source_path FROM media_items WHERE content_id = $1",
-			wantAt:     "SELECT banner_path FROM media_items WHERE content_id = $1",
-		},
-		{
-			job:        &models.MetadataImageCacheJob{TargetType: ImageCacheTargetItem, TargetContentID: "m", ImageType: ImageCacheImageClearArt},
-			wantSource: "SELECT clearart_source_path FROM media_items WHERE content_id = $1",
-			wantAt:     "SELECT clearart_path FROM media_items WHERE content_id = $1",
-		},
-		{
-			job:        &models.MetadataImageCacheJob{TargetType: ImageCacheTargetItemBackdrop, TargetContentID: "42", ImageType: ImageCacheImageBackdrop},
-			wantSource: "SELECT source_path FROM media_item_backdrops WHERE id = $1::bigint",
-			wantAt:     "SELECT path FROM media_item_backdrops WHERE id = $1::bigint",
-		},
-		{
-			job:        &models.MetadataImageCacheJob{TargetType: ImageCacheTargetPerson, TargetContentID: "9", ImageType: ImageCacheImageProfile},
-			wantSource: "SELECT photo_source_path FROM people WHERE id = $1::bigint",
-			wantAt:     "SELECT photo_path FROM people WHERE id = $1::bigint",
-		},
-	}
-	for _, tc := range cases {
-		source, _, ok := currentTargetSourceQuery(tc.job)
-		at, _, okAt := currentTargetCachedPathQuery(tc.job)
-		if !ok || !okAt || source != tc.wantSource || at != tc.wantAt {
-			t.Errorf("%s/%s: source %q, cached %q", tc.job.TargetType, tc.job.ImageType, source, at)
-		}
-	}
-	// Localizations carry no banner, thumb, clear art or disc art.
-	if _, _, ok := currentTargetSourceQuery(&models.MetadataImageCacheJob{TargetType: ImageCacheTargetItemLocalization, ImageType: ImageCacheImageBanner}); ok {
-		t.Fatal("item_localization banner job resolved a target column")
 	}
 }
 

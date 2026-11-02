@@ -56,8 +56,7 @@ function ProfileOnboardingGate({ children }: { children: ReactNode }) {
         },
       },
     );
-    // progress is a stable mutation handle; state.data is covered by `suppressed`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- progress is a stable mutation handle; state.data is covered by `suppressed`
   }, [suppressed]);
 
   const flow = useOnboardingFlow({ enabled: shouldShow && !suppressed });

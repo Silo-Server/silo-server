@@ -382,7 +382,7 @@ export function useSubtitleTracks(
     // the track. The update effects below shift existing cues in place instead.
     // `streamGeneration` IS included: a stream restart reloads the <video>
     // element and orphans the current track, so it must be rebuilt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- delay and timeline changes shift cues in place instead
   }, [
     activeUrl,
     activeCodec,

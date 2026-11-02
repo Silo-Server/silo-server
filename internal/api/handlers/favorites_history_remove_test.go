@@ -46,6 +46,14 @@ func (r *fakeHistoryItemRepo) EnsureAccessible(_ context.Context, contentID stri
 	return nil
 }
 
+func (r *fakeHistoryItemRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
+	}
+	return out, nil
+}
+
 func TestHandleRemoveHistoryAcceptsEbookTargets(t *testing.T) {
 	ctx := context.Background()
 	store := newProfileTestStore(t)

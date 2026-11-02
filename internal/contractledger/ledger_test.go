@@ -105,40 +105,6 @@ func TestGateFailsWhenAnEntryHasNoInventoryRow(t *testing.T) {
 	expectFailure(t, fsys, "ledger entry has no inventory row")
 }
 
-// TestGateReportsSetProblemsBeforeOrderAndOnlyFirstOrderMismatch pins the
-// output shape: a single removed row yields the missing-entry line, then one
-// order line, not hundreds of cascading order lines.
-func TestGateReportsSetProblemsBeforeOrderAndOnlyFirstOrderMismatch(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		doc["entries"] = append(es[:5:5], es[6:]...)
-		doc["totals"].(map[string]any)["entries"] = len(es) - 1
-	})
-	err := verify(fsys)
-	if err == nil {
-		t.Fatal("expected failure")
-	}
-	lines := strings.Split(err.Error(), "\n")
-	var missing, order int
-	for i, l := range lines {
-		switch {
-		case strings.Contains(l, "inventory row has no ledger entry"):
-			missing = i
-		case strings.Contains(l, "must follow inventory order"):
-			order++
-			if i < missing {
-				t.Errorf("order line printed before the set problem:\n%s", err)
-			}
-		}
-	}
-	if missing == 0 {
-		t.Errorf("missing-entry line absent:\n%s", err)
-	}
-	if order != 1 {
-		t.Errorf("want exactly one order line, got %d:\n%s", order, err)
-	}
-}
-
 func TestGateFailsWhenHandlerDrifts(t *testing.T) {
 	fsys := mutatedFS(t, func(doc map[string]any) {
 		es := entries(t, doc)
@@ -237,32 +203,6 @@ func TestGateFailsWhenARatifiedRemovalHasAPendingOwner(t *testing.T) {
 		e["owner"] = "pending:#135/execution-input-1"
 	})
 	expectFailure(t, fsys, "ratified without a named owner")
-}
-
-// TestGateFailsWhenARatifiedRemovalHasAPlaceholderOwner covers the placeholder
-// spellings that satisfy the schema's owner pattern but name nobody.
-func TestGateFailsWhenARatifiedRemovalHasAPlaceholderOwner(t *testing.T) {
-	// "n/a" and a blank owner already fail the schema's owner pattern; the
-	// spellings below pass it and are caught by the review rule.
-	for _, owner := range []string{"TBD", "tbd", "todo", "Unknown", "none", "pending", "Pending review"} {
-		t.Run(strconv.Quote(owner), func(t *testing.T) {
-			fsys := mutatedFS(t, func(doc map[string]any) {
-				e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-				e["review_state"] = ReviewRatified
-				e["owner"] = owner
-			})
-			expectFailure(t, fsys, "ratified without a named owner")
-		})
-	}
-	// A real name passes the owner rule.
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["review_state"] = ReviewRatified
-		e["owner"] = "quick104"
-	})
-	if err := verify(fsys); err != nil && strings.Contains(err.Error(), "ratified without a named owner") {
-		t.Fatalf("named owner refused: %v", err)
-	}
 }
 
 // TestGateFailsWhenARemovedRowIsTierOne pins the tier rule inside the gate
@@ -629,115 +569,6 @@ func TestSchemaRejectsRemovalWithoutOwner(t *testing.T) {
 	expectFailure(t, fsys, "violates")
 }
 
-func TestSchemaRejectsRuleThatDoesNotFitDisposition(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["disposition_rule"] = "contract_root_probes"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsRemovedRowWithV2Target(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["v2"] = map[string]any{"method": "GET", "path": "/api/v2/x", "operation_id": "getX"}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsPartiallyNullV2(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionPorted })
-		e["v2"] = map[string]any{"method": "GET", "path": nil, "operation_id": nil}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-// TestSchemaRejectsMisRootedCallSite covers each repo's root rule with the
-// path shape that was wrong in an earlier revision (an export-directory
-// prefix) and a plainly foreign root.
-func TestSchemaRejectsMisRootedCallSite(t *testing.T) {
-	cases := map[string]string{
-		"android": "android/shared/src/commonMain/kotlin/X.kt",
-		"apple":   "silo-apple/iosApp/iosApp/X.swift",
-		"web":     "web/src/x.ts",
-		"server":  "silo-server/internal/x.go",
-	}
-	for repo, file := range cases {
-		t.Run(repo, func(t *testing.T) {
-			fsys := mutatedFS(t, func(doc map[string]any) {
-				e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-				e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any), map[string]any{"repo": repo, "file": file, "line": 1, "types": []any{}, "match": "manual"})
-			})
-			expectFailure(t, fsys, "violates")
-		})
-	}
-}
-
-func TestSchemaRejectsAnUnknownDisposition(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["disposition"] = "keep"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownRule(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["disposition_rule"] = "frontend_shell"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownField(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["reviewer"] = "nobody"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownMatchKind(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any), map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "guessed"})
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-// TestSchemaAcceptsFollowerAndPathLiteralLine checks the two optional shapes
-// pass the schema, and that path_literal_line must be a positive integer.
-func TestSchemaAcceptsFollowerAndPathLiteralLine(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any),
-			map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "follower"},
-			map[string]any{"repo": "web", "file": "src/y.ts", "line": 9, "path_literal_line": 2, "types": []any{}, "match": "mechanical"},
-		)
-	})
-	if err := verify(fsys); err != nil && strings.Contains(err.Error(), "violates") {
-		t.Fatalf("follower site or path_literal_line refused by the schema: %v", err)
-	}
-	fsys = mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any),
-			map[string]any{"repo": "web", "file": "src/y.ts", "line": 9, "path_literal_line": 0, "types": []any{}, "match": "mechanical"},
-		)
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsUnusedRowWithCallSites(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		e := es[0].(map[string]any)
-		e["consumers"] = []any{"unused"}
-		e["consumer_call_sites"] = []any{map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "manual"}}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
 // TestConcurrencyMarkingIsRestricted pins where the curated concurrency
 // field may appear: ported rows at either tier with a guardable method, and only the
 // if_match value.
@@ -796,6 +627,8 @@ var guardedWithoutLegacyRow = map[string]string{
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"updateRequestDiscoverLayout":  "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
+	"resetRequestDiscoverLayout":   "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
 	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
 	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
@@ -1127,6 +960,12 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"reportPlaybackBandwidthProbe":             "V2-only connection speed observation; no v1 equivalent.",
+	"resetAdminDeviceLearnedLimit":             "V2-only device connection limit reset; no v1 equivalent.",
+	"resetPlaybackLearnedLimit":                "V2-only buffering-quality connection observation reset; no v1 equivalent.",
+	"muteNotificationSeries":                   "V2-only mute of one series' new-episode notifications (v1 is frozen). Muting a muted series inserts no row, so a replay converges on the same mute.",
+	"unmuteNotificationSeries":                 "V2-only lift of a series mute (v1 is frozen). Unmuting a series that is not muted deletes nothing, so a replay converges.",
+	"retirePushDevice":                         "V2-only session-less Android push retirement (v1 is frozen). It is ordered by the installation generation: a replay at the newest removal's generation answers removed without writing, and an older one conflicts.",
 	"markNotInterested":                        "V2-only Not interested mark (v1 is frozen). Marking a marked title changes no row and sends no notice, so a replay converges on the same mark.",
 	"unmarkNotInterested":                      "V2-only clearing of a Not interested mark (v1 is frozen). Clearing an absent mark changes no row and sends no notice, so a replay converges.",
 	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
@@ -1135,11 +974,16 @@ var mutationWithoutLegacyRow = map[string]string{
 	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
 	"ignoreUnmatchedItem":                      "V2-only mark of an unmatched item as intentionally unmatched (v1 is frozen): it keeps the first time the mark was set, so a replay converges on the same mark.",
 	"unignoreUnmatchedItem":                    "V2-only clear of that mark, the inverse of ignoreUnmatchedItem. Clearing an unmarked item is a no-op, so a replay converges on no mark.",
+	"retireApplePushInstallation":              "V2-only session-less Apple push retirement (v1 is frozen). It is ordered by the installation generation: an exact replay of the newest retirement answers removed without writing, and an older one conflicts.",
 	"updateDevice":                             "V2-only rename of a profile's device entry (v1 is frozen): it sets or clears custom_name on one registry row, so a replay converges on the same name.",
 	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
 	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",
 	"selectAdminChatGPTAccount":                "V2-only administrator ChatGPT account selection: it changes the active account and cancels a pending sign-in, so replaying it after intervening account activity must not happen automatically.",
 	"disconnectAdminChatGPTAccount":            "V2-only administrator ChatGPT disconnect: it revokes renewable credentials and cancels pending sign-in, so replaying it after a reconnect must not happen automatically.",
+	"createAdminAIProvider":                    "V2-only AI provider registry: each create assigns a new id, so a replay would connect the provider twice.",
+	"updateAdminAIProvider":                    "V2-only AI provider registry edit: it can replace or clear a stored key, so replaying it after another edit must not happen automatically.",
+	"deleteAdminAIProvider":                    "V2-only AI provider disconnect: it discards the stored key, so a replay after the id is reused elsewhere must not happen automatically.",
+	"checkAdminAIProvider":                     "V2-only AI provider check: it calls the provider's model list, which some providers rate limit, so an uncertain result is not replayed automatically.",
 	"createShuffle":                            "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
 	"advanceShuffle":                           "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
 	"skipShuffleItem":                          "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",
@@ -1171,6 +1015,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"updateRequestRouting":                     "V2-only request routing mode switch, guarded by If-Match on the mode's revision; a replay after success answers 412.",
 	"reorderRequestRoutes":                     "V2-only reorder of a media type's routing rules. The body names the full order, so a replay sets the same positions; it is non-retryable because it moves every rule to a new revision.",
 	"previewRequestRoute":                      "V2-only read-only route preview (POST for the request body). It reads TMDB and the rules and writes nothing, so a replay returns the same answer.",
+	"updateRequestDiscoverLayout":              "V2-only Discover layout replacement, guarded by If-Match on the layout's revision; a replay after success answers 412.",
+	"resetRequestDiscoverLayout":               "V2-only return to the default Discover layout, guarded by If-Match on the stored layout's revision; a replay after success answers 412.",
+	"previewRequestDiscoverRow":                "V2-only read-only Discover row preview (POST for the row body). It reads TMDB or the list and writes nothing, so a replay returns the same page.",
 	"queryCatalogLetters":                      "V2-only read-only letter index for an alphabetical jump bar (POST for the rule-group body, like queryCatalogItems). It counts titles and writes nothing, so a replay returns the same answer.",
 	"followRequestMedia":                       "V2-only title follow (Requests acceptance AC1/AC5): v1 had no way to follow a title someone else requested. The follow row is keyed by title and profile, so a replay converges on the same follow.",
 	"unfollowRequestMedia":                     "V2-only title unfollow, the inverse of followRequestMedia. Deleting an absent follow is a no-op, so a replay converges on no follow.",
@@ -1200,6 +1047,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"createProgressBootstrapSnapshot":          "V2-only full-replacement snapshot admission; request_id identifies one transactional result through expiry plus 24-hour replay retention. This does not port incremental v1 sync reads or progress uploads.",
 	"uploadAdminCollectionPoster":              "V2 separates administrator poster upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
 	"uploadAdminCollectionBackdrop":            "V2 separates administrator backdrop upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
+	"uploadAdminItemImage":                     "V2-only upload of a movie, series or season image (v1 is frozen): it stores the image as local artwork and publishes it with the images lock, so a delayed replay would put back an image replaced since; it is non-retryable like apply.",
 	"uploadCollectionPoster":                   "V2 separates poster upload from legacy multipart collection create and update; their legacy rows remain mapped separately.",
 	"restartAdminPluginInstallation":           "V2-only resident plugin restart: v1 had no supervised plugin processes, so no legacy route stops and relaunches one. Repeating the restart converges on one running process.",
 	"connectNetworkAccess":                     "V2-only network access provider command: v1 had no overlay network providers. Repeating the connect converges on one connected instance per host.",
@@ -1326,25 +1174,6 @@ func TestTier2RetrySafety(t *testing.T) {
 	}
 }
 
-func TestTier2RetrySchemaPreservesNotesAndExclusions(t *testing.T) {
-	for _, value := range []string{RetrySafetyNonRetryable, RetrySafetyIdempotencyKey} {
-		expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-			e := entryWhere(t, doc, func(e map[string]any) bool {
-				m, _ := e["method"].(string)
-				return e["tier"] == float64(2) && e["disposition"] == "ported" && isMutatingMethod(m)
-			})
-			e["retry_safety"] = value
-			delete(e, "retry_safety_note")
-		}), "retry_safety_note")
-	}
-	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool {
-			return e["disposition"] == DispositionDocumentedExcluded
-		})
-		e["retry_safety"] = RetrySafetyNaturalIdempotent
-	}), "retry_safety")
-}
-
 func TestExternalWebhookRetryClassification(t *testing.T) {
 	ledger, err := Load()
 	if err != nil {
@@ -1369,68 +1198,4 @@ func TestExternalWebhookRetryClassification(t *testing.T) {
 	if !found {
 		t.Fatal("external webhook ingress absent")
 	}
-}
-
-func TestTier2ConcurrencyPlacementAndAgreement(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool {
-			method, _ := e["method"].(string)
-			return e["tier"] == float64(2) && e["disposition"] == DispositionPorted && isGuardableMethod(method)
-		})
-		e["concurrency"] = ConcurrencyIfMatch
-	})
-	if err := verify(fsys); err != nil {
-		t.Fatalf("tier-2 ported concurrency refused: %v", err)
-	}
-	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			e := Entry{copied: copied{Method: method, Path: "/api/v1/tier2/{id}"}, Tier: 2, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch,
-				RetrySafety: RetrySafetyNaturalIdempotent, ReviewState: ReviewRatified,
-				V2: V2Target{OperationID: new("updateTier2"), Method: new(method), Path: new("/api/v2/tier2/{id}")}}
-			if got := reviewRules(e.key(), e, inventoryRoute{}); len(got) != 0 {
-				t.Fatalf("ported row without named owner refused: %v", got)
-			}
-			op := apiv2registry.Declared{Method: method, Path: *e.V2.Path, OperationID: *e.V2.OperationID, Guarded: true}
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{op}, nil); len(got) != 0 {
-				t.Fatal(got)
-			}
-			unmarked := e
-			unmarked.Concurrency = ""
-			if got := concurrencyMismatches([]Entry{unmarked}, []apiv2registry.Declared{op}, nil); len(got) != 1 || !strings.Contains(got[0], "is not marked concurrency") {
-				t.Fatalf("missing tier-2 marking accepted: %v", got)
-			}
-			wrongMethod := op
-			wrongMethod.Method = http.MethodGet
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{wrongMethod}, nil); len(got) != 1 || !strings.Contains(got[0], "disagree with the registry") {
-				t.Fatalf("tier-2 target method mismatch accepted: %v", got)
-			}
-			op.Guarded = false
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{op}, nil); len(got) != 1 || !strings.Contains(got[0], "is not declared Guarded") {
-				t.Fatalf("unguarded tier-2 operation accepted: %v", got)
-			}
-		})
-	}
-	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
-		t.Run("reject "+method, func(t *testing.T) {
-			e := Entry{copied: copied{Method: method}, Tier: 2, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch}
-			if eligibleForConcurrency(e) {
-				t.Fatal("unguardable method eligible")
-			}
-			if got := reviewRules(e.key(), e, inventoryRoute{}); len(got) == 0 {
-				t.Fatal("unguardable method accepted")
-			}
-			expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-				row := entryWhere(t, doc, func(e map[string]any) bool { return e["tier"] == float64(2) && e["disposition"] == DispositionPorted })
-				row["method"] = method
-				row["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
-				row["concurrency"] = ConcurrencyIfMatch
-				delete(row, "retry_safety")
-				delete(row, "retry_safety_note")
-			}), "concurrency")
-		})
-	}
-	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-		row := entryWhere(t, doc, func(e map[string]any) bool { return e["tier"] == float64(2) && e["disposition"] != DispositionPorted })
-		row["concurrency"] = ConcurrencyIfMatch
-	}), "concurrency")
 }

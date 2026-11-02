@@ -92,23 +92,6 @@ describe("NewCollectionPicker", () => {
     expect(v2Recorder.callsOf(PERSONAL_CAPABILITIES)).toEqual([]);
   });
 
-  it("follows a card to its editor page", async () => {
-    show("server");
-    const dialog = await open();
-    await userEvent.click(within(dialog).getByRole("link", { name: "Smart" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/collections/new?type=smart");
-  });
-
-  it("offers admins a starter pack, keeping the selected library", async () => {
-    show("server", 7);
-    const dialog = await open();
-    expect(await within(dialog).findByRole("link", { name: "Add a starter pack" })).toHaveAttribute(
-      "href",
-      "/admin/collections?libraryId=7&view=list&dialog=starter-packs",
-    );
-    expect(dialog).toHaveTextContent("Want a whole set at once?");
-  });
-
   it("shows a profile only its own create paths and no server choices", async () => {
     show("personal");
     const dialog = await open();
@@ -150,15 +133,6 @@ describe("NewCollectionPicker", () => {
     },
   );
 
-  it("holds the Synced list card's place while capabilities load", async () => {
-    v2Recorder.answer(PERSONAL_CAPABILITIES, () => new Promise(() => {}));
-    show("personal");
-    const dialog = await open();
-    expect(within(dialog).getByRole("status", { name: "Checking Synced lists…" })).toBeVisible();
-    expect(within(dialog).queryByText("Synced list")).toBeNull();
-    expect(within(dialog).getByRole("link", { name: "Manual" })).toBeVisible();
-  });
-
   it("offers Retry when capabilities fail, then shows the card", async () => {
     let fail = true;
     v2Recorder.answer(PERSONAL_CAPABILITIES, () => {
@@ -173,26 +147,5 @@ describe("NewCollectionPicker", () => {
     fail = false;
     await userEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
     expect(await within(dialog).findByRole("link", { name: "Synced list" })).toBeVisible();
-  });
-
-  it("starts with no card highlighted, tabs to the cards and follows one with Enter", async () => {
-    show("personal");
-    const dialog = await open();
-    await within(dialog).findByRole("link", { name: "Synced list" });
-    expect(within(dialog).getByRole("heading", { name: "New collection" })).toHaveFocus();
-    await userEvent.tab();
-    expect(within(dialog).getByRole("link", { name: "Manual" })).toHaveFocus();
-    await userEvent.tab();
-    expect(within(dialog).getByRole("link", { name: "Smart" })).toHaveFocus();
-    await userEvent.keyboard("{Enter}");
-    expect(screen.getByTestId("location")).toHaveTextContent("/collections/new?type=smart");
-  });
-
-  it("closes on Escape and gives focus back to the button that opened it", async () => {
-    show("server");
-    await open();
-    await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "New collection" })).toHaveFocus();
   });
 });

@@ -46,14 +46,7 @@ func runDisplayPrefsMove(t *testing.T, db *sql.DB) {
 // jellycompat tenants, and the one unparseable row is recorded rather than
 // silently deleted.
 func TestMigrateToV17MovesDisplayPrefs(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	seedLegacyDisplayPrefs(t, db)
 	runDisplayPrefsMove(t, db)
 
@@ -127,14 +120,7 @@ SELECT value, reason FROM user_setting_migration_rejects
 // TestMigrateToV17IsAtomic: the move runs inside the caller's transaction, so
 // a rollback must leave the legacy rows exactly where they were.
 func TestMigrateToV17IsAtomic(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	seedLegacyDisplayPrefs(t, db)
 
 	tx, err := db.Begin()

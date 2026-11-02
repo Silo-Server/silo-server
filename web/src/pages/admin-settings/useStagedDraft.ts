@@ -46,12 +46,11 @@ export function useStagedDraft<B extends { etag?: string }, D>(
   }, []);
   const reset = useCallback(() => {
     setState((prev) => (prev ? { base: prev.base, draft: toDraft(prev.base) } : prev));
-    // toDraft is a module-level function at every call site.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toDraft is a module-level function at every call site
   }, []);
   const adopt = useCallback((base: B) => {
     setState({ base, draft: toDraft(base) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toDraft is a module-level function at every call site
   }, []);
 
   return {

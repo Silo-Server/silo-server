@@ -191,12 +191,31 @@ func (r *RefreshDebtRepository) RequestDue(
 	nextRefreshAt time.Time,
 	cooldown time.Duration,
 ) error {
+	return r.RequestDueMany(ctx, targetType, []string{contentID}, priority, reasonMask, nextRefreshAt, cooldown)
+}
+
+// RequestDueMany is RequestDue for several targets of one type, in one
+// statement.
+func (r *RefreshDebtRepository) RequestDueMany(
+	ctx context.Context,
+	targetType string,
+	contentIDs []string,
+	priority int,
+	reasonMask int64,
+	nextRefreshAt time.Time,
+	cooldown time.Duration,
+) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
 	}
 	targetType = NormalizeRefreshTargetType(targetType)
-	contentID = strings.TrimSpace(contentID)
-	if targetType == "" || contentID == "" || reasonMask == 0 {
+	ids := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if targetType == "" || len(ids) == 0 || reasonMask == 0 {
 		return nil
 	}
 	if cooldown < 0 {
@@ -211,7 +230,9 @@ func (r *RefreshDebtRepository) RequestDue(
 			reason_mask,
 			next_refresh_at,
 			updated_at
-		) VALUES ($1, $2, $3, $4, $5, NOW())
+		)
+		SELECT DISTINCT $1, id, $3::integer, $4::bigint, $5::timestamptz, NOW()
+		FROM unnest($2::text[]) AS id
 		ON CONFLICT (target_type, content_id) DO UPDATE SET
 			priority = GREATEST(metadata_refresh_debt.priority, EXCLUDED.priority),
 			reason_mask = metadata_refresh_debt.reason_mask | EXCLUDED.reason_mask,
@@ -228,7 +249,7 @@ func (r *RefreshDebtRepository) RequestDue(
 				ELSE LEAST(metadata_refresh_debt.next_refresh_at, EXCLUDED.next_refresh_at)
 			END,
 			updated_at = NOW()
-	`, targetType, contentID, priority, reasonMask, nextRefreshAt.UTC(), intervalLiteral(cooldown))
+	`, targetType, ids, priority, reasonMask, nextRefreshAt.UTC(), intervalLiteral(cooldown))
 	if err != nil {
 		return fmt.Errorf("requesting due metadata refresh debt: %w", err)
 	}
@@ -579,6 +600,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 		{reason: "refresh_failure", mask: RefreshDebtReasonRefreshFailure},
 		{reason: "core_metadata_incomplete", mask: RefreshDebtReasonCoreMetadataIncomplete},
 		{reason: "trailers_requested", mask: RefreshDebtReasonTrailersRequested},
+		{reason: "provider_artwork", mask: RefreshDebtReasonProviderArtwork},
 	}
 	for _, def := range reasonDefs {
 		var count int

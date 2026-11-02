@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -50,8 +51,9 @@ func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDet
 // (presignExtraArtwork) and lists every backdrop URL in display order, the
 // primary (BackdropURL) first; batch reads skip that, since only single-item
 // detail returns the URLs. A backdrop still waiting for the image cache has no
-// path yet and is left out.
-func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*ItemDetail, size string, presign bool) {
+// path yet and is left out. Backdrops resolve at the backdrop slot's size and
+// the other artwork at the response-wide size.
+func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*ItemDetail, art imagesize.Request, presign bool) {
 	ids := make([]string, 0, len(details))
 	for _, detail := range details {
 		if hasItemBackdrops(detail) {
@@ -73,13 +75,13 @@ func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*Ite
 		if !presign {
 			continue
 		}
-		s.presignExtraArtwork(ctx, detail, size)
+		s.presignExtraArtwork(ctx, detail, string(art.Size))
 		var urls []string
 		if detail.BackdropURL != "" {
 			urls = append(urls, detail.BackdropURL)
 		}
 		for _, path := range detail.ExtraBackdropPaths {
-			if url := s.PresignImageURL(ctx, path, artworkkey.ImageBackdrop, size); url != "" {
+			if url := s.PresignImageURL(ctx, path, artworkkey.ImageBackdrop, string(art.For(imagesize.SlotBackdrop))); url != "" {
 				urls = append(urls, url)
 			}
 		}

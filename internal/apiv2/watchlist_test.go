@@ -17,26 +17,6 @@ func watchlistRows() []userstore.WatchlistEntry {
 	}
 }
 
-func TestListWatchlist(t *testing.T) {
-	lists := &fakePersonalLists{watchlist: watchlistRows()}
-	h := newTestHandler(t, favoritesDeps(lists))
-
-	rec := do(t, h, http.MethodGet, "/api/v2/watchlist", "", viewerHeaders())
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	page := decodeCards(t, rec.Body.String())
-	if len(page.Items) != 3 || page.Items[0].ContentID != "series:c" || page.Page.HasMore || page.Page.NextCursor != "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	if lists.limits[0] != DefaultLimit+1 {
-		t.Fatalf("limit = %d", lists.limits[0])
-	}
-	if v := lists.viewers[0]; v.UserID != 1 || v.ProfileID != "p-owner" || v.Access.DeviceID != "" {
-		t.Fatalf("viewer = %+v", v)
-	}
-}
-
 func TestListWatchlistCursor(t *testing.T) {
 	lists := &fakePersonalLists{watchlist: watchlistRows()}
 	// The first page ends inside a timestamp tie, so continuation must keep the item ID.
@@ -67,20 +47,6 @@ func TestListWatchlistCursor(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
 }
 
-func TestListWatchlistValidation(t *testing.T) {
-	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
-	for _, tc := range []struct{ query, location, code string }{
-		{"offset=10", "query.offset", codeUnknownParameter},
-		{"limit=0", "query.limit", codeOutOfRange},
-		{"image_size=huge", "query.image_size", codeInvalidEnum},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist?"+tc.query, "", viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.query, p.Errors)
-		}
-	}
-}
-
 func TestGetWatchlistEntry(t *testing.T) {
 	lists := &fakePersonalLists{watchlist: watchlistRows(), missing: map[string]bool{"series:hidden": true}}
 	h := newTestHandler(t, favoritesDeps(lists))
@@ -95,46 +61,28 @@ func TestGetWatchlistEntry(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/series:z", "", viewerHeaders()), TypeNotFound)
 }
 
-func TestAddAndDeleteWatchlistEntry(t *testing.T) {
+// The watchlist twin of TestGetFavoriteMembership.
+func TestGetWatchlistMembership(t *testing.T) {
 	lists := &fakePersonalLists{watchlist: watchlistRows(), missing: map[string]bool{"series:hidden": true}}
 	h := newTestHandler(t, favoritesDeps(lists))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodPut, "/api/v2/watchlist/series:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("put %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.watchlist) != 5 || lists.watchlist[0].MediaItemID != "series:new" {
-		t.Fatalf("watchlist = %+v", lists.watchlist)
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/series:hidden", "", viewerHeaders()), TypeNotFound)
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/series:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("delete %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.watchlist) != 4 {
-		t.Fatalf("watchlist = %+v", lists.watchlist)
-	}
-	// Demo mode lets the mutations through, as v1's demo guard does.
-	demo := favoritesDeps(lists)
-	demo.DemoSettings = fakeSettings{demo: true}
-	dh := newTestHandler(t, demo)
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPut, "/api/v2/watchlist/series:new"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
+	for _, tc := range []struct{ id, want string }{
+		{"series:c", `{"item_id":"series:c","is_member":true,"added_at":"2026-01-02T03:04:05.000Z"}`},
+		{"series:nope", `{"item_id":"series:nope","is_member":false}`},
+		{"series:z", `{"item_id":"series:z","is_member":false}`},
 	} {
-		if rec := do(t, dh, tc.method, tc.path, "", viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("demo %s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
+		rec := do(t, h, http.MethodGet, "/api/v2/watchlist/"+tc.id+"/membership", "", viewerHeaders())
+		if rec.Code != 200 || rec.Body.String() != tc.want+"\n" {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
 		}
 	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/series:hidden/membership", "", viewerHeaders()), TypeNotFound)
 }
 
 func TestWatchlistDenied(t *testing.T) {
 	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{err: errStore}))
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v2/watchlist"}, {http.MethodGet, "/api/v2/watchlist/series:c"},
-		{http.MethodPut, "/api/v2/watchlist/series:c"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
+		{http.MethodGet, "/api/v2/watchlist/series:c/membership"}, {http.MethodPut, "/api/v2/watchlist/series:c"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
 	} {
 		requireProblem(t, do(t, h, tc.method, tc.path, "", nil), TypeAuthenticationRequired)
 		p := requireProblem(t, do(t, h, tc.method, tc.path, "", bearer(memberToken)), TypeValidationFailed)

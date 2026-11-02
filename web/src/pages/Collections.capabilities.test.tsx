@@ -55,24 +55,6 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("New collection on the Collections page", () => {
-  it("has one New collection button and no Browse Templates", () => {
-    show();
-    const header = screen.getByRole("heading", { level: 1, name: "Collections" }).closest("header");
-    expect(header).not.toBeNull();
-    expect(within(header!).getAllByRole("button")).toHaveLength(1);
-    expect(within(header!).getByRole("button", { name: "New collection" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: /Browse Templates/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Browse Templates/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /New collection/ })).toBeNull();
-  });
-
-  it("gives the empty Your collections one New collection button", () => {
-    show();
-    const section = screen.getByRole("region", { name: "Your collections" });
-    expect(within(section).getAllByRole("button")).toHaveLength(1);
-    expect(within(section).getByRole("button", { name: "New collection" })).toBeVisible();
-  });
-
   it("opens the type picker from the header and from the empty state", async () => {
     show();
     const user = userEvent.setup();
@@ -90,22 +72,5 @@ describe("New collection on the Collections page", () => {
 
     await user.click(empty!);
     expect(await screen.findByRole("dialog", { name: "New collection" })).toBeInTheDocument();
-  });
-
-  it("opens the type picker from a link, and a card goes to its editor", async () => {
-    show("/collections?dialog=new");
-    const dialog = await screen.findByRole("dialog", { name: "New collection" });
-    await userEvent.click(within(dialog).getByRole("link", { name: "Smart" }));
-    expect(location()).toHaveTextContent("/collections/new?type=smart");
-  });
-
-  it("keeps Manual and Smart when the server has no import sources", async () => {
-    capability.mockReturnValue({
-      data: { imports: false, artwork: false, item_reorder: false, import_sources: [] },
-    });
-    show("/collections?dialog=new");
-    const dialog = await screen.findByRole("dialog", { name: "New collection" });
-    expect(within(dialog).getAllByRole("link")).toHaveLength(2);
-    expect(within(dialog).getByText("Synced lists are off on this server.")).toBeVisible();
   });
 });

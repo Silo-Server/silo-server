@@ -2,7 +2,8 @@
 
 Some features make Silo send HTTP requests to an address a user typed or a
 third party supplied: history import, webhook sync, notification webhooks,
-collection posters set from a URL, and artwork URLs from metadata providers.
+collection posters set from a URL, artwork URLs from metadata providers, and
+subtitle file links from OpenSubtitles.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -89,8 +90,11 @@ an upstream response body and stay on the server.
 
 Webhook destinations use the same classes with a stricter rule: Public only,
 HTTPS only, checked at registration and at every connection. The admin-only
-`notifications.webhooks.allow_private_destinations` development switch lifts
-it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
+`notifications.webhooks.allow_private_destinations` development switch also
+permits Private addresses; Blocked addresses stay refused at registration and
+on every connection, including redirects. Registration requires resolution to
+allowed addresses in both modes, with a two-second lookup deadline. See
+[Notifications](notifications.md#trust-model-and-ssrf-guard).
 
 ## Artwork downloads
 
@@ -106,6 +110,17 @@ request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
 Only acting admins reach that route, so this does not widen what any other
 account can make the server request.
+
+## Subtitle downloads
+
+An OpenSubtitles download answers with a link to the subtitle file, and the
+provider chooses that address. The file is fetched from Public addresses only,
+through the netguard transport, checked on every dial and redirect; a refused
+link fails the download and stores nothing. The provider's own API calls go to
+its fixed host and are not guarded. Because the guarded transport ignores proxy
+environment variables, a server whose only route to the internet is a proxy can
+search OpenSubtitles but not download from it. SubDL fetches files only from its
+download host and refuses redirects to another host.
 
 ## Serving catalog artwork
 
@@ -163,6 +178,6 @@ that also applies to traffic from the container if that matters.
 
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork
-downloads included. Two setups do this: proxy routers in fake-IP DNS mode,
-which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only network, which
-answers IPv4-only hosts with `64:ff9b::/96` addresses.
+and OpenSubtitles file downloads included. Two setups do this: proxy routers in
+fake-IP DNS mode, which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only
+network, which answers IPv4-only hosts with `64:ff9b::/96` addresses.

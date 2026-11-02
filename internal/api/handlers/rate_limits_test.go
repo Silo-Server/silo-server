@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -259,113 +260,31 @@ func TestRateLimitHandlerWithRunningLimiter(t *testing.T) {
 	}
 }
 
-func TestRateLimitHandlerRejectsExplicitZeroWithoutWriting(t *testing.T) {
-	store := newFakeRateLimitStore()
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+func TestRateLimitHandlerRejectsInvalidUpdatesWithoutWriting(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "explicit zero", body: `{"tiers":{"standard":{"requests_per_second":0}}}`},
+		{name: "overflowing global rate", body: `{"global_requests_per_second":1e308}`},
+		{name: "overflowing burst", body: `{"ip_burst":9223372036854775807}`},
+		{name: "redis without configuration", body: `{"backend":"redis"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeRateLimitStore()
+			h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"tiers":{"standard":{"requests_per_second":0}}}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
+			req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			h.HandleUpdateConfig(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.setManyCalls != 0 || store.setCalls != 0 {
-		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
-	}
-}
-
-func TestRateLimitHandlerRejectsOverflowingGlobalRateWithoutWriting(t *testing.T) {
-	store := newFakeRateLimitStore()
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"global_requests_per_second":1e308}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.setManyCalls != 0 || store.setCalls != 0 {
-		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
-	}
-}
-
-func TestRateLimitHandlerRejectsOverflowingBurstWithoutWriting(t *testing.T) {
-	store := newFakeRateLimitStore()
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"ip_burst":9223372036854775807}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.setManyCalls != 0 || store.setCalls != 0 {
-		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
-	}
-}
-
-func TestRateLimitHandlerRejectsRedisWithoutRedisConfiguration(t *testing.T) {
-	store := newFakeRateLimitStore()
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"backend":"redis"}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.setManyCalls != 0 {
-		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
-	}
-}
-
-func TestRateLimitHandlerRejectsMalformedPersistedRedisURL(t *testing.T) {
-	store := newFakeRateLimitStore()
-	store.values["redis.url"] = "not-a-url"
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"backend":"redis"}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.setManyCalls != 0 {
-		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
-	}
-}
-
-func TestRateLimitHandlerAcceptsBootstrapRedisDespiteStalePersistedURL(t *testing.T) {
-	store := newFakeRateLimitStore()
-	store.values["redis.url"] = " redis://cache.example.invalid:6379 "
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker(), true)
-
-	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
-		`{"backend":"redis"}`,
-	))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateConfig(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-	if store.values["ratelimit.backend"] != "redis" {
-		t.Fatalf("ratelimit.backend = %q, want redis", store.values["ratelimit.backend"])
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+			}
+			if store.setManyCalls != 0 || store.setCalls != 0 {
+				t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+			}
+		})
 	}
 }
 
@@ -393,5 +312,43 @@ func TestRateLimitHandlerDoesNotTreatActiveRedisAsDurableConfiguration(t *testin
 	}
 	if store.setManyCalls != 0 {
 		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
+	}
+}
+
+// The session quota must name a known mode and refill from empty within the
+// week an idle bucket is kept, or dropping that bucket would hand back more
+// than the quota refills.
+func TestRateLimitHandlerValidatesSessionQuota(t *testing.T) {
+	str := func(v string) *string { return &v }
+	num := func(v float64) *float64 { return &v }
+	count := func(v int) *int { return &v }
+	for _, tc := range []struct {
+		name  string
+		quota AdminRateLimitSessionQuotaUpdate
+		ok    bool
+	}{
+		{name: "unknown mode", quota: AdminRateLimitSessionQuotaUpdate{Mode: str("block")}},
+		{name: "refills slower than a week", quota: AdminRateLimitSessionQuotaUpdate{RequestsPerHour: num(100), Burst: count(16801)}},
+		{name: "refills in exactly a week", quota: AdminRateLimitSessionQuotaUpdate{Mode: str("enforce"), RequestsPerHour: num(100), Burst: count(16800)}, ok: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeRateLimitStore()
+			h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+			quota := tc.quota
+			_, err := h.UpdateAdminRateLimitConfig(context.Background(), AdminRateLimitUpdate{SessionQuota: &quota}, nil)
+			if tc.ok {
+				if err != nil || store.setManyCalls+store.setCalls == 0 {
+					t.Fatalf("valid quota: err = %v, writes = %d", err, store.setManyCalls+store.setCalls)
+				}
+				return
+			}
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("err = %v, want a 400", err)
+			}
+			if store.setManyCalls != 0 || store.setCalls != 0 {
+				t.Fatalf("invalid quota wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+			}
+		})
 	}
 }

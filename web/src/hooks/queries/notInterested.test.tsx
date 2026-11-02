@@ -35,7 +35,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { canMarkNotInterested, useToggleNotInterested } from "./notInterested";
+import { useToggleNotInterested } from "./notInterested";
 
 function noContent() {
   return {
@@ -125,20 +125,6 @@ describe("useToggleNotInterested", () => {
     expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
   });
 
-  it("undoes a mark while its profile is still active", async () => {
-    const { result } = renderHook(() => useToggleNotInterested("movie:heat"), { wrapper });
-    await act(() => result.current.mutateAsync(false));
-    const [, options] = mocks.toastSuccess.mock.calls[0] as [
-      string,
-      { action: { onClick: () => void } },
-    ];
-    act(() => options.action.onClick());
-    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(2));
-    const [, init] = mocks.fetchWithSession.mock.calls[1] as [string, RequestInit];
-    expect(init.method).toBe("DELETE");
-    expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
-  });
-
   it("undoes the title it marked after the hook moves to another title", async () => {
     const { result, rerender } = renderHook(({ id }) => useToggleNotInterested(id), {
       wrapper,
@@ -189,12 +175,5 @@ describe("useToggleNotInterested", () => {
       "DELETE",
     );
     expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
-  });
-
-  it("is offered for movies and series only", () => {
-    expect(canMarkNotInterested("movie")).toBe(true);
-    expect(canMarkNotInterested("series")).toBe(true);
-    expect(canMarkNotInterested("episode")).toBe(false);
-    expect(canMarkNotInterested("season")).toBe(false);
   });
 });

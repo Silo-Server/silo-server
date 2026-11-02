@@ -44,6 +44,21 @@ If the email changes first, no link is issued; if issuance wins, the email chang
 deletes that link. Mail sent after a concurrent change can therefore carry only
 an unusable link to the previous address.
 
+**Authority judged under the lock.** Only the Owner may issue a link for
+another admin, nobody else may issue one for the Owner, and a scoped API key
+may not issue one for any admin. The handler checks this on arrival.
+`Repository.Issue` checks it again in the transaction that stores the link,
+after locking the issuer and the account in id order, the order ownership
+transfers use. A promotion of the account, or an ownership move to it, deletes
+the account's link in its own transaction. When it commits first, issuance sees
+the new role and refuses; when issuance commits first, the promotion deletes the
+new link. Either way no link issued under the old role survives. The issuer's
+row is held `FOR KEY SHARE`. That waits for an ownership move, which locks both
+accounts `FOR UPDATE` before changing `is_owner`, so an Owner who hands
+ownership away cannot finish issuing a link for another admin. It does not wait
+for other writers of the issuer's row, such as access-group updates, which lock
+many accounts in no fixed order and could otherwise deadlock with issuance.
+
 **Uniform not-found.** Lookup and completion return the same `ErrNotFound` for
 unknown, expired, used, replaced, and outdated links, so a probe learns nothing.
 The public operations spend the `password_reset` per-IP rate-limit budget; with
@@ -64,7 +79,22 @@ exactly one winner. Sign-in afterwards is a separate effect: when it fails, the
 response still reports the committed reset (`sign_in_required`) and the caller must
 not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
 sessions held in memory, the same as for administrator account edits, on every
-replica: it announces the revocation on the admin event channel.
+replica: it announces the revocation on the admin event channel. A self-service
+password change that asks to sign out other sessions (`sign_out_other_sessions`)
+revokes the same set in its own transaction, except the session that asked
+(`RevokeOtherSignInsInTransaction`), and runs the same hook, so both stay in step.
+
+**Issuing takes the account lock too.** Every sign-out everywhere locks the
+account row before it revokes. A credential it covers is issued under that lock,
+after rechecking what the credential comes from in the same transaction, so it
+either commits first and is revoked or sees the revocation and is refused. A
+local password sign-in rechecks the password hash before opening its login
+session. Audiobookshelf-compatible sign-in, refresh, and `/authorize` hold the
+account row `FOR SHARE` while they check the login session the sign-in opened,
+the refresh token being rotated (revoked in that transaction), or the token
+`/authorize` was called with, then store their tokens. A credentials-plugin
+sign-in still opens its login session outside the lock. Jellyfin-compatible
+sessions carry the login session they came from and end with it.
 
 **No link without an external URL.** Links are built on `server.public_url`
 (`mail.AccountLinkBase`, shared with invitations). Without one, issuing fails with

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -29,6 +32,7 @@ type collectionSource interface {
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
 	ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error)
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
+	ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) (map[string]catalog.ViewerCollectionCount, error)
 }
 
 // CollectionPosterResolver picks the poster a viewer sees for each server
@@ -218,6 +222,37 @@ func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Sessi
 	return collection, nil
 }
 
+// collectionsForViewer returns the collections the session's viewer is shown,
+// carrying the members it can open (catalog CollectionsShownToViewer), as the
+// native collection lists do.
+func (h *ItemsHandler) collectionsForViewer(ctx context.Context, session *Session, collections []*models.LibraryCollection) []*models.LibraryCollection {
+	if session == nil || h.collections == nil || len(collections) == 0 {
+		return collections
+	}
+	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, h.resolveAccessFilter(ctx, session))
+	if err != nil {
+		slog.WarnContext(ctx, "counting compat collections for the viewer failed", "component", "jellycompat", "error", err)
+	}
+	return catalog.CollectionsShownToViewer(collections, counts)
+}
+
+// listViewerCollections returns the collections the session sees as BoxSets:
+// those in a visible library (optionally only libFilter) that keep accepts and
+// that hold something the viewer can see.
+func (h *ItemsHandler) listViewerCollections(ctx context.Context, session *Session, visible map[int]struct{}, libFilter *int, keep func(*models.LibraryCollection) bool) ([]*models.LibraryCollection, error) {
+	collections, err := h.collections.ListAll(ctx, libFilter, catalog.ListLibraryCollectionsOptions{})
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]*models.LibraryCollection, 0, len(collections))
+	for _, c := range collections {
+		if collectionVisible(c, visible) && (keep == nil || keep(c)) {
+			matched = append(matched, c)
+		}
+	}
+	return h.collectionsForViewer(ctx, session, matched), nil
+}
+
 // boxSetsFromCollections maps collections to BoxSet DTOs carrying the posters
 // the session's viewer sees.
 func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*models.LibraryCollection) []baseItemDTO {
@@ -337,7 +372,7 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 		}
 		collections = append(collections, collection)
 	}
-	return h.boxSetsFromCollections(ctx, session, collections), nil
+	return h.boxSetsFromCollections(ctx, session, h.collectionsForViewer(ctx, session, collections)), nil
 }
 
 // handleBoxSetsList serves GET /Items with IncludeItemTypes=BoxSet by listing
@@ -373,33 +408,27 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		libFilter = &query.parentLibraryID
 	}
 
-	collections, err := h.collections.ListAll(r.Context(), libFilter, catalog.ListLibraryCollectionsOptions{})
+	searchTerm := strings.ToLower(strings.TrimSpace(query.searchTerm))
+	namePrefix := strings.ToLower(query.namePrefix)
+	matched, err := h.listViewerCollections(r.Context(), session, visible, libFilter, func(c *models.LibraryCollection) bool {
+		title := strings.ToLower(c.Title)
+		if searchTerm != "" && !strings.Contains(title, searchTerm) {
+			return false
+		}
+		if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
+			return false
+		}
+		if query.nameLessThan != "" && title >= strings.ToLower(query.nameLessThan) {
+			return false
+		}
+		if query.nameStartsWithOrGreater != "" && title < strings.ToLower(query.nameStartsWithOrGreater) {
+			return false
+		}
+		return true
+	})
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
-	}
-
-	searchTerm := strings.ToLower(strings.TrimSpace(query.searchTerm))
-	namePrefix := strings.ToLower(query.namePrefix)
-	matched := make([]*models.LibraryCollection, 0, len(collections))
-	for _, c := range collections {
-		if !collectionVisible(c, visible) {
-			continue
-		}
-		title := strings.ToLower(c.Title)
-		if searchTerm != "" && !strings.Contains(title, searchTerm) {
-			continue
-		}
-		if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
-			continue
-		}
-		if query.nameLessThan != "" && title >= strings.ToLower(query.nameLessThan) {
-			continue
-		}
-		if query.nameStartsWithOrGreater != "" && title < strings.ToLower(query.nameStartsWithOrGreater) {
-			continue
-		}
-		matched = append(matched, c)
 	}
 
 	if query.sort == "sort_title" {
@@ -441,11 +470,22 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 	if startIndex >= len(items) {
 		return []T{}
 	}
-	if limit <= 0 {
-		limit = len(items)
+	// Compare limit with what is left rather than adding it to startIndex: a
+	// client Limit near math.MaxInt would overflow the sum.
+	end := len(items)
+	if limit > 0 && limit < end-startIndex {
+		end = startIndex + limit
 	}
-	end := min(startIndex+limit, len(items))
 	return items[startIndex:end]
+}
+
+// pageFetchLimit returns how many rows to read from offset 0 to serve the
+// page at startIndex, saturating at math.MaxInt instead of wrapping negative.
+func pageFetchLimit(startIndex, limit int) int {
+	if startIndex > 0 && limit > math.MaxInt-startIndex {
+		return math.MaxInt
+	}
+	return startIndex + limit
 }
 
 // handleBoxSetItem serves GET /Items/{id} when the ID decodes as a collection.
@@ -455,11 +495,15 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	if collection == nil {
+	var shown []*models.LibraryCollection
+	if collection != nil {
+		shown = h.collectionsForViewer(r.Context(), session, []*models.LibraryCollection{collection})
+	}
+	if len(shown) == 0 {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*models.LibraryCollection{collection})[0])
+	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, shown)[0])
 }
 
 // HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
@@ -531,6 +575,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 			matched = append(matched, c)
 		}
 	}
+	matched = h.collectionsForViewer(r.Context(), session, matched)
 	sort.SliceStable(matched, func(i, j int) bool {
 		a, b := strings.ToLower(matched[i].Title), strings.ToLower(matched[j].Title)
 		if a != b {
@@ -564,6 +609,12 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
+	// Limit=0 asks only for TotalRecordCount. The paths below read a zero
+	// limit as no cap or as a default page, so read one row for the total;
+	// writeListItemsPage drops it.
+	if query.countOnly {
+		query.limit = 1
+	}
 	leafType, membersAreLeaves := smartCollectionLeafType(collection)
 
 	// Play all / Shuffle asks for the collection's playable leaves. A smart
@@ -595,6 +646,24 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
+
+	// Stored collections keep their membership in SQL: an explicit sort or a
+	// filter browses the catalog joined to it, and the curated order pages it
+	// directly, so neither path loads every member to serve one page.
+	if !catalog.IsLiveQueryType(collection.CollectionType) {
+		if query.sortExplicit || query.hasItemTypeFilter || query.hasMemberFilters() {
+			params := buildBrowseParams(query)
+			params.Set("collection_id", collection.ID)
+			h.writeCollectionBrowsePage(w, r, session, query, routeID, params)
+			return
+		}
+		if pool := h.compatPool(); pool != nil {
+			h.writeStoredCollectionPage(w, r, session, query, routeID, pool, collection.ID)
+			return
+		}
+	}
+
 	contentIDs, err := h.collectionMemberIDs(r.Context(), session, collection)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -604,8 +673,6 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
-
-	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 
 	if query.sortExplicit || query.hasItemTypeFilter || query.hasMemberFilters() {
 		// Catalog browse reads media_items only, so an episode-scoped smart
@@ -629,7 +696,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 				writeCompatUpstreamError(w, hydrateErr)
 				return
 			}
-			h.writeCollectionItemsPage(w, r, session, query, routeID, ordered, episodeTargets, len(sorted))
+			h.writeListItemsPage(w, r, session, query, routeID, ordered, episodeTargets, len(sorted))
 			return
 		}
 
@@ -637,25 +704,89 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		// access-filtered allowlist.
 		params := buildBrowseParams(query)
 		params.Set("content_ids", strings.Join(contentIDs, ","))
-		result, browseErr := h.content.BrowseItems(r.Context(), session, params)
-		if browseErr != nil {
-			writeCompatUpstreamError(w, browseErr)
-			return
-		}
-		h.writeCollectionItemsPage(w, r, session, query, routeID, result.Items, nil, result.Total)
+		h.writeCollectionBrowsePage(w, r, session, query, routeID, params)
 		return
 	}
 
-	// Position order: hydrate the surviving members (collections are capped
-	// well below the browse limit), rebuild curated order, then page locally
-	// before building DTOs.
+	// Position order without a database pool: hydrate the surviving members,
+	// rebuild curated order, then page locally before building DTOs.
 	ordered, episodeTargets, err := h.hydrateCollectionMembers(r.Context(), session, contentIDs, catalog.IsLiveQueryType(collection.CollectionType))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
 	page := slicePage(ordered, query.startIndex, query.limit)
-	h.writeCollectionItemsPage(w, r, session, query, routeID, page, episodeTargets, len(ordered))
+	h.writeListItemsPage(w, r, session, query, routeID, page, episodeTargets, len(ordered))
+}
+
+// writeCollectionBrowsePage lets the catalog browse order, filter, and page a
+// collection's members, then writes that page.
+func (h *ItemsHandler) writeCollectionBrowsePage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, params url.Values) {
+	result, err := h.content.BrowseItems(r.Context(), session, params)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeListItemsPage(w, r, session, query, routeID, result.Items, nil, result.Total)
+}
+
+// writeStoredCollectionPage writes one page of a stored collection in curated
+// order, paged in SQL over the members the viewer can see.
+func (h *ItemsHandler) writeStoredCollectionPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, pool *pgxpool.Pool, collectionID string) {
+	pageIDs, total, err := h.storedCollectionContentIDPage(r.Context(), session, pool, collectionID, query.startIndex, query.limit)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if len(pageIDs) == 0 {
+		result := emptyQueryResult(query.startIndex)
+		result.TotalRecordCount = total
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	// Stored members only reference media_items, so no episode lookup.
+	ordered, _, err := h.hydrateCollectionMembers(r.Context(), session, pageIDs, false)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeListItemsPage(w, r, session, query, routeID, ordered, nil, total)
+}
+
+// storedCollectionContentIDPage returns the [offset, offset+limit) window of a
+// stored collection's members in curated order, plus the member total. Both
+// count only members the viewer can see, with the same access rules as
+// loadCompatItemsByContentIDs, so a hidden member neither shortens a page nor
+// shifts later pages. limit <= 0 means no cap.
+func (h *ItemsHandler) storedCollectionContentIDPage(ctx context.Context, session *Session, pool *pgxpool.Pool, collectionID string, offset, limit int) ([]string, int, error) {
+	access := h.resolveAccessFilter(ctx, session)
+	conditions := []string{"lci.collection_id = $1"}
+	args := []any{collectionID}
+	argIdx := 2
+	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
+		return nil, 0, nil
+	}
+	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
+	from := "library_collection_items lci JOIN media_items mi ON mi.content_id = lci.media_item_id WHERE " + strings.Join(conditions, " AND ")
+
+	offset = max(offset, 0)
+	var limitArg any // NULL is LIMIT ALL
+	if limit > 0 {
+		limitArg = limit
+	}
+	args = append(args, limitArg, offset)
+	// One statement, so the total and the page come from the same snapshot
+	// even while a sync replaces the membership.
+	var (
+		total int
+		ids   []string
+	)
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		"SELECT (SELECT COUNT(*) FROM %[1]s), ARRAY(SELECT lci.media_item_id FROM %[1]s ORDER BY lci.position, lci.source_rank, lci.media_item_id LIMIT $%[2]d OFFSET $%[3]d)",
+		from, argIdx, argIdx+1), args...).Scan(&total, &ids); err != nil {
+		return nil, 0, fmt.Errorf("paging collection members: %w", err)
+	}
+	return ids, total, nil
 }
 
 // writeSmartCollectionPage pages a smart collection's query in SQL and writes
@@ -684,7 +815,7 @@ func (h *ItemsHandler) writeSmartCollectionPage(w http.ResponseWriter, r *http.R
 		return
 	}
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
-	h.writeCollectionItemsPage(w, r, session, query, routeID, ordered, episodeTargets, total)
+	h.writeListItemsPage(w, r, session, query, routeID, ordered, episodeTargets, total)
 }
 
 // sortEpisodeMembers orders episode members by the client's SortBy without
@@ -857,7 +988,7 @@ func (h *ItemsHandler) handleBoxSetLeaves(w http.ResponseWriter, r *http.Request
 		return
 	}
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
-	h.writeCollectionItemsPage(w, r, session, query, routeID, listItems, episodeTargets, len(leaves))
+	h.writeListItemsPage(w, r, session, query, routeID, listItems, episodeTargets, len(leaves))
 }
 
 // expandCollectionLeaves turns movie and series members into playable leaf
@@ -1039,13 +1170,19 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 	return ordered, episodeTargets, nil
 }
 
-// writeCollectionItemsPage hydrates user state for one page of collection
-// members and writes the /Items result with ParentId stamped on each child.
+// writeListItemsPage hydrates user state for one page of list items, such as
+// collection members, and writes the /Items result, stamping routeID as each
+// item's ParentId unless it is empty.
 // Detail-level Fields (MediaSources, Path, ...) upgrade each child to its
 // detail DTO, as the library-parent browse path does; Infuse treats children
 // without them as unplayable. Episode members also get their season and
-// series context from episodeTargets.
-func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, listItems []upstreamListItem, episodeTargets map[string]compatEpisodeTarget, total int) {
+// series context from episodeTargets. A count-only request (Limit=0) gets
+// only the total.
+func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, listItems []upstreamListItem, episodeTargets map[string]compatEpisodeTarget, total int) {
+	if query.countOnly {
+		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: total, StartIndex: query.startIndex})
+		return
+	}
 	h.rememberListImages(listItems)
 	contentIDs := contentIDsFromListItems(listItems)
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)
@@ -1056,7 +1193,7 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
 		// Members may span libraries, so the detail fetch is not library-scoped.
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, nil)
+		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, nil, query.requestedFields)
 	}
 	items := make([]baseItemDTO, 0, len(listItems))
 	for _, item := range listItems {
@@ -1067,7 +1204,9 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 		} else {
 			dto = h.mapper.itemFromList(item, favorites[item.ContentID], progress[item.ContentID], query.requestedFields)
 		}
-		dto.ParentID = routeID
+		if routeID != "" {
+			dto.ParentID = routeID
+		}
 		if target, ok := episodeTargets[item.ContentID]; ok {
 			h.applyCompatEpisodeTarget(&dto, target)
 		}

@@ -41,6 +41,18 @@ type AndroidPushRegistrationReceipt struct {
 type AndroidPushRegistrationOutput struct {
 	Body AndroidPushRegistrationReceipt
 }
+
+// AndroidPushRetirementService stops delivery to an Android installation on
+// the authority of its installation key alone.
+type AndroidPushRetirementService interface {
+	AndroidPushRetirementAvailable() bool
+	RetireAndroidPush(context.Context, notifications.AndroidPushRetirement) (notifications.AndroidPushReceipt, error)
+}
+type AndroidPushRetirementReceipt struct {
+	Generation ID   `json:"generation" doc:"The retirement's generation, which is now the installation's newest intent."`
+	Removed    bool `json:"removed" doc:"Always true: the server delivers nothing to this installation until it registers again with a higher generation."`
+}
+type AndroidPushRetirementOutput struct{ Body AndroidPushRetirementReceipt }
 type AndroidPushRegistrationCapability struct {
 	Capability
 	RegistrationAvailable bool     `json:"registration_available" doc:"Local ordered registration storage is configured; does not assert provider delivery availability."`
@@ -75,9 +87,9 @@ func (reg *Registry) androidPushCommand(ctx context.Context, authority AndroidPu
 	if p != nil {
 		return notifications.AndroidPushCommand{}, p
 	}
-	generation, err := strconv.ParseInt(authority.Generation, 10, 64)
-	if err != nil || generation <= 0 || strconv.FormatInt(generation, 10) != authority.Generation {
-		return notifications.AndroidPushCommand{}, NewProblem(TypeValidationFailed, "X-Push-Generation must be a positive canonical decimal int64.")
+	generation, err := pushGeneration(authority.Generation)
+	if err != nil {
+		return notifications.AndroidPushCommand{}, err
 	}
 	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation}, nil
 }
@@ -120,7 +132,27 @@ func registerOrderedAndroidPush(reg *Registry) {
 		}
 		return &struct{}{}, nil
 	})
+	retire := Operation{Operation: humaOp(http.MethodPost, Prefix+"/notifications/push/devices/{device_id}/retire", "retirePushDevice", "notifications", "Stop delivery to an Android installation without a login session, proved by its installation key. Send it after removing this server or signing out, when the login is already gone."), Class: ClassPublic, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity, RateLimitBucket: bucketAndroidPushRetire}
+	retire.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusTooManyRequests}
+	Register(reg, retire, func(ctx context.Context, in *AndroidPushRemovalInput) (*AndroidPushRetirementOutput, error) {
+		if reg.deps.AndroidPushRetirement == nil || !reg.deps.AndroidPushRetirement.AndroidPushRetirementAvailable() {
+			return nil, unavailable("Android push retirement")
+		}
+		generation, err := pushGeneration(in.Generation)
+		if err != nil {
+			return nil, err
+		}
+		receipt, err := reg.deps.AndroidPushRetirement.RetireAndroidPush(ctx, notifications.AndroidPushRetirement{DeviceID: in.DeviceID, InstallationKey: in.InstallationKey, Generation: generation})
+		if err != nil {
+			return nil, orderedPushProblem(err)
+		}
+		return &AndroidPushRetirementOutput{Body: AndroidPushRetirementReceipt{Generation: ID(strconv.FormatInt(receipt.Generation, 10)), Removed: receipt.Removed}}, nil
+	})
 }
+
+// bucketAndroidPushRetire names the per-IP budget for session-less retirement.
+// The 256-bit installation key is the guard; the budget is anti-probe hygiene.
+const bucketAndroidPushRetire = "android_push_retire"
 
 func (c AndroidPushRegistrationCapability) capabilityState() string {
 	return configuredCapabilityState(c.RegistrationAvailable)

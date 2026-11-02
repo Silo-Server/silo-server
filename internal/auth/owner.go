@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -264,8 +267,21 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 	if err := moveOwnership(ctx, tx, fromID, toID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionOwnershipTransferred, auditmutation.TargetUser,
+		strconv.Itoa(toID), http.StatusNoContent,
+		auditmutation.Changes(map[string]any{auditFieldOwner: fromID}, map[string]any{auditFieldOwner: toID}))
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
+
+// auditFieldOwner names the server Owner's account in an ownership transfer.
+const auditFieldOwner = "owner_user_id"
 
 // moveOwnership clears the current Owner before marking the next: the
 // single-Owner index is checked row by row. The new Owner becomes a
@@ -357,7 +373,7 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		if target.Role != models.RoleAdmin || !target.Enabled {
 			// Recovery also signs the account out everywhere, so every
 			// session starts again under its new authority.
-			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
+			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}, nil); err != nil {
 				return nil, 0, fmt.Errorf("promoting account: %w", err)
 			}
 			if err := RevokeSignInsInTransaction(ctx, tx, id); err != nil {

@@ -24,7 +24,7 @@ import { fetchRecipeCatalog } from "@/lib/recipes";
 import { DetailCard } from "../ui";
 
 // A refused save names its reason in the problem's first error (a 400 from
-// the section source policy or recipe validation) or in its detail.
+// recipe validation) or in its detail.
 function saveErrorMessage(error: unknown): string {
   let reason: string | undefined;
   if (error instanceof V2ProblemError) {
@@ -65,20 +65,19 @@ export function ProfileHomeSections({
   const newOverrideId = useRef(createOverrideIdSource());
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the editable list resets when the saved sections load or change
     if (settings.data) setSections(settings.data);
   }, [settings.data]);
 
   const ready = canMutateSectionSettings(settings, overrides);
   const busy = !ready || save.isPending || reset.isPending;
 
-  function persist(next: SettingsSectionEntry[], changedSectionId: string) {
+  function persist(next: SettingsSectionEntry[]) {
     if (!ready) return;
     setSections(next);
     const body = buildSectionOverrides(next, hydrateRemovedSystemSections(overrides.data), {
       savedOverrides: overrides.data,
       newId: newOverrideId.current,
-      changedSectionId,
       // Store only what changed, as the profile's own Home screen settings
       // do, so rows left alone keep following the server's layout.
       baseline: settings.data,
@@ -109,10 +108,7 @@ export function ProfileHomeSections({
           disabled={busy}
           onMove={persist}
           onToggleHidden={(section) =>
-            persist(
-              sections.map((s) => (s.id === section.id ? { ...s, hidden: !s.hidden } : s)),
-              section.id,
-            )
+            persist(sections.map((s) => (s.id === section.id ? { ...s, hidden: !s.hidden } : s)))
           }
         />
       </div>

@@ -99,102 +99,8 @@ func (d resetDB) issue(t *testing.T, userID int, token string, expiresAt time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), nil, expiresAt); err != nil {
+	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), Issuer{}, expiresAt, DeliveryLink); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestResetLinkCompletesOnceAndSignsOutEverywhere(t *testing.T) {
-	d := newResetDB(t)
-	ctx := t.Context()
-	id := d.account(t, "reset", true, true)
-	d.issue(t, id, "tok", time.Now().Add(time.Hour))
-
-	link, err := d.repo.Lookup(ctx, auth.HashLinkToken("tok"))
-	if err != nil || link.UserID != id || link.Username != "reset" {
-		t.Fatalf("lookup = %+v, %v", link, err)
-	}
-	// Credentials a login minted without the password: Audiobookshelf and
-	// Jellyfin-compatible sessions and a device sign-in approved but not yet
-	// collected.
-	if _, err := d.pool.Exec(ctx, `INSERT INTO abs_sessions(user_id, token_hash, device_id) VALUES ($1, 'abs-token', 'abs-device')`, id); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.pool.Exec(ctx, `INSERT INTO jellycompat_sessions(token, username, account_username, profile_id, profile_name, pseudo_user_id,
-		streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, expires_at)
-		VALUES ('jf-token', 'reset', 'reset', 'primary', 'reset', gen_random_uuid(), $1, 'access', 'refresh', now() + interval '1 hour', now() + interval '1 day')`, id); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.pool.Exec(ctx, `INSERT INTO device_login_requests(id, device_code_hash, browser_code_hash, user_code_hash, match_code, device_name, status, approved_by_user_id, expires_at)
-		VALUES (gen_random_uuid(), 'dev', 'browser', 'user', 'MATCH', 'tv', 'approved', $1, now() + interval '10 minutes')`, id); err != nil {
-		t.Fatal(err)
-	}
-	user, err := d.repo.Complete(ctx, auth.HashLinkToken("tok"), "new-password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !auth.CheckPassword(user, "new-password") || user.PasswordChangeRequired {
-		t.Fatalf("password not reset or still temporary: %+v", user)
-	}
-	var live, liveABS, liveJellyfin, approved int
-	err = d.pool.QueryRow(ctx, `SELECT
-		(SELECT count(*) FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL),
-		(SELECT count(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL),
-		(SELECT count(*) FROM jellycompat_sessions WHERE streamapp_user_id = $1),
-		(SELECT count(*) FROM device_login_requests WHERE approved_by_user_id = $1 AND status = 'approved')`, id).Scan(&live, &liveABS, &liveJellyfin, &approved)
-	if err != nil || live != 0 || liveABS != 0 || liveJellyfin != 0 || approved != 0 {
-		t.Fatalf("survived the reset: %d sessions, %d Audiobookshelf sessions, %d Jellyfin-compatible sessions, %d approved device sign-ins (%v)", live, liveABS, liveJellyfin, approved, err)
-	}
-	if _, err := d.repo.Complete(ctx, auth.HashLinkToken("tok"), "another-password"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("second use: %v", err)
-	}
-	if _, err := d.repo.Lookup(ctx, auth.HashLinkToken("tok")); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("spent link still resolves: %v", err)
-	}
-}
-
-func TestResetLinkRetiresWithoutBeingUsed(t *testing.T) {
-	d := newResetDB(t)
-	ctx := t.Context()
-	usable := func(token string) bool {
-		_, err := d.repo.Lookup(ctx, auth.HashLinkToken(token))
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			t.Fatal(err)
-		}
-		return err == nil
-	}
-
-	id := d.account(t, "replaced", true, true)
-	d.issue(t, id, "first", time.Now().Add(time.Hour))
-	d.issue(t, id, "second", time.Now().Add(time.Hour))
-	if usable("first") || !usable("second") {
-		t.Fatal("a newer link must cancel the older one")
-	}
-
-	// Any other password change outdates the link.
-	if _, err := d.pool.Exec(ctx, `UPDATE users SET password_hash = 'changed' WHERE id = $1`, id); err != nil {
-		t.Fatal(err)
-	}
-	if usable("second") {
-		t.Fatal("link survived a password change")
-	}
-	if _, err := d.repo.Complete(ctx, auth.HashLinkToken("second"), "new-password"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("outdated link completed: %v", err)
-	}
-
-	expired := d.account(t, "expired", true, true)
-	d.issue(t, expired, "late", time.Now().Add(-time.Minute))
-	if usable("late") {
-		t.Fatal("expired link resolves")
-	}
-
-	disabled := d.account(t, "disabled-later", true, true)
-	d.issue(t, disabled, "frozen", time.Now().Add(time.Hour))
-	if _, err := d.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, disabled); err != nil {
-		t.Fatal(err)
-	}
-	if usable("frozen") {
-		t.Fatal("link of a disabled account resolves")
 	}
 }
 
@@ -348,30 +254,11 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 					}
 					done <- err
 				} else {
-					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", nil, time.Now().Add(time.Hour))
+					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", Issuer{}, time.Now().Add(time.Hour), DeliveryLink)
 				}
 			}()
 			// Observe the real database lock before committing the email change.
-			deadline := time.NewTimer(3 * time.Second)
-			defer deadline.Stop()
-			tick := time.NewTicker(10 * time.Millisecond)
-			defer tick.Stop()
-			for {
-				var waiting bool
-				if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
-					t.Fatal(err)
-				}
-				if waiting {
-					break
-				}
-				select {
-				case err := <-done:
-					t.Fatalf("issuance did not wait for the pending email change: %v", err)
-				case <-deadline.C:
-					t.Fatal("issuance never waited for the account")
-				case <-tick.C:
-				}
-			}
+			d.awaitBlocked(t, blocker, done)
 			if err := tx.Commit(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -389,186 +276,163 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 	}
 }
 
-func TestResetLinkRefusesIneligibleAccounts(t *testing.T) {
-	d := newResetDB(t)
-	for name, id := range map[string]int{
-		"disabled": d.account(t, "disabled", false, true),
-		"external": d.account(t, "external", true, false),
-	} {
-		if err := d.repo.Issue(t.Context(), id, name+"@example.invalid", auth.HashLinkToken(name), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
-			t.Fatalf("%s: issue = %v", name, err)
+// awaitBlocked waits until a session is blocked on a lock held by backend
+// blocker, failing if done reports first.
+func (d resetDB) awaitBlocked(t *testing.T, blocker int, done <-chan error) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var waiting bool
+		if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if err := d.repo.Issue(t.Context(), 999999, "ghost@example.invalid", auth.HashLinkToken("ghost"), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
-		t.Fatalf("missing account: issue = %v", err)
+		if waiting {
+			return
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("issuance did not wait for the locked account: %v", err)
+		case <-deadline.C:
+			t.Fatal("issuance never waited for the account")
+		case <-tick.C:
+		}
 	}
 }
 
-func TestResetLinkConcurrentCompletionsHaveOneWinner(t *testing.T) {
+// TestResetIssuanceSerializesPromotionDB holds the real promotion with the
+// account locked and starts issuance behind it, so the link is judged after
+// the promotion deleted the account's links: only the Owner, without a scoped
+// key, may still store one for the new admin.
+func TestResetIssuanceSerializesPromotionDB(t *testing.T) {
 	d := newResetDB(t)
-	id := d.account(t, "race", true, true)
-	d.issue(t, id, "race", time.Now().Add(time.Hour))
+	owner := d.account(t, "owner", true, true)
+	admin := d.account(t, "admin", true, true)
+	if _, err := d.pool.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = ANY($1)`, []int{owner, admin}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(t.Context(), `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	for i, tc := range []struct {
+		name      string
+		owner     bool
+		scopedKey bool
+		want      error
+	}{
+		{"admin", false, false, auth.ErrAdminProtected},
+		{"owner with a scoped key", true, true, ErrScopedKeyAdmin},
+		{"owner", true, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			name := fmt.Sprintf("target-%d", i)
+			target := d.account(t, name, true, true)
+			token := name + "-link"
+			issuer := Issuer{ID: admin, ScopedKey: tc.scopedKey}
+			if tc.owner {
+				issuer.ID = owner
+			}
 
-	const racers = 4
-	var wg sync.WaitGroup
-	results := make(chan error, racers)
-	for i := range racers {
-		wg.Go(func() {
-			_, err := d.repo.Complete(t.Context(), auth.HashLinkToken("race"), fmt.Sprintf("password-%d", i))
-			results <- err
+			locked := make(chan int, 1)
+			release := make(chan struct{})
+			releaseOnce := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(releaseOnce)
+			promoted := make(chan error, 1)
+			go func() {
+				_, err := auth.NewUserRepository(d.pool).MutateAdminAccount(ctx, target, -1, &models.UpdateUserInput{Role: new(models.RoleAdmin)},
+					func(_ *models.User, tx pgx.Tx) (bool, error) {
+						var pid int
+						if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+							return false, err
+						}
+						locked <- pid
+						<-release
+						return false, nil
+					})
+				promoted <- err
+			}()
+			var blocker int
+			select {
+			case blocker = <-locked:
+			case err := <-promoted:
+				t.Fatalf("promotion ended before locking the account: %v", err)
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				done <- d.repo.Issue(ctx, target, name+"@example.invalid", token, issuer, time.Now().Add(time.Hour), DeliveryLink)
+			}()
+			d.awaitBlocked(t, blocker, done)
+			releaseOnce()
+			if err := <-promoted; err != nil {
+				t.Fatal("promotion:", err)
+			}
+			if err := <-done; !errors.Is(err, tc.want) {
+				t.Fatalf("issuance after promotion: %v, want %v", err, tc.want)
+			}
+			_, err := d.repo.Lookup(ctx, token)
+			if tc.want == nil && err != nil {
+				t.Fatal("the Owner's link for the new admin is unusable:", err)
+			}
+			if tc.want != nil && !errors.Is(err, ErrNotFound) {
+				t.Fatalf("a link issued against the pre-promotion role survived: %v", err)
+			}
 		})
 	}
-	wg.Wait()
-	close(results)
-	won := 0
-	for err := range results {
-		switch {
-		case err == nil:
-			won++
-		case !errors.Is(err, ErrNotFound):
-			t.Fatal(err)
-		}
-	}
-	if won != 1 {
-		t.Fatalf("%d completions succeeded, want exactly 1", won)
-	}
 }
 
-func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
+// TestResetIssuanceSerializesOwnershipMoveDB holds an ownership move away from
+// the issuing Owner, with the locks and writes TransferOwnership makes (it
+// cannot be paused from a test), so issuance waits on the issuer and then
+// judges it as the admin it has become.
+func TestResetIssuanceSerializesOwnershipMoveDB(t *testing.T) {
 	d := newResetDB(t)
 	ctx := t.Context()
-	alice := d.account(t, "alice", true, true)
-	hashOf := func() string {
-		t.Helper()
-		var hash string
-		if err := d.pool.QueryRow(ctx, `SELECT token_hash FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&hash); err != nil {
-			t.Fatal(err)
-		}
-		return hash
-	}
-	expires := time.Now().Add(time.Hour)
-
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "first", expires, time.Minute); err != nil || !stored {
-		t.Fatalf("first request: %v, %v", stored, err)
-	}
-	// Inside the cooldown the live link survives, whoever asks.
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "second", expires, time.Minute); err != nil || stored || hashOf() != "first" {
-		t.Fatalf("request inside cooldown: %v, %v, link %q", stored, err, hashOf())
-	}
-	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1`, alice); err != nil {
+	owner := d.account(t, "owner", true, true)
+	successor := d.account(t, "successor", true, true)
+	target := d.account(t, "target", true, true)
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = ANY($1)`, []int{owner, successor, target}); err != nil {
 		t.Fatal(err)
 	}
-	var issuedBy *int
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "third", expires, time.Minute); err != nil || !stored || hashOf() != "third" {
-		t.Fatalf("request after cooldown: %v, %v, link %q", stored, err, hashOf())
-	}
-	// A requested link records the account as its own issuer.
-	if err := d.pool.QueryRow(ctx, `SELECT issued_by FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&issuedBy); err != nil || issuedBy == nil || *issuedBy != alice {
-		t.Fatalf("requested link has issuer %v, %v", issuedBy, err)
-	}
-	// An administrator's link is not subject to the cooldown.
-	admin := d.account(t, "admin", true, true)
-	if err := d.repo.Issue(ctx, alice, "alice@example.invalid", "admin-sent", &admin, expires); err != nil || hashOf() != "admin-sent" {
-		t.Fatalf("admin issue inside cooldown: %v, link %q", err, hashOf())
-	}
-	// A request never retires a live admin link, however old.
-	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours' WHERE user_id = $1`, alice); err != nil {
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, owner); err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "over-admin", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
-		t.Fatalf("request replaced a live admin link: %v, %v, link %q", stored, err, hashOf())
-	}
-	// Nor one whose issuing administrator was deleted (issued_by set NULL).
-	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET issued_by = NULL WHERE user_id = $1`, alice); err != nil {
-		t.Fatal(err)
-	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "over-orphan", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
-		t.Fatalf("request replaced an admin link whose issuer was deleted: %v, %v, link %q", stored, err, hashOf())
-	}
-	// Once that link is dead, expired or outdated by a password change, it can.
-	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET password_fingerprint = 'outdated' WHERE user_id = $1`, alice); err != nil {
-		t.Fatal(err)
-	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "after-outdated", expires, time.Minute); err != nil || !stored || hashOf() != "after-outdated" {
-		t.Fatalf("request after an outdated admin link: %v, %v, link %q", stored, err, hashOf())
-	}
-	if err := d.repo.Issue(ctx, alice, "alice@example.invalid", "admin-again", &admin, expires); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours', expires_at = now() - interval '1 minute' WHERE user_id = $1`, alice); err != nil {
-		t.Fatal(err)
-	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "after-expired", expires, time.Minute); err != nil || !stored || hashOf() != "after-expired" {
-		t.Fatalf("request after an expired admin link: %v, %v, link %q", stored, err, hashOf())
-	}
-	// Withdrawing takes only the named link.
-	if err := d.repo.Withdraw(ctx, alice, "someone-else"); err != nil || hashOf() != "after-expired" {
-		t.Fatalf("withdraw of another digest: %v, link %q", err, hashOf())
-	}
-	if err := d.repo.Withdraw(ctx, alice, "after-expired"); err != nil {
-		t.Fatal(err)
-	}
-	var left int
-	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&left); err != nil || left != 0 {
-		t.Fatalf("withdrawn link still stored: %d, %v", left, err)
-	}
-
-	for name, id := range map[string]int{
-		"disabled": d.account(t, "disabled", false, true),
-		"external": d.account(t, "external", true, false),
-		"unknown":  999999,
-	} {
-		if stored, err := d.repo.IssueUnlessRecent(ctx, id, name+"@example.invalid", "never-"+name, expires, time.Minute); err != nil || stored {
-			t.Errorf("%s: stored=%v err=%v", name, stored, err)
-		}
-	}
-}
-
-// TestResetCompletionLocksAccountBeforeLinkDB holds the account the way a
-// promotion does and checks that completing its link waits on the account
-// before locking the link, so the promotion can still delete the link
-// instead of deadlocking.
-func TestResetCompletionLocksAccountBeforeLinkDB(t *testing.T) {
-	d := newResetDB(t)
-	id := d.account(t, "racing", true, true)
-	d.issue(t, id, "racing-link", time.Now().Add(time.Hour))
-	promotion, err := d.pool.Begin(t.Context())
+	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = promotion.Rollback(t.Context()) }()
-	if _, err := promotion.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = $1`, id); err != nil {
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	for _, stmt := range []struct {
+		sql string
+		arg any
+	}{
+		{`SELECT 1 FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{owner, successor}},
+		{`UPDATE users SET is_owner = false WHERE id = $1`, owner},
+		{`UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, successor},
+	} {
+		if _, err := tx.Exec(ctx, stmt.sql, stmt.arg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var blocker int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blocker); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := d.repo.Complete(t.Context(), auth.HashLinkToken("racing-link"), "brand-new-password")
-		done <- err
+		done <- d.repo.Issue(ctx, target, "target@example.invalid", "moved-link", Issuer{ID: owner}, time.Now().Add(time.Hour), DeliveryLink)
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var waiting int
-		if err := d.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("completion never waited on the account")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if _, err := promotion.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
+	d.awaitBlocked(t, blocker, done)
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := promotion.Exec(t.Context(), `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
-		t.Fatalf("completion locked the link before the account: %v", err)
+	if err := <-done; !errors.Is(err, auth.ErrAdminProtected) {
+		t.Fatalf("issuance after the ownership move: %v, want %v", err, auth.ErrAdminProtected)
 	}
-	if err := promotion.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, ErrNotFound) {
-		t.Fatalf("completing a link the promotion deleted: %v", err)
+	if _, err := d.repo.Lookup(ctx, "moved-link"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the former Owner holds a link for another admin: %v", err)
 	}
 }

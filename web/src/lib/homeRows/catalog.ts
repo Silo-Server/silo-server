@@ -53,7 +53,7 @@ const ROW_KINDS: Record<string, RowKind> = {
   },
   next_up: {
     group: "keep",
-    label: "On deck",
+    label: "Next up",
     sentence: "The next episode of each show a viewer follows.",
     personal: true,
   },
@@ -222,11 +222,16 @@ const ROW_KINDS: Record<string, RowKind> = {
   },
 };
 
-/** Kinds an existing row may still have, but that no picker offers for a new row. */
+/**
+ * Kinds an existing row may still have, but that no picker offers for a new
+ * row. The server adds the only Next up row itself, when a profile's Next up
+ * episodes setting is Separate row, and refuses one added by hand.
+ */
 export const NOT_OFFERED_FOR_NEW_ROWS: ReadonlySet<string> = new Set([
   "admin_curated_list",
   "genre",
   "award_winners",
+  "next_up",
 ]);
 
 const AWARD_NAMES: Record<string, string> = {

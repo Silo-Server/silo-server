@@ -73,7 +73,7 @@ type System struct {
 	mailSender                mail.Sender
 	emailBrand                *mail.BrandLoader
 	emailVerificationDispatch *emailVerificationDispatcher
-	emailWorker               *accountChannelWorker[string]
+	emailWorker               *accountChannelWorker[profileKey]
 	discordWorker             *accountChannelWorker[int]
 	discordClient             *discord.Client
 	// publicURL is the server's externally reachable base URL, used as the
@@ -191,7 +191,7 @@ func NewSystem(
 	// keeps no outbox: its dispatcher only nudges the watermark sweep.
 	var emailPrefs *EmailPrefsRepository
 	var emailChannelInst *emailChannel
-	var emailWorker *accountChannelWorker[string]
+	var emailWorker *accountChannelWorker[profileKey]
 	if mailSender != nil {
 		emailPrefs = NewEmailPrefsRepository(pool)
 		emailChannelInst = &emailChannel{
@@ -448,37 +448,42 @@ func (s *System) Wait() {
 
 // PurgeProfile removes all notification state for a deleted profile.
 // Profiles may live in per-user SQLite stores, so Postgres cascades cannot
-// cover this.
-func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
+// cover this. Interest rows, series mutes, deliveries, preferences,
+// destinations, and email prefs are removed for the profile on userID's
+// account only.
+func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string) error {
 	if s == nil || profileID == "" {
 		return nil
 	}
-	if err := s.Interests.DeleteAllForProfile(ctx, profileID); err != nil {
+	if err := s.Interests.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 		return fmt.Errorf("purge interest rows: %w", err)
 	}
-	if err := s.Deliveries.DeleteAllForProfile(ctx, profileID); err != nil {
+	if err := s.Interests.deleteMutesForProfile(ctx, userID, profileID); err != nil {
+		return fmt.Errorf("purge series mutes: %w", err)
+	}
+	if err := s.Deliveries.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 		return fmt.Errorf("purge deliveries: %w", err)
 	}
-	if err := s.Preferences.DeleteForProfile(ctx, profileID); err != nil {
+	if err := s.Preferences.DeleteForProfile(ctx, userID, profileID); err != nil {
 		return fmt.Errorf("purge preferences: %w", err)
 	}
 	if s.webhookRepo != nil {
-		if err := s.webhookRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.webhookRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge webhooks: %w", err)
 		}
 	}
 	if s.webPushRepo != nil {
-		if err := s.webPushRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.webPushRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge web push subscriptions: %w", err)
 		}
 	}
 	if s.pushDeviceRepo != nil {
-		if err := s.pushDeviceRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.pushDeviceRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge push devices: %w", err)
 		}
 	}
 	if s.EmailPrefs != nil {
-		if err := s.EmailPrefs.DeleteForProfile(ctx, profileID); err != nil {
+		if err := s.EmailPrefs.DeleteForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge email prefs: %w", err)
 		}
 	}
@@ -728,7 +733,7 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 	if err != nil {
 		return err
 	}
-	existing, err := s.Interests.ListSeriesForProfile(ctx, profileID)
+	existing, err := s.Interests.ListSeriesForProfile(ctx, userID, profileID)
 	if err != nil {
 		return err
 	}

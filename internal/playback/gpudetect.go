@@ -18,9 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/nodemetrics"
-	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // GOOS names this package and its tests compare runtime.GOOS against.
@@ -1520,7 +1522,7 @@ func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	return procgroup.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 }
 
 func ffmpegOutputHasToken(output []byte, token string) bool {
@@ -1635,7 +1637,7 @@ type RenderDeviceInfo struct {
 func describeRenderDevice(renderDevPath string) string {
 	name := filepath.Base(renderDevPath)
 	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
-	label := ""
+	var label string
 	switch vendor {
 	case "0x8086":
 		label = "Intel GPU"

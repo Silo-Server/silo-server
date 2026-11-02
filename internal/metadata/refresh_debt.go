@@ -23,6 +23,12 @@ const (
 	// real debt) and nothing recomputes it, so the next successful refresh
 	// clears it like any resolved reason.
 	RefreshDebtReasonTrailersRequested int64 = 32
+	// RefreshDebtReasonProviderArtwork marks an item the stored-artwork
+	// release (StoredArtworkReleaser) queued while metadata.cache_images is
+	// off, so the refresh fills artwork only a provider can supply. Like
+	// trailers_requested it carries no priority case and nothing recomputes
+	// it: the next successful refresh clears it.
+	RefreshDebtReasonProviderArtwork int64 = 64
 )
 
 const (

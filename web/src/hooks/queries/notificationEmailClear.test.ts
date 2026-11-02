@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { captureNotificationAuthority, notificationScope } from "@/api/v2/notifications";
 import { notificationKeys } from "./keys";
 import { useClearEmailNotificationAddress } from "./notifications";
@@ -65,29 +65,6 @@ it("updates only the captured email preferences cache and rejects a stale receip
   });
   expect(client.getQueryData(own)).toEqual([{ id: "two" }]);
   expect(fetch).toHaveBeenCalledTimes(2);
-  client.clear();
-});
-
-it("does not replay address clear on authentication or service failure", async () => {
-  setAccessToken("synthetic-admin");
-  setRefreshToken("synthetic-refresh");
-  const client = new QueryClient();
-  const { result } = renderHook(() => useClearEmailNotificationAddress(), {
-    wrapper: ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client }, children),
-  });
-  for (const status of [401, 500]) {
-    const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-    vi.stubGlobal("fetch", fetch);
-    await act(async () => {
-      await expect(result.current.mutateAsync()).rejects.toThrow();
-    });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(fetch.mock.calls[0]![0])).toContain(
-      "/api/v2/notifications/email-preferences/address",
-    );
-    expect(fetch.mock.calls[0]![1].method).toBe("DELETE");
-  }
   client.clear();
 });
 

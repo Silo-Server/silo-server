@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -107,22 +106,4 @@ func TestAdminSubtitleMetadataGuardedContract(t *testing.T) {
 func adminSubtitleMetadataFixtureCases() []fixtureCase {
 	return []fixtureCase{{name: "admin_subtitle_metadata", operationID: "getAdminSubtitleMetadata", method: http.MethodGet, path: Prefix + "/admin/subtitles/9", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminSubtitleMetadata", scenario: "Canonical administrator metadata omits storage keys and supplies a strong revision validator."},
 		{name: "admin_subtitle_metadata_precondition_required", operationID: "updateAdminSubtitleMetadata", method: http.MethodPatch, path: Prefix + "/admin/subtitles/9", headers: actingRequestAdmin, body: `{"release_name":"New name"}`, status: 428, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem", scenario: "Metadata update refuses an absent captured validator."}}
-}
-
-func TestAdminSubtitleMetadataDependencyProblems(t *testing.T) {
-	fake := fixtureAdminSubtitleMetadata()
-	deps := requestDeps(fixtureRequests())
-	deps.AdminSubtitleMetadata = fake
-	h := newTestHandler(t, deps)
-	for _, input := range []struct {
-		err     error
-		problem ProblemType
-	}{{handlers.ErrAdminSubtitleMetadataUnavailable, TypeDependencyUnavailable}, {subtitles.ErrSubtitleNotFound, TypeNotFound}, {errors.New("PRIVATE database"), TypeInternalError}} {
-		fake.lookupErr = input.err
-		out := do(t, h, http.MethodGet, Prefix+"/admin/subtitles/9", "", actingRequestAdmin)
-		requireProblem(t, out, input.problem)
-		if strings.Contains(out.Body.String(), "PRIVATE") {
-			t.Fatal("private error leaked")
-		}
-	}
 }

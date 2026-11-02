@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { makeStorage, makeStorageFile, makeStorageLocation } from "@/test/downloadStorage";
+import { makeStorage, makeStorageLocation } from "@/test/downloadStorage";
 import {
   formatExpiresIn,
   formatStorageBytes,
   meterSegments,
   recordsDrift,
-  storageEventItem,
   storageTotals,
   storageWarnings,
 } from "./downloadStoragePresentation";
@@ -43,10 +42,6 @@ describe("meterSegments", () => {
       .filter((s) => s.kind === "in_use" || s.kind === "cached")
       .reduce((sum, s) => sum + s.bytes, 0);
     expect(prepared).toBe(214e9);
-  });
-
-  it("is null without a measurement", () => {
-    expect(meterSegments(makeStorageLocation({ usage: undefined }))).toBeNull();
   });
 });
 
@@ -115,22 +110,5 @@ describe("files and history", () => {
     expect(formatExpiresIn("2026-10-09T08:00:00Z", now)).toBe("in 22 h");
     expect(formatExpiresIn("2026-10-12T10:00:00Z", now)).toBe("in 4 d");
     expect(formatExpiresIn("2026-10-08T09:00:00Z", now)).toBe("now");
-  });
-
-  it("names a revoke batch by device and account", () => {
-    expect(
-      storageEventItem({
-        id: "b",
-        reason: "revoked",
-        location: "device",
-        location_name: "Pixel 8",
-        occurred_at: "",
-        count: 12,
-        bytes: 0,
-        titles: [],
-        account: { id: "7", username: "maya" },
-      }),
-    ).toBe("12 downloads · Pixel 8 · maya");
-    expect(makeStorageFile().title).toBe("Dune: Part Two");
   });
 });

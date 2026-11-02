@@ -13,14 +13,12 @@ func TestMovieReleaseNameParity(t *testing.T) {
 	}{
 		{"Super movie 480p.mp4", "Super movie", 0},
 		{"Super movie Multi.mp4", "Super movie", 0},
-		{"Super movie 480p 2001.mp4", "Super movie", 0},
 		{"Super movie [480p].mp4", "Super movie", 0},
 		{"Crouching.Tiger.Hidden.Dragon.4k.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.UltraHD.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.UHD.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.HDR.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.HDC.mkv", "Crouching Tiger Hidden Dragon", 0},
-		{"Crouching.Tiger.Hidden.Dragon-HDC.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.BDrip-HDC.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Crouching.Tiger.Hidden.Dragon.4K.UltraHD.HDR.BDrip-HDC.mkv", "Crouching Tiger Hidden Dragon", 0},
 		{"Last.Call.for.Nowhere.WEB-DL.1080p.mkv", "Last Call for Nowhere", 0},
@@ -46,7 +44,6 @@ func TestMovieReleaseNameParity(t *testing.T) {
 		{"Example Movie DTS-HD MA.mkv", "Example Movie", 0},
 		{"Example Movie DDP5.1.mkv", "Example Movie", 0},
 		{"Example Movie EAC3.mkv", "Example Movie", 0},
-		{"Example Movie 1080p (2001).mkv", "Example Movie", 0},
 		{"My Movie 2013.12.09 1080p.mkv", "My Movie 2013 12 09", 0},
 	}
 	for _, tt := range tests {

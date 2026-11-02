@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -232,6 +235,53 @@ func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
 	return nil
 }
 
+// revokeChecked revokes one session in a transaction holding its row lock.
+// check judges the locked session and may refuse it; an unknown session is
+// ErrSessionNotFound. Revoking a revoked session succeeds and keeps its
+// original revocation time. audit records the domain action only when the
+// session was still live, so a repeated revocation records nothing.
+func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check func(*models.AuthSession) error,
+	audit func(pgx.Tx, *models.AuthSession) (*auditmutation.Entry, error)) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning session revocation: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	// The audit row's account locks come before the session lock, the order
+	// RevokeAsAdmin takes them in.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
+	session, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM auth_sessions WHERE id = $1 FOR UPDATE`, id))
+	if err != nil {
+		return err
+	}
+	if err := check(session); err != nil {
+		return err
+	}
+	// Expiry is judged on the database clock, as RevokeAsAdmin judges it.
+	var unexpired bool
+	if err := tx.QueryRow(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1
+		RETURNING expires_at > NOW()`, id).Scan(&unexpired); err != nil {
+		return fmt.Errorf("revoking session: %w", err)
+	}
+	var entry *auditmutation.Entry
+	if session.RevokedAt == nil && unexpired {
+		if entry, err = audit(tx, session); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing session revocation: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, entry)
+	return nil
+}
+
 // RevokeAllByUser sets revoked_at to NOW() for all active sessions owned by a user.
 func (r *SessionRepository) RevokeAllByUser(ctx context.Context, userID int) error {
 	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`
@@ -297,18 +347,22 @@ func (a SessionAuthority) Narrow(claims *Claims) {
 	claims.ProfileID = a.BoundProfileID
 }
 
-// ActiveSession reports whether a session is active, as IsValid does, and
-// returns its authority: the current role of the account it belongs to and,
-// for a remote-playback session, the profile it is bound to. All of it comes
-// from one indexed lookup, so the per-request authentication check costs no
-// extra round trip. For an impersonation session the account is the one
-// being viewed as. active is false, with no error, for a missing, revoked or
-// expired session, and for a remote-playback session that names no profile.
-func (r *SessionRepository) ActiveSession(ctx context.Context, id string) (authority SessionAuthority, active bool, err error) {
+// ActiveSession reports whether a session of account userID is active, as
+// IsValid does, and returns its authority: the current role of the account it
+// belongs to and, for a remote-playback session, the profile it is bound to.
+// All of it comes from one indexed lookup, so the per-request authentication
+// check costs no extra round trip. userID is the account the credential
+// names: every token Silo mints names its session's own account, so a token
+// pairing one account with another account's session authenticates nobody.
+// For an impersonation session the account is the one being viewed as.
+// active is false, with no error, for a missing, revoked or expired session,
+// a session of another account, and a remote-playback session that names no
+// profile.
+func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
 	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, '') FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
-	err = r.pool.QueryRow(ctx, query, id).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
+		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
+	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}
@@ -344,9 +398,14 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	// The audit row's accounts, an impersonator included, join that id order.
 	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
-		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{actorID, userID})
+		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
 	if err != nil {
 		return 0, err
 	}
@@ -381,7 +440,18 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 		WHERE (user_id = $1 OR impersonator_user_id = $1)
 		AND revoked_at IS NULL AND expires_at > NOW()`
 	args := []any{userID}
+	// A single session reports whether this call ended it: revoking a
+	// session that was already over succeeds and records nothing.
+	var wasLive bool
 	if sessionID != nil {
+		err := tx.QueryRow(ctx, `SELECT revoked_at IS NULL AND expires_at > NOW() FROM auth_sessions
+			WHERE user_id = $1 AND id = $2 FOR UPDATE`, userID, *sessionID).Scan(&wasLive)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrSessionNotFound
+		}
+		if err != nil {
+			return 0, err
+		}
 		query = `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = $1 AND id = $2`
 		args = append(args, *sessionID)
 	}
@@ -392,22 +462,42 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if sessionID != nil && tag.RowsAffected() == 0 {
 		return 0, ErrSessionNotFound
 	}
+	// Sign out everywhere also ends the account's other sign-ins; ending any
+	// of them is worth a domain row, even with no login session left.
+	ended := tag.RowsAffected()
 	if sessionID == nil {
-		if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
+		for _, revoke := range []func(context.Context, pgx.Tx, []int) (int64, error){
+			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction, withdrawDeviceSignInApprovalsInTransaction,
+		} {
+			n, err := revoke(ctx, tx, []int{userID})
+			if err != nil {
+				return 0, err
+			}
+			ended += n
 		}
-		if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
-		if err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
+	}
+	var audit *auditmutation.Entry
+	switch {
+	case sessionID != nil && wasLive:
+		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
+			strconv.Itoa(userID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, *sessionID))
+	case sessionID == nil && ended > 0:
+		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionsRevoked, auditmutation.TargetUser,
+			strconv.Itoa(userID), http.StatusOK, auditmutation.Created(auditFieldRevokedLoginSessions, tag.RowsAffected()))
+	}
+	if err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return int(tag.RowsAffected()), nil
 }
+
+// auditFieldRevokedLoginSessions counts the login sessions one sign-out
+// everywhere ended.
+const auditFieldRevokedLoginSessions = "revoked_login_sessions"
 
 // ExtendExpiresAt pushes expires_at forward for an active session. The update
 // only applies when the session is not revoked and has not already expired, so

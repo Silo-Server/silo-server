@@ -37,7 +37,7 @@ import {
   type HomeRowsAdapter,
   type RowCollections,
 } from "@/lib/homeRows/types";
-import { kindLocked, showsLabel, variantLocked } from "@/lib/homeRows/variants";
+import { showsLabel, variantLocked } from "@/lib/homeRows/variants";
 import type { RecipeCatalogResponse } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 import type { ParamLibrary } from "./ParamFields";
@@ -459,10 +459,7 @@ export function AddRowDialog({
                 ? {
                     label: showsLabel(draft.sectionType, draft.config),
                     sentence: sentenceWithoutStop(rowKindSentence(draft.sectionType)),
-                    onChange:
-                      kindLocked(draft.config) || session?.kindLocked
-                        ? undefined
-                        : () => setStep("pick"),
+                    onChange: session?.kindLocked ? undefined : () => setStep("pick"),
                   }
                 : undefined
             }

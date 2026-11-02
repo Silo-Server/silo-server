@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
@@ -110,5 +112,22 @@ func TestEmbeddingTextSQLMatchesGoForTiedPeoplePostgres(t *testing.T) {
 	}
 	if flagged() {
 		t.Fatal("the text scan returned a row embedded with another model")
+	}
+}
+
+// seedRecoMediaItemTitled inserts an embed-eligible media item via
+// ItemRepository.Upsert. Using the repository (rather than a hand-written
+// INSERT) guarantees every non-nullable column the scan path reads is
+// populated, so the round-trip through GetByIDs in EmbedAll succeeds.
+func seedRecoMediaItemTitled(t *testing.T, pool *pgxpool.Pool, contentID, mediaType, status, title string) {
+	t.Helper()
+	repo := catalog.NewItemRepository(pool)
+	if err := repo.Upsert(context.Background(), &models.MediaItem{
+		ContentID: contentID,
+		Type:      mediaType,
+		Title:     title,
+		Status:    status,
+	}); err != nil {
+		t.Fatalf("seed media item %s: %v", contentID, err)
 	}
 }

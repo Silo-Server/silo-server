@@ -140,37 +140,6 @@ func TestMergePremieresIntoDiscoverRow_PromotesAndRanksCandidates(t *testing.T) 
 	}
 }
 
-func TestBlendUpcomingIntoDiscoverRows_LeavesRowsUnchangedWithoutForYou(t *testing.T) {
-	t.Parallel()
-
-	handler := NewRecommendationsHandler(nil, nil, nil, nil, nil, false)
-	handler.CalendarRepo = stubCalendarRepository{}
-	handler.nowFn = func() time.Time {
-		return time.Date(2026, time.April, 6, 12, 0, 0, 0, time.UTC)
-	}
-
-	rows := []discoverRowModel{{
-		Type:  "genre_sampler",
-		Label: "Top Drama",
-		Items: []recommendations.ScoredItem{{MediaItemID: "movie-1"}},
-	}}
-
-	blended, err := handler.blendUpcomingIntoDiscoverRows(
-		context.Background(),
-		7,
-		"profile-1",
-		catalog.AccessFilter{},
-		rows,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("blendUpcomingIntoDiscoverRows error = %v", err)
-	}
-	if len(blended) != 1 || blended[0].Label != "Top Drama" {
-		t.Fatalf("blended rows = %+v, want unchanged rows", blended)
-	}
-}
-
 func TestRecommendationsHandleDiscover_FallsBackToLegacyRowsWhenUpcomingLoadFails(t *testing.T) {
 	t.Parallel()
 

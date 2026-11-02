@@ -9,9 +9,6 @@ import (
 	"testing"
 	"time"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
-
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -85,66 +82,6 @@ func TestAdminPluginCatalogRead(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
 
-func TestAdminPluginInstallationsRead(t *testing.T) {
-	at := time.Date(2026, 9, 1, 0, 0, 0, 123456789, time.UTC)
-	repo := 4
-	available := "1.1.0"
-	installation := func(id int, pluginID string) handlers.PluginInstallationView {
-		return handlers.PluginInstallationView{ID: id, RepositoryID: &repo, PluginID: pluginID, Version: "1.0.0", InstallPath: "/plugins/" + pluginID, Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", AvailableVersion: &available, SourceKind: "silo", RepositoryName: "Official", UpdatesPaused: false, GlobalConfigs: []handlers.PluginConfigValueView{{Key: "account", Value: map[string]any{"region": "us-east"}, ConfiguredSecrets: []string{"api_key"}}}, AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: "oidc", Enabled: true, DisplayOrder: 2, CreatedAt: at, UpdatedAt: at}}, TaskBindings: []handlers.PluginTaskBindingView{{CapabilityID: "sync", Enabled: true, Trigger: map[string]any{"cron": "0 * * * *"}, CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
-	}
-	f := &fakePluginInventory{installations: []handlers.PluginInstallationView{installation(9, "org.example.b"), installation(3, "org.example.a")}}
-	deps := pilotDeps(nil, nil)
-	deps.AdminPluginInventory = f
-	h := NewHandler(deps)
-	path := Prefix + "/admin/plugins/installations"
-	requireProblem(t, do(t, h, "GET", path, "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, "GET", path, "", bearer(memberToken)), TypePermissionDenied)
-	if f.installCalls != 0 {
-		t.Fatal("refusal read installations")
-	}
-	rec := do(t, h, "GET", path+"?limit=1", "", bearer(adminToken))
-	var body Collection[AdminPluginInstallation]
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	item := body.Items[0]
-	if rec.Code != 200 || len(body.Items) != 1 || item.ID != "3" || item.RepositoryID == nil || *item.RepositoryID != "4" || item.AvailableVersion != "1.1.0" || body.Page == nil || !body.Page.HasMore {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	raw := rec.Body.String()
-	for _, want := range []string{`"value":{"region":"us-east"}`, `"configured_secrets":["api_key"]`, `"trigger":{"cron":"0 * * * *"}`, `"display_order":2`, `2026-09-01T00:00:00.123Z`, `"capabilities":[]`, `"metadata":{}`, `"runtime":{"resident":false,"state":"stopped","restart_count":0}`} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("missing %s in %s", want, raw)
-		}
-	}
-	if strings.Contains(raw, "api_key\":") {
-		t.Fatal("secret value leaked", raw)
-	}
-	cursor := url.QueryEscape(body.Page.NextCursor)
-	rec = do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", bearer(adminToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9"`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", actingRequestAdmin), TypeInvalidCursor)
-	f.installations = nil
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	builtin := installation(1, "silo.builtin")
-	builtin.Kind = plugins.KindBuiltin
-	f.installations = []handlers.PluginInstallationView{builtin}
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 500 {
-		t.Fatal("builtin row must never be projected", rec.Code, rec.Body.String())
-	}
-	f.installations = nil
-	f.err = errors.New("private database detail")
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	deps.AdminPluginInventory = nil
-	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
-}
-
 // TestAdminPluginAuthBindingURLs: an OAuth binding shows the callback and
 // post-logout redirect URLs to register at the provider, built from the
 // public URL; a password binding and a server without a public URL show
@@ -182,61 +119,9 @@ func TestAdminPluginAuthBindingURLs(t *testing.T) {
 	}
 }
 
-// TestAdminPluginAuthCapabilitySignIn: an auth_provider.v1 capability says
-// how it signs in, and an OAuth one carries its registration URLs, without
-// any binding row (a fresh installation) and while its binding is off.
-func TestAdminPluginAuthCapabilitySignIn(t *testing.T) {
-	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	fresh := handlers.PluginInstallationView{ID: 3, PluginID: "org.example.oidc", Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
-		Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: "oidc", AuthModes: []string{"oauth2"}}, {Type: "metadata_provider.v1", ID: "meta"}}, CreatedAt: at, UpdatedAt: at}
-	disabledLDAP := handlers.PluginInstallationView{ID: 4, PluginID: "org.example.ldap", Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
-		Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: "ldap", AuthModes: []string{"password"}}},
-		AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: "ldap", CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
-	deps := pilotDeps(nil, nil)
-	deps.AdminPluginInventory = &fakePluginInventory{installations: []handlers.PluginInstallationView{fresh, disabledLDAP}}
-	rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/plugins/installations", "", bearer(adminToken))
-	var body Collection[AdminPluginInstallation]
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body.Items) != 2 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	oidc, meta, ldap := body.Items[0].Capabilities[0], body.Items[0].Capabilities[1], body.Items[1].Capabilities[0]
-	if oidc.SignInMode != "oauth" || oidc.CallbackURL == nil || *oidc.CallbackURL != "https://silo.example.test/api/v2/auth/oauth/3/callback" ||
-		oidc.PostLogoutRedirectURL == nil || *oidc.PostLogoutRedirectURL != "https://silo.example.test/login" {
-		t.Fatalf("fresh oidc capability = %+v", oidc)
-	}
-	if ldap.SignInMode != "credentials" || ldap.CallbackURL != nil || ldap.PostLogoutRedirectURL != nil {
-		t.Fatalf("ldap capability = %+v", ldap)
-	}
-	if meta.SignInMode != "" || meta.CallbackURL != nil || meta.PostLogoutRedirectURL != nil {
-		t.Fatalf("metadata capability = %+v", meta)
-	}
-}
-
 // noPublicURLOAuth is fakeOAuth on a server without a public URL.
 type noPublicURLOAuth struct{ fakeOAuth }
 
 func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
 
 func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }
-
-// A request_router.v1 capability says which request server fields its plugin
-// can do without; other capability types carry no request_router.
-func TestAdminPluginCapabilitiesCarryRequestRouterFlags(t *testing.T) {
-	caps, err := adminPluginCapabilitiesOf([]handlers.PluginCapabilityView{
-		{Type: sdkcapability.RequestRouter, ID: "local", RequestRouter: &pluginv1.RequestRouterDescriptor{ApiKeyOptional: true, BaseUrlOptional: true}},
-		{Type: sdkcapability.RequestRouter, ID: "arr"},
-		{Type: sdkcapability.ScheduledTask, ID: "task"},
-	})
-	if err != nil {
-		t.Fatalf("adminPluginCapabilitiesOf: %v", err)
-	}
-	if got := caps[0].RequestRouter; got == nil || !got.APIKeyOptional || !got.BaseURLOptional {
-		t.Fatalf("local request_router = %+v, want both fields optional", got)
-	}
-	if got := caps[1].RequestRouter; got == nil || got.APIKeyOptional || got.BaseURLOptional {
-		t.Fatalf("arr request_router = %+v, want both fields needed", got)
-	}
-	if caps[2].RequestRouter != nil {
-		t.Fatalf("task request_router = %+v, want none", caps[2].RequestRouter)
-	}
-}

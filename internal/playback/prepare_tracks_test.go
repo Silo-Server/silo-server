@@ -28,6 +28,8 @@ func preparedTracksTestFile() *models.MediaFile {
 			{Codec: "ass", Language: "en", HearingImpaired: true},
 			{Codec: "dvd_subtitle", Language: "de"},
 			{Codec: "webvtt", Language: "es", HearingImpaired: true},
+			// FFmpeg can't demux it from the source, so the encode leaves it out.
+			{Codec: "webvtt", Language: "en", IndexOnly: true},
 		},
 	}
 }
@@ -113,13 +115,6 @@ func TestPreparedTracksAvailableRequiresAudioInventory(t *testing.T) {
 		if got := PreparedTracksAvailable(tc.file); got != tc.want {
 			t.Errorf("%s: PreparedTracksAvailable = %v, want %v", name, got, tc.want)
 		}
-	}
-}
-
-func TestPlanPreparedTracksWithoutAudio(t *testing.T) {
-	plan := PlanPreparedTracks(&models.MediaFile{}, "aac", -1)
-	if plan.Audio == nil || len(plan.Audio) != 0 {
-		t.Fatalf("empty source plan = %+v", plan)
 	}
 }
 
@@ -226,7 +221,7 @@ func TestPrepareFileKeepsEveryAudioAndTextSubtitleTrack(t *testing.T) {
 	}
 	source := filepath.Join(dir, "source.mkv")
 	if output, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
-		"-f", "lavfi", "-i", "testsrc=d=2:s=320x240:r=24",
+		"-f", "lavfi", "-i", "testsrc=d=2:s=64x64:r=24",
 		"-f", "lavfi", "-i", "sine=f=440:d=2",
 		"-f", "lavfi", "-i", "sine=f=880:d=2",
 		"-i", srt, "-i", srt,

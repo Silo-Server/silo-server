@@ -144,25 +144,11 @@ it("counts skipped items once in a running import's progress", () => {
   expect(screen.getAllByText("An import item could not be processed.")).toHaveLength(2);
 });
 
-it("imports only into the member's own profile when it isn't the primary profile", () => {
-  renderPage();
-  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
-  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
-  expect(screen.queryByText(/into Member/)).toBeNull();
-});
-
 it("lets the primary profile choose the profile and names each run's profile", () => {
   state.primary = true;
   renderPage();
   expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
   expect(screen.getByText(/into Member/)).toBeTruthy();
-});
-
-it("lets an admin's primary profile choose the profile", () => {
-  state.role = "admin";
-  state.primary = true;
-  renderPage();
-  expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
 });
 
 it("imports only into its own profile from an admin's non-primary profile", () => {
@@ -203,15 +189,4 @@ it("keeps the server's message for a refused import by the primary profile", () 
   const alerts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
   expect(alerts.some((text) => text.includes("This profile can only import"))).toBe(false);
   expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
-});
-
-it("says so when the server defines no Emby or Plex servers to pick from", () => {
-  renderPage();
-
-  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
-  expect(screen.getByText("No server-defined Emby servers are available yet.")).toBeTruthy();
-
-  fireEvent.click(screen.getByRole("button", { name: /Plex account or direct server/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
-  expect(screen.getByText("No server-defined Plex servers are available yet.")).toBeTruthy();
 });

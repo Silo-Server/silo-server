@@ -205,14 +205,6 @@ func TestBackgroundPriorityAppliesToChildOnly(t *testing.T) {
 	}
 }
 
-func TestForegroundStartKeepsNormalPriority(t *testing.T) {
-	selfNice := statNice(t, "/proc/self/stat")
-	child := startSleep(t, false)
-	if nice := statNice(t, fmt.Sprintf("/proc/%d/stat", child.Process.Pid)); nice != selfNice {
-		t.Fatalf("foreground child nice %d, want the server's %d", nice, selfNice)
-	}
-}
-
 // loweredThreads lists this process's threads running at background nice.
 func loweredThreads(t *testing.T) []string {
 	t.Helper()

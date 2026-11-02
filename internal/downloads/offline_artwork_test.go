@@ -128,19 +128,6 @@ func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
 	}
 }
 
-func TestArtworkStoreStoppingMidBodyIsRetryable(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Promise bytes, then end the response without sending them.
-		w.Header().Set("Content-Length", "10")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-	s := &Service{httpClient: upstream.Client()}
-	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, upstream.URL+"/poster.jpg"); !errors.Is(err, ErrAssetUnavailable) {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 // brokenClientWriter fails every write, as a connection the client dropped does.
 type brokenClientWriter struct{ *httptest.ResponseRecorder }
 

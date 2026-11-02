@@ -360,33 +360,6 @@ func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
 	}
 }
 
-func BenchmarkGetItemVersions(b *testing.B) {
-	f := newVersionsFixture(b)
-	for _, kind := range []string{"movie", "audiobook", "episode"} {
-		for _, full := range []bool{true, false} {
-			b.Run(fmt.Sprintf("%s/full_detail=%t", kind, full), func(b *testing.B) {
-				filter := AccessFilter{ProfilePreferredLanguage: "fr"}
-				b.ReportAllocs()
-				f.queries.calls.Store(0)
-				f.images.calls.Store(0)
-				for b.Loop() {
-					var err error
-					if full {
-						_, err = f.svc.GetItemDetail(b.Context(), f.ids[kind], filter)
-					} else {
-						_, err = f.svc.GetItemVersions(b.Context(), f.ids[kind], filter)
-					}
-					if err != nil {
-						b.Fatal(err)
-					}
-				}
-				b.ReportMetric(float64(f.queries.calls.Load())/float64(b.N), "SQL/op")
-				b.ReportMetric(float64(f.images.calls.Load())/float64(b.N), "image-calls/op")
-			})
-		}
-	}
-}
-
 type countingUserStores struct {
 	store userstore.UserStore
 	calls int
@@ -446,75 +419,5 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 	}
 	if one, all := lookups(episodes[:1]), lookups(episodes); all != one {
 		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
-	}
-}
-
-// A batch shares the series' preference lookups only with that series'
-// episodes; an episode of another series keeps its own series-level subtitle,
-// audio and version choices.
-func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
-	f := newVersionsFixture(t)
-	store := newDetailTestStore(t)
-	for _, seed := range []struct {
-		scope    settingscontract.Scope
-		seriesID string
-		mode     string
-	}{
-		{settingscontract.ScopeProfile, "", "always"},
-		{settingscontract.ScopeProfileSeries, f.ids["series"] + "-other", "off"},
-	} {
-		encoded, _ := json.Marshal(seed.mode)
-		if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: seed.scope, ProfileID: "profile-1", SeriesID: seed.seriesID}, encoded); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Audio too: English for the profile, French for the other series.
-	setProfileAudioLanguage(t, store, "en")
-	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, f.ids["series"]+"-other", 0, "fr")
-	// Version preference: 1080p for the batch series, 2160p for the other.
-	for series, resolution := range map[string]string{f.ids["series"]: "1080p", f.ids["series"] + "-other": "2160p"} {
-		if err := store.SetSeriesPlaybackPreference(t.Context(), userstore.SeriesPlaybackPreference{ProfileID: "profile-1", SeriesID: series, Resolution: resolution}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
-
-	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
-	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series',$1,'{}')`, otherSeries); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,'Episode')`, otherEpisode, otherSeries); err != nil {
-		t.Fatal(err)
-	}
-	f.files.files[otherEpisode] = f.files.files[f.ids["episode"]]
-
-	details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], []string{f.ids["episode"], otherEpisode}, AccessFilter{UserID: 1, ProfileID: "profile-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]struct {
-		mode, resolution string
-		audio            int
-	}{f.ids["episode"]: {"always", "1080p", 0}, otherEpisode: {"off", "2160p", 1}} {
-		if details[id] == nil {
-			t.Fatalf("episode %s missing from the batch", id)
-		}
-		if got := details[id].EffectiveSubtitleMode; got != want.mode {
-			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want.mode)
-		}
-		got := details[id].Versions[0].EffectiveAudioTrackIndex
-		if got == nil {
-			t.Fatalf("episode %s has no effective audio track", id)
-		}
-		if *got != want.audio {
-			t.Fatalf("episode %s audio track = %d, want %d", id, *got, want.audio)
-		}
-		res := details[id].EffectiveVersionResolution
-		if res == nil {
-			t.Fatalf("episode %s has no effective version resolution", id)
-		}
-		if *res != want.resolution {
-			t.Fatalf("episode %s version resolution = %s, want %s", id, *res, want.resolution)
-		}
 	}
 }

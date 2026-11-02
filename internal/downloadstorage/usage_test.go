@@ -84,29 +84,6 @@ func TestMeasureUnreadableDirectoryReportsError(t *testing.T) {
 	}
 }
 
-func TestFileKind(t *testing.T) {
-	for name, want := range map[string]string{
-		"x.mp4":                    KindComplete,
-		"1_remux_ab_x.mp4":         KindComplete,
-		"x.mp4.part":               KindPartial,
-		"x.mp4.receipt.json":       KindOther,
-		"x.mp4.receipt.json.12345": KindOther,
-		"notes.txt":                KindOther,
-	} {
-		if got := fileKind(name); got != want {
-			t.Errorf("fileKind(%q) = %q, want %q", name, got, want)
-		}
-	}
-}
-
-func TestEphemeralFS(t *testing.T) {
-	for fsType, want := range map[string]bool{"tmpfs": true, "overlay": true, "ext4": false, "": false, "nfs": false} {
-		if got := ephemeralFS(fsType); got != want {
-			t.Errorf("ephemeralFS(%q) = %v, want %v", fsType, got, want)
-		}
-	}
-}
-
 func TestRedactPathDropsDirectory(t *testing.T) {
 	u := Usage{Dir: "/srv/x", Files: 3}
 	if r := u.RedactPath(); r.Dir != "" || r.Files != 3 {

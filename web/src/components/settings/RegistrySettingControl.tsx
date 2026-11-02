@@ -32,7 +32,7 @@ function selectOptions(definition: SettingDisplay, value: string) {
   const options = optionsFor(definition);
   const numeric = definition.type === "integer" || definition.type === "number";
   if (!numeric || options.some((option) => option.value !== "")) return options;
-  const unsetLabel = definition.key === "playback.max_bitrate_kbps" ? "No limit" : "Unset";
+  const unsetLabel = definition.unit === "kbps" ? "No limit" : "Unset";
   return bitrateSelectChoices(definition, value, unsetLabel);
 }
 

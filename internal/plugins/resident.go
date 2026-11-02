@@ -11,6 +11,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -293,7 +294,7 @@ func (r *ResidentSupervisor) Enable(ctx context.Context) {
 	}
 	r.mu.Lock()
 	r.armed = true
-	r.ctx = context.WithoutCancel(ctx)
+	r.ctx = context.WithoutCancel(ctx) //nolint:fatcontext // derived from the caller's ctx, never from r.ctx
 	r.mu.Unlock()
 	r.Reconcile(ctx)
 }

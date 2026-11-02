@@ -9,9 +9,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -330,4 +334,41 @@ SELECT string_agg(user_id || ':' || scope || ':' || COALESCE(profile_id, '') || 
 			t.Errorf("second run changed rows:\nbefore %s\nafter  %s", before, after)
 		}
 	})
+}
+
+// applyMigrationForTest executes the generated SQL through Goose but keeps
+// its applied-version history isolated from the shared test database. The
+// production version table must never be removed just to make a one-time
+// migration run again in a test.
+func applyMigrationForTest(ctx context.Context, t *testing.T, pool *pgxpool.Pool, path string) {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	versionTable := fmt.Sprintf("public.goose_dolby_vision_probe_test_%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DROP TABLE IF EXISTS "+versionTable)
+	})
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	locker, err := lock.NewPostgresSessionLocker(lock.WithLockID(schemaMigrationsLockID))
+	if err != nil {
+		t.Fatalf("create migration lock: %v", err)
+	}
+	provider, err := goose.NewProvider(
+		goose.DialectPostgres,
+		sqlDB,
+		fstest.MapFS{filepath.Base(path): &fstest.MapFile{Data: body}},
+		goose.WithTableName(versionTable),
+		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
+	)
+	if err != nil {
+		t.Fatalf("create migration provider: %v", err)
+	}
+	defer func() { _ = provider.Close() }()
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("apply %s: %v", filepath.Base(path), err)
+	}
 }

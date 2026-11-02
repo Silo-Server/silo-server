@@ -29,8 +29,8 @@ the profile does not own.
 ## Sharing
 
 `is_shared` is the one sharing switch, on `createCollection`, `updateCollection` and the import
-operations (`importMDBListCollection`, `importTMDBCollection`, `importTMDBListCollection`,
-`importTraktCollection`). Clients label it **Show to other profiles**.
+operations (`importMDBListCollection`, `importTMDBCollection`, `importTMDBListCollection`).
+Clients label it **Show to other profiles**.
 
 `include_in_server_collections` is independent: it places the collection in the library
 Collections tab (`listLibraryUserCollections`, `getLibraryCollections`) of every profile that can
@@ -46,6 +46,13 @@ creator's access is checked on every read. When it shrinks, titles disappear for
 at once; stored manual members are hidden, not deleted, and return with the access. This applies
 to `item_count`, item pages, the catalog `user_collection` source, home rows and the library
 Collections tab. It never changes what a viewer can open elsewhere.
+
+List reads (`listCollections`, `getLibraryCollections`, `listLibraryUserCollections`) remember a
+hand-picked or imported collection's `item_count`, and that it has no title with a poster for a
+collage, per viewer for up to five minutes. A change to the collection's members or definition, or
+to the viewer's or creator's access, shows on the next read. A catalog change alone, such as a
+title leaving a library, a new rating or newly fetched artwork, can take up to five minutes to
+reach a list. `getCollection` and the `/api/v1` list routes always count live.
 
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.

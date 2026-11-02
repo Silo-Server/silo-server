@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,20 +151,6 @@ func TestApplyAudiobookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
 	}
 	if exec.calls != 0 {
 		t.Fatalf("Exec calls = %d, want 0", exec.calls)
-	}
-}
-
-func TestAudiobookDuplicateCandidateSQLFiltersTitleBeforeLimit(t *testing.T) {
-	titlePredicate := strings.Index(audiobookDuplicateCandidateSQL, "normalized_title = $6")
-	limit := strings.Index(audiobookDuplicateCandidateSQL, "LIMIT")
-	if titlePredicate == -1 {
-		t.Fatalf("expected SQL to filter on normalized_title, got:\n%s", audiobookDuplicateCandidateSQL)
-	}
-	if limit == -1 {
-		t.Fatalf("expected SQL to keep a bounded candidate query, got:\n%s", audiobookDuplicateCandidateSQL)
-	}
-	if titlePredicate > limit {
-		t.Fatalf("title predicate appears after LIMIT, got:\n%s", audiobookDuplicateCandidateSQL)
 	}
 }
 
@@ -590,27 +577,6 @@ func TestResolveAudiobookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	}
 }
 
-func TestResolveAudiobookMediaItemPropagatesRootLookupError(t *testing.T) {
-	wantErr := errors.New("root lookup failed")
-	finder := &fakeRootContentFinder{err: wantErr}
-	writer := &fakeFilesystemItemWriter{}
-
-	_, err := resolveAudiobookMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		7,
-		"/library/Author/Book",
-		&parsedAudiobook{Title: "Book"},
-	)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want %v", err, wantErr)
-	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("upserts = %d, want 0", len(writer.upserts))
-	}
-}
-
 func TestStripNarratorSuffix(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -677,86 +643,108 @@ func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	}
 }
 
-func TestAudiobookFolderUnchangedAllMatch(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
+// An admin's locked fields survive a changed-book rescan: tags only fill what
+// the editor has not pinned.
+func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
+	book := &parsedAudiobook{
+		Title:       "Tagged Title",
+		Year:        2001,
+		ReleaseDate: "2001-02-03",
+		Genres:      []string{"Tagged Genre"},
+		Publisher:   "Tagged Press",
 	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
+	edited := "2020-05-06"
+	newItem := func(locked ...int) *models.MediaItem {
+		return &models.MediaItem{
+			Title:        "Admin Title",
+			Year:         2020,
+			ReleaseDate:  &edited,
+			Genres:       []string{"Admin Genre"},
+			Studios:      []string{"Admin Studio"},
+			LockedFields: locked,
+		}
 	}
-	if !audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=true when sizes+mtimes match")
+
+	for _, tc := range []struct {
+		name        string
+		locked      []int
+		wantTitle   string
+		wantYear    int
+		wantGenres  []string
+		wantStudios []string
+	}{
+		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
+		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
+		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := newItem(tc.locked...)
+			applyBookToMediaItem(item, book)
+			if item.Title != tc.wantTitle {
+				t.Errorf("Title = %q, want %q", item.Title, tc.wantTitle)
+			}
+			if item.Year != tc.wantYear {
+				t.Errorf("Year = %d, want %d", item.Year, tc.wantYear)
+			}
+			if item.ReleaseDate == nil || *item.ReleaseDate != edited {
+				t.Errorf("ReleaseDate = %v, want %q kept", item.ReleaseDate, edited)
+			}
+			if !slices.Equal(item.Genres, tc.wantGenres) {
+				t.Errorf("Genres = %v, want %v", item.Genres, tc.wantGenres)
+			}
+			if !slices.Equal(item.Studios, tc.wantStudios) {
+				t.Errorf("Studios = %v, want %v", item.Studios, tc.wantStudios)
+			}
+		})
 	}
 }
 
-func TestAudiobookFolderUnchangedRepairsLegacyCoverArtRows(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{{
-		FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now,
-		BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
-		VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
-	}}
-	onDisk := []audiobookDiskFile{{Path: files[0].FilePath, Size: files[0].FileSize, ModTime: now}}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("legacy cover-art rows must bypass the unchanged fast path")
-	}
-}
-
-func TestAudiobookFolderUnchangedSizeDiffers(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 101, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when size differs")
-	}
-}
-
-func TestAudiobookFolderUnchangedNewFileAppeared(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when a new file appeared")
-	}
-}
-
-func TestAudiobookFolderUnchangedFileDisappeared(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when a file disappeared")
-	}
-}
-
-func TestAudiobookFolderUnchangedMtimeDiffers(t *testing.T) {
+func TestAudiobookFolderUnchanged(t *testing.T) {
 	now := time.Now().UTC()
 	earlier := now.Add(-time.Hour)
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &earlier},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when mtime differs")
+	const a, b = "/lib/Author/Book/a.m4b", "/lib/Author/Book/b.m4b"
+	partA := []models.MediaChapter{{Index: 0, Title: "a", EndSeconds: 60}}
+	partB := []models.MediaChapter{{Index: 1, Title: "b", EndSeconds: 60}}
+	for _, tc := range []struct {
+		name   string
+		files  []*models.MediaFile
+		onDisk []audiobookDiskFile
+		want   bool
+	}{
+		{name: "sizes and mtimes match",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: partA}, {FilePath: b, FileSize: 200, FileModifiedAt: &now, Chapters: partB}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}},
+			want:   true},
+		{name: "single file without chapters matches",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: []models.MediaChapter{}}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}},
+			want:   true},
+		{name: "multipart part whose chapters were wiped is reprocessed",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: partA}, {FilePath: b, FileSize: 200, FileModifiedAt: &now, Chapters: []models.MediaChapter{}}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}}},
+		{name: "legacy cover-art rows bypass the fast path",
+			files: []*models.MediaFile{{
+				FilePath: a, FileSize: 100, FileModifiedAt: &now,
+				BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
+				VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
+			}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
+		{name: "size differs",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 101, ModTime: now}}},
+		{name: "new file appeared",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}}},
+		{name: "mtime differs",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &earlier}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := audiobookFolderUnchanged(tc.files, tc.onDisk); got != tc.want {
+				t.Fatalf("audiobookFolderUnchanged = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

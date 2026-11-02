@@ -114,16 +114,17 @@ func Inspect(ctx context.Context, path string, accountID int64) (Report, error) 
 	if err != nil {
 		return r, errors.New("cannot enumerate source tables")
 	}
+	defer func() { _ = rows.Close() }()
 	var names []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			_ = rows.Close()
 			return r, errors.New("cannot read table inventory")
 		}
 		names = append(names, name)
 	}
 	err = rows.Err()
+	// Close before the per-table queries below; the deferred Close is then a no-op.
 	if closeErr := rows.Close(); err == nil {
 		err = closeErr
 	}

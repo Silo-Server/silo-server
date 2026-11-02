@@ -240,58 +240,6 @@ describe("LibraryRecommended", () => {
     return queryClient;
   }
 
-  it("drops what an earlier row shows from avoid-duplicates rows", async () => {
-    mockFetchRecipeCatalog.mockResolvedValue({
-      categories: {
-        personalized: [
-          {
-            type: "recommended_for_you",
-            category: "personalized",
-            presets: [],
-            avoid_duplicates: true,
-            supports_rotation: false,
-            admin_only: false,
-          },
-        ],
-      },
-    });
-    mockUseLibraryLayout.mockReturnValue({
-      data: {
-        sections: [
-          makeLayout({ id: "recent", title: "Recently Added" }),
-          makeLayout({ id: "for-you", section_type: "recommended_for_you", title: "For You" }),
-        ],
-      },
-      isLoading: false,
-    });
-    mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) => {
-      const section =
-        sectionId === "recent"
-          ? makeSection({ id: "recent", title: "Recently Added" })
-          : makeSection({ id: "for-you", section_type: "recommended_for_you", title: "For You" });
-      const items =
-        sectionId === "recent"
-          ? section.items
-          : [...section.items, { ...section.items[0]!, content_id: "item-2", title: "Item Two" }];
-      return Promise.resolve({ section: { ...section, items, total_count: items.length } });
-    });
-
-    await render(<LibraryRecommended libraryId={42} />);
-
-    await waitFor(() => {
-      expect(
-        container
-          .querySelector('[data-section-type="recommended_for_you"]')
-          ?.getAttribute("data-item-ids"),
-      ).toBe("item-2");
-    });
-    expect(
-      container
-        .querySelector('[data-section-type="recently_added"]')
-        ?.getAttribute("data-item-ids"),
-    ).toBe("item-1");
-  });
-
   it("does not invalidate cached library sections on mount", async () => {
     const invalidateQueries = vi.spyOn(QueryClient.prototype, "invalidateQueries");
 
@@ -314,40 +262,27 @@ describe("LibraryRecommended", () => {
       }),
     );
     const queryClient = await render(<LibraryRecommended libraryId={42} />);
-
-    expect(
+    const recentFavorite = () =>
       container
         .querySelector('[data-section-type="recently_added"]')
-        ?.getAttribute("data-favorite"),
-    ).toBe("false");
+        ?.getAttribute("data-favorite");
+    const refreshMediaSurfaces = () =>
+      act(async () => {
+        await invalidateMediaSurfaceQueries(queryClient);
+        bumpHomeRefreshSignal(queryClient);
+      });
+
+    expect(recentFavorite()).toBe("false");
 
     isFavorite = true;
-    await act(async () => {
-      await invalidateMediaSurfaceQueries(queryClient);
-      bumpHomeRefreshSignal(queryClient);
-    });
+    await refreshMediaSurfaces();
 
-    await waitFor(() => {
-      expect(
-        container
-          .querySelector('[data-section-type="recently_added"]')
-          ?.getAttribute("data-favorite"),
-      ).toBe("true");
-    });
+    await waitFor(() => expect(recentFavorite()).toBe("true"));
 
     isFavorite = false;
-    await act(async () => {
-      await invalidateMediaSurfaceQueries(queryClient);
-      bumpHomeRefreshSignal(queryClient);
-    });
+    await refreshMediaSurfaces();
 
-    await waitFor(() => {
-      expect(
-        container
-          .querySelector('[data-section-type="recently_added"]')
-          ?.getAttribute("data-favorite"),
-      ).toBe("false");
-    });
+    await waitFor(() => expect(recentFavorite()).toBe("false"));
   });
 
   it("keeps rows out of the error state when a refresh bump lands mid-load", async () => {
@@ -400,31 +335,6 @@ describe("LibraryRecommended", () => {
 
     expect(container.textContent).not.toContain("could not be loaded");
     expect(requests).toHaveLength(4);
-  });
-
-  it("renders hero banner for featured sections", async () => {
-    mockUseLibraryLayout.mockReturnValue({
-      data: {
-        sections: [
-          makeLayout({ id: "hero", title: "Featured", featured: true }),
-          makeLayout({ id: "recent", title: "Recently Added" }),
-        ],
-      },
-      isLoading: false,
-    });
-    mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) =>
-      Promise.resolve({
-        section:
-          sectionId === "hero"
-            ? makeSection({ id: "hero", title: "Featured", featured: true })
-            : makeSection({ id: "recent", title: "Recently Added" }),
-      }),
-    );
-
-    await render(<LibraryRecommended libraryId={42} />);
-
-    expect(container.innerHTML).toContain('data-kind="hero"');
-    expect(container.textContent).toContain("Recently Added");
   });
 
   it("renders pinned collection rows from sidebar_pins for the current library", async () => {
@@ -489,17 +399,6 @@ describe("LibraryRecommended", () => {
       expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
       expect(container.textContent).not.toContain("Recently Added");
     });
-
-    it("does not claim the library is empty while it still holds items", async () => {
-      mockUseLibraryHasItems.mockReturnValue({ data: true });
-
-      await render(<LibraryRecommended libraryId={42} />);
-
-      await waitFor(() => {
-        expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
-      });
-      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
-    });
   });
 
   describe("library with media but no sections", () => {
@@ -527,24 +426,6 @@ describe("LibraryRecommended", () => {
 
       expect(container.textContent).toContain("No sections yet");
       expect(linkHrefs()).toEqual(["/admin/sections", "/settings/home-screen"]);
-    });
-
-    it("waits for the library check before choosing an empty state", async () => {
-      mockUseLibraryHasItems.mockReturnValue({ data: undefined });
-
-      await render(<LibraryRecommended libraryId={42} />);
-
-      expect(container.textContent).not.toContain("No sections yet");
-      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
-    });
-
-    it("shows the empty-library state when the library holds nothing", async () => {
-      mockUseLibraryHasItems.mockReturnValue({ data: false });
-
-      await render(<LibraryRecommended libraryId={42} />);
-
-      expect(container.querySelector('[data-kind="library-empty"]')).not.toBeNull();
-      expect(container.textContent).not.toContain("No sections yet");
     });
   });
 

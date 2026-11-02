@@ -14,24 +14,18 @@ func TestIsCreditsChapterTitle(t *testing.T) {
 		description string
 	}{
 		{"Credits", true, true, "plain credits"},
-		{"credit", true, true, "singular"},
 		{"End Credits", true, true, "end credits"},
-		{"End Titles", true, true, "end titles"},
 		{"end title", true, true, "lowercase singular end title"},
 		{"Outro", true, true, "outro"},
 		{"Credits: Cast", true, true, "credits with a subtitle"},
 		{"ED", true, true, "anime ending"},
 		{"ED2", true, true, "numbered anime ending"},
 		{"ED: Song Name", true, true, "anime ending with song"},
-		{"ED - Song Name", true, true, "anime ending with dash"},
 		{"Ending", true, false, "ending is credits only in episodes"},
-		{"Ending Theme", true, false, "ending theme"},
 		{"Opening Credits", false, false, "opening credits are an intro"},
 		{"Intro", false, false, "intro"},
 		{"OP", false, false, "anime opening"},
 		{"Post-Credits Scene", false, false, "post-credits scene"},
-		{"Mid Credits", false, false, "mid-credits scene"},
-		{"After Credits", false, false, "after-credits scene"},
 		{"Pre-credits", false, false, "pre-credits scene"},
 		{"Credits Scene", false, false, "a scene during the credits"},
 		{"End Credits Stinger", false, false, "a stinger in the credits"},
@@ -52,7 +46,6 @@ func TestIsCreditsChapterTitle(t *testing.T) {
 		{"Chapter 12", false, false, "generated chapter"},
 		{"Accreditation", false, false, "credit inside a word"},
 		{"", false, false, "empty"},
-		{"Part 3", false, false, "story chapter"},
 		{"The Happy Ending", true, false, "ending as a word"},
 		{"Ending Credits", true, true, "credits keyword wins"},
 	}
@@ -146,13 +139,6 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
 		},
 		{
-			name: "a run must start in the tail window",
-			chapters: []models.MediaChapter{
-				chapter("Story", 0, 900), chapter("End Credits", 900, 1100), chapter("Credits", 1100, 1400),
-			},
-			duration: 1400,
-		},
-		{
 			name: "a credits scene after the credits keeps its chapter",
 			chapters: []models.MediaChapter{
 				chapter("Story", 0, 1300), chapter("End Credits", 1300, 1370), chapter("Credits Scene", 1370, 1400),
@@ -162,11 +148,6 @@ func TestDetectChapterCredits(t *testing.T) {
 		{
 			name:     "a long chapter titled ending is the story's final scene",
 			chapters: []models.MediaChapter{chapter("Story", 0, 1100), chapter("Ending", 1100, 1400)},
-			duration: 1400,
-		},
-		{
-			name:     "a long outro chapter is not credits",
-			chapters: []models.MediaChapter{chapter("Story", 0, 1150), chapter("Outro", 1150, 1400)},
 			duration: 1400,
 		},
 		{

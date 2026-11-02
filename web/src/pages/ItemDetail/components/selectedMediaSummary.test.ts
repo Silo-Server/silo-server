@@ -2,23 +2,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { FileVersion, PlaybackVariant } from "@/api/types";
+import { makeFileVersion } from "../itemDetail.test-support";
 import { resolveSelectedMediaSummary } from "./selectedMediaSummary";
 
-function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    resolution: overrides.resolution ?? "1080p",
-    codec_video: overrides.codec_video ?? "h264",
-    codec_audio: overrides.codec_audio ?? "aac",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "mkv",
-    file_size: overrides.file_size ?? 0,
-    duration: overrides.duration ?? 7200,
-    bitrate: overrides.bitrate ?? 0,
-    audio_tracks: overrides.audio_tracks,
-    video_tracks: overrides.video_tracks,
-  };
-}
+const makeVersion = (overrides: Partial<FileVersion> = {}) =>
+  makeFileVersion({ duration: 7200, ...overrides });
 
 function makeVariant(
   versionsByPart: FileVersion[][],

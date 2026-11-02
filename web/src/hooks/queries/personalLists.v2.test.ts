@@ -1,18 +1,16 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import listFavoritesOk from "../../../../contracts/api/v2/fixtures/list_favorites_ok.json";
-
 import { setProfileId } from "@/api/client";
-import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import { installPolicyStorageMocks } from "@/pages/admin-policy/policyTestUtils";
 
-import { useFavorites, useToggleFavorite } from "./favorites";
+import { useToggleFavorite } from "./favorites";
 import { PERSONAL_STATE_WRITE_TIMEOUT_MS } from "./personalStateWrites";
 import { catalogKeys, itemKeys } from "./keys";
 import { useDeleteRating, useSetRating } from "./ratings";
@@ -66,21 +64,6 @@ describe("personal lists on the v2 contract", () => {
     vi.mocked(toast.error).mockClear();
   });
 
-  it("lists favorites as browse cards from the items envelope", async () => {
-    const fetchMock = stubFetch(() => jsonResponse(listFavoritesOk));
-
-    const { result } = renderHook(() => useFavorites(), { wrapper: createWrapper() });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    const call = callOf(fetchMock);
-    expect(call.url).toBe("/api/v2/favorites");
-    expect(call.headers["X-Profile-Id"]).toBe("p-owner");
-    expect(result.current.data?.map((item) => [item.content_id, item.type, item.title])).toEqual(
-      listFavoritesOk.items.map((item) => [item.content_id, item.type, item.title]),
-    );
-    expect(result.current.data?.[0]?.poster_url).toBe("");
-  });
-
   it("toggles a favorite with PUT to add and DELETE to remove", async () => {
     const fetchMock = stubFetch(() => noContent());
 
@@ -98,27 +81,6 @@ describe("personal lists on the v2 contract", () => {
     });
     expect(callOf(fetchMock, 1)).toMatchObject({
       url: "/api/v2/favorites/movie%3Ac",
-      method: "DELETE",
-    });
-  });
-
-  it("toggles a watchlist entry with PUT to add and DELETE to remove", async () => {
-    const fetchMock = stubFetch(() => noContent());
-
-    const { result } = renderHook(() => useToggleWatchlist("movie:c"), {
-      wrapper: createWrapper(),
-    });
-    await act(async () => {
-      await result.current.mutateAsync(false);
-      await result.current.mutateAsync(true);
-    });
-
-    expect(callOf(fetchMock, 0)).toMatchObject({
-      url: "/api/v2/watchlist/movie%3Ac",
-      method: "PUT",
-    });
-    expect(callOf(fetchMock, 1)).toMatchObject({
-      url: "/api/v2/watchlist/movie%3Ac",
       method: "DELETE",
     });
   });

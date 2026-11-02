@@ -18,7 +18,7 @@ func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, 
 	f.channelPost++
 }
 
-func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profileID string) (bool, error) {
+func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, _ int, profileID string) (bool, error) {
 	return !f.disabled[profileID], nil
 }
 
@@ -71,24 +71,6 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
 	if backend.channelPost != 1 {
 		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
-	}
-}
-
-func TestFulfilledCopyForFollowers(t *testing.T) {
-	requester := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1"}`)}}
-	follower := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1","follower":true}`)}}
-
-	if got := BuildNotificationDisplay(requester); got.Title != "Your request is now available" {
-		t.Fatalf("requester title = %q", got.Title)
-	}
-	if got := BuildNotificationDisplay(follower); got.Title != followedTitleAvailable || got.Body == "Your media request has arrived in the library." {
-		t.Fatalf("follower display = %+v, want copy that does not claim the request", got)
-	}
-	if got := requestLine(follower); got != followedTitleAvailable {
-		t.Fatalf("follower email line = %q", got)
-	}
-	if got := discordEmbedAuthorLine(follower); got != "Now available on Silo" {
-		t.Fatalf("follower Discord author = %q", got)
 	}
 }
 

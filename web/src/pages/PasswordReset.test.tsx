@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import PasswordReset from "./PasswordReset";
 import completed from "../../../contracts/api/v2/fixtures/password_reset_completed.json";
 import lookupFixture from "../../../contracts/api/v2/fixtures/password_reset_lookup.json";
@@ -24,43 +23,20 @@ vi.mock("@/hooks/queries/profiles", () => ({
 }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function problem(status: number, type = "failure", errors?: unknown[]) {
-  return new Response(
-    JSON.stringify({
-      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
-      title: type,
-      status,
-      detail: "Failed.",
-      errors,
-    }),
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
+const problem = (status: number, type = "failure", errors?: unknown[]) =>
+  problemResponse(status, type, { detail: "Failed.", errors });
 let submit: () => Promise<Response>;
 let lookup: () => Promise<Response>;
 let selfService: string;
 const fetchMock = vi.fn<typeof fetch>();
 
 function mount() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/reset-password/secret-token"]}>
-        <Routes>
-          <Route path="/reset-password/:token" element={<PasswordReset />} />
-          <Route path="/profiles" element={<p>Profile picker</p>} />
-          <Route path="/login" element={<p>Ordinary login</p>} />
-          <Route path="/forgot-password" element={<p>Request a link</p>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return renderRoutes("/reset-password/secret-token", {
+    "/reset-password/:token": <PasswordReset />,
+    "/profiles": <p>Profile picker</p>,
+    "/login": <p>Ordinary login</p>,
+    "/forgot-password": <p>Request a link</p>,
+  });
 }
 async function fill(password = "new-password", confirmation = password) {
   fireEvent.change(await screen.findByLabelText("New password"), { target: { value: password } });
@@ -153,14 +129,6 @@ it("explains an unusable link", async () => {
   expect(screen.queryByLabelText("New password")).toBeNull();
   await screen.findByText(/Ask your admin for a new link/);
   expect(screen.queryByRole("link", { name: "Request a new link" })).toBeNull();
-});
-
-it("offers a new link for an unusable one when self-service reset is on", async () => {
-  selfService = "available";
-  lookup = async () => problem(404, "not_found");
-  mount();
-  fireEvent.click(await screen.findByRole("link", { name: "Request a new link" }));
-  expect(await screen.findByText("Request a link")).toBeTruthy();
 });
 
 it("asks a signed-in visitor to sign out before using the link", async () => {

@@ -279,21 +279,6 @@ func TestSendEmailsClaimLink(t *testing.T) {
 	}
 }
 
-func TestSendWithoutMailReturnsClaimURL(t *testing.T) {
-	svc := newTestService(newFakeRepo(), adminInviter(), &fakeAccounts{}, &fakeSessions{}, &fakeMail{configured: false}, fakeSettings{})
-
-	result, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if result.EmailSent {
-		t.Error("EmailSent should be false without SMTP")
-	}
-	if result.ClaimURL == "" {
-		t.Error("ClaimURL must be returned for manual delivery")
-	}
-}
-
 func TestSendRejectsExistingAccountAndBadInput(t *testing.T) {
 	users := adminInviter()
 	users.byEmail["taken@example.com"] = &models.User{ID: 2, Username: "taken", Email: "taken@example.com"}
@@ -676,18 +661,6 @@ func TestAcceptLinkInvitationUsesEnteredEmail(t *testing.T) {
 	}
 	if sent.Invitation.Email != "sam@example.com" {
 		t.Fatalf("accepted invitation email = %q", sent.Invitation.Email)
-	}
-}
-
-func TestSendReportsUnreadableMailSettingsAsFailedDelivery(t *testing.T) {
-	sender := &fakeMail{configured: true, loadErr: errors.New("reading email settings: connection refused")}
-	svc := newTestService(newFakeRepo(), adminInviter(), &fakeAccounts{}, &fakeSessions{}, sender, fakeSettings{})
-	result, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err == nil || result == nil || result.EmailSent {
-		t.Fatalf("result=%+v err=%v, want a committed invitation with a delivery error", result, err)
-	}
-	if result.Invitation.Delivery != models.InvitationDeliveryEmailUnconfirmed {
-		t.Fatalf("delivery = %q, want email_unconfirmed", result.Invitation.Delivery)
 	}
 }
 

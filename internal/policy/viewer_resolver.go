@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -19,6 +20,7 @@ type ViewerResolver struct {
 	pdp          *PDP
 	groups       access.GroupPolicyProvider
 	unrated      access.UnratedContentPolicy
+	defaults     settingsresolve.ServerSettings
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -28,6 +30,24 @@ func (r *ViewerResolver) WithUnratedContentPolicy(policy access.UnratedContentPo
 		r.unrated = policy
 	}
 	return r
+}
+
+// WithAdminDefaults installs the administrator's setting defaults and returns
+// the resolver. See access.Resolver.WithAdminDefaults.
+func (r *ViewerResolver) WithAdminDefaults(defaults settingsresolve.ServerSettings) *ViewerResolver {
+	if r != nil {
+		r.defaults = defaults
+	}
+	return r
+}
+
+// ViewerPreferencesStrict resolves the profile's viewer preferences from
+// reader, such as one database snapshot, with this resolver's administrator
+// defaults, so a scope built through ResolveFacts matches one built by Resolve.
+func (r *ViewerResolver) ViewerPreferencesStrict(
+	ctx context.Context, reader access.ViewerPreferenceReader, profileID string,
+) (access.ViewerPreferences, error) {
+	return access.ResolveViewerPreferencesStrict(ctx, reader, r.defaults, profileID)
 }
 
 // NewViewerResolver creates a PDP-backed viewer scope resolver.
@@ -77,7 +97,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 	}
-	preferences := access.ResolveViewerPreferences(ctx, store, input.ProfileID)
+	preferences := access.ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
 	return r.ResolveFacts(ctx, input, user, profile, effective, preferences)
 }
 
@@ -176,9 +196,14 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	// settles on, including one an override lowered.
 	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
+	var pinRevision int64
+	if profile != nil {
+		pinRevision = profile.PINRevision
+	}
 	return access.Scope{
 		UserID:              user.ID,
 		ProfileID:           input.ProfileID,
+		ProfilePINRevision:  pinRevision,
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,

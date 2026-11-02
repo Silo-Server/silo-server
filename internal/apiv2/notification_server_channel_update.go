@@ -12,7 +12,7 @@ type NotificationServerChannelUpdateInput struct {
 	ID   string `path:"id"`
 	Body struct {
 		Name                   *string `json:"name,omitempty"`
-		URL                    *string `json:"url,omitempty"`
+		URL                    *string `json:"url,omitempty" format:"uri"`
 		Enabled                *bool   `json:"enabled,omitempty"`
 		NotifyNewMovies        *bool   `json:"notify_new_movies,omitempty"`
 		NotifyNewEpisodes      *bool   `json:"notify_new_episodes,omitempty"`

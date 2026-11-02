@@ -90,10 +90,7 @@ func TestNodeAwarePreparerCapabilityProbeRejectsOversizedResponse(t *testing.T) 
 func TestNodeAwarePreparerCoalescesConcurrentColdCapabilityProbes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const callers = 8
-		payload, err := json.Marshal(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}})
+		payload, err := json.Marshal(playback.HWAccelInfo{ToneMapCapabilities: softwarePQToneMap()})
 		if err != nil {
 			t.Fatal(err)
 		}

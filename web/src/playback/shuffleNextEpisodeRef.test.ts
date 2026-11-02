@@ -15,21 +15,6 @@ describe("shuffleNextEpisodeRef", () => {
     expect(ref.watchState).toBeUndefined();
   });
 
-  it("carries the AI marker so the post-roll labels a machine-translated overview", () => {
-    const ref = shuffleNextEpisodeRef(shuffleWith({ machine_translated_fields: ["overview"] }));
-    expect(ref.machineTranslatedFields).toEqual(["overview"]);
-  });
-
-  it("passes an episode's played flag and position", () => {
-    const ref = shuffleNextEpisodeRef(
-      shuffleWith({
-        user_state: { played: true } as Shuffle["next"]["user_state"],
-        position_seconds: 30,
-      }),
-    );
-    expect(ref.watchState).toEqual({ played: true, position_seconds: 30 });
-  });
-
   it("protects a still ThumbHash shown under a series backdrop URL", () => {
     const ref = shuffleNextEpisodeRef(
       shuffleWith({

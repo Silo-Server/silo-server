@@ -31,6 +31,10 @@ const (
 	kindSonarr         = "sonarr"
 )
 
+// configSupports4K is the Seerr plugin's "This Seerr handles 4K requests"
+// switch. The plugin returns no 4K target from a connection without it.
+const configSupports4K = "supports_4k"
+
 // fallbackRouteName names a media type's fallback until an admin renames it.
 const fallbackRouteName = "Everything else"
 
@@ -77,6 +81,10 @@ type RouteConditions struct {
 	NetworkIDs       []int `json:"network_ids,omitempty"`
 	CompanyIDs       []int `json:"company_ids,omitempty"`
 	RequesterUserIDs []int `json:"requester_user_ids,omitempty"`
+	// SeriesStatuses match a series' status as the catalog spells it
+	// (showstatus.Known). A series with no TMDB status has none of them, so
+	// it fails a status list and passes an exclude one.
+	SeriesStatuses []string `json:"series_statuses,omitempty"`
 
 	ExcludeGenreIDs          []int    `json:"exclude_genre_ids,omitempty"`
 	ExcludeKeywordIDs        []int    `json:"exclude_keyword_ids,omitempty"`
@@ -85,6 +93,7 @@ type RouteConditions struct {
 	ExcludeNetworkIDs        []int    `json:"exclude_network_ids,omitempty"`
 	ExcludeCompanyIDs        []int    `json:"exclude_company_ids,omitempty"`
 	ExcludeRequesterUserIDs  []int    `json:"exclude_requester_user_ids,omitempty"`
+	ExcludeSeriesStatuses    []string `json:"exclude_series_statuses,omitempty"`
 	// MaxContentRating matches titles whose rating is at most this one ("PG"
 	// takes G and PG), by minimum age: the US rating, or the title's own
 	// country's when it has no US one. A title with neither does not match,
@@ -104,6 +113,7 @@ const (
 	condNetworkIDs               = "network_ids"
 	condCompanyIDs               = "company_ids"
 	condRequesterUserIDs         = "requester_user_ids"
+	condSeriesStatuses           = "series_statuses"
 	condExcludeGenreIDs          = "exclude_genre_ids"
 	condExcludeKeywordIDs        = "exclude_keyword_ids"
 	condExcludeOriginalLanguages = "exclude_original_languages"
@@ -111,6 +121,7 @@ const (
 	condExcludeNetworkIDs        = "exclude_network_ids"
 	condExcludeCompanyIDs        = "exclude_company_ids"
 	condExcludeRequesterUserIDs  = "exclude_requester_user_ids"
+	condExcludeSeriesStatuses    = "exclude_series_statuses"
 	condMaxContentRating         = "max_content_rating"
 )
 
@@ -125,6 +136,10 @@ func (c RouteConditions) Matches(req Request) bool {
 func (c RouteConditions) Unmet(req Request) []string {
 	f := req.RoutingFacts
 	language := []string{f.OriginalLanguage}
+	var status []string
+	if f.SeriesStatus != nil {
+		status = []string{*f.SeriesStatus}
+	}
 	var out []string
 	fail := func(failed bool, key string) {
 		if failed {
@@ -141,6 +156,7 @@ func (c RouteConditions) Unmet(req Request) []string {
 	fail(len(c.NetworkIDs) > 0 && !anyInt(c.NetworkIDs, f.NetworkIDs), condNetworkIDs)
 	fail(len(c.CompanyIDs) > 0 && !anyInt(c.CompanyIDs, f.CompanyIDs), condCompanyIDs)
 	fail(len(c.RequesterUserIDs) > 0 && !slices.Contains(c.RequesterUserIDs, req.RequestedByUserID), condRequesterUserIDs)
+	fail(len(c.SeriesStatuses) > 0 && !anyFold(c.SeriesStatuses, status), condSeriesStatuses)
 	fail(anyInt(c.ExcludeGenreIDs, f.GenreIDs), condExcludeGenreIDs)
 	fail(anyInt(c.ExcludeKeywordIDs, f.KeywordIDs), condExcludeKeywordIDs)
 	fail(anyFold(c.ExcludeOriginalLanguages, language), condExcludeOriginalLanguages)
@@ -148,6 +164,7 @@ func (c RouteConditions) Unmet(req Request) []string {
 	fail(anyInt(c.ExcludeNetworkIDs, f.NetworkIDs), condExcludeNetworkIDs)
 	fail(anyInt(c.ExcludeCompanyIDs, f.CompanyIDs), condExcludeCompanyIDs)
 	fail(slices.Contains(c.ExcludeRequesterUserIDs, req.RequestedByUserID) && req.RequestedByUserID != 0, condExcludeRequesterUserIDs)
+	fail(anyFold(c.ExcludeSeriesStatuses, status), condExcludeSeriesStatuses)
 	fail(c.MaxContentRating != "" && !ratingWithin(f.ContentRating, c.MaxContentRating), condMaxContentRating)
 	return out
 }
@@ -157,6 +174,18 @@ func (c RouteConditions) Unmet(req Request) []string {
 func routesCheckRating(routes []Route, mediaType MediaType) bool {
 	for _, route := range routes {
 		if route.Enabled && route.MediaType == mediaType && route.Conditions.MaxContentRating != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// routesCheckSeriesStatus reports whether an enabled route of the media type
+// matches on series status.
+func routesCheckSeriesStatus(routes []Route, mediaType MediaType) bool {
+	for _, route := range routes {
+		if route.Enabled && route.MediaType == mediaType &&
+			len(route.Conditions.SeriesStatuses)+len(route.Conditions.ExcludeSeriesStatuses) > 0 {
 			return true
 		}
 	}

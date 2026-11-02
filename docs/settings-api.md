@@ -170,6 +170,23 @@ constraint members when a policy constrained it, and — when a stored row won �
 plus the winning row's own scope and identity members. A default winner has none of the row
 members.
 
+A definition marked `admin_default` (today `ui.title_art`, `ui.next_up_mode` and
+`ui.next_up_new_releases_first`) can have its default replaced for the
+whole server by an administrator. The value is stored as JSON text in the server setting
+`defaults.<key>` (for example `defaults.ui.title_art`), written through the admin settings API and
+validated against the definition's value schema; an empty value removes it. A viewer with no stored
+row at any allowed scope then resolves to the administrator's value, still with `source: "default"`
+and no row members, because the viewer did not choose it. Returning to that inherited value means
+deleting the stored rows, not writing the default. Changing an administrator default publishes one
+`user_settings.changed` event addressed to every viewer rather than to one account (see
+[realtime-api.md](realtime-api.md#personal-event-recipients)), carrying the setting key and
+`scope: "default"`, so a client subscribed to the `user_settings` channel can re-read its effective
+values; other clients see the new default on their next effective read. On a server with several
+nodes, a node that can read its settings answers with the previous default for at most 10 seconds
+after the event, so a client that keeps what it read should read once more after that. The server
+applies the same value wherever it reads the setting itself, such as the Next Up row and ordering in
+home sections and in Jellyfin `/Shows/NextUp`.
+
 ### Batch effective resolution
 
 `POST /api/v2/settings/values/effective` resolves one bounded list of keys under several content
@@ -191,6 +208,11 @@ spends on `library_ids` plus `series_ids` — and a context may name both a `lib
 more than 100 contexts name both. Halving the declared bound keeps every valid context shape
 inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
 `body.contexts`.
+
+A repeated key returns its stored value once per mention, and the batch returns it again in every
+context. The stored values in one `resolveEffectiveSettings` or `listSettingValues` response are
+therefore bounded at 16 MiB in total; a request past that bound is a 422 at `body.keys`
+(`query.keys` on `listSettingValues`).
 
 ```http
 POST /api/v2/settings/values/effective
@@ -993,7 +1015,7 @@ PUT /api/v1/admin/users/42/settings/values/ui.card_presentation?scope=profile_cl
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
-{"value":{"poster_size":"large","caption":"artwork"}}
+{"value":{"poster_size":"large","caption":"title_metadata"}}
 ```
 
 The five accepted `client_family` values are also returned by the capability
@@ -1039,12 +1061,46 @@ first scan, a higher one finishes the backlog sooner. The value is capped by the
 process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
+`metadata.fallback_language` is the language metadata refreshes use when
+providers have no title, description, or episode text in a library's metadata
+language. It defaults to `en`; any registered two-letter ISO 639-1 code is
+accepted, and `original` turns the fallback off so the original language is
+used, as before the setting existed. A refresh that writes an item in its base
+language fetches the missing text in the fallback language and stores it there.
+Gaps the fallback language cannot fill keep the original-language text. A
+manual refresh asks for fallback text even where text is stored. A scheduled
+refresh asks only for fields that have no stored text, and not again for text
+no language had on an earlier pass.
+Text in another library's language row is never filled: those rows fall back to
+the base row when read.
+
+The setting also orders artwork. With it on, posters rank library language,
+fallback language, English, textless, then any other language, and logos,
+banners, and other titled artwork rank library language, fallback language,
+English, language-neutral, then any other language. This applies to English
+libraries too, where a textless poster now beats one titled in another
+language. With it off, a poster in any language still beats a textless one.
+The setting applies without a restart.
+
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
-requires a public S3 bucket because local artwork storage is available. It
-governs provider artwork only: local sidecar artwork found next to media files
-is copied into artwork storage and served whatever its value, because clients
-cannot load it any other way. An image URL an NFO file names is downloaded like
-provider artwork, so it is used only while the setting is on.
+requires a public S3 bucket because local artwork storage is available. With it
+off, clients load item artwork straight from the providers: refreshes select no
+local artwork (sidecar files, files or image URLs an NFO names, extra
+backdrops), nothing is copied into artwork storage, and NFO text still applies.
+Artwork stored earlier goes back to its providers through a hidden task that
+runs at startup, daily, and when the setting is turned off: a stored copy of
+provider artwork serves its provider source again, and a matched movie or
+series whose poster, backdrop, or logo has no provider source, or that keeps
+extra backdrops, or that a storage recovery left without artwork, is queued
+for a metadata refresh at most once a week. The item keeps that art until a
+refresh finds a provider image. A localized copy saved without any source is
+cleared, so the item's or season's own artwork shows. Items with locked
+artwork keep what they have; choosing artwork in Edit Metadata locks it, for a
+season or episode on the whole series. Banner, landscape thumb, clear art, and
+disc art come only from local files, so copies already stored stay. Nothing is
+deleted directly; the artwork revision GC collects the displaced copies.
+Turning the setting back on caches artwork for later refreshes; the Backfill
+Metadata Images task stores the provider artwork already served by URL.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

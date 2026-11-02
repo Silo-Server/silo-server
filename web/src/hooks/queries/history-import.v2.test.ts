@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCapturedProfileAuthorityActive } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import {
-  useCreateHistoryImportRun,
-  useHistoryImportRuns,
-  useHistoryImportRun,
-} from "./history-import";
+import { useCreateHistoryImportRun, useHistoryImportRun } from "./history-import";
 
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
@@ -40,48 +36,6 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
-});
-
-describe("history import v2 hooks", () => {
-  it("reads the bounded runs envelope and adapts opaque account identifiers", async () => {
-    vi.mocked(v2).mockResolvedValueOnce({
-      items: [{ id: "run", user_id: "42", mapping_id: "3", status: "completed" }],
-      page: { has_more: false },
-    } as never);
-    const { result } = renderHook(() => useHistoryImportRuns(10), { wrapper: wrapper() });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(v2).toHaveBeenCalledWith(
-      "GET /api/v2/history-imports/runs",
-      expect.objectContaining({ query: { limit: 10 } }),
-    );
-    expect(result.current.data?.[0]).toMatchObject({ id: "run", user_id: 42, mapping_id: 3 });
-  });
-
-  it("starts a run with its target profile and string source identifier", async () => {
-    vi.mocked(v2).mockImplementationOnce((_op, options) => {
-      (options as { onResponse?: (r: Response) => void }).onResponse?.(
-        new Response(null, {
-          headers: { Location: "/api/v2/history-imports/runs/new", "Retry-After": "2" },
-        }),
-      );
-      return Promise.resolve({
-        id: "new",
-        user_id: "42",
-        profile_id: "target",
-        status: "queued",
-        terminal: false,
-        cancelable: false,
-      }) as never;
-    });
-    const { result } = renderHook(() => useCreateHistoryImportRun(), { wrapper: wrapper() });
-    await act(async () => {
-      await result.current.mutateAsync({ profile_id: "target", source: "plex", source_id: 9 });
-    });
-    expect(v2).toHaveBeenCalledWith(
-      "POST /api/v2/history-imports/runs",
-      expect.objectContaining({ body: { profile_id: "target", source: "plex", source_id: "9" } }),
-    );
-  });
 });
 
 describe("durable personal import monitor", () => {

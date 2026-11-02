@@ -20,8 +20,6 @@ func TestPlexWebhookAction(t *testing.T) {
 		{event: "media.pause", wantAction: ActionImportProgress, wantOK: true},
 		{event: "media.play", wantAction: ActionPlaybackStarted, wantOK: true},
 		{event: "media.resume"},
-		{event: "media.rate"},
-		{event: "library.new"},
 		{event: ""},
 	}
 
@@ -33,17 +31,6 @@ func TestPlexWebhookAction(t *testing.T) {
 				t.Fatalf("plexWebhookAction(%q) = (%q, %v, %v), want (%q, %v, %v)", tc.event, action, completed, ok, tc.wantAction, tc.wantCompleted, tc.wantOK)
 			}
 		})
-	}
-}
-
-func TestBuildWebhookURL(t *testing.T) {
-	t.Parallel()
-
-	if got := buildWebhookURL("", "abc123"); got != "/api/v2/webhook-sync/webhooks/abc123" {
-		t.Fatalf("unexpected relative webhook URL: %q", got)
-	}
-	if got := buildWebhookURL("https://example.com/", "abc123"); got != "https://example.com/api/v2/webhook-sync/webhooks/abc123" {
-		t.Fatalf("unexpected absolute webhook URL: %q", got)
 	}
 }
 

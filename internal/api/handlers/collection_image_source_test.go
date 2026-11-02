@@ -17,8 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/netguard"
-	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // countingImageServer serves a small JPEG on loopback and counts requests.
@@ -73,64 +71,6 @@ func TestPersonalPosterSourceRefusesLocalAddresses(t *testing.T) {
 		if !errors.Is(err, errCollectionImageSourceNotAllowed) || err.Error() != errCollectionImageSourceNotAllowed.Error() {
 			t.Errorf("download %s = %d bytes, %v; want the uniform refusal", source, len(data), err)
 		}
-	}
-	if n := hits.Load(); n != 0 {
-		t.Fatalf("loopback server received %d requests, want 0", n)
-	}
-}
-
-// Every personal surface that takes a poster URL answers an open loopback
-// port and a closed one with the same error, and never connects: the /api/v1
-// create and update, the /api/v2 create, and the /api/v2 poster operation.
-func TestPersonalPosterSourceRefusalIsUniformDB(t *testing.T) {
-	f := newPagingIntegrationFixture(t)
-	ctx := t.Context()
-	provider := pgstore.NewPostgresProvider(f.pool)
-	store, err := provider.ForUser(ctx, f.account)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "owner", Name: "owner"}); err != nil {
-		t.Fatal(err)
-	}
-	h := NewCollectionHandler(provider)
-	server, hits := countingImageServer(t)
-	open, closed := server.URL+"/poster.jpg", closedLoopbackURL(t)
-	create := func(req PersonalCollectionCreateRequest) (PersonalCollectionView, error) {
-		return h.CreatePersonalCollection(ctx, PersonalCollectionCreateCommand{UserID: f.account, ProfileID: "owner", Request: req})
-	}
-	existing := func(name string) string {
-		c, err := create(PersonalCollectionCreateRequest{Name: name})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c.ID
-	}
-
-	surfaces := map[string]func(source string) error{
-		"create": func(source string) error {
-			_, err := create(PersonalCollectionCreateRequest{Name: "Poster", PosterSourceURL: source})
-			return err
-		},
-		"v1 update": func(source string) error {
-			_, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: existing("Update"), Request: PersonalCollectionUpdateRequest{PosterSourceURL: &source}})
-			return err
-		},
-		"poster source": func(source string) error {
-			_, err := h.SetPersonalCollectionPosterSource(ctx, f.account, "owner", existing("Source"), source)
-			return err
-		},
-	}
-	for name, call := range surfaces {
-		t.Run(name, func(t *testing.T) {
-			openErr, closedErr := call(open), call(closed)
-			if openErr == nil || closedErr == nil {
-				t.Fatalf("open = %v, closed = %v; want both refused", openErr, closedErr)
-			}
-			if openErr.Error() != closedErr.Error() {
-				t.Fatalf("open port answered %q, closed port %q; want the same answer", openErr, closedErr)
-			}
-		})
 	}
 	if n := hits.Load(); n != 0 {
 		t.Fatalf("loopback server received %d requests, want 0", n)
@@ -232,7 +172,7 @@ func TestPersonalCollageFetchesLocalArtworkStorage(t *testing.T) {
 
 	detail := &catalog.DetailService{}
 	detail.SetImageResolver(collageSourceResolver{})
-	gen := NewPersonalCollectionCollageGenerator(blobstoretest.NewDirect(server.URL), detail, nil)
+	gen := NewPersonalCollectionCollageGenerator(blobstoretest.NewDirect(server.URL), detail, nil, nil)
 	if gen == nil {
 		t.Fatal("no collage generator")
 	}

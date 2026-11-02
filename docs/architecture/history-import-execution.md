@@ -2,7 +2,9 @@
 
 History imports persist a versioned dispatch intent in `history_import_runs`
 before reporting acceptance. Administrative intent references source and mapping revisions,
-the external user locator, and the original Silo account/profile target. Admin tokens
+the external user locator, the original Silo account/profile target, and an optional
+lookback cutoff (`played_since`, Jellyfin only) fixed at admission; only a full
+import updates the mapping's `last_imported_at`. Admin tokens
 remain in the source's encrypted storage. Personal intent retains the original target,
 optional predefined-source revision, and a run-scoped encrypted credential envelope.
 Tokens are decrypted only for the exact running claim generation. A queued run does
@@ -88,7 +90,10 @@ Silo progress. Favorite-only records add the favorite without creating progress.
 
 Source servers are user-supplied, so what an import reads from one is bounded
 (`internal/historyimport/upstream_limits.go`): each successful response is decoded only up
-to 16 MiB, and each paged listing stops at 5,000 pages, 500,000 items, or 512 MiB in total.
+to 16 MiB and 250,000 JSON values, and each paged listing stops at 5,000 pages, 500,000
+items, or 512 MiB in total. One budget also covers the whole run, across every listing,
+Plex section, ID lookup, and metadata sweep: 2 GiB read and an estimated 256 MiB of kept
+items. Lookups by ID keep only the items they asked for, one per ID.
 Going over a limit fails the run with its own message. That includes lists whose other
 failures only add a warning (resume positions, favorites, the watchlist, Plex sections, and
 metadata lookups), so an import never completes without a list the source sent.

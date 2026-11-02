@@ -4,6 +4,13 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## Recommendation limits
+
+`GET /api/v2/recommendations/because-watched/{item_id}` accepts `limit` from
+1 to 50 (default 20). The v1 bridge route clamps positive limits above 50
+to 50 and keeps its existing default of 50 for missing or invalid values.
+The shared service caps the limit before the engine expands its candidate queries.
+
 ## Section browsing
 
 Catalog reads with `source=section` resolve the row on the acting profile's
@@ -11,6 +18,36 @@ Catalog reads with `source=section` resolve the row on the acting profile's
 to server rows. Paging uses that effective row's configuration. A row hidden or
 removed by the profile, a row belonging to another profile, or a row in an
 inaccessible library answers `404`, as an unknown section does.
+
+Every section type can be browsed. Query-backed rows (genre, custom filter,
+collection, recently added or released, random, watchlist, favorites) page their
+source. Every other row, such as the recommendation rows, trending, Continue
+Watching and Next Up, is built by its section fetcher, so it is
+row-backed: the server lists the items the row shows, in its order, then the
+rest of a fetch of at most 200 items, and pages that list. `total` is exact
+below the cap; a list that reaches 200 items answers `total_exact: false`, since
+the row may hold more. Some engines produce fewer items than the cap
+(recommendation rows stop at 60). On Home, row-backed lists drop watched items when the profile
+hides them, as the row does. Each page request rebuilds the list, so a row
+whose source moves (trending over a sliding window) can shift between pages. The
+frozen `/api/v1` catalog keeps answering row-backed sections with no items.
+
+A Home or library row is the first page of its section: clients show a few cards
+in the row and open the full list here. To download only the cards a row shows,
+`listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
+which caps every row's item limit for that request. Send it only when
+`getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
+the parameter. `getHomeSectionItems` and `getHomeLayout` (for the rows it
+includes) accept the same `item_limit`; send it only when `getHomeCapabilities`
+reports `row_item_limit_max`. A row they answer with `item_limit` carries
+`has_more: true` when it holds more cards than it answered. See the home section
+of [the native API contract](architecture/api-contract.md) for the details.
+
+This listing is not a continuation of a capped row. Query-backed rows page their
+source here, so a Home row that hides watched items lists them here, and a random
+row is drawn again. A client that shows a capped row reporting `has_more` and
+wants the rest of it in place reads the row again at its own limit
+(`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
 ## People search
 
@@ -74,6 +111,20 @@ the person without `prefetch` when the user actually opens them.
 `GET /api/v2/catalog/search/capabilities` advertises `person_prefetch: true` when
 the server accepts the parameter. Check it first: `/api/v2` rejects unknown query
 parameters, so an older server answers a prefetch read with `422`.
+
+## Filter values
+
+`GET /api/v2/catalog/filters` (`getCatalogFilters`) lists the facet values of a
+scope. The `technical` lists (resolutions, audio languages, and subtitle
+languages) come from the scope's files, and building them reads every present
+file in the scope. Each node keeps them for five minutes, keyed by the scope's
+full SQL and arguments like the typeahead lists below, so viewers with
+different access never share them. A value that only a newly added or removed
+file brings or takes away can take up to five minutes to appear in or leave
+`technical`. The other lists are read on every request. Pass
+`skip_technical=true` when a screen does not show the technical lists. The
+audio and subtitle language lists of the Jellyfin-compatible `/Items/Filters2`
+share these cached lists.
 
 ## Facet typeahead
 
@@ -244,8 +295,8 @@ The frozen `/api/v1/collections/preview` response is unchanged and carries no po
 
 ## Personal collection imports
 
-A personal collection imported with `importMDBListCollection`, `importTMDBCollection`,
-`importTMDBListCollection`, or `importTraktCollection` holds only titles its owner profile
+A personal collection imported with `importMDBListCollection`, `importTMDBCollection`, or
+`importTMDBListCollection` holds only titles its owner profile
 can access: titles in the owner's allowed libraries that pass its rating limits. Those are
 the `max_content_rating` ceiling, with the server's `access.unrated_content` setting for
 unrated titles, and the `max_advisory_age` limit, with `require_advisory_age` (see
@@ -256,8 +307,10 @@ whether it runs on import, through `syncCollection`, or on the collection's sche
 - The item limit fills with titles the owner can access. The sync checks every source entry
   it reads before it applies the limit, so titles outside the owner's access never take a
   slot. With an item limit set, the sync reads at most four times the limit from the source
-  (100 to 500 entries), so an owner with tight limits can get fewer titles than the limit
-  even when the full source list holds enough the owner can access.
+  (at least 100 entries), so an owner with tight limits can get fewer titles than the limit
+  even when the full source list holds enough the owner can access. The limit can be any
+  positive number. Without one, an MDBList sync reads up to 10,000 entries, a TMDB list sync
+  the whole list, and a TMDB preset its first 20.
 - `library_ids` keeps only titles in one of the listed libraries, and each title must still
   be one the owner can access. Omit it to match against everything the owner can access.
 - The sync summary counts only titles the owner can access. `items_matched` counts the
@@ -278,7 +331,7 @@ Each viewer of a shared collection still sees only the titles that viewer can ac
 ## Personal sync schedules
 
 `updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
-(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+(a collection imported from MDBList or TMDB). The value is a cadence name, `daily`,
 `weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
 Cron expressions are a validation failure for every account, administrators included, and so is
 `sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
@@ -342,6 +395,13 @@ device, so a device-scoped override wins over the profile value. Without the
 header they resolve the profile's preferences alone. Clients that set
 device overrides should send the header so the detail page matches what playback
 picks.
+
+`effective_audio_track_index` does not know the playing device's capabilities.
+A playback start that names no audio track can play another track in the same
+language when the plan for this one converts its audio and the plan for that
+one does not
+(see "Omission is a request" in `docs/architecture/playback-protocol-v3.md`).
+The plan's `selected_tracks` names the track that plays.
 
 ## Episode files
 
@@ -415,6 +475,12 @@ series, orders the cards by most recent activity, and returns at most the row's
 previous episode; with `ui.next_up_new_releases_first` on, it is when the next
 episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
 Next Up is its own row.
+
+The server inserts that Next Up row (`system-next-up`, type `next_up`) after
+Continue Watching; it is the only one. The recipe gallery does not list
+`next_up`, and creating an admin row of that type, changing a row to it, or
+adding it to a profile's page fails validation. A profile can still save a
+`next_up` row it already has, such as one brought in by a bridge import.
 
 ## Bridge note
 
@@ -548,21 +614,42 @@ Each rule is `{field, op, value}`; an operator a field does not list returns `42
 and so does a value of the wrong shape: a span not like `30d` or reaching back before
 PostgreSQL's earliest date (4714 BC), a non-numeric bound,
 a decade that is not a year from 10 on (decade 0 would catch every title with no
-year), a `title` value that is empty or not a string, or a
+year), a `title` or `show_title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
 
 | Operators | Fields | Value |
 | --- | --- | --- |
-| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title`, `show_title` | string, compared ignoring case; `%` and `_` match literally |
 | `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
 | `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
 | `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
 
+In the `episode` scope, `title` compares the episode title and `show_title`
+compares its parent show's title. Other item types match neither positive nor
+negative `show_title` rules. Combine `show_title`, `watched`, and `title` rules
+to select watched episodes of a show while excluding particular episode titles.
+`GET /api/v2/catalog/search/capabilities` advertises `show_title_rules: true`
+when the server accepts the field. Clients should offer it only in episode
+rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
+
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
-matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
-show's newest episode, so movies never match them. An episode row never matches
+matches no `runtime` bound. An audiobook's `runtime` uses its longest active
+recording copy across libraries: file durations are summed per library and
+canonical recording root, then rounded to the nearest minute (at least one).
+File changes and removals maintain this value; metadata enrichment and refresh
+preserve it. An admin runtime lock preserves the edited value instead; removing
+the lock restores the file-derived value immediately. Books
+without positive file durations retain their stored runtime. The `runtime` rule,
+sort and item field therefore use the same value. Audiobook group totals and
+Audiobookshelf responses retain their library-scoped duration calculations.
+`latest_episode_added` and `last_air_date` describe a
+show's newest episode with a file in a library, so movies never match them. An
+episode the metadata provider lists but no library has a file for does not count,
+even after its air date. The `last_air_date` sort follows the same rule. A show's
+`last_air_date` response field still reports its newest aired episode, with or
+without a file, so it can be later than the date the rule and sort use. An episode row never matches
 `latest_episode_added`, and in the `episode` scope `last_air_date` is the
 episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
 still apply when an administrator hides that rating source, so a saved collection
@@ -621,7 +708,8 @@ PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family
 on the first page and retains that choice. The existing fuzzy candidate cap and
 reranking remain in force. A fuzzy-family query that becomes a richer FTS query
-returns `invalid_cursor` so the client can restart. PostgreSQL search retains its
+returns `invalid_cursor` so the client can restart, as does a cursor issued by a
+server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,
@@ -699,7 +787,65 @@ The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
 seek. It covers the query source only and takes no search text or
 `name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
-the operation is available.
+the operation is available. With `group: "box_set"` it counts a box set browse
+(see Movie box sets) the way `queryCatalogItems` pages it.
+
+## Movie box sets
+
+A movie or mixed library can browse the movies TMDB lists in one collection (a
+franchise such as Harry Potter) as one box set. An administrator turns it on
+with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
+2) is the fewest of a collection's movies the library must hold, and
+`box_sets_in_search` (default true) lists the library's box sets in search.
+`getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
+server supports them (`getLibraryCapabilities` reports the same to
+administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
+so a client knows which libraries to browse with `group=box_set`.
+
+`listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
+`source=query` browse of one library with box sets on and no search text,
+return a box set card in place of the collection's movies once the viewer can
+see at least `box_set_min_movies` of them there. The card has `type:
+"box_set"`, `content_id: "box_set:<tmdb collection id>"`, the collection's
+title, overview, and artwork, and a `box_set` object with its `id`,
+`library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
+The card stands at its first movie in the requested order and carries that
+movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
+`name_prefix` matches that first movie, so a box set is listed under one
+letter, the one the letter index files it under.
+Any other request with `group=box_set` returns the ordinary list. Send the
+same `group` to `queryCatalogLetters` so the letter index counts the grouped
+list. A collection's artwork is cached like item artwork when the server
+caches metadata images; until then its URLs point at TMDB.
+
+`GET /api/v2/catalog/box-sets/{id}?library_id=` (`getCatalogBoxSet`) answers a
+box set with its movies in that library that the viewer can see, in collection
+(release) order; it is `404` when the library has box sets off or the viewer
+can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
+(`searchCatalogBoxSets`) answers the box sets of libraries with
+`box_sets_in_search` whose name contains every word of `q`, or that have two
+or more movies in those libraries the viewer can see whose titles do, best
+match first. Movies the viewer cannot see never count toward a title match.
+`library_id` limits the search to one library. Search results keep listing the
+movies themselves; clients show matching box sets ahead of them.
+
+`GET /api/v2/catalog/items/{id}/box-set?library_id=` (`getCatalogItemBoxSet`)
+answers the box set a movie's page shows, as `getCatalogBoxSet` would answer
+it: from `library_id`, or else the first of the movie's libraries with box sets
+on, when the viewer can see the movie and at least `box_set_min_movies` of the
+collection's movies there. `box_set` is absent when there is none, including
+for a title that is not a movie (a series or an audiobook); like the
+membership reads (see personal-lists in the API contract), that ordinary
+answer is a `200`. `404` is kept for an ID that is missing, hidden from the
+viewer, or not a catalog title (an episode or season ID). Clients show it as a
+row of the box set's movies on the movie page, marking the movie being viewed.
+
+A box set's `title` is its TMDB collection name with a trailing "Collection"
+shown as "Box Set" ("Harry Potter Collection" is "Harry Potter Box Set"), so it
+does not read as one of Silo's own collections; other names are unchanged.
+Search finds it by either form ("harry potter box set" or "harry potter
+collection"), but "box", "set" or "collection" alone matches only names that
+contain the word themselves.
 
 ## History ordering
 

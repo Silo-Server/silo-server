@@ -377,7 +377,7 @@ func (hc *HealthChecker) hooks() (CapabilityFetcher, func(nodeURL string)) {
 // Start runs health checks in a background goroutine. Stops when ctx is cancelled.
 func (hc *HealthChecker) Start(ctx context.Context) {
 	hc.mu.Lock()
-	hc.ctx = ctx
+	hc.ctx = ctx //nolint:fatcontext // stores the caller's ctx as is; nothing derives from hc.ctx here
 	hc.mu.Unlock()
 	go func() {
 		hc.checkAll(ctx)

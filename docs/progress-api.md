@@ -91,8 +91,35 @@ clears the acting profile's resume position on a movie or episode and answers
 204. It is the manual edit for an item someone skimmed and does not want left
 partly watched. The progress entry stays with `position_seconds` 0 and keeps
 `completed` and `duration_seconds`, so a rewatched item stays watched. Watch
-history is untouched. Mark unwatched (`unmarkWatched`) is different: it removes
-the item's history, including unfinished plays.
+history is untouched. Mark unwatched (`unmarkWatched`) is different: it also
+clears the watched state. It keeps watch history too, but plays from before the
+unmark no longer count as watched, and watch providers keep theirs. Only
+`removeHistoryEntries` removes plays from history. The web app offers Mark
+Watched and Mark Unwatched (`unmarkWatched`) on a partly watched movie or
+episode, rewatches included.
+
+`markWatched` on a partly watched item records a play. On a rewatch in progress
+(a watched movie, episode or audiobook with a resume position) it records
+another completed play and clears the position, where it used to be a no-op. A
+season or series mark leaves those episodes alone, as do the frozen v1 operation and the
+Jellyfin played endpoints. A repeated mark records nothing until playback sets
+a new position, so it is not exactly once: a retry that lands after a new
+progress report records another play.
+
+An audiobook's manual play uses the total duration of its present files,
+grouped by recording root and library, then takes the longest copy the
+profile can access. If those files report no usable duration, it uses the
+catalog runtime when available, otherwise zero. A file lookup failure aborts
+the mark before progress or history is written. Unmarking does not require a
+duration lookup.
+Audiobookshelf-compatible Reset Progress also clears listened state through
+the shared history cutoff; it keeps the plays in history without letting
+them restore completion on native reads.
+New ABS reports and session ticks stay newer than that cutoff, including when
+reset covered a future-dated imported play.
+ABS reset requires an accessible audiobook; unknown or inaccessible targets
+return 404 without writing a cutoff. Progress reports serialize with reset
+under the shared profile history lock before reading that cutoff.
 
 The write is stamped with the server time. It advances the delta-sync cursor, so
 other devices receive the cleared position, and an older provider resume point
@@ -104,14 +131,17 @@ cleared, the server publishes `user_state.changed` with `change: "progress"`.
 
 An item without a resume position is a no-op 204. A season, series or ebook has
 no single resume position and fails validation at `path.media_item_id` (422). An
-unknown or hidden item is 404, as is any other kind `markWatched` does not
-handle, such as an audiobook. The operation is profile scoped and
+unknown or hidden item is 404, and so is an audiobook: `markWatched` handles
+audiobooks, but this operation does not cover them. The operation is profile scoped and
 `non_retryable`: a delayed retry would also clear a position recorded after the
 first request.
 
 Clients detect the operation with `getProgressCapabilities`
 (GET `/api/v2/progress/capabilities`), a profile-scoped capability document
-whose `clear_resume_position` is true when it is served. Jellyfin clients
+whose `clear_resume_position` is true when it is served, and whose
+`mark_watched_records_rewatch` is true when `markWatched` records a rewatch in
+progress. An older server answers that mark with a 204 that records nothing, so
+a client checks the flag before offering Mark Watched on a rewatch. Jellyfin clients
 already have the equivalent: `PlaybackPositionTicks` 0 without `Played` on
 `/UserItems/{itemId}/UserData` ([Jellyfin compatibility](jellycompat-api.md)).
 

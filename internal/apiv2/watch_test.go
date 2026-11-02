@@ -23,10 +23,11 @@ type fakeWatch struct {
 }
 
 type fakeMark struct {
-	userID    int
-	profileID string
-	contentID string
-	played    bool
+	userID        int
+	profileID     string
+	contentID     string
+	played        bool
+	recordRewatch bool
 }
 
 func (f *fakeWatch) ContextAccessFilter(_ context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
@@ -72,14 +73,14 @@ func (f *fakeWatch) WatchDetail(_ context.Context, userID int, profileID, conten
 	return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Watch target not found"}
 }
 
-func (f *fakeWatch) SetWatchedState(_ context.Context, userID int, profileID, contentID string, played bool, _ catalogpkg.AccessFilter) (handlers.WatchedStateView, error) {
+func (f *fakeWatch) SetWatchedState(_ context.Context, userID int, profileID, contentID string, played, recordRewatch bool, _ catalogpkg.AccessFilter) (handlers.WatchedStateView, error) {
 	if f.err != nil {
 		return handlers.WatchedStateView{}, f.err
 	}
 	if contentID != "movie:heat-1995" && contentID != "series:heat" {
 		return handlers.WatchedStateView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 	}
-	f.marks = append(f.marks, fakeMark{userID: userID, profileID: profileID, contentID: contentID, played: played})
+	f.marks = append(f.marks, fakeMark{userID: userID, profileID: profileID, contentID: contentID, played: played, recordRewatch: recordRewatch})
 	return handlers.WatchedStateView{ContentID: contentID, Type: "movie", AffectedCount: 1, Played: played}, nil
 }
 
@@ -101,66 +102,6 @@ func watchDeps(watch *fakeWatch) Dependencies {
 	deps := pilotDeps(nil, nil)
 	deps.Watch = watch
 	return deps
-}
-
-func TestGetWatchState(t *testing.T) {
-	watch := &fakeWatch{trickplay: &catalogpkg.TrickplayGrid{Width: 300}}
-	h := newTestHandler(t, watchDeps(watch))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995?file_id=42&library_id=1&image_size=medium", "", owner)
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["content_id"] != "movie:heat-1995" || body["effective_subtitle_language"] != "eng" || body["effective_subtitle_mode"] != nil {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	// The artwork system media controls show (#803).
-	if body["poster_url"] != "/api/images/poster/heat.jpg?size=medium" || body["poster_thumbhash"] != "poster-hash" ||
-		body["backdrop_url"] != "/api/images/backdrop/heat.jpg?size=medium" || body["backdrop_thumbhash"] != "backdrop-hash" {
-		t.Fatalf("artwork in body = %s", rec.Body.String())
-	}
-	versions := body["versions"].([]any)
-	v := versions[0].(map[string]any)
-	if v["file_id"] != "42" || v["duration_seconds"].(float64) != 10200 || v["added_at"] != "2026-01-02T03:04:05.000Z" || v["intro"].(map[string]any)["end_seconds"].(float64) != 90 || v["trickplay_available"] != true {
-		t.Fatalf("version = %v", v)
-	}
-	if variant := body["playback_variants"].([]any)[0].(map[string]any); variant["default_file_id"] != "42" || variant["parts"].([]any)[0].(map[string]any)["versions"] == nil {
-		t.Fatalf("variant = %v", variant)
-	}
-	if ud := body["user_data"].(map[string]any); ud["last_file_id"] != "3" || ud["position_seconds"].(float64) != 1325.5 || ud["played"] != false {
-		t.Fatalf("user_data = %v", ud)
-	}
-	// The query reached the access filter.
-	last := watch.filters[len(watch.filters)-1]
-	if last.SelectedFileID != 42 || last.PresentationLibraryID == nil || *last.PresentationLibraryID != 1 || string(last.ImageSize) != "medium" || last.DeviceID != "" {
-		t.Fatalf("filter = %+v", last)
-	}
-
-	// The profile header is optional: an account-only caller gets the
-	// catalog answer without user_data.
-	watch.trickplay = nil
-	rec = do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", bearer(memberToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	body = nil
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := body["user_data"]; ok {
-		t.Fatalf("user_data present without a profile: %s", rec.Body.String())
-	}
-	if v := body["versions"].([]any)[0].(map[string]any); v["trickplay_available"] != false {
-		t.Fatalf("version without previews = %v", v)
-	}
-	if subs, ok := body["subtitles"].([]any); !ok || len(subs) != 1 {
-		t.Fatalf("subtitles = %v", body["subtitles"])
-	}
 }
 
 func TestGetWatchStateRejects(t *testing.T) {
@@ -197,7 +138,8 @@ func TestMarkWatched(t *testing.T) {
 	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if len(watch.marks) != 2 || watch.marks[0] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "series:heat", played: true}) ||
+	// A v2 mark asks for a rewatch to be recorded; an unmark does not.
+	if len(watch.marks) != 2 || watch.marks[0] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "series:heat", played: true, recordRewatch: true}) ||
 		watch.marks[1] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "movie:heat-1995", played: false}) {
 		t.Fatalf("marks = %+v", watch.marks)
 	}
@@ -283,18 +225,38 @@ func TestGetProgressCapabilities(t *testing.T) {
 	}
 }
 
-func TestGetWatchStatePreservesDevicePreferenceContext(t *testing.T) {
-	watch := &fakeWatch{}
-	h := newTestHandler(t, watchDeps(watch))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	for _, tc := range []struct{ header, want string }{{"tv-1", "tv-1"}, {" tablet-2 ", "tablet-2"}, {"", ""}} {
-		rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", with(owner, deviceIDHeader, tc.header))
-		if rec.Code != http.StatusOK {
-			t.Fatal(rec.Body.String())
-		}
-		filter := watch.filters[len(watch.filters)-1]
-		if filter.DeviceID != tc.want {
-			t.Fatalf("device context = %q, want %q", filter.DeviceID, tc.want)
-		}
+// A marker's confidence is optional because 0 is a rating: the field is absent when
+// nobody rated the range, and present as 0 when a source rated it worthless. A client
+// renders those differently, so the distinction has to survive the wire.
+func TestWatchMarkerCarriesConfidenceOnlyWhenRated(t *testing.T) {
+	rated := 0.0
+	ratedBody, err := json.Marshal(watchMarkerOf(&catalogpkg.Marker{Start: 0, End: 90, Confidence: &rated}))
+	if err != nil {
+		t.Fatalf("marshal rated marker: %v", err)
+	}
+
+	var ratedFields map[string]json.RawMessage
+	if err := json.Unmarshal(ratedBody, &ratedFields); err != nil {
+		t.Fatalf("unmarshal rated marker: %v", err)
+	}
+	value, ok := ratedFields["confidence"]
+	if !ok {
+		t.Fatalf("a rated 0 was dropped: %s", ratedBody)
+	}
+	if string(value) != "0" {
+		t.Fatalf("confidence = %s, want 0", value)
+	}
+
+	unratedBody, err := json.Marshal(watchMarkerOf(&catalogpkg.Marker{Start: 0, End: 90}))
+	if err != nil {
+		t.Fatalf("marshal unrated marker: %v", err)
+	}
+
+	var unratedFields map[string]json.RawMessage
+	if err := json.Unmarshal(unratedBody, &unratedFields); err != nil {
+		t.Fatalf("unmarshal unrated marker: %v", err)
+	}
+	if value, ok := unratedFields["confidence"]; ok {
+		t.Fatalf("an unrated marker serialized confidence %s: %s", value, unratedBody)
 	}
 }

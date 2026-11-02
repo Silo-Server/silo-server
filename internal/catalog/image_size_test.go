@@ -1,6 +1,10 @@
 package catalog
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/imagesize"
+)
 
 // The literals below are the variants this package returned before the
 // image_size parameter existed. Routing the size hint through
@@ -82,7 +86,7 @@ func TestCachedImageVariantPathRewritesKey(t *testing.T) {
 		"":         "tmdb/movies/550/poster/w500.abc123.webp",
 		"small":    "tmdb/movies/550/poster/w300.abc123.webp",
 		"medium":   "tmdb/movies/550/poster/w500.abc123.webp",
-		"large":    "tmdb/movies/550/poster/w780.abc123.webp",
+		"large":    "tmdb/movies/550/poster/w1000.abc123.webp",
 		"original": original,
 	}
 	for size, wantPath := range tests {
@@ -91,8 +95,39 @@ func TestCachedImageVariantPathRewritesKey(t *testing.T) {
 		}
 	}
 
+	// The key's own image type picks the ladder: an episode still passed in a
+	// poster slot resolves to still rungs, not a poster rung it never had.
+	const still = "tvdb/series/73141/seasons/22/episodes/9/still/original.webp"
+	if got := cachedImageVariantPath(still, "poster", "large"); got != "tvdb/series/73141/seasons/22/episodes/9/still/w1280.webp" {
+		t.Errorf("cachedImageVariantPath(still, poster, large) = %q, want the still ladder's w1280", got)
+	}
+	if got := cachedImageVariantPath(still, "backdrop", ""); got != "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp" {
+		t.Errorf("cachedImageVariantPath(still, backdrop, \"\") = %q, want the still default w500", got)
+	}
+
 	const pluginPath = "plugin://tmdb/poster/original.webp"
 	if got := cachedImageVariantPath(pluginPath, "poster", "large"); got != pluginPath {
 		t.Errorf("cachedImageVariantPath(plugin path) = %q, want it unchanged", got)
+	}
+}
+
+// A width size resolves on the key's own ladder: the narrowest rung at least
+// that wide, else the original.
+func TestCachedImageVariantPathForWidth(t *testing.T) {
+	for _, tc := range []struct {
+		path      string
+		imageType string
+		px        int
+		want      string
+	}{
+		{"tmdb/movies/1/backdrop/original.r1.webp", "backdrop", 2688, "tmdb/movies/1/backdrop/original.r1.webp"},
+		{"tmdb/movies/1/backdrop/original.r1.webp", "backdrop", 1344, "tmdb/movies/1/backdrop/w1920.r1.webp"},
+		{"tmdb/series/1/seasons/1/episodes/2/still/original.r1.webp", "backdrop", 1344, "tmdb/series/1/seasons/1/episodes/2/still/original.r1.webp"},
+		{"tmdb/series/1/seasons/1/episodes/2/still/original.r1.webp", "still", 720, "tmdb/series/1/seasons/1/episodes/2/still/w1280.r1.webp"},
+		{"tmdb/movies/1/poster/original.r1.webp", "poster", 352, "tmdb/movies/1/poster/w500.r1.webp"},
+	} {
+		if got := cachedImageVariantPath(tc.path, tc.imageType, string(imagesize.Width(tc.px))); got != tc.want {
+			t.Errorf("cachedImageVariantPath(%q, %q, %dpx) = %q, want %q", tc.path, tc.imageType, tc.px, got, tc.want)
+		}
 	}
 }

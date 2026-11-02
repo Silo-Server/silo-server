@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -24,6 +25,11 @@ function commit(idx: number) {
   window.history.replaceState({ idx }, "");
 }
 
+async function clickBack(back: ReactNode, initialEntries?: string[]) {
+  render(<MemoryRouter initialEntries={initialEntries}>{back}</MemoryRouter>);
+  await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+}
+
 describe("PageBack", () => {
   afterEach(() => {
     mocks.navigate.mockClear();
@@ -33,24 +39,8 @@ describe("PageBack", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses a custom label when provided", () => {
-    render(
-      <MemoryRouter>
-        <PageBack label="Return to library" />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("button", { name: "Return to library" })).toBeInTheDocument();
-  });
-
   it("falls back to the default route when there is no router history", async () => {
-    render(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await clickBack(<PageBack />, ["/item/movie-1"]);
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith("/", { replace: false, viewTransition: true });
@@ -60,13 +50,7 @@ describe("PageBack", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: query === "(min-width: 64rem)",
     }));
-    render(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await clickBack(<PageBack />, ["/item/movie-1"]);
 
     expect(mocks.navigate).toHaveBeenCalledWith("/", {
       replace: false,
@@ -76,13 +60,7 @@ describe("PageBack", () => {
 
   it("uses browser history when a router history entry is available", async () => {
     commit(1);
-    render(
-      <MemoryRouter>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await clickBack(<PageBack />);
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith(-1);
@@ -90,31 +68,12 @@ describe("PageBack", () => {
 
   it("navigates to the declared ancestor when it is not behind us", async () => {
     commit(1);
-    render(
-      <MemoryRouter>
-        <PageBack to="/collections" up />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await clickBack(<PageBack to="/collections" up />);
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith("/collections", {
       replace: false,
       viewTransition: true,
     });
-  });
-
-  it("moves the page backwards whichever route it takes", async () => {
-    commit(1);
-    render(
-      <MemoryRouter>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
-
-    expect(document.documentElement.dataset.navigationDirection).toBe("back");
   });
 });

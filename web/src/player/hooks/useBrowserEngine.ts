@@ -29,8 +29,7 @@ export function useBrowserEngineCapabilities(): BrowserEngineState {
     return () => {
       cancelled = true;
     };
-    // The decision to probe is made once, at mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the decision to probe is made once, at mount
   }, []);
 
   return state;

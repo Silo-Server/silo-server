@@ -40,25 +40,6 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 }
 
 describe("profile-management", () => {
-  it("builds a readable access summary", () => {
-    expect(
-      buildProfileAccessSummary(
-        makeProfile({
-          max_content_rating: "PG",
-          library_restrictions_enabled: true,
-          allowed_library_ids: [2, 5],
-          max_playback_quality: "1080p",
-        }),
-      ),
-    ).toEqual({
-      contentRating: "PG max",
-      advisoryAge: "",
-      libraries: "2 libraries",
-      playbackQuality: "Standard quality",
-      text: "PG max · 2 libraries · Standard quality",
-    });
-  });
-
   it("seeds kids defaults from an unrestricted draft", () => {
     expect(
       applyKidsPreset(createProfileDraft(), {

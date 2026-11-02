@@ -53,6 +53,11 @@ type AccessFilter struct {
 	// size. Unset means the caller expressed no preference, and the per-context
 	// defaults apply. See internal/imagesize.
 	ImageSize imagesize.Size
+	// ImageWidths are the client's per-slot target widths, which override
+	// ImageSize for their slot. Read artwork sizes through ImageSizeFor. Like
+	// ImageSize it only shapes artwork URLs, so it stays out of every key
+	// derived from the filter's encoding.
+	ImageWidths imagesize.Widths `json:"-"`
 	// OmitWatchArtwork skips presentation-only artwork in watch detail for
 	// legacy responses and internal source selection. It does not change access.
 	OmitWatchArtwork bool
@@ -250,6 +255,28 @@ func appendLibraryAccessConditions(keyColumn string, filter AccessFilter, condit
 	*conditions = append(*conditions, libraryAccessConditions(keyColumn, allowedIdx, disabledIdx)...)
 }
 
+// InSomeLibraryWhere requires the media item whose content ID is
+// contentIDExpr to belong to at least one library. Listings that name no
+// library apply it for every viewer, an unrestricted administrator included:
+// an item in no library is either gone or held only by the scanner's file
+// removal grace until a replacement file relinks it (see
+// docs/architecture/missing-files.md), and its library pages already leave it
+// out. Reads by ID do not apply it.
+func InSomeLibraryWhere(contentIDExpr string) string {
+	return "EXISTS (SELECT 1 FROM media_item_libraries in_library WHERE in_library.content_id = " + contentIDExpr + ")"
+}
+
+// appendListedLibraryAccessConditions is appendLibraryAccessConditions for
+// listings such as search: with no library restriction it still applies
+// InSomeLibraryWhere. Reads by ID keep using appendLibraryAccessConditions.
+func appendListedLibraryAccessConditions(keyColumn string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0 {
+		*conditions = append(*conditions, InSomeLibraryWhere(keyColumn))
+		return
+	}
+	appendLibraryAccessConditions(keyColumn, filter, conditions, args, argIdx)
+}
+
 // ApplyLibraryAccessFilter appends the canonical item-level library allow/deny
 // predicates for keyColumn. It is exported for query builders outside the
 // catalog package that must enforce the same dual-membership invariant.
@@ -392,4 +419,15 @@ func mediaFileAccessConditions(alias string, filter AccessFilter, bind func(any)
 		conditions = append(conditions, ceiling)
 	}
 	return conditions
+}
+
+// ImageSizeFor is the size to resolve one artwork slot at: the slot's target
+// width when the client gave one, else ImageSize.
+func (f AccessFilter) ImageSizeFor(slot imagesize.Slot) imagesize.Size {
+	return f.Artwork().For(slot)
+}
+
+// Artwork is the client's artwork preference for this request.
+func (f AccessFilter) Artwork() imagesize.Request {
+	return imagesize.Request{Size: f.ImageSize, Widths: f.ImageWidths}
 }

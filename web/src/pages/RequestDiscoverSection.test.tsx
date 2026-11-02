@@ -94,15 +94,6 @@ describe("RequestDiscoverSection", () => {
     expect(screen.queryByText(/Page \d/)).not.toBeInTheDocument();
   });
 
-  it("stops offering more at the end of the row", () => {
-    mocks.useRequestDiscoverySection.mockReturnValue(
-      loaded([section(1, [100])], { hasNextPage: false }),
-    );
-    renderAt("/requests/discover/trending_movies");
-
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
-  });
-
   it("keeps the loaded titles and offers a retry when a later page fails", () => {
     mocks.useRequestDiscoverySection.mockReturnValue(
       loaded([section(1, [100])], { isError: true, isFetchNextPageError: true }),

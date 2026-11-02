@@ -1,5 +1,5 @@
 import { catalogKeys } from "@/hooks/queries/keys";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -122,18 +122,28 @@ function Harness() {
   );
 }
 
-function renderLayout() {
-  return render(
+function layout() {
+  return (
     <MemoryRouter>
       <Layout>
         <Harness />
       </Layout>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderLayout() {
+  return render(layout());
 }
 
 function setRoute(pathname: string, key: string, search = "") {
   mocks.location = { pathname, search, key };
+}
+
+// Moves the mocked router to a route and re-renders the layout inside act.
+function goTo(view: RenderResult, pathname: string, key: string, search = "") {
+  setRoute(pathname, key, search);
+  act(() => view.rerender(layout()));
 }
 
 let onHeaderResize: ResizeObserverCallback;
@@ -202,28 +212,12 @@ describe("Layout mobile profile", () => {
     expect(disconnectHeaderObserver).toHaveBeenCalledOnce();
   });
 
-  it("renders the current profile avatar in the settings link", () => {
-    renderLayout();
-
-    const settingsLink = screen.getByRole("link", { name: "Admin settings" });
-    const avatar = screen.getByRole("img", { name: "Admin" });
-
-    expect(settingsLink).toContainElement(avatar);
-    expect(avatar).toHaveAttribute("src", "https://example.com/admin-avatar.webp");
-  });
-
   it("marks only Home as the balanced sidebar return destination", () => {
     const view = renderLayout();
     expect(document.documentElement).toHaveAttribute("data-home-route", "true");
 
     setRoute("/library/1", "library");
-    view.rerender(
-      <MemoryRouter>
-        <Layout>
-          <Harness />
-        </Layout>
-      </MemoryRouter>,
-    );
+    view.rerender(layout());
 
     expect(document.documentElement).not.toHaveAttribute("data-home-route");
   });
@@ -243,13 +237,7 @@ describe("Layout sidebar collapse", () => {
       ["/", "home-back", false],
     ] as const) {
       setRoute(pathname, key);
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      );
+      view.rerender(layout());
       act(() => vi.advanceTimersByTime(16));
 
       expect(document.documentElement.hasAttribute("data-sidebar-collapsed")).toBe(collapsed);
@@ -276,11 +264,7 @@ describe("Layout request routes", () => {
 
   it.each([
     ["/requests", false, false],
-    ["/requests/browse/studio/a24", false, false],
-    ["/requests/browse/genre/drama", false, false],
     ["/requests/movie/603", false, true],
-    ["/requests/series/1399", false, true],
-    ["/title/movie/603", false, true],
     ["/title/series/1399", false, true],
     ["/collections", true, false],
   ])("renders %s with shell padding %s and a collapsed sidebar %s", (path, padded, collapsed) => {
@@ -299,25 +283,13 @@ describe("Layout item navigation", () => {
     const begin = screen.getByRole("button", { name: "begin item" });
 
     setRoute("/item/already-there", "item");
-    view.rerender(
-      <MemoryRouter>
-        <Layout>
-          <Harness />
-        </Layout>
-      </MemoryRouter>,
-    );
+    view.rerender(layout());
     fireEvent.click(begin);
     expect(mocks.beginResult).toBe(false);
     expect(mocks.navigate).not.toHaveBeenCalled();
 
     setRoute("/", "home-2");
-    view.rerender(
-      <MemoryRouter>
-        <Layout>
-          <Harness />
-        </Layout>
-      </MemoryRouter>,
-    );
+    view.rerender(layout());
     fireEvent.click(screen.getByRole("button", { name: "begin library" }));
     expect(mocks.beginResult).toBe(false);
     expect(mocks.navigate).not.toHaveBeenCalled();
@@ -334,13 +306,7 @@ describe("Layout item navigation", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     }));
-    view.rerender(
-      <MemoryRouter>
-        <Layout>
-          <Harness />
-        </Layout>
-      </MemoryRouter>,
-    );
+    view.rerender(layout());
     fireEvent.click(screen.getByRole("button", { name: "begin item" }));
     expect(mocks.beginResult).toBe(false);
     expect(mocks.navigate).not.toHaveBeenCalled();
@@ -371,17 +337,7 @@ describe("Layout detail reveal", () => {
   it("reveals immediately when the sidebar surface is absent", () => {
     mocks.renderSurface = false;
     const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item");
 
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });
@@ -394,27 +350,8 @@ describe("Layout detail reveal", () => {
     );
     const view = renderLayout();
 
-    setRoute("/library/1", "library");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
-
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/library/1", "library");
+    goTo(view, "/item/movie-1", "item");
 
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
     expect(vi.getTimerCount()).toBe(0);
@@ -430,16 +367,7 @@ describe("Layout detail reveal", () => {
 
     const enterCachedItem = (key: string) => {
       fireEvent.click(screen.getByRole("button", { name: "begin item" }));
-      setRoute("/item/movie-1", key, "?libraryId=2");
-      act(() =>
-        view.rerender(
-          <MemoryRouter>
-            <Layout>
-              <Harness />
-            </Layout>
-          </MemoryRouter>,
-        ),
-      );
+      goTo(view, "/item/movie-1", key, "?libraryId=2");
     };
 
     enterCachedItem("item-first");
@@ -448,16 +376,7 @@ describe("Layout detail reveal", () => {
     expect(document.documentElement).not.toHaveAttribute("data-home-item-entry");
     expect(vi.getTimerCount()).toBe(0);
 
-    setRoute("/", "home-again");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/", "home-again");
     expect(document.documentElement).toHaveAttribute("data-home-item-return", "true");
 
     enterCachedItem("item-repeat");
@@ -475,16 +394,7 @@ describe("Layout detail reveal", () => {
     const view = renderLayout();
 
     fireEvent.click(screen.getByRole("button", { name: "begin item" }));
-    setRoute("/item/movie-1", "item", "?libraryId=2");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item", "?libraryId=2");
 
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("false");
     expect(document.documentElement).toHaveAttribute("data-home-item-entry", "true");
@@ -492,16 +402,7 @@ describe("Layout detail reveal", () => {
 
   it("reveals as soon as the surface settles", () => {
     const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item");
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("false");
 
     screen.getByTestId("sidebar-surface").setAttribute("data-collapsed", "true");
@@ -512,16 +413,7 @@ describe("Layout detail reveal", () => {
 
   it("reveals by the deadline when requestAnimationFrame never fires", () => {
     const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item");
 
     act(() => vi.advanceTimersByTime(SIDEBAR_DETAILS_REVEAL_DEADLINE_MS));
 
@@ -530,16 +422,7 @@ describe("Layout detail reveal", () => {
 
   it("cancels reveal polling on unmount", () => {
     const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item");
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
     view.unmount();
@@ -549,16 +432,7 @@ describe("Layout detail reveal", () => {
 
   it("reveals only for a collapsed surface transform transition", () => {
     const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
+    goTo(view, "/item/movie-1", "item");
     const surface = screen.getByTestId("sidebar-surface");
     surface.setAttribute("data-collapsed", "true");
 

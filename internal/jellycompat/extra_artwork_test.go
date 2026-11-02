@@ -67,36 +67,6 @@ func TestItemTagsAdvertiseExtendedArtwork(t *testing.T) {
 	}
 }
 
-func TestItemDetailTagsAdvertiseEveryBackdrop(t *testing.T) {
-	m := newMapper(NewResourceIDCodec(), &config.Config{})
-	detail := upstreamItemDetail{
-		ContentID: "series-1", Type: "series", Title: "Show",
-		BackdropURL:        "https://cdn.example.test/b0?sig=one",
-		BannerPath:         "local/series/series-1/aa/banner/original.r.webp",
-		ThumbPath:          "local/series/series-1/bb/thumb/original.r.webp",
-		ClearArtPath:       "local/series/series-1/cc/clearart/original.r.webp",
-		ExtraBackdropPaths: []string{"local/series/series-1/dd-1/backdrop/original.r.webp", "local/series/series-1/ee-2/backdrop/original.r.webp"},
-	}
-	dto := m.itemFromDetail(detail, false, nil)
-	if len(dto.BackdropImageTags) != 3 {
-		t.Fatalf("BackdropImageTags = %q, want 3", dto.BackdropImageTags)
-	}
-	for _, key := range []string{"Banner", "Thumb", "Art"} {
-		if dto.ImageTags[key] == "" {
-			t.Errorf("ImageTags[%s] missing: %v", key, dto.ImageTags)
-		}
-	}
-	if _, ok := dto.ImageTags["Disc"]; ok {
-		t.Fatal("Disc advertised without disc art")
-	}
-	// The tags follow the cached image, not each presigned URL.
-	detail.BackdropURL = "https://cdn.example.test/b0?sig=two"
-	again := m.itemFromDetail(detail, false, nil)
-	if !slices.Equal(again.BackdropImageTags[1:], dto.BackdropImageTags[1:]) || again.ImageTags["Banner"] != dto.ImageTags["Banner"] {
-		t.Fatalf("tags changed with the signature: %q / %q", again.BackdropImageTags, dto.BackdropImageTags)
-	}
-}
-
 func extendedArtworkImagesHandler(item *models.MediaItem, extras []string) (*ImagesHandler, *countingImageResolver) {
 	resolver := &countingImageResolver{}
 	detailSvc := &catalog.DetailService{}

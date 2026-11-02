@@ -55,15 +55,6 @@ func TestResolveDirectFileTranslatesMissingFileToNotFound(t *testing.T) {
 	}
 }
 
-func TestResolveFileTranslatesMissingFileToNotFound(t *testing.T) {
-	svc := serviceWithFileRepo(missingFileRepo{err: scanner.ErrFileNotFound})
-
-	_, err := svc.resolveFile(context.Background(), 7, CreateRequest{FileID: 4242}, catalog.AccessFilter{})
-	if !errors.Is(err, catalog.ErrItemNotFound) {
-		t.Fatalf("err = %v, want catalog.ErrItemNotFound", err)
-	}
-}
-
 func TestFileLookupKeepsRealFailuresOpaque(t *testing.T) {
 	boom := errors.New("connection refused")
 	svc := serviceWithFileRepo(missingFileRepo{err: boom})

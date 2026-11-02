@@ -110,13 +110,15 @@ func (h *Hub) PublishJSON(
 	}
 
 	return h.Publish(ctx, Envelope{
-		Channel:   channel,
-		Event:     event,
-		EventID:   opts.EventID,
-		Data:      payload,
-		UserID:    opts.UserID,
-		ProfileID: opts.ProfileID,
-		AdminOnly: opts.AdminOnly,
+		Channel:    channel,
+		Event:      event,
+		EventID:    opts.EventID,
+		Data:       payload,
+		UserID:     opts.UserID,
+		ProfileID:  opts.ProfileID,
+		AdminOnly:  opts.AdminOnly,
+		AllViewers: opts.AllViewers,
+		V2Only:     opts.V2Only,
 	})
 }
 

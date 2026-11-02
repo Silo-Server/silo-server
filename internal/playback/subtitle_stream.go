@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // StreamExtractOpts configures a single streaming subtitle extract.
@@ -61,6 +61,27 @@ type StreamExtractOpts struct {
 	// longer applies. Seeking such an input with -copyts re-emits its
 	// stored timestamps.
 	InputIsExtractedSup bool
+	// Packets, when set, is the source instead of InputPath: ffmpeg reads
+	// the track as a subtitle-only stream of these packets on its stdin and
+	// converts it as it would the track in the source file, to the same
+	// bytes. TrackIndex, SeekSeconds, DurationSeconds and
+	// InputIsExtractedSup don't apply; read a window's packets instead
+	// (embeddedsub.ReadPackets).
+	Packets *SubtitlePacketInput
+	// Embedded names the track in the catalog. SubtitleCache, given an
+	// EmbeddedSubtitleSource, reads the track through it before demuxing
+	// InputPath. StreamExtractSubtitle ignores it.
+	Embedded *EmbeddedSubtitleRef
+	// KeepPath, on an unwindowed extract from InputPath, makes ffmpeg also
+	// copy the track, unconverted, into a file at KeepPath with the
+	// KeepFormat muxer ("matroska" or "mp4"), so the one demux both serves
+	// the track and keeps it (EmbeddedSubtitleSource.KeepDemuxed). The
+	// copy's timestamps get KeepOffset, the source's start time, back.
+	KeepPath   string
+	KeepFormat string
+	KeepOffset time.Duration
+	// KeepMaxBytes can lower the kept copy's cutoff; zero uses MaxDemuxCopyBytes.
+	KeepMaxBytes int64
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -82,8 +103,15 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	if opts.Writer == nil {
 		return errors.New("StreamExtractSubtitle: Writer is required")
 	}
-	if opts.InputPath == "" {
+	if opts.Packets != nil {
+		if err := opts.Packets.validate(); err != nil {
+			return fmt.Errorf("StreamExtractSubtitle: %w", err)
+		}
+	} else if opts.InputPath == "" {
 		return errors.New("StreamExtractSubtitle: InputPath is required")
+	} else if opts.Embedded != nil && opts.Embedded.IndexOnly {
+		// Every fallback to demuxing the source ends here.
+		return fmt.Errorf("StreamExtractSubtitle: %w", ErrSubtitleIndexOnly)
 	}
 
 	bin := opts.FFmpegPath
@@ -93,7 +121,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 
 	extractCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(extractCtx, bin, streamExtractArgs(opts)...)
+	cmd := fspath.CommandContext(extractCtx, bin, streamExtractArgs(opts)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
@@ -102,7 +130,8 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	cmd.Stderr = stderrBuf
 
 	start := time.Now()
-	if err := cmd.Start(); err != nil {
+	wait, err := startSubtitleCommand(extractCtx, cmd, opts.Packets)
+	if err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
@@ -116,7 +145,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		cancel()
 	}
 
-	waitErr := cmd.Wait()
+	waitErr, feedErr := wait()
 	slog.DebugContext(ctx, "subtitle stream extract finished", "component", "playback",
 		"track", opts.TrackIndex,
 		"seek", opts.SeekSeconds,
@@ -131,10 +160,29 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		return copyErr
 	}
 	if waitErr != nil {
-		return fmt.Errorf("ffmpeg subtitle stream failed: %w (stderr: %s)",
-			waitErr, truncateStderr(stderrBuf.String()))
+		// A write that failed first is why FFmpeg failed; callers look for it.
+		return errors.Join(fmt.Errorf("ffmpeg subtitle stream failed: %w (stderr: %s)",
+			waitErr, truncateStderr(stderrBuf.String())), feedErr)
+	}
+	if feedErr != nil {
+		// ffmpeg converted what it got, but not the whole track.
+		return fmt.Errorf("write subtitle packets to ffmpeg: %w", feedErr)
 	}
 	return nil
+}
+
+// keepFormatMP4 is the KeepFormat of MP4 copies.
+const keepFormatMP4 = "mp4"
+
+// MaxDemuxCopyBytes is the cutoff for a demuxed subtitle copy. Files at or
+// above it are not persisted: FFmpeg may have stopped that output early.
+const MaxDemuxCopyBytes int64 = 128 << 20
+
+func (opts StreamExtractOpts) demuxCopyLimit() int64 {
+	if opts.KeepMaxBytes > 0 {
+		return min(opts.KeepMaxBytes, MaxDemuxCopyBytes)
+	}
+	return MaxDemuxCopyBytes
 }
 
 // cachedSupSeekSlack is how far before a window's start an extract from a
@@ -164,7 +212,7 @@ func windowFromCachedSup(opts StreamExtractOpts, firstCue float64) StreamExtract
 // readSupFirstCue returns the time, in seconds, of the first segment in a
 // .sup file.
 func readSupFirstCue(path string) (float64, error) {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		return 0, err
 	}
@@ -186,6 +234,17 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 
 	args := []string{
 		"-hide_banner", "-nostats", "-loglevel", "error",
+	}
+	keep := opts.KeepPath != "" && opts.KeepFormat != "" && opts.Packets == nil &&
+		!opts.InputIsExtractedSup && opts.SeekSeconds == 0 && opts.DurationSeconds == 0
+	if keep {
+		// The kept copy goes to a file the caller just created.
+		args = append(args, "-y")
+	}
+	if opts.Packets != nil {
+		// The packets are the whole extract: no seek, window or remap.
+		args = append(args, opts.Packets.inputArgs()...)
+		return append(args, "-map", "0:s:0", "-c:s", outCodec, "-f", outFormat, "pipe:1")
 	}
 
 	// Input seek (before -i) is the fast variant: ffmpeg jumps near the
@@ -261,10 +320,28 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		args = append(args, "-to", strconv.FormatFloat(end, 'f', 3, 64))
 	}
 
-	return append(args,
+	args = append(args,
 		"-f", outFormat,
 		"pipe:1",
 	)
+	if keep {
+		// The demux takes the source's start time off; adding it back keeps
+		// the copy on the source's timeline, where no timestamp is negative,
+		// so the muxer has nothing to shift.
+		// Flush packets so -fs observes MP4 output while it is written.
+		args = append(args, "-map", fmt.Sprintf("0:s:%d", trackIndex), "-c:s", "copy",
+			"-output_ts_offset", formatMicroseconds(opts.KeepOffset),
+			"-flush_packets", "1",
+			"-fs", strconv.FormatInt(opts.demuxCopyLimit(), 10))
+		if opts.KeepFormat == keepFormatMP4 {
+			// The copy is converted from a pipe later, and FFmpeg's MP4
+			// demuxer can't seek back on one: past the first few dozen
+			// kilobytes of samples, a moov after the mdat is never read.
+			args = append(args, "-movflags", "+faststart")
+		}
+		args = append(args, "-f", opts.KeepFormat, "file:"+opts.KeepPath)
+	}
+	return args
 }
 
 // PGSWindowRequest reports whether a subtitle request explicitly opts in

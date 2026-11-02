@@ -135,61 +135,13 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 	}
 }
 
-func TestHandleSessionSyncUpdatesNativePlaybackSession(t *testing.T) {
-	media := &playStartMediaStore{
-		item: &models.MediaItem{ContentID: "book-1", Type: "audiobook", Title: "Book", UpdatedAt: time.Now()},
-	}
+func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 	absSessions := &fakePlaybackSessionStore{}
 	nativeSessions := playback.NewSessionManager(0, 0)
-	native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("start native session: %v", err)
-	}
-	_ = absSessions.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
-		ID:        native.ID,
-		UserID:    "1",
-		ProfileID: "profile-1",
-		ContentID: "book-1",
+	var finished []string
+	nativeSessions.AddFinishHook(func(_ context.Context, s *playback.Session) {
+		finished = append(finished, s.ID)
 	})
-	syncer := &recordingPlaybackSessionSyncer{}
-	h := New(Dependencies{
-		MediaStore:           media,
-		ProgressStore:        &fakeProgressStore{},
-		PlaybackSessionStore: absSessions,
-		NativeSessions:       nativeSessions,
-		NativeSessionSyncer:  syncer,
-	})
-
-	rec := dispatchABSWithParams(
-		http.MethodPatch,
-		"/api/session/"+native.ID,
-		map[string]string{"sid": native.ID},
-		[]byte(`{"currentTime":55.25,"timeListening":10}`),
-		"1",
-		"profile-1",
-		h.handleSessionSync,
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	updated, err := nativeSessions.GetSession(native.ID)
-	if err != nil {
-		t.Fatalf("native session missing: %v", err)
-	}
-	if updated.Position != 55.25 {
-		t.Fatalf("native position = %v, want 55.25", updated.Position)
-	}
-	if updated.IsPaused {
-		t.Fatalf("native session should be marked playing")
-	}
-	if syncer.calls == 0 {
-		t.Fatalf("native session syncer was not called")
-	}
-}
-
-func TestHandleSessionCloseStopsNativePlaybackSession(t *testing.T) {
-	absSessions := &fakePlaybackSessionStore{}
-	nativeSessions := playback.NewSessionManager(0, 0)
 	native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
 	if err != nil {
 		t.Fatalf("start native session: %v", err)
@@ -222,6 +174,10 @@ func TestHandleSessionCloseStopsNativePlaybackSession(t *testing.T) {
 	}
 	if _, err := nativeSessions.GetSession(native.ID); err == nil {
 		t.Fatalf("native session still exists after close")
+	}
+	// The finish hook is what records the play in admin playback history.
+	if len(finished) != 1 || finished[0] != native.ID {
+		t.Fatalf("finish hooks ran for %v, want [%s]", finished, native.ID)
 	}
 	if syncer.calls == 0 {
 		t.Fatalf("native session syncer was not called")

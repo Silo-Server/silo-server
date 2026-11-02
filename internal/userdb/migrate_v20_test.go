@@ -1,19 +1,11 @@
 package userdb
 
 import (
-	"database/sql"
 	"testing"
 )
 
 func TestMigrateToV20AllowsPersonalSortPreferenceKinds(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	if _, err := db.Exec(`
 DROP TABLE collection_sort_preferences;
 CREATE TABLE collection_sort_preferences (

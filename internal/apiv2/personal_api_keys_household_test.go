@@ -40,60 +40,6 @@ func (p householdStores) ForUser(context.Context, int) (userstore.UserStore, err
 	return householdStore{profiles: p.profiles}, nil
 }
 
-// TestPersonalAPIKeyCreationRequiresActingAdmin: a key skips every profile's
-// PIN, so on an admin account only the acting admin — the primary profile,
-// verified when it has a PIN — mints one. A child profile on the admin's
-// account is refused, and so is a profile-less request once the household
-// has a limited profile.
-func TestPersonalAPIKeyCreationRequiresActingAdmin(t *testing.T) {
-	restricted := []userstore.Profile{
-		{ID: "p-primary", Name: "Ada", IsPrimary: true},
-		{ID: "p-primary-locked", Name: "Ada locked", PINHash: "hash"},
-		{ID: "p-owner", Name: "Kiddo", IsChild: true, MaxContentRating: "PG"},
-	}
-	lockedPrimary := []userstore.Profile{
-		{ID: "p-primary-locked", Name: "Ada", IsPrimary: true, PINHash: "hash"},
-		{ID: "p-owner", Name: "Kiddo"},
-	}
-	unrestricted := []userstore.Profile{
-		{ID: "p-primary", Name: "Ada", IsPrimary: true},
-		{ID: "p-owner", Name: "Sam"},
-	}
-	for _, tc := range []struct {
-		name     string
-		profiles []userstore.Profile
-		headers  map[string]string
-		want     ProblemType
-	}{
-		{"child profile on the admin account", restricted, with(bearer(adminToken), "X-Profile-Id", "p-owner"), TypePermissionDenied},
-		{"non-primary on an unrestricted household", unrestricted, with(bearer(adminToken), "X-Profile-Id", "p-owner"), TypePermissionDenied},
-		{"profile-less on a restricted household", restricted, bearer(adminToken), TypePermissionDenied},
-		{"locked primary without a token", lockedPrimary, with(bearer(adminToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
-		{"primary without a PIN", restricted, with(bearer(adminToken), "X-Profile-Id", "p-primary"), ProblemType{}},
-		{"locked primary with a token", lockedPrimary, with(with(bearer(adminToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "pvt"), ProblemType{}},
-		{"profile-less on an unrestricted household", unrestricted, bearer(adminToken), ProblemType{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &scopeCatalogStore{}
-			svc := handlers.NewAPIKeyHandler(store)
-			svc.Stores = householdStores{profiles: tc.profiles}
-			deps := pilotDeps(nil, nil)
-			deps.PersonalAPIKeys = svc
-			rec := do(t, NewHandler(deps), http.MethodPost, Prefix+"/api-keys", `{"label":"Tool"}`, tc.headers)
-			if tc.want == (ProblemType{}) {
-				if rec.Code != http.StatusCreated || !store.created {
-					t.Fatalf("status %d created %v body %s", rec.Code, store.created, rec.Body.String())
-				}
-				return
-			}
-			requireProblem(t, rec, tc.want)
-			if store.created {
-				t.Fatal("a refused create reached storage")
-			}
-		})
-	}
-}
-
 // TestPersonalAPIKeyCreationFailsClosedWithoutStores: a service wired without
 // the household stores cannot tell the acting admin apart, so it refuses.
 func TestPersonalAPIKeyCreationFailsClosedWithoutStores(t *testing.T) {

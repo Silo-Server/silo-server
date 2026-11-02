@@ -20,6 +20,9 @@ const (
 
 type QueryExecutor struct {
 	GroupByWork bool
+	// BoxSetCollections groups the movies of these TMDB collections into one
+	// row each. It applies only together with GroupByWork.
+	BoxSetCollections []int64
 	// SourceWhere and SourceArgs are trusted internal source predicates. The
 	// predicate numbers its parameters from $1; the executor rebinds them.
 	SourceWhere string
@@ -77,6 +80,9 @@ func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access A
 }
 
 func (e *QueryExecutor) buildCountQuery(def QueryDefinition, access AccessFilter) (string, []any, error) {
+	if countSQL, countArgs, ok, err := e.episodeCatalogCountQuery(def, access); ok || err != nil {
+		return countSQL, countArgs, err
+	}
 	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
 	if err != nil {
 		return "", nil, err
@@ -100,7 +106,7 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, fmt.Errorf("query executor requires a database pool")
 	}
 
-	if !e.GroupByWork && e.SourceWhere == "" && e.SourceJoin == "" && len(e.SourceOrder) == 0 {
+	if e.usesEpisodeCatalogQueries() {
 		if items, total, hasMore, ok, err := e.tryEpisodeCatalogUserStatePreviewPage(
 			ctx,
 			def,
@@ -215,6 +221,12 @@ type previewPagePlan struct {
 	// titleKey is the scope's title sort key, which title order sorts by and
 	// the letter index files items under. It binds no arguments.
 	titleKey string
+	// namePrefixWhere is the name prefix condition, also part of whereClause,
+	// and whereWithoutNamePrefix the clause without it. A box set is filed
+	// under its representative's letter, so grouping applies the prefix after
+	// choosing representatives rather than before.
+	namePrefixWhere        string
+	whereWithoutNamePrefix string
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -414,6 +426,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
+	} else if baseRelation == mediaItemsBaseRelation {
+		// No library named or denied: a media item must still belong to one.
+		// Other relations (episodes, the search cursor's pre-filtered union)
+		// carry their own membership.
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
 	}
 	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")
@@ -440,14 +457,20 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	// sub-units and must never surface as standalone catalog items.
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
+	whereWithoutNamePrefix := ""
+	if len(conditions) > 0 {
+		whereWithoutNamePrefix = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	namePrefixWhere := ""
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
 		// Match only the scope-specific sort key that title sorting orders by,
 		// like sortTitlePrefixCondition in browse.go: title="The Office" with
 		// sort_title="Office, The" belongs under O, not also under T.
-		conditions = append(conditions, fmt.Sprintf(
+		namePrefixWhere = fmt.Sprintf(
 			"%s LIKE $%d ESCAPE '\\'",
 			builder.normalizedTitleExpr(), argIdx,
-		))
+		)
+		conditions = append(conditions, namePrefixWhere)
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
 	}
@@ -510,6 +533,8 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		fromClausePaged = rebindSQLPlaceholders(fromClausePaged, cteShift)
 		fromClauseCount = rebindSQLPlaceholders(fromClauseCount, cteShift)
 		whereClause = rebindSQLPlaceholders(whereClause, cteShift)
+		whereWithoutNamePrefix = rebindSQLPlaceholders(whereWithoutNamePrefix, cteShift)
+		namePrefixWhere = rebindSQLPlaceholders(namePrefixWhere, cteShift)
 		sortPlan.OrderBy = rebindSQLPlaceholders(sortPlan.OrderBy, cteShift)
 		for i := range sortPlan.terms {
 			sortPlan.terms[i].expression = rebindSQLPlaceholders(sortPlan.terms[i].expression, cteShift)
@@ -534,6 +559,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
 		titleKey:        builder.normalizedTitleExpr(),
+
+		namePrefixWhere:        namePrefixWhere,
+		whereWithoutNamePrefix: whereWithoutNamePrefix,
 		// Keep non-episode relations, sort joins, history CTEs and source-ordered
 		// plans on their existing paths. Only the built-in episode relation
 		// guarantees the unique IDs and simple, deterministic title sort required
@@ -543,7 +571,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 			len(e.SourceOrder) == 0 && e.SourceJoin == "",
 	}
 	if e.GroupByWork {
-		return plan.groupedByWork(), nil
+		return plan.groupedByWork(e.BoxSetCollections), nil
 	}
 	return plan, nil
 }

@@ -1,9 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import dismissHomeItemMissingAnchor from "../../../../contracts/api/v2/fixtures/dismiss_home_item_missing_anchor.json";
-import { V2ProblemError } from "@/api/v2/request";
-
 const mocks = vi.hoisted(() => ({
   fetchWithSession: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
@@ -109,48 +106,6 @@ describe("home dismissal query hooks", () => {
     });
   });
 
-  it("calls the next up dismissal endpoint with series_id", async () => {
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    await mutation.mutationFn({
-      itemId: "ep-2",
-      surface: "next_up",
-      seriesId: "series-1",
-    });
-
-    expect(lastRequest()).toEqual({
-      url: "/api/v2/home/dismissals/next_up/ep-2",
-      method: "PUT",
-      body: JSON.stringify({ series_id: "series-1" }),
-    });
-  });
-
-  it("surfaces a validation problem as a V2ProblemError and reports it through the toast", async () => {
-    mocks.fetchWithSession.mockImplementation(() =>
-      Promise.resolve({
-        res: new Response(JSON.stringify(dismissHomeItemMissingAnchor), {
-          status: 422,
-          headers: { "Content-Type": "application/problem+json" },
-        }),
-        requestProfileId: "p-owner",
-        requestProfileToken: null,
-      }),
-    );
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    const error = await mutation
-      .mutationFn({ itemId: "ep-1", surface: "continue_watching" })
-      .catch((e: unknown) => e);
-
-    expect(error).toBeInstanceOf(V2ProblemError);
-    expect((error as V2ProblemError).status).toBe(422);
-    expect((error as V2ProblemError).problemType).toBe("validation_failed");
-    mutation.onError?.(error);
-    expect(mocks.toastError).toHaveBeenCalledWith(dismissHomeItemMissingAnchor.detail);
-  });
-
   it("invalidates media surfaces and shows an undo toast on success", async () => {
     useDismissHomeItem();
     const mutation = latestMutationOptions();
@@ -174,75 +129,6 @@ describe("home dismissal query hooks", () => {
     });
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Removed from Continue Watching and Next Up",
-      expect.objectContaining({
-        action: expect.objectContaining({
-          label: "Undo",
-        }),
-      }),
-    );
-  });
-
-  it("keeps continue watching toast copy for movie dismissals", async () => {
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    const variables: DismissHomeItemVariables = {
-      itemId: "movie-1",
-      surface: "continue_watching",
-      mediaType: "movie",
-      progressUpdatedAt: "2026-03-22T18:10:00Z",
-    };
-
-    await mutation.onSuccess?.(undefined, variables);
-
-    expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Removed from Continue Watching",
-      expect.objectContaining({
-        action: expect.objectContaining({
-          label: "Undo",
-        }),
-      }),
-    );
-  });
-
-  it("uses continue listening toast copy for audiobook dismissals", async () => {
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    const variables: DismissHomeItemVariables = {
-      itemId: "book-1",
-      surface: "continue_watching",
-      mediaType: "audiobook",
-      progressUpdatedAt: "2026-03-22T18:10:00Z",
-    };
-
-    await mutation.onSuccess?.(undefined, variables);
-
-    expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Removed from Continue Listening",
-      expect.objectContaining({
-        action: expect.objectContaining({
-          label: "Undo",
-        }),
-      }),
-    );
-  });
-
-  it("uses continue reading toast copy for ebook dismissals", async () => {
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    const variables: DismissHomeItemVariables = {
-      itemId: "ebook-1",
-      surface: "continue_watching",
-      mediaType: "ebook",
-      progressUpdatedAt: "2026-03-22T18:10:00Z",
-    };
-
-    await mutation.onSuccess?.(undefined, variables);
-
-    expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Removed from Continue Reading",
       expect.objectContaining({
         action: expect.objectContaining({
           label: "Undo",

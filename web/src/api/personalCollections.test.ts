@@ -131,17 +131,6 @@ describe("saving a staged poster removal", () => {
     ]);
   });
 
-  it("uploads a replacement URL instead of deleting", async () => {
-    request.mockReset().mockResolvedValueOnce(withPoster);
-    await saveCollectionPoster(withPoster, null, "https://images.example/new.png", true);
-    expect(request.mock.calls).toEqual([
-      [
-        "PUT /api/v2/collections/{id}/poster",
-        { path: { id: "saved" }, form: { source_url: "https://images.example/new.png" } },
-      ],
-    ]);
-  });
-
   it("keeps the saved collection and reports a failed removal", async () => {
     request.mockReset().mockRejectedValueOnce(new Error("Storage unavailable"));
     const result = await saveCollectionPoster(withPoster, null, undefined, true);

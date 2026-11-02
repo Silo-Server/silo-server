@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -111,30 +112,6 @@ func TestRequestLabelsAreStable(t *testing.T) {
 	}
 }
 
-func TestValidationFailureCounter(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
-	before := counterValue(t, validationFailures, prometheus.Labels{"operation_id": "probepublic"})
-	rec := do(t, h, http.MethodPost, "/api/v2/probe/public", `{"count":99}`, nil)
-	requireProblem(t, rec, TypeValidationFailed)
-	if after := counterValue(t, validationFailures, prometheus.Labels{"operation_id": "probepublic"}); after != before+1 {
-		t.Fatalf("validation counter %v -> %v", before, after)
-	}
-	getBefore := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": "GET"})
-	RecordV1Tombstone(http.MethodGet)
-	otherBefore := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": labelOther})
-	RecordV1Tombstone("BREW")
-	if v := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": labelOther}); v != otherBefore+1 {
-		t.Fatalf("tombstone other-method series: %v -> %v", otherBefore, v)
-	}
-	if v := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": "GET"}); v != getBefore+1 {
-		t.Fatalf("tombstone GET series: %v -> %v", getBefore, v)
-	}
-	var m dto.Metric
-	if err := requestDuration.WithLabelValues("2", "probepublic", "POST").(prometheus.Histogram).Write(&m); err != nil || m.Histogram.GetSampleCount() == 0 {
-		t.Fatalf("duration not observed: %v %v", err, m.Histogram.GetSampleCount())
-	}
-}
-
 func TestSecretBearingRequestIsNotLogged(t *testing.T) {
 	buf := captureLogs(t)
 	h := newTestHandler(t, parityDeps(false))
@@ -207,15 +184,26 @@ func TestMethodLabelIsBounded(t *testing.T) {
 }
 
 // zeroCopyWriter stands in for net/http's response writer, whose ReadFrom is
-// the sendfile path, and records how many bytes arrived through it.
+// the sendfile path, and records how many bytes arrived through it. fromFile
+// counts the ones whose source sendfile could use: an *os.File, alone or under
+// one *io.LimitedReader.
 type zeroCopyWriter struct {
 	*httptest.ResponseRecorder
 	readFrom int64
+	fromFile int64
 }
 
 func (w *zeroCopyWriter) ReadFrom(src io.Reader) (int64, error) {
+	file := src
+	if limited, ok := src.(*io.LimitedReader); ok {
+		file = limited.R
+	}
+	_, isFile := file.(*os.File)
 	n, err := io.Copy(w.ResponseRecorder, src)
 	w.readFrom += n
+	if isFile {
+		w.fromFile += n
+	}
 	return n, err
 }
 

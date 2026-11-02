@@ -335,23 +335,6 @@
           "admin_only": false
         },
         {
-          "type": "next_up",
-          "category": "library_staples",
-          "presets": [
-            {
-              "key": "next_up_default",
-              "display_name": "On Deck",
-              "icon": "📺",
-              "description_short": "Next episodes ready to watch.",
-              "description_long": "",
-              "default_params": {}
-            }
-          ],
-          "avoid_duplicates": false,
-          "supports_rotation": false,
-          "admin_only": false
-        },
-        {
           "type": "random",
           "category": "library_staples",
           "presets": [
@@ -640,13 +623,15 @@
               "display_name": "Seasonal Picks",
               "icon": "🗓️",
               "description_short": "Cycles automatically — Halloween in October, Christmas in December, etc.",
-              "description_long": "One section that swaps in different theme picks based on the calendar. Toggle which holidays this profile celebrates from the Add section dialog.",
+              "description_long": "One section that swaps in curated holiday picks based on the calendar. Choose the holidays, a vibe for each, and add your own holidays.",
               "default_params": {
                 "enabled_themes": [
                   "halloween",
                   "christmas",
+                  "new_year",
                   "valentines",
                   "st_patricks",
+                  "easter",
                   "thanksgiving",
                   "summer_blockbuster",
                   "saturday_morning"

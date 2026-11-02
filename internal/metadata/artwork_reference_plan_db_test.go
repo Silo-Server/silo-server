@@ -45,6 +45,9 @@ func TestArtworkReferenceChecksUsePathIndexesDB(t *testing.T) {
 			indexes = append(indexes, name)
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			t.Fatalf("%s: list indexes: %v", surface.name, err)
+		}
 		if len(indexes) == 0 {
 			continue
 		}
@@ -66,6 +69,9 @@ func TestArtworkReferenceChecksUsePathIndexesDB(t *testing.T) {
 			plan.WriteString(line + "\n")
 		}
 		planRows.Close()
+		if err := planRows.Err(); err != nil {
+			t.Fatalf("%s: explain: %v", surface.name, err)
+		}
 		if _, err := tx.Exec(ctx, `DEALLOCATE artwork_reference_check`); err != nil {
 			t.Fatal(err)
 		}

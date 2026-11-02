@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
-	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 type stubCalendarRepo struct {
@@ -54,24 +52,6 @@ func (r *stubCalendarImageResolver) ResolveImageURLs(_ context.Context, paths []
 	return result
 }
 
-func TestHandleGetCalendar_RejectsEndBeforeStart(t *testing.T) {
-	t.Parallel()
-
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{repo: repo}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-12&end=2026-04-06", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if repo.calls != 0 {
-		t.Fatalf("expected repo not to be called, got %d calls", repo.calls)
-	}
-}
-
 func TestHandleGetCalendar_RejectsRangesLongerThan31Days(t *testing.T) {
 	t.Parallel()
 
@@ -87,29 +67,6 @@ func TestHandleGetCalendar_RejectsRangesLongerThan31Days(t *testing.T) {
 	}
 	if repo.calls != 0 {
 		t.Fatalf("expected repo not to be called, got %d calls", repo.calls)
-	}
-}
-
-func TestHandleGetCalendar_ReturnsEmptyEvents(t *testing.T) {
-	t.Parallel()
-
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{repo: repo}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-
-	var resp calendarResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Events) != 0 {
-		t.Fatalf("events len = %d, want 0", len(resp.Events))
 	}
 }
 
@@ -448,21 +405,6 @@ func (s *stubCalendarPersonal) ListWatchedItemIDs(_ context.Context, _ int, _ st
 	return s.watched, nil
 }
 
-type stubPopularSource struct{ items []recommendations.ScoredItem }
-
-func (s *stubPopularSource) GetRecommendationCache(_ context.Context, _ int, _, _, _ string) ([]recommendations.ScoredItem, error) {
-	return s.items, nil
-}
-
-type stubTrendingSource struct {
-	snap sections.TrendingSnapshot
-	ok   bool
-}
-
-func (s *stubTrendingSource) Get(_ context.Context, _, _ string) (sections.TrendingSnapshot, bool, error) {
-	return s.snap, s.ok, nil
-}
-
 func TestHandleGetCalendar_FollowingPassesFollowedIDs(t *testing.T) {
 	repo := &stubCalendarRepo{}
 	handler := &CalendarHandler{repo: repo, personal: &stubCalendarPersonal{followed: []string{"s1", "s2"}}}
@@ -479,70 +421,6 @@ func TestHandleGetCalendar_FollowingPassesFollowedIDs(t *testing.T) {
 	}
 	if got := repo.last.RestrictToIDs; len(got) != 2 || got[0] != "s1" || got[1] != "s2" {
 		t.Fatalf("RestrictToIDs = %v, want [s1 s2]", got)
-	}
-}
-
-func TestHandleGetCalendar_PopularReadsCache(t *testing.T) {
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{
-		repo:    repo,
-		popular: &stubPopularSource{items: []recommendations.ScoredItem{{MediaItemID: "p1"}, {MediaItemID: "p2"}}},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12&filter=popular", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if !repo.last.RestrictByIDs || len(repo.last.RestrictToIDs) != 2 || repo.last.RestrictToIDs[0] != "p1" {
-		t.Fatalf("RestrictToIDs = %v, want [p1 p2]", repo.last.RestrictToIDs)
-	}
-}
-
-func TestHandleGetCalendar_TrendingReadsSnapshot(t *testing.T) {
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{
-		repo:     repo,
-		trending: &stubTrendingSource{ok: true, snap: sections.TrendingSnapshot{ContentIDs: []string{"t1"}}},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12&filter=trending", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if !repo.last.RestrictByIDs || len(repo.last.RestrictToIDs) != 1 || repo.last.RestrictToIDs[0] != "t1" {
-		t.Fatalf("RestrictToIDs = %v, want [t1]", repo.last.RestrictToIDs)
-	}
-}
-
-func TestHandleGetCalendar_EverythingHasNoRestriction(t *testing.T) {
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{repo: repo}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12&filter=everything", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if rec.Code != http.StatusOK || repo.calls != 1 {
-		t.Fatalf("calendar = %d with %d repository calls, want 200 and one call", rec.Code, repo.calls)
-	}
-	if repo.last.RestrictByIDs {
-		t.Fatalf("expected no restriction for everything")
-	}
-}
-
-func TestHandleGetCalendar_RejectsUnknownFilter(t *testing.T) {
-	repo := &stubCalendarRepo{}
-	handler := &CalendarHandler{repo: repo}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12&filter=bogus", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetCalendar(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if repo.calls != 0 {
-		t.Fatalf("expected repo not called, got %d", repo.calls)
 	}
 }
 

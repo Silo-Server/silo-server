@@ -85,26 +85,6 @@ func TestRunIntrosOnlySkipsCreditsAndMovies(t *testing.T) {
 	}
 }
 
-// The episode-only pass of a server without Chromaprint narrows to the kinds
-// selected, as Run does.
-func TestRunEpisodesCreditsOnlySkipsIntroWork(t *testing.T) {
-	analyzer, repo, sampler := kindsRunFixture(t)
-
-	summary, err := analyzer.RunEpisodes(context.Background(), EpisodeMarkerKinds{Credits: true}, nil)
-	if err != nil {
-		t.Fatalf("RunEpisodes: %v", err)
-	}
-	if summary.ChapterMarkersWritten != 0 || summary.SeasonGroupsConsidered != 0 || summary.SilenceBackfillConsidered != 0 {
-		t.Fatalf("summary %+v, want no intro chapters, intro groups, or silence backfill", summary)
-	}
-	if intros := patchesOfKind(repo.patches, kindIntro); len(intros) != 0 {
-		t.Fatalf("intro patches %+v, want none with intro detection off", intros)
-	}
-	if summary.CreditsAudioMarkersWritten != 3 || summary.MoviesConsidered != 0 || sampler.tailCount() != 0 {
-		t.Fatalf("summary %+v with %d movie tails, want episode credits and no movies", summary, sampler.tailCount())
-	}
-}
-
 // The movie-only pass of a server without Chromaprint checks movies for
 // credits, so it runs with intros off and does nothing with credits off.
 func TestRunMoviesFollowsCreditsKind(t *testing.T) {

@@ -449,8 +449,7 @@ function useServerOptions(
     probe().catch(() => {
       // Shown inline through `status`; the Test button reports the reason.
     });
-    // Only the connection identity decides when to probe again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the connection identity decides when to probe again
   }, [debouncedSig, canLoad]);
 
   return { options, status, problem, canLoad, probe };

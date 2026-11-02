@@ -389,7 +389,7 @@ func decodeEmbyMultipart(body []byte, boundary string, payload *embyWebhookPaylo
 	var fallback []byte
 	for {
 		part, err := reader.NextPart()
-		if err == io.EOF {
+		if err == io.EOF { //nolint:errorlint // NextPart returns a bare io.EOF only at the closing boundary; a wrapped one means a truncated body
 			break
 		}
 		if err != nil {

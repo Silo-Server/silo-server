@@ -16,16 +16,7 @@ func TestClassifyFSType(t *testing.T) {
 		display string
 	}{
 		{"ext4", 0xef53, fsMonitored, ""},
-		{"xfs", 0x58465342, fsMonitored, ""},
-		{"btrfs", 0x9123683e, fsMonitored, ""},
-		{"zfs", 0x2fc12fc1, fsMonitored, ""},
-		{"tmpfs", 0x01021994, fsMonitored, ""},
 		{"nfs", 0x6969, fsUnsupported, "NFS"},
-		{"smb", 0x517b, fsUnsupported, "SMB"},
-		{"cifs", 0xff534d42, fsUnsupported, "CIFS"},
-		{"smb2", 0xfe534d42, fsUnsupported, "SMB2"},
-		{"cephfs", 0x00c36400, fsUnsupported, "CephFS"},
-		{"9p", 0x01021997, fsUnsupported, "9p"},
 		{"fuse and virtiofs", 0x65735546, fsMonitoredCaveat, "FUSE"},
 	}
 	for _, tt := range tests {

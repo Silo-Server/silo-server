@@ -3,7 +3,7 @@
 // library_collections subsystem).
 //
 // User collections live in user_personal_collections and use external sources
-// (TMDB / Trakt / MDBList) the same way admin collections do. A sync keeps
+// (TMDB / MDBList) the same way admin collections do. A sync keeps
 // only titles the collection's owner profile can access (its libraries and
 // rating limit), so an item limit fills with titles the owner can see. Catalog
 // reads still limit what each viewer sees to that viewer's own access.
@@ -27,14 +27,13 @@ func CanonicalMDBListURL(url string) (string, error) {
 type SourceMode string
 
 const (
-	SourceModeMDBList     SourceMode = "mdblist_json"
-	SourceModeTMDBPreset  SourceMode = "tmdb_preset"
-	SourceModeTMDBList    SourceMode = "tmdb_list"
-	SourceModeTraktPreset SourceMode = "trakt_preset"
+	SourceModeMDBList    SourceMode = "mdblist_json"
+	SourceModeTMDBPreset SourceMode = "tmdb_preset"
+	SourceModeTMDBList   SourceMode = "tmdb_list"
 )
 
 // MinSyncIntervalHours is the smallest interval (in hours between fires) that
-// a user is allowed to schedule. Stricter than admin to keep TMDB/Trakt API
+// a user is allowed to schedule. Stricter than admin to keep TMDB API
 // quota bounded across many users.
 const MinSyncIntervalHours = 24
 
@@ -75,7 +74,7 @@ func ParseSourceConfig(raw string) (SourceConfig, error) {
 
 // DisplayURL produces a stable, human-friendly identifier for the source —
 // stored on the row so list views can render it without reparsing
-// SourceConfig. Mirrors the admin tmdb://… / trakt://… scheme.
+// SourceConfig. Mirrors the admin tmdb://… scheme.
 func (c SourceConfig) DisplayURL() string {
 	switch c.Mode {
 	case SourceModeMDBList:
@@ -87,11 +86,6 @@ func (c SourceConfig) DisplayURL() string {
 		return fmt.Sprintf("tmdb://%s/%s", c.Preset, c.MediaType)
 	case SourceModeTMDBList:
 		return c.URL
-	case SourceModeTraktPreset:
-		if c.Preset == "recommended" {
-			return fmt.Sprintf("trakt://%s/%s/%s", c.Preset, c.MediaType, c.ProfileID)
-		}
-		return fmt.Sprintf("trakt://%s/%s", c.Preset, c.MediaType)
 	default:
 		return ""
 	}

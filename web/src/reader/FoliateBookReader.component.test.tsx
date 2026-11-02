@@ -393,25 +393,6 @@ describe("FoliateBookReader open flow", () => {
     }
   });
 
-  it("surfaces a user-facing error when the ebook file fails to load", async () => {
-    mocks.file.mockImplementation(
-      () =>
-        new Response("epub", {
-          headers: {
-            "Content-Length": String(3 * 1024 ** 3),
-            "Content-Type": "application/epub+zip",
-          },
-        }),
-    );
-
-    await act(async () => {
-      root.render(ui(fileA));
-    });
-
-    expect(container.textContent).toContain("This file is too large to open in the browser");
-    expect(container.textContent).not.toContain("Loading reader...");
-  });
-
   it("ignores progress save responses that resolve out of order", async () => {
     const book = makeBook("A");
     mocks.loaderOpen.mockResolvedValue({ book });

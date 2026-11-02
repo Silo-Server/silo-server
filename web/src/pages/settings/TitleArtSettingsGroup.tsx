@@ -1,4 +1,4 @@
-import { Info, MonitorSmartphone, Type } from "lucide-react";
+import { Info, MonitorSmartphone, RotateCcw, Type } from "lucide-react";
 import { toast } from "sonner";
 
 import { SettingRow } from "@/components/settings/SettingRow";
@@ -14,7 +14,8 @@ import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 /**
  * Title art and its "Apply to all devices" companion. Unlike the rest of the
  * Title Pages page this is not only the profile's choice: it is this browser's
- * own choice, or the profile's choice for every device.
+ * own choice, the profile's choice for every device, or, with neither, the
+ * server default an administrator may set.
  */
 export function TitleArtSettingsGroup() {
   const capabilities = useSettingsCapabilities();
@@ -65,11 +66,27 @@ export function TitleArtSettingsGroup() {
             choose per device again.
           </span>
         </p>
-      ) : (
+      ) : titleArt.followsServerDefault ? (
+        <p className="text-muted-foreground text-[13px] leading-relaxed">
+          Using the server default ({titleArt.showTitleArt ? "on" : "off"}). Change it here to
+          choose for this browser.
+        </p>
+      ) : titleArt.hasOwnChoice ? (
         <p className="text-muted-foreground text-[13px] leading-relaxed">
           Only affects this browser. Your other devices keep their own setting.
         </p>
-      )}
+      ) : null}
+      {titleArt.hasOwnChoice ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void save(titleArt.followServerDefault())}
+          className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1.5 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0"
+        >
+          <RotateCcw aria-hidden="true" className="size-3.5" />
+          Use server default
+        </button>
+      ) : null}
     </SettingsGroup>
   );
 }

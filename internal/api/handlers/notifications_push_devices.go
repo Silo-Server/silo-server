@@ -63,6 +63,8 @@ func (h *NotificationsHandler) HandleRegisterApplePushDevice(w http.ResponseWrit
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, notifications.ErrPushGenerationConflict):
+			writeError(w, http.StatusConflict, "conflict", "Push registration conflicts with the current installation")
 		case errors.Is(err, notifications.ErrPushLegacyWriter):
 			writeError(w, http.StatusConflict, "push_registration_upgrade_required", "This installation requires ordered push registration")
 		case errors.Is(err, notifications.ErrPushDeviceInvalid):
@@ -132,6 +134,8 @@ func (h *NotificationsHandler) HandleRegisterPushDevice(w http.ResponseWriter, r
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, notifications.ErrPushGenerationConflict):
+			writeError(w, http.StatusConflict, "conflict", "Push registration conflicts with the current installation")
 		case errors.Is(err, notifications.ErrPushLegacyWriter):
 			writeError(w, http.StatusConflict, "push_registration_upgrade_required", "This installation requires ordered push registration")
 		case errors.Is(err, notifications.ErrPushDeviceInvalid):
@@ -161,7 +165,7 @@ func (h *NotificationsHandler) HandleUnregisterPushDevice(w http.ResponseWriter,
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Push registration is not available")
 		return
 	}
-	err := service.Unregister(r.Context(), apimw.GetProfileID(r.Context()), chi.URLParam(r, "device_id"))
+	err := service.Unregister(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "device_id"))
 	if err != nil {
 		switch {
 		case errors.Is(err, notifications.ErrPushLegacyWriter):

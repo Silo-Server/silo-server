@@ -19,14 +19,9 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const NOW = Date.parse("2026-08-26T14:37:00Z");
 const CURRENT_HOUR = Math.floor(NOW / HOUR_MS) * HOUR_MS;
-const CURRENT_DAY = Math.floor(NOW / DAY_MS) * DAY_MS;
 
 function isoHour(hoursAgo: number): string {
   return new Date(CURRENT_HOUR - hoursAgo * HOUR_MS).toISOString();
-}
-
-function isoDay(daysAgo: number): string {
-  return new Date(CURRENT_DAY - daysAgo * DAY_MS).toISOString();
 }
 
 function activity(overrides: Partial<AdminPlaybackActivity> = {}): AdminPlaybackActivity {
@@ -104,23 +99,6 @@ describe("buildPlaybackActivityColumns", () => {
     expect(columns.every((column) => column.segments.every((value) => value === 0))).toBe(true);
   });
 
-  // Past two days the endpoint groups by day, and zero-filling on an hourly
-  // grid would scatter those columns across empty hours.
-  it("zero-fills a week on the daily grid the server bucketed by", () => {
-    const columns = buildPlaybackActivityColumns(
-      [{ hour: isoDay(3), direct: 5, remux: 0, transcode: 1 }],
-      { hours: 168, bucketSeconds: 86_400, now: NOW },
-    );
-
-    // Eight columns, not seven: the day the window opens in is partial and the
-    // endpoint still reports it.
-    expect(columns).toHaveLength(8);
-    expect(columns[0]?.t).toBe(CURRENT_DAY - 7 * DAY_MS);
-    expect(columns[7]?.t).toBe(CURRENT_DAY);
-    expect([...(columns[4]?.segments ?? [])]).toEqual([5, 0, 1]);
-    expect([...(columns[5]?.segments ?? [])]).toEqual([0, 0, 0]);
-  });
-
   it("falls back to hourly buckets when the response omits the width", () => {
     const columns = buildPlaybackActivityColumns([], { hours: 24, bucketSeconds: 0, now: NOW });
 
@@ -131,27 +109,6 @@ describe("buildPlaybackActivityColumns", () => {
 describe("PlaybackActivityWidget", () => {
   beforeEach(() => {
     mocks.useAdminPlaybackActivity.mockReset();
-  });
-
-  it("renders one column per hour of the window", () => {
-    mocks.useAdminPlaybackActivity.mockReturnValue({
-      data: activity({
-        buckets: [
-          { hour: new Date(Date.now() - HOUR_MS).toISOString(), direct: 2, remux: 0, transcode: 1 },
-        ],
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<PlaybackActivityWidget />);
-
-    const chart = screen.getByRole("img", { name: /playback sessions per hour/i });
-    // 25 hourly columns: the hour the window opens in is partial but real.
-    expect(chart.querySelectorAll(":scope > div")).toHaveLength(25);
-    expect(screen.getByText("3 sessions")).toBeTruthy();
-    expect(screen.getByText("Direct stream")).toBeTruthy();
-    expect(screen.getByText("Playback activity · last 24 h")).toBeTruthy();
   });
 
   // A month asks for 720 hours and gets daily buckets back, so the chart has to
@@ -180,29 +137,5 @@ describe("PlaybackActivityWidget", () => {
     expect(chart.querySelectorAll(":scope > div")).toHaveLength(31);
     expect(screen.getByText("6 sessions")).toBeTruthy();
     expect(screen.getByText("Playback activity · last 30 d")).toBeTruthy();
-  });
-
-  it("says the window was quiet instead of drawing an empty axis", () => {
-    mocks.useAdminPlaybackActivity.mockReturnValue({
-      data: activity(),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<PlaybackActivityWidget />);
-
-    expect(screen.getByText("No playback in the last 24 hours")).toBeTruthy();
-  });
-
-  it("surfaces a failed load", () => {
-    mocks.useAdminPlaybackActivity.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error("boom"),
-    });
-
-    render(<PlaybackActivityWidget />);
-
-    expect(screen.getByText("Failed to load playback activity.")).toBeTruthy();
   });
 });

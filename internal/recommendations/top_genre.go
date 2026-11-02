@@ -2,10 +2,16 @@ package recommendations
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // topGenreTTL is how long a server reuses the top genre. It follows the
@@ -37,7 +43,16 @@ func (c *topGenreCache) get(ctx context.Context, load func(context.Context) (str
 	if fresh {
 		return genre, nil
 	}
-	result := c.loading.DoChan("", func() (any, error) {
+	result := c.loading.DoChan("", func() (value any, err error) {
+		defer func() {
+			// The read runs on its own goroutine, out of reach of the
+			// request's panic recovery.
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "top genre read panicked", "component", "recommendations",
+					"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+				value, err = "", errors.New("top genre read panicked")
+			}
+		}()
 		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), topGenreTimeout)
 		defer cancel()
 		genre, err := load(loadCtx)

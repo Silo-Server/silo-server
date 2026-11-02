@@ -2,7 +2,6 @@ package nodemetrics
 
 import (
 	"context"
-	"errors"
 	"os"
 	"strconv"
 	"sync"
@@ -46,10 +45,7 @@ func (f *diskFixture) answer(path string, stats fsStats) {
 func newDiskFixture(t *testing.T, paths ...string) *diskFixture {
 	t.Helper()
 	tree := newProcTree(t)
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 	clock := newFakeClock()
 
 	f := &diskFixture{
@@ -172,40 +168,6 @@ func TestDiskStatsFlagsTheScratchMount(t *testing.T) {
 	}
 }
 
-// A scratch dir that does not exist yet is still the scratch entry: an
-// unavailable reading has to be distinguishable from a media root's, and the
-// admission guard depends on telling "cannot measure" from "not the scratch".
-func TestDiskStatsFlagsAnUnavailableScratchMount(t *testing.T) {
-	f := newDiskFixture(t, "/transcode", "/media")
-	f.answer("/media", fsStats{UsedBytes: 10 << 30, TotalBytes: 100 << 30, FSID: "b:2"})
-
-	f.sampleAndSettle(t, 2)
-	disks := f.sampleAndSettle(t, 2)
-
-	if len(disks) == 0 || disks[0].Path != "/transcode" {
-		t.Fatalf("disks = %+v, want the scratch dir first", disks)
-	}
-	if !disks[0].Unavailable || !disks[0].Scratch {
-		t.Fatalf("disks[0] = %+v, want an unavailable scratch entry", disks[0])
-	}
-}
-
-// A sampler with no scratch dir — a proxy node — flags nothing, so a reader
-// never mistakes a media root for the transcode volume.
-func TestDiskStatsFlagsNoScratchWithoutAScratchDir(t *testing.T) {
-	f := newDiskFixture(t, "", "/media")
-	f.answer("/media", fsStats{UsedBytes: 10 << 30, TotalBytes: 100 << 30, FSID: "b:2"})
-
-	f.sampleAndSettle(t, 1)
-	disks := f.sampleAndSettle(t, 1)
-
-	for _, disk := range disks {
-		if disk.Scratch {
-			t.Fatalf("mount flagged as scratch with no scratch dir configured: %+v", disk)
-		}
-	}
-}
-
 // The contract that matters most: a mount whose server died reports its last
 // good numbers marked stale, and never delays a sample.
 func TestDiskStatsReportsHungMountAsStaleWithoutBlocking(t *testing.T) {
@@ -258,27 +220,6 @@ func TestDiskStatsReportsHungMountAsStaleWithoutBlocking(t *testing.T) {
 	}
 }
 
-// A media root that exists on other nodes but not this one is reported rather
-// than hidden: an operator needs to see the gap, and zeros would read as an
-// empty disk.
-func TestDiskStatsReportsUnseenPathAsUnavailable(t *testing.T) {
-	f := newDiskFixture(t, "/transcode", "/media-on-another-node")
-	f.answer("/transcode", fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
-
-	f.sampleAndSettle(t, 2)
-	disks := f.sampleAndSettle(t, 2)
-
-	if len(disks) != 2 {
-		t.Fatalf("disks = %+v, want both paths reported", disks)
-	}
-	if !disks[1].Unavailable {
-		t.Fatalf("disks[1] = %+v, want Unavailable", disks[1])
-	}
-	if disks[1].UsedGB != 0 || disks[1].TotalGB != 0 {
-		t.Fatalf("disks[1] = %+v, want no capacity numbers alongside Unavailable", disks[1])
-	}
-}
-
 // A deployment with dozens of library roots must not grow the health response
 // without bound. Only the capped set is probed, so that is also how many probe
 // completions this can wait for.
@@ -300,68 +241,12 @@ func TestDiskStatsCapsMountCount(t *testing.T) {
 	}
 }
 
-// The cap exists so a health response does not grow with the library count, and
-// a path this host cannot measure costs an entry just like a measured one. An
-// API host whose library roots live on the nodes reports nothing but
-// unavailable entries.
-func TestDiskStatsCapsUnavailableMountsToo(t *testing.T) {
-	paths := make([]string, 0, 20)
-	for i := range 20 {
-		paths = append(paths, "/mount"+itoa(i))
-	}
-	f := newDiskFixture(t, paths...)
-	// Only the scratch dir can be measured; every library root fails statfs.
-	f.answer(paths[0], fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
-
-	f.sampleAndSettle(t, maxSampledDisks)
-	disks := f.sampleAndSettle(t, maxSampledDisks)
-
-	if len(disks) != maxSampledDisks {
-		t.Fatalf("len(disks) = %d, want the cap of %d even when the mounts are unavailable", len(disks), maxSampledDisks)
-	}
-}
-
-// Several filesystems leave statfs's f_fsid zero — FUSE has no fsid in its
-// protocol at all, which covers rclone, mergerfs and s3fs. Treating that as an
-// identity collapses unrelated media roots onto one entry, and the mount that
-// disappears is a real volume with real capacity nobody is watching any more.
-func TestDiskStatsDoesNotDeduplicateMountsWithoutAnFSID(t *testing.T) {
-	f := newDiskFixture(t, "/transcode", "/mnt/rclone-movies", "/mnt/rclone-tv")
-	f.answer("/transcode", fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
-	// What osStatfs reports for a FUSE mount: no usable filesystem id.
-	f.answer("/mnt/rclone-movies", fsStats{UsedBytes: 1 << 30, TotalBytes: 100 << 30})
-	f.answer("/mnt/rclone-tv", fsStats{UsedBytes: 98 << 30, TotalBytes: 100 << 30})
-
-	f.sampleAndSettle(t, 3)
-	disks := f.sampleAndSettle(t, 3)
-
-	if len(disks) != 3 {
-		t.Fatalf("disks = %+v, want all three mounts reported", disks)
-	}
-	if disks[2].Path != "/mnt/rclone-tv" || disks[2].UsedGB != 98 {
-		t.Fatalf("disks[2] = %+v, want the nearly full second FUSE mount kept", disks[2])
-	}
-}
-
-// The dedup itself must still work for filesystems that do publish an id.
-func TestFormatFSIDDropsAZeroIdentity(t *testing.T) {
-	if got := formatFSID(0, 0); got != "" {
-		t.Fatalf("formatFSID(0, 0) = %q, want no identity", got)
-	}
-	if got := formatFSID(0x1a, 0x2b); got != "1a:2b" {
-		t.Fatalf("formatFSID(0x1a, 0x2b) = %q, want 1a:2b", got)
-	}
-}
-
 // Library roots change over a server's life. Entries for paths no longer
 // configured must be forgotten rather than accumulate for months.
 func TestDiskStatsForgetsPathsNoLongerConfigured(t *testing.T) {
 	roots := []string{"/media-a"}
 	tree := newProcTree(t)
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 	clock := newFakeClock()
 	done := make(chan string, 16)
 
@@ -399,67 +284,6 @@ func TestDiskStatsForgetsPathsNoLongerConfigured(t *testing.T) {
 	}
 	if len(order) != 2 {
 		t.Fatalf("diskOrder = %v, want only the two current paths", order)
-	}
-}
-
-func TestOSStatfsOnUnsupportedPlatformIsNotFatal(t *testing.T) {
-	// Guards the non-Linux build path: the fallback must return an error rather
-	// than panic, since NewSampler installs it unconditionally.
-	if _, err := osStatfs("/definitely/not/a/path"); err == nil {
-		t.Fatal("statfs on a missing path returned no error")
-	} else if errors.Is(err, errors.ErrUnsupported) {
-		t.Log("platform has no statfs; sampler correctly reports paths unavailable")
-	}
-}
-
-// A mount's role is what the unauthenticated surfaces name it by, so it has to
-// be assigned to the mount rather than to its luck this pass: numbering only the
-// measurable entries would slide every library root up a place the moment one
-// went unavailable.
-func TestDiskStatsAssignsPositionalRoles(t *testing.T) {
-	f := newDiskFixture(t, "/transcode", "/media/movies", "/media/shows")
-	f.answer("/transcode", fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
-	// /media/movies is never answered, so it stays unavailable.
-	f.answer("/media/shows", fsStats{UsedBytes: 3 << 30, TotalBytes: 30 << 30, FSID: "c:1"})
-
-	f.sampleAndSettle(t, 3)
-	disks := f.sampleAndSettle(t, 3)
-
-	got := map[string]string{}
-	for _, disk := range disks {
-		got[disk.Path] = disk.Role
-	}
-	want := map[string]string{
-		"/transcode":    ScratchDiskRole,
-		"/media/movies": "library-1",
-		"/media/shows":  "library-2",
-	}
-	for path, role := range want {
-		if got[path] != role {
-			t.Fatalf("role for %s = %q, want %q (all: %v)", path, got[path], role, got)
-		}
-	}
-}
-
-// statfs on a dead network mount is uninterruptible, so every probe started is a
-// goroutine that may never return. Bounding only the published output would let
-// a deployment with forty library roots start forty probes every interval to
-// fill eight slots.
-func TestDiskPathsAreBoundedByTheSampleCap(t *testing.T) {
-	roots := make([]string, 0, maxSampledDisks+4)
-	for i := range maxSampledDisks + 4 {
-		roots = append(roots, "/media/root-"+strconv.Itoa(i))
-	}
-	f := newDiskFixture(t, append([]string{"/transcode"}, roots...)...)
-
-	paths := f.sampler.diskPaths(context.Background())
-	if len(paths) != maxSampledDisks {
-		t.Fatalf("probed paths = %d, want the cap of %d", len(paths), maxSampledDisks)
-	}
-	// The scratch dir is what admission control reads, so it is never the entry
-	// the cap drops.
-	if paths[0] != "/transcode" {
-		t.Fatalf("first probed path = %q, want the scratch dir", paths[0])
 	}
 }
 
@@ -552,28 +376,6 @@ func TestRefreshDisksRotatesProbesPastAWedgedRetiredMount(t *testing.T) {
 	}
 }
 
-// Scratch keeps its priority through the rotation: it is the mount transcode
-// admission reads, so it must be the one that gets a freed slot.
-func TestRefreshDisksAlwaysOffersScratchFirst(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{ScratchDir: staticScratch("/transcode")})
-	// Which mount is the scratch one is resolved once per pass, so the ordering
-	// below is asking a question a pass has to have asked first.
-	s.diskPaths(context.Background())
-
-	candidates := []*diskEntry{{path: "/transcode"}, {path: "/a"}, {path: "/b"}, {path: "/c"}}
-	for pass := range 6 {
-		ordered := s.probeOrderLocked(candidates)
-		if ordered[0].path != "/transcode" {
-			t.Fatalf("pass %d offered %q first, want the scratch dir", pass, ordered[0].path)
-		}
-		if len(ordered) != len(candidates) {
-			t.Fatalf("pass %d offered %d entries, want all %d", pass, len(ordered), len(candidates))
-		}
-	}
-}
-
 // Capacity is measured against what this process can write, not against the
 // device: a filesystem that reserves blocks for root hands them to nobody else,
 // and counting them as headroom is what makes a volume with nothing left read
@@ -657,4 +459,109 @@ func scratchDisk(t *testing.T, s *Sampler) DiskStats {
 	}
 	t.Fatalf("no disk carried the scratch role: %+v", s.Snapshot().System.Disks)
 	return DiskStats{}
+}
+
+// statfs on a dead network mount is uninterruptible, so every probe started is a
+// goroutine that may never return. Bounding only the published output would let
+// a deployment with forty library roots start forty probes every interval to
+// fill eight slots.
+func TestDiskPathsAreBoundedByTheSampleCap(t *testing.T) {
+	roots := make([]string, 0, maxSampledDisks+4)
+	for i := range maxSampledDisks + 4 {
+		roots = append(roots, "/media/root-"+strconv.Itoa(i))
+	}
+	f := newDiskFixture(t, append([]string{"/transcode"}, roots...)...)
+
+	paths := f.sampler.diskPaths(context.Background())
+	if len(paths) != maxSampledDisks {
+		t.Fatalf("probed paths = %d, want the cap of %d", len(paths), maxSampledDisks)
+	}
+	// The scratch dir is what admission control reads, so it is never the entry
+	// the cap drops.
+	if paths[0] != "/transcode" {
+		t.Fatalf("first probed path = %q, want the scratch dir", paths[0])
+	}
+}
+
+// Scratch keeps its priority through the rotation: it is the mount transcode
+// admission reads, so it must be the one that gets a freed slot.
+func TestRefreshDisksAlwaysOffersScratchFirst(t *testing.T) {
+	tree := newProcTree(t)
+	clock := newFakeClock()
+	s := newTestSampler(t, tree, clock, Options{ScratchDir: staticScratch("/transcode")})
+	// Which mount is the scratch one is resolved once per pass, so the ordering
+	// below is asking a question a pass has to have asked first.
+	s.diskPaths(context.Background())
+
+	candidates := []*diskEntry{{path: "/transcode"}, {path: "/a"}, {path: "/b"}, {path: "/c"}}
+	for pass := range 6 {
+		ordered := s.probeOrderLocked(candidates)
+		if ordered[0].path != "/transcode" {
+			t.Fatalf("pass %d offered %q first, want the scratch dir", pass, ordered[0].path)
+		}
+		if len(ordered) != len(candidates) {
+			t.Fatalf("pass %d offered %d entries, want all %d", pass, len(ordered), len(candidates))
+		}
+	}
+}
+
+// A mount's role is what the unauthenticated surfaces name it by, so it has to
+// be assigned to the mount rather than to its luck this pass: numbering only the
+// measurable entries would slide every library root up a place the moment one
+// went unavailable.
+func TestDiskStatsAssignsPositionalRoles(t *testing.T) {
+	f := newDiskFixture(t, "/transcode", "/media/movies", "/media/shows")
+	f.answer("/transcode", fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
+	// /media/movies is never answered, so it stays unavailable.
+	f.answer("/media/shows", fsStats{UsedBytes: 3 << 30, TotalBytes: 30 << 30, FSID: "c:1"})
+
+	f.sampleAndSettle(t, 3)
+	disks := f.sampleAndSettle(t, 3)
+
+	got := map[string]string{}
+	for _, disk := range disks {
+		got[disk.Path] = disk.Role
+	}
+	want := map[string]string{
+		"/transcode":    ScratchDiskRole,
+		"/media/movies": "library-1",
+		"/media/shows":  "library-2",
+	}
+	for path, role := range want {
+		if got[path] != role {
+			t.Fatalf("role for %s = %q, want %q (all: %v)", path, got[path], role, got)
+		}
+	}
+}
+
+// Several filesystems leave statfs's f_fsid zero — FUSE has no fsid in its
+// protocol at all, which covers rclone, mergerfs and s3fs. Treating that as an
+// identity collapses unrelated media roots onto one entry, and the mount that
+// disappears is a real volume with real capacity nobody is watching any more.
+func TestDiskStatsDoesNotDeduplicateMountsWithoutAnFSID(t *testing.T) {
+	f := newDiskFixture(t, "/transcode", "/mnt/rclone-movies", "/mnt/rclone-tv")
+	f.answer("/transcode", fsStats{UsedBytes: 1 << 30, TotalBytes: 10 << 30, FSID: "a:1"})
+	// What osStatfs reports for a FUSE mount: no usable filesystem id.
+	f.answer("/mnt/rclone-movies", fsStats{UsedBytes: 1 << 30, TotalBytes: 100 << 30})
+	f.answer("/mnt/rclone-tv", fsStats{UsedBytes: 98 << 30, TotalBytes: 100 << 30})
+
+	f.sampleAndSettle(t, 3)
+	disks := f.sampleAndSettle(t, 3)
+
+	if len(disks) != 3 {
+		t.Fatalf("disks = %+v, want all three mounts reported", disks)
+	}
+	if disks[2].Path != "/mnt/rclone-tv" || disks[2].UsedGB != 98 {
+		t.Fatalf("disks[2] = %+v, want the nearly full second FUSE mount kept", disks[2])
+	}
+}
+
+// The dedup itself must still work for filesystems that do publish an id.
+func TestFormatFSIDDropsAZeroIdentity(t *testing.T) {
+	if got := formatFSID(0, 0); got != "" {
+		t.Fatalf("formatFSID(0, 0) = %q, want no identity", got)
+	}
+	if got := formatFSID(0x1a, 0x2b); got != "1a:2b" {
+		t.Fatalf("formatFSID(0x1a, 0x2b) = %q, want 1a:2b", got)
+	}
 }

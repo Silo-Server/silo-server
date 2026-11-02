@@ -14,15 +14,9 @@ func TestMembersRunningCommandsOnTimeStayInSyncWithASlowMember(t *testing.T) {
 	f.member("far").lastPingMS = 1800
 
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	f.now = f.now.Add(5 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	play := lastTransport(t, f.conns["ann"])
 	if play.Action != TransportActionPlay {
 		t.Fatalf("room command = %+v, want play", play)
@@ -140,27 +134,18 @@ func TestReportsWhileACommandSettlesAreNotCorrected(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	pause := lastTransport(t, f.conns["guest"])
 	still := transportCount(f.conns["guest"])
 
 	f.now = f.now.Add(200 * time.Millisecond)
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
-		StateReport{SessionID: "guest-session", PositionSeconds: position + 0.2, IsPaused: false}); err != nil {
-		t.Fatal(err)
-	}
+	f.stateReport("guest", StateReport{SessionID: "guest-session", PositionSeconds: position + 0.2, IsPaused: false})
 	if got := transportCount(f.conns["guest"]); got != still {
 		t.Fatalf("a report racing the pause was corrected %d times", got-still)
 	}
 
 	f.now = f.now.Add(defaultTransportLead + commandSettleWindow)
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
-		StateReport{SessionID: "guest-session", PositionSeconds: pause.PositionSeconds + 2, IsPaused: false}); err != nil {
-		t.Fatal(err)
-	}
+	f.stateReport("guest", StateReport{SessionID: "guest-session", PositionSeconds: pause.PositionSeconds + 2, IsPaused: false})
 	if command := lastTransport(t, f.conns["guest"]); command.Action != TransportActionPause || command.CommandID == pause.CommandID {
 		t.Fatalf("a settled pause mismatch was not corrected: %+v", command)
 	}
@@ -200,15 +185,9 @@ func TestPlayAndResumeAnchorTheRoomAtExecution(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.member("guest").lastPingMS = 1200
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	f.now = f.now.Add(5 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	assertAnchoredAtExecution := func(what string) {
 		t.Helper()
 		command := lastTransport(t, f.conns["guest"])
@@ -231,10 +210,7 @@ func TestPlayAndResumeAnchorTheRoomAtExecution(t *testing.T) {
 	// A seek's barrier resumes the same way.
 	f.now = f.now.Add(10 * time.Second)
 	target := 500.0
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionSeek, PositionSeconds: &target}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionSeek, PositionSeconds: &target})
 	f.now = f.now.Add(2 * time.Second)
 	f.resumeAll()
 	assertAnchoredAtExecution("resume")
@@ -287,24 +263,15 @@ func TestStalledHostPausesTheRoomAtItsPosition(t *testing.T) {
 func TestReportNamingTheLatestCommandEndsTheSettleWindow(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	play := lastTransport(t, f.conns["guest"])
 	hostReport := func(paused bool) {
 		t.Helper()
-		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
-			StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: f.expected(), IsPaused: paused}); err != nil {
-			t.Fatal(err)
-		}
+		f.stateReport("host", StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: f.expected(), IsPaused: paused})
 	}
 	guestReport := func() {
 		t.Helper()
-		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
-			StateReport{SessionID: "guest-session", CommandID: play.CommandID, PositionSeconds: f.expected() - 3}); err != nil {
-			t.Fatal(err)
-		}
+		f.stateReport("guest", StateReport{SessionID: "guest-session", CommandID: play.CommandID, PositionSeconds: f.expected() - 3})
 	}
 
 	// Matching the play, the guest's drift counts at once.
@@ -387,15 +354,9 @@ func TestCommandsNeverRunBeforeTheRoomsOwnCommand(t *testing.T) {
 	f := newBufferingRoom(t, "ann", "far")
 	f.member("far").lastPingMS = 1800
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	f.now = f.now.Add(5 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	play := lastTransport(t, f.conns["ann"])
 	if err := f.s.HandlePingForConnection(t.Context(), f.reg("far"), f.userID("far"), "far", 100); err != nil {
 		t.Fatal(err)
@@ -419,23 +380,14 @@ func TestCommandsNeverRunBeforeTheRoomsOwnCommand(t *testing.T) {
 func TestReportNamingAnOlderCommandPredatesTheNewest(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	older := lastTransport(t, f.conns["host"])
 	f.now = f.now.Add(10 * time.Second)
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	// Past the pause's settle window, a slow host's report still names the play.
 	f.now = f.now.Add(4 * time.Second)
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
-		StateReport{SessionID: "host-session", CommandID: older.CommandID, PositionSeconds: position + 4}); err != nil {
-		t.Fatal(err)
-	}
+	f.stateReport("host", StateReport{SessionID: "host-session", CommandID: older.CommandID, PositionSeconds: position + 4})
 	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
 		t.Fatalf("a report from before the pause resumed the room: %s", f.repo.room.PlaybackState)
 	}
@@ -446,26 +398,17 @@ func TestReportNamingAnOlderCommandPredatesTheNewest(t *testing.T) {
 func TestReportNamingItsCommandWaitsForAnUndeliveredRoomCommand(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPlay}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPlay})
 	play := lastTransport(t, f.conns["host"])
 	f.now = f.now.Add(10 * time.Second)
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	// As if the pause came from another server and was not yet forwarded here.
 	host := f.member("host")
 	host.lastCommandID, host.lastSentCommandID, host.lastSentPaused = play.CommandID, play.CommandID, false
 	host.settleUntil = time.Time{}
 	f.now = f.now.Add(500 * time.Millisecond)
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
-		StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: position + 0.5}); err != nil {
-		t.Fatal(err)
-	}
+	f.stateReport("host", StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: position + 0.5})
 	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
 		t.Fatalf("a report from before an undelivered pause resumed the room: %s", f.repo.room.PlaybackState)
 	}
@@ -544,10 +487,7 @@ func TestRepeatedPlayInsideTheLeadKeepsThePausedPosition(t *testing.T) {
 	request := func(action TransportAction) TransportCommand {
 		t.Helper()
 		// is_paused as web and Android send it: the state the request asks for.
-		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause}); err != nil {
-			t.Fatal(err)
-		}
+		f.hostRequest(TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause})
 		return lastTransport(t, f.conns["guest"])
 	}
 	request(TransportActionPause)
@@ -565,18 +505,12 @@ func TestRepeatedPlayInsideTheLeadKeepsThePausedPosition(t *testing.T) {
 func TestPausedRoomMemberIsCorrectedAfterTwoReports(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	position := 100.0
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	f.now = f.now.Add(10 * time.Second)
 	before := transportCount(f.conns["guest"])
 	for range guestCorrectionStrikes {
 		f.now = f.now.Add(1500 * time.Millisecond)
-		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
-			StateReport{SessionID: "guest-session", PositionSeconds: 103, IsPaused: true}); err != nil {
-			t.Fatal(err)
-		}
+		f.stateReport("guest", StateReport{SessionID: "guest-session", PositionSeconds: 103, IsPaused: true})
 	}
 	if got := transportCount(f.conns["guest"]) - before; got != 1 {
 		t.Fatalf("a paused member 3 s off got %d corrections after %d reports, want 1", got, guestCorrectionStrikes)
@@ -654,10 +588,7 @@ func TestRepeatedSeekDuringABarrierIsTheSameSeek(t *testing.T) {
 	f.now = f.now.Add(10 * time.Second)
 	seek := func(target float64, paused bool) {
 		t.Helper()
-		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-			TransportRequest{Action: TransportActionSeek, PositionSeconds: &target, IsPaused: paused}); err != nil {
-			t.Fatal(err)
-		}
+		f.hostRequest(TransportRequest{Action: TransportActionSeek, PositionSeconds: &target, IsPaused: paused})
 	}
 	seek(140, false)
 	first := lastTransport(t, f.conns["guest"])
@@ -692,17 +623,11 @@ func TestPausedMemberThatCannotMoveIsNotCorrectedAgain(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
 	position := f.expected()
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 	pause := lastTransport(t, f.conns["guest"])
 	report := func(at float64) {
 		t.Helper()
-		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
-			StateReport{SessionID: "guest-session", CommandID: pause.CommandID, PositionSeconds: at, IsPaused: true}); err != nil {
-			t.Fatal(err)
-		}
+		f.stateReport("guest", StateReport{SessionID: "guest-session", CommandID: pause.CommandID, PositionSeconds: at, IsPaused: true})
 	}
 	f.now = f.now.Add(commandSettleWindow + time.Second)
 	stuck := pause.PositionSeconds - 1.6
@@ -745,10 +670,7 @@ func TestPausedMemberThatCannotMoveIsNotCorrectedAgain(t *testing.T) {
 func TestSeekBackToTargetAfterAHostLandingIsNotARepeat(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	target := 1500.0
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionSeek, PositionSeconds: &target}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionSeek, PositionSeconds: &target})
 	seek := lastTransport(t, f.conns["host"])
 	if _, err := f.s.HandleReadyForConnection(t.Context(), f.reg("host"), 7, "host",
 		StateReport{SessionID: "host-session", CommandID: seek.CommandID, PositionSeconds: 1494, IsPaused: true}); err != nil {
@@ -757,10 +679,7 @@ func TestSeekBackToTargetAfterAHostLandingIsNotARepeat(t *testing.T) {
 	if f.repo.room.AnchorPositionSeconds != 1494 {
 		t.Fatalf("host landing did not move the destination: %v", f.repo.room.AnchorPositionSeconds)
 	}
-	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-		TransportRequest{Action: TransportActionSeek, PositionSeconds: &target}); err != nil {
-		t.Fatal(err)
-	}
+	f.hostRequest(TransportRequest{Action: TransportActionSeek, PositionSeconds: &target})
 	if again := lastTransport(t, f.conns["guest"]); again.CommandID == seek.CommandID || again.PositionSeconds != 1500 {
 		t.Fatalf("the seek back to 1500 was dropped as a repeat: %+v", again)
 	}
@@ -792,10 +711,7 @@ func TestPauseFromAPlayingMemberRunsOnToExecuteAt(t *testing.T) {
 	pause := func() TransportCommand {
 		t.Helper()
 		position := f.expected()
-		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-			TransportRequest{Action: TransportActionPause, PositionSeconds: &position, IsPaused: true}); err != nil {
-			t.Fatal(err)
-		}
+		f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position, IsPaused: true})
 		command := lastTransport(t, f.conns["guest"])
 		executeAt, err := time.Parse(time.RFC3339Nano, command.ExecuteAt)
 		if err != nil {
@@ -820,10 +736,7 @@ func TestRequestInsideTheLeadUsesTheStateBeforeThePendingCommand(t *testing.T) {
 	f.member("guest").lastPingMS = 2000
 	request := func(action TransportAction, position float64) TransportCommand {
 		t.Helper()
-		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause}); err != nil {
-			t.Fatal(err)
-		}
+		f.hostRequest(TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause})
 		return lastTransport(t, f.conns["guest"])
 	}
 	leadAfter := func(command TransportCommand) float64 {

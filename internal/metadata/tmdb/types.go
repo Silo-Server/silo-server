@@ -82,7 +82,15 @@ type DiscoverParams struct {
 	WithRuntimeGte   int
 	WithRuntimeLte   int
 	OriginalLanguage string
-	Limit            int
+	// WithKeywords, WithOriginCountry (ISO 3166-1 alpha-2) and
+	// WithWatchProviders match any of their values. WatchRegion (ISO 3166-1
+	// alpha-2) is where the watch providers stream; TMDB requires it with
+	// them.
+	WithKeywords       []int
+	WithOriginCountry  []string
+	WithWatchProviders []int
+	WatchRegion        string
+	Limit              int
 }
 
 // ExternalIDs holds cross-references used for matching collection entries.
@@ -96,9 +104,28 @@ type ExternalIDs struct {
 // implicitly a movie. The Parts slice preserves TMDB's ordering, which is
 // curated and (for most franchises) chronological by release date.
 type Collection struct {
-	ID    int
-	Name  string
-	Parts []CollectionPart
+	ID           int
+	Name         string
+	Overview     string
+	PosterPath   string
+	BackdropPath string
+	Parts        []CollectionPart
+}
+
+// CollectionRef is the collection a movie belongs to, from the
+// belongs_to_collection member of /movie/{id}.
+type CollectionRef struct {
+	ID   int
+	Name string
+}
+
+// movieCollectionResponse is the slice of /movie/{id} a collection lookup
+// reads.
+type movieCollectionResponse struct {
+	BelongsToCollection *struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"belongs_to_collection"`
 }
 
 // CollectionPart is a single movie inside a TMDB collection.
@@ -110,13 +137,14 @@ type CollectionPart struct {
 }
 
 // collectionResponse is the wire format of /collection/{id}. Fields we don't
-// use (overview, poster_path, backdrop_path, original_name, etc.) are
-// intentionally omitted so we don't drag unused decoding work into the
-// library-collection sync hot path.
+// use (original_name, etc.) are intentionally omitted.
 type collectionResponse struct {
-	ID    int                      `json:"id"`
-	Name  string                   `json:"name"`
-	Parts []collectionResponsePart `json:"parts"`
+	ID           int                      `json:"id"`
+	Name         string                   `json:"name"`
+	Overview     string                   `json:"overview"`
+	PosterPath   string                   `json:"poster_path"`
+	BackdropPath string                   `json:"backdrop_path"`
+	Parts        []collectionResponsePart `json:"parts"`
 }
 
 type collectionResponsePart struct {
@@ -129,9 +157,9 @@ type collectionResponsePart struct {
 // listResponse is the wire format of one /list/{id} page. Unlike the
 // discovery endpoints, a list pages its entries under "items".
 type listResponse struct {
-	Page       int              `json:"page"`
-	TotalPages int              `json:"total_pages"`
-	Items      []TrendingResult `json:"items"`
+	Page       int                        `json:"page"`
+	TotalPages int                        `json:"total_pages"`
+	Items      []mediaMultiSearchResponse `json:"items"`
 }
 
 type mediaMovieResponse struct {
@@ -175,6 +203,22 @@ type mediaMultiSearchResponse struct {
 	FirstAirDate string  `json:"first_air_date"`
 	Popularity   float64 `json:"popularity"`
 	VoteAverage  float64 `json:"vote_average"`
+}
+
+// asMovie and asTV read a mixed list or trending entry as the movie or show
+// it is.
+func (m mediaMultiSearchResponse) asMovie() mediaMovieResponse {
+	return mediaMovieResponse{
+		ID: m.ID, Title: m.Title, Overview: m.Overview, PosterPath: m.PosterPath, BackdropPath: m.BackdropPath,
+		ReleaseDate: m.ReleaseDate, Popularity: m.Popularity, VoteAverage: m.VoteAverage,
+	}
+}
+
+func (m mediaMultiSearchResponse) asTV() mediaTVResponse {
+	return mediaTVResponse{
+		ID: m.ID, Name: m.Name, Overview: m.Overview, PosterPath: m.PosterPath, BackdropPath: m.BackdropPath,
+		FirstAirDate: m.FirstAirDate, Popularity: m.Popularity, VoteAverage: m.VoteAverage,
+	}
 }
 
 type apiError struct {

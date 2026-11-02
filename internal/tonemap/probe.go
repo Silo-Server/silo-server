@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const (
@@ -289,7 +290,9 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // not make a missing configured hardware executor permanent: temporary device
 // contention must be retried after the negative-cache interval.
 //
-// Only the standard kinds count. A Dolby Vision smoke that FFmpeg refuses is a
+// The standard kinds count, plus full-range PQ on a filter that converts it:
+// its smoke differs from the PQ smoke only in leaving the frame's range alone,
+// so it fails when they do. A Dolby Vision smoke that FFmpeg refuses is a
 // genuine answer for that build, and executors that cannot apply an RPU never
 // run it; counting it would re-probe those devices every negative-cache
 // interval for good.
@@ -313,23 +316,35 @@ func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backen
 	if index < 0 {
 		return false
 	}
-	return !slices.ContainsFunc(StandardSourceKinds(), func(kind SourceKind) bool {
+	return !slices.ContainsFunc(requiredSourceKinds(capabilities[index].Filter), func(kind SourceKind) bool {
 		return !slices.Contains(capabilities[index].SourceKinds, kind)
 	})
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
 // command the selected backend and device set can execute. The software filter
-// is only known after the listing, so its Dolby Vision smoke is always counted.
+// is only known after the listing, so its full-range PQ and Dolby Vision smokes
+// are always counted.
 func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	total := time.Duration(2+len(AllSourceKinds())) * probeCommandTimeout
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		hardwareCommandCount := len(smokeKindsForFilter(hardwareFilter(backend))) * len(probeDevices(hardwareDevice, backend))
+		hardwareCommandCount := len(smokeKindBudget(backend)) * len(probeDevices(hardwareDevice, backend))
 		total += time.Duration(hardwareCommandCount) * hardwareProbeCommandTimeout(backend)
 	}
 	return total + probeTimeoutSlack
+}
+
+// smokeKindBudget is the most source kinds a backend's smoke matrix can test on
+// one device. It doesn't read the host's devices, because a server also prices
+// a remote node's probe with it: VAAPI counts the smokes of the OpenCL path it
+// runs on Intel, which include Dolby Vision.
+func smokeKindBudget(backend string) []SourceKind {
+	if backend == BackendVAAPI {
+		return smokeKindsForFilter(HardwareFilterOpenCL)
+	}
+	return smokeKindsForFilter(hardwareFilter(backend, ""))
 }
 
 // ProbeEndpointTimeout includes auto-backend discovery and response overhead
@@ -412,10 +427,11 @@ func ProbeWithRunner(
 	}
 
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
-	if hardwareProbeAvailable(backend, filters, encoders) {
-		kinds := hardwareSmokeSourceKinds(ctx, run, ffmpegPath, fixturePath, backend, hardwareDevice)
+	filter := hardwareFilter(backend, hardwareDevice)
+	if hardwareProbeAvailable(backend, filter, filters, encoders) {
+		kinds := hardwareSmokeSourceKinds(ctx, run, ffmpegPath, fixturePath, backend, filter, hardwareDevice)
 		if len(kinds) > 0 {
-			capabilities = append(capabilities, Capability{Mode: ModeHardware, Backend: backend, Filter: hardwareFilter(backend), SourceKinds: kinds})
+			capabilities = append(capabilities, Capability{Mode: ModeHardware, Backend: backend, Filter: filter, SourceKinds: kinds})
 		}
 	}
 	return capabilities
@@ -423,12 +439,18 @@ func ProbeWithRunner(
 
 // hardwareSmokeSourceKinds returns only source kinds converted successfully on
 // every configured device so the advertised union is safe for later selection.
-func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, hardwareDevice string) []SourceKind {
+func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, filter, hardwareDevice string) []SourceKind {
 	devices := probeDevices(hardwareDevice, backend)
-	validated := smokeKindsForFilter(hardwareFilter(backend))
+	validated := smokeKindsForFilter(filter)
 	for _, device := range devices {
+		if filter == HardwareFilterVAAPI && drmVendorUnreadable(device) {
+			if _, warned := unreadableVendorWarned.LoadOrStore(device, true); !warned {
+				slog.WarnContext(ctx, "could not read the VAAPI device's GPU vendor, so HDR is tone mapped with tonemap_vaapi, which gives wrong colors on Intel GPUs",
+					"component", "tonemap", "device", device)
+			}
+		}
 		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
-			return hardwareSmokeArgs(fixturePath, backend, device, kind)
+			return hardwareSmokeArgs(fixturePath, backend, filter, device, kind)
 		})
 		validated = intersectSourceKinds(validated, supported)
 		if len(validated) == 0 {
@@ -504,8 +526,9 @@ func intersectSourceKinds(left, right []SourceKind) []SourceKind {
 	return result
 }
 
-// hardwareFilter returns the FFmpeg tone-map filter required by a backend.
-func hardwareFilter(backend string) string {
+// hardwareFilter returns the FFmpeg tone-map filter a backend uses on the
+// configured devices.
+func hardwareFilter(backend, hardwareDevice string) string {
 	switch backend {
 	case BackendQSV:
 		return HardwareFilterOpenCL
@@ -513,6 +536,8 @@ func hardwareFilter(backend string) string {
 		return HardwareFilterCUDA
 	case BackendVideoToolbox:
 		return HardwareFilterVideoToolbox
+	case BackendVAAPI:
+		return vaapiFilter(hardwareDevice)
 	default:
 		return HardwareFilterVAAPI
 	}
@@ -521,7 +546,7 @@ func hardwareFilter(backend string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return fspath.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // runBounded applies the per-command probe deadline within the caller's total
@@ -544,16 +569,15 @@ func hasToken(output []byte, token string) bool {
 }
 
 // hardwareProbeAvailable performs the cheap listing gate before device smoke
-// tests are attempted for a configured backend.
-func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
+// tests are attempted for a configured backend and its tone-map filter.
+func hardwareProbeAvailable(backend, filter string, filters, encoders []byte) bool {
 	switch backend {
 	case BackendQSV:
-		// Bitmap subtitle burn-in on HDR sources composites and scales on
-		// OpenCL, so a build without those filters falls back to software
-		// tone mapping instead of failing at transcode start.
-		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") &&
-			hasToken(filters, "overlay_opencl") && hasToken(filters, "scale_opencl") && hasToken(encoders, "h264_qsv")
+		return intelOpenCLFiltersListed(filters) && hasToken(encoders, "h264_qsv")
 	case BackendVAAPI:
+		if filter == HardwareFilterOpenCL {
+			return intelOpenCLFiltersListed(filters) && hasToken(encoders, "h264_vaapi")
+		}
 		return hasToken(filters, HardwareFilterVAAPI) && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_vaapi")
 	case BackendNVENC:
 		return hasToken(filters, HardwareFilterCUDA) && hasToken(filters, "scale_cuda") && hasToken(encoders, "h264_nvenc")
@@ -564,18 +588,40 @@ func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	}
 }
 
+// intelOpenCLFiltersListed reports whether a -filters listing has every filter
+// IntelFilter and the HDR bitmap subtitle graph use. Bitmap subtitle burn-in on
+// HDR sources composites and scales on OpenCL, so a build without those
+// filters falls back to software tone mapping instead of failing at transcode
+// start.
+func intelOpenCLFiltersListed(filters []byte) bool {
+	return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") &&
+		hasToken(filters, "overlay_opencl") && hasToken(filters, "scale_opencl")
+}
+
 // smokeKindsForFilter lists the source kinds worth smoke testing on an
-// executor. The Dolby Vision kind is tried only where the filter can apply an
-// RPU; elsewhere the conversion would run and still be wrong.
+// executor. The full-range PQ and Dolby Vision kinds are tried only where the
+// filter can convert them; elsewhere the conversion would run and still be
+// wrong.
 //
 // The embedded fixture carries no RPU, so a Dolby Vision smoke proves the
 // filter accepts apply_dovi and the graph runs on the device, not the reshaping
 // itself.
 func smokeKindsForFilter(filter string) []SourceKind {
+	kinds := requiredSourceKinds(filter)
 	if FilterAppliesDolbyVision(filter) {
-		return AllSourceKinds()
+		kinds = append(kinds, SourceDolbyVision)
 	}
-	return StandardSourceKinds()
+	return kinds
+}
+
+// requiredSourceKinds lists the kinds a complete inventory for filter must
+// contain; see probeCapabilitiesComplete.
+func requiredSourceKinds(filter string) []SourceKind {
+	kinds := StandardSourceKinds()
+	if FilterConvertsFullRange(filter) {
+		kinds = append(kinds, SourcePQFullRange)
+	}
+	return kinds
 }
 
 // smokeSourceKinds runs one bounded conversion per source kind and returns only
@@ -610,7 +656,7 @@ func softwareSmokeArgs(fixturePath string, kind SourceKind, filterName string) [
 
 // hardwareSmokeArgs builds a single-frame decode, conversion, and encode
 // command for one hardware backend, device, and source kind.
-func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceKind) []string {
+func hardwareSmokeArgs(fixturePath, backend, filter, hardwareDevice string, kind SourceKind) []string {
 	device := firstDevice(hardwareDevice)
 	if device == "" && backend != BackendNVENC && backend != BackendVideoToolbox {
 		device = defaultDRIRenderDevice
@@ -626,6 +672,7 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 		)
 	case BackendVAAPI:
 		base = append(base, VAAPIInitDeviceArgs("va", device)...)
+		base = append(base, VAAPIOpenCLInitArgs("va", filter, kind)...)
 		base = append(base, "-filter_hw_device", "va", "-hwaccel", BackendVAAPI, "-hwaccel_output_format", BackendVAAPI)
 	case BackendNVENC:
 		cudaDevice := device
@@ -638,7 +685,7 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 	}
 	base = append(base,
 		"-f", codecHEVC, "-i", fixturePath,
-		"-vf", hardwareSmokeFilter(backend, kind, decodeProbeFixtureBitDepth),
+		"-vf", hardwareSmokeFilter(backend, filter, kind, decodeProbeFixtureBitDepth),
 		"-frames:v", "1", "-c:v", hardwareEncoder(backend), "-f", "null", "-",
 	)
 	return base
@@ -646,7 +693,7 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 
 // hardwareSmokeFilter builds the backend-specific graph used to validate both
 // HDR and already-SDR Dolby Vision base layers.
-func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth int) string {
+func hardwareSmokeFilter(backend, filter string, kind SourceKind, sourceVideoBitDepth int) string {
 	if backend == BackendVideoToolbox {
 		return SourceParameters(kind) + "," + VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(sourceVideoBitDepth) + "," + HDRMetadataRemovalFilter()
 	}
@@ -656,11 +703,14 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 		}
 		return SourceParameters(kind) + "," + CUDAFilter(kind) + "," + HDRMetadataRemovalFilter()
 	}
-	filter := VAAPIFilter(kind)
-	if backend == BackendQSV {
-		filter = QSVFilter(kind, 0) + "," + QSVInteropFilter()
+	switch {
+	case backend == BackendQSV:
+		return IntelFilter(kind, 0) + "," + QSVInteropFilter() + "," + HDRMetadataRemovalFilter()
+	case filter == HardwareFilterOpenCL:
+		return IntelFilter(kind, 0) + "," + HDRMetadataRemovalFilter()
+	default:
+		return VAAPIFilter(kind) + "," + HDRMetadataRemovalFilter()
 	}
-	return filter + "," + HDRMetadataRemovalFilter()
 }
 
 // writeDecodeProbeFixture materializes the embedded HEVC frame and returns an

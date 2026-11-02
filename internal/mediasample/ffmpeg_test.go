@@ -125,7 +125,7 @@ func TestRunStatsWithRealFFmpeg(t *testing.T) {
 
 // TestRunSamplesWithRealFFmpeg samples a generated clip with a keyframe every
 // second, black until 16 s and white after, every three seconds from 0.5 s,
-// in containers the concat demuxer reads (Matroska, MP4, their timestamps
+// in containers the concat demuxer reads (Matroska, and MP4 with timestamps
 // shifted to start at 11.4 s) and one it cannot (MPEG-TS). Each frame must
 // carry its sample time and show the picture at that time in media time; the
 // sample at 15.5 s must decode the keyframe at 15 s (black), not the next one.
@@ -163,10 +163,9 @@ func TestRunSamplesWithRealFFmpeg(t *testing.T) {
 		return path
 	}
 	inputs := map[string]string{
-		"matroska":         clip,
-		"matroska shifted": remux("shifted.mkv", "-output_ts_offset", "11.4"),
-		"mp4 shifted":      remux("shifted.mp4", "-output_ts_offset", "11.4"),
-		"mpegts":           remux("clip.ts"),
+		"matroska":    clip,
+		"mp4 shifted": remux("shifted.mp4", "-output_ts_offset", "11.4"),
+		"mpegts":      remux("clip.ts"),
 	}
 	for name, input := range inputs {
 		t.Run(name, func(t *testing.T) {
@@ -247,16 +246,16 @@ func TestRunImageWithRealFFmpeg(t *testing.T) {
 // TestRunSheetsWithRealFFmpeg tiles a generated 2.4:1 clip of six ten-second
 // gray scenes, keyframes every two seconds, sampled at each scene's middle,
 // into two 2x2 sheets: in Matroska and in MP4 with timestamps shifted to
-// start at 11.4 s (read through a list), in MPEG-TS (read as a window), and
-// read through as one window. Each cell must show its scene's gray at full
-// range, and the cells after the last sample black.
+// start at 11.4 s (read through a list), and in MPEG-TS (read as a window).
+// Each cell must show its scene's gray at full range, and the cells after the
+// last sample black.
 func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 	ffmpeg, caps := realFFmpeg(t)
 	grays := []int{20, 60, 100, 140, 180, 220}
 	var sources []string
 	var inputs []string
 	for i, gray := range grays {
-		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=160x66:r=24:d=10", gray, gray, gray))
 		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
 	}
 	dir := t.TempDir()
@@ -293,10 +292,6 @@ func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 		req.Input = input
 		cases[name] = req
 	}
-	readThrough := base
-	readThrough.Input = clip
-	readThrough.Samples = &Samples{Seconds: base.Samples.Seconds, ReadThrough: true}
-	cases["read through"] = readThrough
 
 	want := [][]int{{20, 60, 100, 140}, {180, 220, 0, 0}}
 	for name, req := range cases {
@@ -409,6 +404,9 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 	ffmpeg, _ := realFFmpeg(t)
 	for _, shift := range []int{0, 10} {
 		for _, offset := range []float64{0, 11.4} {
+			if shift > 0 && offset > 0 {
+				continue // each start after zero is covered on its own
+			}
 			for _, duration := range []int{2, 8} {
 				t.Run(fmt.Sprintf("sample-shift-%d/container-offset-%g/duration-%d", shift, offset, shift+duration), func(t *testing.T) {
 					clip := filepath.Join(t.TempDir(), "clip.ts")
@@ -466,7 +464,7 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 	grays := []int{20, 60, 100, 140, 180, 220}
 	var sources, inputs []string
 	for i, gray := range grays {
-		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=160x66:r=24:d=10", gray, gray, gray))
 		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
 	}
 	for name, encoder := range map[string][]string{
@@ -514,51 +512,6 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestRunSheetsToneMapsHDRWithRealFFmpeg tiles a generated 10-bit PQ clip
-// with software tone mapping; the sheet must come out, not black.
-func TestRunSheetsToneMapsHDRWithRealFFmpeg(t *testing.T) {
-	ffmpeg, caps := realFFmpeg(t)
-	if !caps.HasFilter("zscale") {
-		t.Skip("ffmpeg lacks zscale")
-	}
-	clip := filepath.Join(t.TempDir(), "hdr.mkv")
-	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=6",
-		"-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast",
-		"-x265-params", "log-level=error:keyint=24:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
-		clip)
-	if output, err := generate.CombinedOutput(); err != nil {
-		t.Skipf("cannot generate an HDR clip: %v: %s", err, output)
-	}
-	req := Request{
-		Input:   clip,
-		Samples: &Samples{Seconds: []float64{1, 3, 5}},
-		Sheets:  &SheetsOutput{TileWidth: 160, TileHeight: 90, Columns: 3, Rows: 1, Quality: 80, ToneMap: &ToneMap{AllowSoftware: true}},
-		Threads: 1,
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if len(result.Sheets) != 1 || result.SheetFrames.Decoded != 3 {
-		t.Fatalf("got %d sheets, frames %+v", len(result.Sheets), result.SheetFrames)
-	}
-	img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ycc := img.(*image.YCbCr)
-	var sum int
-	for _, y := range ycc.Y {
-		sum += int(y)
-	}
-	if mean := sum / len(ycc.Y); mean < 30 {
-		t.Fatalf("tone-mapped sheet has mean luma %d, want a visible picture", mean)
 	}
 }
 

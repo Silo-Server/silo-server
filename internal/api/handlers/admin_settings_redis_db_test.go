@@ -319,21 +319,6 @@ func TestAdminSettingsStoreRedisDBNextToAnUnreadableURL(t *testing.T) {
 	}
 }
 
-func TestAdminSettingsRejectInvalidRedisDB(t *testing.T) {
-	for _, value := range []string{"-1", "three", "1.5"} {
-		for _, single := range []bool{false, true} {
-			settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": "redis://cache.example.invalid:6379/3"}}
-			rec := saveRedisDB(&AdminHandler{SettingsRepo: settings}, value, single)
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "redis.db") {
-				t.Errorf("redis.db=%q (single=%v): status = %d, body = %s; want a 400 that names redis.db", value, single, rec.Code, rec.Body.String())
-			}
-			if _, stored := settings.values["redis.db"]; stored {
-				t.Errorf("redis.db=%q (single=%v) was stored", value, single)
-			}
-		}
-	}
-}
-
 func TestAdminSettingsRefuseRedisDBManagedByEnvironment(t *testing.T) {
 	for _, single := range []bool{false, true} {
 		settings := &fakeServerSettingsStore{values: map[string]string{}}

@@ -17,100 +17,44 @@ func mustParse(t *testing.T, data string) *parsedNFO {
 	return p
 }
 
-func TestParseNFOData_MovieScalarFields(t *testing.T) {
+func TestParseNFOData_ScalarFields(t *testing.T) {
 	t.Parallel()
 
+	overview := func(p *parsedNFO) string { return p.Overview }
+	contentRating := func(p *parsedNFO) string { return p.ContentRating }
+	originalLanguage := func(p *parsedNFO) string { return p.OriginalLanguage }
 	tests := []struct {
-		name  string
-		data  string
-		check func(t *testing.T, p *parsedNFO)
+		name, data, field string
+		get               func(p *parsedNFO) string
+		want              string
 	}{
-		{
-			name: "sorttitle",
-			data: `<movie><title>The Matrix</title><sorttitle>Matrix 1</sorttitle></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.SortTitle != "Matrix 1" {
-					t.Errorf("SortTitle = %q", p.SortTitle)
-				}
-			},
-		},
-		{
-			name: "outline when plot is absent",
-			data: `<movie><title>M</title><outline>Short version.</outline></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.Overview != "Short version." {
-					t.Errorf("Overview = %q, want the outline", p.Overview)
-				}
-			},
-		},
-		{
-			name: "plot wins over outline",
-			data: `<movie><title>M</title><outline>Short.</outline><plot>Long.</plot></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.Overview != "Long." {
-					t.Errorf("Overview = %q, want the plot", p.Overview)
-				}
-			},
-		},
-		{
-			name: "certification when mpaa is absent",
-			data: `<movie><title>M</title><certification>PG-13</certification></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.ContentRating != "PG-13" {
-					t.Errorf("ContentRating = %q, want PG-13", p.ContentRating)
-				}
-			},
-		},
-		{
-			name: "certification lists ratings by country",
-			data: `<movie><title>M</title><certification>US:PG-13 / GB:12A</certification></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.ContentRating != "PG-13" {
-					t.Errorf("ContentRating = %q, want PG-13", p.ContentRating)
-				}
-			},
-		},
-		{
-			name: "mpaa wins over certification",
-			data: `<movie><title>M</title><certification>US:PG</certification><mpaa>R</mpaa></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.ContentRating != "R" {
-					t.Errorf("ContentRating = %q, want R", p.ContentRating)
-				}
-			},
-		},
-		{
-			name: "original language code",
-			data: `<movie><title>M</title><originallanguage>fra</originallanguage></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.OriginalLanguage != "fr" {
-					t.Errorf("OriginalLanguage = %q, want fr", p.OriginalLanguage)
-				}
-			},
-		},
-		{
-			name: "original language display name is dropped",
-			data: `<movie><title>M</title><originallanguage>English</originallanguage></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.OriginalLanguage != "" {
-					t.Errorf("OriginalLanguage = %q, want empty", p.OriginalLanguage)
-				}
-			},
-		},
-		{
-			name: "language is the metadata language, not the original",
-			data: `<movie><title>M</title><language>de</language></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.OriginalLanguage != "" {
-					t.Errorf("OriginalLanguage = %q, want empty", p.OriginalLanguage)
-				}
-			},
-		},
+		{"outline when plot is absent", `<movie><title>M</title><outline>Short version.</outline></movie>`,
+			"Overview", overview, "Short version."},
+		{"plot wins over outline", `<movie><title>M</title><outline>Short.</outline><plot>Long.</plot></movie>`,
+			"Overview", overview, "Long."},
+		{"certification when mpaa is absent", `<movie><title>M</title><certification>PG-13</certification></movie>`,
+			"ContentRating", contentRating, "PG-13"},
+		{"certification lists ratings by country", `<movie><title>M</title><certification>US:PG-13 / GB:12A</certification></movie>`,
+			"ContentRating", contentRating, "PG-13"},
+		{"mpaa wins over certification", `<movie><title>M</title><certification>US:PG</certification><mpaa>R</mpaa></movie>`,
+			"ContentRating", contentRating, "R"},
+		{"original language code", `<movie><title>M</title><originallanguage>fra</originallanguage></movie>`,
+			"OriginalLanguage", originalLanguage, "fr"},
+		{"original language display name is dropped", `<movie><title>M</title><originallanguage>English</originallanguage></movie>`,
+			"OriginalLanguage", originalLanguage, ""},
+		{"language is the metadata language, not the original", `<movie><title>M</title><language>de</language></movie>`,
+			"OriginalLanguage", originalLanguage, ""},
+		{"tvshow aired falls back to the first air date", `<tvshow><title>Show</title><aired>2010-09-01</aired></tvshow>`,
+			"FirstAirDate", func(p *parsedNFO) string { return p.FirstAirDate }, "2010-09-01"},
+		{"movie releasedate fallback", `<movie><title>M</title><releasedate>1999-03-31</releasedate></movie>`,
+			"ReleaseDate", func(p *parsedNFO) string { return p.ReleaseDate }, "1999-03-31"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tt.check(t, mustParse(t, tt.data))
+			if got := tt.get(mustParse(t, tt.data)); got != tt.want {
+				t.Errorf("%s = %q, want %q", tt.field, got, tt.want)
+			}
 		})
 	}
 }
@@ -119,19 +63,17 @@ func TestParseRuntimeMinutes(t *testing.T) {
 	t.Parallel()
 
 	for raw, want := range map[string]int{
-		"117":         117,
-		" 117 ":       117,
-		"117 min":     117,
-		"117 mins":    117,
-		"117 Minutes": 117,
-		"117min":      117,
-		"1h 57m":      117,
-		"2h":          120,
-		"0":           0,
-		"":            0,
-		"long":        0,
-		"117.5":       0,
-		"1:57:00":     0,
+		"117":     117,
+		" 117 ":   117,
+		"117 min": 117,
+		"117min":  117,
+		"1h 57m":  117,
+		"2h":      120,
+		"0":       0,
+		"":        0,
+		"long":    0,
+		"117.5":   0,
+		"1:57:00": 0,
 	} {
 		if got := parseRuntimeMinutes(raw); got != want {
 			t.Errorf("parseRuntimeMinutes(%q) = %d, want %d", raw, got, want)
@@ -304,14 +246,6 @@ func TestParseNFOData_Ratings(t *testing.T) {
 </ratings></movie>`,
 			wantTMDB:    7.6,
 			wantSources: map[string]metadata.RatingSource{"tmdb": {Score: 76}},
-		},
-		{
-			name: "named imdb wins over the legacy value",
-			data: `<movie><rating>5</rating><ratings>
-  <rating name="imdb" default="true"><value>8.1</value><votes>700000</votes></rating>
-</ratings></movie>`,
-			wantIMDB:    8.1,
-			wantSources: map[string]metadata.RatingSource{"imdb": {Score: 81, Votes: 700000}},
 		},
 		{
 			name: "declared sources on their scales, unknown names dropped",

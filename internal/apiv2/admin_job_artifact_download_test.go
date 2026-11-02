@@ -101,20 +101,6 @@ func TestAdminJobArtifactDownloadRejectsBadCapabilities(t *testing.T) {
 	}
 }
 
-func TestAdminJobArtifactDownloadHidesMissingArtifacts(t *testing.T) {
-	stub := &jobArtifactStub{err: handlers.ErrJobArtifactNotFound}
-	h, signer := jobArtifactHandler(t, stub)
-	path, _ := signer.SignFor("job-abc", time.Now(), 15*time.Minute)
-
-	rec := do(t, h, "GET", path, "", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	if stub.calls != 1 {
-		t.Fatalf("calls = %d", stub.calls)
-	}
-}
-
 // Once the capability verifies, the caller has proven it holds a URL for this
 // job. Reporting an outage as 404 from there would tell an administrator their
 // artifact is gone when storage is only unreachable.

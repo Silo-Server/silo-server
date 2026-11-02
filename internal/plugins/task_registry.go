@@ -3,10 +3,12 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
@@ -85,7 +87,7 @@ func (r *TaskRegistry) Tasks(ctx context.Context) ([]taskmanager.Task, error) {
 			}
 
 			binding, err := r.bindings.GetTaskBinding(ctx, installation.ID, capability.ID)
-			if err != nil && err != ErrTaskBindingNotFound {
+			if err != nil && !errors.Is(err, ErrTaskBindingNotFound) {
 				return nil, err
 			}
 			if binding != nil && !binding.Enabled {

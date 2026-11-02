@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -28,9 +31,11 @@ const rehomeTestTransport = "rehome-transport"
 // fakeRehomeNode is a transcode node that accepts a start and then serves the
 // started transport's segments.
 type fakeRehomeNode struct {
-	server  *httptest.Server
-	starts  atomic.Int32
-	release chan struct{} // when non-nil, a start waits for it to close
+	server      *httptest.Server
+	starts      atomic.Int32
+	stops       atomic.Int32
+	legacyAudio bool
+	release     chan struct{} // when non-nil, a start waits for it to close
 
 	mu       sync.Mutex
 	lastSeen transcodenode.TranscodeStartRequest
@@ -59,10 +64,13 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started"})
+			// Like a node from before MPEG-TS copy attestation: it echoes the
+			// copy-fMP4 recipe version but not copy_video_mpegts.
+			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion, RequireAudioTrack: req.RequireAudioTrack && !node.legacyAudio})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
+			node.stops.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -205,6 +213,31 @@ func TestRelayMovesTranscodeOffUnreachableNodeToAnotherNode(t *testing.T) {
 	}
 	if got := healthy.starts.Load(); got != 1 {
 		t.Fatalf("starts = %d, want 1", got)
+	}
+}
+
+// TestRelayMoveSkipsTheDeadNodesRow covers a stream_nodes row repointed at a
+// replacement process while the old one hangs. The replacement shares the
+// dead node's row id, so a move there under the same transport id would leave
+// its card deletable by the old process; the move picks another node.
+func TestRelayMoveSkipsTheDeadNodesRow(t *testing.T) {
+	replacement := newFakeRehomeNode(t, false)
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(1, replacement.server.URL),
+		pooledNode(2, healthy.server.URL),
+	}, "ffmpeg")
+
+	rr := f.segment("seg_00003.ts")
+	if rr.Code != http.StatusOK || rr.Body.String() != "moved:seg_00003.ts" {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if got := replacement.starts.Load(); got != 0 {
+		t.Fatalf("starts on the dead node's row = %d, want 0", got)
+	}
+	if got := healthy.starts.Load(); got != 1 {
+		t.Fatalf("starts on the other node = %d, want 1", got)
 	}
 }
 
@@ -448,6 +481,35 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}
 }
 
+// TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS pins that a move checks the
+// MPEG-TS echo as a start does: a node that omits it would publish fMP4 under
+// a plan that promises MPEG-TS.
+func TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS(t *testing.T) {
+	legacy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(2, legacy.server.URL),
+	}, "ffmpeg")
+	previous := f.handler.PlaybackConfig
+	f.handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := previous()
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+	card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	card.PlayMethod, card.CopyFMP4RecipeVersion = streamtoken.PlayMethodCopyFMP4Transcode, playback.CopyFMP4RecipeVersion
+	card.SourceVideoCodec, card.TargetCodecVideo, card.TargetCodecAudio, card.CopyVideoMPEGTS = "h264", "copy", "copy", true
+	f.token = f.handler.signSessionToken(*card, false)
+
+	if rr := f.segment("seg_00003.ts"); rr.Code == http.StatusOK {
+		t.Fatalf("status = %d, body = %q; want the unattested node refused", rr.Code, rr.Body.String())
+	}
+	if legacy.starts.Load() != 1 || !legacy.lastStart().CopyVideoMPEGTS {
+		t.Fatalf("starts = %d, request = %+v; want one MPEG-TS start", legacy.starts.Load(), legacy.lastStart())
+	}
+}
+
 // TestRelayMoveRestoresStoredRecipeAfterRefusedStart pins that a candidate's
 // rollback stop, which makes the node delete the transport's stored recipe,
 // does not cost a tokenless session the only recipe it has.
@@ -653,7 +715,7 @@ func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 		t.Fatal("did not write the recipe for the live route")
 	}
 
-	if _, err := f.handler.stopPlaybackSessionWithResult(context.Background(), f.session, true); err != nil {
+	if _, err := f.handler.stopPlaybackSessionWithResult(context.Background(), f.session, PlaybackEndStopped); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if _, ok := store.Get(context.Background(), rehomeTestTransport); ok {
@@ -662,5 +724,177 @@ func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 	f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
 	if _, ok := store.Get(context.Background(), rehomeTestTransport); ok {
 		t.Fatal("wrote the recipe back after the session stopped")
+	}
+}
+
+// sharedStopMarkers stands in for the deny markers every replica shares
+// (Redis in production). afterRead, when set, runs once each read has been
+// answered, with the read's number. failRead, when set, fails the read with
+// that number.
+type sharedStopMarkers struct {
+	mu        sync.Mutex
+	stopped   map[string]bool
+	afterRead func(read int)
+	failRead  int
+	reads     int
+}
+
+func useSharedStopMarkers(t *testing.T) *sharedStopMarkers {
+	t.Helper()
+	markers := &sharedStopMarkers{stopped: map[string]bool{}}
+	previous := readStopMarkerV3.Load()
+	reader := stopMarkerReaderV3(func(_ context.Context, _ *playback.StreamDeny, sessionID string) (bool, error) {
+		markers.mu.Lock()
+		markers.reads++
+		read, hook, stopped := markers.reads, markers.afterRead, markers.stopped[sessionID]
+		failed := markers.failRead != 0 && read == markers.failRead
+		markers.mu.Unlock()
+		if hook != nil {
+			hook(read)
+		}
+		if failed {
+			return false, errors.New("redis: i/o timeout")
+		}
+		return stopped, nil
+	})
+	readStopMarkerV3.Store(&reader)
+	t.Cleanup(func() { readStopMarkerV3.Store(previous) })
+	return markers
+}
+
+func (m *sharedStopMarkers) stop(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopped[sessionID] = true
+}
+
+// TestMovedRecipeWriteUndoesItselfWhenAStopLandsMidWrite covers the stop on
+// another replica landing after this replica read the marker and before it
+// wrote: that stop's delete has already run, so the write re-reads the marker
+// and removes the card itself.
+func TestMovedRecipeWriteUndoesItselfWhenAStopLandsMidWrite(t *testing.T) {
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, healthy.server.URL)}, "ffmpeg")
+	stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	store := &sharedRecipeStore{cards: map[string]playback.RecipeCard{}}
+	f.handler.NodeRecipeStore = store
+	markers := useSharedStopMarkers(t)
+	markers.afterRead = func(read int) {
+		if read == 1 {
+			// The other replica's stop runs right after the first read.
+			markers.stop(f.session.ID)
+			_ = store.Delete(context.Background(), rehomeTestTransport)
+		}
+	}
+	live := playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}
+	f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
+	if card, ok := store.Get(context.Background(), rehomeTestTransport); ok {
+		t.Fatalf("a write racing a stop elsewhere left the card: %+v", card)
+	}
+}
+
+// TestMovedRecipeWriteSurvivesAnUnreadableMarker pins the two reads around a
+// moved-card write. A marker that cannot be read before the write skips it; one
+// that cannot be read after it keeps the card, because deleting it would cost a
+// live session its restart recovery without any stop having happened.
+func TestMovedRecipeWriteSurvivesAnUnreadableMarker(t *testing.T) {
+	for _, tc := range []struct {
+		failRead int
+		wantCard bool
+	}{
+		{failRead: 1, wantCard: false},
+		{failRead: 2, wantCard: true},
+	} {
+		healthy := newFakeRehomeNode(t, false)
+		f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, healthy.server.URL)}, "ffmpeg")
+		stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+		store := &sharedRecipeStore{cards: map[string]playback.RecipeCard{}}
+		f.handler.NodeRecipeStore = store
+		markers := useSharedStopMarkers(t)
+		markers.failRead = tc.failRead
+		live := playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}
+		f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
+		if _, ok := store.Get(context.Background(), rehomeTestTransport); ok != tc.wantCard {
+			t.Fatalf("read %d unreadable: card stored = %v, want %v", tc.failRead, ok, tc.wantCard)
+		}
+	}
+}
+
+// A moved transport keeps its subtitle rendition: node selection must admit
+// only nodes that emit one, and the start request asks the new node for it.
+func TestRelayMoveKeepsTheSubtitleRendition(t *testing.T) {
+	card := &playback.RecipeCard{SubtitleRendition: true, SubtitleTrackIndex: 2, SubtitleCodec: "subrip"}
+	if plan := (&PlaybackHandler{}).rehomePlanV3(t.Context(), &playback.Session{ID: "session"}, card); !plan.SubtitleRendition {
+		t.Fatal("rehome plan dropped the subtitle rendition, so node selection would admit nodes without it")
+	}
+	if req := rehomeStartRequestV3(*card, "transport", "", -1); !req.SubtitleRendition {
+		t.Fatal("rehome start request dropped the subtitle rendition")
+	}
+}
+
+// predicateEnumeratingNodePlannerV3 lists its nodes and accepts an eligibility
+// predicate, the seam transcodeEligibilityV3 builds its filter for.
+type predicateEnumeratingNodePlannerV3 struct{ enumeratingNodePlannerV3 }
+
+func (predicateEnumeratingNodePlannerV3) PlanSessionWith(string, string, bool, int, func(*nodepool.Node) bool) nodepool.Plan {
+	return nodepool.Plan{}
+}
+
+// A moved rendition whose attempt plan is no longer recorded still finds a
+// node that emits renditions: with no plan there are no transformations to
+// require, as at that session's own start.
+func TestRelayMoveWithoutARecordedPlanAdmitsRenditionNodes(t *testing.T) {
+	node := func(features ...string) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{TransportFeatures: features})
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	capable := node(playback.TransportFeatureHLSSubtitleRenditionV1)
+	older := node()
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{capable.URL, older.URL}}}
+
+	card := &playback.RecipeCard{SubtitleRendition: true, SubtitleTrackIndex: 2, SubtitleCodec: "subrip"}
+	plan := handler.rehomePlanV3(t.Context(), &playback.Session{ID: "session"}, card)
+	if plan.Plan != nil || !plan.SubtitleRendition {
+		t.Fatalf("rehome plan = %+v, want no recorded plan with the rendition kept", plan)
+	}
+	eligible := handler.transcodeEligibilityV3(t.Context(), plan, nil)
+	if eligible == nil || !eligible(&nodepool.Node{URL: capable.URL}) {
+		t.Fatal("the rendition-capable node was rejected")
+	}
+	if eligible(&nodepool.Node{URL: older.URL}) {
+		t.Fatal("a node without the rendition feature was admitted")
+	}
+}
+
+func TestRelayMovePreservesMandatoryAudio(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			node := newFakeRehomeNode(t, false)
+			node.legacyAudio = legacy
+			f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, node.server.URL)}, "missing-test-ffmpeg")
+			card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+			if card == nil {
+				t.Fatal("fixture stream token did not contain a recipe")
+			}
+			card.RequireAudioTrack, card.AudioTrackIndex = true, 1
+			f.token = f.handler.signSessionToken(*card, false)
+			response := f.segment("seg_00003.ts")
+			if !node.lastStart().RequireAudioTrack {
+				t.Fatal("rehome discarded mandatory audio selection")
+			}
+			if legacy {
+				if response.Code == http.StatusOK || node.stops.Load() == 0 {
+					t.Fatalf("unconfirmed rehome status=%d, cleanup=%d", response.Code, node.stops.Load())
+				}
+				return
+			}
+			if response.Code != http.StatusOK {
+				t.Fatalf("confirmed rehome status=%d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -22,7 +21,7 @@ type WatchDetailInput struct {
 	ID        ID     `path:"id" doc:"A movie, episode, audiobook or ebook; a series is not directly playable" example:"movie:heat-1995"`
 	FileID    ID     `query:"file_id" doc:"Prefer this file when the item has several versions" example:"42"`
 	LibraryID ID     `query:"library_id" doc:"Present the item as a member of this library" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // WatchDetailOutput is the getWatchState response.
@@ -50,7 +49,7 @@ type WatchDetail struct {
 	SeriesTitle                     string                  `json:"series_title,omitempty"`
 	SeasonNumber                    int                     `json:"season_number,omitempty"`
 	EpisodeNumber                   int                     `json:"episode_number,omitempty"`
-	EffectiveSubtitleLanguage       *string                 `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the profile's preferences resolve to"`
+	EffectiveSubtitleLanguage       *string                 `json:"effective_subtitle_language,omitempty" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"The subtitle language the profile's preferences resolve to: BCP 47 tag; empty when the preference is None"`
 	EffectiveSubtitleMode           *string                 `json:"effective_subtitle_mode,omitempty"`
 	EffectiveShowForcedSubtitles    *bool                   `json:"effective_show_forced_subtitles,omitempty"`
 	EffectiveSubtitleTrackSignature *WatchSubtitleSignature `json:"effective_subtitle_track_signature,omitempty" doc:"The subtitle track the profile last chose on this item"`
@@ -58,9 +57,9 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
-	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls"`
+	PosterURL                       string                  `json:"poster_url,omitempty" format:"uri-reference" doc:"The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls"`
 	PosterThumbhash                 string                  `json:"poster_thumbhash,omitempty"`
-	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
+	BackdropURL                     string                  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
 	BackdropThumbhash               string                  `json:"backdrop_thumbhash,omitempty"`
 }
 
@@ -87,7 +86,7 @@ type WatchFileVersion struct {
 	MultiEpisodeStart        int                  `json:"multi_episode_start,omitempty"`
 	MultiEpisodeEnd          int                  `json:"multi_episode_end,omitempty"`
 	EffectiveAudioTrackIndex *int                 `json:"effective_audio_track_index,omitempty"`
-	EffectiveAudioLanguage   string               `json:"effective_audio_language,omitempty"`
+	EffectiveAudioLanguage   string               `json:"effective_audio_language,omitempty" doc:"Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown"`
 	VideoTracks              []WatchVideoTrack    `json:"video_tracks,omitempty"`
 	AudioTracks              []WatchAudioTrack    `json:"audio_tracks,omitempty"`
 	SubtitleTracks           []WatchSubtitleTrack `json:"subtitle_tracks,omitempty"`
@@ -138,7 +137,7 @@ type WatchVideoTrack struct {
 type WatchAudioTrack struct {
 	Title         string `json:"title,omitempty"`
 	EmbeddedTitle string `json:"embedded_title,omitempty"`
-	Language      string `json:"language,omitempty" example:"eng"`
+	Language      string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag" example:"en"`
 	Codec         string `json:"codec,omitempty" example:"eac3"`
 	Profile       string `json:"profile,omitempty"`
 	Layout        string `json:"layout,omitempty"`
@@ -153,7 +152,7 @@ type WatchAudioTrack struct {
 // external.
 type WatchSubtitleTrack struct {
 	Index           int    `json:"index,omitempty"`
-	Language        string `json:"language,omitempty" example:"eng"`
+	Language        string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name" example:"en"`
 	Codec           string `json:"codec,omitempty"`
 	Title           string `json:"title,omitempty"`
 	EmbeddedTitle   string `json:"embedded_title,omitempty"`
@@ -172,7 +171,7 @@ type WatchChapter struct {
 	StartSeconds       float64 `json:"start_seconds"`
 	EndSeconds         float64 `json:"end_seconds"`
 	Source             string  `json:"source" doc:"Where the chapter came from"`
-	ThumbnailURL       string  `json:"thumbnail_url,omitempty"`
+	ThumbnailURL       string  `json:"thumbnail_url,omitempty" format:"uri-reference"`
 	ThumbnailThumbhash string  `json:"thumbnail_thumbhash,omitempty"`
 }
 
@@ -180,6 +179,19 @@ type WatchChapter struct {
 type WatchMarker struct {
 	StartSeconds float64 `json:"start_seconds" example:"0"`
 	EndSeconds   float64 `json:"end_seconds" example:"90"`
+	// Source is the class of source that produced the range: "scanner" for
+	// local detection, "plugin" or "online" for a marker provider, "manual" for
+	// one a person set. Absent when the file row recorded no source.
+	Source string `json:"source,omitempty" enum:"scanner,online,plugin,s3,manual"`
+	// Provider is the provider that supplied the range — a plugin capability id
+	// such as "introdb", or "built_in" — empty for local detection.
+	Provider string `json:"provider,omitempty"`
+	// Confidence is the source's own rating, 0-1, absent when the marker was
+	// never rated. It is a pointer because an unrated marker is stored as 0, and
+	// a client rendering that as a real "0%" would be inventing a measurement.
+	Confidence *float64 `json:"confidence,omitempty" minimum:"0" maximum:"1"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4" or "introdb:v4".
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
 // WatchPlaybackVariant is one logical watch choice.
@@ -206,7 +218,7 @@ type WatchPlaybackVariantPart struct {
 // WatchSubtitle is a subtitle available for the item.
 type WatchSubtitle struct {
 	Source          string `json:"source" doc:"embedded or external" example:"embedded"`
-	Language        string `json:"language" example:"eng"`
+	Language        string `json:"language" doc:"Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value" example:"en"`
 	Codec           string `json:"codec,omitempty"`
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
@@ -234,7 +246,7 @@ type WatchUserData struct {
 // WatchSubtitleSignature identifies a subtitle track independent of index.
 type WatchSubtitleSignature struct {
 	Source          string `json:"source,omitempty"`
-	Language        string `json:"language,omitempty"`
+	Language        string `json:"language,omitempty" doc:"Track language as the client recorded it, normally the track's language (BCP 47); stored as sent"`
 	Codec           string `json:"codec,omitempty"`
 	Label           string `json:"label,omitempty"`
 	Forced          bool   `json:"forced"`
@@ -248,7 +260,7 @@ const (
 
 // WatchedInput names the item to mark.
 type WatchedInput struct {
-	ID ID `path:"id" doc:"A movie, ebook, episode, season or series; a season or series expands to its episodes" example:"movie:heat-1995"`
+	ID ID `path:"id" doc:"A movie, audiobook, ebook, episode, season or series; a season or series expands to its episodes" example:"movie:heat-1995"`
 }
 
 func registerWatch(reg *Registry) {
@@ -266,14 +278,14 @@ func registerWatch(reg *Registry) {
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
-		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.")
+		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie, episode or audiobook with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.")
 	mark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, true)
 	})
 
 	unmark := humaOp(http.MethodDelete, Prefix+"/watched/{id}", "unmarkWatched", "watch",
-		"Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.")
+		"Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched.")
 	unmark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: unmark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, false)
@@ -307,9 +319,8 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		}
 		opts.PresentationLibraryID = &n
 	}
-	if size, err := imagesize.Parse(in.ImageSize); err == nil {
-		opts.ImageSize = size
-	}
+	art := in.Artwork()
+	opts.ImageSize, opts.ImageWidths = art.Size, art.Widths
 	filter, err := reg.deps.Watch.ContextAccessFilter(ctx, opts)
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
@@ -337,7 +348,9 @@ func watchTargetProblem(err error, location string) error {
 	return serviceProblem(err)
 }
 
-// setWatched runs the same command as v1 POST/DELETE /watched/{id}.
+// setWatched runs the same command as v1 POST/DELETE /watched/{id}, except
+// that marking a movie, episode or audiobook watched mid-rewatch records
+// another play.
 func (reg *Registry) setWatched(ctx context.Context, in *WatchedInput, played bool) (*struct{}, error) {
 	if reg.deps.Watch == nil {
 		return nil, unavailable("watch")
@@ -350,7 +363,7 @@ func (reg *Registry) setWatched(ctx context.Context, in *WatchedInput, played bo
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	if _, err := reg.deps.Watch.SetWatchedState(ctx, userID, profileID, string(in.ID), played, filter); err != nil {
+	if _, err := reg.deps.Watch.SetWatchedState(ctx, userID, profileID, string(in.ID), played, played, filter); err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil
@@ -495,7 +508,16 @@ func watchMarkerOf(m *catalogpkg.Marker) *WatchMarker {
 	if m == nil {
 		return nil
 	}
-	return &WatchMarker{StartSeconds: m.Start, EndSeconds: m.End}
+	out := &WatchMarker{
+		StartSeconds: m.Start,
+		EndSeconds:   m.End,
+		Source:       m.Source,
+		Provider:     m.Provider,
+		Algorithm:    m.Algorithm,
+	}
+	// Absent, not zero: an unrated marker must not read as a rated 0.
+	out.Confidence = m.Confidence
+	return out
 }
 
 func watchUserDataOf(u *catalogpkg.SeasonUserData) *WatchUserData {
@@ -529,6 +551,6 @@ func optionalIDOfInt(n int) ID {
 type WatchService interface {
 	ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error)
 	WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error)
-	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
+	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
 	ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) error
 }

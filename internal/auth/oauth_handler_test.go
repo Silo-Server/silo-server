@@ -511,12 +511,6 @@ func TestOAuthCallback_FailureReasons(t *testing.T) {
 		{name: "exchange fails", setup: func(r *oauthTestRig) { r.client.exchangeErr = errors.New("token endpoint secret context") }, reason: "provider_unavailable", noLogins: true},
 		{name: "empty subject", setup: func(r *oauthTestRig) { r.client.exchangeResp = &pluginv1.AuthenticateResponse{} }, reason: "login_failed", noLogins: true},
 		{name: "unknown failure", setup: func(r *oauthTestRig) { r.comp.err = errors.New("insert users failed: private db detail") }, reason: "login_failed"},
-		{name: "not permitted", setup: func(r *oauthTestRig) { r.comp.err = ErrNotPermitted }, reason: "not_permitted"},
-		{name: "account required", setup: func(r *oauthTestRig) { r.comp.err = ErrAccountRequired }, reason: "account_required"},
-		{name: "email in use", setup: func(r *oauthTestRig) { r.comp.err = ErrEmailInUse }, reason: "email_in_use"},
-		{name: "linked elsewhere", setup: func(r *oauthTestRig) { r.comp.err = ErrIdentityLinkedElsewhere }, reason: "identity_linked_elsewhere"},
-		{name: "disabled", setup: func(r *oauthTestRig) { r.comp.err = ErrUserDisabled }, reason: "account_disabled"},
-		{name: "provider unavailable", setup: func(r *oauthTestRig) { r.comp.err = ErrProviderUnavailable }, reason: "provider_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOAuthRig(t)
@@ -1404,50 +1398,6 @@ func TestOAuthProviderLogoutURLIsBounded(t *testing.T) {
 	}
 }
 
-func TestClientIPUsesResolvedContextAndPreservesIPv6(t *testing.T) {
-	tests := []struct {
-		name       string
-		contextIP  string
-		remoteAddr string
-		want       string
-	}{
-		{
-			name:       "middleware context wins",
-			contextIP:  "2001:db8::7",
-			remoteAddr: "10.0.0.1:1234",
-			want:       "2001:db8::7",
-		},
-		{
-			name:       "bracketed ipv6 with port",
-			remoteAddr: "[::1]:8080",
-			want:       "::1",
-		},
-		{
-			name:       "bare ipv6 from middleware remote addr",
-			remoteAddr: "::1",
-			want:       "::1",
-		},
-		{
-			name:       "ipv4 with port",
-			remoteAddr: "192.0.2.10:8080",
-			want:       "192.0.2.10",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/", nil)
-			r.RemoteAddr = tt.remoteAddr
-			if tt.contextIP != "" {
-				r = r.WithContext(clientip.SetContext(r.Context(), tt.contextIP))
-			}
-			if got := clientIP(r); got != tt.want {
-				t.Fatalf("clientIP() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // A credentials (LDAP) installation takes no part in the OAuth routes: it
 // gets no link ticket and no flow, answered like an unknown installation.
 func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
@@ -1479,21 +1429,9 @@ func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
 }
 
 // TestOAuthNative_IssuerSerialization: iss is serialized in one canonical
-// form, so the app can compare it with its saved server's origin.
+// form (clientip.SerializeOrigin, tested there), so the app can compare it
+// with its saved server's origin.
 func TestOAuthNative_IssuerSerialization(t *testing.T) {
-	for _, tc := range []struct{ scheme, host, want string }{
-		{"https", "silo.test", "https://silo.test"},
-		{"HTTPS", "Silo.Example.TEST:443", "https://silo.example.test"},
-		{"http", "10.0.0.5:80", "http://10.0.0.5"},
-		{"http", "10.0.0.5:8096", "http://10.0.0.5:8096"},
-		{"https", "[FE80::1]:8443", "https://[fe80::1]:8443"},
-		{"https", "[::1]", "https://[::1]"},
-	} {
-		if got := serializeOrigin(tc.scheme, tc.host); got != tc.want {
-			t.Errorf("serializeOrigin(%q, %q) = %q, want %q", tc.scheme, tc.host, got, tc.want)
-		}
-	}
-
 	// A start on the public origin of a public URL with a path, a default
 	// port and upper case names its origin only.
 	rig := newOAuthRig(t)
@@ -1534,30 +1472,6 @@ func completionCookieValue(t *testing.T, w *httptest.ResponseRecorder) string {
 		t.Fatalf("completion cookies = %v", paths)
 	}
 	return v1
-}
-
-func TestSameOriginComparesCanonicalHosts(t *testing.T) {
-	cases := []struct {
-		scheme, host, base string
-		want               bool
-	}{
-		{"https", "[::1]", "https://[0:0:0:0:0:0:0:1]", true},
-		{"https", "[::1]:443", "https://[0:0:0:0:0:0:0:1]", true},
-		{"http", "[::1]:8096", "http://[::1]:8096", true},
-		{"https", "Silo.Example.test", "https://silo.example.test:443", true},
-		{"https", "[::2]", "https://[::1]", false},
-		{"http", "silo.example.test", "https://silo.example.test", false},
-		{"https", "silo.example.test:8443", "https://silo.example.test", false},
-	}
-	for _, tc := range cases {
-		base, err := url.Parse(tc.base)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := sameOrigin(tc.scheme, tc.host, base); got != tc.want {
-			t.Errorf("sameOrigin(%q, %q, %q) = %v, want %v", tc.scheme, tc.host, tc.base, got, tc.want)
-		}
-	}
 }
 
 func TestHandleCompleteRejectsOversizedBody(t *testing.T) {

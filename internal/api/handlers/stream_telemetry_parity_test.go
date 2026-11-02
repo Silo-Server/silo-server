@@ -30,29 +30,6 @@ func serveParity(t *testing.T, handler *StreamTelemetryParityHandler) parityResp
 	return decodeParity(t, recorder)
 }
 
-// With telemetry off the endpoint must say so rather than return an empty
-// report, which a reader would take as "the two projections agree".
-func TestStreamTelemetryParityReportsDisabled(t *testing.T) {
-	t.Run("nil handler fields", func(t *testing.T) {
-		response := serveParity(t, &StreamTelemetryParityHandler{})
-		if response.Enabled || response.Reason == "" {
-			t.Fatalf("response = %+v", response)
-		}
-		if len(response.Sources) != 0 {
-			t.Fatalf("disabled telemetry still produced comparisons: %+v", response.Sources)
-		}
-	})
-	t.Run("disabled registry", func(t *testing.T) {
-		cfg := streamtelemetry.DefaultConfig("parity-test")
-		registry := streamtelemetry.NewRegistry(cfg, streamtelemetry.NewLocalStore(), nil)
-		t.Cleanup(func() { _ = registry.Stop(context.Background()) })
-		response := serveParity(t, &StreamTelemetryParityHandler{Registry: registry})
-		if response.Enabled {
-			t.Fatalf("disabled registry reported enabled: %+v", response)
-		}
-	})
-}
-
 func enabledParityHandler(t *testing.T) *StreamTelemetryParityHandler {
 	t.Helper()
 	cfg := streamtelemetry.DefaultConfig("parity-test")

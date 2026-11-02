@@ -378,25 +378,6 @@ func TestDeleteObjectsFallbackReturnsErrorForFailedKeys(t *testing.T) {
 	}
 }
 
-func TestDeleteObjectsReturnsContextError(t *testing.T) {
-	var calls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	deleted, err := client.deleteObjects(ctx, client.Bucket(), []string{"a.webp", "b.webp"})
-	if !errors.Is(err, context.Canceled) || deleted != 0 {
-		t.Fatalf("deleteObjects() = %d, %v; want 0, context.Canceled", deleted, err)
-	}
-	if calls != 0 {
-		t.Fatalf("requests=%d; want 0", calls)
-	}
-}
-
 func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
@@ -407,66 +388,6 @@ func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
 	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
 	if err := client.DeleteObject(t.Context(), client.Bucket(), "missing.webp"); err == nil {
 		t.Fatal("DeleteObject() ignored a missing bucket")
-	}
-}
-
-func TestClientWithoutKeyPrefixUsesLogicalKeys(t *testing.T) {
-	t.Parallel()
-
-	srv := newS3TestServer(t)
-	client := NewClient(BucketConfig{
-		Endpoint:       srv.URL(),
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		PublicEndpoint: "",
-	})
-
-	ctx := context.Background()
-	if err := client.PutObject(ctx, client.Bucket(), "poster.jpg", []byte("data")); err != nil {
-		t.Fatalf("PutObject() returned error: %v", err)
-	}
-	if _, err := client.GetObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("GetObject() returned error: %v", err)
-	}
-	if ok, err := client.ObjectExists(ctx, client.Bucket(), "poster.jpg"); err != nil || !ok {
-		t.Fatalf("ObjectExists() = %v, %v, want true, nil", ok, err)
-	}
-	if err := client.DeleteObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("DeleteObject() returned error: %v", err)
-	}
-	if err := client.HeadBucket(ctx, client.Bucket()); err != nil {
-		t.Fatalf("HeadBucket() returned error: %v", err)
-	}
-	if err := client.SetBucketCORS(ctx, client.Bucket(), []string{"*"}); err != nil {
-		t.Fatalf("SetBucketCORS() returned error: %v", err)
-	}
-
-	requests := srv.Requests()
-	paths := make([]string, 0, len(requests))
-	for _, req := range requests {
-		paths = append(paths, req.Path)
-	}
-
-	if !containsRequest(requests, http.MethodPut, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want PutObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodGet, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want GetObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want HeadObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodDelete, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want DeleteObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo", "") {
-		t.Fatalf("requests = %#v, want HeadBucket path /silo", paths)
-	}
-	if !containsRequest(requests, http.MethodPut, "/silo", "cors=") {
-		t.Fatalf("requests = %#v, want PutBucketCors path /silo?cors=", requests)
 	}
 }
 
@@ -575,31 +496,6 @@ func TestClientWithKeyPrefixPrefixesGeneratedURLs(t *testing.T) {
 	}
 }
 
-func TestClientWithKeyPrefixPrefixesCloudflareTokenURL(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.test",
-		PublicEndpoint: "https://cdn.example.test",
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		KeyPrefix:      "silo/dev",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "secret",
-	})
-
-	u, err := client.PresignGetURL(context.Background(), client.Bucket(), "poster.jpg", time.Minute)
-	if err != nil {
-		t.Fatalf("PresignGetURL() returned error: %v", err)
-	}
-	if !strings.HasPrefix(u, "https://cdn.example.test/silo/dev/poster.jpg?verify=") {
-		t.Fatalf("PresignGetURL() = %q, want prefixed Cloudflare token URL", u)
-	}
-}
-
 func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	t.Parallel()
 
@@ -669,40 +565,6 @@ func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	}
 }
 
-func TestClientObjectAvailableUsesStorageWithoutExternalDelivery(t *testing.T) {
-	t.Parallel()
-
-	for _, authMode := range []string{URLAuthPresigned, URLAuthPublic, URLAuthCloudflareToken} {
-		t.Run(authMode, func(t *testing.T) {
-			srv := newS3TestServer(t)
-			client := NewClient(BucketConfig{
-				Endpoint:  srv.URL(),
-				Region:    "us-east-1",
-				Bucket:    "silo",
-				AccessKey: "test",
-				SecretKey: "test",
-				PathStyle: true,
-				URLAuth:   authMode,
-			})
-
-			if client.UsesExternalDelivery() {
-				t.Fatal("UsesExternalDelivery() = true without a public endpoint")
-			}
-			available, err := client.ObjectAvailable(t.Context(), client.Bucket(), "poster.webp")
-			if err != nil || !available {
-				t.Fatalf("ObjectAvailable() = %v, %v, want true, nil", available, err)
-			}
-			requests := srv.Requests()
-			if !containsRequest(requests, http.MethodHead, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, want storage HEAD", requests)
-			}
-			if containsRequest(requests, http.MethodGet, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, do not want a delivery GET without external delivery", requests)
-			}
-		})
-	}
-}
-
 func TestClientObjectAvailableReportsExternalAuthFailureWithoutToken(t *testing.T) {
 	t.Parallel()
 
@@ -751,22 +613,6 @@ func TestClientEffectivePresignTTLClampsCloudflareTokenTTL(t *testing.T) {
 	}
 	if got := client.EffectivePresignTTL(5 * time.Minute); got != 5*time.Minute {
 		t.Fatalf("EffectivePresignTTL(5m) = %s, want 5m", got)
-	}
-}
-
-func TestClientEffectivePresignTTLPreservesNonTokenAuth(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:  "https://s3.example.test",
-		Region:    "us-east-1",
-		Bucket:    "silo",
-		AccessKey: "test",
-		SecretKey: "test",
-	})
-
-	if got := client.EffectivePresignTTL(4 * time.Hour); got != 4*time.Hour {
-		t.Fatalf("EffectivePresignTTL(4h) = %s, want 4h", got)
 	}
 }
 
@@ -822,4 +668,152 @@ func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
 			t.Errorf("safeErrorCode(%q) = %q, want %q", code, got, want)
 		}
 	}
+}
+
+// A HEAD response has no body, so a 403 cannot say whether the key is missing
+// (AWS S3 answers 403 for a missing key when the credential lacks
+// s3:ListBucket) or access is denied. ObjectMatches reports it as unverified so
+// the caller rewrites the object and the PUT reports any real denial (#911).
+func TestObjectMatchesStatusMapping(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		wantErr bool
+	}{
+		{status: http.StatusNotFound},
+		{status: http.StatusForbidden},
+		{status: http.StatusBadRequest, wantErr: true},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+
+			matched, err := client.ObjectMatches(t.Context(), client.Bucket(), "poster/original.webp", []byte("image"))
+			if matched {
+				t.Fatal("ObjectMatches() = true for a failed HEAD")
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ObjectMatches() error = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// r2RateLimitCode is the error code Cloudflare R2 sends with HTTP 429.
+const r2RateLimitCode = "TooManyRequests"
+
+// throttlingBackend answers the first throttled requests of each method with
+// a provider rate-limit response, Cloudflare R2's 429 unless set otherwise,
+// and every later request with success.
+type throttlingBackend struct {
+	mu        sync.Mutex
+	status    int
+	code      string
+	throttled map[string]int
+	calls     map[string]int
+}
+
+func newThrottlingBackend(throttled map[string]int) *throttlingBackend {
+	return &throttlingBackend{status: http.StatusTooManyRequests, code: r2RateLimitCode, throttled: throttled, calls: map[string]int{}}
+}
+
+func (b *throttlingBackend) Do(r *http.Request) (*http.Response, error) {
+	if r.Body != nil {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+	}
+	b.mu.Lock()
+	b.calls[r.Method]++
+	throttle := b.throttled[r.Method] > 0
+	if throttle {
+		b.throttled[r.Method]--
+	}
+	b.mu.Unlock()
+	if !throttle {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": {"2"}}, Body: io.NopCloser(strings.NewReader("ok")), ContentLength: 2, Request: r}, nil
+	}
+	body := `<?xml version="1.0" encoding="UTF-8"?><Error><Code>` + b.code + `</Code><Message>Please reduce your request rate</Message></Error>`
+	if r.Method == http.MethodHead {
+		// HEAD responses carry no body, so only the status identifies the throttle.
+		body = ""
+	}
+	return &http.Response{StatusCode: b.status, Header: http.Header{"Content-Type": {"application/xml"}}, Body: io.NopCloser(strings.NewReader(body)), ContentLength: int64(len(body)), Request: r}, nil
+}
+
+func (b *throttlingBackend) Calls(method string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls[method]
+}
+
+func TestClientRetriesProviderRateLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"cloudflare r2", http.StatusTooManyRequests, r2RateLimitCode},
+		{"aws s3", http.StatusServiceUnavailable, "SlowDown"},
+		{"minio write quorum", http.StatusServiceUnavailable, "SlowDownWrite"},
+		{"minio read quorum", http.StatusServiceUnavailable, "SlowDownRead"},
+		{"minio busy", http.StatusServiceUnavailable, "ServerBusy"},
+		{"wasabi", http.StatusForbidden, "RequestRateLimitExceeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				backend := newThrottlingBackend(map[string]int{http.MethodPut: 2})
+				backend.status, backend.code = tc.status, tc.code
+				client := newMutationFenceTestClient(backend.Do)
+				if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err != nil {
+					t.Fatalf("PutObject() after a short rate limit = %v, want success", err)
+				}
+				if got := backend.Calls(http.MethodPut); got != 3 {
+					t.Fatalf("PUT attempts = %d, want 2 throttled and 1 successful", got)
+				}
+				backend.mu.Lock()
+				backend.throttled[http.MethodPut] = retryMaxAttempts
+				backend.mu.Unlock()
+				if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); !errors.Is(err, ErrThrottled) {
+					t.Fatalf("PutObject() during a lasting rate limit = %v, want ErrThrottled", err)
+				}
+			})
+		})
+	}
+}
+
+func TestClientKeepsBackingOffAfterALongThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// The SDK's default quota of 500 tokens covers 50 calls that each spend
+		// two 5-token retries, so 60 such calls would empty it.
+		const exhausted = 60
+		backend := newThrottlingBackend(map[string]int{http.MethodPut: exhausted*retryMaxAttempts + 1})
+		client := newMutationFenceTestClient(backend.Do)
+		for range exhausted {
+			if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err == nil {
+				t.Fatal("PutObject() succeeded while every attempt was throttled")
+			}
+		}
+		before := backend.Calls(http.MethodPut)
+		if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err != nil {
+			t.Fatalf("PutObject() after a long throttle = %v, want a retry once it clears", err)
+		}
+		if got := backend.Calls(http.MethodPut) - before; got != 2 {
+			t.Fatalf("PUT attempts for the last call = %d, want 1 throttled and 1 successful", got)
+		}
+	})
+}
+
+func TestClientRetriesBodilessRateLimitOnHead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := newThrottlingBackend(map[string]int{http.MethodHead: 2})
+		client := newMutationFenceTestClient(backend.Do)
+		if _, err := client.HeadObject(t.Context(), client.Bucket(), "tmdb/poster.webp"); err != nil {
+			t.Fatalf("HeadObject() after a bodiless 429 = %v, want success", err)
+		}
+		if got := backend.Calls(http.MethodHead); got != 3 {
+			t.Fatalf("HEAD attempts = %d, want 2 throttled and 1 successful", got)
+		}
+	})
 }

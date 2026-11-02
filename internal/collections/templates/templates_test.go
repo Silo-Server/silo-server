@@ -264,10 +264,10 @@ func TestRegisterBundleRejectsProfileRequiredTemplates(t *testing.T) {
 		ID:              "recommended",
 		Title:           "Recommended",
 		Category:        CategoryEditorial,
-		Source:          SourceTrakt,
+		Source:          SourceTMDB,
 		MediaKind:       MediaMovie,
 		RequiresProfile: true,
-		Trakt:           &TraktSpec{Preset: "recommended", MediaType: "movie"},
+		TMDB:            &TMDBSpec{Preset: "popular", MediaType: "movie"},
 	})
 	defer func() {
 		if recover() == nil {
@@ -313,8 +313,8 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			name: "two source specs",
 			tmpl: Template{
 				ID: "x", Title: "x", Category: CategoryTrending, Source: SourceTMDB, MediaKind: MediaMovie,
-				TMDB:  &TMDBSpec{Preset: "popular", MediaType: "movie"},
-				Trakt: &TraktSpec{Preset: "popular", MediaType: "movie"},
+				TMDB:    &TMDBSpec{Preset: "popular", MediaType: "movie"},
+				MDBList: &MDBListSpec{URL: "https://example.com/list"},
 			},
 		},
 		{
@@ -326,12 +326,8 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			tmpl: Template{ID: "x", Title: "x", Category: CategoryInTheaters, Source: SourceTMDB, MediaKind: MediaTV, TMDB: &TMDBSpec{Preset: "now_playing", MediaType: "tv"}},
 		},
 		{
-			name: "trakt recommended without requires_profile",
-			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: SourceTrakt, MediaKind: MediaMovie, Trakt: &TraktSpec{Preset: "recommended", MediaType: "movie"}},
-		},
-		{
-			name: "trakt recommended with bad media type",
-			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: SourceTrakt, MediaKind: MediaMovie, RequiresProfile: true, Trakt: &TraktSpec{Preset: "recommended", MediaType: "all"}},
+			name: "retired trakt source",
+			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: "trakt", MediaKind: MediaMovie},
 		},
 		{
 			name: "mdblist non-http URL",
@@ -403,53 +399,6 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			}()
 			r.Register(c.tmpl)
 		})
-	}
-}
-
-func TestRegisterAcceptsTMDBCollectionTemplates(t *testing.T) {
-	// Happy-path register for a real TMDB-collection franchise template.
-	r := NewRegistry()
-	r.Register(Template{
-		ID:        "tmdb_mcu",
-		Title:     "Marvel Cinematic Universe",
-		Category:  CategoryEditorial,
-		Source:    SourceTMDBCollection,
-		MediaKind: MediaMovie,
-		TMDBCollection: &TMDBCollectionSpec{
-			CollectionID: 86311,
-		},
-	})
-	tmpl, ok := r.Get("tmdb_mcu")
-	if !ok {
-		t.Fatal("tmdb_mcu was not registered")
-	}
-	if tmpl.TMDBCollection == nil || tmpl.TMDBCollection.CollectionID != 86311 {
-		t.Fatalf("registered spec was lost: %+v", tmpl.TMDBCollection)
-	}
-}
-
-// TestRegisterAcceptsPlaceholderTMDBCollection pins the rule that a
-// CollectionID of 0 is a permitted "fill me in later" sentinel — the generic
-// "TMDB Franchise" catalog entry ships this way so admins can edit the
-// resulting collection's source_config at apply-time.
-func TestRegisterAcceptsPlaceholderTMDBCollection(t *testing.T) {
-	r := NewRegistry()
-	r.Register(Template{
-		ID:        "tmdb_franchise_placeholder",
-		Title:     "TMDB Franchise",
-		Category:  CategoryCustom,
-		Source:    SourceTMDBCollection,
-		MediaKind: MediaMovie,
-		TMDBCollection: &TMDBCollectionSpec{
-			CollectionID: 0,
-		},
-	})
-	tmpl, ok := r.Get("tmdb_franchise_placeholder")
-	if !ok {
-		t.Fatal("placeholder template was not registered")
-	}
-	if tmpl.TMDBCollection == nil || tmpl.TMDBCollection.CollectionID != 0 {
-		t.Fatalf("placeholder spec was lost: %+v", tmpl.TMDBCollection)
 	}
 }
 
@@ -568,14 +517,6 @@ func TestRegisterRejectsInvalidTMDBDiscover(t *testing.T) {
 			},
 		},
 		{
-			name: "discover with trakt spec",
-			tmpl: Template{
-				ID: "x", Title: "x", Category: CategoryPopular, Source: SourceTMDBDiscover, MediaKind: MediaMovie,
-				TMDBDiscover: validTMDBDiscoverSpec(),
-				Trakt:        &TraktSpec{Preset: "popular", MediaType: "movie"},
-			},
-		},
-		{
 			name: "discover with mdblist spec",
 			tmpl: Template{
 				ID: "x", Title: "x", Category: CategoryPopular, Source: SourceTMDBDiscover, MediaKind: MediaMovie,
@@ -603,14 +544,5 @@ func TestRegisterRejectsInvalidTMDBDiscover(t *testing.T) {
 			}()
 			r.Register(c.tmpl)
 		})
-	}
-}
-
-func TestCatalogPreservesOrder(t *testing.T) {
-	cat := CatalogDefault()
-	for i, group := range cat.Categories {
-		if i == 0 && group.Category != CategoryTrending {
-			t.Errorf("expected first category to be trending, got %q", group.Category)
-		}
 	}
 }

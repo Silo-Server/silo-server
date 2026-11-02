@@ -57,14 +57,7 @@ func TestThemeAudioRouteServesOnlyThemeTokens(t *testing.T) {
 	srv.nodeRowID = func() (int, bool) { return 11, true }
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 	direct := themeDirectClaims(path, size, modified)
 	directToken := sign(direct)
 
@@ -127,14 +120,7 @@ func TestThemeConversionHeadAndRelay(t *testing.T) {
 	srv.nodeRowID = func() (int, bool) { return 11, true }
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 
 	// No FFmpeg is configured here: HEAD must answer without starting one.
 	local := themeAACClaims(path, size, modified)

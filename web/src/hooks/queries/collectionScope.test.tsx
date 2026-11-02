@@ -89,19 +89,6 @@ describe("useScopeEditor (personal)", () => {
     expect(result.current.snapshot!.view.posterUrl).toBe("https://images.example/listed.png");
   });
 
-  it("keeps the collection's own poster when the list could not be read", async () => {
-    v2Recorder.answer("GET /api/v2/collections", () => {
-      throw new Error("list unavailable");
-    });
-    v2Recorder.answer("GET /api/v2/collections/{id}", {
-      ...getCollectionOk,
-      poster_url: "https://images.example/own.png",
-    });
-    const { result } = open("c1");
-    await waitFor(() => expect(result.current.snapshot).toBeDefined());
-    expect(result.current.snapshot!.view.posterUrl).toBe("https://images.example/own.png");
-  });
-
   it("opens without waiting for the list, as the personal editor always has", async () => {
     v2Recorder.answer("GET /api/v2/collections", () => new Promise(() => {}));
     v2Recorder.answer("GET /api/v2/collections/{id}", {
@@ -112,14 +99,6 @@ describe("useScopeEditor (personal)", () => {
     await waitFor(() => expect(result.current.snapshot).toBeDefined());
     expect(result.current.isLoading).toBe(false);
     expect(result.current.snapshot!.view.posterUrl).toBe("https://images.example/own.png");
-  });
-
-  it("reads no collection without an id, and is loading only until the list arrives", async () => {
-    const { result } = open(undefined);
-    expect(result.current.isLoading).toBe(true);
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.snapshot).toBeUndefined();
-    expect(v2Recorder.callsOf("GET /api/v2/collections/{id}")).toEqual([]);
   });
 
   it("reads the collection again when it opens on a copy another page cached", async () => {

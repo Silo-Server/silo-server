@@ -106,47 +106,39 @@ func TestStreamExtractSubtitleStopsOnWriterFailure(t *testing.T) {
 	}
 }
 
-func TestIsPGS(t *testing.T) {
-	cases := []struct {
-		codec string
-		want  bool
-	}{
-		{"pgs", true},
-		{"hdmv_pgs_subtitle", true},
-		{"pgssub", true},
-		{"HDMV_PGS_SUBTITLE", true},
-		{"dvd_subtitle", false},
-		{"dvb_subtitle", false},
-		{"subrip", false},
-		{"ass", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		if got := IsPGS(tc.codec); got != tc.want {
-			t.Errorf("IsPGS(%q) = %v, want %v", tc.codec, got, tc.want)
-		}
-	}
-}
-
 func TestStreamExtractOutput(t *testing.T) {
 	cases := []struct {
 		codec      string
+		target     string
 		wantCodec  string
 		wantFormat string
 	}{
-		{"ass", "copy", "ass"},
-		{"ssa", "copy", "ass"},
-		{"pgs", "copy", "sup"},
-		{"hdmv_pgs_subtitle", "copy", "sup"},
-		{"pgssub", "copy", "sup"},
-		{"subrip", "webvtt", "webvtt"},
-		{"mov_text", "webvtt", "webvtt"},
+		{"ass", "", "copy", "ass"},
+		{"ssa", "", "copy", "ass"},
+		{"pgs", "", "copy", "sup"},
+		{"hdmv_pgs_subtitle", "", "copy", "sup"},
+		{"pgssub", "", "copy", "sup"},
+		{"subrip", "", "webvtt", "webvtt"},
+		{"mov_text", "", "webvtt", "webvtt"},
+		// A forced "vtt" target applies only to text sources: bitmap codecs carry no
+		// text for ffmpeg's webvtt encoder, so the override must fall back to the
+		// source-driven mapping instead of building a command that always fails.
+		{"subrip", "vtt", "webvtt", "webvtt"},
+		{"mov_text", "vtt", "webvtt", "webvtt"},
+		{"ass", "vtt", "webvtt", "webvtt"},
+		{"pgs", "vtt", "copy", "sup"},
+		{"hdmv_pgs_subtitle", "vtt", "copy", "sup"},
 	}
 	for _, tc := range cases {
-		outCodec, outFormat := streamExtractOutput(tc.codec)
+		var outCodec, outFormat string
+		if tc.target == "" {
+			outCodec, outFormat = streamExtractOutput(tc.codec)
+		} else {
+			outCodec, outFormat = streamExtractOutput(tc.codec, tc.target)
+		}
 		if outCodec != tc.wantCodec || outFormat != tc.wantFormat {
-			t.Errorf("streamExtractOutput(%q) = (%q, %q), want (%q, %q)",
-				tc.codec, outCodec, outFormat, tc.wantCodec, tc.wantFormat)
+			t.Errorf("streamExtractOutput(%q, %q) = (%q, %q), want (%q, %q)",
+				tc.codec, tc.target, outCodec, outFormat, tc.wantCodec, tc.wantFormat)
 		}
 	}
 }
@@ -337,43 +329,6 @@ func TestPGSWindowRequest(t *testing.T) {
 					tc.query, allow, seek, duration, tc.wantAllow, tc.wantSeek, tc.wantDuration)
 			}
 		})
-	}
-}
-
-// A forced "vtt" target applies only to text sources: bitmap codecs carry no
-// text for ffmpeg's webvtt encoder, so the override must fall back to the
-// source-driven mapping instead of building a command that always fails.
-func TestStreamExtractOutput_TargetFormatVTTGatedToTextSources(t *testing.T) {
-	cases := []struct {
-		codec      string
-		wantCodec  string
-		wantFormat string
-	}{
-		{"subrip", "webvtt", "webvtt"},
-		{"mov_text", "webvtt", "webvtt"},
-		{"ass", "webvtt", "webvtt"},
-		{"pgs", "copy", "sup"},
-		{"hdmv_pgs_subtitle", "copy", "sup"},
-	}
-	for _, tc := range cases {
-		outCodec, outFormat := streamExtractOutput(tc.codec, "vtt")
-		if outCodec != tc.wantCodec || outFormat != tc.wantFormat {
-			t.Errorf("streamExtractOutput(%q, \"vtt\") = (%q, %q), want (%q, %q)",
-				tc.codec, outCodec, outFormat, tc.wantCodec, tc.wantFormat)
-		}
-	}
-}
-
-func TestStreamExtractArgs_PGSProducesSup(t *testing.T) {
-	args := streamExtractArgs(StreamExtractOpts{
-		InputPath:   "/media/movie.mkv",
-		TrackIndex:  1,
-		SourceCodec: "pgs",
-	})
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-map 0:s:1 -c:s copy -f sup pipe:1") {
-		t.Fatalf("PGS extract should copy into a sup stream: %s", joined)
 	}
 }
 

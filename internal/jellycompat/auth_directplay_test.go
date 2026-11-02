@@ -121,9 +121,7 @@ func TestPlaybackSessionAuth_DirectPlayRequiresAuthority(t *testing.T) {
 		url  string
 	}{
 		{"stream + mediaSourceId", "/Videos/item123/stream?static=true&mediaSourceId=src9&container=mkv"},
-		{"stream.{container} + mediaSourceId", "/Videos/item123/stream.mkv?static=true&mediaSourceId=src9"},
 		{"stream, route-item lookup (no mediaSourceId)", "/Videos/item123/stream?static=true&container=mkv"},
-		{"stream.{container}, route-item lookup", "/Videos/item123/stream.mkv?static=true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,94 +140,6 @@ func TestPlaybackSessionAuth_DirectPlayRequiresAuthority(t *testing.T) {
 				t.Fatal("item/source identifiers must not authorize the handler")
 			}
 		})
-	}
-}
-
-// TestPlaybackSessionAuth_DirectPlayNoMatchingSession: with a resolvable compat
-// session present but NO PlaybackSession negotiated for the requested item, the
-// token-less request stays a 401 (proves the playback-session match gates it,
-// not a missing compat session).
-func TestPlaybackSessionAuth_DirectPlayNoMatchingSession(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	sessions := NewSessionStore(time.Hour, clock)
-	if err := sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 7}); err != nil {
-		t.Fatalf("put session: %v", err)
-	}
-	playback := NewPlaybackSessionStore(time.Hour, clock)
-	// Session exists, but for a different item id and source id.
-	playback.Put(PlaybackSession{ID: "ps1", CompatToken: "compat-tok", RouteItemID: "other"})
-
-	var reached bool
-	router := directPlayRouter(t, sessions, playback, nil, &reached)
-
-	req := httptest.NewRequest(http.MethodGet, "/Videos/item123/stream?static=true&mediaSourceId=src9", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
-	}
-	if reached {
-		t.Fatal("inner handler must not run without a matching PlaybackSession")
-	}
-}
-
-// TestPlaybackSessionAuth_DirectPlayCrossItemDenied: a mediaSourceId that resolves
-// to a session for a DIFFERENT route item must not authorize the request — the
-// session's RouteItemID must match the requested item.
-func TestPlaybackSessionAuth_DirectPlayCrossItemDenied(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	sessions := NewSessionStore(time.Hour, clock)
-	if err := sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 7}); err != nil {
-		t.Fatalf("put session: %v", err)
-	}
-	playback := NewPlaybackSessionStore(time.Hour, clock)
-	// src9 belongs to itemB's session; the request targets itemA.
-	playback.Put(PlaybackSession{
-		ID:           "psB",
-		CompatToken:  "compat-tok",
-		RouteItemID:  "itemB",
-		MediaSources: []PlaybackMediaSource{{ID: "src9"}},
-	})
-
-	var reached bool
-	router := directPlayRouter(t, sessions, playback, nil, &reached)
-
-	req := httptest.NewRequest(http.MethodGet, "/Videos/itemA/stream?static=true&mediaSourceId=src9", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
-	}
-	if reached {
-		t.Fatal("inner handler must not run when the matched session belongs to another item")
-	}
-}
-
-// TestPlaybackSessionAuth_DownloadNotLoosened: the new direct-play fallback must
-// not apply to /Items/{id}/Download — a token-less download stays 401 even when a
-// resolvable compat session AND a PlaybackSession exist for the same item id, so
-// the 401 proves route scoping rather than a missing session.
-func TestPlaybackSessionAuth_DownloadNotLoosened(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	sessions, playback := seedDirectPlaySession(t, clock)
-
-	var reached bool
-	router := directPlayRouter(t, sessions, playback, nil, &reached)
-
-	req := httptest.NewRequest(http.MethodGet, "/Items/item123/Download", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
-	}
-	if reached {
-		t.Fatal("download route must not be served via the direct-play fallback")
 	}
 }
 

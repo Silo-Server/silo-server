@@ -20,6 +20,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -98,17 +100,10 @@ type imageCacheLadderBackfiller interface {
 }
 
 type targetImageCacheJobStore interface {
-	retryTargetNow(ctx context.Context, targetContentID string, localOnly bool) error
-	claimDueForTarget(ctx context.Context, workerID, targetContentID string, localOnly bool, limit int) ([]*models.MetadataImageCacheJob, error)
-	targetHasRunningJobs(ctx context.Context, targetContentID string, localOnly bool) (bool, error)
+	retryTargetNow(ctx context.Context, targetContentID string) error
+	claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error)
+	targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error)
 	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
-}
-
-// imageCacheTargetCachedPathReader is optionally implemented by the job store
-// (ImageCacheJobRepository does) to expose the target's currently stored
-// cached path for the local-artwork unchanged-skip and stale-prefix cleanup.
-type imageCacheTargetCachedPathReader interface {
-	CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
 }
 
 // imageCacheBacklogReader is optional so lightweight processor fakes and
@@ -124,14 +119,8 @@ type LibraryRootResolver interface {
 	LibraryRootsForContent(ctx context.Context, contentID string) ([]string, error)
 }
 
-// ImagePrefixDeleter deletes cached image objects under a key prefix; used to
-// sweep the previous hashed local/ prefix after a successful re-cache.
-type ImagePrefixDeleter interface {
-	DeletePrefix(context.Context, string) (int, error)
-}
-
 type SeasonArtworkUpdater interface {
-	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error)
+	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
 type EpisodeStillUpdater interface {
@@ -178,17 +167,17 @@ type ImageCacheProcessor struct {
 	logger  *slog.Logger
 
 	// Local file:// artwork support. libraryRoots confines reads to the
-	// owning library's roots; prefixDeleter sweeps stale hashed prefixes.
-	// localCopies copies art this process discovered (CopyLocalArtwork).
-	libraryRoots  LibraryRootResolver
-	prefixDeleter ImagePrefixDeleter
-	localCopies   localArtworkCopies
+	// owning library's roots. localCopies copies art this process
+	// discovered (CopyLocalArtwork).
+	libraryRoots LibraryRootResolver
+	localCopies  localArtworkCopies
 	// workBudget bounds artwork jobs across drains, manual refreshes and
 	// discovery copies (SetWorkerBudget).
 	workBudget imageWorkBudget
 
-	// enabled mirrors metadata.cache_images. It governs remote artwork only:
-	// local sidecar art is copied whatever its value.
+	// enabled mirrors metadata.cache_images. While it is off nothing is
+	// cached, remote or local: clients load artwork straight from the
+	// providers.
 	enabled atomic.Bool
 
 	// idleWaitTimeout bounds how long CacheTargetArtwork waits on jobs held by
@@ -212,21 +201,11 @@ func (p *ImageCacheProcessor) SetLibraryRootResolver(resolver LibraryRootResolve
 	p.libraryRoots = resolver
 }
 
-// SetImagePrefixDeleter wires the object store used to delete the previous
-// hashed local/ prefix after a successful local re-cache. Optional: without
-// it, stale prefixes are left behind (item deletion still sweeps them).
-func (p *ImageCacheProcessor) SetImagePrefixDeleter(deleter ImagePrefixDeleter) {
-	if p == nil {
-		return
-	}
-	p.prefixDeleter = deleter
-}
-
-// SetEnabled toggles caching of remote artwork. When disabled the processor
-// begins no new discovery, remote claims, or downloads; a job already in flight
-// may finish. This honors metadata.cache_images so merely configuring object
-// storage does not download the whole catalog. Local sidecar artwork is copied
-// either way: without a copy it cannot be served at all.
+// SetEnabled toggles artwork caching. When disabled the processor begins no
+// new discovery, claims, downloads, or local copies; a job already in flight
+// may finish, and the stored-artwork release sweep undoes what it publishes.
+// This honors metadata.cache_images so merely configuring object storage does
+// not download the whole catalog.
 func (p *ImageCacheProcessor) SetEnabled(enabled bool) {
 	if p == nil {
 		return
@@ -324,13 +303,8 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 	if p == nil || p.jobs == nil || p.cacher == nil {
 		return stats, nil
 	}
-	claim := p.jobs.ClaimDue
 	if !p.enabled.Load() {
-		local, ok := p.jobs.(localImageCacheJobClaimer)
-		if !ok {
-			return stats, nil
-		}
-		claim = local.ClaimDueLocal
+		return stats, nil
 	}
 	if claimLimit <= 0 {
 		claimLimit = 100
@@ -340,7 +314,7 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 	}
 
 	claimStarted := time.Now()
-	jobs, err := claim(ctx, workerID, claimLimit)
+	jobs, err := p.jobs.ClaimDue(ctx, workerID, claimLimit)
 	if err != nil {
 		return stats, err
 	}
@@ -354,17 +328,9 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 }
 
 // ArtworkCachingEnabled reports whether the processor caches anything. Callers
-// use it to decide whether to advertise an artwork step at all. Local sidecar
-// art is always copied once the processor is wired, so this holds even while
-// metadata.cache_images keeps remote artwork uncached.
+// use it to decide whether to advertise an artwork step at all.
 func (p *ImageCacheProcessor) ArtworkCachingEnabled() bool {
-	return p != nil && p.jobs != nil && p.cacher != nil
-}
-
-// mayProcess reports whether a claimed job may start: remote artwork only
-// while caching is enabled, local sidecar files always.
-func (p *ImageCacheProcessor) mayProcess(job *models.MetadataImageCacheJob) bool {
-	return p.enabled.Load() || (job != nil && isLocalSidecarSource(job.SourcePath))
+	return p != nil && p.jobs != nil && p.cacher != nil && p.enabled.Load()
 }
 
 // CacheTargetArtwork processes only the artwork queued for a manually
@@ -374,7 +340,7 @@ func (p *ImageCacheProcessor) mayProcess(job *models.MetadataImageCacheJob) bool
 // refresh does not report success before the cached paths have been updated;
 // past that it returns ErrTargetArtworkPending and lets the queue finish. It
 // does the same when a job was left for a server that can see its library
-// root. While metadata.cache_images is off it handles local artwork only.
+// root. While metadata.cache_images is off it does nothing.
 func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetContentID string) error {
 	if !p.ArtworkCachingEnabled() {
 		return nil
@@ -392,7 +358,7 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	// earlier failure becomes due now. Repeating it on every poll would clear
 	// backoff that background workers set on sibling jobs and would turn the
 	// wait below into a write-heavy hot loop.
-	if err := store.retryTargetNow(ctx, targetContentID, !p.enabled.Load()); err != nil {
+	if err := store.retryTargetNow(ctx, targetContentID); err != nil {
 		return err
 	}
 
@@ -406,11 +372,13 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	failed := 0
 	pending := false
 	for {
-		// Re-read each round: once caching is turned off, remote jobs must not
-		// be claimed only to be handed straight back.
-		localOnly := !p.enabled.Load()
+		// Re-read each round: once caching is turned off, jobs must not be
+		// claimed only to be handed straight back.
+		if !p.enabled.Load() {
+			return nil
+		}
 		claimStarted := time.Now()
-		jobs, err := store.claimDueForTarget(ctx, workerID, targetContentID, localOnly, immediateImageCacheClaimLimit)
+		jobs, err := store.claimDueForTarget(ctx, workerID, targetContentID, immediateImageCacheClaimLimit)
 		if err != nil {
 			return err
 		}
@@ -437,7 +405,7 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			continue
 		}
 
-		running, err := store.targetHasRunningJobs(ctx, targetContentID, localOnly)
+		running, err := store.targetHasRunningJobs(ctx, targetContentID)
 		if err != nil {
 			return err
 		}
@@ -516,9 +484,9 @@ func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID strin
 	defer cancelStart()
 loop:
 	for i, job := range jobs {
-		// Disabling caching mid-run stops remote jobs from starting; local
-		// jobs carry on (see SetEnabled).
-		if !p.mayProcess(job) {
+		// Disabling caching mid-run stops jobs from starting (see
+		// SetEnabled).
+		if !p.enabled.Load() {
 			unstarted = append(unstarted, job.ID)
 			continue
 		}
@@ -543,7 +511,7 @@ loop:
 			leaveFrom(i)
 			break loop
 		}
-		if !p.mayProcess(job) {
+		if !p.enabled.Load() {
 			release()
 			<-sem
 			unstarted = append(unstarted, job.ID)
@@ -716,13 +684,13 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	if p.jobs == nil || p.cacher == nil {
 		return total, nil
 	}
-	// With caching off, draining still copies local artwork (RunOnce claims
-	// local jobs only); the provider-artwork backfill does not run.
+	// With caching off the provider-artwork backfill does not run, and
+	// draining claims nothing (RunOnce).
 	if discover && !p.enabled.Load() {
 		return total, ErrImageCachingDisabled
 	}
-	// The backlog counts every queued job; with caching off most of them are
-	// remote jobs this run will not touch, so it reports no denominator.
+	// The backlog counts every queued job; with caching off this run touches
+	// none of them, so it reports no denominator.
 	if p.enabled.Load() {
 		total.Backlog = p.sampleBacklog(ctx)
 	}
@@ -1000,7 +968,7 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 		if p.targets.Seasons == nil {
 			return false, errors.New("missing season updater")
 		}
-		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, thumbhash)
+		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			return false, errors.New("missing season localization updater")
@@ -1070,26 +1038,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	// The target's current cached path drives the unchanged-skip (same hash →
-	// same key → nothing to sweep) and the stale-prefix cleanup below.
-	previousCachedPath := ""
-	if reader, ok := p.jobs.(imageCacheTargetCachedPathReader); ok {
-		previousCachedPath, err = reader.CurrentTargetCachedPath(ctx, job)
-		if err != nil {
-			p.logger.WarnContext(ctx, "metadata image cache: failed to read current cached path", "job_id", job.ID, "error", err)
-			previousCachedPath = ""
-		}
-	}
-
 	digest := sha256.Sum256(data)
 	discriminator := hex.EncodeToString(digest[:4])
 	if job.TargetType == ImageCacheTargetItemBackdrop {
 		// An item's backdrops share its key folder, and two sidecars can hold
 		// the same bytes. A hash of the sidecar's own path keeps each file's
-		// key apart from the primary's and every other file's, so the
-		// stale-prefix cleanup below never deletes art another backdrop shows,
-		// even after rows shift. A backdrop that moves to another row keeps
-		// its key.
+		// key apart from the primary's and every other file's, so each copy is
+		// replaced and retired on its own, even after rows shift. A backdrop
+		// that moves to another row keeps its key.
 		pathDigest := sha256.Sum256([]byte(localPath))
 		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
 	}
@@ -1122,10 +1078,11 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		processResult.outcome = "failed"
 		return processResult
 	}
+	// The target update displaces the previous copy, and the displacement
+	// trigger hands it to the artwork revision GC, which deletes it only once
+	// nothing references it. Deleting it here would break an admin pick of
+	// the same bytes, which shares this key, published since the update.
 	p.finishJobWithTargetUpdate(ctx, job, cachedPath, result.Thumbhash, &processResult)
-	if processResult.outcome == "succeeded" {
-		p.deleteStaleLocalPrefix(ctx, previousCachedPath, cachedPath)
-	}
 	return processResult
 }
 
@@ -1214,14 +1171,14 @@ func closeLibraryRoots(opened []openedLibraryRoot) {
 // matching root failed to open, or a directory could not be stat'ed, so
 // nothing is known about confinement.
 func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
-	current, err := os.Stat(resolvedRoot)
+	current, err := fspath.Stat(resolvedRoot)
 	if err != nil {
 		return nil, err
 	}
 	var failure error
 	for _, root := range opened {
 		if root.handle == nil {
-			if info, err := os.Stat(root.path); err == nil && os.SameFile(info, current) && failure == nil {
+			if info, err := fspath.Stat(root.path); err == nil && fspath.SameFile(info, current) && failure == nil {
 				failure = root.err
 			}
 			continue
@@ -1231,34 +1188,11 @@ func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.
 			failure = cmp.Or(failure, err)
 			continue
 		}
-		if os.SameFile(info, current) {
+		if fspath.SameFile(info, current) {
 			return root.handle, nil
 		}
 	}
 	return nil, failure
-}
-
-// deleteStaleLocalPrefix removes the previous hashed local/ image prefix
-// after a re-cache stored the artwork under a different key.
-func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previousCachedPath, cachedPath string) {
-	previousCachedPath = strings.TrimSpace(previousCachedPath)
-	if p.prefixDeleter == nil ||
-		previousCachedPath == "" ||
-		previousCachedPath == cachedPath ||
-		!strings.HasPrefix(previousCachedPath, "local/") {
-		return
-	}
-	lastSlash := strings.LastIndex(previousCachedPath, "/")
-	if lastSlash <= 0 {
-		return
-	}
-	prefix := previousCachedPath[:lastSlash+1]
-	if strings.HasPrefix(cachedPath, prefix) {
-		return
-	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
-		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
-	}
 }
 
 // errLocalImageOutsideRoots is returned by localImagePathResolvedWithinRoots
@@ -1279,12 +1213,12 @@ func localImageOutsideRootsError(path string) error {
 // surfaces as fs.ErrNotExist for the caller to treat as a stable "missing"
 // failure via the reader; any other resolution failure fails closed.
 func localImagePathResolvedWithinRoots(path string, roots []string) (string, string, error) {
-	resolvedPath, err := filepath.EvalSymlinks(path)
+	resolvedPath, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", "", err
 	}
 	for _, root := range roots {
-		resolvedRoot, err := filepath.EvalSymlinks(strings.TrimSpace(root))
+		resolvedRoot, err := fspath.EvalSymlinks(strings.TrimSpace(root))
 		if err != nil {
 			continue
 		}
@@ -1337,7 +1271,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 			return fmt.Errorf("local image read failed: %w", err)
 		}
 	}
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1350,7 +1284,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	// Open through the root handle: it refuses any path that leaves the root,
 	// including through a directory swapped for a symlink after resolution,
 	// so confinement holds at the open itself.
-	file, err := root.Open(rel)
+	file, err := root.Open(fspath.Decode(rel))
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1361,7 +1295,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	}
 	// Reject unless the opened handle is the exact file the Lstat above
 	// inspected, so a leaf swapped between the two cannot be read instead.
-	if !os.SameFile(info, stat) {
+	if !fspath.SameFile(info, stat) {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
 	if !stat.Mode().IsRegular() {

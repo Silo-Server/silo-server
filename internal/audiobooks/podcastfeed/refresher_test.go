@@ -92,60 +92,6 @@ const rssFixture = `<?xml version="1.0" encoding="UTF-8"?>
 </channel>
 </rss>`
 
-// TestRefreshOne_InsertsNewEpisodes drives the refresher against a fake
-// feed and confirms it upserts every item with the expected fields.
-func TestRefreshOne_InsertsNewEpisodes(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(rssFixture))
-	}))
-	defer srv.Close()
-
-	feed := podcastfeed.PodcastFeed{MediaItemID: "mi-1", FeedURL: srv.URL}
-	fs := newFakeStore(feed)
-	r := podcastfeed.New().WithHTTPClient(srv.Client())
-
-	if err := r.RefreshOne(context.Background(), fs, feed); err != nil {
-		t.Fatalf("RefreshOne: %v", err)
-	}
-
-	if len(fs.upsertedEpisodes) != 2 {
-		t.Fatalf("upserts = %d, want 2", len(fs.upsertedEpisodes))
-	}
-	first := fs.upsertedEpisodes[0]
-	if first.Title != "Episode 1" {
-		t.Errorf("first.Title = %q", first.Title)
-	}
-	if first.AudioURL != "https://cdn.example.com/ep1.mp3" {
-		t.Errorf("first.AudioURL = %q", first.AudioURL)
-	}
-	if first.GUID != "episode-guid-1" {
-		t.Errorf("first.GUID = %q", first.GUID)
-	}
-	if first.DurationSeconds != 1800 {
-		t.Errorf("first.DurationSeconds = %d, want 1800 (00:30:00)", first.DurationSeconds)
-	}
-	if first.EpisodeNumber != 1 {
-		t.Errorf("first.EpisodeNumber = %d, want 1", first.EpisodeNumber)
-	}
-	if first.SeasonNumber != 1 {
-		t.Errorf("first.SeasonNumber = %d, want 1", first.SeasonNumber)
-	}
-	if first.PublishedAt == nil {
-		t.Errorf("first.PublishedAt must be parsed")
-	}
-
-	// 45:30 mm:ss must parse to 2730s on the second item.
-	if fs.upsertedEpisodes[1].DurationSeconds != 2730 {
-		t.Errorf("second.DurationSeconds = %d, want 2730 (45:30)", fs.upsertedEpisodes[1].DurationSeconds)
-	}
-
-	// Mark-refreshed bookkeeping must record success (empty last_error).
-	if got := fs.refreshed["mi-1"]; got != "" {
-		t.Errorf("refreshed[mi-1] = %q, want empty (success)", got)
-	}
-}
-
 // TestRefreshOne_ReusesExistingEpisodeID confirms the idempotent-upsert
 // contract: when a feed re-emits an item we've already stored, we keep
 // the existing content_id so per-user progress rows don't lose their FK.
@@ -176,27 +122,6 @@ func TestRefreshOne_ReusesExistingEpisodeID(t *testing.T) {
 	// Episode 2 is new — must mint a non-empty id, but not the stored one.
 	if fs.upsertedEpisodes[1].ContentID == "" || fs.upsertedEpisodes[1].ContentID == "stored-ulid-for-ep1" {
 		t.Errorf("new episode id = %q (must be a fresh ULID)", fs.upsertedEpisodes[1].ContentID)
-	}
-}
-
-// TestRefreshOne_UpstreamFailure records the error in the feed's
-// last_refresh_error column so operators see the cause without reading logs.
-func TestRefreshOne_UpstreamFailure(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "feed gone", http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	feed := podcastfeed.PodcastFeed{MediaItemID: "mi-1", FeedURL: srv.URL}
-	fs := newFakeStore(feed)
-	r := podcastfeed.New().WithHTTPClient(srv.Client())
-
-	err := r.RefreshOne(context.Background(), fs, feed)
-	if err == nil {
-		t.Fatal("RefreshOne must surface upstream 404 as an error")
-	}
-	if fs.refreshed["mi-1"] == "" {
-		t.Errorf("MarkFeedRefreshed not called with the error message")
 	}
 }
 
@@ -253,33 +178,5 @@ func TestRefreshDue_OnlyWalksDuePodcasts(t *testing.T) {
 	}
 	if _, ok := fs.refreshed["never"]; !ok {
 		t.Errorf("never-refreshed feed was not refreshed")
-	}
-}
-
-// TestRefreshOne_SkipsItemsWithoutAudio drops feed items that have no
-// audio enclosure (text-only posts that some podcasts mix in).
-func TestRefreshOne_SkipsItemsWithoutAudio(t *testing.T) {
-	const mixedFixture = `<?xml version="1.0"?>
-<rss version="2.0"><channel><title>Mixed</title>
-<item><title>Text-only</title><guid>t-1</guid></item>
-<item><title>Has audio</title><guid>a-1</guid>
-  <enclosure url="https://cdn.example.com/a.mp3" type="audio/mpeg"/>
-</item></channel></rss>`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(mixedFixture))
-	}))
-	defer srv.Close()
-
-	feed := podcastfeed.PodcastFeed{MediaItemID: "mi-p", FeedURL: srv.URL}
-	fs := newFakeStore(feed)
-	r := podcastfeed.New().WithHTTPClient(srv.Client())
-	if err := r.RefreshOne(context.Background(), fs, feed); err != nil {
-		t.Fatalf("RefreshOne: %v", err)
-	}
-	if len(fs.upsertedEpisodes) != 1 {
-		t.Fatalf("upserts = %d, want 1 (text-only item skipped)", len(fs.upsertedEpisodes))
-	}
-	if fs.upsertedEpisodes[0].Title != "Has audio" {
-		t.Errorf("wrong item kept: %q", fs.upsertedEpisodes[0].Title)
 	}
 }

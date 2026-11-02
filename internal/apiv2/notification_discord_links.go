@@ -38,8 +38,12 @@ func registerNotificationDiscordLinks(reg *Registry) {
 	init := notificationOperation(http.MethodPost, "/discord/link/init", beginNotificationDiscordLinkOperation)
 	init.ProfileOptional = true
 	init.Summary = "Begin one account-bound Discord consent flow."
+	init.Description = discordManagementDescription
 	init.RetrySafety = RetrySafetyNonRetryable
 	Register(reg, init, func(ctx context.Context, _ *struct{}) (*NotificationDiscordLinkOutput, error) {
+		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.NotificationDiscordLinks
 		if svc == nil {
 			return nil, unavailable(discordLinkDiscordLinking)

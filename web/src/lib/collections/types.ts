@@ -1,13 +1,13 @@
 import type { LibraryCollection } from "@/api/types";
 
-// List-backed collections follow an MDBList, TMDB or legacy Trakt list, and
+// List-backed collections follow an MDBList or TMDB list, and
 // only they can be synced: a manual collection has no list, and a smart one
 // is filled from its rules whenever it is read. Mirrors catalog.IsSyncableType
 // in internal/catalog/collection_type.go.
 export function isListBackedCollectionType(
   collectionType: LibraryCollection["collection_type"],
 ): boolean {
-  return collectionType === "mdblist" || collectionType === "tmdb" || collectionType === "trakt";
+  return collectionType === "mdblist" || collectionType === "tmdb";
 }
 
 /** What a person picks when they make a collection; every stored list type is "synced". */
@@ -19,8 +19,7 @@ export type SyncedSource =
   | "tmdb_chart"
   | "tmdb_list"
   | "tmdb_franchise"
-  | "tmdb_discover"
-  | "trakt";
+  | "tmdb_discover";
 
 export const COLLECTION_KIND_LABEL: Readonly<Record<CollectionKind, string>> = {
   manual: "Manual",
@@ -34,7 +33,6 @@ export const SYNCED_SOURCE_LABEL: Readonly<Record<SyncedSource, string>> = {
   tmdb_list: "TMDB list",
   tmdb_franchise: "TMDB franchise",
   tmdb_discover: "TMDB Discover",
-  trakt: "Trakt (legacy)",
 };
 
 export function collectionKindOf(collectionType: string): CollectionKind {
@@ -54,8 +52,6 @@ export function syncedSourceOf(
   switch (collectionType) {
     case "mdblist":
       return "mdblist";
-    case "trakt":
-      return "trakt";
     case "tmdb":
       switch (sourceConfig?.mode) {
         case "tmdb_list":

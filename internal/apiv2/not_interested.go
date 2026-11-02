@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -32,7 +33,7 @@ type NotInterestedService interface {
 
 // NotInterestedListInput is the listNotInterested query.
 type NotInterestedListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -113,7 +114,7 @@ func (reg *Registry) listNotInterested(ctx context.Context, cursors *Cursors, in
 	if reg.deps.NotInterested == nil {
 		return nil, unavailable("not-interested")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -139,7 +140,7 @@ func (reg *Registry) getNotInterested(ctx context.Context, in *NotInterestedItem
 	if reg.deps.NotInterested == nil {
 		return nil, unavailable("not-interested")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -161,7 +162,7 @@ func (reg *Registry) markNotInterested(ctx context.Context, in *NotInterestedIte
 	if reg.deps.NotInterested == nil {
 		return nil, unavailable("not-interested")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -175,7 +176,7 @@ func (reg *Registry) unmarkNotInterested(ctx context.Context, in *NotInterestedI
 	if reg.deps.NotInterested == nil {
 		return nil, unavailable("not-interested")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}

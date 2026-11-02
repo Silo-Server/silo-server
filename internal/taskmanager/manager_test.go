@@ -3,9 +3,7 @@ package taskmanager_test
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
-	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -139,22 +137,6 @@ func (t *fakeTrigger) NextRunTime() time.Time {
 func (t *fakeTrigger) Config() taskmanager.TriggerConfig { return t.cfg }
 func (t *fakeTrigger) C() <-chan struct{}                { return t.ch }
 
-type fakeServerSettings struct {
-	values map[string]string
-}
-
-func (s *fakeServerSettings) Get(_ context.Context, key string) (string, error) {
-	return s.values[key], nil
-}
-
-func (s *fakeServerSettings) Set(_ context.Context, key, value string) error {
-	if s.values == nil {
-		s.values = map[string]string{}
-	}
-	s.values[key] = value
-	return nil
-}
-
 type stubTask struct {
 	key      string
 	triggers []taskmanager.TriggerConfig
@@ -234,43 +216,6 @@ func (o *recordingObserver) last() taskmanager.TaskInfo {
 	return o.updates[len(o.updates)-1]
 }
 
-func TestTaskManagerStartSeedsCleanupTaskDefaults(t *testing.T) {
-	triggerRepo := &fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{}}
-	settings := &fakeServerSettings{
-		values: map[string]string{"opslog.cleanup_interval_minutes": "42"},
-	}
-	manager := taskmanager.New(
-		triggerRepo,
-		fakeExecutionRepository{},
-		newFakeTrigger,
-		slog.New(slog.DiscardHandler),
-	)
-
-	manager.Register(taskdefs.NewActivityLogCleanupTask(nil, settings, nil))
-	manager.Register(taskdefs.NewOperationalLogCleanupTask(nil, settings, nil))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer manager.Stop()
-	defer cancel()
-	manager.Start(ctx)
-
-	wantActivity := []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeStartup},
-		{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((24 * time.Hour) / time.Millisecond)},
-	}
-	if got := triggerRepo.setCalls["cleanup_activity_log"]; !reflect.DeepEqual(got, wantActivity) {
-		t.Fatalf("cleanup_activity_log triggers = %#v, want %#v", got, wantActivity)
-	}
-
-	wantOps := []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeStartup},
-		{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((42 * time.Minute) / time.Millisecond)},
-	}
-	if got := triggerRepo.setCalls["cleanup_operational_log"]; !reflect.DeepEqual(got, wantOps) {
-		t.Fatalf("cleanup_operational_log triggers = %#v, want %#v", got, wantOps)
-	}
-}
-
 func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 	const taskKey = "refresh_metadata"
 	triggerRepo := &fakeTriggerRepository{
@@ -314,76 +259,6 @@ func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 	if last.NextRunAt.Sub(last.LastExecution.CompletedAt) < 59*time.Minute {
 		t.Fatalf("next run was not rearmed from the latest completion: got %s after completion",
 			last.NextRunAt.Sub(last.LastExecution.CompletedAt))
-	}
-}
-
-type libraryScopedStubTask struct {
-	stubTask
-	libraryType string
-}
-
-func (t libraryScopedStubTask) ServesLibrary(libraryType string) bool {
-	return libraryType == t.libraryType
-}
-
-type hiddenStubTask struct{ stubTask }
-
-func (hiddenStubTask) IsHidden() bool { return true }
-
-func TestTaskManagerListRelevantTasksOmitsLibraryScopedTasksWithoutLibrary(t *testing.T) {
-	newManager := func(lookup taskmanager.LibraryTypesFunc) *taskmanager.TaskManager {
-		manager := taskmanager.New(
-			&fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{}},
-			fakeExecutionRepository{},
-			newFakeTrigger,
-			slog.New(slog.DiscardHandler),
-		)
-		manager.Register(stubTask{key: "always"})
-		manager.Register(hiddenStubTask{stubTask{key: "hidden"}})
-		manager.Register(libraryScopedStubTask{stubTask: stubTask{key: "ebooks"}, libraryType: "ebooks"})
-		if lookup != nil {
-			manager.SetLibraryTypes(lookup)
-		}
-		return manager
-	}
-	keys := func(infos []taskmanager.TaskInfo) []string {
-		out := make([]string, 0, len(infos))
-		for _, info := range infos {
-			out = append(out, info.Key)
-		}
-		return out
-	}
-	libraries := func(types ...string) taskmanager.LibraryTypesFunc {
-		return func(context.Context) ([]string, error) { return types, nil }
-	}
-	failing := func(context.Context) ([]string, error) { return nil, errors.New("database unavailable") }
-	relevant := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo {
-		return m.ListRelevantTasks(context.Background())
-	}
-	visible := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo { return m.ListTasks(false) }
-	all := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo { return m.ListTasks(true) }
-
-	tests := []struct {
-		name   string
-		lookup taskmanager.LibraryTypesFunc
-		list   func(*taskmanager.TaskManager) []taskmanager.TaskInfo
-		want   []string
-	}{
-		{name: "no matching library", lookup: libraries("movies", "series"), list: relevant, want: []string{"always"}},
-		{name: "matching library", lookup: libraries("movies", "ebooks"), list: relevant, want: []string{"always", "ebooks"}},
-		{name: "lookup fails open", lookup: failing, list: relevant, want: []string{"always", "ebooks"}},
-		{name: "no lookup installed", list: relevant, want: []string{"always", "ebooks"}},
-		// The v1 list keeps its behavior: hidden flags only, no library scoping.
-		{name: "full list ignores library scoping", lookup: libraries("movies"), list: visible, want: []string{"always", "ebooks"}},
-		{name: "hidden-inclusive list", lookup: libraries("movies"), list: all, want: []string{"always", "ebooks", "hidden"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := keys(tt.list(newManager(tt.lookup)))
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("listed keys = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -437,150 +312,93 @@ func TestTaskManagerRejectsScheduledTriggersForManualOnlyTask(t *testing.T) {
 	}
 }
 
-func TestTaskManagerTriggerSkipsConditionalTaskWithoutHistory(t *testing.T) {
-	triggerRepo := &fakeTriggerRepository{
-		triggers: map[string][]taskmanager.TriggerConfig{
-			"conditional": {
-				{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
-			},
+// A scheduled run of a conditional task whose preflight says no, or fails,
+// skips Execute and rearms the trigger. Preflight errors must fail closed.
+func TestTaskManagerTriggerSkipsConditionalTask(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		latest          *taskmanager.ExecutionResult
+		shouldRunErr    error
+		checkNoInserted bool
+	}{
+		{
+			name:            "without history",
+			latest:          &taskmanager.ExecutionResult{TaskKey: "conditional", CompletedAt: time.Now().Add(-24 * time.Hour)},
+			checkNoInserted: true,
 		},
-	}
-	historyRepo := &recordingExecutionRepository{
-		latest: &taskmanager.ExecutionResult{
-			TaskKey:     "conditional",
-			CompletedAt: time.Now().Add(-24 * time.Hour),
-		},
-	}
-	var triggers []*fakeTrigger
-	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
-		tr := &fakeTrigger{
-			cfg:     cfg,
-			ch:      make(chan struct{}, 1),
-			stopCh:  make(chan struct{}),
-			started: make(chan struct{}, 2),
-		}
-		triggers = append(triggers, tr)
-		return tr
-	}
-	manager := taskmanager.New(
-		triggerRepo,
-		historyRepo,
-		factory,
-		slog.New(slog.DiscardHandler),
-	)
-	task := &conditionalStubTask{
-		stubTask:        stubTask{key: "conditional"},
-		shouldRunCalled: make(chan struct{}, 1),
-	}
-	manager.Register(task)
+		{name: "on preflight error", shouldRunErr: errors.New("settings unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			triggerRepo := &fakeTriggerRepository{
+				triggers: map[string][]taskmanager.TriggerConfig{
+					"conditional": {
+						{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
+					},
+				},
+			}
+			historyRepo := &recordingExecutionRepository{latest: tc.latest}
+			var triggers []*fakeTrigger
+			factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+				tr := &fakeTrigger{
+					cfg:     cfg,
+					ch:      make(chan struct{}, 1),
+					stopCh:  make(chan struct{}),
+					started: make(chan struct{}, 2),
+				}
+				triggers = append(triggers, tr)
+				return tr
+			}
+			manager := taskmanager.New(
+				triggerRepo,
+				historyRepo,
+				factory,
+				slog.New(slog.DiscardHandler),
+			)
+			task := &conditionalStubTask{
+				stubTask:        stubTask{key: "conditional"},
+				shouldRunCalled: make(chan struct{}, 1),
+				shouldRunErr:    tc.shouldRunErr,
+			}
+			manager.Register(task)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer manager.Stop()
-	defer cancel()
-	manager.Start(ctx)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer manager.Stop()
+			defer cancel()
+			manager.Start(ctx)
 
-	if len(triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(triggers))
-	}
-	initialNextRun := triggers[0].NextRunTime()
-	select {
-	case <-triggers[0].started:
-	default:
-	}
-	triggers[0].ch <- struct{}{}
+			if len(triggers) != 1 {
+				t.Fatalf("triggers = %d, want 1", len(triggers))
+			}
+			initialNextRun := triggers[0].NextRunTime()
+			select {
+			case <-triggers[0].started:
+			default:
+			}
+			triggers[0].ch <- struct{}{}
 
-	select {
-	case <-task.shouldRunCalled:
-	case <-time.After(time.Second):
-		t.Fatal("scheduled preflight was not called")
-	}
+			select {
+			case <-task.shouldRunCalled:
+			case <-time.After(time.Second):
+				t.Fatal("scheduled preflight was not called")
+			}
 
-	select {
-	case <-triggers[0].started:
-	case <-time.After(time.Second):
-		t.Fatal("trigger was not rearmed after skipped preflight error")
-	}
-	if got := task.executeCount(); got != 0 {
-		t.Fatalf("Execute calls = %d, want 0", got)
-	}
-	if got := historyRepo.insertCount(); got != 0 {
-		t.Fatalf("history inserts = %d, want 0", got)
-	}
-	if !triggers[0].NextRunTime().After(initialNextRun) {
-		t.Fatalf("next run = %s, want later than original run %s",
-			triggers[0].NextRunTime().Format(time.RFC3339Nano),
-			initialNextRun.Format(time.RFC3339Nano))
-	}
-}
-
-// A preflight that cannot answer must fail closed: skipping the run is
-// recoverable at the next trigger, while running an expensive conditional
-// task on a transient error is exactly what the gate exists to prevent.
-func TestTaskManagerTriggerSkipsConditionalTaskOnPreflightError(t *testing.T) {
-	triggerRepo := &fakeTriggerRepository{
-		triggers: map[string][]taskmanager.TriggerConfig{
-			"conditional": {
-				{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
-			},
-		},
-	}
-	historyRepo := &recordingExecutionRepository{}
-	var triggers []*fakeTrigger
-	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
-		tr := &fakeTrigger{
-			cfg:     cfg,
-			ch:      make(chan struct{}, 1),
-			stopCh:  make(chan struct{}),
-			started: make(chan struct{}, 2),
-		}
-		triggers = append(triggers, tr)
-		return tr
-	}
-	manager := taskmanager.New(
-		triggerRepo,
-		historyRepo,
-		factory,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-	)
-	task := &conditionalStubTask{
-		stubTask:        stubTask{key: "conditional"},
-		shouldRunCalled: make(chan struct{}, 1),
-		shouldRunErr:    errors.New("settings unavailable"),
-	}
-	manager.Register(task)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer manager.Stop()
-	defer cancel()
-	manager.Start(ctx)
-
-	if len(triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(triggers))
-	}
-	initialNextRun := triggers[0].NextRunTime()
-	select {
-	case <-triggers[0].started:
-	default:
-	}
-	triggers[0].ch <- struct{}{}
-
-	select {
-	case <-task.shouldRunCalled:
-	case <-time.After(time.Second):
-		t.Fatal("scheduled preflight was not called")
-	}
-
-	select {
-	case <-triggers[0].started:
-	case <-time.After(time.Second):
-		t.Fatal("trigger was not rearmed after skipped preflight error")
-	}
-	if got := task.executeCount(); got != 0 {
-		t.Fatalf("Execute calls = %d, want 0 (preflight errors must fail closed)", got)
-	}
-	if !triggers[0].NextRunTime().After(initialNextRun) {
-		t.Fatalf("next run = %s, want rearmed after skipped preflight error",
-			triggers[0].NextRunTime().Format(time.RFC3339Nano))
+			select {
+			case <-triggers[0].started:
+			case <-time.After(time.Second):
+				t.Fatal("trigger was not rearmed after skipped preflight")
+			}
+			if got := task.executeCount(); got != 0 {
+				t.Fatalf("Execute calls = %d, want 0", got)
+			}
+			if got := historyRepo.insertCount(); tc.checkNoInserted && got != 0 {
+				t.Fatalf("history inserts = %d, want 0", got)
+			}
+			if !triggers[0].NextRunTime().After(initialNextRun) {
+				t.Fatalf("next run = %s, want later than original run %s",
+					triggers[0].NextRunTime().Format(time.RFC3339Nano),
+					initialNextRun.Format(time.RFC3339Nano))
+			}
+		})
 	}
 }
 

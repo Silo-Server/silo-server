@@ -6,10 +6,11 @@
  * The browser can only answer MIME support probes through
  * `MediaSource.isTypeSupported(...)` and `HTMLMediaElement.canPlayType(...)`, so
  * every claim here is `declared` evidence (see §3 of
- * `docs/architecture/playback-protocol-v3.md`). We deliberately never populate
- * `video_decode[]`: on `declared` the server matches the flat codec lists and
- * ignores the detail walk, and fabricating profile/level entries we cannot
- * observe would be exactly the dishonest attestation the tier exists to avoid.
+ * `docs/architecture/playback-protocol-v3.md`). `video_decode[]` carries only
+ * the bit depths a codec's probes accepted: on `declared` an entry can narrow
+ * the flat codec claim but never widen it, and fabricating profile/level
+ * entries we cannot observe would be exactly the dishonest attestation the
+ * tier exists to avoid.
  */
 
 import {
@@ -23,12 +24,8 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
-import {
-  networkInformation,
-  onMeteredConnection,
-  readMeasuredBandwidthKbps,
-  readMeteredObservedLimitKbps,
-} from "./bandwidth-probe";
+import { onMeteredConnection, readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import { detectFormFactor } from "./form-factor";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -89,11 +86,16 @@ export interface WebCapabilityProbe {
   codecsVideo: string[];
   /** Video codecs supported specifically by direct media-element playback. */
   progressiveCodecsVideo: string[];
+  /**
+   * Bit depths each probed codec decodes, for codecs whose deeper profile
+   * browsers often refuse (H.264 High 10). Absent codecs are unconstrained.
+   */
+  videoBitDepths?: Record<string, number[]>;
   /** Audio codec names the browser reported support for. */
   codecsAudio: string[];
   /** Audio codecs supported specifically inside progressive MP4 delivery. */
   progressiveCodecsAudio: string[];
-  /** Best-effort screen-derived resolution ceiling. */
+  /** Largest video size the browser decodes; never derived from the screen. */
   maxResolution: string;
   /** Best-effort HDR display detection. */
   hdr: boolean;
@@ -129,6 +131,12 @@ export function buildClientCapabilitiesV3(
     probe.progressiveCodecsVideo,
     engine?.videoCodecs ?? [],
   );
+  // The server reads `hardware` only on the strict tiers.
+  const videoDecode = Object.entries(probe.videoBitDepths ?? {}).map(([codec, bitDepths]) => ({
+    codec,
+    bit_depths: bitDepths,
+    hardware: false,
+  }));
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
@@ -139,6 +147,7 @@ export function buildClientCapabilitiesV3(
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
     hdr_details: probe.hdrDetails,
+    ...(videoDecode.length > 0 ? { video_decode: videoDecode } : {}),
   };
 }
 
@@ -242,58 +251,18 @@ export function buildDeliveriesV3(
 }
 
 /**
- * Whether the user is on a connection they would rather not spend: Data Saver
- * is on, or the browser reports cellular. `connection.type` is missing on
- * desktop browsers, so its absence means "unknown, assume unmetered". The
- * same test decides when a probe measurement is ignored, so a link without
- * one is still flagged and the planner's metered limit can apply.
- */
-export function detectMeteredV3(): boolean {
-  return onMeteredConnection();
-}
-
-/**
- * Browsers clamp `connection.downlink` to this ceiling (Chromium caps it at
- * 10 Mbps), so a reading at the ceiling means "at least this fast", not a
- * measured limit.
- */
-const DOWNLINK_CEILING_MBPS = 10;
-
-/**
- * Best-effort downlink estimate in kbps for the planner's ladder choice.
+ * Measured downlink in kbps for the planner's Auto choice: a source that fits
+ * the estimate plays as-is, and only one that does not is converted.
  *
- * A fresh measurement from the background bandwidth probe wins, unless the
+ * A fresh measurement from the background bandwidth probe is used, unless the
  * link is metered (Data Saver or cellular): that measurement was taken on
- * another link, and the planner applies its metered limit only when no
- * estimate is sent. Otherwise
- * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
- * hint, used only below the browser's ceiling. Returns undefined rather than a
- * fabricated value when neither source has a usable reading, which lets Auto
- * plan from the device and the source alone.
+ * another link, and a metered one is never probed. `connection.downlink` is
+ * never used: browsers round and cap it (Chromium at 10 Mbps), so it is a
+ * guess, not a measurement. Returns undefined when nothing was measured, which
+ * lets Auto send the source, under any limit the server learned.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  // On a metered link a probe result describes another link; only a limit
-  // playback observed on a metered link describes this one.
-  const measured = onMeteredConnection()
-    ? readMeteredObservedLimitKbps()
-    : readMeasuredBandwidthKbps();
-  if (measured !== undefined) return measured;
-  const downlinkMbps = networkInformation()?.downlink;
-  if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
-  if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
-  const kbps = Math.round(downlinkMbps * 1000);
-  if (kbps < 100) return undefined;
-  return kbps;
-}
-
-/** Coarse form factor, used by the server only for quirk lookups. */
-function detectFormFactor(): string {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent.toLowerCase();
-  if (/\b(smart-?tv|smarttv|googletv|appletv|hbbtv|netcast|webos|tizen)\b/.test(ua)) return "tv";
-  if (/\b(ipad|tablet)\b/.test(ua)) return "tablet";
-  if (/\b(iphone|ipod|android.*mobile|mobile)\b/.test(ua)) return "phone";
-  return "desktop";
+  return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
 }
 
 /** Bounded (≤128 chars) opaque platform detail; the server treats it as text. */

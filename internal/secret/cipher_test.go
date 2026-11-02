@@ -86,7 +86,10 @@ func TestEncryptNonDeterministic(t *testing.T) {
 	}
 }
 
-func TestDecryptTamperRejected(t *testing.T) {
+// Decrypt refuses every value it cannot authenticate. A non-prefixed legacy
+// value is the caller's pass-through responsibility, but Decrypt itself must
+// reject it rather than echo it back.
+func TestDecryptRejects(t *testing.T) {
 	c := newTestCipher(t)
 	const aad = "t:c:1"
 	ct, err := c.Encrypt("secret", aad)
@@ -94,39 +97,29 @@ func TestDecryptTamperRejected(t *testing.T) {
 		t.Fatalf("Encrypt: %v", err)
 	}
 	// Decode the body, flip a byte, re-encode, reattach the envelope.
-	body := strings.TrimPrefix(ct, "enc:v1:")
-	raw, err := base64.RawURLEncoding.DecodeString(body)
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(ct, "enc:v1:"))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	raw[len(raw)-1] ^= 0xFF
-	tampered := "enc:v1:" + base64.RawURLEncoding.EncodeToString(raw)
-	if _, err := c.Decrypt(tampered, aad); err == nil {
-		t.Fatalf("Decrypt of tampered ciphertext succeeded, want error")
-	}
-}
-
-func TestDecryptAADMismatchRejected(t *testing.T) {
-	c := newTestCipher(t)
-	ct, err := c.Encrypt("secret", "t:c:1")
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	if _, err := c.Decrypt(ct, "t:c:2"); err == nil {
-		t.Fatalf("Decrypt with mismatched AAD succeeded, want error (row binding broken)")
-	}
-}
-
-func TestDecryptWrongKeyRejected(t *testing.T) {
-	a := newTestCipher(t)
-	b := newTestCipher(t)
-	const aad = "t:c:1"
-	ct, err := a.Encrypt("secret", aad)
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	if _, err := b.Decrypt(ct, aad); err == nil {
-		t.Fatalf("Decrypt with the wrong key succeeded, want error")
+	for _, tc := range []struct {
+		name    string
+		cipher  *Cipher
+		ct, aad string
+		want    error
+	}{
+		{"tampered ciphertext", c, "enc:v1:" + base64.RawURLEncoding.EncodeToString(raw), aad, nil},
+		{"mismatched AAD (row binding broken)", c, ct, "t:c:2", nil},
+		{"the wrong key", newTestCipher(t), ct, aad, nil},
+		{"enc:v99:", c, "enc:v99:" + base64.RawURLEncoding.EncodeToString([]byte("whatever")), aad, ErrUnknownVersion},
+		{"a non-envelope value", c, "plaintext-not-an-envelope", aad, nil},
+		// Valid base64url but fewer bytes than the GCM nonce.
+		{"a too-short ciphertext", c, "enc:v1:" + base64.RawURLEncoding.EncodeToString([]byte("ab")), aad, nil},
+	} {
+		_, err := tc.cipher.Decrypt(tc.ct, tc.aad)
+		if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+			t.Errorf("Decrypt with %s returned %v, want error %v", tc.name, err, tc.want)
+		}
 	}
 }
 
@@ -155,32 +148,6 @@ func TestIsEncrypted(t *testing.T) {
 		if got := IsEncrypted(in); got != want {
 			t.Errorf("IsEncrypted(%q) = %v, want %v", in, got, want)
 		}
-	}
-}
-
-func TestDecryptUnknownVersion(t *testing.T) {
-	c := newTestCipher(t)
-	_, err := c.Decrypt("enc:v99:"+base64.RawURLEncoding.EncodeToString([]byte("whatever")), "t:c:1")
-	if !errors.Is(err, ErrUnknownVersion) {
-		t.Fatalf("Decrypt of enc:v99: returned %v, want ErrUnknownVersion", err)
-	}
-}
-
-func TestDecryptNonEnvelopeErrors(t *testing.T) {
-	c := newTestCipher(t)
-	// A non-prefixed legacy value is the caller's pass-through responsibility, but
-	// Decrypt itself must reject it rather than echo it back.
-	if _, err := c.Decrypt("plaintext-not-an-envelope", "t:c:1"); err == nil {
-		t.Fatalf("Decrypt of a non-envelope value succeeded, want error")
-	}
-}
-
-func TestDecryptShortCiphertext(t *testing.T) {
-	c := newTestCipher(t)
-	// Valid base64url but fewer bytes than the GCM nonce.
-	short := "enc:v1:" + base64.RawURLEncoding.EncodeToString([]byte("ab"))
-	if _, err := c.Decrypt(short, "t:c:1"); err == nil {
-		t.Fatalf("Decrypt of a too-short ciphertext succeeded, want error")
 	}
 }
 

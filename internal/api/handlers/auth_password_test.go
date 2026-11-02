@@ -26,7 +26,7 @@ func (s *stubAccountPasswordService) PasswordChangeAvailable(context.Context, in
 	return s.available, s.err
 }
 
-func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string) error {
+func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string, _ bool) error {
 	s.userID = userID
 	s.sessionID = sessionID
 	s.current = currentPassword
@@ -137,45 +137,6 @@ func TestHandleChangePasswordRejectsNonUserSessions(t *testing.T) {
 	}
 }
 
-func TestHandleChangePasswordMapsCredentialErrors(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-		wantCode   string
-	}{
-		{name: "wrong current password", err: auth.ErrCurrentPasswordInvalid, wantStatus: http.StatusBadRequest, wantCode: "invalid_current_password"},
-		{name: "weak password", err: auth.ErrPasswordTooShort, wantStatus: http.StatusBadRequest, wantCode: codeWeakPassword},
-		{name: "password too long", err: auth.ErrPasswordTooLong, wantStatus: http.StatusBadRequest, wantCode: codePasswordTooLong},
-		{name: "local login disabled", err: auth.ErrPasswordLoginDisabled, wantStatus: http.StatusConflict, wantCode: "password_login_disabled"},
-		{name: "repository failure", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: tt.err})
-			rec := httptest.NewRecorder()
-			handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "primary", passwordClaims(), changePasswordRequest{
-				CurrentPassword: "current password",
-				NewPassword:     "new password",
-			}))
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-			var response errorResponse
-			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if response.Error != tt.wantCode {
-				t.Fatalf("error = %q, want %q", response.Error, tt.wantCode)
-			}
-		})
-	}
-}
-
 func TestAccountPasswordCapability(t *testing.T) {
 	t.Parallel()
 
@@ -227,9 +188,48 @@ func TestChangePasswordRejectsReusedTemporaryPassword(t *testing.T) {
 
 	handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: auth.ErrPasswordUnchanged})
 	claims := passwordClaims()
-	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass")
+	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass", false)
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Field != "new_password" || apiErr.Status != http.StatusBadRequest {
 		t.Fatalf("err = %#v", err)
+	}
+}
+
+func TestHandleChangePasswordMapsCredentialErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "wrong current password", err: auth.ErrCurrentPasswordInvalid, wantStatus: http.StatusBadRequest, wantCode: "invalid_current_password"},
+		{name: "weak password", err: auth.ErrPasswordTooShort, wantStatus: http.StatusBadRequest, wantCode: codeWeakPassword},
+		{name: "password too long", err: auth.ErrPasswordTooLong, wantStatus: http.StatusBadRequest, wantCode: codePasswordTooLong},
+		{name: "local login disabled", err: auth.ErrPasswordLoginDisabled, wantStatus: http.StatusConflict, wantCode: "password_login_disabled"},
+		{name: "repository failure", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: tt.err})
+			rec := httptest.NewRecorder()
+			handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "primary", passwordClaims(), changePasswordRequest{
+				CurrentPassword: "current password",
+				NewPassword:     "new password",
+			}))
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			var response errorResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if response.Error != tt.wantCode {
+				t.Fatalf("error = %q, want %q", response.Error, tt.wantCode)
+			}
+		})
 	}
 }

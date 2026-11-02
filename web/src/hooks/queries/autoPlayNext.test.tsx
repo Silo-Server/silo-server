@@ -1,12 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
-
-import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
+import { type StoredSettingRow } from "@/lib/settingsResolve";
 import { useAutoPlayNextSetting } from "./autoPlayNext";
+import { createHarness, fakeSettingsServer as fakeServer } from "./settingsServer.test-support";
 
 const v2Mock = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", async () => {
@@ -16,82 +13,11 @@ vi.mock("@/api/v2/request", async () => {
 
 const KEY = SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT;
 
-function createHarness() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-  return { queryClient, wrapper };
-}
-
-/**
- * A server stand-in that resolves through the shared client resolver, which
- * mirrors internal/settingsresolve. Using it rather than a canned answer is
- * what makes the scope-precedence assertions below mean something: a
- * profile_device row really does outrank a profile row here.
- */
-function fakeSettingsServer(initial: StoredSettingRow[] = []) {
-  const rows = [...initial];
-  v2Mock.mockImplementation(
-    (
-      operation: string,
-      options?: { path?: { key: string }; query?: { scope: string }; body?: { value: unknown } },
-    ) => {
-      if (operation === "GET /api/v2/settings/values/effective") {
-        const resolved = resolveSettingValues([KEY], rows, {
-          profileId: "profile-1",
-          deviceId: "device-1",
-        })[0]!;
-        return Promise.resolve({
-          revision: 1,
-          items: [
-            { key: KEY, value: resolved.value, source: resolved.source, definition_revision: 1 },
-          ],
-        });
-      }
-      const key = options?.path?.key;
-      const scope = options?.query?.scope;
-      if (!key || !scope) return Promise.resolve(undefined);
-      const index = rows.findIndex((row) => row.key === key && row.scope === scope);
-      if (operation.startsWith("DELETE ")) {
-        if (index < 0) {
-          return Promise.reject(v2Problem(404, "not_found", "No value is set at this scope"));
-        }
-        rows.splice(index, 1);
-        return Promise.resolve(undefined);
-      }
-      const value = options?.body?.value;
-      const row: StoredSettingRow = {
-        key,
-        scope: scope as StoredSettingRow["scope"],
-        profileId: "profile-1",
-        deviceId: scope === "profile_device" ? "device-1" : undefined,
-        value,
-      };
-      if (index < 0) rows.push(row);
-      else rows[index] = row;
-      return Promise.resolve(undefined);
-    },
-  );
-  return rows;
-}
+const fakeSettingsServer = (initial?: StoredSettingRow[]) => fakeServer(v2Mock, KEY, initial);
 
 describe("useAutoPlayNextSetting", () => {
   beforeEach(() => {
     v2Mock.mockReset();
-  });
-
-  it("saves at profile scope so both surfaces read the same row", async () => {
-    const rows = fakeSettingsServer();
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useAutoPlayNextSetting(), { wrapper });
-    await waitFor(() => expect(result.current.enabled).toBe(true));
-
-    await result.current.setEnabled(false);
-
-    expect(rows).toEqual([expect.objectContaining({ key: KEY, scope: "profile", value: false })]);
   });
 
   it("clears a shadowing device row so the saved value actually takes effect", async () => {

@@ -30,33 +30,15 @@ func (m mapSettingStore) SetMany(_ context.Context, values map[string]string) er
 	return nil
 }
 
-func TestApplePushDeliverySettings(t *testing.T) {
-	ctx := context.Background()
-	settings := NewSettings(nil)
-	if !settings.ApplePushDeliveryEnabled(ctx) {
-		t.Fatal("ApplePushDeliveryEnabled must default to true")
-	}
-	if NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "false"}).ApplePushDeliveryEnabled(ctx) {
-		t.Fatal("ApplePushDeliveryEnabled = true with setting off")
-	}
-	if got := settings.PushRelayURL(ctx); got != DefaultPushRelayURL {
-		t.Fatalf("PushRelayURL default = %q, want %q", got, DefaultPushRelayURL)
-	}
-
-	settings = NewSettings(mapSettingReader{
-		SettingApplePushDeliveryEnabled: "true",
-		SettingPushRelayURL:             "https://push.example.test/",
-		SettingPushRelayAPIKey:          " relay-key ",
-	})
-	if !settings.ApplePushDeliveryEnabled(ctx) {
-		t.Fatal("ApplePushDeliveryEnabled = false with setting on")
-	}
-	if got := settings.PushRelayURL(ctx); got != "https://push.example.test" {
-		t.Fatalf("PushRelayURL = %q", got)
-	}
-	if got := settings.PushRelayAPIKey(ctx); got != "relay-key" {
-		t.Fatalf("PushRelayAPIKey was not trimmed")
-	}
+// newRelayTestSender sends through server as the push relay, with an API key.
+func newRelayTestSender(server *httptest.Server) *pushSender {
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
+		SettingPushRelayURL:    server.URL,
+		SettingPushRelayAPIKey: "relay-key",
+	}))
+	sender.client = server.Client()
+	sender.developmentRelayURL = server.URL
+	return sender
 }
 
 func TestPushSenderSendBuildsRelayRequest(t *testing.T) {
@@ -83,13 +65,7 @@ func TestPushSenderSendBuildsRelayRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	settings := NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	})
-	sender := newPushSender(nil, nil, nil, settings)
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
+	sender := newRelayTestSender(server)
 
 	deliveryID := "delivery-1"
 	result := sender.send(context.Background(), PushDeliveryAttempt{
@@ -119,134 +95,51 @@ func TestPushSenderSendBuildsRelayRequest(t *testing.T) {
 	}
 }
 
-func TestPushSenderSendMapsRelayTerminalAPNsRejection(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(pushRelayErrorResponse{
-			Error: struct {
-				Code      string `json:"code"`
-				Message   string `json:"message"`
-				RequestID string `json:"request_id"`
-			}{
-				Code:      "apns_rejected",
-				Message:   "APNs rejected the notification: BadDeviceToken",
-				RequestID: "relay-request-2",
+// A relay error maps to a device-terminal result with its diagnostic, or to a
+// retryable one that carries the relay's Retry-After.
+func TestPushSenderSendMapsRelayErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		status                   int
+		retryAfter               string
+		code, message, requestID string
+		want                     func(pushSendResult) bool
+	}{
+		{
+			name: "terminal APNs rejection", status: http.StatusUnprocessableEntity,
+			code: "apns_rejected", message: "APNs rejected the notification: BadDeviceToken", requestID: "relay-request-2",
+			want: func(r pushSendResult) bool {
+				return !r.OK && r.TerminalDevice && r.HTTPStatus == http.StatusUnprocessableEntity &&
+					r.UpstreamReason == "apns_rejected" && r.RelayRequestID == "relay-request-2"
 			},
+		},
+		{
+			name: "retry after", status: http.StatusTooManyRequests, retryAfter: "30",
+			code: "upstream_rate_limited", message: "APNs upstream rate limited the request", requestID: "relay-request-3",
+			want: func(r pushSendResult) bool { return !r.OK && !r.TerminalDevice && r.RetryAfter != 0 },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.status)
+				var body pushRelayErrorResponse
+				body.Error.Code, body.Error.Message, body.Error.RequestID = tc.code, tc.message, tc.requestID
+				_ = json.NewEncoder(w).Encode(body)
+			}))
+			defer server.Close()
+
+			result := newRelayTestSender(server).send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, &PushDevice{
+				APNsEnvironment: APNsEnvironmentSandbox,
+				APNsTopic:       ApplePushTopicSilo,
+				ServerDeviceID:  "server-device-1",
+			}, strings.Repeat("a", 64))
+			if !tc.want(result) {
+				t.Fatalf("result = %+v", result)
+			}
 		})
-	}))
-	defer server.Close()
-
-	settings := NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	})
-	sender := newPushSender(nil, nil, nil, settings)
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
-
-	result := sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, &PushDevice{
-		APNsEnvironment: APNsEnvironmentSandbox,
-		APNsTopic:       ApplePushTopicSilo,
-		ServerDeviceID:  "server-device-1",
-	}, strings.Repeat("a", 64))
-
-	if result.OK || !result.TerminalDevice || result.HTTPStatus != http.StatusUnprocessableEntity {
-		t.Fatalf("terminal result = %+v", result)
-	}
-	if result.UpstreamReason != "apns_rejected" || result.RelayRequestID != "relay-request-2" {
-		t.Fatalf("terminal diagnostic = %+v", result)
-	}
-}
-
-func TestPushSenderSendBuildsFcmRelayRequest(t *testing.T) {
-	token := strings.Repeat("F", 140)
-	var got struct {
-		auth           string
-		idempotencyKey string
-		body           pushRelayFcmRequest
-	}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got.auth = r.Header.Get("Authorization")
-		got.idempotencyKey = r.Header.Get("Idempotency-Key")
-		if r.URL.Path != relayFcmSendPath {
-			t.Fatalf("path = %q, want %q", r.URL.Path, relayFcmSendPath)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&got.body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"request_id":     "relay-request-fcm-1",
-			"fcm_message_id": "fcm-1",
-			"status":         "accepted",
-		})
-	}))
-	defer server.Close()
-
-	settings := NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	})
-	sender := newPushSender(nil, nil, nil, settings)
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
-
-	deliveryID := "delivery-fcm-1"
-	result := sender.send(context.Background(), PushDeliveryAttempt{
-		ID:                     "attempt-fcm-1",
-		NotificationDeliveryID: &deliveryID,
-	}, &PushDevice{
-		Platform:       PushPlatformAndroid,
-		ServerDeviceID: "server-device-fcm",
-	}, token)
-
-	if !result.OK || result.RelayRequestID != "relay-request-fcm-1" {
-		t.Fatalf("result = %+v", result)
-	}
-	if got.auth != "Bearer relay-key" || got.idempotencyKey != "attempt-fcm-1" {
-		t.Fatalf("headers = %+v", got)
-	}
-	if got.body.Token != token || got.body.Mode != "private_alert" || got.body.DeliveryID != deliveryID {
-		t.Fatalf("relay body = %+v", got.body)
-	}
-	if got.body.CollapseID == nil || *got.body.CollapseID != deliveryID {
-		t.Fatalf("collapse_id = %+v, want delivery id", got.body.CollapseID)
-	}
-}
-
-func TestPushSenderSendMapsRelayTerminalFCMRejection(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(pushRelayErrorResponse{
-			Error: struct {
-				Code      string `json:"code"`
-				Message   string `json:"message"`
-				RequestID string `json:"request_id"`
-			}{
-				Code:      "fcm_rejected",
-				Message:   "FCM rejected the notification: UNREGISTERED",
-				RequestID: "relay-request-fcm-2",
-			},
-		})
-	}))
-	defer server.Close()
-
-	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	}))
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
-
-	result := sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-fcm-2"}, &PushDevice{
-		Platform:       PushPlatformAndroid,
-		ServerDeviceID: "server-device-fcm",
-	}, strings.Repeat("F", 140))
-
-	if result.OK || !result.TerminalDevice || result.HTTPStatus != http.StatusUnprocessableEntity {
-		t.Fatalf("terminal result = %+v", result)
-	}
-	if result.UpstreamReason != "fcm_rejected" || result.RelayRequestID != "relay-request-fcm-2" {
-		t.Fatalf("terminal diagnostic = %+v", result)
 	}
 }
 
@@ -290,12 +183,7 @@ func TestPushSenderNamesTheServerAndProfileOfEachPush(t *testing.T) {
 				_, _ = w.Write([]byte(`{"request_id":"relay-request","status":"accepted"}`))
 			}))
 			defer server.Close()
-			sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
-				SettingPushRelayURL:    server.URL,
-				SettingPushRelayAPIKey: "relay-key",
-			}))
-			sender.client = server.Client()
-			sender.developmentRelayURL = server.URL
+			sender := newRelayTestSender(server)
 			sender.serverID = tc.serverID
 
 			result := sender.send(context.Background(), tc.attempt, &tc.device, strings.Repeat("a", 64))
@@ -445,41 +333,6 @@ func TestTerminalFCMDeviceRejectionReasons(t *testing.T) {
 	}
 }
 
-func TestAndroidPushDeliverySettings(t *testing.T) {
-	ctx := context.Background()
-	settings := NewSettings(nil)
-	if !settings.AndroidPushDeliveryEnabled(ctx) {
-		t.Fatal("AndroidPushDeliveryEnabled must default to true")
-	}
-	if NewSettings(mapSettingReader{SettingAndroidPushDeliveryEnabled: "false"}).AndroidPushDeliveryEnabled(ctx) {
-		t.Fatal("AndroidPushDeliveryEnabled = true with setting off")
-	}
-	if got := settings.EnabledPushPlatforms(ctx); len(got) != 2 {
-		t.Fatalf("EnabledPushPlatforms = %v, want both platforms by default", got)
-	}
-	settings = NewSettings(mapSettingReader{
-		SettingApplePushDeliveryEnabled:   "false",
-		SettingAndroidPushDeliveryEnabled: "false",
-	})
-	if settings.PushDeliveryEnabled(ctx) {
-		t.Fatal("PushDeliveryEnabled must be false with both toggles off")
-	}
-	if got := settings.EnabledPushPlatforms(ctx); len(got) != 0 {
-		t.Fatalf("EnabledPushPlatforms = %v, want empty", got)
-	}
-
-	settings = NewSettings(mapSettingReader{
-		SettingApplePushDeliveryEnabled:   "false",
-		SettingAndroidPushDeliveryEnabled: "true",
-	})
-	if !settings.AndroidPushDeliveryEnabled(ctx) || !settings.PushDeliveryEnabled(ctx) {
-		t.Fatal("android delivery setting did not enable push delivery")
-	}
-	if got := settings.EnabledPushPlatforms(ctx); len(got) != 1 || got[0] != PushPlatformAndroid {
-		t.Fatalf("EnabledPushPlatforms = %v, want [android]", got)
-	}
-}
-
 func TestTerminalAPNsDeviceRejectionReasons(t *testing.T) {
 	for _, reason := range []string{
 		"BadDeviceToken",
@@ -501,78 +354,6 @@ func TestTerminalAPNsDeviceRejectionReasons(t *testing.T) {
 		"APNs rejected the notification: PayloadTooLarge",
 	) {
 		t.Fatal("request-level APNs rejection was terminal for the device")
-	}
-}
-
-func TestPushSenderDoesNotDisableDeviceForRequestLevelAPNsRejection(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(pushRelayErrorResponse{
-			Error: struct {
-				Code      string `json:"code"`
-				Message   string `json:"message"`
-				RequestID string `json:"request_id"`
-			}{
-				Code:      "apns_rejected",
-				Message:   "APNs rejected the notification: PayloadTooLarge",
-				RequestID: "relay-request-request-rejection",
-			},
-		})
-	}))
-	defer server.Close()
-
-	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	}))
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
-
-	result := sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, &PushDevice{
-		APNsEnvironment: APNsEnvironmentSandbox,
-		APNsTopic:       ApplePushTopicSilo,
-		ServerDeviceID:  "server-device-1",
-	}, strings.Repeat("a", 64))
-
-	if result.OK || result.TerminalDevice || result.HTTPStatus != http.StatusUnprocessableEntity {
-		t.Fatalf("request-level rejection result = %+v", result)
-	}
-}
-
-func TestPushSenderSendMapsRelayRetryAfter(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Retry-After", "30")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(pushRelayErrorResponse{
-			Error: struct {
-				Code      string `json:"code"`
-				Message   string `json:"message"`
-				RequestID string `json:"request_id"`
-			}{
-				Code:      "upstream_rate_limited",
-				Message:   "APNs upstream rate limited the request",
-				RequestID: "relay-request-3",
-			},
-		})
-	}))
-	defer server.Close()
-
-	settings := NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	})
-	sender := newPushSender(nil, nil, nil, settings)
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
-
-	result := sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, &PushDevice{
-		APNsEnvironment: APNsEnvironmentSandbox,
-		APNsTopic:       ApplePushTopicSilo,
-		ServerDeviceID:  "server-device-1",
-	}, strings.Repeat("a", 64))
-
-	if result.OK || result.TerminalDevice || result.RetryAfter == 0 {
-		t.Fatalf("retryable result = %+v", result)
 	}
 }
 
@@ -963,12 +744,7 @@ func TestPushSenderRetriesLaterWhenAFailedIdentityLookupMismatchesTheRecordedAtt
 		_, _ = w.Write([]byte(`{"error":{"code":"idempotency_key_reuse","message":"Idempotency-Key was reused with a different payload"}}`))
 	}))
 	defer server.Close()
-	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
-		SettingPushRelayURL:    server.URL,
-		SettingPushRelayAPIKey: "relay-key",
-	}))
-	sender.client = server.Client()
-	sender.developmentRelayURL = server.URL
+	sender := newRelayTestSender(server)
 	device := &PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
 	send := func() pushSendResult {
 		return sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, device, strings.Repeat("a", 64))

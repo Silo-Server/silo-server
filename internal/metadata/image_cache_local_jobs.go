@@ -16,8 +16,7 @@ import (
 
 const (
 	// localImageCacheSourceSQL matches jobs whose source is a local sidecar
-	// file (LocalImageSourceURL writes the scheme in lower case). It matches
-	// the predicate of metadata_image_cache_jobs_local_due_idx.
+	// file (LocalImageSourceURL writes the scheme in lower case).
 	localImageCacheSourceSQL = "source_path LIKE 'file://%'"
 
 	// heldLocalDiscoverySQL matches a local job queued by a discovery and not
@@ -44,19 +43,6 @@ const (
 	// localImageStorageUnavailable starts the last_error of a deferred job.
 	localImageStorageUnavailable = "local image storage not mounted on this server"
 )
-
-// ClaimDueLocal claims due jobs with local file:// sources only. Draining uses
-// it while metadata.cache_images is off: that setting stops remote downloads,
-// but local art is always copied.
-func (r *ImageCacheJobRepository) ClaimDueLocal(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
-	if r == nil || r.pool == nil || limit <= 0 {
-		return nil, nil
-	}
-	if err := r.recoverExpiredRunning(ctx, ""); err != nil {
-		return nil, err
-	}
-	return r.claimDue(ctx, workerID, "", true, limit)
-}
 
 // enqueueHeldLocalJobs queues discovered local artwork behind
 // localArtworkDiscoveryHold, so background drains on other servers leave it to
@@ -167,6 +153,10 @@ func (r *ImageCacheJobRepository) targetHasDeferredLocalJobs(ctx context.Context
 // local artwork for its discovering process.
 var errNoLocalArtworkQueue = errors.New("metadata image cache does not support local artwork discovery")
 
+// errLocalArtworkCachingOff refuses a discovery copy while
+// metadata.cache_images is off.
+var errLocalArtworkCachingOff = errors.New("metadata image caching is off")
+
 // localArtworkJobStore is the queue surface the local artwork copier needs.
 // ImageCacheJobRepository implements it; lightweight fakes may not.
 type localArtworkJobStore interface {
@@ -180,15 +170,8 @@ type imageCacheJobDeferrer interface {
 	DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error
 }
 
-// localImageCacheJobClaimer is implemented by job stores that can claim only
-// local jobs, which draining uses while remote caching is off.
-type localImageCacheJobClaimer interface {
-	ClaimDueLocal(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error)
-}
-
 // isLocalSidecarSource reports whether source names a sidecar file (file://):
-// the artwork copied on discovery, and whatever metadata.cache_images says.
-// It matches localImageCacheSourceSQL.
+// the artwork copied on discovery. It matches localImageCacheSourceSQL.
 func isLocalSidecarSource(source string) bool {
 	return strings.HasPrefix(strings.TrimSpace(source), "file://")
 }

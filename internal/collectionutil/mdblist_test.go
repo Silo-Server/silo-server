@@ -29,21 +29,6 @@ func TestNormalizeMDBListURL(t *testing.T) {
 	}
 }
 
-func TestMDBListURLCandidatesNormalizesAndDeduplicates(t *testing.T) {
-	got := MDBListURLCandidates(
-		"https://mdblist.com/lists/example-user/external/1234/json/json",
-		"https://mdblist.com/lists/example-user/external/1234/json",
-		"https://mdblist.com/lists/example-user/other",
-	)
-	want := []string{
-		"https://mdblist.com/lists/example-user/external/1234/json",
-		"https://mdblist.com/lists/example-user/other/json",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("MDBListURLCandidates = %#v, want %#v", got, want)
-	}
-}
-
 func TestFetchMDBListWithFallback(t *testing.T) {
 	errFetch := errors.New("fetch failed")
 

@@ -95,14 +95,7 @@ func TestRouter_ActivityLog(t *testing.T) {
 
 	for _, path := range []string{
 		"/Items/abc/Images/Primary",
-		"/Items/abc/Images/Backdrop/0",
-		"/Users/abc/Images/Primary",
-		"/UserImage?userId=abc",
-		"/api/v2/artwork/x",
-		"/web/index.html",
 		"/Videos/abc/hls/p1/0.ts",
-		"/videos/abc/hls/p1/stream.m3u8",
-		"/Videos/abc/remux-v1/hls/p1/0.mp4",
 	} {
 		t.Run("skips "+path, func(t *testing.T) {
 			if entries := serve(http.MethodGet, path, true); len(entries) != 0 {

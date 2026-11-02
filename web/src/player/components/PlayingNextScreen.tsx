@@ -9,7 +9,7 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
-import { preferredDateLocale } from "@/lib/datetime";
+import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
@@ -135,6 +135,7 @@ export function PlayingNextScreen({
   const progress = videoEnded && autoplay && nextEpisode ? secondsRemaining / COUNTDOWN_SECONDS : 0;
   const strokeDashoffset = circumference * (1 - progress);
 
+  const nextAirDate = parseCalendarDate(nextEpisode?.airDate);
   const episodeStillUrl = nextEpisode?.stillUrl;
   const episodeThumbhash = nextEpisode?.stillThumbhash;
   const blurPlaceholder = episodeThumbhash ? decodeThumbhash(episodeThumbhash) : undefined;
@@ -255,16 +256,16 @@ export function PlayingNextScreen({
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-[11px] text-white/40 sm:text-xs">
-                  {nextEpisode.airDate && (
+                  {nextAirDate && (
                     <span>
-                      {new Date(nextEpisode.airDate).toLocaleDateString(preferredDateLocale(), {
+                      {nextAirDate.toLocaleDateString(preferredDateLocale(), {
                         year: "numeric",
                         month: "long",
                         day: "numeric",
                       })}
                     </span>
                   )}
-                  {nextEpisode.airDate && nextEpisode.runtime > 0 && (
+                  {nextAirDate && nextEpisode.runtime > 0 && (
                     <span className="text-white/20">&bull;</span>
                   )}
                   {nextEpisode.runtime > 0 && (

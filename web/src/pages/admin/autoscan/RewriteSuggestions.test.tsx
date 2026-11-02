@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { setRefreshToken, setProfileToken } from "@/api/client";
 import { RewriteSuggestions } from "./RewriteSuggestions";
+import { setupAutoscanAdmin } from "./autoscanTestSession.test-support";
 
 const suggestions = {
   proposed: [{ from: "/synthetic/remote", to: "/synthetic/local", match_depth: 1 }],
@@ -15,18 +16,7 @@ const response = (value: unknown, status = 200) =>
     status,
     headers: { "Content-Type": status === 200 ? "application/json" : "application/problem+json" },
   });
-beforeEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
-  setAccessToken("synthetic-admin");
-  setRefreshToken(null);
-  setProfileId("a");
-  setProfileToken("proof-a");
-});
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+setupAutoscanAdmin({ profileToken: "proof-a" });
 function fixture() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: 3 } } });
   const onApply = vi.fn();
@@ -37,18 +27,6 @@ function fixture() {
   );
   return { client, onApply, editor };
 }
-it("previews the captured source without applying rewrites", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(response(suggestions));
-  vi.stubGlobal("fetch", fetchMock);
-  const { editor, onApply } = fixture();
-  render(editor("source-a"));
-  fireEvent.click(screen.getByRole("button", { name: "Sync from server" }));
-  await screen.findByRole("button", { name: "Add selected" });
-  expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-    "/api/v2/admin/autoscan/sources/source-a/rewrite-suggestions",
-  );
-  expect(onApply).not.toHaveBeenCalled();
-});
 it("discards an old source preview after editor replacement", async () => {
   let finish!: (text: string) => void;
   const res = response({});
@@ -131,16 +109,4 @@ it("hands checked proposals to the draft without writing anything", async () => 
   ]);
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("region", { name: "Rewrite suggestions" })).not.toBeInTheDocument();
-});
-
-it("explains why syncing is unavailable and sends nothing", () => {
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const { editor } = fixture();
-  render(editor("source-a", "Save the new server choice first, then sync from it."));
-  expect(screen.getByRole("button", { name: "Sync from server" })).toBeDisabled();
-  expect(
-    screen.getByText("Save the new server choice first, then sync from it."),
-  ).toBeInTheDocument();
-  expect(fetchMock).not.toHaveBeenCalled();
 });

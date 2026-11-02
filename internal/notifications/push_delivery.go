@@ -101,20 +101,22 @@ func scanPushDeliveryAttempts(rows pgx.Rows) ([]PushDeliveryAttempt, error) {
 }
 
 // ListEnabledPushByProfiles loads delivery-eligible push devices for the
-// admin-enabled platforms, keyed by profile.
-func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx pgx.Tx, profileIDs, platforms []string) (map[string][]PushDevice, error) {
-	out := make(map[string][]PushDevice, len(profileIDs))
-	if len(profileIDs) == 0 || len(platforms) == 0 {
+// admin-enabled platforms, keyed by account and profile: profile IDs repeat
+// across accounts.
+func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx pgx.Tx, profiles []profileKey, platforms []string) (map[profileKey][]PushDevice, error) {
+	out := make(map[profileKey][]PushDevice, len(profiles))
+	if len(profiles) == 0 || len(platforms) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
 		FROM push_devices
-		WHERE profile_id = ANY($1)
-		  AND platform = ANY($2)
-		  AND provider = $3
-		  AND push_mode = $4
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[]))
+		  AND platform = ANY($3)
+		  AND provider = $4
+		  AND push_mode = $5
 		  AND enabled`,
-		profileIDs, platforms, PushProviderSiloRelay, PushModePrivatePush)
+		userIDs, profileIDs, platforms, PushProviderSiloRelay, PushModePrivatePush)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled push devices: %w", err)
 	}
@@ -124,7 +126,8 @@ func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx
 		if err != nil {
 			return nil, fmt.Errorf("scan enabled push device: %w", err)
 		}
-		out[device.ProfileID] = append(out[device.ProfileID], *device)
+		key := profileKey{device.UserID, device.ProfileID}
+		out[key] = append(out[key], *device)
 	}
 	return out, rows.Err()
 }

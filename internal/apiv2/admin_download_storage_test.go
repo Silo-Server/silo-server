@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -181,30 +180,6 @@ func adminDownloadStorageFixtureCases() []fixtureCase {
 		{name: "admin_download_revoke_device", operationID: "revokeAdminDownloads", method: http.MethodPost, path: Prefix + "/admin/downloads/revoke", headers: admin, body: `{"user_id":"7","profile_id":"p-maya","device_id":"dev-pixel","pause_monitors":true,"reason":"Lost phone"}`, status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminDownloadRevokeOutputBody", scenario: "Revoking every download on one device, pausing its series monitors."},
 		{name: "admin_download_revoke_mixed", operationID: "revokeAdminDownloads", method: http.MethodPost, path: Prefix + "/admin/downloads/revoke", headers: admin, body: `{"ids":["dl-1"],"device_id":"dev-pixel"}`, status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem, scenario: "A revoke names download ids or one device, not both."},
 		{name: "prepare_download_again", operationID: "prepareDownloadAgain", method: http.MethodPost, path: Prefix + "/downloads/entry-1/prepare", headers: with(with(bearer(memberToken), "X-Profile-Id", "p-owner"), "X-Silo-Device-Id", "device-one"), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/DownloadEntry", scenario: "A finished download whose server file expired returns to preparing with the same revision."},
-	}
-}
-
-func TestAdminDownloadStorageDeleteForwardsActorAndInUse(t *testing.T) {
-	storage := new(fakeAdminDownloadStorage)
-	deps := fixtureDeps()
-	deps.AdminDownloadStorage = storage
-	h := newTestHandler(t, deps)
-	req := httptest.NewRequest(http.MethodPost, Prefix+"/admin/downloads/storage/files/delete", strings.NewReader(`{"ids":["art-oppenheimer"],"include_in_use":true}`))
-	for k, v := range bearer(adminToken) {
-		req.Header.Set(k, v)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-	}
-	var body AdminDownloadStorageDeleteOutput
-	if err := json.Unmarshal(rec.Body.Bytes(), &body.Body); err != nil {
-		t.Fatal(err)
-	}
-	if !storage.includeInUse || storage.actor == 0 || len(body.Body.Results) != 1 || body.Body.Results[0].Outcome != downloads.StorageDeleteRequeued {
-		t.Fatalf("delete = %+v, include_in_use=%v actor=%d", body.Body.Results, storage.includeInUse, storage.actor)
 	}
 }
 

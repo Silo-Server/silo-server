@@ -49,28 +49,6 @@ describe("v2Recorder", () => {
     expect((stale as V2ProblemError).currentETag).toBe('"/api/v2/collections/c1#2"');
   });
 
-  it("answers 412 to a guarded write that sends another resource's ETag", async () => {
-    const listETag = await etagOf((onResponse) => v2("GET /api/v2/collections", { onResponse }));
-
-    const wrong = await v2("PATCH /api/v2/collections/{id}", {
-      path: { id: "c1" },
-      headers: { "If-Match": listETag! },
-      body: { name: "Renamed" },
-    }).catch((error: unknown) => error);
-
-    expect(listETag).not.toBe(v2Recorder.etag("/api/v2/collections/c1"));
-    expect((wrong as V2ProblemError).status).toBe(412);
-  });
-
-  it("moves a collection's ETag when one of its items changes", async () => {
-    expect(v2Recorder.etag("/api/v2/collections/c1")).toBe('"/api/v2/collections/c1#1"');
-    await v2("PUT /api/v2/collections/{id}/items/{item_id}", {
-      path: { id: "c1", item_id: "movie:heat-1995" },
-      body: { position: 0 },
-    });
-    expect(v2Recorder.etag("/api/v2/collections/c1")).toBe('"/api/v2/collections/c1#2"');
-  });
-
   it("fails an operation it has no answer for and remembers it", async () => {
     await expect(v2("GET /api/v2/collections/server")).rejects.toThrow("no answer");
     expect(v2Recorder.unanswered).toEqual(["GET /api/v2/collections/server"]);

@@ -190,7 +190,7 @@ it rejects silently counts as "no NFO".
   `<writer>` (both writers, one credit per name), split on Kodi's ` / `
   separator. A show's `<studio>` also fills its networks; Kodi has no network
   element. `<tag>` is not split.
-- Shows: `<status>` through `NormalizeShowStatus`.
+- Shows: `<status>` through `showstatus.Normalize`.
 - Trailers: `<trailer>` as a YouTube or Vimeo video, from the YouTube add-on
   link Kodi's scrapers write (`plugin://plugin.video.youtube/...`) or a web
   link. A link to any other site is dropped: videos are stored as a site and a
@@ -336,7 +336,34 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 | Disc art (movies only) | `<basename>-disc`, `<basename>-cdart`, `<basename>-discart`, then `disc`, `cdart`, `discart` |
 | Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
 | Episode still | `<basename>-thumb`, then `<basename>` |
+| Local extra still | `<basename>-thumb`, then `<basename>`, beside the extra's own file (below) |
 
+- A local extra (a trailer or featurette file, `media_extras`) has no metadata
+  refresh, so the scanner reads its image instead
+  (`internal/scanner/extra_stills.go`): every scan that walks the extra checks
+  the folder listing the walk already read (a single-file scan reads the
+  folder), copies a new or changed sidecar into the image cache as a 16:9
+  still, and clears the image when the sidecar is gone. A folder that cannot
+  be read leaves the stored image alone. `media_extras.still_source` records
+  the sidecar's path, size and mtime, so an unchanged image is not read again,
+  and an image that cannot be decoded is recorded without a still until it
+  changes. When the scanner or a library delete removes an extra's last file
+  row, the extra's image is cleared for the artwork revision GC. Adding or replacing the image starts a
+  subtree scan of its folder, like any sidecar change. API v2 detail returns it
+  as `extras[].still_url`, and Jellyfin clients get it as the extra's Primary
+  image.
+- An extra without a sidecar gets a frame of its video instead
+  (`internal/extrastills`, the hidden `generate_extra_stills` task, at startup
+  and every 15 minutes, in every library): a tenth of the way in, between 5
+  seconds and a minute, taken through the chapter-thumbnail extractor and its
+  local or transcode-node routing. The frame is keyed to the file's size and
+  mtime, so a replaced file gets a new one. A file ffmpeg cannot decode is
+  skipped until it changes; other failures are tried again after six hours, and
+  a run stops early when no transcode node can be reserved. Extras in disabled
+  libraries, and files not yet probed, wait. A sidecar always wins: a scan
+  replaces a frame with it, and the task never overwrites one. An extra whose
+  sidecar cannot be decoded gets no frame either; it shows no image until the
+  sidecar is fixed or removed.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
@@ -375,9 +402,11 @@ Caching and refresh:
 - The metadata image-cache processor caches the file under
   `local/{contentType}/{contentID}/{hash8}/{imageType}/...` (`hash8` = content
   hash; the discriminator sits before the imageType segment because variant
-  clamping reads the parent directory). A replaced image rotates the key; the
-  stale hashed prefix is deleted after a successful re-cache, and item
-  deletion trims local paths to the content prefix.
+  clamping reads the parent directory). A replaced image rotates the key. The
+  catalog update that points at the new copy displaces the old one to the
+  artwork revision GC, which deletes it only once nothing references it: an
+  admin pick of the same bytes shares the key. Item deletion trims local
+  paths to the content prefix.
 - The process that discovered the sidecar copies it
   (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
   processes run refreshes and the image cache, and a refresh can only discover
@@ -433,19 +462,27 @@ Caching and refresh:
   the best remote candidate by the `applyBestImages` rules, for seasons and
   episodes the first remote poster or still that the local one displaced while
   provider results merged, or, when the refresh kept a local source it could
-  not see, the remote one it chose. The slot's source stays the local file, so the
+  not see, the remote one it chose. When the refresh offers no remote image for
+  an item slot, which is always so for a local re-apply because it asks no
+  remote provider, the remote image the slot was serving stays as the stand-in,
+  as a cached copy would, so a copy that keeps failing never leaves the slot
+  blank; clear art stored as the logo is the exception and never stands in. The
+  slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update, and a refresh
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO
   names: its slot stays empty until the image cache has downloaded it.
-- `metadata.cache_images` governs remote artwork only. With it off, local art
-  files are still selected, copied, and served: the drain claims local jobs
-  only (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
-  remote jobs left queued are not read), a manual refresh waits for local jobs
-  only, and the provider-artwork backfill stays off. An image URL an NFO names
-  is a download, never served directly, so with caching off it is not selected
-  (`localSourceUsable`) and the slot takes provider artwork, as it does for
-  person photos.
+- With `metadata.cache_images` off, clients load artwork straight from the
+  providers, so no local artwork is used (`localArtworkUsable`): refreshes,
+  targeted season and episode refreshes, scan re-applies, and person photos
+  drop local candidates, items keep no extra backdrops, and the image cache
+  claims, copies, and downloads nothing. NFO text still applies. A refresh
+  also stops keeping stored copies: `preserveCachedArtwork` lets a provider
+  path replace one unless the artwork is locked, and an unlocked item's stored
+  poster, backdrop, and logo count as empty for `applyBestImages`, so even a
+  fill-empty refresh takes an unrated provider image. Artwork stored before the
+  setting went off is released by `StoredArtworkReleaser` (see
+  [settings-api.md](../settings-api.md)).
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.
@@ -520,8 +557,8 @@ reference is a path relative to the NFO or an http(s) URL:
   sidecar file: `isLocalImageSourcePath` counts it, it waits in
   `*_source_path` until the image cache downloads it through its
   public-address guard, it is never served to clients or fetched by
-  jellycompat's image proxy, and it is not used while
-  `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
+  jellycompat's image proxy, and, like all local artwork, it is not used
+  while `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
   refresh or the ladder backfill, not by the provider-artwork sweeps. Its
   copy is attributed to the `nfo` provider and keyed like a provider's
   (`nfo/{contentType}/{contentID}/{imageType}/...`); only `file://` copies
@@ -549,8 +586,8 @@ still waiting for its copy, stays. It queues a person image-cache job whose `ser
 title, so the processor confines a local read to that title's library roots;
 a title's interactive artwork refresh leaves those person jobs out of its
 scope. A person refresh keeps a cached NFO photo over a provider's. Like other
-local artwork, a sidecar photo is copied whatever `metadata.cache_images` says;
-a photo URL an NFO names is used only while the setting is on.
+local artwork, NFO photos are used only while `metadata.cache_images` is on;
+photos already copied stay (the stored-artwork release leaves people alone).
 
 ### Admin image picker
 
@@ -584,6 +621,20 @@ lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
 choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
+
+An admin can also upload a poster, backdrop or logo for a movie or series, or
+a season's poster (`POST .../images/upload`). Silo does not write into library
+folders, which are usually mounted read-only, so the upload is stored only in
+artwork storage: under the same `local/...` keys as cached sidecar art, with
+the image's digest as the key discriminator. It is published with the images
+lock, and its source is `upload://sha256:<hex>`, one of the non-provider
+schemes image caching, artwork reconcile and the ladder backfill never try to
+download. A storage reconcile that resets cached artwork in bulk still checks
+each upload's object and clears the row only when the object is gone. The list offers the upload as a local choice only while the item
+shows it; applying another image replaces it, and revision GC reclaims it
+after the grace period like any displaced revision. Its only record is the
+item's artwork columns, so there is no upload table to keep in step with
+content ID moves or GC references.
 
 The reads open each library root as an `os.Root`, which needs read (list)
 permission on the root directory, not only search permission. The scanner lists

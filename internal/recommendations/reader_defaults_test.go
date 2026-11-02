@@ -52,7 +52,7 @@ func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 		RecTypeTopRated:      scored("watched", "disliked", "liked", "top-1", "top-2"),
 		RecTypeRecentlyAdded: scored("recent-1", "watched"),
 	}, rated: []string{"disliked", "liked"}}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}
 
 	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestDefaultRowSectionsMatchDiscover(t *testing.T) {
 		},
 		hidden: map[string]struct{}{"hidden": {}},
 	}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}
 
 	discover, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil {
@@ -187,16 +187,6 @@ func TestDiscoverDedupesOnlyAgainstShownItems(t *testing.T) {
 	// Genre rows are titled for their rating-led content.
 	if got := rowItems(rows, "Top Drama"); !slices.Equal(got, []string{"main-21", "drama"}) {
 		t.Fatalf("genre row = %v (rows %v)", got, rowLabels(rows))
-	}
-}
-
-// A genre "see all" page carries the label Discover gives the row.
-func TestGenreSectionIsTitledTopGenre(t *testing.T) {
-	repo := &fakeReaderRepo{global: map[string][]ScoredItem{RecTypeGenreSamplerPrefix + "Drama": scored("drama")}}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-	row, err := r.GetSection(t.Context(), 7, "p1", SectionKindGenre, "Drama", 60, catalog.AccessFilter{})
-	if err != nil || row == nil || row.Label != "Top Drama" {
-		t.Fatalf("genre section = %+v, %v; want Top Drama", row, err)
 	}
 }
 

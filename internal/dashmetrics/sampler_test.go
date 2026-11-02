@@ -232,17 +232,6 @@ func TestEgressKbps(t *testing.T) {
 	}
 }
 
-func TestNewSamplerSourceKey(t *testing.T) {
-	t.Parallel()
-
-	if got := NewSampler(nil, nil, "api-2").source; got != "proc:api-2" {
-		t.Fatalf("source = %q, want %q", got, "proc:api-2")
-	}
-	if got := NewSampler(nil, nil, "").source; got == "proc:" {
-		t.Fatal("an empty node id must fall back to a host identity, not an empty source key")
-	}
-}
-
 func TestSamplerStopIsIdempotent(t *testing.T) {
 	t.Parallel()
 

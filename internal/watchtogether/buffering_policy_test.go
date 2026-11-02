@@ -105,6 +105,14 @@ func (f *bufferingRoom) ready(profileID string, position float64) Snapshot {
 	return snapshot
 }
 
+// hostRequest sends the host's transport request and fails the test on error.
+func (f *bufferingRoom) hostRequest(request TransportRequest) {
+	f.t.Helper()
+	if _, err := f.s.HandleTransportRequestForConnection(f.t.Context(), f.reg("host"), 7, "host", request); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *bufferingRoom) report(profileID string, position float64) Snapshot {
 	f.t.Helper()
 	snapshot, err := f.s.HandleStateReportForConnection(f.t.Context(), f.reg(profileID), f.userID(profileID), profileID, StateReport{
@@ -114,6 +122,15 @@ func (f *bufferingRoom) report(profileID string, position float64) Snapshot {
 		f.t.Fatal(err)
 	}
 	return snapshot
+}
+
+// stateReport sends the member's full state report and fails the test on
+// error.
+func (f *bufferingRoom) stateReport(profileID string, report StateReport) {
+	f.t.Helper()
+	if _, err := f.s.HandleStateReportForConnection(f.t.Context(), f.reg(profileID), f.userID(profileID), profileID, report); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 // resumeAll acknowledges the current barrier for every member.
@@ -232,9 +249,7 @@ func TestRecoveryAfterDeadlineClearsBufferingAndTargetsTheRoom(t *testing.T) {
 			f.missDeadline()
 			if paused {
 				position := f.expected()
-				if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host", TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
-					t.Fatal(err)
-				}
+				f.hostRequest(TransportRequest{Action: TransportActionPause, PositionSeconds: &position})
 			}
 			f.now = f.now.Add(20 * time.Second)
 			frames := len(f.conns["guest"].payloads)

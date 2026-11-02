@@ -7,6 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // Section scopes and the titles and IDs of default rows, named once for the
@@ -42,6 +43,18 @@ const (
 // DefaultItemLimit is the row size of default rows and of rows an admin
 // creates without a limit.
 const DefaultItemLimit = 100
+
+// MaxItemLimit is the largest row size a section may ask for, whether an
+// admin sets it or a profile overrides it. Fetchers size their buffers from
+// the limit, so it must stay bounded. The /api/v2 schemas carry the same
+// value as a literal `maximum:"500"` tag on every item_limit they accept.
+const MaxItemLimit = 500
+
+// ClampItemLimit caps a stored row size at MaxItemLimit. Values below 1 pass
+// through unchanged; the fetchers already read them as "use the default".
+func ClampItemLimit(limit int) int {
+	return min(limit, MaxItemLimit)
+}
 
 // betaLibraryItemLimit is the row size of default rows for beta library
 // types (audiobooks, ebooks, manga, podcasts). Those surfaces stay as they
@@ -102,10 +115,8 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 			SectionType: SectionSeasonalThemed,
 			Title:       "Seasonal Picks",
 			ItemLimit:   DefaultItemLimit,
-			Config: json.RawMessage(
-				`{"enabled_themes":["halloween","christmas","valentines","st_patricks","thanksgiving","summer_blockbuster","saturday_morning"]}`,
-			),
-			Enabled: true,
+			Config:      json.RawMessage(recipes.DefaultSeasonalConfig),
+			Enabled:     true,
 		},
 	)
 

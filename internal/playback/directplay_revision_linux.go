@@ -15,7 +15,7 @@ func directPlayFilesystemRevision(_ *os.File, info os.FileInfo) (string, bool) {
 	}
 	return fmt.Sprintf(
 		"linux:%x:%x:%x:%x:%x:%x",
-		uint64(stat.Dev),
+		stat.Dev,
 		stat.Ino,
 		stat.Ctim.Sec,
 		stat.Ctim.Nsec,

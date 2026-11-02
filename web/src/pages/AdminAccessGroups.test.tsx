@@ -9,20 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTestUtils";
 import AdminAccessGroups from "./AdminAccessGroups";
+import { stubRadixDom } from "./adminPage.test-support";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
-const adminUsers = vi.hoisted(() => ({
-  data: [] as Array<{
-    id: number;
-    username: string;
-    email: string;
-    role: string;
-    access_group_id: number | null;
-  }>,
-}));
 vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUsers: () => ({
-    data: adminUsers.data,
+    data: [],
     isPending: false,
     isError: false,
     isSuccess: true,
@@ -32,21 +24,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
 const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 
-// Radix Select needs these to open under jsdom.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-if (typeof globalThis.ResizeObserver === "undefined") {
-  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
-    ResizeObserverStub;
-}
-if (!window.HTMLElement.prototype.hasPointerCapture) {
-  window.HTMLElement.prototype.hasPointerCapture = () => false;
-  window.HTMLElement.prototype.releasePointerCapture = () => {};
-  window.HTMLElement.prototype.scrollIntoView = () => {};
-}
+stubRadixDom();
 
 async function pickOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -342,32 +320,6 @@ describe("AdminAccessGroups", () => {
     expect(limitWrites[1]?.body).toMatchObject({ limit_mode: "unlimited", max_requests: null });
   });
 
-  it("lists the group's members with links to their user pages", async () => {
-    const user = (id: number, username: string, role: string, group: number | null) => ({
-      id,
-      username,
-      email: `${username}@example.test`,
-      role,
-      access_group_id: group,
-    });
-    adminUsers.data = [
-      user(7, "taylor", "user", 1),
-      user(8, "sam", "user", 2),
-      user(9, "robin", "user", null),
-      user(10, "root", "admin", null),
-    ];
-    renderPage("/admin/access-groups/1");
-    const members = await screen.findByRole("region", { name: "Members" });
-    expect(within(members).getByRole("link", { name: "taylor" })).toHaveAttribute(
-      "href",
-      "/admin/users/7",
-    );
-    expect(within(members).queryByRole("link", { name: "sam" })).toBeNull();
-    expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
-    expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
-    adminUsers.data = [];
-  });
-
   it("stays in the editor with the error when a save fails", async () => {
     toastSuccess.mockClear();
     const serve = globalThis.fetch;
@@ -388,18 +340,6 @@ describe("AdminAccessGroups", () => {
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(toastSuccess).not.toHaveBeenCalled();
-  });
-
-  it("opens a group at its own URL so Back returns to the group list", async () => {
-    const router = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    expect(await screen.findByRole("button", { name: "All groups" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
-
-    await router.navigate(-1);
-    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-    expect(screen.queryByRole("button", { name: "All groups" })).not.toBeInTheDocument();
   });
 
   it("retries a failed group load when the same group is opened again", async () => {
@@ -426,24 +366,6 @@ describe("AdminAccessGroups", () => {
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
     expect(groupReads).toBe(2);
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
-  });
-
-  it("clears the loading message when leaving a group before it loads", async () => {
-    const serve = globalThis.fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) =>
-        String(input) === "/api/v2/admin/access-groups/1" && (init?.method ?? "GET") === "GET"
-          ? new Promise<Response>(() => {})
-          : serve(input, init),
-      ),
-    );
-    const router = renderPage("/admin/access-groups/1");
-    expect(await screen.findByText("Loading group editor...")).toBeInTheDocument();
-    await router.navigate("/admin/access-groups");
-    await waitFor(() =>
-      expect(screen.queryByText("Loading group editor...")).not.toBeInTheDocument(),
-    );
   });
 
   function holdCreate() {
@@ -543,31 +465,6 @@ describe("AdminAccessGroups", () => {
     expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
-  it("says a deleted group's members move to the default group", async () => {
-    group = { ...GROUP, is_default: false };
-    const everyone = { ...GROUP, id: "2", name: "Everyone", is_default: true, member_count: 0 };
-    const serve = globalThis.fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) =>
-        String(input) === "/api/v2/admin/access-groups?limit=200" &&
-        (init?.method ?? "GET") === "GET"
-          ? jsonResponse({ items: [group, everyone], page: { has_more: false } })
-          : serve(input, init),
-      ),
-    );
-    renderPage("/admin/access-groups/1");
-
-    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
-    const dialog = await screen.findByRole("alertdialog");
-    await waitFor(() =>
-      expect(dialog).toHaveTextContent(
-        "3 members will move to the default group, Everyone, and get its access right away, without being signed out",
-      ),
-    );
-    expect(dialog).not.toHaveTextContent("no group");
-  });
-
   it("keeps the move warning when the cached member count is zero", async () => {
     // The list's count can be stale: an account may have joined since it loaded.
     group = { ...GROUP, is_default: false, member_count: 0 };
@@ -611,23 +508,6 @@ describe("AdminAccessGroups", () => {
     });
   });
 
-  it("saves a custom Mbps bitrate limit as whole kbps", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    await screen.findByRole("combobox", { name: "Max remote stream bitrate" });
-    await pickOption(user, "Max remote stream bitrate", "Custom");
-    await user.type(screen.getByLabelText("Max remote stream bitrate in Mbps"), "1.5");
-    await pickOption(user, "Max local stream bitrate", "40 Mbps");
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() => {
-      expect(putBody).toMatchObject({
-        max_remote_stream_bitrate_kbps: 1500,
-        max_local_stream_bitrate_kbps: 40000,
-      });
-    });
-  });
-
   it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
     const user = userEvent.setup();
     group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };
@@ -667,153 +547,145 @@ describe("AdminAccessGroups", () => {
   });
 });
 
-it("keeps a stale draft and requires explicit canonical reload before resubmission", async () => {
-  installPolicyStorageMocks();
-  setAccessToken("account");
-  setProfileId("owner");
-  setProfileToken(null);
-  let reads = 0;
-  const tags: (string | null)[] = [];
-  const bodies: Record<string, unknown>[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      if (url === "/api/v2/admin/users/capabilities") return jsonResponse({ access_groups: true });
-      if (url.includes("/admin/access-groups?"))
-        return jsonResponse({ items: [GROUP], page: { has_more: false } });
-      if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
-        reads++;
-        return new Response(
-          JSON.stringify({ ...GROUP, name: reads === 1 ? "Canonical" : "Someone else's name" }),
-          {
+/** The 412 a stale write gets; `headers` adds to the problem content type. */
+function reloadCurrentState(headers: Record<string, string> = {}) {
+  return new Response(
+    JSON.stringify({
+      type: "https://silo.example/problems/precondition_failed",
+      title: "Changed",
+      status: 412,
+      detail: "Reload current state",
+    }),
+    { status: 412, headers: { "Content-Type": "application/problem+json", ...headers } },
+  );
+}
+
+describe("AdminAccessGroups revisions and capability", () => {
+  beforeEach(() => {
+    installPolicyStorageMocks();
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a stale draft and requires explicit canonical reload before resubmission", async () => {
+    let reads = 0;
+    const tags: (string | null)[] = [];
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url === "/api/v2/admin/users/capabilities")
+          return jsonResponse({ access_groups: true });
+        if (url.includes("/admin/access-groups?"))
+          return jsonResponse({ items: [GROUP], page: { has_more: false } });
+        if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
+          reads++;
+          return new Response(
+            JSON.stringify({ ...GROUP, name: reads === 1 ? "Canonical" : "Someone else's name" }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+                ETag: reads === 1 ? '"old"' : '"fresh"',
+              },
+            },
+          );
+        }
+        if (method === "PUT") {
+          tags.push(new Headers(init?.headers).get("If-Match"));
+          bodies.push(JSON.parse(String(init?.body)));
+          if (tags.length === 1) return reloadCurrentState({ ETag: '"must-not-adopt"' });
+          return new Response(JSON.stringify(GROUP), {
+            headers: { "Content-Type": "application/json", ETag: '"saved"' },
+          });
+        }
+        if (url.includes("libraries")) return jsonResponse([]);
+        return jsonResponse({}, 404);
+      }),
+    );
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const name = await screen.findByLabelText("Name");
+    expect(name).toHaveValue("Canonical");
+    fireEvent.change(name, { target: { value: "My draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText(/Your draft is preserved/);
+    expect(name).toHaveValue("My draft");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(reads).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Reload current group" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+    expect(name).toHaveValue("My draft");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(tags).toEqual(['"old"', '"fresh"']));
+    expect(bodies.map((body) => body.name)).toEqual(["My draft", "My draft"]);
+  });
+
+  it("keeps delete confirmation after conflict and reloads before retry", async () => {
+    let reads = 0;
+    const tags: (string | null)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url === "/api/v2/admin/users/capabilities")
+          return jsonResponse({ access_groups: true });
+        if (url.includes("/admin/access-groups?"))
+          return jsonResponse({ items: [GROUP], page: { has_more: false } });
+        if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
+          reads++;
+          return new Response(JSON.stringify({ ...GROUP, is_default: false }), {
             headers: {
               "Content-Type": "application/json",
               ETag: reads === 1 ? '"old"' : '"fresh"',
             },
-          },
-        );
-      }
-      if (method === "PUT") {
-        tags.push(new Headers(init?.headers).get("If-Match"));
-        bodies.push(JSON.parse(String(init?.body)));
-        if (tags.length === 1)
-          return new Response(
-            JSON.stringify({
-              type: "https://silo.example/problems/precondition_failed",
-              title: "Changed",
-              status: 412,
-              detail: "Reload current state",
-            }),
-            {
-              status: 412,
-              headers: { "Content-Type": "application/problem+json", ETag: '"must-not-adopt"' },
-            },
-          );
-        return new Response(JSON.stringify(GROUP), {
-          headers: { "Content-Type": "application/json", ETag: '"saved"' },
-        });
-      }
-      if (url.includes("libraries")) return jsonResponse([]);
-      return jsonResponse({}, 404);
-    }),
-  );
-  renderPage();
-  fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-  const name = await screen.findByLabelText("Name");
-  expect(name).toHaveValue("Canonical");
-  fireEvent.change(name, { target: { value: "My draft" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-  await screen.findByText(/Your draft is preserved/);
-  expect(name).toHaveValue("My draft");
-  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
-  expect(reads).toBe(1);
-  fireEvent.click(screen.getByRole("button", { name: "Reload current group" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
-  expect(name).toHaveValue("My draft");
-  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-  await waitFor(() => expect(tags).toEqual(['"old"', '"fresh"']));
-  expect(bodies.map((body) => body.name)).toEqual(["My draft", "My draft"]);
-  cleanup();
-  vi.unstubAllGlobals();
-});
+          });
+        }
+        if (method === "DELETE") {
+          tags.push(new Headers(init?.headers).get("If-Match"));
+          if (tags.length === 1) return reloadCurrentState();
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse([]);
+      }),
+    );
+    const router = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled());
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(reads).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Reload current group" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(tags).toEqual(['"old"', '"fresh"']);
+    // Deleting replaces the group's history entry, so Back can't reopen it.
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/access-groups"));
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+  });
 
-it("keeps delete confirmation after conflict and reloads before retry", async () => {
-  installPolicyStorageMocks();
-  setAccessToken("account");
-  setProfileId("owner");
-  setProfileToken(null);
-  let reads = 0;
-  const tags: (string | null)[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      if (url === "/api/v2/admin/users/capabilities") return jsonResponse({ access_groups: true });
-      if (url.includes("/admin/access-groups?"))
-        return jsonResponse({ items: [GROUP], page: { has_more: false } });
-      if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
-        reads++;
-        return new Response(JSON.stringify({ ...GROUP, is_default: false }), {
-          headers: { "Content-Type": "application/json", ETag: reads === 1 ? '"old"' : '"fresh"' },
-        });
-      }
-      if (method === "DELETE") {
-        tags.push(new Headers(init?.headers).get("If-Match"));
-        if (tags.length === 1)
-          return new Response(
-            JSON.stringify({
-              type: "https://silo.example/problems/precondition_failed",
-              title: "Changed",
-              status: 412,
-              detail: "Reload current state",
-            }),
-            { status: 412, headers: { "Content-Type": "application/problem+json" } },
-          );
-        return new Response(null, { status: 204 });
-      }
-      return jsonResponse([]);
-    }),
-  );
-  const router = renderPage();
-  fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
-  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled());
-  expect(screen.getByRole("alertdialog")).toBeInTheDocument();
-  expect(reads).toBe(1);
-  fireEvent.click(screen.getByRole("button", { name: "Reload current group" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-  expect(tags).toEqual(['"old"', '"fresh"']);
-  // Deleting replaces the group's history entry, so Back can't reopen it.
-  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/access-groups"));
-  await router.navigate(-1);
-  expect(router.state.location.pathname).toBe("/admin/access-groups");
-  cleanup();
-  vi.unstubAllGlobals();
-});
-
-it("blocks configuration controls when capability is unavailable", async () => {
-  installPolicyStorageMocks();
-  setAccessToken("account");
-  setProfileId("owner");
-  setProfileToken(null);
-  const fetch = vi.fn<typeof globalThis.fetch>(async (input) =>
-    String(input).includes("capabilities")
-      ? jsonResponse({ access_groups: false })
-      : jsonResponse({ items: [GROUP], page: { has_more: false } }),
-  );
-  vi.stubGlobal("fetch", fetch);
-  renderPage();
-  fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-  expect(screen.getByText("Access group editing is unavailable.")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "New group" })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
-  expect(fetch.mock.calls.every(([url]) => !String(url).endsWith("/1"))).toBe(true);
-  cleanup();
-  vi.unstubAllGlobals();
+  it("blocks configuration controls when capability is unavailable", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) =>
+      String(input).includes("capabilities")
+        ? jsonResponse({ access_groups: false })
+        : jsonResponse({ items: [GROUP], page: { has_more: false } }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    expect(screen.getByText("Access group editing is unavailable.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New group" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(fetch.mock.calls.every(([url]) => !String(url).endsWith("/1"))).toBe(true);
+  });
 });

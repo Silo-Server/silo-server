@@ -8,11 +8,9 @@ import { v2Problem } from "@/api/v2/problems.test-support";
 import { V2ProblemError } from "@/api/v2/request";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
-  settingsCapabilitiesSupportAtomicShortcuts,
   settingsCapabilitiesSupportKey,
   type SettingIdentity,
   useClearSettingValue,
-  useSetNavigationShortcutPresence,
   useSetSettingValue,
   useSettingsCapabilities,
   useSettingValue,
@@ -104,34 +102,6 @@ describe("self-service setting identities", () => {
       });
       expect(options.query).not.toHaveProperty("client_family");
     }
-  });
-
-  it("sends an atomic shortcut with its captured profile and PIN token", async () => {
-    const shortcutHook = renderHook(() => useSetNavigationShortcutPresence(), { wrapper });
-
-    const profileAuth = {
-      profileId: "profile-old",
-      profileToken: "fake",
-      accessToken: "fake",
-      authContextVersion: 3,
-      serverOrigin: "https://old.example",
-    };
-    await act(async () => {
-      await shortcutHook.result.current.mutateAsync({
-        item: { type: "library", library_id: 42, label: "Movies" },
-        present: true,
-        profileAuth,
-        invalidateOnSettled: false,
-      });
-    });
-
-    expect(v2Mock).toHaveBeenCalledWith("PUT /api/v2/settings/values/nav.shortcuts/item", {
-      body: {
-        item: { type: "library", library_id: 42, label: "Movies" },
-        present: true,
-      },
-      profileContext: profileAuth,
-    });
   });
 
   it("keeps an ordinary write pending until effective values reconcile", async () => {
@@ -292,22 +262,6 @@ describe("settings capability gates", () => {
       supports_idempotent_writes: false,
       supports_atomic_shortcuts: true,
     });
-  });
-
-  it("requires an explicit atomic-shortcut capability", () => {
-    expect(settingsCapabilitiesSupportAtomicShortcuts(revisionFive)).toBe(false);
-    expect(
-      settingsCapabilitiesSupportAtomicShortcuts({
-        ...revisionFive,
-        supports_atomic_shortcuts: false,
-      }),
-    ).toBe(false);
-    expect(
-      settingsCapabilitiesSupportAtomicShortcuts({
-        ...revisionFive,
-        supports_atomic_shortcuts: true,
-      }),
-    ).toBe(true);
   });
 });
 

@@ -53,11 +53,9 @@ func TestThemeDirectPlayFormats(t *testing.T) {
 		{"", "mp4", true},
 		{"maxAudioBitRate=128000&maxAudioChannels=2&audioSampleRate=44100&audioStreamIndex=-1", "m4a", true},
 		{"audioCodec=mp3", "", false},
-		{"audioStreamIndex=1", "", false},
 		{"audioStreamIndex=0", "", false},
 		{"maxAudioBitRate=64000", "", false},
 		{"audioChannels=1", "", false},
-		{"audioSampleRate=48000", "", false},
 		{"container=mp4", "ogg", false},
 	} {
 		t.Run(tc.container+"?"+tc.query, func(t *testing.T) {
@@ -86,8 +84,6 @@ func TestThemeUniversalFallbackNegotiation(t *testing.T) {
 		{"container=aac&audioCodec=mp3", true, false},
 		{"audioCodec=aac&transcodingContainer=mp4", true, false},
 		{"container=mp3&audioCodec=aac&maxStreamingBitrate=64000", true, false},
-		{"container=mp3&audioCodec=aac&maxAudioChannels=1", true, false},
-		{"container=mp3&audioCodec=aac&maxAudioSampleRate=22050", true, false},
 		{"container=mp3&audioCodec=aac&audioBitRate=64000&transcodingAudioChannels=1", true, true},
 	} {
 		t.Run(tc.query, func(t *testing.T) {

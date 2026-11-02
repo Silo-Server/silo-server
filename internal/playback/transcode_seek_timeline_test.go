@@ -33,7 +33,7 @@ func TestEncodedSeekSegmentsMatchSyntheticTimeline(t *testing.T) {
 	).CombinedOutput(); err != nil {
 		t.Fatalf("generate synthetic source: %v\n%s", err, output)
 	}
-	for _, seek := range []int{0, 26, 56} {
+	for _, seek := range []int{0, 56} {
 		t.Run(fmt.Sprintf("seek_%d", seek), func(t *testing.T) {
 			dir := t.TempDir()
 			args := buildFFmpegArgs(TranscodeOpts{

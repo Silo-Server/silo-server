@@ -319,7 +319,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	}()
 	release := func(item enrichmentItemRow) {
 		cleanupOnce.Do(func() {
-			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second) //nolint:fatcontext,gosec // set once under cleanupOnce from the batch ctx; the deferred func above calls cleanupCancel
 		})
 		e.releaseClaim(cleanupCtx, item)
 	}
@@ -929,9 +929,8 @@ func (e *Enricher) persist(ctx context.Context, item enrichmentItemRow, provider
 	if result.ContentRating != "" {
 		upd.ContentRating = &result.ContentRating
 	}
-	if result.Runtime > 0 {
-		upd.Runtime = &result.Runtime
-	}
+	// result.Runtime is left out on purpose: it describes whichever edition
+	// the provider matched. Active audio files determine the book's runtime.
 	if result.Year > 0 {
 		upd.Year = &result.Year
 	}

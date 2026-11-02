@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // ABSProgressStore implements abs.ProgressStore directly against the
@@ -153,10 +154,24 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 	if row.IsFinished {
 		position = 0
 	}
-	_, err = s.Pool.Exec(ctx, `
+	// A reset can cover a future-dated imported play. New reports must be
+	// newer than its cutoff to remain visible to native progress reads.
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fmt.Errorf("abs_progress_store: begin progress report: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := pgstore.LockHistoryCutoff(ctx, tx, uid, row.ProfileID); err != nil {
+		return fmt.Errorf("abs_progress_store: lock progress cutoff: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO user_watch_progress
 		  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6, GREATEST($7::timestamptz, (
+		  SELECT hidden_before + interval '1 second'
+		  FROM user_history_hidden_items
+		  WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+		)))
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
 		  position_seconds = CASE WHEN EXCLUDED.completed THEN 0
 		      ELSE GREATEST(user_watch_progress.position_seconds, EXCLUDED.position_seconds) END,
@@ -168,6 +183,9 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 	)
 	if err != nil {
 		return fmt.Errorf("abs_progress_store: upsert progress: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("abs_progress_store: commit progress report: %w", err)
 	}
 	return nil
 }
@@ -188,7 +206,11 @@ func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, p
 	_, err = s.Pool.Exec(ctx, `
 		UPDATE user_watch_progress
 		SET position_seconds = GREATEST(position_seconds, $4),
-		    updated_at       = now()
+		    updated_at       = GREATEST(updated_at, now(), (
+		      SELECT hidden_before + interval '1 second'
+		      FROM user_history_hidden_items
+		      WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+		    ))
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
 		  AND NOT completed`,
 		uid, profileID, contentID, positionSeconds,
@@ -199,18 +221,19 @@ func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, p
 	return nil
 }
 
-// DeleteProgress removes the progress row entirely. Idempotent on missing-row.
-// Used by the ABS "Reset Progress" / clear-progress affordance.
+// DeleteProgress clears progress and completion without deleting history.
+// Used by the ABS "Reset Progress" / clear-progress affordance. The history
+// cutoff keeps native reads from restoring completion from a retained play.
 func (s *ABSProgressStore) DeleteProgress(ctx context.Context, userID, profileID, contentID string) error {
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
 		return fmt.Errorf("abs_progress_store: invalid user id %q: %w", userID, err)
 	}
-	if _, err := s.Pool.Exec(ctx, `
-		DELETE FROM user_watch_progress
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		uid, profileID, contentID,
-	); err != nil {
+	store, err := pgstore.NewPostgresProvider(s.Pool).ForUser(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("abs_progress_store: open user store: %w", err)
+	}
+	if err := store.ClearWatchedState(ctx, profileID, []string{contentID}, time.Now().UTC()); err != nil {
 		return fmt.Errorf("abs_progress_store: delete progress: %w", err)
 	}
 	return nil

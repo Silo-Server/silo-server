@@ -76,6 +76,13 @@
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
+# Jellyfin Items/Latest with MediaSources: a fixed number of statements per
+# page, and every card identical to its single-item detail rendering.
+./internal/jellycompat TestLatestStatementBudgetDB
+./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
@@ -98,6 +105,10 @@
 ./internal/catalog TestEpisodeSearchRefreshWorkPostgres
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
+
+# People search: each query is planned for its own words, exact names rank
+# first, and viewer access applies before the limit.
+./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query, and the PostgreSQL path picks what the general path
@@ -149,6 +160,13 @@
 ./internal/metadata TestInitialMatch_NFOIDsReplaceTagAnchoredSkeleton
 ./internal/metadata TestInitialMatch_NFOOnlyChainReplacesTagAnchoredSkeleton
 
+# A scan never merges a tagged movie into a title it shares only one provider
+# ID with, and copies of one movie still merge (#2263).
+./internal/metadata TestScanKeepsTaggedMovieFoldersApartDB
+./internal/metadata TestScanStillMergesCopiesOfOneMovieDB
+./internal/metadata TestRescanAfterSplitKeepsTaggedMovieApartDB
+./internal/metadata TestScanKeepsTaggedMovieApartFromTitleWithItsTaggedIDDB
+
 # A corrected Identify moves a series and its anchored children in one rename.
 ./internal/metadata TestIdentify_CorrectedSeriesMovesWithItsChildren
 ./internal/metadata TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState
@@ -158,6 +176,9 @@
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestNextUpModeStatementBudgetPostgres
+
+# Home sections: one statement for a content ID lookup of any length.
+./internal/sections TestContentIDLookupsKeepOneStatementPostgres
 
 # Server collection rows: a cached row costs one revision read, which shows an
 # edit on the next read, and lists what the collection's page lists.
@@ -169,6 +190,10 @@
 # Subtree file reads bound file_path on the folder path index under a generic
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+
+# Subtree theme passes read the scanned subtree and probe canonical roots above
+# it on their indexes instead of reading every file in the library.
+./internal/themesongs TestDirectoriesReadsOnlyTheScannedSubtreeDB
 ./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
 
 # Book scans (beta): unchanged files skip without per-file or literary-works
@@ -192,10 +217,6 @@
 # Artwork reference check (revision GC and storage sweep): every sweep surface
 # whose path column has an index uses it under a generic plan.
 ./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
-
-# The local-only image-cache claim, run while metadata.cache_images is off, uses
-# its partial index instead of reading the remote jobs left queued.
-./internal/metadata TestLocalImageCacheClaimUsesLocalDueIndexDB
 
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
@@ -259,6 +280,11 @@
 # DATABASE_URL already chose jit.
 ./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
 
+# Pool connections move vectors in binary, report a NULL vector as an error
+# rather than a panic, still connect before the vector extension exists, and
+# switch to binary once the migrations create it.
+./internal/database TestNewPoolMovesVectorsInBinaryPostgres
+
 # Operational log pages: a cursor prunes the partitions newer than it.
 ./internal/opslog TestListCursorPrunesNewerPartitionsDB
 
@@ -276,3 +302,29 @@
 # the frozen legacy bridge alike.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
 ./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+
+# A person write reindexes the person's titles only when it changes the name,
+# the only person field search documents carry.
+./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
+./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
+
+# Server collection counts for a restricted viewer: one statement for stored
+# members and at most four for smart collections, however many are listed.
+./internal/catalog TestViewerCollectionCountsStatementBudgetDB
+
+# Person lookups resolve their metadata providers with one statement and reuse
+# them: later lookups in the window issue none, and a plugin change drops them.
+./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
+
+# A Jellyfin NextUp page that asks for detail fields, and an Ids list, fetch
+# their details as one batch and answer exactly what per-item lookups did.
+./internal/jellycompat TestCompatDetailBatchesMatchPerItemDB
+
+# A Jellyfin item request resolves the viewer access scope once, however many
+# catalog reads in the request need it.
+./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB
+
+# Administrator catalog listing: present movies, series and episodes only, per-library
+# versus earliest first-seen times, every present file with one track's facts, and two
+# statements for a page with files, whatever else it holds.
+./internal/catalog TestListAdminCatalogItemsDB

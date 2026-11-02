@@ -189,161 +189,103 @@ func TestMatcherMatchEpisode_AllowsSeasonZeroSpecials(t *testing.T) {
 	}
 }
 
-func TestMatcherMatchEpisode_UsesCoordinatesBeforeAmbiguousSeriesRows(t *testing.T) {
+func TestMatcherMatchByProviderID(t *testing.T) {
 	t.Parallel()
 
-	repo := &matcherRepoStub{
-		mediaByExternal: map[string][]mediaLookupRow{
-			"series:tvdb_id:296188": {
-				{ContentID: "angie-library-a", Title: "Angie Tribeca", Year: 2016},
-				{ContentID: "angie-library-b", Title: "Angie Tribeca", Year: 2016},
+	for _, tc := range []struct {
+		name       string
+		repo       *matcherRepoStub
+		record     Record
+		wantID     string
+		wantReason string
+	}{
+		{
+			name: "episode coordinates resolve before ambiguous series rows",
+			repo: &matcherRepoStub{
+				mediaByExternal: map[string][]mediaLookupRow{
+					"series:tvdb_id:296188": {
+						{ContentID: "angie-library-a", Title: "Angie Tribeca", Year: 2016},
+						{ContentID: "angie-library-b", Title: "Angie Tribeca", Year: 2016},
+					},
+				},
+				episodeByExternal: map[string][]mediaLookupRow{
+					"series:tvdb_id:296188:1:8": {{ContentID: "angie-s01e08", Title: "Murder in the First Class", Year: 2016}},
+				},
 			},
+			record: Record{
+				Kind:          KindEpisode,
+				SeriesTitle:   "Angie Tribeca",
+				SeriesYear:    2016,
+				SeriesTVDBID:  "296188",
+				SeasonNumber:  1,
+				EpisodeNumber: 8,
+			},
+			wantID: "angie-s01e08",
 		},
-		episodeByExternal: map[string][]mediaLookupRow{
-			"series:tvdb_id:296188:1:8": {{ContentID: "angie-s01e08", Title: "Murder in the First Class", Year: 2016}},
+		{
+			name: "an Emby favorite series prefers TMDB",
+			repo: &matcherRepoStub{
+				mediaByExternal: map[string][]mediaLookupRow{
+					"series:tmdb_id:94997":  {{ContentID: "house-of-the-dragon", Title: "House of the Dragon", Year: 2022}},
+					"series:tvdb_id:425793": {{ContentID: "making-of", Title: "The House That Dragons Built", Year: 2022}},
+				},
+			},
+			record: Record{
+				Kind:       KindSeries,
+				Title:      "House of the Dragon",
+				Year:       2022,
+				TMDBID:     "94997",
+				TVDBID:     "425793",
+				PreferTMDB: true,
+			},
+			wantID: "house-of-the-dragon",
 		},
-	}
-	matcher := NewMatcher(repo)
-
-	match, reason, err := matcher.Match(context.Background(), Record{
-		Kind:          KindEpisode,
-		SeriesTitle:   "Angie Tribeca",
-		SeriesYear:    2016,
-		SeriesTVDBID:  "296188",
-		SeasonNumber:  1,
-		EpisodeNumber: 8,
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if reason != "" {
-		t.Fatalf("reason = %q, want empty string", reason)
-	}
-	if match == nil || match.MediaItemID != "angie-s01e08" {
-		t.Fatalf("match = %+v, want angie-s01e08", match)
-	}
-}
-
-func TestMatcherMatchSeries_PrefersTMDBForEmbyFavorite(t *testing.T) {
-	t.Parallel()
-
-	repo := &matcherRepoStub{
-		mediaByExternal: map[string][]mediaLookupRow{
-			"series:tmdb_id:94997":  {{ContentID: "house-of-the-dragon", Title: "House of the Dragon", Year: 2022}},
-			"series:tvdb_id:425793": {{ContentID: "making-of", Title: "The House That Dragons Built", Year: 2022}},
+		{
+			name: "a movie does not fall back to title and year",
+			repo: &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{}},
+			record: Record{
+				Kind:   KindMovie,
+				Title:  "The Odyssey",
+				Year:   2026,
+				TMDBID: "986056",
+				IMDbID: "tt30057084",
+			},
+			wantReason: `no tmdb_id match for "986056"; no imdb_id match for "tt30057084"`,
 		},
-	}
-	matcher := NewMatcher(repo)
+		{
+			name:       "a series requires an external ID",
+			repo:       &matcherRepoStub{},
+			record:     Record{Kind: KindSeries, Title: "The Odyssey", Year: 2026},
+			wantReason: missingProviderIDsReason,
+		},
+		{
+			name: "a movie matches by TVDB ID",
+			repo: &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
+				"movie:tvdb_id:12345": {{ContentID: "movie-tvdb", Title: "Movie", Year: 2026}},
+			}},
+			record: Record{Kind: KindMovie, TVDBID: "12345"},
+			wantID: "movie-tvdb",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	match, reason, err := matcher.Match(context.Background(), Record{
-		Kind:       KindSeries,
-		Title:      "House of the Dragon",
-		Year:       2022,
-		TMDBID:     "94997",
-		TVDBID:     "425793",
-		PreferTMDB: true,
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if reason != "" {
-		t.Fatalf("reason = %q, want empty string", reason)
-	}
-	if match == nil || match.MediaItemID != "house-of-the-dragon" {
-		t.Fatalf("match = %+v, want TMDB-backed House of the Dragon", match)
-	}
-}
-
-func TestMatcherMatchMovieDoesNotFallBackToTitleAndYear(t *testing.T) {
-	t.Parallel()
-
-	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{}}
-	match, reason, err := NewMatcher(repo).Match(context.Background(), Record{
-		Kind:   KindMovie,
-		Title:  "The Odyssey",
-		Year:   2026,
-		TMDBID: "986056",
-		IMDbID: "tt30057084",
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if match != nil {
-		t.Fatalf("match = %+v, want no match", match)
-	}
-	want := `no tmdb_id match for "986056"; no imdb_id match for "tt30057084"`
-	if reason != want {
-		t.Fatalf("reason = %q, want %q", reason, want)
-	}
-}
-
-func TestMatcherMatchMovieRequiresExternalID(t *testing.T) {
-	t.Parallel()
-
-	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
-		Kind: KindMovie, Title: "The Odyssey", Year: 2026,
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if match != nil {
-		t.Fatalf("match = %+v, want no match", match)
-	}
-	if reason != missingProviderIDsReason {
-		t.Fatalf("reason = %q", reason)
-	}
-}
-
-func TestMatcherMatchSeriesRequiresExternalID(t *testing.T) {
-	t.Parallel()
-
-	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
-		Kind: KindSeries, Title: "The Odyssey", Year: 2026,
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if match != nil {
-		t.Fatalf("match = %+v, want no match", match)
-	}
-	if reason != missingProviderIDsReason {
-		t.Fatalf("reason = %q", reason)
-	}
-}
-
-func TestMatcherMatchEpisodeRequiresEpisodeOrSeriesExternalID(t *testing.T) {
-	t.Parallel()
-
-	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
-		Kind:          KindEpisode,
-		Title:         "Episode",
-		SeriesTitle:   "Series",
-		SeriesYear:    2026,
-		SeasonNumber:  1,
-		EpisodeNumber: 1,
-	})
-	if err != nil {
-		t.Fatalf("Match returned error: %v", err)
-	}
-	if match != nil {
-		t.Fatalf("match = %+v, want no match", match)
-	}
-	want := "series match failed: " + missingProviderIDsReason
-	if reason != want {
-		t.Fatalf("reason = %q, want %q", reason, want)
-	}
-}
-
-func TestMatcherMatchMovieUsesTVDBID(t *testing.T) {
-	t.Parallel()
-
-	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
-		"movie:tvdb_id:12345": {{ContentID: "movie-tvdb", Title: "Movie", Year: 2026}},
-	}}
-	match, reason, err := NewMatcher(repo).Match(context.Background(), Record{
-		Kind: KindMovie, TVDBID: "12345",
-	})
-	if err != nil || reason != "" || match == nil || match.MediaItemID != "movie-tvdb" {
-		t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
+			match, reason, err := NewMatcher(tc.repo).Match(context.Background(), tc.record)
+			if err != nil {
+				t.Fatalf("Match returned error: %v", err)
+			}
+			if reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			if tc.wantID == "" {
+				if match != nil {
+					t.Fatalf("match = %+v, want no match", match)
+				}
+				return
+			}
+			if match == nil || match.MediaItemID != tc.wantID {
+				t.Fatalf("match = %+v, want %s", match, tc.wantID)
+			}
+		})
 	}
 }

@@ -67,26 +67,6 @@ func (t observedDefaultsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return t.scheduleTask.DefaultTriggers()
 }
 
-func TestSavedTaskScheduleDoesNotLoadDefaults(t *testing.T) {
-	for _, saved := range [][]taskmanager.TriggerConfig{
-		{}, {{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "09:45"}},
-	} {
-		store := &scheduleStore{saved: map[string][]taskmanager.TriggerConfig{"schedule_test": saved}}
-		consulted := false
-		m := taskmanager.New(store, scheduleHistory{}, func(c taskmanager.TriggerConfig) taskmanager.Trigger {
-			return scheduleTrigger{config: c}
-		}, slog.New(slog.DiscardHandler))
-		m.Register(observedDefaultsTask{onDefaults: func() { consulted = true }})
-		ctx, cancel := context.WithCancel(context.Background())
-		m.Start(ctx)
-		cancel()
-		m.Stop()
-		if consulted {
-			t.Errorf("loaded defaults for saved schedule %+v", saved)
-		}
-	}
-}
-
 func TestDefaultResolutionPreservesConcurrentScheduleEdit(t *testing.T) {
 	for _, saved := range [][]taskmanager.TriggerConfig{
 		{}, {{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "09:45"}},

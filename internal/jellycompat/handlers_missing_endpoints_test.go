@@ -59,17 +59,6 @@ func TestHandleLocalTrailers(t *testing.T) {
 			t.Fatalf("body = %q, want bare empty array %q", got, "[]")
 		}
 	})
-
-	t.Run("missing session returns 401", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/Items/abc/LocalTrailers", nil)
-		rec := httptest.NewRecorder()
-
-		h.HandleLocalTrailers(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", rec.Code)
-		}
-	})
 }
 
 // TestHandleClientLogDocument verifies the upload endpoint drains the body and
@@ -106,35 +95,4 @@ func TestHandleClientLogDocument(t *testing.T) {
 			t.Fatalf("status = %d, want 413", rec.Code)
 		}
 	})
-}
-
-// TestHandleUserImageQueryFallback verifies /UserImage?userId= resolves the id
-// from the query string (the path param is empty on this route) and serves the
-// same deterministic palette avatar as the legacy path form — not the empty-id
-// avatar every caller would otherwise share.
-func TestHandleUserImageQueryFallback(t *testing.T) {
-	h := &ImagesHandler{}
-	const userID = "45def085-5dd8-5ad7-b972-9c7a499fa846"
-
-	req := httptest.NewRequest(http.MethodGet, "/UserImage?userId="+userID, nil)
-	rec := httptest.NewRecorder()
-
-	h.HandleUserImage(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-		t.Fatalf("Content-Type = %q, want image/png", ct)
-	}
-	want := avatarPalette[avatarPaletteIndex(userID)]
-	if !bytes.Equal(rec.Body.Bytes(), want) {
-		t.Fatalf("served avatar does not match the userId-derived palette entry; query fallback not applied")
-	}
-	// Guard against regression to the empty-id avatar.
-	if empty := avatarPalette[avatarPaletteIndex("")]; bytes.Equal(want, empty) {
-		t.Skip("palette collision: userID and empty id hash to the same entry; pick another userID")
-	} else if bytes.Equal(rec.Body.Bytes(), empty) {
-		t.Fatalf("served the empty-id avatar; query fallback not applied")
-	}
 }

@@ -179,11 +179,10 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     }
     setApplying(true);
     const failures: string[] = [];
-    const keptSavedChanges: string[] = [];
     for (const page of plan.pages) {
       try {
         const query = pageQuery(page.scope, page.libraryId);
-        const { keptSavedChanges: kept } = await importPage(
+        await importPage(
           page,
           plan.sameServer,
           {
@@ -191,16 +190,11 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
               v2("GET /api/v2/profile/sections", { query, profileContext }).then(
                 (result) => result.items,
               ),
-            listView: () =>
-              v2("GET /api/v2/profile/sections/settings", { query, profileContext }).then(
-                (result) => result.items,
-              ),
             save: (overrides) =>
               v2("PUT /api/v2/profile/sections", { query, body: { overrides }, profileContext }),
           },
           randomUUID,
         );
-        if (kept) keptSavedChanges.push(page.label);
       } catch (error) {
         failures.push(`${page.label} (${problemMessage(error)})`);
       }
@@ -228,14 +222,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     await qc.invalidateQueries({ queryKey: sectionKeys.all });
     setApplying(false);
     if (failures.length === 0) {
-      toast.success(
-        "Home layout imported",
-        keptSavedChanges.length > 0
-          ? {
-              description: `This profile's own changes to some sections were kept on: ${keptSavedChanges.join(", ")}.`,
-            }
-          : undefined,
-      );
+      toast.success("Home layout imported");
       onClose();
     } else {
       toast.error(`Some parts didn't import: ${failures.join("; ")}`);

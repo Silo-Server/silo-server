@@ -5,11 +5,11 @@ import { storage } from "@/utils/storage";
  * cannot (Dolby TrueHD and DTS audio, HDR on SDR screens, Matroska in Firefox).
  *
  * The choice is per browser, like volume: it describes what this browser and
- * GPU can do, not the viewer's account. Off by default while the engine is in
- * beta.
+ * GPU can do, not the viewer's account. On unless the viewer has turned it off
+ * in this browser.
  */
 export function isBrowserDecodingEnabled(): boolean {
-  return storage.get(storage.KEYS.BROWSER_DECODING) === "true";
+  return storage.get(storage.KEYS.BROWSER_DECODING) !== "false";
 }
 
 export function setBrowserDecodingEnabled(enabled: boolean): void {

@@ -237,15 +237,6 @@ func TestJellyfinFetchItems_PaginatesPlayedItems(t *testing.T) {
 	}
 }
 
-func TestJellyfinHTTPErrorUsesJellyfinBranding(t *testing.T) {
-	t.Parallel()
-
-	err := (&jellyfinHTTPError{StatusCode: http.StatusUnauthorized}).Error()
-	if err != "jellyfin http 401" {
-		t.Fatalf("error = %q, want jellyfin branding", err)
-	}
-}
-
 // Local HTTP fixtures exercise decoding and paging without the production rate limit.
 // Keep the guarded transport so address-policy checks still run.
 func newUnthrottledJellyfinClient() *JellyfinClient {

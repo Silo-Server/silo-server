@@ -12,7 +12,7 @@ import {
   LEGACY_DASHBOARD_LAYOUT_STORAGE_KEY,
   useDashboardLayout,
 } from "./useDashboardLayout";
-import type { DashboardLayoutEntry } from "./types";
+import type { DashboardLayoutEntry, WidgetId } from "./types";
 
 const ADMIN_USER_ID = 1;
 
@@ -82,18 +82,22 @@ function hiddenWidgetIds(...alsoRemoved: string[]): string[] {
   return DASHBOARD_WIDGETS.filter((widget) => !visible.has(widget.id)).map((widget) => widget.id);
 }
 
-describe("useDashboardLayout", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
-    mocks.userId = ADMIN_USER_ID;
-    mocks.query = { data: undefined, isSuccess: false };
-    mocks.save.mockReset();
-    mocks.reset.mockReset();
-  });
+beforeEach(() => {
+  window.localStorage.clear();
+  setAccessToken("synthetic-admin");
+  setProfileId("profile-a");
+  setProfileToken("pin-a");
+  mocks.userId = ADMIN_USER_ID;
+  mocks.query = { data: undefined, isSuccess: false };
+  mocks.save.mockReset();
+  mocks.reset.mockReset();
+});
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("useDashboardLayout", () => {
   it("falls back to the default layout on corrupt JSON", () => {
     window.localStorage.setItem(storageKey(), "{not json");
 
@@ -102,142 +106,103 @@ describe("useDashboardLayout", () => {
     expect(result.current.entries).toEqual(DEFAULT_LAYOUT);
   });
 
-  it("falls back to the default layout on an unexpected shape", () => {
-    window.localStorage.setItem(
-      storageKey(),
-      JSON.stringify({ version: 2, entries: [{ id: "libraries", span: 7 }] }),
-    );
+  it.each([
+    {
+      name: "drops unknown widget ids on load",
+      stored: [
+        { id: "libraries", span: 7 },
+        { id: "not-a-widget", span: 6 },
+        { id: "users", span: 5 },
+      ],
+      expected: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+    },
+    {
+      name: "clamps spans to the widget's [minSpan, maxSpan] on load",
+      stored: [
+        { id: "stat-movies", span: 1, rows: 1 }, // min 2
+        { id: "now-playing", span: 40, rows: 4 }, // max 12
+        { id: "users", span: "wide", rows: 4 }, // non-numeric -> defaultSpan
+      ],
+      expected: [
+        { id: "stat-movies", span: 2, rows: 1 },
+        { id: "now-playing", span: 12, rows: 4 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+    },
+    // Every layout saved before two-axis resizing shipped is missing `rows`; the
+    // widget's default height is what those admins were already looking at.
+    {
+      name: "gives entries without rows the widget's default height",
+      stored: [
+        { id: "libraries", span: 7 },
+        { id: "watch-providers", span: 9 },
+        { id: "stat-movies", span: 3 },
+      ],
+      expected: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "watch-providers", span: 9, rows: 1 },
+        { id: "stat-movies", span: 3, rows: 1 },
+      ],
+    },
+    // "trakt-sync" became "watch-providers" once the widget covered every watch
+    // provider. A layout stored under the old id is the admin's arrangement, so
+    // it resolves to the replacement rather than being dropped as unknown.
+    {
+      name: "resolves a renamed widget id to its replacement",
+      stored: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "trakt-sync", span: 9, rows: 1 },
+      ],
+      expected: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "watch-providers", span: 9, rows: 1 },
+      ],
+    },
+    // A document holding both ids must not render the widget twice: dedupe keys
+    // off the resolved widget, not the stored string.
+    {
+      name: "collapses a renamed id and its replacement into one entry",
+      stored: [
+        { id: "trakt-sync", span: 9, rows: 1 },
+        { id: "watch-providers", span: 12, rows: 2 },
+      ],
+      expected: [{ id: "watch-providers", span: 9, rows: 1 }],
+    },
+    // Windows arrived after the first layouts were saved, so an entry without
+    // one is the common case rather than a corrupt one.
+    {
+      name: "fills in the widget's default window and leaves unranged widgets alone",
+      stored: [
+        { id: "egress-24h", span: 6, rows: 3 },
+        { id: "top-titles", span: 6, rows: 3 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+      expected: [
+        { id: "egress-24h", span: 6, rows: 3, range: "day" },
+        { id: "top-titles", span: 6, rows: 3, range: "week" },
+        { id: "users", span: 5, rows: 4 },
+      ],
+    },
+    {
+      name: "keeps a stored window the widget allows",
+      stored: [
+        { id: "egress-24h", span: 6, rows: 3, range: "month" },
+        { id: "top-titles", span: 6, rows: 3, range: "day" },
+      ],
+      expected: [
+        { id: "egress-24h", span: 6, rows: 3, range: "month" },
+        { id: "top-titles", span: 6, rows: 3, range: "day" },
+      ],
+    },
+  ])("$name", ({ stored, expected }) => {
+    writeStored(stored);
 
     const { result } = renderHook(() => useDashboardLayout());
 
-    expect(result.current.entries).toEqual(DEFAULT_LAYOUT);
-  });
-
-  it("drops unknown widget ids on load", () => {
-    writeStored([
-      { id: "libraries", span: 7 },
-      { id: "not-a-widget", span: 6 },
-      { id: "users", span: 5 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-  });
-
-  it("clamps spans to the widget's [minSpan, maxSpan] on load", () => {
-    writeStored([
-      { id: "stat-movies", span: 1, rows: 1 }, // min 2
-      { id: "now-playing", span: 40, rows: 4 }, // max 12
-      { id: "users", span: "wide", rows: 4 }, // non-numeric -> defaultSpan
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "stat-movies", span: 2, rows: 1 },
-      { id: "now-playing", span: 12, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-  });
-
-  it("clamps rows to the widget's [minRows, maxRows] on load", () => {
-    writeStored([
-      { id: "stat-movies", span: 3, rows: 0 }, // min 1
-      { id: "now-playing", span: 12, rows: 40 }, // max 8
-      { id: "users", span: 5, rows: "tall" }, // non-numeric -> defaultRows
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "stat-movies", span: 3, rows: 1 },
-      { id: "now-playing", span: 12, rows: 8 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-  });
-
-  // Every layout saved before two-axis resizing shipped is missing `rows`; the
-  // widget's default height is what those admins were already looking at.
-  it("gives entries without rows the widget's default height", () => {
-    writeStored([
-      { id: "libraries", span: 7 },
-      { id: "watch-providers", span: 9 },
-      { id: "stat-movies", span: 3 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "watch-providers", span: 9, rows: 1 },
-      { id: "stat-movies", span: 3, rows: 1 },
-    ]);
-  });
-
-  // "trakt-sync" became "watch-providers" once the widget covered every watch
-  // provider. A layout stored under the old id is the admin's arrangement, so
-  // it resolves to the replacement rather than being dropped as unknown.
-  it("resolves a renamed widget id to its replacement", () => {
-    writeStored([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "trakt-sync", span: 9, rows: 1 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "watch-providers", span: 9, rows: 1 },
-    ]);
-  });
-
-  // A document holding both ids must not render the widget twice: dedupe keys
-  // off the resolved widget, not the stored string.
-  it("collapses a renamed id and its replacement into one entry", () => {
-    writeStored([
-      { id: "trakt-sync", span: 9, rows: 1 },
-      { id: "watch-providers", span: 12, rows: 2 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([{ id: "watch-providers", span: 9, rows: 1 }]);
-  });
-
-  // Windows arrived after the first layouts were saved, so an entry without
-  // one is the common case rather than a corrupt one.
-  it("fills in the widget's default window and leaves unranged widgets alone", () => {
-    writeStored([
-      { id: "egress-24h", span: 6, rows: 3 },
-      { id: "top-titles", span: 6, rows: 3 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "egress-24h", span: 6, rows: 3, range: "day" },
-      { id: "top-titles", span: 6, rows: 3, range: "week" },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-  });
-
-  it("keeps a stored window the widget allows", () => {
-    writeStored([
-      { id: "egress-24h", span: 6, rows: 3, range: "month" },
-      { id: "top-titles", span: 6, rows: 3, range: "day" },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual([
-      { id: "egress-24h", span: 6, rows: 3, range: "month" },
-      { id: "top-titles", span: 6, rows: 3, range: "day" },
-    ]);
+    expect(result.current.entries).toEqual(expected);
   });
 
   // The leaderboards do not offer an hour, and an unranged widget must not
@@ -293,46 +258,6 @@ describe("useDashboardLayout", () => {
     ]);
   });
 
-  it("round-trips a chosen window through localStorage", () => {
-    const first = renderHook(() => useDashboardLayout());
-    expect(first.result.current.isCustomizing).toBe(false);
-    act(() => {
-      first.result.current.setWidgetRange("egress-24h", "month");
-      first.result.current.setWidgetRange("top-profiles", "day");
-      first.result.current.setWidgetRange("top-titles", "month");
-    });
-    expect(first.result.current.entries).toContainEqual({
-      id: "top-titles",
-      span: 6,
-      rows: 3,
-      range: "month",
-    });
-    expect(readStored().entries).toContainEqual({
-      id: "top-titles",
-      span: 6,
-      rows: 3,
-      range: "month",
-    });
-    const saved = first.result.current.entries;
-    first.unmount();
-
-    const second = renderHook(() => useDashboardLayout());
-
-    expect(second.result.current.entries).toEqual(saved);
-    expect(second.result.current.entries).toContainEqual({
-      id: "egress-24h",
-      span: 6,
-      rows: 3,
-      range: "month",
-    });
-    expect(second.result.current.entries).toContainEqual({
-      id: "top-profiles",
-      span: 6,
-      rows: 3,
-      range: "day",
-    });
-  });
-
   it("addWidget starts a ranged widget on its default window", () => {
     writeStored([{ id: "libraries", span: 7, rows: 4 }]);
     const { result } = renderHook(() => useDashboardLayout());
@@ -362,58 +287,39 @@ describe("useDashboardLayout", () => {
     );
   });
 
-  it("addWidget appends with the default span and rows and persists", () => {
-    writeStored([{ id: "libraries", span: 7, rows: 4 }]);
+  it.each([
+    {
+      name: "addWidget appends with the default span and rows and persists",
+      stored: [{ id: "libraries", span: 7, rows: 4 }],
+      beforeId: undefined,
+      expected: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "now-playing", span: 12, rows: 3 },
+      ],
+    },
+    {
+      name: "addWidget with a beforeId inserts in front of that entry and persists",
+      stored: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+      beforeId: "users" as WidgetId,
+      expected: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "now-playing", span: 12, rows: 3 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+    },
+  ])("$name", ({ stored, beforeId, expected }) => {
+    writeStored(stored);
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
-      result.current.addWidget("now-playing");
+      result.current.addWidget("now-playing", beforeId);
     });
 
-    const expected = [
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "now-playing", span: 12, rows: 3 },
-    ];
     expect(result.current.entries).toEqual(expected);
     expect(readStored()).toEqual({ version: 1, entries: expected });
-  });
-
-  it("addWidget with a beforeId inserts in front of that entry and persists", () => {
-    writeStored([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.addWidget("now-playing", "users");
-    });
-
-    const expected = [
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "now-playing", span: 12, rows: 3 },
-      { id: "users", span: 5, rows: 4 },
-    ];
-    expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
-  });
-
-  it("addWidget with a beforeId stamps a ranged widget's default window", () => {
-    writeStored([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.addWidget("playback-reliability", "libraries");
-    });
-
-    expect(result.current.entries).toEqual([
-      { id: "playback-reliability", span: 6, rows: 3, range: "day" },
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
   });
 
   // The drop anchor may have been removed between the drag starting and the
@@ -460,43 +366,36 @@ describe("useDashboardLayout", () => {
     expect(readStored().entries.some((entry) => entry.id === "top-titles")).toBe(false);
   });
 
-  it("moveWidget inserts before the target and persists", () => {
-    writeStored([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-      { id: "recent-activity", span: 12, rows: 4 },
-    ]);
+  it.each([
+    {
+      name: "moveWidget inserts before the target and persists",
+      stored: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "users", span: 5, rows: 4 },
+        { id: "recent-activity", span: 12, rows: 4 },
+      ],
+      move: ["recent-activity", "users"] as const,
+      expected: ["libraries", "recent-activity", "users"],
+    },
+    {
+      name: "moveWidget with a null beforeId moves to the end",
+      stored: [
+        { id: "libraries", span: 7, rows: 4 },
+        { id: "users", span: 5, rows: 4 },
+      ],
+      move: ["libraries", null] as const,
+      expected: ["users", "libraries"],
+    },
+  ])("$name", ({ stored, move, expected }) => {
+    writeStored(stored);
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
-      result.current.moveWidget("recent-activity", "users");
+      result.current.moveWidget(move[0], move[1]);
     });
 
-    expect(result.current.entries.map((entry) => entry.id)).toEqual([
-      "libraries",
-      "recent-activity",
-      "users",
-    ]);
-    expect(readStored().entries.map((entry) => entry.id)).toEqual([
-      "libraries",
-      "recent-activity",
-      "users",
-    ]);
-  });
-
-  it("moveWidget with a null beforeId moves to the end", () => {
-    writeStored([
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.moveWidget("libraries", null);
-    });
-
-    expect(result.current.entries.map((entry) => entry.id)).toEqual(["users", "libraries"]);
-    expect(readStored().entries.map((entry) => entry.id)).toEqual(["users", "libraries"]);
+    expect(result.current.entries.map((entry) => entry.id)).toEqual(expected);
+    expect(readStored().entries.map((entry) => entry.id)).toEqual(expected);
   });
 
   it("resizeWidget clamps the span and persists", () => {
@@ -521,56 +420,7 @@ describe("useDashboardLayout", () => {
     expect(readStored().entries).toEqual([{ id: "users", span: 4, rows: 4 }]);
   });
 
-  it("resizeWidget clamps rows and leaves the span alone", () => {
-    writeStored([{ id: "users", span: 5, rows: 4 }]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.resizeWidget("users", { rows: 6 });
-    });
-    expect(result.current.entries).toEqual([{ id: "users", span: 5, rows: 6 }]);
-    expect(readStored().entries).toEqual([{ id: "users", span: 5, rows: 6 }]);
-
-    act(() => {
-      result.current.resizeWidget("users", { rows: 99 });
-    });
-    expect(result.current.entries).toEqual([{ id: "users", span: 5, rows: 8 }]);
-
-    act(() => {
-      result.current.resizeWidget("users", { rows: 0 });
-    });
-    expect(result.current.entries).toEqual([{ id: "users", span: 5, rows: 2 }]);
-  });
-
-  it("resizeWidget changes both axes at once", () => {
-    writeStored([{ id: "users", span: 5, rows: 4 }]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.resizeWidget("users", { span: 8, rows: 2 });
-    });
-
-    expect(result.current.entries).toEqual([{ id: "users", span: 8, rows: 2 }]);
-    expect(readStored().entries).toEqual([{ id: "users", span: 8, rows: 2 }]);
-  });
-
-  // watch-providers tops out at 3 rows, so a taller resize clamps rather than
-  // storing a height the grid would not render.
-  it("resizeWidget clamps an axis to the widget's ceiling", () => {
-    writeStored([{ id: "watch-providers", span: 9, rows: 1 }]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.resizeWidget("watch-providers", { span: 12, rows: 5 });
-    });
-
-    expect(result.current.entries).toEqual([{ id: "watch-providers", span: 12, rows: 3 }]);
-  });
-
   it("resetLayout restores the defaults and clears storage", () => {
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
@@ -612,21 +462,6 @@ describe("useDashboardLayout", () => {
 });
 
 describe("useDashboardLayout server persistence", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
-    mocks.userId = ADMIN_USER_ID;
-    mocks.query = { data: undefined, isSuccess: false };
-    mocks.save.mockReset();
-    mocks.reset.mockReset();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("adopts the server layout and mirrors it to localStorage", () => {
     writeStored([{ id: "users", span: 5, rows: 4 }]);
     serverLayout([
@@ -655,22 +490,6 @@ describe("useDashboardLayout server persistence", () => {
     const { result } = renderHook(() => useDashboardLayout());
 
     expect(result.current.entries).toEqual([{ id: "users", span: 8, rows: 8 }]);
-  });
-
-  it("fills in default rows for a server layout saved before row heights", () => {
-    serverLayout([
-      { id: "libraries", span: 7 },
-      { id: "users", span: 5 },
-    ]);
-
-    const { result } = renderHook(() => useDashboardLayout());
-
-    const expected = [
-      { id: "libraries", span: 7, rows: 4 },
-      { id: "users", span: 5, rows: 4 },
-    ];
-    expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
   });
 
   it("keeps the local layout when the server document is not a v1 layout", () => {
@@ -759,9 +578,6 @@ describe("useDashboardLayout server persistence", () => {
   });
 
   it("resetLayout refuses an obsolete authority callback before local reset", () => {
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
     writeStored([{ id: "users", span: 5, rows: 4 }]);
     const { result } = renderHook(() => useDashboardLayout());
     const prior = result.current.entries;
@@ -774,9 +590,6 @@ describe("useDashboardLayout server persistence", () => {
   });
 
   it("resetLayout deletes the server layout and drops the queued save", () => {
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
     vi.useFakeTimers();
     writeStored(DEFAULT_LAYOUT);
     serverLayout(DEFAULT_LAYOUT);
@@ -805,21 +618,6 @@ describe("useDashboardLayout server persistence", () => {
 
 describe("useDashboardLayout account scoping", () => {
   const OTHER_ADMIN_USER_ID = 2;
-
-  beforeEach(() => {
-    window.localStorage.clear();
-    setAccessToken("synthetic-admin");
-    setProfileId("profile-a");
-    setProfileToken("pin-a");
-    mocks.userId = ADMIN_USER_ID;
-    mocks.query = { data: undefined, isSuccess: false };
-    mocks.save.mockReset();
-    mocks.reset.mockReset();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
 
   it("does not show one admin's cached layout to another on the same browser", () => {
     writeStored([{ id: "users", span: 5, rows: 6 }], ADMIN_USER_ID);

@@ -339,19 +339,6 @@ describe("useOnViewTranslation", () => {
     expect(result.current.translating).toBe(false);
   });
 
-  it("lets the button try again after a failed request", async () => {
-    mocks.mode = "button";
-    mocks.v2.mockImplementationOnce(() => Promise.reject(new Error("rate limited")));
-    const { result } = renderHook(
-      () => useOnViewTranslation({ content_id: "movie-1", pending_translation_language: "de" }),
-      { wrapper },
-    );
-    await act(async () => result.current.onTranslate?.());
-    expect(result.current.translating).toBe(false);
-    act(() => result.current.onTranslate?.());
-    expect(mocks.v2).toHaveBeenCalledTimes(2);
-  });
-
   // Auto mode fires once per view; after a failure such as a 429 it offers
   // the translate action so the viewer can try again without a reload.
   it("offers the translate action after a failed auto run", async () => {

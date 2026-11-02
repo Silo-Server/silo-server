@@ -42,6 +42,7 @@ const CORE_TEXT_FILES = [
   "pages/ItemDetail/components/AudioTracksPopover.tsx",
   "pages/ItemDetail/components/DetailBreadcrumb.tsx",
   "pages/ItemDetail/components/DetailOverview.tsx",
+  "pages/ItemDetail/components/EpisodeCardCaption.tsx",
   "pages/ItemDetail/components/EpisodeCarousel.tsx",
   "pages/ItemDetail/components/ExtrasSection.tsx",
   "pages/ItemDetail/components/HeroCrewLine.tsx",

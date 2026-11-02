@@ -30,8 +30,8 @@ type WatchTogetherSocketV2 struct {
 	checkInterval  time.Duration
 }
 
-func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether.RoomSocketCredentialStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *WatchTogetherSocketV2 {
-	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: refuseRemotePlaybackSocket(newSocketAuthorityValidator(sessions, users, resolver, primary)), PublicOrigin: publicURL}
+func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether.RoomSocketCredentialStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *WatchTogetherSocketV2 {
+	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: refuseRemotePlaybackSocket(newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)), PublicOrigin: publicURL}
 }
 func (h *WatchTogetherSocketV2) available() bool {
 	return h != nil && h.Room != nil && h.Room.Service != nil && h.Room.TokenService != nil && h.Tickets != nil && h.Validate != nil
@@ -127,7 +127,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := context.WithDeadline(validated, deadline)
 	defer cancel()
-	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}}
 	conn, err := upgrader.Upgrade(w, r, nil)

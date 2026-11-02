@@ -75,12 +75,23 @@ export function RecommendationGridSkeleton({ count = 6 }: { count?: number }) {
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className={posterWidthClasses}>
             <Skeleton className="aspect-[2/3] w-full rounded-lg" />
-            {cardPresentation.caption !== "artwork" ? (
-              <Skeleton className="mt-1.5 h-4 w-3/4" />
-            ) : null}
+            <Skeleton className="mt-1.5 h-4 w-3/4" />
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** The episode card caption: title line, date and runtime, three description lines. */
+function EpisodeCaptionSkeleton() {
+  return (
+    <div className="mt-2 space-y-1.5">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-2/3" />
     </div>
   );
 }
@@ -92,9 +103,7 @@ export function EpisodeGridSkeleton({ count = 10 }: { count?: number }) {
       {Array.from({ length: count }, (_, i) => (
         <div key={i}>
           <Skeleton className="aspect-video w-full rounded-lg" />
-          <Skeleton className="mt-2 h-3 w-16" />
-          <Skeleton className="mt-1 h-4 w-24" />
-          <Skeleton className="mt-1.5 h-3 w-20" />
+          <EpisodeCaptionSkeleton />
         </div>
       ))}
     </div>
@@ -110,9 +119,7 @@ export function EpisodeCarouselSkeleton({ count = 5 }: { count?: number }) {
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className="w-[240px] shrink-0">
             <Skeleton className="aspect-video w-full rounded-[1.1rem]" />
-            <Skeleton className="mt-2 h-3 w-16" />
-            <Skeleton className="mt-1 h-4 w-32" />
-            <Skeleton className="mt-1 h-3 w-10" />
+            <EpisodeCaptionSkeleton />
           </div>
         ))}
       </div>

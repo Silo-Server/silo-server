@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -252,12 +253,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 
 	startRequest := v3HandlerStartRequest()
 	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-	startRR := httptest.NewRecorder()
-	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
 	session, err := handler.sessionMgr.GetSession(started.SessionID)
 	if err != nil || session.TranscodeNodeURL == "" {
 		t.Fatalf("start did not place the transcode on a node: %#v", session)
@@ -446,5 +442,30 @@ func TestEscalateRefusedProgressiveRemuxV3TreatsAnUnreachableProxyAsAbsent(t *te
 				t.Fatalf("escalated result = %s, want %q", playback.ExplainPlannerResultV3(escalated), playback.DeliveryRemuxHLSV3)
 			}
 		})
+	}
+}
+
+// TestUnreachableSessionNodesV3FindsHungNode pins that a replan's real probe
+// leaves out a node that accepts connections but answers nothing, as after
+// SIGSTOP, within the probe bound.
+func TestUnreachableSessionNodesV3FindsHungNode(t *testing.T) {
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer hung.Close()
+	defer close(release)
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	started := time.Now()
+	unreachable := handler.unreachableSessionNodesV3(context.Background(), &playback.Session{ID: "s1", TranscodeNodeURL: hung.URL})
+	if _, ok := unreachable[hung.URL]; !ok {
+		t.Fatalf("unreachable = %v, want the hung node", unreachable)
+	}
+	if took := time.Since(started); took > routeNodeProbeTimeoutV3+time.Second {
+		t.Fatalf("probe took %v, want within %v", took, routeNodeProbeTimeoutV3)
 	}
 }

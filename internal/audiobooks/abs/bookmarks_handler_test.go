@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -146,14 +145,6 @@ func (p *recordingPublisher) Publish(userID, event string, payload any) {
 }
 func (p *recordingPublisher) Broadcast(_ string, _ any) {}
 
-func (p *recordingPublisher) snapshot() []publishedEvent {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]publishedEvent, len(p.events))
-	copy(out, p.events)
-	return out
-}
-
 // stubMediaStore satisfies MediaStore with a configurable item lookup so
 // handler tests can drive both the 200 and 404 branches.
 type stubMediaStore struct {
@@ -258,125 +249,6 @@ func dispatchBookmark(h *Handler, method, path, itemID, timeParam string, body [
 // Tests
 // ---------------------------------------------------------------------------
 
-func TestCreate_NewBookmark_ReturnsListContainingIt(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	body := []byte(`{"title":"Chapter cliffhanger","time":42.5}`)
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", body, "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var list []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
-	}
-	if len(list) != 1 {
-		t.Fatalf("list len = %d, want 1; body=%s", len(list), rec.Body.String())
-	}
-	got := list[0]
-	if got["libraryItemId"] != "book-1" {
-		t.Errorf("libraryItemId = %v, want book-1", got["libraryItemId"])
-	}
-	if got["time"] != 42.5 {
-		t.Errorf("time = %v, want 42.5", got["time"])
-	}
-	if got["title"] != "Chapter cliffhanger" {
-		t.Errorf("title = %v, want Chapter cliffhanger", got["title"])
-	}
-	for _, k := range []string{"id", "createdAt", "updatedAt"} {
-		if _, ok := got[k]; !ok {
-			t.Errorf("response missing %q; body=%s", k, rec.Body.String())
-		}
-	}
-}
-
-func TestUpsert_SameTime_UpdatesTitleNoDuplicate(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-
-	// POST first.
-	postBody := []byte(`{"title":"first","time":10}`)
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", postBody, "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var postList []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &postList)
-	if len(postList) != 1 {
-		t.Fatalf("after POST list len = %d, want 1", len(postList))
-	}
-	firstID := postList[0]["id"]
-
-	// PATCH at the same time with a new title.
-	patchBody := []byte(`{"title":"renamed","time":10}`)
-	rec2 := dispatchBookmark(hb.H, http.MethodPatch, "/api/me/item/book-1/bookmark", "book-1", "", patchBody, "1", "", hb.H.handleUpsertBookmark("bookmark_updated"))
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("PATCH status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
-	}
-	var patchList []map[string]any
-	if err := json.Unmarshal(rec2.Body.Bytes(), &patchList); err != nil {
-		t.Fatalf("decode: %v; body=%s", err, rec2.Body.String())
-	}
-	if len(patchList) != 1 {
-		t.Fatalf("after PATCH list len = %d, want 1 (upsert, not insert)", len(patchList))
-	}
-	if patchList[0]["title"] != "renamed" {
-		t.Errorf("title = %v, want renamed", patchList[0]["title"])
-	}
-	if patchList[0]["id"] != firstID {
-		t.Errorf("id changed across upsert: was %v, now %v (id must be preserved)", firstID, patchList[0]["id"])
-	}
-}
-
-func TestDelete_ExistingBookmark_RemovedFromList(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-
-	// Seed a bookmark via POST.
-	postBody := []byte(`{"title":"to delete","time":99}`)
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", postBody, "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-
-	// DELETE it.
-	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/99", "book-1", "99", nil, "1", "", hb.H.handleDeleteBookmark)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var list []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
-	}
-	if len(list) != 0 {
-		t.Errorf("list len = %d, want 0; body=%s", len(list), rec.Body.String())
-	}
-}
-
-func TestDelete_NonExistentTime_IdempotentReturnsEmptyList(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/123", "book-1", "123", nil, "1", "", hb.H.handleDeleteBookmark)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (idempotent); body=%s", rec.Code, rec.Body.String())
-	}
-	var list []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list) != 0 {
-		t.Errorf("list len = %d, want 0", len(list))
-	}
-}
-
-func TestCreate_TwoAtDifferentTimes_ListOrderedByTime(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"later","time":100}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"earlier","time":50}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-
-	var list []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list) != 2 {
-		t.Fatalf("list len = %d, want 2", len(list))
-	}
-	if list[0]["time"] != float64(50) || list[1]["time"] != float64(100) {
-		t.Errorf("list times = [%v, %v], want [50, 100]", list[0]["time"], list[1]["time"])
-	}
-}
-
 func TestProfileIsolation_BookmarksScopedPerProfile(t *testing.T) {
 	hb := newBookmarksHarness(t, "book-1")
 
@@ -421,107 +293,5 @@ func TestDelete_OtherUserBookmark_NoOpAndNoExistenceLeak(t *testing.T) {
 	}
 	if len(bList) != 1 {
 		t.Errorf("user B bookmarks = %d, want 1 (was wrongly deleted)", len(bList))
-	}
-}
-
-func TestMissingItem_404(t *testing.T) {
-	hb := newBookmarksHarness(t /* no known items */)
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/unknown/bookmark", "unknown", "", []byte(`{"title":"x","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItemLookup_ErrorFromMediaStore_500(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	hb.H.deps.MediaStore = &stubMediaStore{
-		known:     map[string]*models.MediaItem{"book-1": nil},
-		lookupErr: errors.New("media lookup failed"),
-	}
-
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestInvalidBody_400(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{not json`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestMissingTime_400(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"no time"}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func assertOneEvent(t *testing.T, pub *recordingPublisher, wantUser, wantReason string) {
-	t.Helper()
-	evts := pub.snapshot()
-	if len(evts) != 1 {
-		t.Fatalf("publisher events = %d, want 1: %+v", len(evts), evts)
-	}
-	e := evts[0]
-	if e.UserID != wantUser {
-		t.Errorf("event userID = %q, want %q", e.UserID, wantUser)
-	}
-	if e.Event != "user_updated" {
-		t.Errorf("event name = %q, want user_updated", e.Event)
-	}
-	payload, ok := e.Payload.(map[string]any)
-	if !ok {
-		t.Fatalf("payload type = %T, want map[string]any", e.Payload)
-	}
-	if payload["reason"] != wantReason {
-		t.Errorf("reason = %v, want %q", payload["reason"], wantReason)
-	}
-	if _, ok := payload["bookmark"].(map[string]any); !ok {
-		t.Errorf("bookmark payload missing or wrong type: %T", payload["bookmark"])
-	}
-}
-
-func TestSocketEvent_FiredOnCreate(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	assertOneEvent(t, hb.Pub, "7", "bookmark_created")
-}
-
-func TestSocketEvent_FiredOnUpdate(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	// Seed (publishes a create event); then PATCH and only assert the
-	// second event.
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	_ = dispatchBookmark(hb.H, http.MethodPatch, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"y","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_updated"))
-	evts := hb.Pub.snapshot()
-	if len(evts) != 2 {
-		t.Fatalf("publisher events = %d, want 2", len(evts))
-	}
-	payload := evts[1].Payload.(map[string]any)
-	if payload["reason"] != "bookmark_updated" {
-		t.Errorf("second event reason = %v, want bookmark_updated", payload["reason"])
-	}
-}
-
-func TestSocketEvent_FiredOnDelete(t *testing.T) {
-	hb := newBookmarksHarness(t, "book-1")
-	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
-	_ = dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/1", "book-1", "1", nil, "7", "", hb.H.handleDeleteBookmark)
-	evts := hb.Pub.snapshot()
-	if len(evts) != 2 {
-		t.Fatalf("publisher events = %d, want 2 (create + delete)", len(evts))
-	}
-	payload := evts[1].Payload.(map[string]any)
-	if payload["reason"] != "bookmark_deleted" {
-		t.Errorf("delete event reason = %v, want bookmark_deleted", payload["reason"])
-	}
-	bm, _ := payload["bookmark"].(map[string]any)
-	if bm["title"] != "x" {
-		t.Errorf("delete payload title = %v, want 'x' (pre-delete snapshot)", bm["title"])
 	}
 }

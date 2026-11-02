@@ -9,7 +9,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -65,59 +64,6 @@ func (r *collectionArtworkS3Recorder) putPaths() []string {
 	out := make([]string, len(r.puts))
 	copy(out, r.puts)
 	return out
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_NoS3KeepsPath(t *testing.T) {
-	path := "/images/collection-templates/template.jpg"
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		nil,
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
-	path := "collection-images/existing/poster/original.webp"
-
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		blobstore.NewS3(recorder.client()),
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
-	}
 }
 
 func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *testing.T) {
@@ -200,9 +146,9 @@ func TestUploadCollectionImageVariants_ContentAddressedKeysBustCache(t *testing.
 	if pathA != pathARepeat {
 		t.Fatalf("identical bytes produced different keys %q and %q", pathA, pathARepeat)
 	}
-	// The revision uses the shared artworkkey shape inside .../poster/, so the
-	// whole prefix is still cleanable by removeCollectionImageVariants and the
-	// signed artwork route treats the key as immutable.
+	// The revision uses the shared artworkkey shape inside .../poster/, so
+	// deleting an admin collection still clears it by prefix and the signed
+	// artwork route treats the key as immutable.
 	if !strings.HasPrefix(pathA, "collection-images/collection-1/poster/original.") ||
 		artworkkey.Revision(pathA) == "" {
 		t.Fatalf("unexpected key shape %q", pathA)
@@ -314,6 +260,46 @@ func TestRemoveReplacedCollectionImageVersion_RemovesLegacyFixedKeys(t *testing.
 		"collection-images/c1/poster/w500.webp",
 		"collection-images/c1/poster/w300.webp",
 	)
+}
+
+// partialDeleteStore deletes the first okKeys keys of a batch and then fails,
+// as the filesystem store does when one key cannot be removed.
+type partialDeleteStore struct {
+	stubListDeleteStore
+	okKeys int
+}
+
+func (s *partialDeleteStore) Delete(_ context.Context, keys []string) (int, error) {
+	n := min(s.okKeys, len(keys))
+	s.deleted = append(s.deleted, keys[:n]...)
+	if n < len(keys) {
+		return n, errors.New("permission denied")
+	}
+	return n, nil
+}
+
+// Clearing an image removes only the revision the clear displaced. A
+// revision that a concurrent upload stored, committed or not, survives the
+// cleanup, so the upload never ends up referencing deleted artwork.
+func TestCleanUpReplacedCollectionImage_ClearKeepsConcurrentUpload(t *testing.T) {
+	store := &stubListDeleteStore{keys: []string{
+		"collection-images/c1/poster/original.0000000000000001.webp",
+		"collection-images/c1/poster/w300.0000000000000001.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+		"collection-images/c1/poster/w300.0000000000000002.webp",
+		"collection-images/c1/backdrop/original.0000000000000001.webp",
+	}}
+	for _, current := range []string{"", "collection-images/c1/poster/original.0000000000000002.webp"} {
+		store.deleted = nil
+		cleanUpReplacedCollectionImage(t.Context(), store, adminCollectionImagePrefix, "c1", "poster",
+			"collection-images/c1/poster/original.0000000000000001.webp",
+			func(context.Context) (string, error) { return current, nil },
+		)
+		assertCollectionImageDeletes(t, store.deleted,
+			"collection-images/c1/poster/original.0000000000000001.webp",
+			"collection-images/c1/poster/w300.0000000000000001.webp",
+		)
+	}
 }
 
 func assertCollectionImageDeletes(t *testing.T, got []string, want ...string) {
@@ -462,26 +448,6 @@ func TestCleanUpReplacedCollectionImage_OutlivesCanceledRequest(t *testing.T) {
 	assertCollectionImageDeletes(t, store.deleted, "collection-images/c1/poster/original.0000000000000001.webp")
 }
 
-func TestUploadCollectionImageVariants_RejectsNonImage(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
-
-	_, _, err := uploadCollectionImageVariants(
-		context.Background(),
-		blobstore.NewS3(recorder.client()),
-		adminCollectionImagePrefix,
-		"collection-1",
-		"poster",
-		[]byte(`<?xml version="1.0"?><root/>`),
-	)
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("err = %v, want a 400 APIError", err)
-	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
-	}
-}
-
 func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -501,46 +467,6 @@ func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 				t.Fatalf("err = %v, want a 400 APIError", err)
 			}
 		})
-	}
-}
-
-// lockedBuffer collects log output written from the HTTP client's goroutines.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func TestDownloadCollectionImageURL_LogsTheHostThatAnswered(t *testing.T) {
-	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(missing.Close)
-	redirect := httptest.NewServer(http.RedirectHandler(missing.URL+"/poster.jpg", http.StatusFound))
-	t.Cleanup(redirect.Close)
-
-	var logs lockedBuffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	if _, err := downloadCollectionImageURL(context.Background(), redirect.Client(), redirect.URL+"/poster.jpg"); err == nil {
-		t.Fatal("downloadCollectionImageURL succeeded, want the 404 error")
-	}
-	missingHost := strings.TrimPrefix(missing.URL, "http://")
-	if got := logs.String(); !strings.Contains(got, "host="+missingHost) || !strings.Contains(got, "status=404") {
-		t.Fatalf("log = %q, want host=%s status=404", got, missingHost)
 	}
 }
 

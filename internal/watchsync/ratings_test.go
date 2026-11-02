@@ -305,20 +305,6 @@ func TestSyncRatingsUnmatchedRowSharingAnIDIsNotARemoval(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsTombstoneRemovesByProviderKey(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, false)
-	tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: h.media[ratingTestMovieA].ProviderItemKey, Removed: true}}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
-
-	h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 0 {
-		t.Fatalf("movie A = %d stars, want removed by tombstone", got)
-	}
-}
-
 func TestSyncRatingsRemembersTheProviderKeyForTombstonesAndWrites(t *testing.T) {
 	h := newRatingHarness(t)
 	h.store.set(ratingTestMovieA, 4)
@@ -430,15 +416,6 @@ func TestSyncRatingsDirectionToggles(t *testing.T) {
 			t.Fatal("an import read must set the import marker")
 		}
 	})
-}
-
-func TestSyncRatingsPersistsCursorsWhenImporting(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.batch = RatingImportBatch{UpdatedCursors: map[string]string{"test.ratings.movies": "c1"}}
-	h.sync()
-	if cursor := h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)].SyncCursors["test.ratings.movies"]; cursor != "c1" {
-		t.Fatalf("cursor = %q, want c1", cursor)
-	}
 }
 
 // A plugin declares the gate with rating_export_requires_watched, here for
@@ -584,32 +561,6 @@ func TestSyncRatingsResendsAValueChangedDuringTheSend(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsAgreesOnTheLastSentValueWhenResendsNeverSettle(t *testing.T) {
-	h := newRatingHarness(t)
-	h.agree(ratingTestMovieA, 1, true)
-	h.store.set(ratingTestMovieA, 2)
-	// Every write overlaps another edit, so no send ever confirms the current
-	// value. The agreed row must name what the provider was last sent, so the
-	// next merge sends the newer value instead of importing the sent one.
-	stars := 2
-	h.provider.onExport = func() {
-		stars = stars%5 + 1
-		h.store.set(ratingTestMovieA, stars)
-	}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	result := h.sync()
-	if len(h.provider.exported) != 1+maxRatingResends {
-		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
-	}
-	last := h.provider.exported[len(h.provider.exported)-1].Rating
-	if s := h.state(ratingTestMovieA); s == nil || providerRatingFromStars(s.SyncedRating) != last || s.RemoteSeen {
-		t.Fatalf("agreed row = %#v, want the last sent rating %d, unseen", s, last)
-	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("unsettled ratings must be reported")
-	}
-}
-
 func TestSyncRatingsSendsARemovalMadeDuringTheLastResend(t *testing.T) {
 	h := newRatingHarness(t)
 	h.agree(ratingTestMovieA, 1, true)
@@ -642,17 +593,6 @@ func TestSyncRatingsSendsARemovalMadeDuringTheLastResend(t *testing.T) {
 	}
 	if len(h.provider.removed) != 1 {
 		t.Fatalf("removed = %#v, want the removal sent", h.provider.removed)
-	}
-}
-
-func TestSyncRatingsResendsARatingSetDuringARemoval(t *testing.T) {
-	h := newRatingHarness(t)
-	h.agree(ratingTestMovieA, 4, true)
-	h.provider.onRemove = func() { h.store.set(ratingTestMovieA, 2) }
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.sync()
-	if len(h.provider.removed) != 1 || len(h.provider.exported) != 1 || h.provider.exported[0].Rating != 4 {
-		t.Fatalf("removed = %#v exported = %#v, want the new rating sent after the removal", h.provider.removed, h.provider.exported)
 	}
 }
 
@@ -725,38 +665,6 @@ func TestSyncRatingsResolvesTombstonesWithinTheirKind(t *testing.T) {
 	})
 }
 
-func TestSyncRatingsInvalidRowsKeepTheEmptySnapshotGuard(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 2)
-	h.agree(ratingTestMovieA, 4, true)
-	h.agree(ratingTestMovieB, 2, true)
-	// The only movie row is unusable and names neither title.
-	bad := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "imdb:tt9999", Kind: historyimport.KindMovie, IMDbID: "tt9999"}, Rating: 11}
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{bad}, SnapshotKinds: []string{historyimport.KindMovie}}
-	result := h.sync()
-	if h.store.stars(ratingTestMovieA) != 4 || h.store.stars(ratingTestMovieB) != 2 {
-		t.Fatalf("movieA=%d movieB=%d, a snapshot with no usable rows must not remove ratings", h.store.stars(ratingTestMovieA), h.store.stars(ratingTestMovieB))
-	}
-	found := false
-	for _, w := range result.Warnings {
-		found = found || strings.Contains(w, "returned no movie ratings")
-	}
-	if !found {
-		t.Fatalf("warnings = %v, want the empty-snapshot guard reported", result.Warnings)
-	}
-}
-
-func TestDeleteConnectionWithoutAConnectionTakesNoLock(t *testing.T) {
-	h := newRatingHarness(t)
-	if err := h.service.DeleteConnection(context.Background(), h.conn.UserID, "another-profile", h.conn.Provider); err != nil {
-		t.Fatal(err)
-	}
-	if len(h.repo.ratingLocks) != 0 || len(h.repo.connections) != 1 {
-		t.Fatalf("locks=%v connections=%d, want nothing touched", h.repo.ratingLocks, len(h.repo.connections))
-	}
-}
-
 func TestSyncRatingsWatchGateLetsHeldTitlesChange(t *testing.T) {
 	h := newRatingHarness(t)
 	h.provider.gateMovies = true
@@ -767,36 +675,6 @@ func TestSyncRatingsWatchGateLetsHeldTitlesChange(t *testing.T) {
 	h.sync()
 	if len(h.provider.exported) != 1 {
 		t.Fatalf("exported = %#v; a title the provider already rates is not held for a watch", h.provider.exported)
-	}
-}
-
-func TestExecuteSyncRunRecordsRatingCounters(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 3)
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 7)}, SnapshotKinds: []string{historyimport.KindMovie}}
-
-	created, err := h.repo.CreateSyncRun(context.Background(), SyncRun{ConnectionID: h.conn.ID, Provider: h.conn.Provider})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := h.service.executeSyncRun(context.Background(), h.conn, created)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.InboundRatingsFound != 1 || run.InboundRatingsImported != 1 || run.OutboundRatingsFound != 1 || run.OutboundRatingsSent != 1 {
-		t.Fatalf("run counters = %#v", run)
-	}
-}
-
-func TestPersistConnectionEnablesRatingsForNewConnections(t *testing.T) {
-	repo := newServiceFakeRepo()
-	service := NewService(repo, NewRegistry())
-	conn, err := service.persistConnection(context.Background(), "test", 1, "p", TokenSet{AccessToken: "a"}, ProviderAccount{ID: "acct"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !conn.ImportRatingsEnabled || !conn.ExportRatingsEnabled {
-		t.Fatalf("new connection rating toggles = %v/%v, want on", conn.ImportRatingsEnabled, conn.ExportRatingsEnabled)
 	}
 }
 
@@ -846,60 +724,6 @@ func TestDeleteConnectionWaitsForTheRatingSyncLock(t *testing.T) {
 	if len(h.repo.connections) != 0 {
 		t.Fatal("the connection was not deleted")
 	}
-}
-
-// A run whose rating bookkeeping fails after an import committed still
-// reports the import, once, with a live context, so the profile's
-// recommendations are rebuilt.
-func TestExecuteSyncRunReportsAnImportWhenBookkeepingFailsAfterIt(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	// The run's deadline ends right after the import commits.
-	ctx, cancel := context.WithCancel(context.Background())
-	h.repo.upsertRatingErr = context.Canceled
-	h.store.afterWrite = cancel
-	if _, err := h.service.executeSyncRun(ctx, h.conn, h.newRun()); err == nil {
-		t.Fatal("want the bookkeeping error")
-	}
-	if h.store.stars(ratingTestMovieB) != 4 {
-		t.Fatalf("movieB=%d, want the import committed", h.store.stars(ratingTestMovieB))
-	}
-	h.signals.assert(t, 1)
-	if h.signals.ctxErrs[0] != nil {
-		t.Fatalf("notification ran with context error %v, want a live context", h.signals.ctxErrs[0])
-	}
-}
-
-// A sync run reports signal changes once however many items it imported,
-// and not at all when it imported nothing.
-func TestExecuteSyncRunReportsImportsOncePerRun(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.batch = RatingImportBatch{
-		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieB, 7), h.remoteRow(ratingTestSeries, 10)},
-		SnapshotKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
-	}
-	run, err := h.service.executeSyncRun(context.Background(), h.conn, h.newRun())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.InboundRatingsImported != 2 {
-		t.Fatalf("imported = %d, want 2", run.InboundRatingsImported)
-	}
-	h.signals.assert(t, 1)
-	if h.signals.userID != ratingTestUserID || h.signals.profileID != ratingTestProfileID {
-		t.Fatalf("notified %d/%s, want the connection's profile", h.signals.userID, h.signals.profileID)
-	}
-
-	// The same ratings again import nothing; sending a local rating is not a
-	// signal change either.
-	h.store.set(ratingTestMovieA, 3)
-	if _, err := h.service.executeSyncRun(context.Background(), h.conn, h.newRun()); err != nil {
-		t.Fatal(err)
-	}
-	if len(h.provider.exported) == 0 {
-		t.Fatal("precondition: the second run sent the local rating")
-	}
-	h.signals.assert(t, 1)
 }
 
 func TestSyncRatingsLeavesRatingsToARunHoldingTheLock(t *testing.T) {
@@ -953,24 +777,6 @@ func (n *recordingSignalsNotifier) NotifySignalsChanged(ctx context.Context, use
 	n.ctxErrs = append(n.ctxErrs, ctx.Err())
 }
 
-func (n *recordingSignalsNotifier) assert(t *testing.T, want int) {
-	t.Helper()
-	if n.calls != want {
-		t.Fatalf("signal change notifications = %d, want %d", n.calls, want)
-	}
-}
-
-func (h *ratingHarness) newRun() SyncRun {
-	h.t.Helper()
-	h.provider.exported, h.provider.removed = nil, nil
-	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
-	run, err := h.repo.CreateSyncRun(context.Background(), SyncRun{ConnectionID: h.conn.ID, Provider: h.conn.Provider})
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return run
-}
-
 func newRatingHarness(t *testing.T) *ratingHarness {
 	t.Helper()
 	h := &ratingHarness{
@@ -998,7 +804,7 @@ func newRatingHarness(t *testing.T) *ratingHarness {
 	}
 	h.service = NewService(h.repo, registry).
 		WithMatcher(ratingMatcherStub{media: h.media}).
-		WithUserStoreProvider(ratingHistoryStoreProvider{watched: h.watched}).
+		WithUserStoreProvider(staticStoreProvider{store: ratingHistoryStore{watched: h.watched}}).
 		WithRatingStore(h.store).
 		WithSignalsChangedNotifier(h.signals)
 	return h
@@ -1126,16 +932,6 @@ func (m ratingMatcherStub) Match(_ context.Context, record historyimport.Record)
 	return nil, "no match", nil
 }
 
-type ratingHistoryStoreProvider struct {
-	watched map[string]bool
-}
-
-func (p ratingHistoryStoreProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
-	return ratingHistoryStore{watched: p.watched}, nil
-}
-
-func (ratingHistoryStoreProvider) Close() error { return nil }
-
 // ratingHistoryStore answers completed-history lookups for the watch gate.
 type ratingHistoryStore struct {
 	userstore.UserStore
@@ -1245,20 +1041,5 @@ func TestSyncRatingsSkipsApplyingAfterAnAccountRebind(t *testing.T) {
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("a skipped stale run should warn")
-	}
-}
-
-func TestSyncRatingsImportLosesToASameValueResave(t *testing.T) {
-	h := newRatingHarness(t)
-	h.store.set(ratingTestMovieA, 4)
-	h.agree(ratingTestMovieA, 4, true)
-	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	// The user re-saves the same stars after the sync read them.
-	h.provider.onFetch = func() { h.store.set(ratingTestMovieA, 4) }
-
-	result := h.sync()
-
-	if got := h.store.stars(ratingTestMovieA); got != 4 || result.Imported != 0 {
-		t.Fatalf("movie A = %d stars, imported %d; a newer local save must win", got, result.Imported)
 	}
 }

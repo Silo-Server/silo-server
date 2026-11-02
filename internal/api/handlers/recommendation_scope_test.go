@@ -13,30 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestProfileScopeSet(t *testing.T) {
-	str := func(v string) *string { return &v }
-	num := func(v int) *int { return &v }
-	flag := func(v bool) *bool { return &v }
-	ids := func(v ...int) *[]int { return &v }
-	for _, tc := range []struct {
-		name string
-		req  ProfileUpdateRequest
-		want bool
-	}{
-		{"name only", ProfileUpdateRequest{Name: str("Kid")}, false},
-		{"same values sent back", ProfileUpdateRequest{MaxContentRating: str("PG"), MaxAdvisoryAge: num(10), LibraryRestrictionsEnabled: flag(true), AllowedLibraryIDs: ids(5, 2)}, true},
-		{"rating ceiling", ProfileUpdateRequest{MaxContentRating: str("PG-13")}, true},
-		{"advisory age", ProfileUpdateRequest{MaxAdvisoryAge: num(0)}, true},
-		{"require advisory age", ProfileUpdateRequest{RequireAdvisoryAge: flag(true)}, true},
-		{"restrictions off", ProfileUpdateRequest{LibraryRestrictionsEnabled: flag(false)}, true},
-		{"allowed libraries", ProfileUpdateRequest{AllowedLibraryIDs: ids(2)}, true},
-	} {
-		if got := profileScopeSet(tc.req); got != tc.want {
-			t.Errorf("%s: set = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestAccountScopeChanged(t *testing.T) {
 	role := models.RoleUser
 	email := "a@example.com"

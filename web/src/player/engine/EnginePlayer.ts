@@ -4,6 +4,7 @@ import { EngineAudioOutput } from "./audioOutput";
 import { EngineClock } from "./clock";
 import {
   ENGINE_READ_FAILED,
+  ENGINE_STARTUP_TIMEOUT,
   ENGINE_VIDEO_DECODE_FAILED,
   type EngineMediaInfo,
   type PageToWorkerMessage,
@@ -54,7 +55,7 @@ export const DECODER_RESTART_DELAY_MS = 750;
 /** Typed failures the server records against the plan (see routing.ts). */
 export const ENGINE_PAGE_FAILURES = {
   worker: "browser_engine_worker_failed",
-  startup: "browser_engine_startup_timeout",
+  startup: ENGINE_STARTUP_TIMEOUT,
   presentation: "browser_engine_presentation_failed",
   audioOutput: "browser_engine_audio_output_failed",
 } as const;
@@ -100,7 +101,19 @@ export interface EnginePlayerOptions {
   element: HTMLVideoElement;
   volume: number;
   muted: boolean;
+  /** The speed playback starts at, as a media element's defaultPlaybackRate. */
+  playbackRate?: number;
   onFailure: (failure: FailureV3) => void;
+  /**
+   * A read from the file received data: `request` has `bytes` in all, its
+   * first at `first` and its latest at `last`, on the page's
+   * `performance.now()` clock.
+   */
+  onMediaData?: (request: number, bytes: number, first: number, last: number) => void;
+}
+
+function clampRate(value: number): number {
+  return Math.min(4, Math.max(0.25, value || 1));
 }
 
 /**
@@ -118,6 +131,7 @@ export class EnginePlayer {
   private readonly layers: HTMLElement;
   private readonly element: HTMLVideoElement;
   private readonly onFailure: (failure: FailureV3) => void;
+  private readonly onMediaData: EnginePlayerOptions["onMediaData"];
   private worker: Worker | null = null;
   private audio: EngineAudioOutput | null = null;
   private renderer: FrameRenderer | null = null;
@@ -129,6 +143,7 @@ export class EnginePlayer {
   private shown: QueuedPicture | null = null;
   private presentedFrames = 0;
   private decoderRestarts = 0;
+  private recovering = false;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   /** Decoded frames skipped because a later one was already due. */
   private droppedFrames = 0;
@@ -185,8 +200,10 @@ export class EnginePlayer {
     options.surface.replaceChildren(this.layers);
     this.element = options.element;
     this.onFailure = options.onFailure;
+    this.onMediaData = options.onMediaData;
     this.volumeValue = options.volume;
     this.mutedValue = options.muted;
+    this.rateValue = clampRate(options.playbackRate ?? 1);
     this.seekTarget = options.source.startSeconds;
     this.resizeObserver = new ResizeObserver((entries) => {
       const box = entries[entries.length - 1]?.devicePixelContentBoxSize?.[0];
@@ -257,6 +274,15 @@ export class EnginePlayer {
     return new EngineTimeRanges([[Math.min(this.seekTarget, this.currentTime), end]]);
   }
 
+  /**
+   * A decoder restart is under way: the wait it causes is the decoder's, not
+   * the network's, though the engine holds little media past the playhead.
+   * Ends with the new run's first picture.
+   */
+  get decoderRecovering(): boolean {
+    return this.recovering;
+  }
+
   get seekable(): TimeRanges {
     return new EngineTimeRanges(this.info ? [[0, this.info.durationSeconds]] : []);
   }
@@ -292,7 +318,7 @@ export class EnginePlayer {
   }
 
   set playbackRate(value: number) {
-    const rate = Math.min(4, Math.max(0.25, value || 1));
+    const rate = clampRate(value);
     if (rate === this.rateValue) return;
     this.rateValue = rate;
     this.audio?.setRate(rate);
@@ -527,6 +553,10 @@ export class EnginePlayer {
           return;
         }
         this.queue.push(picture);
+        // A hidden tab presents on a slow timer, and each picture held for it
+        // keeps the decoder waiting for a credit. Releasing due pictures as
+        // they arrive keeps video up with fast playback.
+        if (this.hiddenTimer !== null && !this.idle()) this.advance(false);
         return;
       }
       case "video-ended":
@@ -537,6 +567,19 @@ export class EnginePlayer {
         return;
       case "audio-buffered":
         if (message.generation === this.generation) this.audioBuffered = true;
+        return;
+      case "read-failed":
+        // The page treats this like the element's own \`stalled\`: the
+        // transport is failing, so the wait is an outage, not a slow link.
+        this.dispatch("stalled");
+        break;
+      case "media-data":
+        this.onMediaData?.(
+          message.request,
+          message.bytes,
+          message.first - performance.timeOrigin,
+          message.last - performance.timeOrigin,
+        );
         return;
       case "error":
         if (message.generation === null || message.generation === this.generation) {
@@ -672,6 +715,7 @@ export class EnginePlayer {
     if (this.restartTimer !== null) return true;
     if (!this.info || this.decoderRestarts >= MAX_DECODER_RESTARTS) return false;
     this.decoderRestarts += 1;
+    this.recovering = true;
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
       if (this.stopped) return;
@@ -732,6 +776,7 @@ export class EnginePlayer {
     if (this.shown) this.release(this.shown);
     this.shown = picture;
     this.presentedFrames += 1;
+    if (picture.generation === this.generation) this.recovering = false;
     if (this.callbacks.size === 0) return;
     const callbacks = this.callbacks;
     this.callbacks = new Map();

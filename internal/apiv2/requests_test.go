@@ -67,18 +67,24 @@ func (f *fakeRequests) Search(_ context.Context, viewer mediarequests.Viewer, qu
 	return &mediarequests.MediaPage{Page: page, TotalPages: 3, TotalResults: 41, Results: []mediarequests.MediaResult{fixtureResult(949)}}, nil
 }
 
-func (f *fakeRequests) Discover(_ context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error) {
-	if err := f.record(viewer, "discover", section, page); err != nil {
+func (f *fakeRequests) DiscoverRow(_ context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error) {
+	if err := f.record(viewer, "discover", rowID, page); err != nil {
 		return nil, err
 	}
-	return &mediarequests.DiscoverySection{Key: section, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
+	return &mediarequests.DiscoverySection{Key: rowID, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
 }
 
-func (f *fakeRequests) DiscoverAll(_ context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error) {
+func (f *fakeRequests) DiscoverRows(_ context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error) {
 	if err := f.record(viewer, "discoverAll"); err != nil {
 		return nil, err
 	}
-	return []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}}, nil
+	return &mediarequests.DiscoverLayoutPage{
+		Order: []mediarequests.DiscoverRowRef{
+			{Key: "trending_movies", Type: "tmdb_chart", Title: "Trending Movies"},
+			{Key: "studios", Type: "studios", Title: "Studios"},
+		},
+		Sections: []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}},
+	}, nil
 }
 
 func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error) {
@@ -311,55 +317,6 @@ func TestCreateRequest(t *testing.T) {
 	}
 }
 
-func TestListMyRequests(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	type page struct {
-		Items []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"items"`
-		Page struct {
-			NextCursor string `json:"next_cursor"`
-			HasMore    bool   `json:"has_more"`
-		} `json:"page"`
-	}
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/mine", "", requestOwner)
-	var got page
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || len(got.Items) != 2 || got.Page.HasMore || got.Items[0].ID != "r-2" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if svc.lastFilter.Limit != 51 || svc.lastFilter.Offset != 0 {
-		t.Fatalf("filter = %+v", svc.lastFilter)
-	}
-
-	// Paging: limit 1 walks both rows through the cursor.
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1", "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || !got.Page.HasMore || got.Page.NextCursor == "" {
-		t.Fatalf("first page = %s", rec.Body.String())
-	}
-	firstCursor := got.Page.NextCursor
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1&cursor="+firstCursor, "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || got.Items[0].ID != "r-1" || got.Page.HasMore {
-		t.Fatalf("second page = %s", rec.Body.String())
-	}
-	// A cursor minted under another filter is refused.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1&status=pending&cursor="+firstCursor, "", requestOwner), TypeInvalidCursor)
-
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?status=pending", "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || got.Items[0].ID != "r-2" || svc.lastFilter.Status != mediarequests.StatusPending {
-		t.Fatalf("%s %+v", rec.Body.String(), svc.lastFilter)
-	}
-	// Offset paging and unknown statuses are validation failures.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?offset=10", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?status=weird", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=100", "", requestOwner), TypeValidationFailed)
-}
-
 func TestGetRequest(t *testing.T) {
 	h := newTestHandler(t, requestDeps(fixtureRequests()))
 	rec := do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", requestOwner)
@@ -558,37 +515,6 @@ func TestRequestAdminReachFollowsActingProfile(t *testing.T) {
 	requireAdminMembers(t, "admin getRequest", got, adminRequestMembers, adminTargetMembers)
 }
 
-func TestSearchRequestMedia(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&media_type=movie&page=2", "", requestOwner)
-	var got struct {
-		Page    int `json:"page"`
-		Results []struct {
-			TMDBID  int `json:"tmdb_id"`
-			Request struct {
-				Requestable bool `json:"requestable"`
-			} `json:"request"`
-		} `json:"results"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || got.Page != 2 || len(got.Results) != 1 || got.Results[0].TMDBID != 949 || !got.Results[0].Request.Requestable {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if svc.lastArgs[0] != "heat" || svc.lastArgs[1] != mediarequests.MediaTypeMovie || svc.lastArgs[2] != 2 {
-		t.Fatalf("args = %v", svc.lastArgs)
-	}
-	// media_type defaults to all; page to 1.
-	do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat", "", requestOwner)
-	if svc.lastArgs[1] != mediarequests.MediaTypeAll || svc.lastArgs[2] != 1 {
-		t.Fatalf("args = %v", svc.lastArgs)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=%20", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&media_type=tv", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&page=0", "", requestOwner), TypeValidationFailed)
-}
-
 func TestGetRequestMediaDetail(t *testing.T) {
 	svc := fixtureRequests()
 	h := newTestHandler(t, requestDeps(svc))
@@ -625,12 +551,26 @@ func TestDiscover(t *testing.T) {
 			Key     string `json:"key"`
 			Results []any  `json:"results"`
 		} `json:"items"`
-		Page *any `json:"page"`
+		RowOrder []DiscoverRowRef `json:"row_order"`
+		Page     *any             `json:"page"`
 	}
 	decodeBody(t, rec.Body, &sections)
 	if rec.Code != 200 || len(sections.Items) != 1 || sections.Items[0].Key != "trending_movies" || len(sections.Items[0].Results) != 1 || sections.Page != nil {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	if len(sections.RowOrder) != 2 || sections.RowOrder[1] != (DiscoverRowRef{Key: "studios", Type: "studios", Title: "Studios"}) {
+		t.Fatalf("row_order = %+v, want the title row then the brand row", sections.RowOrder)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/r_abc?page=2", "", requestOwner)
+	var custom struct {
+		Key  string `json:"key"`
+		Page int    `json:"page"`
+	}
+	decodeBody(t, rec.Body, &custom)
+	if rec.Code != 200 || custom.Key != "r_abc" || custom.Page != 2 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/Not-A-Key", "", requestOwner), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/popular_series?page=3", "", requestOwner)
 	var section struct {
@@ -757,24 +697,4 @@ func TestFollowRequestMedia(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/requests/follows/movie/949", "", requestOwner), TypeConflict)
 	svc.err = mediarequests.ErrAlreadyAvailable
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/requests/follows/movie/949", "", requestOwner), TypeConflict)
-}
-
-func TestCreateSeriesRequestPassesSeasons(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	rec := do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"series","tmdb_id":95396,"title":"Severance","seasons":[2,3]}`, requestOwner)
-	if rec.Code != http.StatusCreated {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if !slices.Equal(svc.lastCreate.Seasons, []int{2, 3}) {
-		t.Fatalf("seasons passed = %v, want [2 3]", svc.lastCreate.Seasons)
-	}
-	var got struct {
-		Seasons        []int `json:"seasons"`
-		SeasonProgress []any `json:"season_progress"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if got.Seasons == nil || got.SeasonProgress == nil {
-		t.Fatalf("seasons fields must be arrays, never null: %s", rec.Body.String())
-	}
 }

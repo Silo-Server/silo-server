@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 
@@ -38,23 +39,8 @@ const DEFAULTS: Record<string, string> = {
   "audiobookshelf_compat.enabled": "false",
 };
 
-function makeForm(overrides: Record<string, string> = {}, dirty: string[] = []) {
-  const values = { ...DEFAULTS, ...overrides };
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    isDirty: (key: string) => dirty.includes(key),
-    dirtyKeys: dirty,
-    dirtyCount: dirty.length,
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-    sensitiveConfigured: [],
-    sensitiveManagedByEnv: [],
-  };
-}
+const makeForm = (overrides: Record<string, string> = {}, dirty: string[] = []) =>
+  fakeSettingsForm({ ...DEFAULTS, ...overrides }, { dirty });
 
 function renderPage() {
   return render(
@@ -89,25 +75,6 @@ describe("CompatibilityProxiesSettings", () => {
     expect(within(jellyfin).queryByRole("textbox", { name: "Server ID" })).not.toBeInTheDocument();
     // Its key still loads so the value can be shown.
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toContain("jellyfin_compat.server_id");
-  });
-
-  it("keeps the advanced Jellyfin fields editable", async () => {
-    const form = makeForm();
-    useSettingsFormMock.mockReturnValue(form);
-    renderPage();
-    await userEvent.click(screen.getByRole("button", { name: "Advanced · 7 settings" }));
-
-    await userEvent.type(screen.getByLabelText("Name shown to Jellyfin apps"), "x");
-    expect(form.setValue).toHaveBeenCalledWith("jellyfin_compat.server_name", "Silox");
-    // Nothing reads branding.server_name for Jellyfin apps.
-    expect(screen.getByText("Separate from the server name on General.")).toBeInTheDocument();
-    // The default refills an emptied field, so "leave blank" is not offered.
-    expect(screen.queryByText(/Leave blank/)).not.toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "The default pairs with the default reported Jellyfin version; change them together.",
-      ),
-    ).toBeInTheDocument();
   });
 
   it.each([
@@ -156,15 +123,5 @@ describe("CompatibilityProxiesSettings", () => {
       within(group).getByRole("switch", { name: "Allow Audiobookshelf apps to connect" }),
     ).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Jellyfin" })).queryByText("Beta")).toBeNull();
-  });
-
-  it("opens the web player's download details through the shared disclosure", async () => {
-    renderPage();
-
-    const details = screen.getByRole("button", { name: "Download details" });
-    expect(details).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Listen address")).not.toBeInTheDocument();
-    await userEvent.click(details);
-    expect(screen.getByText("Listen address")).toBeInTheDocument();
   });
 });

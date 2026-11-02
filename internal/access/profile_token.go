@@ -74,7 +74,7 @@ func (s *ProfileTokenService) Validate(tokenStr string) (*ProfileTokenClaims, er
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, fmt.Errorf("%w: expired", ErrProfileUnverified)
 		}
-		return nil, fmt.Errorf("%w: %v", ErrProfileUnverified, err)
+		return nil, fmt.Errorf("%w: %v", ErrProfileUnverified, err) //nolint:errorlint // the sentinel is the verdict on a client token; the jwt parse error is only reported
 	}
 	if !token.Valid {
 		return nil, ErrProfileUnverified

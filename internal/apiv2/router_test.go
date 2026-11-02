@@ -641,7 +641,9 @@ func TestPanicIsInternalErrorWithoutLeak(t *testing.T) {
 	}
 }
 
-func TestCanceledRequestWritesNothing(t *testing.T) {
+// A canceled context does not mean the client is gone (a half-closed client
+// is still reading), so the handler's answer is still written.
+func TestCanceledRequestStillWritesResponse(t *testing.T) {
 	h := sharedTransportHandler()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := httptest.NewRequest(http.MethodGet, "/api/v2/probe/slow", nil).WithContext(ctx)
@@ -654,8 +656,8 @@ func TestCanceledRequestWritesNothing(t *testing.T) {
 	}()
 	cancel()
 	<-done
-	if rec.Body.Len() != 0 {
-		t.Fatalf("body written after cancel: %s", rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"late"`) {
+		t.Fatalf("after cancel got %d %s, want the handler's 200 body", rec.Code, rec.Body.String())
 	}
 }
 
@@ -681,7 +683,8 @@ func TestSystemInfo(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+	// request_origin is per-request, so no shared cache may store it.
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
 		t.Fatalf("Cache-Control = %q", cc)
 	}
 	var info SystemInfo

@@ -81,7 +81,7 @@ func (r *Repository) WithUserQuotaLock(ctx context.Context, userID int, fn func(
 			return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
 		}
 		if acquired {
-			defer func() { _ = tx.Rollback(ctx) }()
+			defer func() { _ = tx.Rollback(ctx) }() //nolint:gocritic,revive // returns next; the lock transaction must outlive fn
 			return fn(ctx)
 		}
 		_ = tx.Rollback(ctx)
