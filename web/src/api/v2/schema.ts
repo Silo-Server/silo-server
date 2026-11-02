@@ -31389,11 +31389,11 @@ export interface components {
     };
     ProfileImportResult: {
       data: components["schemas"]["ProfileImportData"][];
-      /** @description Titles of items the profile may not see: outside its libraries, or above its content-rating or advisory limits */
+      /** @description Always empty: items the profile may not see are listed in unmatched, so an import cannot reveal what a hidden library holds */
       hidden: string[];
       /** @description The export came from this server; library references were kept only then */
       same_server: boolean;
-      /** @description Titles of items this server's catalog does not hold */
+      /** @description Titles of items left out: not in this server's catalog, or not available to this profile. The two are not told apart */
       unmatched: string[];
     };
     ProfilePINCheck: {

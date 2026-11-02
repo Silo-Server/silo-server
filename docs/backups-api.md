@@ -369,9 +369,9 @@ ratings, favorites, and dismissals are added where missing, collections gain
 missing items, and preferences are overwritten. Nothing is deleted;
 importing the same document again changes nothing. The answer has
 `same_server`, `data` (`{type, added, updated, unchanged, left_out, notes}`
-per data type), `unmatched` (titles not in this catalog), and `hidden`
-(titles the profile may not see: outside its libraries or above its
-content-rating or advisory limits); both were left out. `422
+per data type), `unmatched` (titles left out because they are not in this
+catalog or the profile may not see them, not told apart, so an import cannot
+probe what a hidden library holds), and `hidden`, always empty. `422
 validation_failed` for a document carrying account or access fields, from a
 newer version, or otherwise not a valid export; `403
 profile_verification_required` for a PIN-protected profile reached without

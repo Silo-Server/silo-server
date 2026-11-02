@@ -20,10 +20,11 @@ import (
 //
 // A collection matches one of the profile's own collections by name: none
 // creates it with a new id (its poster copied under the new id first),
-// exactly one gains the items it lacks, several leave it out. Restored
-// collections are ungrouped; collection groups are account-wide shelf layout
-// and are not carried. Audiobookshelf rows that share the table are not
-// carried either.
+// exactly one gains the items it lacks, several leave it out. A
+// collection's group travels with it: the account's group of the same slug
+// (or label) is used, or created, and an ungrouped collection here joins
+// the backup's group (ensureGroup, regroup). Audiobookshelf rows that share
+// the table are not carried.
 type BackupData struct{}
 
 func (BackupData) ID() string { return userdata.Collections }

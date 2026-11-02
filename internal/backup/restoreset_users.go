@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -27,6 +31,9 @@ type UserDocument struct {
 	// Items describe every content id the profiles' data references, with
 	// provider ids, so another server can match what its catalog lacks.
 	Items []ItemRef `json:"items"`
+	// lockedCredentials counts the password and PIN hashes the reader
+	// replaced (lockCredentials); a restore reports them.
+	lockedCredentials int
 }
 
 // AccountEntry is one users row: identity, login, and every policy override
@@ -586,6 +593,9 @@ func validateUserDocument(doc *UserDocument) ([]string, error) {
 	if err := validateAccountEntry(doc.Account); err != nil {
 		return nil, err
 	}
+	if err := doc.lockCredentials(); err != nil {
+		return nil, err
+	}
 	if len(doc.Profiles) > maxProfilesInDoc {
 		return nil, fmt.Errorf("account %d has too many profiles", doc.Account.ID)
 	}
@@ -682,4 +692,57 @@ func validateProfileEntry(p *ProfileEntry) ([]string, error) {
 		}
 	}
 	return blobs, nil
+}
+
+// maxRestoredHashCost bounds the bcrypt cost of a restored password or PIN
+// hash: this server hashes at bcrypt.DefaultCost, and a little above leaves
+// room for another release's. Every sign-in with a hash pays its cost, in a
+// slot sign-ins share (passwordhash.Admit), so a document must not choose it.
+const maxRestoredHashCost = bcrypt.DefaultCost + 2
+
+// lockCredentials replaces each password and PIN hash that is not a bcrypt
+// hash within maxRestoredHashCost with one of a secret nobody knows, so the
+// account or profile is restored locked rather than open: an admin sets a
+// new password, a household parent a new PIN.
+func (doc *UserDocument) lockCredentials() error {
+	check := func(hash *string) error {
+		if *hash == "" {
+			return nil
+		}
+		if cost, err := bcrypt.Cost([]byte(*hash)); err == nil && cost >= bcrypt.MinCost && cost <= maxRestoredHashCost {
+			return nil
+		}
+		locked, err := unknownSecretHash()
+		if err != nil {
+			return err
+		}
+		*hash = locked
+		doc.lockedCredentials++
+		return nil
+	}
+	if err := check(&doc.Account.PasswordHash); err != nil {
+		return err
+	}
+	for i := range doc.Profiles {
+		if err := check(&doc.Profiles[i].PINHash); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var unknownSecret struct {
+	once sync.Once
+	hash string
+	err  error
+}
+
+// unknownSecretHash is a bcrypt hash of a random secret no one holds, made
+// once per process.
+func unknownSecretHash() (string, error) {
+	unknownSecret.once.Do(func() {
+		hash, err := passwordhash.Generate(context.Background(), []byte(rand.Text()), bcrypt.DefaultCost)
+		unknownSecret.hash, unknownSecret.err = string(hash), err
+	})
+	return unknownSecret.hash, unknownSecret.err
 }
