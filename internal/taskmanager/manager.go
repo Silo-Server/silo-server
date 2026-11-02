@@ -123,7 +123,8 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		// merged carries the firing trigger's config so the run gets its max runtime.
+		merged := make(chan TriggerConfig, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -135,7 +136,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				case _, ok := <-tr.C():
 					if ok {
 						select {
-						case merged <- struct{}{}:
+						case merged <- tr.Config():
 						default:
 						}
 					}
@@ -149,17 +150,18 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				return
 			case <-w.triggerUpdate:
 				select {
-				case merged <- struct{}{}:
+				case merged <- TriggerConfig{}:
 				default:
 				}
 			}
 		}()
 
+		var fired TriggerConfig
 		select {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-merged:
+		case fired = <-merged:
 			close(done)
 		}
 
@@ -184,7 +186,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			continue
 		}
 
-		result, err := w.run(ctx)
+		result, err := w.run(ctx, time.Duration(fired.MaxRuntimeMs)*time.Millisecond)
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
@@ -262,7 +264,7 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 		return err
 	}
 
-	result, err := w.run(ctx)
+	result, err := w.run(ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -298,7 +300,7 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, err
 	}
-	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true))
+	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true), 0)
 	if err != nil {
 		return TaskInfo{}, err
 	}

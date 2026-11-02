@@ -29,7 +29,7 @@ export function TaskStatusBadge({ result, className }: TaskStatusBadgeProps) {
   );
   const errorMessage = result.error_message?.trim();
 
-  if (result.status !== "failed" || !errorMessage) {
+  if (!errorMessage) {
     return badge;
   }
 
