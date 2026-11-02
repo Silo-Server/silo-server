@@ -2677,8 +2677,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	}
 	// Unknown source rates cannot establish that a copy fits a client ceiling.
 	bitrateRequiresEncode := maxBitrate > 0 && (version.Bitrate <= 0 || int64(version.Bitrate)*1000 > maxBitrate)
-	audio := compatAudioTrack(version, selectedAudioIndex)
-	channelsRequireEncode := req.MaxAudioChannels > 0 && (audio.Channels <= 0 || audio.Channels > req.MaxAudioChannels)
+	channelsRequireEncode := compatAudioExceedsChannels(version, selectedAudioIndex, req.MaxAudioChannels)
 	supportsDirectPlay = supportsDirectPlay && !bitrateRequiresEncode && !channelsRequireEncode
 	audioSupported := !channelsRequireEncode && profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := !bitrateRequiresEncode && profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
