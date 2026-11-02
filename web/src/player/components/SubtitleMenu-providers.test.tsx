@@ -125,6 +125,7 @@ it.each([
   "file changed",
   "session changed after response",
   "viewer chose Off",
+  "viewer toggled captions during download",
 ])("selects only this viewer's download when %s", async (order) => {
   let finish!: (value: unknown) => void;
   const download = new Promise((resolve) => {
@@ -167,7 +168,7 @@ it.each([
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let props = {
     tracks: [] as PlayerSubtitleInfo[],
-    activeIndex: null,
+    activeIndex: null as number | null,
     onSelect,
     delayMs: 0,
     onDelayChange: () => {},
@@ -191,6 +192,12 @@ it.each([
   if (order === "session changed") props = { ...props, sessionId: "session-2" };
   if (order === "file changed") props = { ...props, mediaFileId: 43 };
   view.rerender(component());
+  if (order === "viewer toggled captions during download") {
+    props = { ...props, activeIndex: 2 };
+    view.rerender(component());
+    props = { ...props, activeIndex: null };
+    view.rerender(component());
+  }
   await act(async () => {
     finish({ subtitle: { id: "9", media_file_id: "42" } });
     await download;

@@ -87,6 +87,7 @@ export function SubtitleMenu({
     generation: number;
   } | null>(null);
   const downloadGeneration = useRef(0);
+  const downloadSelectionGeneration = useRef(0);
   const profileId = playerConfig?.getProfileId();
   const profileToken = playerConfig?.getProfileToken?.();
   const authContext = playerConfig?.getAuthContext?.();
@@ -461,12 +462,21 @@ export function SubtitleMenu({
             isOpen={searchOpen}
             onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
+            onDownloadStarted={() => {
+              downloadSelectionGeneration.current = downloadGeneration.current;
+            }}
             onSubtitleDownloaded={(subtitle, source) => {
               setSearchOpen(false);
               if (subtitle) {
                 subtitleSync?.remember(subtitle);
-                if (source === "download") {
-                  setPendingDownload({ id: subtitle.id, generation: downloadGeneration.current });
+                if (
+                  source === "download" &&
+                  downloadSelectionGeneration.current === downloadGeneration.current
+                ) {
+                  setPendingDownload({
+                    id: subtitle.id,
+                    generation: downloadSelectionGeneration.current,
+                  });
                 }
               }
               onRefreshSubtitles?.();
