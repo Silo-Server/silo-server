@@ -324,8 +324,17 @@ func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
 // them late and revise them, they alone place a movie on the calendar, and only
 // a provider supplies them, so a stored date is never a manual correction a
 // fill-empty refresh must keep. The FieldReleaseDates lock still holds them.
-func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField) {
+//
+// A refresh keeps a date the provider stops sending, but a rematch is a
+// different movie: its dates replace the stored ones even when empty, so the
+// wrong match's release cannot keep the item on the calendar.
+func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField, rematch bool) {
 	if isFieldLocked(locked, FieldReleaseDates) {
+		return
+	}
+	if rematch {
+		stored.DigitalReleaseDate = fresh.DigitalReleaseDate
+		stored.PhysicalReleaseDate = fresh.PhysicalReleaseDate
 		return
 	}
 	mergeScalar(&stored.DigitalReleaseDate, fresh.DigitalReleaseDate, MergeReplaceUnlocked)

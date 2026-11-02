@@ -2934,7 +2934,7 @@ func (s *MetadataService) mergeAndPersist(
 		} else {
 			MergeGlobalMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		}
-		refreshHomeReleaseDates(existingResult, accumulator, mergeLocked)
+		refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, req.Mode == ModeIdentify)
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
 		}
