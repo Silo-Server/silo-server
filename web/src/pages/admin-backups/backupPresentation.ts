@@ -289,7 +289,8 @@ export function lockBlocker(busy: boolean, active: AdminBackupActive | undefined
   if (!busy && !active) return null;
   if (active?.operation === "backup") return "A backup is running. Wait for it to finish.";
   if (active?.operation === "delete") return "A backup is being deleted. Wait for it to finish.";
-  return "A restore is running. Wait for it to finish.";
+  if (active?.operation === "restore") return "A restore is running. Wait for it to finish.";
+  return "Another backup task is running. Wait for it to finish.";
 }
 
 /** Why "Back up now" is unavailable, or null when it can run. */
