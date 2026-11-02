@@ -2984,7 +2984,7 @@ func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing
 }
 
 // A per-account cap must not present as server capacity: a busy server means
-// wait, a spent allowance means stop the other session. Retrying still works
+// wait, a spent allowance means stop the other session. A fresh attempt works
 // once that session ends, so both caps stay retryable.
 func TestSessionStartErrorV3SeparatesAccountLimitsFromServerCapacity(t *testing.T) {
 	for _, tc := range []struct {

@@ -108,14 +108,14 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
         title: "Streaming limit reached",
         message:
           terminal.message?.trim() ||
-          "Stop anything playing or paused on another device and try again.",
+          "Stop anything else playing or paused on your account, then try again.",
       };
     case "transcode_limit_reached":
       return {
         title: "Video conversion limit reached",
         message:
           terminal.message?.trim() ||
-          "Stop anything playing or paused on your other devices and try again.",
+          "Stop anything else playing or paused on your account, then try again.",
       };
     case "session_expired":
       return {

@@ -1510,9 +1510,10 @@ HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playba
 `route_capability_unavailable`, `route_preparation_failed`.
 `stream_limit_reached` and `transcode_limit_reached` mean the account has used
 its `max_streams` or `max_transcodes` allowance, not that the server is short of
-capacity, which is `capacity_unavailable`. Both are retryable, because the same
-request succeeds once another of the account's sessions ends, and their
-`message` tells the viewer what to do.
+capacity, which is `capacity_unavailable`. Both are retryable: a new attempt with
+a fresh `playback_attempt_id` succeeds once another of the account's sessions
+ends, while the same id replays the stored terminal. Their `message` tells the
+viewer what to do.
 `routing_policy_unsatisfied` and `route_capacity_unavailable` come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while

@@ -7661,13 +7661,14 @@ func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forc
 // viewer has to act rather than wait. Native clients show the message as
 // written, so it must make sense to a viewer who has never heard of a
 // transcode. Paused sessions count toward both caps, so the message names them.
-// Both stay retryable: once the other session ends, the same request succeeds.
+// Both stay retryable: once the other session ends, a fresh playback attempt
+// succeeds. The same playback_attempt_id replays this stored terminal.
 func sessionStartErrorV3(err error) *transportErrorV3 {
 	switch {
 	case errors.Is(err, playback.ErrTooManyStreams):
-		return &transportErrorV3{reason: "stream_limit_reached", message: "Your account is already watching on as many devices as it's allowed to. Stop anything playing or paused on another device and try again.", retryable: true}
+		return &transportErrorV3{reason: "stream_limit_reached", message: "Your account is already playing as many videos at once as it's allowed to. Stop anything else playing or paused on your account, then try again.", retryable: true}
 	case errors.Is(err, playback.ErrTooManyTranscodes):
-		return &transportErrorV3{reason: "transcode_limit_reached", message: "This video needs to be converted to play on this device, but your account is already converting as many videos as it's allowed to. Stop anything playing or paused on your other devices and try again. Videos that don't need converting will still play.", retryable: true}
+		return &transportErrorV3{reason: "transcode_limit_reached", message: "This video needs to be converted to play on this device, but your account is already converting as many videos as it's allowed to. Stop anything else playing or paused on your account, then try again. Videos that don't need converting will still play.", retryable: true}
 	case errors.Is(err, playback.ErrAudioTranscodingDisabled):
 		return &transportErrorV3{reason: "audio_transcoding_disabled", message: "The selected audio adaptation is disabled."}
 	case errors.Is(err, playback.ErrTranscodingDisabled):
