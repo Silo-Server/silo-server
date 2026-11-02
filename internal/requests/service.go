@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -1572,6 +1574,20 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: strings.TrimSpace(integration.APIKeyRef), Config: integration.PluginConfig}
+	// A router may answer an empty option list for a server it cannot reach,
+	// so the options alone do not prove the connection works. Ask the router
+	// first; one that does not implement the check is judged by its options.
+	ok, message, err := s.router.TestConnection(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	switch {
+	case status.Code(err) == codes.Unimplemented:
+	case err != nil:
+		return nil, classifyIntegrationError(err, integration.CapabilityID)
+	case !ok:
+		if strings.TrimSpace(message) == "" {
+			message = "connection test failed"
+		}
+		return nil, classifyIntegrationError(errors.New(message), integration.CapabilityID)
+	}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
 		return nil, classifyIntegrationError(err, integration.CapabilityID)

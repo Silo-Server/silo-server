@@ -2564,6 +2564,12 @@ type fakeRouterProvider struct {
 	optionsErr     error
 	gotOptionsConn ResolvedRouterConnection
 
+	// TestConnection behavior: testFails answers not ok with testMessage;
+	// testErr fails the call itself.
+	testFails   bool
+	testMessage string
+	testErr     error
+
 	// Validate behavior (default empty = valid).
 	validateFieldErrors   map[string]string
 	validateFormError     string
@@ -2656,7 +2662,10 @@ func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ strin
 }
 
 func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (bool, string, error) {
-	return true, "", nil
+	if f.testErr != nil {
+		return false, "", f.testErr
+	}
+	return !f.testFails, f.testMessage, nil
 }
 
 func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {

@@ -81,6 +81,49 @@ func TestLoadIntegrationOptionsClassifiesProbeFailures(t *testing.T) {
 	}
 }
 
+// The options probe behind the editor's Test button asks the router to test
+// the connection before loading options, since a router can answer an empty
+// option list for a server it cannot reach. A failed test is classified like
+// a failed options load; a router without the check is judged by its options.
+func TestLoadIntegrationOptionsTestsTheConnection(t *testing.T) {
+	cases := []struct {
+		name        string
+		router      *fakeRouterProvider
+		wantOptions bool
+		detail      string
+	}{
+		{name: "connected", router: &fakeRouterProvider{}, wantOptions: true},
+		{name: "not connected", router: &fakeRouterProvider{testFails: true, testMessage: "dial tcp 10.0.0.5:5055: connect: connection refused"}, detail: integrationRefused},
+		{name: "not connected without a message", router: &fakeRouterProvider{testFails: true}},
+		{name: "test call failed", router: &fakeRouterProvider{testErr: status.Error(codes.Unknown, "dial tcp: lookup seerr.invalid: no such host")}, detail: integrationNoSuchHost},
+		{name: "router without the check", router: &fakeRouterProvider{testErr: status.Error(codes.Unimplemented, "method TestConnection not implemented")}, wantOptions: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.router.options = map[string][]RouterOption{}
+			service := newTestService(newFakeStore())
+			service.SetRouterProvider(tc.router)
+			install := 1
+			options, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+				ID: "new", CapabilityID: "seerr", InstallationID: &install, BaseURL: "http://10.0.0.5:5055", APIKeyRef: "key",
+			})
+			if tc.wantOptions {
+				if err != nil || options == nil {
+					t.Fatalf("options = %v, err = %v; want the router's options", options, err)
+				}
+				return
+			}
+			var unreachable *IntegrationUnreachableError
+			if !errors.As(err, &unreachable) || unreachable.Detail != tc.detail {
+				t.Fatalf("err = %v, want *IntegrationUnreachableError with detail %q", err, tc.detail)
+			}
+			if tc.router.gotOptionsConn.ID != "" {
+				t.Fatalf("options loaded after a failed connection test")
+			}
+		})
+	}
+}
+
 func TestNormalizeIntegrationBaseURL(t *testing.T) {
 	for _, bad := range []string{"", "ftp://10.0.0.5", "http://", "http://user:pw@10.0.0.5:8989", "http://10.0.0.5:8989/?a=1", "http://10.0.0.5:8989/#x"} {
 		_, err := NormalizeIntegrationBaseURL(bad)
