@@ -2739,8 +2739,9 @@ func (h *ItemsHandler) requestCanViewFilePaths(r *http.Request) bool {
 	return h.canViewFilePaths(r.Context())
 }
 
-// canViewFilePaths reports whether the caller may see on-disk paths: admins
-// always, other accounts when their stored flag allows it.
+// canViewFilePaths reports whether the caller may see on-disk paths: the
+// acting admin always, any other caller when the account's effective
+// permissions, after the access group's mask, include metadata curation.
 func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 	claims := apimw.GetClaims(ctx)
 	if claims == nil {
@@ -2748,8 +2749,8 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 	}
 	if claims.Role == "admin" {
 		// Only the acting admin sees paths by role. Another profile on the
-		// admin's account needs metadata curation assigned to the account,
-		// the bar the curation gate holds it to.
+		// admin's account falls through: it needs metadata curation assigned
+		// to the account, the bar the curation gate holds it to.
 		actingAdmin, err := apimw.ActingAdmin(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "checking file path visibility for an admin account", "component", "api", "user_id", claims.UserID, "error", err)
@@ -2758,7 +2759,6 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		if actingAdmin {
 			return true
 		}
-		return h.hasAssignedMetadataCuration(ctx, claims.UserID)
 	}
 	if h == nil || h.UserRepo == nil {
 		return false
@@ -2768,20 +2768,22 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "checking file path visibility permissions", "component", "api", "user_id", claims.UserID, "error", err)
 		return false
 	}
-	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+	return hasMaskedMetadataCuration(ctx, user, h.AccessGroups)
 }
 
-// hasAssignedMetadataCuration reports whether the account has metadata
-// curation assigned explicitly, not by its admin role. A failed lookup fails
-// closed.
-func (h *ItemsHandler) hasAssignedMetadataCuration(ctx context.Context, userID int) bool {
-	if h == nil || h.UserRepo == nil {
+// hasMaskedMetadataCuration reports whether an enabled account holds
+// metadata_curation after its access group's permission mask, as the metadata
+// curation gate resolves it. A failed group lookup fails closed.
+func hasMaskedMetadataCuration(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
+	// The group mask can only remove permissions, so an account without the
+	// grant skips the group lookup.
+	if user == nil || !user.Enabled || !slices.Contains(user.Permissions, string(auth.PermissionMetadataCuration)) {
 		return false
 	}
-	user, err := h.UserRepo.GetByID(ctx, userID)
+	effective, err := access.EffectivePolicyForUser(ctx, user, groups)
 	if err != nil {
-		slog.WarnContext(ctx, "checking file path visibility permissions", "component", "api", "user_id", userID, "error", err)
+		slog.WarnContext(ctx, "resolving metadata curation policy", "component", "api", "user_id", user.ID, "error", err)
 		return false
 	}
-	return user != nil && user.Enabled && auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
+	return slices.Contains(auth.PolicyPermissions(effective), string(auth.PermissionMetadataCuration))
 }

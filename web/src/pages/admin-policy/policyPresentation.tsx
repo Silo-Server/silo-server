@@ -48,7 +48,7 @@ const DOMAIN_META: Record<string, PolicyDomainMeta> = {
     baseline: [
       "Disabled accounts are denied everything.",
       "Admin actions require the admin role, used from the household's primary profile (or before any profile is chosen).",
-      "Marker editing: admins automatically; everyone else needs the permission assigned to their account.",
+      "Marker editing: admins automatically while acting as admin; everyone else, including the admin's other profiles, needs the permission assigned to their account.",
       "Metadata curation: same rule, and the item must also live inside the user's allowed libraries.",
     ],
     overrideCan:
