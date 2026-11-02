@@ -1,3 +1,25 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4986d7bcb21ff793cefcb4f6f6b385955e299c8c1772e2f4f156459abee23eeb",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the endpoint is new in #3397 and only the web admin in this stack reads it.",
+      "approved_in": "#3398"
+    },
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ce75e5d2e90b4ccea6ae858e4ec4bbd0911d1142e2c5d4d33dba263f45d88ce7",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the endpoint is new in #3397 and only the web admin in this stack reads it.",
+      "approved_in": "#3398"
+    },
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b81dddc052749bc7593e3eade3246586a9aee1b8d7bd0450c6bba96ec8146375",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the endpoint is new in #3397 and only the web admin in this stack reads it.",
+      "approved_in": "#3398"
+    }
+  ]
 }

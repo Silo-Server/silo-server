@@ -231,6 +231,9 @@ func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*
 func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap map[int]int, sameServer bool) ([]string, error) {
 	e, local := plan.entry, plan.local
 	var changes []string
+	if e.SectionType != string(local.SectionType) {
+		changes = append(changes, "type")
+	}
 	if e.Title != local.Title {
 		changes = append(changes, "title")
 	}
