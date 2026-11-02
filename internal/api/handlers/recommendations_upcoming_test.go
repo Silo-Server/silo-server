@@ -371,14 +371,25 @@ func TestRecommendationCardsCarryBadgeMetadata(t *testing.T) {
 	if len(rows) != 1 || len(rows[0].Items) != 2 {
 		t.Fatalf("rows = %+v, want one row with two cards", rows)
 	}
-	watchTonight := handler.buildSectionItem(movie, nil, nil, sectionItemImageURLs{})
-	for _, card := range []sectionItemResponse{rows[0].Items[0], watchTonight} {
+	handler.reader = watchTonightReader{result: recommendations.WatchTonightResult{
+		Items: []recommendations.ScoredItem{{MediaItemID: "movie-1", Score: 2}, {MediaItemID: "series-1", Score: 1}},
+	}}
+	watchTonight, err := handler.WatchTonight(context.Background(), 7, "profile-1", catalog.AccessFilter{}, 2)
+	if err != nil {
+		t.Fatalf("WatchTonight: %v", err)
+	}
+	if len(watchTonight.Items) != 2 {
+		t.Fatalf("WatchTonight items = %+v, want two cards", watchTonight.Items)
+	}
+	for _, card := range []sectionItemResponse{rows[0].Items[0], watchTonight.Items[0].Card()} {
 		if card.ContentRating != "PG-13" || card.AdvisoryAge == nil || *card.AdvisoryAge != 13 || card.AdvisorySource != "commonsense" ||
 			card.Runtime != 117 || len(card.Studios) != 1 || card.Studios[0] != "Northlight Pictures" {
 			t.Errorf("movie card = rating %q, advisory %v/%q, runtime %d, studios %v", card.ContentRating, card.AdvisoryAge, card.AdvisorySource, card.Runtime, card.Studios)
 		}
 	}
-	if card := rows[0].Items[1]; card.ContentRating != "TV-14" || card.ShowStatus != "Continuing" || len(card.Networks) != 1 || card.Networks[0] != "Harbor TV" {
-		t.Errorf("series card = rating %q, show status %q, networks %v", card.ContentRating, card.ShowStatus, card.Networks)
+	for _, card := range []sectionItemResponse{rows[0].Items[1], watchTonight.Items[1].Card()} {
+		if card.ContentRating != "TV-14" || card.ShowStatus != "Continuing" || len(card.Networks) != 1 || card.Networks[0] != "Harbor TV" {
+			t.Errorf("series card = rating %q, show status %q, networks %v", card.ContentRating, card.ShowStatus, card.Networks)
+		}
 	}
 }
