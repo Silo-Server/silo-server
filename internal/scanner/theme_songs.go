@@ -56,9 +56,6 @@ func (d *themeDiscovery) scan(ctx context.Context, repo *themesongs.Repository, 
 		return err
 	}
 	for _, directory := range directories {
-		if scope != "" && !pathWithinAnyRoot(directory, []string{scope}) && !pathWithinAnyRoot(scope, []string{directory}) {
-			continue
-		}
 		root := scopeLibraryRoot(directory, d.roots)
 		if root == "" {
 			continue

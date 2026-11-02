@@ -1632,6 +1632,8 @@ func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 
 func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
+	tracker := &recordingSessionTracker{}
+	server.tracker = tracker
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	releaseHandler := make(chan struct{})
@@ -1685,6 +1687,12 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after stop = %d, want 0", got)
+	}
+	// A running remux is tracked under the viewer's playback session id.
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if len(tracker.removed) != 1 || tracker.removed[0] != "playback-1" {
+		t.Fatalf("removed sessions = %v, want playback session %q", tracker.removed, "playback-1")
 	}
 }
 
@@ -1771,6 +1779,46 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 	server.mu.RUnlock()
 	if fenced {
 		t.Fatal("ordinary HLS teardown was retained in the progressive-remux fence map")
+	}
+}
+
+// A stop removes the tracker record under the transport id unless a progressive
+// remux is still running here: a native v3 HLS job is tracked under that id, not
+// its card's playback session id, and an ended remux already removed its own.
+func TestHandleStopRemovesTrackerRecordByTransportID(t *testing.T) {
+	const transportID = "playback-1-plan-transport"
+	remuxCard := nativeTransportCard("playback-1", transportID)
+	remuxCard.PlayMethod = playback.PlayRemux
+	for _, tc := range []struct {
+		name    string
+		card    *playback.RecipeCard
+		running bool
+	}{
+		{name: "native HLS transcode", card: nativeTransportCard("playback-1", transportID), running: true},
+		{name: "remux no longer running here", card: remuxCard},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newTestServer(t)
+			tracker := &recordingSessionTracker{}
+			server.tracker = tracker
+			if tc.running {
+				server.sessions[transportID] = &playback.TranscodeSession{}
+				server.activeJobs.Store(1)
+			}
+			server.SetRecipeStore(&stubRecipeStore{card: tc.card, ok: true})
+			rr := httptest.NewRecorder()
+
+			server.handleStop(rr, stopRequest(transportID))
+
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			tracker.mu.Lock()
+			defer tracker.mu.Unlock()
+			if len(tracker.removed) != 1 || tracker.removed[0] != transportID {
+				t.Fatalf("removed sessions = %v, want transport %q", tracker.removed, transportID)
+			}
+		})
 	}
 }
 
@@ -2353,6 +2401,49 @@ func TestReconstructFromToken_TokenlessRebuildsFromTheStoredTransportRecipe(t *t
 	}
 	if got := session.Opts().StartSegmentNumber; got != 5 {
 		t.Fatalf("rebuilt start segment = %d, want the segment the client is fetching", got)
+	}
+}
+
+func TestReconstructFromTokenKeepsSubtitleRenditionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		change  func(*playback.RecipeCard)
+		hydrate bool
+	}{
+		{name: "matching record", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].Default = false }, hydrate: true},
+		{name: "different source", change: func(c *playback.RecipeCard) { c.SubtitleRenditionSource.Size++ }},
+		{name: "different track", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].TrackNumber++ }},
+		{name: "different owner", change: func(c *playback.RecipeCard) { c.UserID++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sessionID = "sess-rendition-metadata"
+			const transportID = sessionID + "-plan1234-abcd1234"
+			s := newLoopingFFmpegServer(t)
+			card := nativeTransportCard(sessionID, transportID)
+			card.SubtitleRendition = true
+			card.SubtitleRenditionSource = playback.SubtitleRenditionSource{Size: 100, ModTimeUnixNano: 10}
+			card.SubtitleRenditionTracks = []playback.SubtitleRenditionTrack{{StreamIndex: 2, TrackNumber: 3, Codec: "subrip", Name: "English forced", Language: "en", Forced: true, Default: true}}
+			stored := *card
+			stored.SubtitleRenditionTracks = slices.Clone(card.SubtitleRenditionTracks)
+			tc.change(&stored)
+			s.SetRecipeStore(&stubRecipeStore{ok: true, card: &stored})
+			session, err := s.reconstructFromToken(requestWithToken(transportID, signCard(t, *card)), transportID, 5)
+			if err != nil || session == nil {
+				t.Fatalf("reconstruct: %v, %v", session, err)
+			}
+			t.Cleanup(func() { _ = session.CloseProcess() })
+			want := playback.RecipeCardFromClaims(new(card.ToClaims())).SubtitleRenditionTracks
+			if tc.hydrate {
+				want = card.SubtitleRenditionTracks
+			}
+			opts := session.Opts()
+			if !slices.Equal(opts.SubtitleRenditionTracks, want) {
+				t.Fatalf("reconstructed rendition metadata = %+v, want %+v", opts.SubtitleRenditionTracks, want)
+			}
+			if opts.SubtitleRenditionSource != card.SubtitleRenditionSource {
+				t.Fatalf("reconstruction changed token source: %+v", opts.SubtitleRenditionSource)
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -78,6 +79,160 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+// podcastProbeFixture writes a one-episode show whose file holds the ffprobe
+// output for a probed duration, and returns the show folder and episode path.
+func podcastProbeFixture(t *testing.T, dir, duration string) (string, string) {
+	t.Helper()
+	showDir := filepath.Join(dir, "Show")
+	if err := os.Mkdir(showDir, 0o755); err != nil {
+		t.Fatalf("mkdir show: %v", err)
+	}
+	path := filepath.Join(showDir, "01.mp3")
+	if err := os.WriteFile(path, []byte(podcastProbeJSON(duration)), 0o644); err != nil {
+		t.Fatalf("write episode: %v", err)
+	}
+	return showDir, path
+}
+
+func podcastProbeJSON(duration string) string {
+	return `{"format":{"format_name":"mp3","duration":"` + duration + `","tags":{"album":"Show","title":"One","track":"1"}},` +
+		`"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3"}]}`
+}
+
+func TestParsePodcastShowReprobesAFileReplacedDuringTheProbe(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file. The first time, it then renames a
+	// waiting replacement over the file with the same size and mtime, as an
+	// atomic replacement written while ffprobe reads the file would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"if [ -e \"$last.next\" ]; then touch -r \"$last\" \"$last.next\"; mv \"$last.next\" \"$last\"; fi\n")
+	showDir, path := podcastProbeFixture(t, dir, "61")
+	if err := os.WriteFile(path+".next", []byte(podcastProbeJSON("62")), 0o644); err != nil {
+		t.Fatalf("write replacement: %v", err)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 {
+		t.Fatalf("got %d episodes, want 1", len(got.Episodes))
+	}
+	ep := got.Episodes[0]
+	if ep.Probe == nil || ep.Probe.Duration != 62 {
+		t.Fatalf("probe = %+v, want the replacement's 62-second probe", ep.Probe)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat episode: %v", err)
+	}
+	if ep.Size != after.Size() || !ep.ModTime.Equal(normalizeFileModifiedAt(after.ModTime())) {
+		t.Fatalf("recorded size %d mtime %v, want the replacement's %d %v",
+			ep.Size, ep.ModTime, after.Size(), normalizeFileModifiedAt(after.ModTime()))
+	}
+}
+
+func TestParsePodcastShowSkipsAFileStillChanging(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file, then grows a "-grow" file, as a
+	// download still being written would. A "-partial" file grows too, but
+	// can't be probed yet, like an M4A whose index isn't written.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"case \"$last\" in *-grow.mp3) printf ' ' >> \"$last\";; *-partial.mp3) printf ' ' >> \"$last\"; exit 1;; esac\n")
+	showDir, stable := podcastProbeFixture(t, dir, "61")
+	if err := os.WriteFile(filepath.Join(showDir, "02-grow.mp3"), []byte(podcastProbeJSON("62")), 0o644); err != nil {
+		t.Fatalf("write growing episode: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "03-partial.mp3"), []byte(podcastProbeJSON("63")), 0o644); err != nil {
+		t.Fatalf("write partial episode: %v", err)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 || got.Episodes[0].Path != stable {
+		t.Fatalf("episodes = %+v, want only the stable %s", got.Episodes, stable)
+	}
+
+	// A show whose only episodes are still changing fails for this scan.
+	if err := os.Remove(stable); err != nil {
+		t.Fatalf("remove stable episode: %v", err)
+	}
+	if _, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil); !errors.Is(err, errPodcastFileChanging) {
+		t.Fatalf("parsePodcastShow error = %v, want errPodcastFileChanging", err)
+	}
+}
+
+// A show folder whose name needs fspath encoding is listed encoded, and its
+// episodes are still stat'ed and probed by their real names.
+func TestParsePodcastShowReadsAnEncodedShowName(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n")
+	// A Latin-1 name, as older tools write one. A file system that takes only
+	// UTF-8 names, such as APFS, gets a name holding a code point from
+	// fspath's reserved range instead, which is escaped the same way.
+	showDir := ""
+	for _, name := range []string{"B\xe5rd", "B\U0010FE80rd"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o755); err == nil {
+			showDir = filepath.Join(dir, name)
+			break
+		}
+	}
+	if showDir == "" {
+		t.Skip("file system takes no name that needs encoding")
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "01.mp3"), []byte(podcastProbeJSON("61")), 0o644); err != nil {
+		t.Fatalf("write episode: %v", err)
+	}
+	encoded := fspath.Encode(showDir)
+	if encoded == showDir {
+		t.Fatalf("%q needs no encoding", showDir)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, encoded, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 || got.Episodes[0].Path != filepath.Join(encoded, "01.mp3") {
+		t.Fatalf("episodes = %+v, want the one episode under the encoded show path", got.Episodes)
+	}
+	if ep := got.Episodes[0]; ep.Probe == nil || ep.Probe.Duration != 61 || ep.Size == 0 {
+		t.Fatalf("probe = %+v, size %d; want the 61-second probe and the file's size", ep.Probe, ep.Size)
+	}
+}
+
+func TestPodcastShowFolder(t *testing.T) {
+	roots := []string{"/media/podcasts", "/media/more-podcasts", "/media/more-podcasts/nested"}
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "show folder", path: "/media/podcasts/Show A", want: "/media/podcasts/Show A"},
+		{name: "episode file", path: "/media/podcasts/Show A/Episode 2.mp3", want: "/media/podcasts/Show A"},
+		{name: "folder inside a show", path: "/media/podcasts/Show A/extras/bonus", want: "/media/podcasts/Show A"},
+		{name: "unclean path", path: "/media/podcasts//Show A/./extras/", want: "/media/podcasts/Show A"},
+		{name: "second root", path: "/media/more-podcasts/Show B/Episode 1.mp3", want: "/media/more-podcasts/Show B"},
+		{name: "most specific nested root", path: "/media/more-podcasts/nested/Show C", want: "/media/more-podcasts/nested/Show C"},
+		{name: "nested library root", path: "/media/more-podcasts/nested", want: ""},
+		{name: "library root", path: "/media/podcasts", want: ""},
+		{name: "library root with trailing slash", path: "/media/podcasts/", want: ""},
+		{name: "sibling with a root's name as prefix", path: "/media/podcasts-old/Show A", want: ""},
+		{name: "outside every root", path: "/srv/Show A", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := podcastShowFolder(tt.path, roots); got != tt.want {
+				t.Fatalf("podcastShowFolder(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "02.mp3"), []byte("audio"), 0o644); err != nil {
@@ -124,54 +279,5 @@ func TestListPodcastShowAudioFilesVanishedShowSignalsNoMedia(t *testing.T) {
 	_, err := listPodcastShowAudioFiles(gone, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("vanished show error = %v, want errFolderHasNoMedia", err)
-	}
-}
-
-func TestResolvePodcastMediaItemReusesRootScopedContentID(t *testing.T) {
-	finder := &fakeRootContentFinder{contentID: "podcast-root-id"}
-	writer := &fakeFilesystemItemWriter{}
-
-	got, err := resolvePodcastMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		8,
-		"/library/Same Show",
-		&parsedPodcastShow{Title: "Same Show", Year: 0, Author: "Host A"},
-	)
-	if err != nil {
-		t.Fatalf("resolvePodcastMediaItem: %v", err)
-	}
-	if got != "podcast-root-id" {
-		t.Fatalf("contentID = %q, want root-scoped id", got)
-	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
-	}
-}
-
-func TestResolvePodcastMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
-	finder := &fakeRootContentFinder{}
-	writer := &fakeFilesystemItemWriter{}
-
-	got, err := resolvePodcastMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		8,
-		"/library/Another Same Show",
-		&parsedPodcastShow{Title: "Same Show", Year: 0, Author: "Host B"},
-	)
-	if err != nil {
-		t.Fatalf("resolvePodcastMediaItem: %v", err)
-	}
-	if got == "" {
-		t.Fatal("contentID is empty")
-	}
-	if len(writer.upserts) != 1 {
-		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
-	}
-	if writer.upserts[0].ContentID != got || writer.upserts[0].Type != "podcast" {
-		t.Fatalf("upserted item = %+v, contentID %q", writer.upserts[0], got)
 	}
 }

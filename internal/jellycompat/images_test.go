@@ -809,6 +809,46 @@ func TestHandleItemImagePresignsOnlyRequestedType(t *testing.T) {
 	}
 }
 
+// A season's backdrop on a cold node (no tag, nothing in the route cache) is
+// the season's own when it has one and the series' otherwise, as season detail
+// serves it.
+func TestHandleItemImageSeasonBackdropPrefersTheSeasonsOwn(t *testing.T) {
+	codec := NewResourceIDCodec()
+	series := &models.MediaItem{ContentID: "series-1", Type: "series", BackdropPath: "tmdb/series/1/backdrop/original.ghi.webp"}
+	routeID := codec.EncodeStringID(EncodedIDSeason, "season-2")
+
+	tests := []struct {
+		name           string
+		seasonBackdrop string
+		wantPrefix     string
+	}{
+		{name: "own backdrop", seasonBackdrop: "tmdb/series/1/season/2/backdrop/original.def.webp", wantPrefix: "tmdb/series/1/season/2/backdrop/"},
+		{name: "no backdrop of its own", wantPrefix: "tmdb/series/1/backdrop/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			season := &models.Season{ContentID: "season-2", SeriesID: "series-1", SeasonNumber: 2, BackdropPath: tt.seasonBackdrop}
+			detailSvc := &catalog.DetailService{}
+			detailSvc.SetImageResolver(&countingImageResolver{})
+			h := &ImagesHandler{
+				codec:      codec,
+				images:     NewImageCache(time.Hour, time.Now),
+				itemRepo:   fakeImageItemRepo{item: series},
+				seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{"season-2": season}},
+				detailSvc:  detailSvc,
+			}
+
+			rec := requestItemImage(h, routeID, "Backdrop", "")
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, body = %s; want 302", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Location"); !strings.HasPrefix(got, "https://cdn.example.test/"+tt.wantPrefix) {
+				t.Fatalf("Location = %q, want the image under %q", got, tt.wantPrefix)
+			}
+		})
+	}
+}
+
 // TestSearchHintImageTagResolvesThroughTagCache pins why the cache keeps its
 // tag map when image tags are signed: /Search/Hints emits URL-derived tags,
 // which only the tag map can answer for a sessionless image request. The

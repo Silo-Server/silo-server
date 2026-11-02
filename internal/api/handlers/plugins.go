@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -646,8 +648,12 @@ func (h *PluginHandler) HandleCancelChunkedUpload(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) (*plugins.InstallResult, error) {
-	zipUpload, err := isZipUploadFile(path)
+// installUploadedPlugin installs the upload in file. A zip archive is
+// installed from path, which names the same file, because the archive
+// installer reads by path; a bare binary is read from file itself, so the
+// binary that gets executed is the one that was uploaded.
+func (h *PluginHandler) installUploadedPlugin(ctx context.Context, file *os.File, path string) (*plugins.InstallResult, error) {
+	zipUpload, err := isZipUploadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +663,7 @@ func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) 
 		})
 	}
 
-	uploadData, err := os.ReadFile(path)
+	uploadData, err := io.ReadAll(io.NewSectionReader(file, 0, math.MaxInt64))
 	if err != nil {
 		return nil, fmt.Errorf("read uploaded plugin binary: %w", err)
 	}
@@ -703,16 +709,10 @@ func isZipUpload(data []byte) bool {
 		bytes.Equal(data[:4], []byte("PK\x07\x08"))
 }
 
-func isZipUploadFile(path string) (bool, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return false, fmt.Errorf("open uploaded plugin file: %w", err)
-	}
-	defer file.Close()
-
+func isZipUploadFile(file io.ReaderAt) (bool, error) {
 	var header [4]byte
-	n, err := io.ReadFull(file, header[:])
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	n, err := file.ReadAt(header[:], 0)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read uploaded plugin header: %w", err)
 	}
 	return isZipUpload(header[:n]), nil
@@ -1176,6 +1176,13 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
 			continue
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			// Its files are missing, for example because a damaged stored
+			// archive couldn't restore them. It has no settings to read and
+			// must not hide the other plugins either.
+			slog.WarnContext(ctx, "skipping plugin with no installed manifest", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1403,12 +1410,25 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	taskBindings []*plugins.TaskBinding,
 	repositoriesByID map[int]*plugins.Repository,
 ) (PluginInstallationView, error) {
+	var unreadableArchive string
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		// A row admitted before the identity check never loads; list it
-		// without its manifest so the admin can still uninstall it.
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+		// A row admitted before the identity check, or one whose stored
+		// archive is damaged, never loads. List it without its manifest so
+		// one broken plugin doesn't fail the whole list and the admin can
+		// still turn it off or uninstall it.
+		// An archive whose own manifest has an invalid identity matches both
+		// sentinels, so check the archive first; a row with an invalid identity
+		// fails before its archive is read and matches only the second.
+		switch {
+		case errors.Is(err, plugins.ErrArchiveUnreadable):
+			// The message can quote the archive's own contents; mask any
+			// credential assignment before it is logged or returned.
+			unreadableArchive = logredact.SanitizeText(err.Error())
+			slog.WarnContext(ctx, "listing plugin without its manifest", "component", "api", "installation_id", installation.ID, "plugin_id", installation.PluginID, "error", unreadableArchive)
+		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
+		default:
 			return PluginInstallationView{}, err
 		}
 	}
@@ -1461,6 +1481,12 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 					runtime.Resident = true
 				}
 			}
+		}
+		// A plugin that isn't running can't start from an archive that won't
+		// load, so show it as failed and say why.
+		if unreadableArchive != "" && state.State == plugins.ResidentStopped {
+			runtime.State = string(plugins.ResidentFailed)
+			runtime.LastError = unreadableArchive
 		}
 	}
 

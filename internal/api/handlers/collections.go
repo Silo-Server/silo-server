@@ -41,6 +41,10 @@ type CollectionHandler struct {
 	// uploaded or imported poster shows; nil when artwork storage is not
 	// configured.
 	Collages *catalog.PersonalCollectionCollages
+	// MemberCounts counts the members a viewer sees in hand-picked and
+	// imported collections and remembers the counts between reads; nil
+	// counts on every read.
+	MemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 // itemPosterSigner resolves item poster paths to delivery URLs in one batch;

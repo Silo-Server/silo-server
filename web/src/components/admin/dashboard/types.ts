@@ -27,7 +27,8 @@ export type WidgetId =
   | "downloads"
   | "scan-activity"
   | "recent-errors"
-  | "recent-activity";
+  | "recent-activity"
+  | "api-clients";
 
 /**
  * The window a metric widget covers.

@@ -1496,40 +1496,42 @@ func ladderCandidateRowsSQL() string {
 `)
 }
 
-// EnqueueLadderBackfill queues a bounded batch of cached artwork that is still
-// missing the rung its image type gained at the current
-// artworkkey.LadderVersion, so the cacher regenerates it.
+// ladderCandidateHeldSQL is true when ladder candidate ac already has a job for
+// the same source that a batch must leave alone: one that is queued or running,
+// or one that failed and is parked until its cooldown ends. The upsert counts a
+// queued or running row as enqueued without making it due, so letting one into a
+// batch would keep RunLadderBackfill enqueueing work it cannot drain, and parked
+// rows could fill a batch and end the sweep before it reaches artwork it can
+// enqueue.
 //
-// It is the mirror image of EnqueueExistingProviderArtwork: that sweep looks for
-// artwork with no cached destination, this one looks for artwork whose
-// destination exists but predates a rung.
-//
-// The LEFT JOIN below is deduplication only — it keeps a row that already has a
-// queued or running job from being enqueued twice. It is deliberately NOT the
-// completion signal: a row held by another node's in-flight job is absent here
-// but is not done. HasLadderBackfillRemaining answers that question instead.
-func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
-	if r == nil || r.pool == nil || limit <= 0 {
-		return 0, nil
-	}
-	query := `
+// Only those jobs can hold a candidate, and on a cached catalog they are a few
+// rows beside hundreds of thousands of succeeded ones. Looking for them alone
+// keeps Postgres from hashing the whole job table on every batch, which spills
+// to temporary files once that table outgrows work_mem.
+const ladderCandidateHeldSQL = `EXISTS (
+				SELECT 1
+				FROM metadata_image_cache_jobs j
+				WHERE j.target_type = ac.target_type
+				  AND j.target_content_id = ac.target_content_id
+				  AND j.image_type = ac.image_type
+				  AND j.target_language = ac.target_language
+				  AND j.source_path = ac.source_path
+				  AND (
+					  j.status IN ('queued', 'running')
+					  OR (j.status = 'failed' AND j.next_attempt_at > NOW())
+				  )
+			)`
+
+// ladderBackfillBatchSQL selects the next EnqueueLadderBackfill batch: at most
+// $1 ladder candidates that no job holds, in a stable order.
+func ladderBackfillBatchSQL() string {
+	return `
 		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
 		),
 		candidates AS (
 			SELECT ac.*
 			FROM all_candidates ac
-			LEFT JOIN metadata_image_cache_jobs j
-			  ON j.target_type = ac.target_type
-			 AND j.target_content_id = ac.target_content_id
-			 AND j.image_type = ac.image_type
-			 AND j.target_language = ac.target_language
-			WHERE j.id IS NULL
-			   OR j.source_path IS DISTINCT FROM ac.source_path
-			   OR j.status = 'succeeded'
-			   OR (
-				   j.status = 'failed'
-				   AND j.next_attempt_at <= NOW()
-			   )
+			WHERE NOT ` + ladderCandidateHeldSQL + `
 			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
 			LIMIT $1
 		)
@@ -1540,8 +1542,25 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
 	`
+}
 
-	rows, err := r.pool.Query(ctx, query, limit)
+// EnqueueLadderBackfill queues a bounded batch of cached artwork that is still
+// missing the rung its image type gained at the current
+// artworkkey.LadderVersion, so the cacher regenerates it.
+//
+// It is the mirror image of EnqueueExistingProviderArtwork: that sweep looks for
+// artwork with no cached destination, this one looks for artwork whose
+// destination exists but predates a rung.
+//
+// The batch's job check is deduplication only: it keeps a row whose job is queued,
+// running, or parked after failing from being enqueued again. It is deliberately NOT the
+// completion signal: a row held by another node's in-flight job is absent here
+// but is not done. HasLadderBackfillRemaining answers that question instead.
+func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return 0, nil
+	}
+	rows, err := r.pool.Query(ctx, ladderBackfillBatchSQL(), limit)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing artwork ladder backfill: %w", err)
 	}

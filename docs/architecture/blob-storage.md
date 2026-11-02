@@ -32,9 +32,19 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
+| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}`, in the operational store (see below) |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+
+Kept embedded subtitle tracks come from users' media and are never delivered to
+browsers, so they are kept in the operational store, never in a bucket whose
+objects can be read outside the server's own authorization. With no operational
+store (an S3 backend with no private bucket), they use the assets bucket only
+while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
+`cloudflare_token` delivery nothing is kept, and tracks are read through their
+index or demuxed instead. The blob collector and sweep reach them in whichever
+store holds them (`blobgc.Namespace.Store`).
 
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
@@ -60,7 +70,11 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 
 Images generated from a media file (chapter thumbnails, under
 `chapter-images/<media_files.id>/`) are deleted with their file
-(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+(`internal/blobgc`). Kept embedded subtitle tracks go the same way: a trigger
+on `embedded_subtitle_tracks` queues a stream's exact key whenever its row
+goes, by replacement, by a rescan that finds the file changed, or by the
+cascade from the file's deletion, and the sweep lists them by file
+(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due groups whose namespace reports them

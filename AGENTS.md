@@ -167,7 +167,7 @@ what goes in it.
 
 `make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`, `make migrate-status`
 / `make migrate-up` — read the `Makefile` for the rest. Local services:
-`docker compose -f docker-compose.dev.yml up -d postgres redis`.
+`docker compose -f dev/compose.yml up -d postgres redis`.
 
 While iterating, run the focused tests for the packages you touched (`go test ./internal/<pkg>/...`)
 rather than the whole suite; the full gate below is for pre-PR. In tests, wait on observable

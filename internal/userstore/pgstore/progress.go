@@ -1295,7 +1295,7 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Shared with RemoveHistoryItems. The next statement gets a fresh READ
 	// COMMITTED snapshot after any concurrent import or hide has committed.
-	if err := lockImportedHistory(ctx, tx, s.userID, entry.ProfileID); err != nil {
+	if err := LockHistoryCutoff(ctx, tx, s.userID, entry.ProfileID); err != nil {
 		return false, err
 	}
 	// The watermark is compared at full precision ($5), so an import later in
@@ -1339,9 +1339,12 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	return tag.RowsAffected() > 0, nil
 }
 
-// A profile-scoped database lock serializes imported-history deduplication and
-// hiding across API nodes. Hash collisions only serialize unrelated profiles.
-func lockImportedHistory(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+// LockHistoryCutoff serializes a profile's history imports, resets, and
+// cutoff-aware progress writes across API nodes. Read the cutoff in a separate
+// statement after acquiring this lock under READ COMMITTED, so a concurrent
+// reset's committed cutoff is visible. Hash collisions only serialize unrelated
+// profiles.
+func LockHistoryCutoff(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::integer, hashtext('imported-history:' || $2))`, userID, profileID)
 	if err != nil {
 		return fmt.Errorf("lock imported history: %w", err)
@@ -1650,7 +1653,7 @@ func (s *PostgresUserStore) raiseHistoryCutoffs(ctx context.Context, tx pgx.Tx, 
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	if err := lockImportedHistory(ctx, tx, s.userID, profileID); err != nil {
+	if err := LockHistoryCutoff(ctx, tx, s.userID, profileID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

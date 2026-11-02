@@ -33,8 +33,10 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on. When that is the server's local-network origin (a local
-route), clients send the probe with the saved server's credentials and trust,
+the request arrived on. A reverse proxy that rewrites `Host` to a bare IP
+address and sends no `X-Forwarded-Host` leaves only the address it dialed;
+then the URL is on `server.public_url` when one is configured. When the origin
+is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust,
 as they do for any request to that server. The response also adds the speed
 test schedule:
 `bandwidth_probe_automatic` (the `playback.bandwidth_probe_automatic` server
@@ -362,7 +364,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
@@ -377,7 +379,8 @@ client re-presents
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`.
+terminated session answers `410 playback_session_ended`. A subtitle sidecar the
+node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

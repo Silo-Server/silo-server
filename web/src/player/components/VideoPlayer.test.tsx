@@ -4664,9 +4664,9 @@ describe("VideoPlayer translation handoff", () => {
         },
       }),
     );
-    expect(toastError).toHaveBeenCalledExactlyOnceWith(
-      "Subtitle processing failed: Source subtitle unavailable",
-    );
+    expect(toastError).toHaveBeenCalledExactlyOnceWith("Subtitle processing failed", {
+      description: "Source subtitle unavailable",
+    });
     expect(controls.current?.activeSubtitleIndex).toBeNull();
     expect(subtitleTimeline.liveKey).toBeNull();
   });
@@ -5015,9 +5015,9 @@ describe("VideoPlayer translation handoff", () => {
     expect(subtitleTimeline.liveKey).toBeNull();
     expect(subtitleTimeline.liveCues).toEqual([]);
     expect(controls.current?.activeSubtitleIndex).toBeNull();
-    expect(toastError).toHaveBeenCalledWith(
-      "Subtitle processing failed: Transcription unavailable",
-    );
+    expect(toastError).toHaveBeenCalledWith("Subtitle processing failed", {
+      description: "Transcription unavailable",
+    });
   });
 
   it("selects the refreshed downloaded track and clears the live overlay", async () => {

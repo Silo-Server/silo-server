@@ -14,22 +14,9 @@ source /etc/silo-omnibus/lib.sh
 if [[ -e /config/.compose-migration-pending ]]; then
   cat >&2 <<'MSG'
 A move from the multi-container Compose stack into /config was interrupted
-(/config/.compose-migration-pending is present). Run `docker compose up -d`
-without --no-deps so the Compose file's postgres service can finish it.
-MSG
-  exit 1
-fi
-
-# With Silo's database elsewhere no cluster is created below, but the
-# migration still moves Silo's directories, so Silo waits for it the same way
-# under REQUIRE_COMPOSE_MIGRATION.
-if ! enabled postgres && truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
-  cat >&2 <<'MSG'
-The Compose file's postgres service has not yet checked SILO_DATA_ROOT for an
-earlier multi-container install to move here (/config/.compose-migration-checked
-is missing). Silo was likely started on its own, as `docker compose up -d
---no-deps silo` does. Run `docker compose up -d` once without --no-deps; later
-updates can use --no-deps again.
+(/config/.compose-migration-pending is present). Run the move again to finish
+it; see "Moving from the multi-container stack" in
+docs/architecture/omnibus-image.md.
 MSG
   exit 1
 fi
@@ -75,21 +62,6 @@ MSG
   own_tree postgres postgres "$PGDATA"
   s6-setuidgid postgres chmod 0700 "$PGDATA"
 else
-  # docker-compose.yml runs migrate-compose-stack before Silo to move an
-  # install of the multi-container stack here, and sets this so that Silo
-  # started without it (up --no-deps) does not create an empty cluster first.
-  # That step leaves the marker whenever it finishes, whatever it found.
-  if truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
-    cat >&2 <<'MSG'
-/config/postgres/data holds no database, and the Compose file's postgres service
-has not yet checked SILO_DATA_ROOT for an earlier multi-container install to move
-here (/config/.compose-migration-checked is missing). Silo was likely started on
-its own, as `docker compose up -d --no-deps silo` does. Run `docker compose up -d`
-once without --no-deps so the postgres service can move an earlier install;
-later updates can use --no-deps again.
-MSG
-    exit 1
-  fi
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
   # The directory can already exist, empty: a bind mount, or a directory
   # created ahead of the first start.

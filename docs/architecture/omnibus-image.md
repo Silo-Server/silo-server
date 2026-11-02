@@ -1,23 +1,41 @@
 # Omnibus image
 
-The omnibus image is the regular Silo image plus PostgreSQL, and optional Redis
-and Meilisearch, in one container supervised by
+The omnibus image is Silo's Docker image, published as
+`ghcr.io/silo-server/silo-server`: the base Silo image plus PostgreSQL, and
+optional Redis and Meilisearch, in one container supervised by
 [s6-overlay](https://github.com/just-containers/s6-overlay). It serves
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
-main server and `docker-compose.node.yml` a node.
+main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
+and `NODE_URL`. Hardware transcoding and node access are commented out in it.
+`docker-compose.advanced.yml` is the earlier multi-container file, kept for
+installs that stay on that layout; it runs the same image, whose bundled
+services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
 
 ## Build
 
-The `omnibus` job in `.github/workflows/docker.yml` runs after the regular
-image's manifest list is pushed. It builds `omnibus/Dockerfile` with
-`SILO_IMAGE` set to that commit's regular image and publishes the regular tags
-with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`). In place
-of `latest` it moves `aio`; it takes over `latest` only once validated for
-every install, in a later change.
+The `merge` job in `.github/workflows/docker.yml` pushes the base image, built
+from the root `Dockerfile`, under one tag, `<full SHA>-base`; no other tag
+names it. The `omnibus` job then builds `omnibus/Dockerfile` with `SILO_IMAGE`
+set to that tag and publishes the result as `<full SHA>`, plus `build-N` and
+`latest` on the default branch or `apiv2` on the `apiv2` branch.
 
-Because the omnibus image starts from the regular one, both run the same Silo
+Builds from before this layout published the base image under those tags and
+the omnibus image under the same tags with `-aio` added, with `aio` in place of
+`latest`. Those tags still exist and `aio` no longer moves. Rolling back to
+such a build means pinning its `build-N-aio`: its `build-N` is the base image,
+which has no PostgreSQL or s6.
+
+The omnibus image is not a drop-in replacement for the base image, which an
+install that pulled `latest` before this layout ran. It runs Silo as `PUID` (911 unless set) instead of root, so media that only root could
+read becomes unreadable; re-owns the bind-mounted Silo, transcode, and download
+directories to that account on first start; and starts `/init` rather than
+`silo`. `/init` needs root, so a deployment that sets a container `user:` or a
+Kubernetes `runAsUser` must also set the entrypoint to `silo` (see
+[Starting without root](#starting-without-root)).
+
+Because the omnibus image starts from the base one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
 it that way: a runtime dependency Silo needs belongs in the root `Dockerfile`,
 and `omnibus/Dockerfile` adds only the bundled services and s6. The base changes
@@ -39,7 +57,9 @@ Two versions are load-bearing for existing installs:
 The s6-rc services under `omnibus/rootfs/etc/s6-overlay/s6-rc.d` start in this
 order:
 
-1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`. The path
+1. `init-envfile` stops a start as any uid but 0 with a pointer to
+   [Starting without root](#starting-without-root), since every init script
+   needs root. It turns each `FILE__NAME=/path` variable into `NAME`. The path
    must resolve, outside `/config`, to a regular file that group and others
    cannot write and that no service account owns, in directories only root can
    change (sticky directories count); otherwise a service account could point
@@ -67,7 +87,12 @@ order:
    `svc-meilisearch` start alongside. A service that is off reports ready and
    sleeps, so the dependency graph stays fixed.
 5. `svc-silo` runs Silo once the database exists and the enabled services
-   are ready.
+   are ready. It passes a granted NET_ADMIN to `silo` as an ambient capability
+   through `setpriv`, so Silo's startup helper can configure client sockets.
+   If `setpriv` fails, including when the ambient raise is refused, `svc-silo`
+   starts Silo through `s6-setuidgid` without the grant, so a refusal never
+   keeps Silo from starting. Silo then holds only the bounding bit and enables
+   `no_new_privs` to contain its child processes.
 
 s6 stops services in reverse order, so Silo drains before PostgreSQL's fast
 shutdown. `svc-silo` and `svc-postgres` have no stop timeout of their own; the
@@ -85,6 +110,31 @@ same `/config` refuses to start PostgreSQL. Bundled Redis keeps an append-only
 file (`appendfsync everysec`), forced on the command line even with a
 `redis.conf`: a snapshot alone can restore a playback session older than its
 revocation. A host crash can still lose about a second of writes.
+
+## Starting without root
+
+The init scripts only do container work: map the `silo` account onto `PUID`,
+lay out `/config`, hand directories to the service accounts, and run the
+bundled services. What Silo needs to behave correctly, including refusing a
+configuration it cannot run with, belongs in the `silo` binary. Keep it there,
+so that a container started with `silo` as its entrypoint, or an image built
+around the binary, behaves the same as this one.
+
+A container started with `silo` as its entrypoint and a non-root uid runs
+none of the init, so code in the binary must not rely on what the init does:
+
+- Nothing creates `/config/silo`, maps `PUID`, or re-owns a directory. Silo's
+  storage refuses a root reached through the dangling `/var/lib/silo` link
+  rather than writing somewhere else.
+- No bundled services, `FILE__` loading, GPU group discovery, or supervisor.
+- The working directory is `/`, and Docker sets `HOME` to `/` for a uid with no
+  passwd entry. That is why the Jellyfin Web installer keeps npm's cache in its
+  own workspace.
+- NET_ADMIN added to the container does not reach a non-root process, so Silo
+  starts without its helper (see [TCP congestion control](tcp-congestion.md)).
+
+How to deploy this way is in the user manual:
+[Run Silo without root](https://siloserver.org/docs/docker#run-silo-without-root).
 
 ## Accounts and data
 
@@ -125,7 +175,10 @@ the database role.
 PostgreSQL listens only on `/run/postgresql`. The `silo` role is the cluster's
 superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
-migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
+migrations create the `vector`, `pg_trgm`, and `citext` extensions.
+`00-omnibus.conf` preloads `pg_stat_statements`, as the shipped Compose files
+do, and a migration creates that extension only on a server that preloads it,
+so an external PostgreSQL without it is left alone. The cluster
 uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the earlier
 multi-container Compose stack. Each database records the C library collation version it was built
 under, and an index on text sorted under another version can miss rows. On
@@ -173,17 +226,20 @@ working.
 ## Nodes
 
 The same image runs a proxy or transcode node. With `MODE=proxy` or
-`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`, starts
-none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
+`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`,
+starts none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
 and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
 `POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
 changes the shared database's schema or settings. `/config` holds the node's
-own state. An administrator adds the node on the main server, which then checks
-its health over `NODE_URL`.
+own state. Silo itself refuses to start either mode without `NODE_URL`, the
+node's identity. An administrator registers the node's URL on the main server,
+which checks the node's health at that registered URL; it can differ from
+`NODE_URL` (see [Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
 
-A main server shares its bundled services with nodes when
-`ENABLE_NODE_ACCESS=true`, which `docker-compose.node-access.yml` sets
-alongside publishing ports 5432 and 6379 on `NODE_ACCESS_HOST`:
+A main server shares its bundled services with nodes when `.env` sets
+`ENABLE_NODE_ACCESS=true` and the two commented port lines in
+`docker-compose.yml` are uncommented to publish 5432 and 6379 on
+`NODE_ACCESS_HOST`:
 
 - PostgreSQL also listens on every interface (`conf.d/01-node-access.conf`),
   and `pg_hba.conf` gains `host silo silo all scram-sha-256`.
@@ -210,12 +266,34 @@ until their `DATABASE_URL` names `silo`. Their `REDIS_URL` gains the password.
 Before the omnibus image, `docker-compose.yml` ran PostgreSQL
 (`pgvector/pgvector:pg18`), Redis, and Meilisearch as services of their own,
 with data in `SILO_DATA_ROOT/postgres`, `redis`, and `meilisearch`, and Silo's
-state in `plugins`, `artwork`, and `compat`. The current file keeps services
-named `postgres`, `redis`, and `meilisearch`, so `docker compose up` replaces the
-old containers, which stops them, and Silo waits for all three to exit
-successfully. `redis` and `meilisearch` exit at once. `postgres` runs
-`/etc/silo-omnibus/migrate-compose-stack` with `SILO_DATA_ROOT` mounted at
-`/silo-data`, which works within that one mount so it can hard-link:
+state in `plugins`, `artwork`, and `compat`. That file is now
+`docker-compose.advanced.yml` (briefly `docker-compose.split.yml`), and an
+install of that layout keeps it by selecting it in `COMPOSE_FILE`. A
+`COMPOSE_FILE` that still names `docker-compose.split.yml` fails until it names
+the new file.
+
+`docker-compose.yml` is an example of a new install and does not look for an
+earlier one. Started on its `SILO_DATA_ROOT`, it replaces the earlier `silo`
+container and creates a new, empty bundled database, with first-run setup open
+on the published ports. The earlier `postgres`, `redis`, and `meilisearch`
+containers keep running as orphans of the Compose project, their data
+untouched; selecting `docker-compose.advanced.yml` and running
+`docker compose up -d` again brings the install back.
+
+Moving an install into the single container is a separate step that an
+administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
+earlier stack stopped. With `.env` still holding the earlier stack's
+settings, and `COMPOSE_FILE` removed from it once the stack is down:
+
+```sh
+docker compose -f docker-compose.advanced.yml down
+docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
+  --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
+docker compose up -d
+```
+
+`docker compose run` gives the script the `silo` service's `.env` and `PUID`,
+and the script works within the one mount so it can hard-link:
 
 - Silo's three directories are hard-linked into `config/silo`, or copied when
   hard links fail across file systems. This happens with an external
@@ -241,16 +319,18 @@ successfully. `redis` and `meilisearch` exit at once. `postgres` runs
   `postgres` in the copy, unless `ENABLE_MEILISEARCH` is on, in which case
   `init-config` hands Silo the bundled instance.
 
-It does nothing when the omnibus install already has a database of its own
-and none of the earlier stack is here, and refuses, before anything is moved
-into place, when:
+It reports nothing to move when the install was already moved, or when an
+omnibus install has a database of its own and none of the earlier stack is
+here. It refuses, before anything is moved into place, when:
 
+- No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
+  or other paths, which have to move there first.
 - A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
-  `aio` past the pin.
+  `latest` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
   the earlier stack's cluster or Silo directories are here: Silo created that
-  database first, most likely when started with `--no-deps` before this step.
+  database first, most likely when `docker-compose.yml` started before the move.
   Copying over it would drop what it holds, and going on would leave the
   earlier install behind unannounced. The message says to move
   `config/postgres/data` aside and start again if it holds nothing needed, or
@@ -266,10 +346,6 @@ into place, when:
 - `plugins`, `artwork`, or `compat` in `SILO_DATA_ROOT` is a symbolic link,
   which the earlier stack's bind mount followed but this mount cannot, or is
   not a directory.
-- None of the earlier stack's data is here but `.env` sets `POSTGRES_PASSWORD`
-  (without node access) or `SILO_IMAGE`, which only it used: its data is in
-  named volumes or other paths, and starting would make an empty server
-  beside it.
 - The earlier install's directories exist without a cluster and `DATABASE_URL`
   is unset, or `.env` sets a `DATABASE_URL` beside the earlier stack's cluster:
   the earlier file set `DATABASE_URL` for Silo itself, so that cluster is the
@@ -322,27 +398,16 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- Every run that succeeds, including one that finds nothing to move, then
-  leaves a root-owned `/config/.compose-migration-checked`. The `silo` service
-  sets `REQUIRE_COMPOSE_MIGRATION`, under which `init-postgres` refuses to
-  create a cluster in an empty `/config/postgres/data` until that marker
-  exists, and with an external `DATABASE_URL`, where the migration moves only
-  Silo's directories, refuses to start Silo until it exists. The user manual's update command, `docker compose up -d --no-deps
-  silo`, skips this step, and on the first update onto this file Silo would
-  otherwise come up on a new, empty database in front of the earlier install.
-  Instead it exits and asks for one `docker compose up -d` without
-  `--no-deps`; later updates can skip the step again. The migration removes the
-  empty Silo directories `init-config` made on that refused start instead of
-  setting them aside. Without the variable, as
-  under `docker run`, `init-postgres` creates the cluster as before.
-- A run with nothing to move prints nothing.
+- Going back to `docker-compose.advanced.yml` after a move leaves the copy
+  stale. Before using `docker-compose.yml` again, move `config` aside and run
+  the move again; a run on the stale copy refuses (the done marker above).
+- Silo directories that `init-config` made, empty, before the move are
+  removed instead of set aside. A database created beside the old install
+  has to be moved aside by hand (above).
 
-Overrides of the old `postgres`, `redis`, or `meilisearch` services in a
-`docker-compose.override.yml` merge into these one-shot services and can break
-them (an `image` there has no migration script). Compose cannot check that
-before replacing the old containers, so the failure is loud: the `postgres`
-service exits non-zero and Silo does not start. Such overrides have to go
-before the update.
+A `docker-compose.override.yml` that still changes the old `postgres`,
+`redis`, or `meilisearch` services makes Compose reject `docker-compose.yml`,
+which no longer has them. Such overrides have to go before the update.
 
-Remove the three bridge services, and this script, once installs of the
-multi-container stack no longer need an upgrade path.
+Remove this script once installs of the multi-container stack no longer move
+to the single container.

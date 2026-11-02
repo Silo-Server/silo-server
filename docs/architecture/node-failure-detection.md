@@ -40,11 +40,12 @@ acknowledges requests, so nothing fails, and nothing answers. A response
 deadline cannot tell it from a node that is slowly rebuilding a transcode.
 
 `transcodeproxy.DoNode` asks the node instead. Once a call has waited 2 seconds
-for response headers, it probes the node's unauthenticated `/api/v1/health`
-endpoint, and probes again every 3 seconds while the call keeps waiting. Any
-HTTP answer to a probe means the process is serving, and the call keeps
-waiting, however long the node takes. A probe that gets no answer within
-2 seconds is retried at once, so one lost packet does not condemn a live node.
+for response headers or a pending body read, it probes the node's
+unauthenticated `/api/v1/health` endpoint, and probes again every 3 seconds
+while the call keeps waiting. Any HTTP answer to a probe means the process
+is serving, and the call keeps waiting, however long the node takes. A probe
+that gets no answer within 2 seconds is retried at once, so one lost packet
+does not condemn a live node.
 A node that misses both is hung: the call is canceled and fails with
 `nodepool.ErrNodeNotAnswering`, which `nodepool.IsConnectFailure` counts as a
 failure to reach the node. A hung node is found about 6 seconds after the call
@@ -53,17 +54,34 @@ resolve, local socket exhaustion) counts as neither an answer nor a miss, for
 the same reason those errors never mark a node.
 
 Concurrent calls waiting on one node share one probe. A node found hung is
-remembered in the process until a probe or a call gets an answer from it, and
-calls to a remembered node probe at once instead of waiting out the grace and
-take one missed probe as proof, so its other sessions find out within one probe
-timeout.
+remembered in the process until it answers a probe or sends response headers
+or body data. Calls to a remembered node probe at once instead of waiting out
+the grace and take one missed probe as proof, so its other sessions find out
+within one probe timeout.
 
-The watch covers the native API relay, the native transcode start, and the
-proxy relay. On the API it marks the node unreachable like any other failure to
-reach it, and the native relay then moves the transcode (see
+Only reads in progress are watched. Between reads, including while the relay
+writes to a slow viewer, no watch runs. Each read starts its own grace period;
+health probes, missed-probe rules, and the remembered hung state are shared
+with the header watch.
+
+The watch covers the native API relay, the Jellyfin-compatible manifest fetch
+and segment relay, the native transcode start, and the proxy relay. Before
+headers, the API marks the node unreachable like any other failure to reach
+it. The native relay then moves the transcode (see
 [restart-resilient playback](restart-resilient-playback.md#transcode-node-lost-under-the-api-relay)).
-The proxy answers `502` at once, and the client replans; the replan's own probe
-of the session's nodes leaves the hung node out.
+The proxy answers `502` at once, and the client replans. A Jellyfin client
+receives `502` if its segment request fails before headers. After headers, a
+hung body read fails with `nodepool.ErrNodeNotAnswering`. The relay aborts the
+partial response, as it does for any body copy error while the viewer's request
+is live, so a chunked client sees a short body rather than a clean end. The
+response cannot move to another executor. All three relays warn
+with the node and playback session unless the viewer's request is canceled.
+The next native API request finds the remembered hung node through the header
+watch and can move the transcode through the same recovery path. A proxy-origin
+stream needs a client replan, whose own probe of the session's nodes leaves the
+hung node out.
+A Jellyfin client receives the partial segment response and needs to retry or
+replan playback.
 
 ## Marking a node unreachable
 
@@ -121,12 +139,8 @@ and its recheck is the newer evidence. A peer's report is always applied.
 
 ## Known gaps
 
-- The liveness watch ends when response headers arrive. A node that hangs
-  partway through a segment body leaves that response stalled until the client
-  gives up; the client's retry then hits the watch.
-- The Jellyfin-compatible relays and other node calls (capability reads,
-  completion acknowledgements, stops) do not use the liveness watch.
-
+- The Jellyfin-compatible transcode start and other node calls (capability
+  reads, completion acknowledgements, stops) do not use the liveness watch.
 - A sweep that checked a node just before it died can publish it healthy after a
   failed call marked it. The next failed call marks it again.
 - A node that is alive but too loaded to accept a connection within the bound is

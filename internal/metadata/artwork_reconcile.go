@@ -259,10 +259,15 @@ func (s artworkSweepSurface) parseKeys(raw []string) ([]any, error) {
 	return values, nil
 }
 
+// cachedPredicate selects rows whose path is an artwork storage key. Provider
+// URLs ('%://%') and app-relative paths ('/%') are excluded: the latter are
+// bundled frontend assets such as "/images/collection-templates/x.jpg", which
+// have nothing in storage behind them and which blobstore.ValidateKey rejects
+// outright, so checking them would fail every sweep with "invalid key".
 func (s artworkSweepSurface) cachedPredicate() string {
 	predicate := fmt.Sprintf(
-		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%'`,
-		s.pathCol, s.pathCol,
+		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%' AND %s NOT LIKE '/%%'`,
+		s.pathCol, s.pathCol, s.pathCol,
 	)
 	if s.filter != "" {
 		predicate += " AND (" + s.filter + ")"
@@ -347,6 +352,10 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		// sidecar again, or the extra stills task take the frame again.
 		{name: "extra stills", table: "media_extras", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", clearSet: `still_path = '', still_source = '', still_thumbhash = '', still_retry_after = NULL, updated_at = NOW()`},
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
+		// Movie box set artwork; a reset row is served from TMDB until the box
+		// set sync caches it again.
+		{name: "box set posters", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: `poster_path = '', poster_thumbhash = '', updated_at = NOW()`},
+		{name: "box set backdrops", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: `backdrop_path = '', backdrop_thumbhash = '', updated_at = NOW()`},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
 		// to the generated collage (collections) or the default tile (library

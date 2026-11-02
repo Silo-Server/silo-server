@@ -106,6 +106,10 @@
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
 
+# People search: each query is planned for its own words, exact names rank
+# first, and viewer access applies before the limit.
+./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
+
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query, and the PostgreSQL path picks what the general path
 # picks.
@@ -186,6 +190,10 @@
 # Subtree file reads bound file_path on the folder path index under a generic
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+
+# Subtree theme passes read the scanned subtree and probe canonical roots above
+# it on their indexes instead of reading every file in the library.
+./internal/themesongs TestDirectoriesReadsOnlyTheScannedSubtreeDB
 ./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
 
 # Book scans (beta): unchanged files skip without per-file or literary-works
