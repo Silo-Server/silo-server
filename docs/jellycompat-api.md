@@ -68,11 +68,18 @@ Non-null `Rating` or `Likes` values return 400. `PlayCount` accepts only 0 or 1;
 other values return 400. Inaccessible items and another profile's user ID are
 rejected before mutation.
 
-Configuration maps audio language, subtitle language, autoplay, and subtitle
-mode into Silo's canonical profile settings. Field names are case-insensitive;
+Configuration maps audio language, subtitle language, autoplay, subtitle mode,
+and `HidePlayedInLatest` into Silo's canonical profile settings. Field names are case-insensitive;
 duplicate casing variants of the same field return 400. Other declared
 presentation preferences round-trip for clients. Storage failures produce
 errors instead of success responses.
+
+`HidePlayedInLatest` is `home.hide_watched_items`, the profile's "Hide watched
+items from Home" switch, so turning it on in either client applies to both.
+When it is on, `/Items/Latest` requests that don't send `IsPlayed` (or an
+`IsPlayed`/`IsUnplayed` filter) leave out items the profile has watched, as
+Jellyfin does. Jellyfin Web's home Latest rows send neither, so they rely on it.
+A request that sends `IsPlayed` gets what it asked for.
 
 `/UserViews` lists libraries in the profile's native `ui.library_order`, then
 the server's library order. `OrderedViews` then applies Jellyfin's rule: views
