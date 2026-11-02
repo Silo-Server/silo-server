@@ -5101,6 +5101,13 @@ describe("VideoPlayer translation handoff", () => {
   it.each([
     { selection: "no subtitle", initial: [], expected: null, withTrack: true },
     {
+      selection: "a new session receiving an old session event",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      staleSession: true,
+    },
+    {
       selection: "no subtitle for a track without a URL",
       initial: [],
       expected: null,
@@ -5131,8 +5138,8 @@ describe("VideoPlayer translation handoff", () => {
       withTrack: false,
     },
   ])(
-    "keeps an automatic choice of $selection when another viewer adds a track",
-    async ({ initial, expected, withTrack, withoutUrl }) => {
+    "preserves automatic subtitle selection for $selection",
+    async ({ initial, expected, withTrack, withoutUrl, staleSession }) => {
       const onSubtitleTrackChange = vi.fn();
       const onApplySubtitleTrack = vi.fn();
       const onRefreshSubtitles = vi.fn();
@@ -5161,10 +5168,10 @@ describe("VideoPlayer translation handoff", () => {
       act(() => {
         realtimeOptions.current?.onEvent?.({
           type: "event",
-          session_id: "session-1",
+          session_id: staleSession ? "previous-session" : "session-1",
           name: "subtitle_ready",
           payload: {
-            session_id: "session-1",
+            session_id: staleSession ? "previous-session" : "session-1",
             file_id: 7,
             subtitle_id: 44,
             language: "en",
@@ -5179,13 +5186,18 @@ describe("VideoPlayer translation handoff", () => {
           },
         });
       });
-      expect(withTrack ? onApplySubtitleTrack : onRefreshSubtitles).toHaveBeenCalledOnce();
       rerenderPlayer({ subtitleUrls: [...initial, added] });
 
       await act(async () => Promise.resolve());
       expect(controls.current?.subtitleTracks).toContainEqual(added);
-      expect(controls.current?.activeSubtitleIndex).toBe(expected);
-      expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(added.index, expect.any(Number));
+      expect(controls.current?.activeSubtitleIndex).toBe(staleSession ? added.index : expected);
+      if (staleSession) {
+        expect(onApplySubtitleTrack).not.toHaveBeenCalled();
+        expect(onRefreshSubtitles).not.toHaveBeenCalled();
+      } else {
+        expect(withTrack ? onApplySubtitleTrack : onRefreshSubtitles).toHaveBeenCalledOnce();
+        expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(added.index, expect.any(Number));
+      }
     },
   );
 

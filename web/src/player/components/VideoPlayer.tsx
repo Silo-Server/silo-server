@@ -2105,7 +2105,7 @@ export function VideoPlayer({
           // server-assigned ordinal, so the track is folded in at that ordinal
           // without a round trip; only a payload the server could not resolve
           // falls back to a replan. The track is offered, never auto-selected.
-          if (event.payload.file_id === activeFileId) {
+          if (isForActiveStream(event.payload)) {
             announcedSubtitleKeysRef.current.add(`stored-${event.payload.subtitle_id}`);
             if (event.payload.track) {
               onApplySubtitleTrack?.(event.payload.track);
