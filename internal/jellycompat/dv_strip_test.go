@@ -213,9 +213,7 @@ func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
 
 			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVSDRDisplay...))
 
-			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-				t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
-			}
+			assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 		})
 	}
 }
@@ -233,9 +231,7 @@ func TestPlaybackInfoSkipsStripForTSOnlyClient(t *testing.T) {
 
 	rr := servePlaybackInfo(handler, routeID, body)
 
-	if rr.Code != http.StatusBadRequest || strings.Contains(rr.Body.String(), "remux-dv-v1") {
-		t.Fatalf("status = %d body = %s, want no fMP4 strip route", rr.Code, rr.Body.String())
-	}
+	assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 }
 
 func TestPlaybackInfoSkipsStripWhenRPUCannotBeStripped(t *testing.T) {
@@ -244,9 +240,7 @@ func TestPlaybackInfoSkipsStripWhenRPUCannotBeStripped(t *testing.T) {
 
 	rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVDVProfile8Disabled...))
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d body = %s, want no strip route for an unparseable RPU", rr.Code, rr.Body.String())
-	}
+	assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 }
 
 func TestCompatDVStripCandidateMatchesNativePlanner(t *testing.T) {

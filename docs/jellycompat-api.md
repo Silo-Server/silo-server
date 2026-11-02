@@ -345,6 +345,15 @@ empty `MediaSources` list and `ErrorCode: "NoCompatibleStream"`, which Jellyfin
 Web shows as a playback error instead of trying to play. `GET /Items/{id}`
 still lists such a version, and `Static=true` direct play does not check it.
 
+PlaybackInfo answers the same way when every version is readable but none can
+direct play, direct stream or transcode under the request's limits, unless the
+server's bitrate cap is the reason (that keeps `PlaybackUnavailable`, above).
+H.264 encodes are packaged only as MPEG-TS segments and HEVC encodes only as
+fMP4, so a profile whose HLS transcoding profiles list only `mp4` gets an
+encode only while HEVC encoding is allowed. Streamyfin sends such a profile on
+phones that decode AV1. The `found no route` log line records the profile's
+HLS transcoding containers and whether HEVC encoding is allowed.
+
 Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
 the item id. Some clients therefore send a media-source id where an item id
 belongs. `PlaybackInfo`, `GET /Items/{id}`, `MediaSegments`, `Download`, static
