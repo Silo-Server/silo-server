@@ -66,6 +66,13 @@ affected credentials:
 - `auth.jwt_secret` becomes unreadable, so all existing sessions are invalid and
   users must log in again (a new secret is generated on next boot if the row is
   cleared — see below).
+- **Backups in an S3 bucket are lost too.** Every object of an S3 backup is
+  encrypted with a key derived from `SECRET_KEY` (HKDF-SHA256, info
+  `silo/backup-encryption/v1`; see
+  [backups.md](backups.md#encryption)), and nothing else can decrypt it. That
+  is why the Backups page asks the admin to confirm an off-server copy of the
+  key before S3 backups start. Local backups are not encrypted beyond the
+  values inside the database, which are lost as above.
 
 ## Rollout (automatic backfill)
 
@@ -124,10 +131,13 @@ out of scope for this release; the versioning exists so it can be added without 
 data migration of the envelope format.
 
 A rotation must keep old backups restorable. Each backup manifest records the
-check value of the key it was taken with (`silo/backup-key-check/v1`), and the
-encrypted values inside a backup's database need that key. A rotation
-therefore has to keep the old key available for backups whose manifest names
-its check value, and record the new key's check value in new manifests.
+check value of the key it was taken with (`silo/backup-key-check/v1`), and
+encrypted backups need that key's archive passphrase
+(`silo/backup-encryption/v1`). A rotation therefore has to keep the old key
+available to decrypt backups whose manifest names its check value (or
+re-encrypt them), and record the new key's check value in new manifests; the
+S3 destination's key confirmation (`backup.s3.key_acknowledged`) asks the admin
+to confirm the new key before backups resume.
 
 ## Scope and known gaps
 

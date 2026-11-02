@@ -15,9 +15,11 @@ artifacts, and profile avatars.
 - **Assets** — artwork, branding assets, intro/credit markers, chapter
   thumbnails, and downloaded subtitles. Carries the recorded storage identity.
 - **Operational** — diagnostic bundles, job artifacts, profile avatars, and
-  backups on local storage ([backups.md](backups.md)). Every API server must
-  share it: any server can list, download, or delete a backup another server
-  wrote.
+  backups at the default destination ([backups.md](backups.md)). Every API
+  server must share it: any server can list, download, or delete a backup
+  another server wrote. A dedicated backup bucket (`backup.destination=s3`)
+  is not a blob store: `internal/backup` opens it from `backup.s3.*` with
+  `s3client`, apart from both stores.
 
 These are separate because the public bucket can serve browsers directly under
 token auth and the private one never does. A configured private bucket owns the
@@ -215,6 +217,10 @@ does a store without an atomic create: a check followed by a write could
 replace an object published between the two, so there is no such fallback.
 Selective restore writes every blob this way and fails the item on
 `ErrExclusiveUnsupported`; ordinary writes are unaffected.
+
+`blobstore.S3.PutStreamParts` streams an object in multipart parts of a chosen size,
+for objects whose size would need more parts than S3 allows at the default
+size; backups to the private bucket size them from the previous backup.
 
 `Matches` lets the image cache skip rewriting an immutable object whose bytes
 are already stored. It is only an optimization, so on S3 a `HeadObject` 403

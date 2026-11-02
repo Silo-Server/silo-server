@@ -14,7 +14,10 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 var (
@@ -32,10 +35,15 @@ var (
 )
 
 // Source is a backup folder on local disk: the folder at a local destination
-// (<root>/backups/<server-id>/<id>), or a downloaded copy of its objects.
+// (<root>/backups/<server-id>/<id>), a downloaded copy of its objects, or the
+// plaintext FetchSource wrote of an encrypted or remote backup.
 type Source struct {
 	Dir      string
 	Manifest *Manifest
+	// fetched says Dir holds plaintext whose stored bytes were checked
+	// against the manifest as they were fetched; withoutBlobs that blobs.tar
+	// was not fetched, for a database-only restore.
+	fetched, withoutBlobs bool
 }
 
 // OpenSource reads a backup folder's manifest.
@@ -55,6 +63,221 @@ func OpenSource(dir string) (*Source, error) {
 }
 
 func (src *Source) path(name string) string { return filepath.Join(src.Dir, name) }
+
+// writesBlobs reports whether a restore from src writes blobs.tar: not for
+// a database-only restore.
+func (src *Source) writesBlobs() bool { return !src.withoutBlobs }
+
+// Objects reads the stored objects of one backup folder by name.
+type Objects interface {
+	Open(ctx context.Context, name string) (io.ReadCloser, error)
+}
+
+// DirObjects is a backup folder on local disk.
+type DirObjects string
+
+func (d DirObjects) Open(_ context.Context, name string) (io.ReadCloser, error) {
+	f, err := os.Open(filepath.Join(string(d), name)) //nolint:gosec // G304: an object of the backup folder the operator named
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	return f, err
+}
+
+// BucketObjects is a backup folder in a bucket: Prefix is the folder's key,
+// such as <key prefix>/backups/<server-id>/<id>.
+type BucketObjects struct {
+	Client *s3client.Client
+	Prefix string
+}
+
+func (b BucketObjects) Open(ctx context.Context, name string) (io.ReadCloser, error) {
+	body, err := b.Client.GetObjectStream(ctx, b.Client.Bucket(), strings.TrimSuffix(b.Prefix, "/")+"/"+name)
+	if errors.Is(err, s3client.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	return body, err
+}
+
+// noManifestError is a folder without a manifest. It wraps ErrNotFound.
+type noManifestError struct{ where string }
+
+func (e noManifestError) Error() string {
+	return fmt.Sprintf("%s has no %s: it is not a complete backup", e.where, ManifestName)
+}
+
+func (e noManifestError) Unwrap() error { return ErrNotFound }
+
+// ReadSourceManifest reads and parses a backup folder's manifest. A folder
+// without one returns an error that wraps ErrNotFound.
+func ReadSourceManifest(ctx context.Context, objects Objects, where string) (*Manifest, error) {
+	body, err := objects.Open(ctx, ManifestName)
+	if errors.Is(err, ErrNotFound) {
+		return nil, noManifestError{where: where}
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	return ParseManifest(data)
+}
+
+// CheckKey refuses an encrypted backup that key cannot open, before anything
+// is downloaded. key may be nil when SECRET_KEY is not set.
+func CheckKey(m *Manifest, key *ArchiveKey) error {
+	if !m.Encrypted {
+		return nil
+	}
+	if key == nil {
+		return fmt.Errorf("this backup is encrypted (key check %s); set SECRET_KEY to the key it was taken with", m.KeyCheck)
+	}
+	if m.KeyCheck != key.Check {
+		return fmt.Errorf("%w (backup %s, this key %s); an encrypted backup needs the key it was taken with", ErrKeyMismatch, m.KeyCheck, key.Check)
+	}
+	return nil
+}
+
+// fetchReserve is the free space FetchSource leaves beyond what it fetches.
+const fetchReserve = 256 << 20
+
+// FetchOptions say what FetchSource fetches and where.
+type FetchOptions struct {
+	// Key decrypts an encrypted backup; nil cannot.
+	Key *ArchiveKey
+	// WorkDir receives the plaintext; the caller makes it (mode 0700) and
+	// removes it.
+	WorkDir string
+	// DatabaseOnly fetches db.dump alone, for a restore that skips files.
+	DatabaseOnly bool
+	// FreeBytes reports the space free at WorkDir; nil asks the filesystem.
+	FreeBytes func(dir string) (uint64, error)
+	Out       io.Writer
+}
+
+// FetchSource copies the objects a full restore reads (db.dump, and
+// blobs.tar unless opts.DatabaseOnly) into opts.WorkDir as plaintext,
+// decrypting as each streams and checking its stored bytes against the
+// manifest's size and SHA-256. Before anything is fetched, the working
+// folder must have room for the objects' stored sizes (a plaintext is never
+// larger) plus a reserve, and no object may write more than its stored
+// size. A mismatch fails before anything is restored.
+func FetchSource(ctx context.Context, objects Objects, m *Manifest, opts FetchOptions) (*Source, error) {
+	if err := CheckKey(m, opts.Key); err != nil {
+		return nil, err
+	}
+	out := writerOrDiscard(opts.Out)
+	key := opts.Key
+	if !m.Encrypted {
+		key = nil
+	}
+	bases := []string{DumpName, BlobsName}
+	if opts.DatabaseOnly {
+		bases = bases[:1]
+	}
+	entries := make([]ObjectEntry, 0, len(bases))
+	var need uint64 = fetchReserve
+	for _, base := range bases {
+		entry, ok := m.object(base)
+		if !ok {
+			return nil, fmt.Errorf("the manifest lists no %s", base)
+		}
+		entries = append(entries, entry)
+		need += uint64(max(entry.Size, 0))
+	}
+	freeBytes := opts.FreeBytes
+	if freeBytes == nil {
+		freeBytes = dirFreeBytes
+	}
+	free, err := freeBytes(opts.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	if free < need {
+		return nil, fmt.Errorf("%w in %s: %s free, %s needed to fetch the backup (its files plus %s)",
+			ErrNotEnoughSpace, opts.WorkDir, humanBytes(int64(free)), humanBytes(int64(need)), humanBytes(fetchReserve)) //nolint:gosec // G115: sizes of real files
+	}
+	for i, entry := range entries {
+		_, _ = fmt.Fprintf(out, "Fetching %s (%s)…\n", entry.Name, humanBytes(entry.Size))
+		if err := fetchObject(ctx, objects, entry, key, filepath.Join(opts.WorkDir, bases[i])); err != nil {
+			return nil, err
+		}
+	}
+	return &Source{Dir: opts.WorkDir, Manifest: m, fetched: true, withoutBlobs: opts.DatabaseOnly}, nil
+}
+
+// dirFreeBytes is the space available to this user at dir.
+func dirFreeBytes(dir string) (uint64, error) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(dir, &st); err != nil {
+		return 0, fmt.Errorf("reading free space in %s: %w", dir, err)
+	}
+	return blockBytes(st.Bavail, st.Bsize), nil
+}
+
+func fetchObject(ctx context.Context, objects Objects, entry ObjectEntry, key *ArchiveKey, path string) error {
+	body, err := objects.Open(ctx, entry.Name)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", entry.Name, err)
+	}
+	plain, err := openStored(body, key)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", entry.Name, err)
+	}
+	defer func() { _ = plain.Close() }()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // G304: a file in the working directory this command made
+	if err != nil {
+		return err
+	}
+	// The space check counted the stored size, which a plaintext never
+	// exceeds; an object that writes more is refused at that point.
+	n, err := io.Copy(f, io.LimitReader(ctxReader{ctx: ctx, r: plain}, entry.Size+1))
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("reading %s: %w", entry.Name, err)
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if n > entry.Size {
+		return fmt.Errorf("%s is larger than its manifest says", entry.Name)
+	}
+	stored, err := plain.storedEntry(entry.Name)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", entry.Name, err)
+	}
+	if stored.Size != entry.Size || stored.SHA256 != entry.SHA256 {
+		return fmt.Errorf("%s does not match its checksum in the manifest", entry.Name)
+	}
+	return nil
+}
+
+// ctxReader stops a copy when ctx ends.
+type ctxReader struct {
+	ctx context.Context //nolint:containedctx // scoped to one copy
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
+}
 
 // ValidateOptions are the inputs to §10.2 step 1.
 type ValidateOptions struct {
@@ -91,17 +314,25 @@ func (opts ValidateOptions) checkMigrations(applied []int64, where string) error
 // archive's entries, the schema version, and the key.
 func (src *Source) Validate(ctx context.Context, opts ValidateOptions) error {
 	m := src.Manifest
+	if m.Encrypted && !src.fetched {
+		return errors.New("this backup is encrypted; read it with FetchSource, which decrypts it")
+	}
 	for _, name := range []string{DumpName, BlobsName} {
 		entry, ok := m.object(name)
 		if !ok {
 			return fmt.Errorf("the manifest lists no %s", name)
 		}
+		if src.fetched {
+			continue // checked as it was fetched
+		}
 		if err := checkFile(src.path(name), entry); err != nil {
 			return err
 		}
 	}
-	if err := src.checkArchive(ctx, nil); err != nil {
-		return err
+	if src.writesBlobs() {
+		if err := src.checkArchive(ctx, nil); err != nil {
+			return err
+		}
 	}
 	if opts.BinaryGooseVersion > 0 && m.GooseVersion > opts.BinaryGooseVersion {
 		return fmt.Errorf("%w: schema version %d, this binary %d", ErrNewerSchema, m.GooseVersion, opts.BinaryGooseVersion)
@@ -112,6 +343,9 @@ func (src *Source) Validate(ctx context.Context, opts ValidateOptions) error {
 		return err
 	}
 	if m.KeyCheck != "" && m.KeyCheck != opts.KeyCheck {
+		if m.Encrypted {
+			return fmt.Errorf("%w (backup %s, this key %s); an encrypted backup needs the key it was taken with", ErrKeyMismatch, m.KeyCheck, opts.KeyCheck)
+		}
 		if !opts.AcceptLostCredentials {
 			return fmt.Errorf("%w (backup %s, this key %s); encrypted settings and credentials in it cannot be read with this key. Pass --accept-lost-credentials to restore anyway", ErrKeyMismatch, m.KeyCheck, opts.KeyCheck)
 		}
@@ -122,6 +356,9 @@ func (src *Source) Validate(ctx context.Context, opts ValidateOptions) error {
 // checkArchive validates blobs.tar against where its entries would land and
 // against the manifest's count. physical is as for validateBlobArchive.
 func (src *Source) checkArchive(ctx context.Context, physical func(store string) (string, bool)) error {
+	if src.withoutBlobs {
+		return errors.New("blobs.tar was not fetched; this restore was asked for the database only")
+	}
 	n, err := validateBlobArchive(ctx, src.path(BlobsName), physical)
 	if err != nil {
 		return err
@@ -238,8 +475,11 @@ type SeparateOptions struct {
 	// Into is the pre-created empty database to restore into.
 	Into string
 	// BlobsInto is a directory that receives the blobs, laid out as a local
-	// store root. Required unless DatabaseOnly.
-	BlobsInto    string
+	// store root, or names BlobStore. Required unless DatabaseOnly.
+	BlobsInto string
+	// BlobStore, when set, receives the blobs instead of a directory: a
+	// bucket under a key prefix. Both stores' files land in it.
+	BlobStore    blobstore.Store
 	DatabaseOnly bool
 	Out          io.Writer
 }
@@ -285,12 +525,16 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	return report, nil
 }
 
-// writeSeparateBlobs writes blobs.tar into the directory opts.BlobsInto;
-// both stores land in it.
+// writeSeparateBlobs writes blobs.tar into opts.BlobStore, or the directory
+// opts.BlobsInto; both stores land in the same place.
 func writeSeparateBlobs(ctx context.Context, src *Source, opts SeparateOptions) (int, error) {
-	root, err := blobstore.NewFilesystem(opts.BlobsInto)
-	if err != nil {
-		return 0, err
+	root := opts.BlobStore
+	if root == nil {
+		fs, err := blobstore.NewFilesystem(opts.BlobsInto)
+		if err != nil {
+			return 0, err
+		}
+		root = fs
 	}
 	return writeBlobsFromTar(ctx, src.path(BlobsName), blobStores{storeAssets: root, storeOperational: root}, nil)
 }
@@ -300,6 +544,9 @@ func writeSeparateBlobs(ctx context.Context, src *Source, opts SeparateOptions) 
 // checks of step 4.
 func VerifyBackup(ctx context.Context, src *Source, loader DatabaseLoader, scratch string, validate ValidateOptions, out io.Writer) error {
 	out = writerOrDiscard(out)
+	if src.withoutBlobs {
+		return errors.New("a restore drill reads blobs.tar; fetch the whole backup")
+	}
 	validate.AcceptLostCredentials = true
 	if err := src.Validate(ctx, validate); err != nil {
 		return err
@@ -386,4 +633,90 @@ func writerOrDiscard(w io.Writer) io.Writer {
 // quoteIdent quotes a database name for the SQL the command prints.
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// DecryptObject writes the plaintext of the stored object name to w. With a
+// manifest in the same folder it refuses a key other than the backup's
+// before reading anything, and checks the stored bytes against the
+// manifest's size and SHA-256 once they are read. The plaintext written
+// before a failed check is not trustworthy; DecryptObjectToFile keeps none.
+func DecryptObject(ctx context.Context, objects Objects, name string, key *ArchiveKey, w io.Writer) error {
+	want, err := manifestEntry(ctx, objects, name, key)
+	if err != nil {
+		return err
+	}
+	body, err := objects.Open(ctx, name)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", name, err)
+	}
+	plain, err := openStored(body, key)
+	if errors.Is(err, ErrWrongKey) {
+		return fmt.Errorf("%w (this key %s)", ErrWrongKey, key.Check)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = plain.Close() }()
+	if _, err := io.Copy(w, ctxReader{ctx: ctx, r: plain}); err != nil {
+		return fmt.Errorf("decrypting %s: %w", name, err)
+	}
+	stored, err := plain.storedEntry(name)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", name, err)
+	}
+	if want != nil && (stored.Size != want.Size || stored.SHA256 != want.SHA256) {
+		return fmt.Errorf("%s does not match its checksum in the manifest", name)
+	}
+	return nil
+}
+
+// DecryptObjectToFile is DecryptObject into a new file at path. It writes
+// path.partial and renames it only once every check passed, so a failed
+// decrypt leaves nothing behind.
+func DecryptObjectToFile(ctx context.Context, objects Objects, name string, key *ArchiveKey, path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s already exists", path)
+	}
+	partial := path + ".partial"
+	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // G304: the output the operator named
+	if err != nil {
+		return err
+	}
+	err = DecryptObject(ctx, objects, name, key, f)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(partial, path)
+	}
+	if err != nil {
+		_ = os.Remove(partial)
+	}
+	return err
+}
+
+// manifestEntry reads the manifest beside an object, when there is one, and
+// returns the object's entry: nil when the folder has no manifest or the
+// manifest does not list the object. A manifest that names another key
+// refuses the decrypt.
+func manifestEntry(ctx context.Context, objects Objects, name string, key *ArchiveKey) (*ObjectEntry, error) {
+	m, err := ReadSourceManifest(ctx, objects, "")
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the manifest beside %s: %w", name, err)
+	}
+	if !m.Encrypted {
+		return nil, fmt.Errorf("backup %s is not encrypted; its files can be used as they are", m.ID)
+	}
+	if err := CheckKey(m, key); err != nil {
+		return nil, err
+	}
+	for _, o := range m.Objects {
+		if o.Name == name {
+			return &o, nil
+		}
+	}
+	return nil, nil
 }

@@ -1048,6 +1048,8 @@ var mutationWithoutLegacyRow = map[string]string{
 	"completeAdminBackupUpload":                "V2-only upload completion. A complete or rejected upload answers as it is, so a replay changes nothing.",
 	"deleteAdminBackupUpload":                  "V2-only upload deletion. Deleting an upload that is already gone answers 404, so a replay changes nothing.",
 	"startAdminBackupUploadRestore":            "V2-only selective restore from an upload. The one-active-restore constraint answers a concurrent or replayed start with 409 and the running job, and every restored item is idempotent.",
+	"testAdminBackupS3":                        "V2-only bucket test. It writes and deletes one probe object and saves nothing, so a replay runs the same test.",
+	"acknowledgeAdminBackupKey":                "V2-only key confirmation. It records this server's check value, so a replay writes the same value.",
 	"importProfile":                            "V2-only profile import. It merges a profile export into the acting profile in one transaction; importing the same document again changes nothing.",
 	"createThemeSongPlayback":                  "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":              "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",

@@ -55,7 +55,12 @@ type Manifest struct {
 	PgDumpVersion     string   `json:"pg_dump_version"`
 	ExcludedTableData []string `json:"excluded_table_data"`
 
+	// Objects are named as stored: db.dump.age and so on when Encrypted.
 	Objects []ObjectEntry `json:"objects"`
+	// Encrypted is false for every object at the default destination. The
+	// S3 destination encrypts every object but the manifest with age, under
+	// the passphrase secret.BackupPassphrase derives from SECRET_KEY.
+	Encrypted bool `json:"encrypted"`
 	// KeyCheck is the SECRET_KEY check value (secret.KeyCheckValue). A restore
 	// with another key cannot read encrypted settings and credentials.
 	KeyCheck string `json:"key_check"`
@@ -130,8 +135,10 @@ func (m *Manifest) Size() int64 {
 	return total
 }
 
-// object finds the object named name (db.dump, blobs.tar, restore-set.tar).
-func (m *Manifest) object(name string) (ObjectEntry, bool) {
+// object finds the object of base (db.dump, blobs.tar, restore-set.tar)
+// under its stored name.
+func (m *Manifest) object(base string) (ObjectEntry, bool) {
+	name := storedName(base, m.Encrypted)
 	for _, o := range m.Objects {
 		if o.Name == name {
 			return o, true
@@ -179,7 +186,7 @@ func (m *Manifest) validate() error {
 	if err := validateApplied(m.AppliedMigrations, m.GooseVersion); err != nil {
 		return err
 	}
-	if err := validateObjects(m.Objects, m.RestoreSet != nil); err != nil {
+	if err := validateObjects(m.Objects, m.RestoreSet != nil, m.Encrypted); err != nil {
 		return err
 	}
 	if err := m.RestoreSet.validate(); err != nil {
@@ -197,11 +204,12 @@ func (m *Manifest) validate() error {
 }
 
 // validateObjects requires exactly db.dump, blobs.tar, and restore-set.tar
-// when the manifest describes one, each once, with a size and a SHA-256.
-func validateObjects(objects []ObjectEntry, restoreSet bool) error {
-	want := map[string]bool{DumpName: false, BlobsName: false}
+// when the manifest describes one, each once, with a size and a SHA-256;
+// each named .age when encrypted.
+func validateObjects(objects []ObjectEntry, restoreSet, encrypted bool) error {
+	want := map[string]bool{storedName(DumpName, encrypted): false, storedName(BlobsName, encrypted): false}
 	if restoreSet {
-		want[RestoreSetName] = false
+		want[storedName(RestoreSetName, encrypted)] = false
 	}
 	for _, o := range objects {
 		seen, known := want[o.Name]

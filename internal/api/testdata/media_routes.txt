@@ -68,6 +68,8 @@ POST /api/v2/admin/autoscan/trigger	non-media
 GET /api/v2/admin/backups	non-media
 POST /api/v2/admin/backups	non-media
 GET /api/v2/admin/backups/capabilities	non-media
+POST /api/v2/admin/backups/s3/acknowledge-key	non-media
+POST /api/v2/admin/backups/s3/test	non-media
 GET /api/v2/admin/backups/uploads	non-media
 POST /api/v2/admin/backups/uploads	non-media
 DELETE /api/v2/admin/backups/uploads/{upload_id}	non-media
@@ -1401,6 +1403,8 @@ POST /api/v2/admin/autoscan/trigger	non-media
 GET /api/v2/admin/backups	non-media
 POST /api/v2/admin/backups	non-media
 GET /api/v2/admin/backups/capabilities	non-media
+POST /api/v2/admin/backups/s3/acknowledge-key	non-media
+POST /api/v2/admin/backups/s3/test	non-media
 GET /api/v2/admin/backups/uploads	non-media
 POST /api/v2/admin/backups/uploads	non-media
 DELETE /api/v2/admin/backups/uploads/{upload_id}	non-media

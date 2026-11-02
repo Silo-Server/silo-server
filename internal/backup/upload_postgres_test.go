@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -308,7 +309,7 @@ func TestUploadRejectsHostileArchivesDB(t *testing.T) {
 		data         []byte
 		sha256       string
 	}{
-		{"armored age", RejectNotRestoreSet, []byte("-----BEGIN AGE ENCRYPTED FILE-----\nYWdl\n-----END AGE ENCRYPTED FILE-----\n"), ""},
+		{"armored age", RejectEncrypted, []byte("-----BEGIN AGE ENCRYPTED FILE-----\nYWdl\n-----END AGE ENCRYPTED FILE-----\n"), ""},
 		{"newer format", RejectNewerSilo, buildTar(t, newer, entries), ""},
 		{"trailing data", RejectNotRestoreSet, append(buildTar(t, index, entries), bytes.Repeat([]byte{1}, 2<<20)...), ""},
 		{"other bytes than declared", RejectChecksum, buildTar(t, index, entries), strings.Repeat("0", 64)},
@@ -328,6 +329,9 @@ func TestUploadRejectsHostileArchivesDB(t *testing.T) {
 		if done.Status != UploadRejected || done.Rejection == nil || done.Rejection.Reason != c.reason || done.Digest != "" {
 			t.Fatalf("%s: completed = %+v (rejection %+v), want rejected %s", c.name, done, done.Rejection, c.reason)
 		}
+		if c.reason == RejectEncrypted && done.Rejection.Message != EncryptedUploadMessage {
+			t.Fatalf("%s: message %q", c.name, done.Rejection.Message)
+		}
 		if keys := uploadObjects(t, store, u.ID); len(keys) != 0 {
 			t.Fatalf("%s: a rejected upload's parts remain: %v", c.name, keys)
 		}
@@ -338,6 +342,22 @@ func TestUploadRejectsHostileArchivesDB(t *testing.T) {
 		if err := svc.DeleteUpload(ctx, u.ID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A restore set encrypted with this server's key is decrypted and read,
+	// frozen by the SHA-256 of the bytes uploaded; another key's is refused
+	// with the decrypt command.
+	key := testArchiveKey(t, "upload-node")
+	keyed := uploadNode(pool, store)
+	keyed.opts.ArchiveKey, keyed.opts.KeyCheck = key, key.Check
+	mine := encryptBytes(t, key, paddedRestoreSet(t))
+	if done := upload(t, keyed, mine); done.Status != UploadComplete || done.Digest != sha256Of(mine) {
+		t.Fatalf("an upload encrypted with this server's key = %+v (rejection %+v)", done, done.Rejection)
+	} else if _, err := keyed.PreviewUpload(ctx, done.ID); err != nil {
+		t.Fatalf("preview of an encrypted upload: %v", err)
+	}
+	theirs := upload(t, keyed, encryptBytes(t, testArchiveKey(t, "another-server"), paddedRestoreSet(t)))
+	if theirs.Status != UploadRejected || theirs.Rejection == nil || theirs.Rejection.Reason != RejectEncrypted || theirs.Rejection.Message != EncryptedUploadMessage {
+		t.Fatalf("an upload encrypted with another key = %+v (rejection %+v)", theirs, theirs.Rejection)
 	}
 	resetUploads(t, pool)
 
@@ -537,5 +557,57 @@ func TestRestoreFromUploadDB(t *testing.T) {
 	}
 	if keys := uploadObjects(t, f.store, u.ID); len(keys) != 0 {
 		t.Fatalf("a deleted upload's parts remain: %v", keys)
+	}
+}
+
+// TestUploadEncryptedOnABucketDB: where the operational store is a bucket,
+// an upload needs the confirmed SECRET_KEY, as backups there do, and every
+// part is stored encrypted. The parts read back as the bytes sent: the
+// digest is of the file as uploaded, and the restore set reads from it.
+func TestUploadEncryptedOnABucketDB(t *testing.T) {
+	pool, _ := testDB(t)
+	resetUploads(t, pool)
+	ctx := t.Context()
+	srv := s3test.New(t, testBucket)
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := testArchiveKey(t, "upload-server")
+	settings := &mapSettings{values: map[string]string{}}
+	svc := New(Options{
+		Pool: pool, Settings: settings, SettingsWriter: settings, ArchiveKey: key,
+		Stores: blobstore.Stores{Assets: store, Operational: store}, Destination: NewStoreDestination(blobstore.NewS3(s3TestConfig(srv).Client())),
+		Locker: PostgresLocker{Pool: pool}, Status: PostgresStatus{Pool: pool},
+		ServerID: func(context.Context) (string, error) { return "upload-node", nil },
+	})
+	data := paddedRestoreSet(t)
+	if _, err := svc.CreateUpload(ctx, 0, int64(len(data)), "", MinUploadPartSize); !errors.Is(err, ErrKeyNotConfirmed) {
+		t.Fatalf("an upload to a bucket before the key is confirmed = %v, want ErrKeyNotConfirmed", err)
+	}
+	if err := svc.AcknowledgeKey(ctx, key.Check); err != nil {
+		t.Fatal(err)
+	}
+	u := upload(t, svc, data)
+	if u.Status != UploadComplete || u.Digest != sha256Of(data) {
+		t.Fatalf("upload = %+v, want complete with the digest of the bytes sent", u)
+	}
+	parts := srv.Keys(testBucket, "silo/"+uploadPrefix(u.ID))
+	if len(parts) != u.PartCount {
+		t.Fatalf("stored parts = %v, want %d", parts, u.PartCount)
+	}
+	for _, k := range parts {
+		stored, _ := srv.Object(testBucket, k)
+		if !strings.HasSuffix(k, EncryptedSuffix) || !isAgeHeader(stored) || bytes.Contains(stored, data[:512]) {
+			t.Fatalf("part %s is stored unencrypted", k)
+		}
+	}
+	rs, err := svc.openRestoreSet(ctx, restoreSource{uploadID: u.ID}, false)
+	if err != nil {
+		t.Fatalf("reading the encrypted upload: %v", err)
+	}
+	rs.Cleanup()
+	if rs.Digest != u.Digest {
+		t.Fatalf("restore set digest = %s, want %s", rs.Digest, u.Digest)
 	}
 }

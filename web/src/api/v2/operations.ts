@@ -618,6 +618,8 @@ export const v2Operations = {
   "POST /api/v2/admin/autoscan/sources/{id}/webhook/rotate": "rotateAdminAutoscanSourceWebhook",
   "POST /api/v2/admin/autoscan/trigger": "triggerAdminAutoscan",
   "POST /api/v2/admin/backups": "startAdminBackup",
+  "POST /api/v2/admin/backups/s3/acknowledge-key": "acknowledgeAdminBackupKey",
+  "POST /api/v2/admin/backups/s3/test": "testAdminBackupS3",
   "POST /api/v2/admin/backups/uploads": "createAdminBackupUpload",
   "POST /api/v2/admin/backups/uploads/{upload_id}/complete": "completeAdminBackupUpload",
   "POST /api/v2/admin/backups/uploads/{upload_id}/restore": "startAdminBackupUploadRestore",

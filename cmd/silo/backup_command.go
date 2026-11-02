@@ -9,6 +9,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -31,21 +34,40 @@ const backupCommandUsage = `usage:
       Replace the live database (DATABASE_URL) and restore files into the live storage, then
       clear the Redis database Silo uses (FLUSHDB) unless --keep-redis.
       Stop Silo on every server and turn off automatic restarts first.
-  silo backup restore --from <backup> --into <database URL> (--blobs-into <dir> | --database-only)
+  silo backup restore --from <backup> --into <database URL> (--blobs-into <dir | s3://bucket/prefix> | --database-only)
                       [--accept-lost-credentials] [-env .env]
       Restore into a new, empty database and a separate location; nothing live changes.
   silo backup restore --recover <time> [-env .env]
       Finish a replace that stopped, from silo-restore-<time>.journal in this directory.
   silo backup verify --from <backup> --scratch <database URL> [-env .env]
       Restore into an empty scratch database and check it against the manifest.
+  silo backup decrypt <file | s3://bucket/key> [-o <file | ->] [-env .env]
+      Write the plaintext of an encrypted backup object (db.dump.age, blobs.tar.age,
+      restore-set.tar.age), with the SECRET_KEY of the server that took it.
 
-<backup> is a backup folder on this computer: the folder at the backup destination, or a
-downloaded copy of its objects`
+<backup> is a backup folder on this computer, or s3://bucket/<key prefix>/backups/<server-id>/<id>
+in a bucket. An encrypted backup is decrypted with SECRET_KEY as it is fetched into a
+working folder in the current directory, which needs room for about the backup's size.
+A bucket is reached with ` + backupS3EnvUsage
+
+// The bucket a backup command reads from or restores into. Nothing comes
+// from the database being replaced.
+const (
+	envBackupS3Endpoint  = "SILO_BACKUP_S3_ENDPOINT"
+	envBackupS3Region    = "SILO_BACKUP_S3_REGION"
+	envBackupS3AccessKey = "SILO_BACKUP_S3_ACCESS_KEY"
+	envBackupS3SecretKey = "SILO_BACKUP_S3_SECRET_KEY" //nolint:gosec // G101: the variable's name, not a credential
+	envBackupS3PathStyle = "SILO_BACKUP_S3_PATH_STYLE"
+
+	backupS3EnvUsage = envBackupS3Endpoint + ", " + envBackupS3Region + ", " + envBackupS3AccessKey + ", " +
+		envBackupS3SecretKey + ", and " + envBackupS3PathStyle + " (true or false), from the environment or the .env file"
+)
 
 // The `silo backup` subcommands.
 const (
 	backupRestoreCommand = "restore"
 	backupVerifyCommand  = "verify"
+	backupDecryptCommand = "decrypt"
 )
 
 // runBackupMain runs `silo backup ...` for main. The first SIGINT or SIGTERM
@@ -99,6 +121,8 @@ func runBackupCommand(ctx context.Context, args []string, out io.Writer) error {
 		return runBackupRestore(ctx, args[1:], out)
 	case backupVerifyCommand:
 		return runBackupVerify(ctx, args[1:], out)
+	case backupDecryptCommand:
+		return runBackupDecrypt(ctx, args[1:], out)
 	default:
 		return errors.New(backupCommandUsage)
 	}
@@ -132,18 +156,71 @@ func parseBackupRestoreFlags(args []string) (backupRestoreFlags, error) {
 		}
 	case f.from == "":
 		return f, errors.New("--from is required\n" + backupCommandUsage)
-	case strings.Contains(f.from, "://"):
-		return f, errors.New("--from must be a backup folder on this computer")
+	case !localOrS3(f.from):
+		return f, errors.New("--from must be a local backup folder or an s3:// address")
 	case f.blobsInto != "" && f.into == "":
 		return f, errors.New("--blobs-into needs --into\n" + backupCommandUsage)
 	case f.into != "" && f.blobsInto == "" && !f.databaseOnly:
 		return f, errors.New("--into needs --blobs-into, or --database-only\n" + backupCommandUsage)
 	case f.into != "" && f.databaseOnly && f.blobsInto != "":
 		return f, errors.New("--blobs-into and --database-only exclude each other")
-	case strings.Contains(f.blobsInto, "://"):
-		return f, errors.New("--blobs-into must be a directory on this computer")
+	case f.blobsInto != "" && !localOrS3(f.blobsInto):
+		return f, errors.New("--blobs-into must be a local directory or an s3:// address")
 	}
 	return f, nil
+}
+
+// blobTarget opens --blobs-into when it names a bucket; a directory (or
+// nothing) returns nil, and the restore writes to the directory.
+func blobTarget(where string) (blobstore.Store, error) {
+	bucket, prefix, isS3, err := parseS3Address(where)
+	if !isS3 || err != nil {
+		return nil, err
+	}
+	client, err := backupS3Client(bucket, prefix)
+	if err != nil {
+		return nil, err
+	}
+	return blobstore.NewS3(client), nil
+}
+
+// localOrS3 accepts a local path or an s3:// address, and no other scheme.
+func localOrS3(where string) bool {
+	_, _, isS3, err := parseS3Address(where)
+	return isS3 && err == nil || !strings.Contains(where, "://")
+}
+
+// parseS3Address splits s3://bucket/key into its bucket and key, with the
+// key's slashes trimmed. isS3 is false for anything else.
+func parseS3Address(where string) (bucket, key string, isS3 bool, err error) {
+	rest, ok := strings.CutPrefix(where, "s3://")
+	if !ok {
+		return "", "", false, nil
+	}
+	bucket, key, _ = strings.Cut(rest, "/")
+	if bucket == "" {
+		return "", "", true, fmt.Errorf("%s names no bucket", where)
+	}
+	return bucket, strings.Trim(key, "/"), true, nil
+}
+
+// backupS3Client opens bucket with the credentials in the environment.
+func backupS3Client(bucket, keyPrefix string) (*s3client.Client, error) {
+	endpoint := os.Getenv(envBackupS3Endpoint)
+	if endpoint == "" {
+		return nil, fmt.Errorf("%s is required to reach s3://%s; set %s", envBackupS3Endpoint, bucket, backupS3EnvUsage)
+	}
+	pathStyle := false
+	if raw := os.Getenv(envBackupS3PathStyle); raw != "" {
+		var err error
+		if pathStyle, err = strconv.ParseBool(raw); err != nil {
+			return nil, fmt.Errorf("%s must be true or false", envBackupS3PathStyle)
+		}
+	}
+	return backup.S3Config{
+		Endpoint: endpoint, Region: os.Getenv(envBackupS3Region), Bucket: bucket, KeyPrefix: keyPrefix,
+		AccessKey: os.Getenv(envBackupS3AccessKey), SecretKey: os.Getenv(envBackupS3SecretKey), PathStyle: pathStyle,
+	}.Client(), nil
 }
 
 func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
@@ -159,14 +236,20 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	src, tools, validate, err := openBackupSource(ctx, f.from, keyCheck, f.acceptLostCredentials)
+	src, tools, validate, cleanup, err := openBackupSource(ctx, f.from, sourceOptions{
+		masterKey: masterKey, keyCheck: keyCheck, acceptLostCredentials: f.acceptLostCredentials, databaseOnly: f.databaseOnly,
+	}, out)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	loader := backup.PGLoader{Tools: tools}
 	if f.into != "" {
 		opts := backup.SeparateOptions{
 			Validate: validate, Into: f.into, BlobsInto: f.blobsInto, DatabaseOnly: f.databaseOnly, Out: out,
+		}
+		if opts.BlobStore, err = blobTarget(f.blobsInto); err != nil {
+			return err
 		}
 		if _, err := backup.RestoreSeparate(ctx, src, loader, opts); err != nil {
 			return err
@@ -278,16 +361,94 @@ func runBackupVerify(ctx context.Context, args []string, out io.Writer) error {
 	}
 	_ = godotenv.Load(*envFile)
 	// The drill runs anywhere: without SECRET_KEY it only cannot say whether
-	// the key matches.
-	_, keyCheck, err := backupMasterKey(false)
+	// the key matches, and cannot read an encrypted backup.
+	masterKey, keyCheck, err := backupMasterKey(false)
 	if err != nil {
 		return err
 	}
-	src, tools, validate, err := openBackupSource(ctx, *from, keyCheck, true)
+	src, tools, validate, cleanup, err := openBackupSource(ctx, *from, sourceOptions{masterKey: masterKey, keyCheck: keyCheck, acceptLostCredentials: true}, out)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	return backup.VerifyBackup(ctx, src, backup.PGLoader{Tools: tools}, *scratch, validate, out)
+}
+
+// runBackupDecrypt writes the plaintext of one encrypted backup object. With
+// the manifest beside it, it refuses a key other than the backup's before
+// reading anything, and checks the stored bytes against the manifest.
+func runBackupDecrypt(ctx context.Context, args []string, out io.Writer) error {
+	flags := flag.NewFlagSet("backup "+backupDecryptCommand, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	envFile := flags.String("env", ".env", "path to .env file")
+	output := flags.String("o", "", "plaintext file, or - for standard output")
+	// The input comes first or last; flag stops at the first argument.
+	var input string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		input, args = args[0], args[1:]
+	}
+	if err := flags.Parse(args); err != nil {
+		return errors.New(backupCommandUsage)
+	}
+	if input == "" && flags.NArg() == 1 {
+		input = flags.Arg(0)
+	} else if flags.NArg() != 0 || input == "" {
+		return errors.New(backupCommandUsage)
+	}
+	_ = godotenv.Load(*envFile)
+	masterKey, _, err := backupMasterKey(true)
+	if err != nil {
+		return err
+	}
+	key, err := backup.NewArchiveKey(masterKey)
+	if err != nil {
+		return err
+	}
+	objects, name, err := decryptInput(input)
+	if err != nil {
+		return err
+	}
+	target := *output
+	if target == "" {
+		plain, ok := strings.CutSuffix(name, backup.EncryptedSuffix)
+		if !ok || plain == "" {
+			return errors.New("the input has no .age suffix; name the output with -o")
+		}
+		// A local file's plaintext lands beside it; an object's in the
+		// current directory.
+		target = plain
+		if _, _, isS3, _ := parseS3Address(input); !isS3 {
+			target = filepath.Join(filepath.Dir(input), plain)
+		}
+	}
+	if target == "-" {
+		return backup.DecryptObject(ctx, objects, name, key, out)
+	}
+	if err := backup.DecryptObjectToFile(ctx, objects, name, key, target); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(out, "Wrote %s.\n", target)
+	return err
+}
+
+// decryptInput splits a decrypt input into its folder and object name.
+func decryptInput(input string) (backup.Objects, string, error) {
+	bucket, key, isS3, err := parseS3Address(input)
+	if err != nil {
+		return nil, "", err
+	}
+	if !isS3 {
+		return backup.DirObjects(filepath.Dir(input)), filepath.Base(input), nil
+	}
+	dir, name := path.Split(key)
+	if name == "" {
+		return nil, "", fmt.Errorf("%s names no object", input)
+	}
+	client, err := backupS3Client(bucket, "")
+	if err != nil {
+		return nil, "", err
+	}
+	return backup.BucketObjects{Client: client, Prefix: strings.TrimSuffix(dir, "/")}, name, nil
 }
 
 // liveDatabaseURL reads DATABASE_URL, the database a replace or recovery
@@ -313,33 +474,93 @@ func backupMasterKey(required bool) ([]byte, string, error) {
 	return []byte(key), check, err
 }
 
+// sourceOptions say how openBackupSource reads a backup: the key, whether
+// another key's unencrypted backup is accepted, and whether only the
+// database is restored, so blobs.tar is not fetched.
+type sourceOptions struct {
+	masterKey                           []byte
+	keyCheck                            string
+	acceptLostCredentials, databaseOnly bool
+}
+
 // findBackupTools discovers pg_dump and pg_restore; tests replace it.
 var findBackupTools = backup.FindTools
 
-// openBackupSource opens the backup folder at from, the tools that restore
-// it, and the checks a restore runs: keyCheck is this SECRET_KEY's check
-// value, and acceptLostCredentials restores a backup taken with another key.
-func openBackupSource(ctx context.Context, from, keyCheck string, acceptLostCredentials bool) (*backup.Source, backup.Tools, backup.ValidateOptions, error) {
-	src, err := backup.OpenSource(from)
+// openBackupSource opens the backup at from: a local folder in place, or,
+// for an encrypted backup or one in a bucket, a plaintext copy fetched into
+// a working folder in the current directory, which cleanup removes.
+func openBackupSource(ctx context.Context, from string, so sourceOptions, out io.Writer) (*backup.Source, backup.Tools, backup.ValidateOptions, func(), error) {
+	fail := func(err error) (*backup.Source, backup.Tools, backup.ValidateOptions, func(), error) {
+		return nil, backup.Tools{}, backup.ValidateOptions{}, func() {}, err
+	}
+	var objects backup.Objects = backup.DirObjects(from)
+	bucket, prefix, remote, err := parseS3Address(from)
 	if err != nil {
-		return nil, backup.Tools{}, backup.ValidateOptions{}, err
+		return fail(err)
+	}
+	if remote {
+		client, err := backupS3Client(bucket, "")
+		if err != nil {
+			return fail(err)
+		}
+		objects = backup.BucketObjects{Client: client, Prefix: prefix}
+	}
+	m, err := backup.ReadSourceManifest(ctx, objects, from)
+	if err != nil {
+		return fail(err)
 	}
 	tools, err := findBackupTools(ctx)
 	if err != nil {
-		return nil, backup.Tools{}, backup.ValidateOptions{}, err
+		return fail(err)
 	}
-	if err := backup.CheckRestoreTools(tools, src.Manifest); err != nil {
-		return nil, backup.Tools{}, backup.ValidateOptions{}, err
+	if err := backup.CheckRestoreTools(tools, m); err != nil {
+		return fail(err)
 	}
 	carried, err := database.MigrationVersions(migrations.FS, "sql")
 	if err != nil {
-		return nil, backup.Tools{}, backup.ValidateOptions{}, err
+		return fail(err)
 	}
-	validate := backup.ValidateOptions{KeyCheck: keyCheck, BinaryMigrations: carried, AcceptLostCredentials: acceptLostCredentials}
+	validate := backup.ValidateOptions{KeyCheck: so.keyCheck, BinaryMigrations: carried, AcceptLostCredentials: so.acceptLostCredentials}
 	if len(carried) > 0 {
 		validate.BinaryGooseVersion = carried[len(carried)-1]
 	}
-	return src, tools, validate, nil
+	if !remote && !m.Encrypted {
+		return &backup.Source{Dir: from, Manifest: m}, tools, validate, func() {}, nil
+	}
+	if remote && !m.Encrypted {
+		return fail(backup.ErrPlaintextInBucket)
+	}
+	var key *backup.ArchiveKey
+	if len(so.masterKey) > 0 {
+		if key, err = backup.NewArchiveKey(so.masterKey); err != nil {
+			return fail(err)
+		}
+	}
+	if err := backup.CheckKey(m, key); err != nil {
+		return fail(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fail(err)
+	}
+	// The folder holds decrypted user data, so only this user may read it
+	// (MkdirTemp makes it 0700; the files in it are 0600). It is removed
+	// when the command ends, an interrupt included (runBackupMain).
+	workDir, err := os.MkdirTemp(cwd, "silo-backup-"+m.ID+"-")
+	if err != nil {
+		return fail(fmt.Errorf("making a working folder for the backup: %w", err))
+	}
+	cleanup := func() { _ = os.RemoveAll(workDir) }
+	if err := os.Chmod(workDir, 0o700); err != nil { //nolint:gosec // G302: a directory, which needs its search bit
+		cleanup()
+		return fail(err)
+	}
+	src, err := backup.FetchSource(ctx, objects, m, backup.FetchOptions{Key: key, WorkDir: workDir, DatabaseOnly: so.databaseOnly, Out: out})
+	if err != nil {
+		cleanup()
+		return fail(err)
+	}
+	return src, tools, validate, cleanup, nil
 }
 
 // liveConfigFromDatabase reads the configuration a database's settings

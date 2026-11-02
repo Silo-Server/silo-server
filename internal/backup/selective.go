@@ -196,8 +196,10 @@ func (r RestoreRequest) source() restoreSource {
 }
 
 // locate returns a source's digest, frozen in its manifest or at upload
-// completion, and a function that opens it. The digest is of the stored
-// bytes; the opened reader hashes them as it reads.
+// completion, and a function that opens its plaintext. The digest is of the
+// stored bytes, encrypted or not; the opened reader hashes them as it reads.
+// An encrypted backup this server's key cannot open is refused here, before
+// anything is read.
 func (s *Service) locate(ctx context.Context, src restoreSource) (string, func(context.Context) (*storedReader, error), error) {
 	if src.uploadID != "" {
 		digest, keys, err := s.completedUpload(ctx, src.uploadID)
@@ -205,7 +207,7 @@ func (s *Service) locate(ctx context.Context, src restoreSource) (string, func(c
 			return "", nil, err
 		}
 		return digest, func(ctx context.Context) (*storedReader, error) {
-			return openUploaded(s.openParts(ctx, keys)), nil
+			return s.openUploaded(s.openParts(ctx, keys))
 		}, nil
 	}
 	b, err := s.completeBackup(ctx, src.backupID)
@@ -215,6 +217,9 @@ func (s *Service) locate(ctx context.Context, src restoreSource) (string, func(c
 	entry, ok := b.manifest.object(RestoreSetName)
 	if b.manifest.RestoreSet == nil || !ok {
 		return "", nil, ErrNoRestoreSet
+	}
+	if err := s.readable(b.manifest); err != nil {
+		return "", nil, err
 	}
 	return entry.SHA256, func(ctx context.Context) (*storedReader, error) {
 		return s.openPlain(ctx, b, RestoreSetName)

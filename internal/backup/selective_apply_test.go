@@ -73,11 +73,6 @@ func TestApplyBrandingChecksTheSettingAgain(t *testing.T) {
 	}
 }
 
-// mapSettings is a SettingsReader over a map.
-type mapSettings struct{ values map[string]string }
-
-func (m *mapSettings) Get(_ context.Context, key string) (string, error) { return m.values[key], nil }
-
 // memLocker is an in-process subsystem lock.
 type memLocker struct {
 	mu   sync.Mutex

@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -407,5 +408,114 @@ func TestBackupAndDeleteWithOnePoolConnectionDB(t *testing.T) {
 	}
 	if objects, _, _ := store.List(ctx, folderPrefix(serverID, result.ID), "", 0); len(objects) != 0 {
 		t.Fatalf("the deleted backup still holds %d objects", len(objects))
+	}
+}
+
+// TestEncryptedS3RoundTripDB is the round trip through an S3 destination:
+// every object but the manifest is stored encrypted, the backup previews
+// on this server, and the full restore fetches it from the bucket,
+// decrypting as it streams, into an empty database and a bucket prefix.
+// Another SECRET_KEY cannot fetch it, and a damaged object fails the fetch.
+func TestEncryptedS3RoundTripDB(t *testing.T) {
+	pool, dsn := backuptest.Database(t)
+	tools := testTools(t)
+	ctx := t.Context()
+	masterKey := []byte("s3-round-trip-test-key-0123456789abcdef")
+	cipher, err := secret.New(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := NewArchiveKey(masterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := seedRoundTrip(t, pool, settings, store)
+	srv := s3test.New(t, testBucket)
+	serverID := "s3-round-trip-" + randomHex(t, 4)
+	opts := Options{
+		Pool: pool, DatabaseURL: dsn, Settings: s3Settings(srv, key.Check),
+		Stores: blobstore.Stores{Assets: store, Operational: store}, Destination: NewStoreDestination(store),
+		Locker:     PostgresLocker{Pool: pool},
+		ServerID:   func(context.Context) (string, error) { return serverID, nil },
+		ArchiveKey: key,
+		FindTools:  func(context.Context) (Tools, error) { return tools, nil },
+	}
+	svc := New(opts)
+	result, err := backupUnderLock(t, svc, KindManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := "silo/" + folderPrefix(serverID, result.ID)
+	keys := srv.Keys(testBucket, folder)
+	if want := []string{"blobs.tar.age", "db.dump.age", ManifestName, "restore-set.tar.age"}; len(keys) != len(want) {
+		t.Fatalf("stored %v, want %v", keys, want)
+	}
+	for _, k := range keys {
+		data, _ := srv.Object(testBucket, k)
+		if strings.HasSuffix(k, EncryptedSuffix) != isAgeHeader(data) {
+			t.Fatalf("%s: encrypted %v", k, isAgeHeader(data))
+		}
+	}
+	manifestData, _ := srv.Object(testBucket, folder+ManifestName)
+	m, err := ParseManifest(manifestData)
+	if dump, _ := srv.Object(testBucket, folder+"db.dump.age"); err != nil || !m.Encrypted || m.KeyCheck != key.Check || m.TOCCheck == "" || bytes.Contains(dump, []byte("PGDMP")) {
+		t.Fatalf("manifest = %+v, %v; or the stored dump holds plaintext", m, err)
+	}
+	// A preview reads the restore set decrypted and checks it against the
+	// stored digest. (The seeded account has no email, which the users
+	// section's account reader does not take, so the read stops short of
+	// planning.)
+	if rs, err := svc.previewSet(ctx, restoreSource{backupID: result.ID}); err != nil || rs.Index.ServerID != serverID {
+		t.Fatalf("reading the encrypted restore set: %v", err)
+	}
+	otherKey, err := NewArchiveKey([]byte("another-servers-key-0123456789abcdefgh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The command names the folder by its whole key, as Location shows it.
+	whole := s3TestConfig(srv)
+	whole.KeyPrefix = ""
+	objects := BucketObjects{Client: whole.Client(), Prefix: strings.TrimSuffix(folder, "/")}
+	if _, err := FetchSource(ctx, objects, m, FetchOptions{Key: otherKey, WorkDir: t.TempDir()}); !errors.Is(err, ErrKeyMismatch) {
+		t.Fatalf("fetch with another key = %v, want ErrKeyMismatch", err)
+	}
+	src, err := FetchSource(ctx, objects, m, FetchOptions{Key: key, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	into := createDatabase(t, pool, dsn)
+	restored := S3Config{Endpoint: srv.URL, Bucket: testBucket, KeyPrefix: "restored", AccessKey: "a", SecretKey: "s", PathStyle: true}
+	if _, err := RestoreSeparate(ctx, src, PGLoader{Tools: tools}, SeparateOptions{
+		Validate: ValidateOptions{KeyCheck: key.Check}, Into: into, BlobsInto: "s3://backups/restored",
+		BlobStore: blobstore.NewS3(restored.Client()),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range seed.blobs {
+		if got, ok := srv.Object(testBucket, "restored/"+k); !ok || !bytes.Equal(got, want) {
+			t.Fatalf("restored blob %s = %q, want %q", k, got, want)
+		}
+	}
+	restoredPool, err := pgxpool.New(ctx, into)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restoredPool.Close()
+	restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+	if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
+		t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
+	}
+
+	// A damaged object fails the fetch before anything is restored.
+	damaged, _ := srv.Object(testBucket, folder+"blobs.tar.age")
+	srv.Put(testBucket, folder+"blobs.tar.age", append(damaged[:len(damaged)-1:len(damaged)-1], damaged[len(damaged)-1]^1))
+	if _, err := FetchSource(ctx, objects, m, FetchOptions{Key: key, WorkDir: t.TempDir()}); err == nil {
+		t.Fatal("a damaged blobs.tar.age fetched")
 	}
 }

@@ -59,8 +59,9 @@ describe("sniffRestoreSet", () => {
     expect(sniffRestoreSet(tarHead("PaxHeaders.0/restore-set.json"))).toBe("restore_set");
   });
 
-  it("refuses anything else", () => {
+  it("tells an encrypted file from anything else", () => {
     const text = (value: string) => new TextEncoder().encode(value.padEnd(600, "x"));
+    expect(sniffRestoreSet(text("age-encryption.org/v1\n-> X25519"))).toBe("encrypted");
     expect(sniffRestoreSet(tarHead("db.dump"))).toBe("not_a_restore_set");
     expect(sniffRestoreSet(text("PGDMP"))).toBe("not_a_restore_set");
   });
@@ -77,9 +78,9 @@ describe("failures", () => {
   it("offers to continue the same upload only when its parts are kept", () => {
     expect(failureCopy({ kind: "part_failed", part: 2, partCount: 16 }).resumable).toBe(true);
     expect(failureCopy({ kind: "busy" }).resumable).toBe(true);
-    expect(
-      failureCopy({ kind: "rejected", reason: "not_a_restore_set", message: "" }).resumable,
-    ).toBe(false);
+    expect(failureCopy({ kind: "rejected", reason: "encrypted", message: "" }).resumable).toBe(
+      false,
+    );
   });
 });
 

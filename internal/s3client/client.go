@@ -317,6 +317,18 @@ func conditionalHeaderRejected(err error) bool {
 // known Content-Length, which backends like Cloudflare R2 require (a plain
 // PutObject with an unsized stream is rejected with 411 MissingContentLength).
 func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.Reader, contentType string) error {
+	return c.PutObjectStreamParts(ctx, bucket, key, r, contentType, streamUploadPartSize)
+}
+
+// MaxUploadParts is the most parts one multipart upload may have.
+const MaxUploadParts = 10_000
+
+// PutObjectStreamParts is PutObjectStream with partSize-byte parts, for
+// objects that may be larger than 10,000 default parts: the multipart upload
+// holds one part in memory at a time, and an object can be at most
+// MaxUploadParts parts. A partSize below the default uses the default.
+func (c *Client) PutObjectStreamParts(ctx context.Context, bucket, key string, r io.Reader, contentType string, partSize int64) error {
+	partSize = max(partSize, streamUploadPartSize)
 	if err := c.mutations.Acquire(ctx, 1); err != nil {
 		return err
 	}
@@ -335,7 +347,7 @@ func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.R
 	}
 
 	uploader := manager.NewUploader(c.s3Client, func(u *manager.Uploader) {
-		u.PartSize = streamUploadPartSize
+		u.PartSize = partSize
 		u.Concurrency = 1
 	})
 	if _, err := uploader.Upload(ctx, input); err != nil {
@@ -855,6 +867,20 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 	}
 	return deleted, nil
 }
+
+// ErrorCode returns the backend's error code for err, such as "AccessDenied"
+// or "NoSuchBucket", or "" when err carries none (a network failure). The
+// backend's free-form message is never returned.
+func ErrorCode(err error) string {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		return safeErrorCode(apiErr.ErrorCode())
+	}
+	return ""
+}
+
+// HTTPStatus returns the HTTP status of the response behind err, or 0 when
+// no response arrived.
+func HTTPStatus(err error) int { return httpStatusCode(err) }
 
 // s3ErrorCode returns the backend error code for err without its free-form
 // message, which may echo credentials or signed URLs.

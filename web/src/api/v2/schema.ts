@@ -847,6 +847,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/backups/s3/acknowledge-key": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm that a copy of this server's SECRET_KEY is kept somewhere other than this server. backup.destination can be set to s3 only after this, and S3 backups pause when SECRET_KEY changes until it is confirmed again. 409 when key_check is not this server's current check value. */
+    post: operations["acknowledgeAdminBackupKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/s3/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Test a bucket for backups: reach it (HeadBucket), then write and delete a test object under the key prefix. A failed test answers ok false with the step that failed. Nothing is saved. */
+    post: operations["testAdminBackupS3"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/backups/uploads": {
     parameters: {
       query?: never;
@@ -857,7 +891,7 @@ export interface paths {
     /** List restore sets uploaded to this server, newest first, finished or not. Unfinished and rejected uploads are deleted 24 hours after their last activity, complete ones 7 days after their last use. */
     get: operations["listAdminBackupUploads"];
     put?: never;
-    /** Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress. */
+    /** Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress. Where this server's private storage is an S3 bucket the parts are stored encrypted with a key derived from SECRET_KEY, and uploads, like backups, need that key confirmed first (409 otherwise). */
     post: operations["createAdminBackupUpload"];
     delete?: never;
     options?: never;
@@ -891,7 +925,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, or from a newer Silo). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then. */
+    /** Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, from a newer Silo, encrypted with another server's key). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then. */
     post: operations["completeAdminBackupUpload"];
     delete?: never;
     options?: never;
@@ -14310,15 +14344,17 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description Whether the objects are stored encrypted with a key derived from SECRET_KEY. The manifest is never encrypted */
+      encrypted: boolean;
       /** @description The backup folder name: UTC start time and kind */
       id: string;
       /** @description Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4 */
       key_check?: string;
-      /** @description Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key */
+      /** @description Whether key_check is this server's. An encrypted backup that does not match cannot be previewed, restored, or downloaded decrypted here */
       key_matches: boolean;
       /** @enum {string} */
       kind: "nightly" | "manual" | "before-restore";
-      /** @description Where the backup folder is: a filesystem path on this server's storage */
+      /** @description Where the backup folder is: a filesystem path on this server's storage, or s3://bucket/key in a bucket */
       location: string;
       missing_blobs: components["schemas"]["AdminBackupMissingBlob"][];
       objects: components["schemas"]["AdminBackupObject"][];
@@ -14332,6 +14368,14 @@ export interface components {
        * @enum {string}
        */
       status: "complete" | "complete_with_warnings" | "in_progress" | "incomplete";
+    };
+    AdminBackupAcknowledgeKeyBody: {
+      /** @description The check value the admin was shown (key_check from the backup list). It must be this server's current one */
+      key_check: string;
+    };
+    AdminBackupAcknowledgeKeyOutputBody: {
+      /** @description The check value now confirmed */
+      key_check: string;
     };
     AdminBackupActive: {
       backup_id?: string;
@@ -14357,10 +14401,12 @@ export interface components {
     AdminBackupCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description Backup destinations this server can write to: default, the server's own local storage, when it has one */
+      /** @description Backup destinations this server can write to: default, the server's own storage, when it has one, and s3, a bucket used only for backups */
       destinations: string[];
       /** @description Whether a full backup can be downloaded */
       download: boolean;
+      /** @description Whether backups can be encrypted. Backups in any S3 bucket always are, with a key derived from SECRET_KEY: the s3 destination, and the default one when this server's private storage is a bucket */
+      encryption: boolean;
       /**
        * Format: int64
        * @description The largest restore set an upload takes
@@ -14395,7 +14441,7 @@ export interface components {
     };
     AdminBackupDownloadLinksBody: {
       /**
-       * @description What to download: full is every stored object as it is; restore-set is restore-set.tar alone
+       * @description What to download: full is every stored object as it is, encrypted for an encrypted backup (decrypt with silo backup decrypt); restore-set is restore-set.tar alone, decrypted by this server for an encrypted backup
        * @enum {string}
        */
       scope: "full" | "restore-set";
@@ -14447,13 +14493,15 @@ export interface components {
       /** @description Whether a backup, delete, or selective restore holds the cluster-wide backup lock now */
       busy: boolean;
       /**
-       * @description Where new backups go
+       * @description Where new backups go (backup.destination). Items lists only this destination's backups; copies at a previous destination stay there
        * @enum {string}
        */
-      destination: "default";
+      destination: "default" | "s3";
       destination_available: boolean;
       /** @description Whether nightly backups run (backup.enabled) */
       enabled: boolean;
+      /** @description Whether new backups are encrypted: true for the s3 destination, and for default when this server's private storage is an S3 bucket. Encrypted backups run only while key_confirmed is true */
+      encrypted: boolean;
       /** @description This server's backups, newest first */
       items: components["schemas"]["AdminBackup"][];
       /**
@@ -14463,11 +14511,13 @@ export interface components {
       keep: number;
       /** @description This server's SECRET_KEY check value, 16 hex digits in groups of 4. It names the key without revealing it; silo secret check prints it for a key */
       key_check: string;
+      /** @description Whether an admin confirmed keeping a copy of the SECRET_KEY with this check value. Encrypted backups (any S3 bucket) run only while it is true */
+      key_confirmed: boolean;
       /** @description The latest backup run, including one that failed or was interrupted */
       last_run?: components["schemas"]["AdminBackupLastRun"];
       /**
        * Format: date-time
-       * @description When the latest successful backup finished
+       * @description When the latest successful backup finished, at any destination
        */
       last_success_at?: string;
       /** @description Other server identities with backups at this destination */
@@ -14485,7 +14535,7 @@ export interface components {
       store: "assets" | "operational";
     };
     AdminBackupObject: {
-      /** @description Object name in the backup folder, such as db.dump */
+      /** @description Object name in the backup folder as stored, such as db.dump, or db.dump.age when the backup is encrypted */
       name: string;
       /** @description SHA-256 of the stored bytes */
       sha256: string;
@@ -15012,6 +15062,29 @@ export interface components {
       /** @description The target the preview showed: the local account id, or new */
       target: string;
     };
+    AdminBackupS3TestBody: {
+      access_key?: string;
+      bucket: string;
+      /** @description The S3 API endpoint, such as https://s3.us-east-1.amazonaws.com. It is not validated as a URI here: an endpoint the test cannot reach fails with step endpoint */
+      endpoint: string;
+      /** @description The folder in the bucket; backups go under <key_prefix>/backups/ */
+      key_prefix?: string;
+      /** @description Path-style addressing (endpoint/bucket/key) instead of virtual-hosted (bucket.endpoint/key) */
+      path_style?: boolean;
+      region?: string;
+      /** @description Omitted uses the stored backup.s3.secret_key, but only when endpoint and access_key are the stored ones */
+      secret_key?: string;
+    };
+    AdminBackupS3TestResult: {
+      /** @description What happened, for display: Connected. Silo wrote and deleted a test file. or what failed */
+      message: string;
+      ok: boolean;
+      /**
+       * @description The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write under the folder; a bucket that refuses only the delete passes, and its lifecycle rules remove old backups
+       * @enum {string}
+       */
+      step?: "endpoint" | "credentials" | "bucket" | "permission";
+    };
     AdminBackupStarted: {
       id: string;
       /** @enum {string} */
@@ -15030,7 +15103,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
-      /** @description SHA-256 of the file as uploaded, frozen when the upload completed; a restore request must carry it */
+      /** @description SHA-256 of the file as uploaded (the bytes sent, not the parts as stored, which are encrypted on a bucket), frozen when the upload completed; a restore request must carry it */
       digest?: string;
       /**
        * Format: date-time
@@ -15087,10 +15160,10 @@ export interface components {
     AdminBackupUploadRejection: {
       message: string;
       /**
-       * @description not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started
+       * @description not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; encrypted: encrypted with another server's SECRET_KEY, decrypt it with silo backup decrypt first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started
        * @enum {string}
        */
-      reason: "not_a_restore_set" | "newer_silo" | "checksum_mismatch";
+      reason: "not_a_restore_set" | "newer_silo" | "encrypted" | "checksum_mismatch";
     };
     AdminBackupUploadSource: {
       /**
@@ -15107,7 +15180,7 @@ export interface components {
     };
     AdminBackupWarning: {
       /**
-       * @description no_recent_backup: no backup completed in 48 hours
+       * @description no_recent_backup: no backup completed in 48 hours, at any destination. no_backups_at_destination: backups completed before, but none is at the current destination (it was switched); earlier copies stay where they were written. key_not_confirmed: backups are encrypted (an S3 bucket) and this server's SECRET_KEY was not confirmed, or changed since; encrypted backups and uploads are paused until POST /admin/backups/s3/acknowledge-key
        * @enum {string}
        */
       code:
@@ -15116,7 +15189,9 @@ export interface components {
         | "destination_unavailable"
         | "sqlite_user_store"
         | "pg_dump_missing"
-        | "pg_dump_too_old";
+        | "pg_dump_too_old"
+        | "key_not_confirmed"
+        | "no_backups_at_destination";
       message: string;
     };
     AdminBrandingAsset: {
@@ -43670,7 +43745,14 @@ export interface operations {
       header?: never;
       path: {
         id: string;
-        name: "manifest.json" | "db.dump" | "blobs.tar" | "restore-set.tar";
+        name:
+          | "manifest.json"
+          | "db.dump"
+          | "blobs.tar"
+          | "restore-set.tar"
+          | "db.dump.age"
+          | "blobs.tar.age"
+          | "restore-set.tar.age";
       };
       cookie?: never;
     };
@@ -43689,6 +43771,13 @@ export interface operations {
       };
       /** @description Object not found, or the capability is invalid or expired */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The backup is encrypted with another server's SECRET_KEY, so this server cannot decrypt its restore set, or the stored restore set no longer matches its checksum in the manifest */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -44058,6 +44147,289 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  acknowledgeAdminBackupKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupAcknowledgeKeyBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupAcknowledgeKeyOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  testAdminBackupS3: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupS3TestBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupS3TestResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

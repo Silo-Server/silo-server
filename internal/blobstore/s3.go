@@ -26,6 +26,15 @@ func (s *S3) PutStream(ctx context.Context, key string, r io.Reader, contentType
 	}
 	return s.client.PutObjectStream(ctx, s.client.Bucket(), key, r, contentType)
 }
+
+// PutStreamParts streams an object as a multipart upload of partSize-byte
+// parts, for objects too large for the default part size's part count.
+func (s *S3) PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+	return s.client.PutObjectStreamParts(ctx, s.client.Bucket(), key, r, contentType, partSize)
+}
 func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
 	if err := ValidateKey(key); err != nil {
 		return nil, ObjectInfo{}, err

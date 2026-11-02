@@ -199,6 +199,10 @@ type AdminHandler struct {
 	// setting whose effective value changes. An error rolls the save back. tx
 	// is nil when the settings store has no transactional update.
 	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
+	// BackupKeyCheck is this server's SECRET_KEY check value. A save that
+	// switches backup.destination to s3 needs backup.s3.key_acknowledged to
+	// hold it; empty refuses that switch.
+	BackupKeyCheck string
 	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
 	// Deleting an account drops its entries through the users foreign key,
 	// which can leave such titles behind. Nil skips the sweep.
@@ -1795,6 +1799,9 @@ var machineManagedSettingKeys = map[string]bool{
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
 	config.StorageTransitionTargetKey:           true,
+	// Written only by POST /api/v2/admin/backups/s3/acknowledge-key, which
+	// records this server's check value.
+	config.BackupS3KeyAcknowledgedSettingKey: true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -2652,6 +2659,38 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
 }
 
+// errBackupKeyNotConfirmed refuses switching backups to S3 before the admin
+// confirmed keeping a copy of this server's SECRET_KEY.
+var errBackupKeyNotConfirmed = &APIError{
+	Status:  http.StatusConflict,
+	Code:    "backup_key_not_confirmed",
+	Message: "Confirm that you keep a copy of this server's SECRET_KEY before keeping backups in S3 (POST /api/v2/admin/backups/s3/acknowledge-key)",
+}
+
+// checkBackupDestination refuses a save that switches backup.destination to
+// s3 unless the confirmed key check value is this server's, and one that
+// leaves the S3 destination without a bucket. A destination already on s3
+// stays saveable after SECRET_KEY changes; the backups pause instead.
+func (h *AdminHandler) checkBackupDestination(changed, before, after map[string]string) error {
+	if after[config.BackupDestinationSettingKey] != config.BackupDestinationS3 {
+		return nil
+	}
+	_, destination := changed[config.BackupDestinationSettingKey]
+	_, bucket := changed[config.BackupS3BucketSettingKey]
+	_, endpoint := changed[config.BackupS3EndpointSettingKey]
+	if (destination || bucket || endpoint) &&
+		(strings.TrimSpace(after[config.BackupS3BucketSettingKey]) == "" || strings.TrimSpace(after[config.BackupS3EndpointSettingKey]) == "") {
+		return &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: "backups in S3 need backup.s3.endpoint and backup.s3.bucket"}
+	}
+	if before[config.BackupDestinationSettingKey] == config.BackupDestinationS3 {
+		return nil
+	}
+	if h.BackupKeyCheck == "" || strings.TrimSpace(after[config.BackupS3KeyAcknowledgedSettingKey]) != h.BackupKeyCheck {
+		return errBackupKeyNotConfirmed
+	}
+	return nil
+}
+
 func (h *AdminHandler) beforeServerSettingCommit(ctx context.Context, tx pgx.Tx, key, value string) error {
 	if h.BeforeServerSettingCommit == nil {
 		return nil
@@ -2808,6 +2847,10 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkBackupDestination(normalized, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
@@ -3248,6 +3291,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkBackupDestination(change, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}

@@ -312,6 +312,11 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
         <div className="space-y-2" role="alert">
           <p className="text-sm font-medium">{copy.title}</p>
           <p className="text-muted-foreground text-sm">{copy.body}</p>
+          {copy.command ? (
+            <pre className="bg-muted overflow-x-auto rounded-md px-3 py-2 font-mono text-xs">
+              <code>{copy.command}</code>
+            </pre>
+          ) : null}
           {phase.failure.kind === "rejected" && phase.failure.message ? (
             <p className="text-muted-foreground text-xs break-words">{phase.failure.message}</p>
           ) : null}

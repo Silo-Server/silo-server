@@ -36,12 +36,15 @@ import {
   BACKUP_KIND_LABELS,
   BACKUP_ROWS_SHOWN,
   BACKUP_STATUS_LABELS,
+  OTHER_KEY_REASON,
   backupDateTime,
   backupErrorMessage,
   backupRowId,
   canRestoreParts,
+  encryptedWithOtherKey,
   isFinished,
   knownSiloVersion,
+  otherKeyNote,
   restorePath,
 } from "./backupPresentation";
 
@@ -128,33 +131,98 @@ function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
 }
 
 /** What the downloaded files are for, in the download dialog's description. */
-function downloadHint(): string {
-  return "To restore it in full, put the files in one folder. To restore parts of it on another server, upload restore-set.tar there.";
+function downloadHint(backup: AdminBackup): string {
+  const restoreSet = backup.encrypted ? "the decrypted restore set" : "restore-set.tar";
+  return `To restore it in full, put the files in one folder. To restore parts of it on another server, upload ${restoreSet} there.`;
 }
 
 function DownloadDialogBody({
   backup,
   links,
+  sqliteUserStore,
 }: {
   backup: AdminBackup;
   links: AdminBackupDownloadLink[];
+  sqliteUserStore: boolean;
 }) {
+  const restoreSet = useAdminBackupDownloadLinks();
+  const [restoreSetLinks, setRestoreSetLinks] = useState<AdminBackupDownloadLink[]>([]);
+  const reasonId = useId();
   const expires = links[0]?.expires_at;
+  const otherKey = encryptedWithOtherKey(backup);
+  const fetchRestoreSet = () =>
+    restoreSet.mutate(
+      { id: backup.id, scope: "restore-set" },
+      {
+        onSuccess: setRestoreSetLinks,
+        onError: (error) =>
+          toast.error("Couldn't prepare the restore set", {
+            description: backupErrorMessage(error, { sqliteUserStore }),
+          }),
+      },
+    );
   return (
     <>
       <DialogHeader>
         <DialogTitle>Download backup</DialogTitle>
         <DialogDescription>
           {`${takenLabel(backup)}. `}
-          {downloadHint()}
+          {downloadHint(backup)}
           {expires ? ` The links stop working at ${formatTime(expires)}.` : null}
         </DialogDescription>
       </DialogHeader>
+      {backup.encrypted ? (
+        <p className="bg-muted/40 rounded-lg border px-3 py-2 text-[13px] leading-relaxed">
+          {otherKey
+            ? `These files are encrypted with another SECRET_KEY${backup.key_check ? ` (key check ${backup.key_check})` : ""}. To read one, run `
+            : "These files are encrypted with this server's SECRET_KEY. To read one, run "}
+          <code className="font-mono text-xs">silo backup decrypt &lt;file&gt;.age</code>
+          {otherKey ? " with that key set; " : " with SECRET_KEY set; "}
+          <code className="font-mono text-xs">silo backup restore --from &lt;folder&gt;</code> reads
+          the encrypted folder directly.
+        </p>
+      ) : null}
       <ul className="divide-border/60 divide-y">
         {links.map((link) => (
           <DownloadRow key={link.name} link={link} />
         ))}
       </ul>
+      {backup.encrypted && canRestoreParts(backup) ? (
+        <div className="space-y-2 border-t pt-3">
+          {restoreSetLinks.length > 0 ? (
+            <ul className="divide-border/60 divide-y">
+              {restoreSetLinks.map((link) => (
+                <DownloadRow key={link.name} link={link} />
+              ))}
+            </ul>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={fetchRestoreSet}
+                disabled={otherKey || restoreSet.isPending}
+                aria-describedby={otherKey ? reasonId : undefined}
+              >
+                {restoreSet.isPending ? (
+                  <LoaderCircle
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="motion-safe:animate-spin"
+                  />
+                ) : (
+                  <Download data-icon="inline-start" aria-hidden="true" />
+                )}
+                Download the restore set (decrypted)
+              </Button>
+              {otherKey ? (
+                <p id={reasonId} className="text-muted-foreground text-xs">
+                  {OTHER_KEY_REASON}
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -162,16 +230,25 @@ function DownloadDialogBody({
 function DownloadDialog({
   backup,
   links,
+  sqliteUserStore,
   onClose,
 }: {
   backup: AdminBackup | null;
   links: AdminBackupDownloadLink[];
+  sqliteUserStore: boolean;
   onClose: () => void;
 }) {
   return (
     <Dialog open={backup !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        {backup ? <DownloadDialogBody key={backup.id} backup={backup} links={links} /> : null}
+        {backup ? (
+          <DownloadDialogBody
+            key={backup.id}
+            backup={backup}
+            links={links}
+            sqliteUserStore={sqliteUserStore}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -285,6 +362,8 @@ export function BackupTable({
               const open = expanded.has(backup.id);
               const pendingDownload =
                 downloadLinks.isPending && downloadLinks.variables?.id === backup.id;
+              const otherKey = encryptedWithOtherKey(backup);
+              const otherKeyId = `${backupRowId(backup.id)}-key`;
               const restorable = selectiveRestore && canRestoreParts(backup);
               const restoreLabel = (
                 <>
@@ -307,6 +386,16 @@ export function BackupTable({
                       <div className="text-muted-foreground text-xs">
                         {BACKUP_KIND_LABELS[backup.kind]}
                       </div>
+                      {otherKey ? (
+                        <div id={otherKeyId} className="mt-1 max-w-80 space-y-0.5 text-xs">
+                          <p className="text-amber-600 dark:text-amber-400">
+                            {otherKeyNote(backup)}
+                          </p>
+                          <p className="text-muted-foreground whitespace-normal">
+                            {OTHER_KEY_REASON}
+                          </p>
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -336,7 +425,11 @@ export function BackupTable({
                     </TableCell>
                     <TableCell className={cn(PHONE_CELL, "max-sm:col-span-2 max-sm:row-start-3")}>
                       <div className="flex flex-wrap justify-end gap-1 max-sm:-ml-2.5 max-sm:justify-start">
-                        {restorable ? (
+                        {restorable && otherKey ? (
+                          <Button variant="ghost" size="sm" disabled aria-describedby={otherKeyId}>
+                            {restoreLabel}
+                          </Button>
+                        ) : restorable ? (
                           <Button asChild variant="ghost" size="sm">
                             <Link to={restorePath(backup.id)}>{restoreLabel}</Link>
                           </Button>
@@ -411,7 +504,12 @@ export function BackupTable({
         isPending={deleteBackup.isPending}
         onConfirm={confirmDelete}
       />
-      <DownloadDialog backup={downloading} links={links} onClose={() => setDownloading(null)} />
+      <DownloadDialog
+        backup={downloading}
+        links={links}
+        sqliteUserStore={sqliteUserStore}
+        onClose={() => setDownloading(null)}
+      />
     </div>
   );
 }

@@ -34,6 +34,7 @@ func TestParseManifestRefusesWhatARestoreCouldNotCheck(t *testing.T) {
 		"kind disagrees with the id": func(m *Manifest) { m.Kind = KindManual },
 		"server id with a slash":     func(m *Manifest) { m.ServerID = "../other" },
 		"newer version":              func(m *Manifest) { m.Version = manifestVersion + 1 },
+		"encrypted with plain names": func(m *Manifest) { m.Encrypted = true },
 		"applied migrations out of order": func(m *Manifest) {
 			m.GooseVersion, m.AppliedMigrations = 9, []int64{9, 1, 9}
 		},

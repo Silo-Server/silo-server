@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -29,10 +30,15 @@ import (
 // session to be uploading and the attempt to be its own, so once completion
 // has frozen the parts a late writer cannot change them.
 //
-// The parts read back in order are the bytes the client sent. The digest an
-// upload freezes is the SHA-256 of those bytes (the file as uploaded): it is
-// what a client computes, what the declared sha256 is checked against, and
-// what previews and restores bind to.
+// Where the operational store is a bucket, every part is stored encrypted
+// with the archive key, as backups there are (an uploaded restore set holds
+// password hashes), and named <part>.<nonce>.age; the admin must have
+// confirmed the key, as for backups. Each part is its own age file, so the
+// parts read back in order are the bytes the client sent. The digest an
+// upload freezes is the SHA-256 of those bytes (the file as uploaded),
+// never of the encrypted parts: it is what a client computes, what the
+// declared sha256 is checked against, and what previews and restores bind
+// to.
 
 const (
 	// MaxUploadBytes is the largest restore set an upload takes.
@@ -98,8 +104,13 @@ const (
 const (
 	RejectNotRestoreSet = "not_a_restore_set"
 	RejectNewerSilo     = "newer_silo"
+	RejectEncrypted     = "encrypted"
 	RejectChecksum      = "checksum_mismatch"
 )
+
+// EncryptedUploadMessage is what an upload encrypted with another server's
+// key is told. One encrypted with this server's key is decrypted and read.
+const EncryptedUploadMessage = "This file is encrypted with another server's SECRET_KEY. On a computer with that server's SECRET_KEY in the environment, run `silo backup decrypt restore-set.tar.age -o restore-set.tar`, then upload restore-set.tar."
 
 var (
 	ErrUploadNotFound = errors.New("upload not found")
@@ -167,8 +178,9 @@ type UploadSession struct {
 	CompletedAt   *time.Time
 	// ExpiresAt is when an unfinished or rejected upload is deleted.
 	ExpiresAt *time.Time
-	// Digest is the SHA-256 completion froze, of the file as uploaded; a
-	// preview and a restore of the upload are bound to it.
+	// Digest is the SHA-256 completion froze, of the file as uploaded (not
+	// of the parts as stored, which are encrypted on a bucket); a preview and
+	// a restore of the upload are bound to it.
 	Digest    string
 	Source    *UploadSource
 	Rejection *UploadRejection
@@ -216,7 +228,27 @@ func (s *Service) uploadReady() error {
 	if s.opts.Pool == nil {
 		return errors.New("uploads need the database")
 	}
+	if s.opts.Destination.Encrypted() && s.opts.ArchiveKey == nil {
+		return ErrNoArchiveKey
+	}
 	return nil
+}
+
+// uploadKey returns the key new upload parts are encrypted with: nil on a
+// local store, the archive key on a bucket, once the admin confirmed the
+// SECRET_KEY it derives from (ErrKeyNotConfirmed otherwise, as for backups).
+func (s *Service) uploadKey(ctx context.Context) (*ArchiveKey, error) {
+	if !s.opts.Destination.Encrypted() {
+		return nil, nil
+	}
+	confirmed, err := s.keyConfirmed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !confirmed {
+		return nil, ErrKeyNotConfirmed
+	}
+	return s.opts.ArchiveKey, nil
 }
 
 // CreateUpload opens an upload of size bytes. sha256, when set, is the
@@ -241,6 +273,9 @@ func (s *Service) CreateUpload(ctx context.Context, userID int, size int64, sha2
 	sha256 = strings.ToLower(strings.TrimSpace(sha256))
 	if sha256 != "" && !sha256Hex.MatchString(sha256) {
 		return UploadSession{}, &UploadPartError{Message: "sha256 must be 64 hexadecimal digits"}
+	}
+	if _, err := s.uploadKey(ctx); err != nil {
+		return UploadSession{}, err
 	}
 	s.sweepUploadsOften(ctx)
 
@@ -393,7 +428,11 @@ func (s *Service) PutUploadPart(ctx context.Context, id string, n int, body io.R
 	if length >= 0 && length != want {
 		return UploadSession{}, &UploadPartError{Message: fmt.Sprintf("part %d must be %d bytes, not %d", n, want, length), TooLarge: length > want}
 	}
-	name := fmt.Sprintf("%05d.%s", n, strings.ToLower(rand.Text()[:16]))
+	encryptWith, err := s.uploadKey(ctx)
+	if err != nil {
+		return UploadSession{}, err
+	}
+	name := storedName(fmt.Sprintf("%05d.%s", n, strings.ToLower(rand.Text()[:16])), encryptWith != nil)
 	key := uploadPrefix(id) + name
 	if err := s.beginAttempt(ctx, id, n, name); err != nil {
 		return UploadSession{}, err
@@ -414,8 +453,14 @@ func (s *Service) PutUploadPart(ctx context.Context, id string, n int, body io.R
 		return UploadSession{}, err
 	}
 	counted := &countingReader{r: io.LimitReader(body, want+1)}
+	stored := io.Reader(counted)
+	if encryptWith != nil {
+		enc := encryptWith.encryptingReader(counted)
+		defer func() { _ = enc.Close() }()
+		stored = enc
+	}
 	write, cancelWrite := context.WithTimeout(ctx, s.partWriteTimeout())
-	err = s.opts.Destination.Put(write, key, counted)
+	err = s.opts.Destination.Put(write, key, stored)
 	cancelWrite()
 	if err != nil {
 		discard()
@@ -677,14 +722,47 @@ func (s *Service) beginCheck(ctx context.Context, id string) ([]string, error) {
 	return keys, tx.Commit(ctx)
 }
 
-// openUploaded reads an uploaded restore set, hashing it as it is read.
-func openUploaded(parts *partsReader) *storedReader { return openStored(parts) }
+// openUploaded reads an uploaded restore set: decrypted with this server's
+// key when it is an age file, as stored otherwise. A file encrypted with
+// another key returns ErrWrongKey.
+func (s *Service) openUploaded(parts *partsReader) (*storedReader, error) {
+	br := bufio.NewReaderSize(parts, 64<<10)
+	head, _ := br.Peek(64)
+	if parts.err != nil {
+		_ = parts.Close()
+		return nil, parts.err
+	}
+	var key *ArchiveKey
+	if isAgeHeader(head) {
+		if s.opts.ArchiveKey == nil {
+			_ = parts.Close()
+			return nil, ErrWrongKey
+		}
+		key = s.opts.ArchiveKey
+	}
+	return openStored(readCloser{Reader: br, Closer: parts}, key)
+}
 
-// checkUpload reads an upload through the restore-set reader. It returns
-// the set, or why the upload is rejected, or an error when the bytes could
-// not be read, which rejects nothing.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// checkUpload reads an upload through the restore-set reader, decrypting
+// one encrypted with this server's key. It returns the set, or why the
+// upload is rejected, or an error when the bytes could not be read, which
+// rejects nothing.
 func (s *Service) checkUpload(ctx context.Context, parts *partsReader, declared string) (*RestoreSet, *UploadRejection, error) {
-	rs, err := readStoredRestoreSet(ctx, openUploaded(parts), ReadOptions{})
+	body, err := s.openUploaded(parts)
+	switch {
+	case parts.err != nil:
+		return nil, nil, parts.err
+	case errors.Is(err, ErrWrongKey):
+		return nil, &UploadRejection{Reason: RejectEncrypted, Message: EncryptedUploadMessage}, nil
+	case err != nil:
+		return nil, &UploadRejection{Reason: RejectNotRestoreSet, Message: truncateRejection(err.Error())}, nil
+	}
+	rs, err := readStoredRestoreSet(ctx, body, ReadOptions{})
 	switch {
 	case parts.err != nil:
 		return nil, nil, parts.err
@@ -748,11 +826,24 @@ type partsReader struct {
 var errPartsClosed = errors.New("the upload's parts were closed")
 
 // openParts reads keys from the destination in order, and closes them when
-// ctx ends.
+// ctx ends. A part stored encrypted (named .age) is decrypted, so the
+// stream is the bytes the client sent.
 func (s *Service) openParts(ctx context.Context, keys []string) *partsReader {
 	r := &partsReader{keys: keys, open: func(key string) (io.ReadCloser, error) {
 		body, _, err := s.opts.Destination.Open(ctx, key)
-		return body, err
+		if err != nil || !strings.HasSuffix(key, EncryptedSuffix) {
+			return body, err
+		}
+		if s.opts.ArchiveKey == nil {
+			_ = body.Close()
+			return nil, ErrWrongKey
+		}
+		plain, err := s.opts.ArchiveKey.Decrypt(body)
+		if err != nil {
+			_ = body.Close()
+			return nil, err
+		}
+		return readCloser{Reader: plain, Closer: body}, nil
 	}}
 	r.stop = context.AfterFunc(ctx, func() { _ = r.Close() })
 	return r
