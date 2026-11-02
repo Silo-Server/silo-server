@@ -46,6 +46,13 @@ func testAccount(t *testing.T, pool *pgxpool.Pool, username, hash string, group 
 	return id
 }
 
+// fakeHash is a bcrypt-shaped hash at the lowest cost: a restore keeps a
+// password or PIN hash only when it reads as one (lockCredentials).
+func fakeHash(label string) string {
+	label = strings.ReplaceAll(label, "-", ".")
+	return "$2a$04$" + label + strings.Repeat(".", 53-len(label))
+}
+
 func testProfile(t *testing.T, pool *pgxpool.Pool, userID int, id, name string, primary bool, pin string) {
 	t.Helper()
 	dbExec(t, pool, `INSERT INTO user_profiles (id, user_id, name, is_primary, pin_hash) VALUES ($1, $2, $3, $4, $5)`, id, userID, name, primary, pin)
@@ -154,9 +161,9 @@ func seedUsers(t *testing.T, f *selectiveFixture) userSeed {
 	s.groupFamily = testGroup(t, pool, "family-"+s.suffix, 3)
 	s.groupWide = testGroup(t, pool, "wide-"+s.suffix, 2)
 
-	s.alice = testAccount(t, pool, "alice-"+s.suffix, "hash-alice", nil, []int{s.lib1, s.lib2})
+	s.alice = testAccount(t, pool, "alice-"+s.suffix, fakeHash("hash-alice"), nil, []int{s.lib1, s.lib2})
 	testProfile(t, pool, s.alice, "pa-main-"+s.suffix, "Main", true, "")
-	testProfile(t, pool, s.alice, "pa-kids-"+s.suffix, "Kids", false, "pin-kids")
+	testProfile(t, pool, s.alice, "pa-kids-"+s.suffix, "Kids", false, fakeHash("pin-kids"))
 	dbExec(t, pool, `UPDATE user_profiles SET library_restrictions_enabled = true, subtitle_language = 'fr', avatar = $3 WHERE user_id = $1 AND id = $2`,
 		s.alice, "pa-main-"+s.suffix, "upload:profile-avatars/"+strconv.Itoa(s.alice)+"/pa-main-"+s.suffix+"/original.webp")
 	dbExec(t, pool, `UPDATE user_profiles SET library_restrictions_enabled = false WHERE user_id = $1 AND id = $2`, s.alice, "pa-main-"+s.suffix)
@@ -198,17 +205,17 @@ func seedUsers(t *testing.T, f *selectiveFixture) userSeed {
 	}
 	seedUserAuthored(t, f, &s, main)
 
-	s.bob = testAccount(t, pool, "bob-"+s.suffix, "hash-bob", nil, nil)
-	testProfile(t, pool, s.bob, "pb-main-"+s.suffix, "Main", true, "pin-backup")
+	s.bob = testAccount(t, pool, "bob-"+s.suffix, fakeHash("hash-bob"), nil, nil)
+	testProfile(t, pool, s.bob, "pb-main-"+s.suffix, "Main", true, fakeHash("pin-backup"))
 	testProfile(t, pool, s.bob, "pb-extra-"+s.suffix, "Extra", false, "")
 	dbExec(t, pool, `INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at) VALUES ($1, $2, $3, 100, 6000, $4)`,
 		s.bob, "pb-main-"+s.suffix, s.movies[0], s.aliceWatchT)
 	dbExec(t, pool, `INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 5)`, s.bob, "pb-main-"+s.suffix, s.movies[1])
 	dbExec(t, pool, `INSERT INTO user_favorites (user_id, profile_id, media_item_id) VALUES ($1, $2, $3)`, s.bob, "pb-main-"+s.suffix, s.movies[2])
 
-	s.carol = testAccount(t, pool, "carol-"+s.suffix, "hash-carol", &s.groupFamily, nil)
-	s.dave = testAccount(t, pool, "dave-"+s.suffix, "hash-dave", &s.groupWide, nil)
-	s.frank = testAccount(t, pool, "frank-"+s.suffix, "hash-frank", nil, []int{})
+	s.carol = testAccount(t, pool, "carol-"+s.suffix, fakeHash("hash-carol"), &s.groupFamily, nil)
+	s.dave = testAccount(t, pool, "dave-"+s.suffix, fakeHash("hash-dave"), &s.groupWide, nil)
+	s.frank = testAccount(t, pool, "frank-"+s.suffix, fakeHash("hash-frank"), nil, []int{})
 	return s
 }
 
@@ -275,8 +282,8 @@ func (f *selectiveFixture) loseUsers(t *testing.T, s *userSeed, backupID string)
 	// Bob is still here and changed his password and PIN since; his local
 	// progress is newer than the backup's and he rated the second movie.
 	s.bobLocalProgressAt = s.aliceWatchT.Add(time.Hour)
-	dbExec(t, pool, `UPDATE users SET password_hash = 'hash-bob-now' WHERE id = $1`, s.bob)
-	dbExec(t, pool, `UPDATE user_profiles SET pin_hash = 'pin-now' WHERE user_id = $1 AND id = $2`, s.bob, "pb-main-"+s.suffix)
+	dbExec(t, pool, `UPDATE users SET password_hash = $2 WHERE id = $1`, s.bob, fakeHash("hash-bob-now"))
+	dbExec(t, pool, `UPDATE user_profiles SET pin_hash = $3 WHERE user_id = $1 AND id = $2`, s.bob, "pb-main-"+s.suffix, fakeHash("pin-now"))
 	dbExec(t, pool, `DELETE FROM user_profiles WHERE user_id = $1 AND id = $2`, s.bob, "pb-extra-"+s.suffix)
 	dbExec(t, pool, `UPDATE user_watch_progress SET position_seconds = 900, updated_at = $3 WHERE user_id = $1 AND profile_id = $2`,
 		s.bob, "pb-main-"+s.suffix, s.bobLocalProgressAt)
@@ -448,7 +455,7 @@ func checkNewAccount(t *testing.T, f *selectiveFixture, s userSeed, newAlice int
 	if err := pool.QueryRow(ctx, `SELECT password_hash, library_ids, access_group_id, is_owner FROM users WHERE id = $1`, newAlice).Scan(&hash, &libraries, &group, &owner); err != nil {
 		t.Fatal(err)
 	}
-	if newAlice == s.alice || hash != "hash-alice" || !slices.Equal(libraries, []int{s.lib1}) || group != nil || owner {
+	if newAlice == s.alice || hash != fakeHash("hash-alice") || !slices.Equal(libraries, []int{s.lib1}) || group != nil || owner {
 		t.Fatalf("restored alice: id %d hash %q libraries %v group %v owner %v", newAlice, hash, libraries, group, owner)
 	}
 	frank := reportItem(t, report, SectionUsers, strconv.Itoa(s.frank)).Account.LocalID
@@ -476,7 +483,7 @@ func checkNewAccount(t *testing.T, f *selectiveFixture, s userSeed, newAlice int
 	switch {
 	case mainID == "pa-main-"+s.suffix || !mainPrimary || mainAvatar != uploadedAvatarPrefix+avatarKey:
 		t.Fatalf("restored main profile %s primary %v avatar %q", mainID, mainPrimary, mainAvatar)
-	case kidsPIN != "pin-kids" || !kidsRestricted || kidsLibraries != 1:
+	case kidsPIN != fakeHash("pin-kids") || !kidsRestricted || kidsLibraries != 1:
 		t.Fatalf("restored kids profile pin %q restricted %v libraries %d", kidsPIN, kidsRestricted, kidsLibraries)
 	}
 	for _, key := range []string{avatarKey, "profile-avatars/" + strconv.Itoa(newAlice) + "/" + mainID + "/w256.webp"} {
@@ -552,7 +559,7 @@ func checkExistingAccount(t *testing.T, f *selectiveFixture, s userSeed, report 
 		t.Fatal(err)
 	}
 	switch {
-	case hash != "hash-bob-now" || pin != "pin-now":
+	case hash != fakeHash("hash-bob-now") || pin != fakeHash("pin-now"):
 		t.Fatalf("existing account changed: hash %q pin %q", hash, pin)
 	case position != 900 || rating != 2:
 		t.Fatalf("merge replaced newer local data: progress %v rating %d", position, rating)
@@ -844,8 +851,9 @@ func TestProfileTransferDB(t *testing.T) {
 		t.Fatal("a restricted profile lost an item it can see")
 	case countRows(t, pool, `SELECT count(*) FROM user_library_playback_preferences WHERE user_id = $1 AND profile_id = $2 AND library_id = $3`, user, kid, lib2) != 0:
 		t.Fatal("a restricted profile gained a preference for a library it cannot see")
-	case len(res.Hidden) != 2 || res.Hidden[0] != "Three "+sfx+" (2001)" || res.Hidden[1] != "Two "+sfx+" (2001)":
-		t.Fatalf("hidden = %v", res.Hidden)
+	// Hidden titles are listed with unmatched ones, never told apart.
+	case len(res.Hidden) != 0 || !slices.Contains(res.Unmatched, "Three "+sfx+" (2001)") || !slices.Contains(res.Unmatched, "Two "+sfx+" (2001)"):
+		t.Fatalf("unmatched = %v, hidden = %v", res.Unmatched, res.Hidden)
 	}
 	if _, err := transfer.Import(ctx, ProfileImportScope{UserID: other, ProfileID: dst}, data); !errors.Is(err, ErrProfileNotFound) {
 		t.Fatalf("importing into another account's profile = %v, want not found", err)
@@ -890,7 +898,7 @@ func TestUserRestoreSameServerDB(t *testing.T) {
 	account := testAccount(t, f.pool, "same-"+sfx, "h", nil, nil)
 	keep, gone := "keep-"+sfx, "gone-"+sfx
 	testProfile(t, f.pool, account, keep, "Keep", true, "")
-	testProfile(t, f.pool, account, gone, "Gone", false, "pin")
+	testProfile(t, f.pool, account, gone, "Gone", false, fakeHash("pin"))
 	// The child profile's ceiling hides the R-rated movie, though it once
 	// watched it: a restore gives it no data about a title it may not see.
 	dbExec(t, f.pool, `UPDATE user_profiles SET is_child = true, max_content_rating = 'PG' WHERE user_id = $1 AND id = $2`, account, gone)
@@ -924,7 +932,7 @@ func TestUserRestoreSameServerDB(t *testing.T) {
 		t.Fatalf("same-server restore = %+v %+v", restored, restored.Account)
 	}
 	newGone := restored.Account.Profiles[1].LocalID
-	if newGone == gone || countRows(t, f.pool, `SELECT count(*) FROM user_profiles WHERE user_id = $1 AND id = $2 AND pin_hash = 'pin'`, account, newGone) != 1 ||
+	if newGone == gone || countRows(t, f.pool, `SELECT count(*) FROM user_profiles WHERE user_id = $1 AND id = $2 AND pin_hash = $3`, account, newGone, fakeHash("pin")) != 1 ||
 		countRows(t, f.pool, `SELECT count(*) FROM user_watch_progress WHERE user_id = $1`, account) != 3 ||
 		countRows(t, f.pool, `SELECT count(*) FROM user_watch_progress WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`, account, newGone, mature) != 0 {
 		t.Fatalf("restored profile %s: its progress is missing, or it gained the R-rated movie", newGone)

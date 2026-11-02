@@ -66,8 +66,10 @@ export async function putBackupUploadPart(
       body: bytes,
       signal,
     },
+    // An upload can outlast the access token: a 401 refreshes it and sends
+    // the part again, still bound to the captured account and profile.
     context,
-    false,
+    true,
   );
   const decoded = await decodeV2Response(key, res);
   if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
@@ -84,7 +86,6 @@ export function completeBackupUpload(
     v2("POST /api/v2/admin/backups/uploads/{upload_id}/complete", {
       profileContext: context,
       path: { upload_id: uploadId },
-      retryAuthentication: false,
       signal,
     }),
   );
@@ -95,7 +96,6 @@ export function deleteBackupUpload(context: ProfileRequestContextSnapshot, uploa
     v2("DELETE /api/v2/admin/backups/uploads/{upload_id}", {
       profileContext: context,
       path: { upload_id: uploadId },
-      retryAuthentication: false,
     }),
   );
 }

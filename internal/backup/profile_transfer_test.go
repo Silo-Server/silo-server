@@ -77,3 +77,19 @@ func TestProfileImportAdmission(t *testing.T) {
 	second()
 	third()
 }
+
+// A restored password or PIN hash this server would not check at its own
+// cost is replaced with one nobody knows, locking the account or profile
+// instead of making every sign-in pay the document's cost.
+func TestRestoredCredentialsAreLockedOutsideTheServersCost(t *testing.T) {
+	hash := func(cost string) string { return "$2a$" + cost + "$" + strings.Repeat("a", 53) }
+	doc := UserDocument{Account: AccountEntry{PasswordHash: hash("31")}, Profiles: []ProfileEntry{{PINHash: hash("04")}, {PINHash: "plain"}, {}}}
+	if err := doc.lockCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Account.PasswordHash == hash("31") || doc.Profiles[0].PINHash != hash("04") || doc.Profiles[1].PINHash == "plain" ||
+		doc.Profiles[2].PINHash != "" || doc.lockedCredentials != 2 {
+		t.Fatalf("locked %d: password %q, pins %q %q %q", doc.lockedCredentials, doc.Account.PasswordHash,
+			doc.Profiles[0].PINHash, doc.Profiles[1].PINHash, doc.Profiles[2].PINHash)
+	}
+}
