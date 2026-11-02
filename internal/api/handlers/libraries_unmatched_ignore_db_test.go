@@ -296,3 +296,86 @@ func TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB(t *testing.T) {
 		t.Fatalf("after restoring one item of a shared root: series queue row = %s, want pending", got)
 	}
 }
+
+// TestUnmatchedItemsLeaveOutItemsInNoLibraryDB covers issue #2818: renaming
+// an unmatched movie's file leaves its old item behind with a missing file and
+// no library membership, held only by the scanner's file removal grace. The
+// unmatched list, its total and its search leave that item out, and still
+// list the unmatched item that is in a library.
+func TestUnmatchedItemsLeaveOutItemsInNoLibraryDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	tag := fmt.Sprintf("ghost2818-%d", suffix)
+	listedID := fmt.Sprintf("local-listed-%d", suffix)
+	ghostID := fmt.Sprintf("local-ghost-%d", suffix)
+	var folderID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, tag).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{listedID, ghostID})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+
+	items := catalog.NewItemRepository(pool)
+	files := scanner.NewFileRepository(pool)
+	for _, seed := range []struct {
+		contentID, title string
+		ghost            bool
+	}{
+		{listedID, tag + " Atlas Listed", false},
+		{ghostID, tag + " Atlas Ghost", true},
+	} {
+		if err := items.Upsert(ctx, &models.MediaItem{ContentID: seed.contentID, Type: "movie", Title: seed.title, Year: 2024, Status: "unmatched"}); err != nil {
+			t.Fatalf("upsert %s: %v", seed.contentID, err)
+		}
+		root := fmt.Sprintf("/ghost-%d/%s", suffix, seed.contentID)
+		file, err := files.Upsert(ctx, models.MediaFile{ContentID: seed.contentID, MediaFolderID: folderID, FilePath: root + "/Atlas (2024).mkv", ObservedRootPath: root, FileSize: 1024})
+		if err != nil {
+			t.Fatalf("upsert file for %s: %v", seed.contentID, err)
+		}
+		if seed.ghost {
+			// A full scan marked the file missing and removed the membership.
+			if _, err := pool.Exec(ctx, `UPDATE media_files SET missing_since = NOW() - INTERVAL '1 hour' WHERE id = $1`, file.ID); err != nil {
+				t.Fatalf("mark file missing: %v", err)
+			}
+			continue
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.contentID, folderID); err != nil {
+			t.Fatalf("seed membership: %v", err)
+		}
+	}
+
+	h := NewLibraryHandler(nil, nil, nil, pool, nil)
+	for _, search := range []string{tag, "unmatched"} {
+		views, total, err := h.ListUnmatchedItems(ctx, search, false, 500, 0)
+		if err != nil {
+			t.Fatalf("list %q: %v", search, err)
+		}
+		listed := map[string]UnmatchedItemView{}
+		for _, v := range views {
+			listed[v.ContentID] = v
+		}
+		if _, ok := listed[ghostID]; ok {
+			t.Fatalf("list %q includes the item in no library", search)
+		}
+		if v, ok := listed[listedID]; !ok || v.LibraryID != folderID {
+			t.Fatalf("list %q = %+v, want %s in library %d", search, views, listedID, folderID)
+		}
+		if search == tag && total != 1 {
+			t.Fatalf("list %q total = %d, want 1", search, total)
+		}
+	}
+}

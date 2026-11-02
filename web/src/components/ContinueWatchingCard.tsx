@@ -234,8 +234,6 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   const containerWidth = isPoster
     ? carouselCardWidthClasses(cardPresentation.poster_size)
     : WIDE_CAROUSEL_CARD_WIDTH_CLASSES;
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
   // Audiobook covers are square (Audible-style); use 1:1 for the poster
   // variant so they don't get top/bottom-cropped into a 2:3 frame.
   const imageAspect = isPoster
@@ -359,48 +357,46 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       </div>
 
       {/* Info */}
-      {showCaption ? (
-        <div className="px-0.5 pt-2.5">
+      <div className="px-0.5 pt-2.5">
+        <ViewTransitionLink
+          to={headingHref}
+          className="block truncate text-[0.8125rem] font-semibold hover:underline"
+        >
+          {heading}
+        </ViewTransitionLink>
+        {episodeMeta && (
           <ViewTransitionLink
-            to={headingHref}
-            className="block truncate text-[0.8125rem] font-semibold hover:underline"
+            to={isMangaChapter ? card.watchHref : card.itemHref}
+            className="text-muted-foreground block truncate text-xs hover:underline"
           >
-            {heading}
+            {episodeMeta}
           </ViewTransitionLink>
-          {showMetadata && episodeMeta && (
-            <ViewTransitionLink
-              to={isMangaChapter ? card.watchHref : card.itemHref}
-              className="text-muted-foreground block truncate text-xs hover:underline"
-            >
-              {episodeMeta}
-            </ViewTransitionLink>
-          )}
-          {showMetadata && (timeLeftLabel || premiereBadge) && (
-            <div className="flex items-center gap-1.5">
-              {timeLeftLabel &&
-                (timeLeftLabel === "\u00A0" ? (
-                  <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
-                ) : (
-                  <ViewTransitionLink
-                    to={isMangaChapter ? card.watchHref : card.itemHref}
-                    className="text-muted-foreground block w-fit truncate text-xs hover:underline"
-                  >
-                    {timeLeftLabel}
-                  </ViewTransitionLink>
-                ))}
-              {premiereBadge && (
-                <span
-                  className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
-                    premiereBadge,
-                  )}`}
+        )}
+        {(timeLeftLabel || premiereBadge) && (
+          <div className="flex items-center gap-1.5">
+            {timeLeftLabel &&
+              (timeLeftLabel === "\u00A0" ? (
+                <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
+              ) : (
+                <ViewTransitionLink
+                  to={isMangaChapter ? card.watchHref : card.itemHref}
+                  className="text-muted-foreground block w-fit truncate text-xs hover:underline"
                 >
-                  {upcomingBadgeLabel(premiereBadge)}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      ) : null}
+                  {timeLeftLabel}
+                </ViewTransitionLink>
+              ))}
+            {premiereBadge && (
+              <span
+                className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                  premiereBadge,
+                )}`}
+              >
+                {upcomingBadgeLabel(premiereBadge)}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

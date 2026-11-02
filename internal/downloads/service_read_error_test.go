@@ -127,7 +127,7 @@ func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 			if err := repo.Create(t.Context(), row); err != nil {
 				t.Fatal(err)
 			}
-			svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, nil, nil, &config.DownloadConfig{Enabled: true})
+			svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			w := &interruptedResponseWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
@@ -160,5 +160,32 @@ func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 				t.Fatalf("stored status %s, want %s", stored.Status, expected)
 			}
 		})
+	}
+}
+
+func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
+	repo := statusEventTestRepo(t)
+	path := filepath.Join(t.TempDir(), "fixture.mp4")
+	if err := os.WriteFile(path, []byte("media"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	// Another profile on the account queued this account-level row.
+	row := &Download{ID: "shared-row", UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now, UpdatedAt: now}
+	if err := repo.Create(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{err: catalog.ErrItemNotFound}, nil, &config.DownloadConfig{Enabled: true})
+	w := httptest.NewRecorder()
+	err := svc.ServeFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), 2, "restricted", "", row.ID, catalog.AccessFilter{})
+	if !errors.Is(err, catalog.ErrItemNotFound) || w.Body.Len() != 0 {
+		t.Fatalf("profile without access to the item: err %v, %d bytes served", err, w.Body.Len())
+	}
+	stored, err := repo.GetByID(t.Context(), row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != StatusQueued {
+		t.Fatalf("refused request moved the row to %s", stored.Status)
 	}
 }

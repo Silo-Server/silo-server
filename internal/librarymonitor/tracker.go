@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // changeKind is what a reported path means for scanning.
@@ -58,7 +60,7 @@ type fileState struct {
 }
 
 func lstatFile(path string) (fileState, error) {
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return fileState{}, err
 	}

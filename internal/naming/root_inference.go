@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -228,7 +229,7 @@ func inferFileRootAssignment(
 	overrides map[string]models.MediaRootOverride,
 	libraryRoots ...string,
 ) RootAssignment {
-	assignment := extractPathEvidence(filePath, libraryType, libraryRoots...)
+	assignment := extractDisplayPathEvidence(filePath, libraryType, libraryRoots...)
 
 	if overrideRoot, ok := deepestOverrideAncestor(filePath, overrides); ok {
 		assignment.RootPath = overrideRoot
@@ -268,8 +269,25 @@ func inferFileRootAssignment(
 	// Recorded for every file: an override can still force the root's final
 	// type, so callers apply the movie-only rule once that type is known.
 	assignment.HasFileIDs = FileNameHasProviderTag(filePath)
+	assignment.Title = fspath.Display(assignment.Title)
 
 	return assignment
+}
+
+// extractDisplayPathEvidence parses names as display text (see
+// fspath.Display), so the inferred type and title do not depend on whether a
+// name was stored in UTF-8; the paths keep the input's encoding.
+func extractDisplayPathEvidence(filePath string, libraryType string, libraryRoots ...string) RootAssignment {
+	paths := newDisplayPaths(filePath, libraryRoots)
+	if paths == nil {
+		return extractPathEvidence(filePath, libraryType, libraryRoots...)
+	}
+	evidence := extractPathEvidence(paths.file, libraryType, paths.roots...)
+	evidence.FilePath = paths.toEncoded(evidence.FilePath)
+	evidence.LibraryRootPath = paths.toEncoded(evidence.LibraryRootPath)
+	evidence.RootPath = paths.toEncoded(evidence.RootPath)
+	evidence.LegacyRootPath = paths.toEncoded(evidence.LegacyRootPath)
+	return evidence
 }
 
 func extractPathEvidence(filePath string, libraryType string, libraryRoots ...string) RootAssignment {

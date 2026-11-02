@@ -58,6 +58,14 @@ func TestSearchUsesCustomPlansPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, id) }()
+	var library int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders(type,name,enabled) VALUES('movies',$1,true) RETURNING id`, id).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, library) }()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, library); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), "SET plan_cache_mode=force_generic_plan"); err != nil {
 		t.Fatal(err)
 	}

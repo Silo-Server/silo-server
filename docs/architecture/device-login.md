@@ -115,6 +115,9 @@ phone's verified profile. Collecting it gives the TV a temporary login session
 of that one profile. The poll answer is unchanged: `tokens` (access and
 refresh), `profile_id`, `profile_token`, `temporary: true` and
 `session_expires_at`. The Apple and Android TV apps require the refresh token.
+The web approval page (`/activate`) never approves a handoff: it shows the
+request as playback sent from a Silo app, offers only deny, and follows a
+pending one until the app decides it.
 
 The session row (`auth_sessions`) records what the session is, and every node
 enforces it from the row rather than from the tokens, so a token issued before

@@ -592,9 +592,13 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 	if err != nil {
 		return nil, err
 	}
+	binaryPath, err := s.localInstallPath(installation)
+	if err != nil {
+		return nil, err
+	}
 	return s.host.Start(ctx, pluginhost.StartRequest{
 		InstallationID: installation.ID,
-		BinaryPath:     s.localInstallPath(installation),
+		BinaryPath:     binaryPath,
 		Manifest:       manifest,
 		Config:         configEntries,
 	})
@@ -603,14 +607,12 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 // localInstallPath is where this host keeps the installation's binary: the
 // recorded install path on the API server, the archive cache's own copy on a
 // host with its own cache root (a proxy node).
-func (s *Service) localInstallPath(installation *Installation) string {
-	if installation == nil {
-		return ""
+func (s *Service) localInstallPath(installation *Installation) (string, error) {
+	var cache *ArchiveCache
+	if s != nil {
+		cache = s.archiveCache
 	}
-	if s == nil || s.archiveCache == nil {
-		return installation.InstallPath
-	}
-	return s.archiveCache.LocalInstallPath(installation)
+	return cache.LocalInstallPath(installation)
 }
 
 func (s *Service) Stop(installationID int) error {
@@ -833,9 +835,13 @@ func (s *Service) ResolveAssetPath(ctx context.Context, installationID int, asse
 	if err != nil {
 		return "", err
 	}
+	binaryPath, err := s.localInstallPath(installation)
+	if err != nil {
+		return "", err
+	}
 	for _, asset := range manifest.GetAssets() {
 		if asset.GetPath() == assetPath {
-			resolved := filepath.Join(filepath.Dir(s.localInstallPath(installation)), assetPath)
+			resolved := filepath.Join(filepath.Dir(binaryPath), assetPath)
 			if _, err := os.Stat(resolved); err != nil {
 				return "", fmt.Errorf("plugin asset %q: %w", assetPath, err)
 			}
@@ -911,7 +917,11 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 		if !allowResident && isResidentManifest(cachedManifest) {
 			return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
 		}
-		installedManifest, manifestErr := LoadManifestFile(InstalledManifestPath(s.localInstallPath(installation)))
+		binaryPath, pathErr := s.localInstallPath(installation)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		installedManifest, manifestErr := LoadManifestFile(InstalledManifestPath(binaryPath))
 		if manifestErr != nil {
 			// The files are not here (yet): on a proxy node the row may name
 			// a release this host has not rehydrated. The running process is
@@ -1109,7 +1119,11 @@ func (s *Service) ensureLoadedInstallation(
 	installation *Installation,
 ) (*pluginv1.PluginManifest, error) {
 	if s.archiveCache == nil {
-		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
+		binaryPath, err := s.localInstallPath(installation)
+		if err != nil {
+			return nil, err
+		}
+		return LoadManifestFile(InstalledManifestPath(binaryPath))
 	}
 	return s.archiveCache.Ensure(ctx, installation)
 }
@@ -1122,7 +1136,11 @@ func (s *Service) readInstalledManifest(
 	installation *Installation,
 ) (*pluginv1.PluginManifest, error) {
 	if s.archiveCache == nil {
-		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
+		binaryPath, err := s.localInstallPath(installation)
+		if err != nil {
+			return nil, err
+		}
+		return LoadManifestFile(InstalledManifestPath(binaryPath))
 	}
 	return s.archiveCache.Manifest(ctx, installation)
 }

@@ -42,7 +42,7 @@ func serveDownload(t *testing.T, status int, body []byte) *Provider {
 func TestDownloadRejectsOversizedResponse(t *testing.T) {
 	p := serveDownload(t, http.StatusOK, make([]byte, subtitles.MaxProviderResponseSize+1))
 
-	if _, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestDownloadRejectsHighRatioZipEntry(t *testing.T) {
 	archive := zipArchive(t, "movie.srt", io.LimitReader(zeros{}, 64<<20))
 	p := serveDownload(t, http.StatusOK, archive)
 
-	if _, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -59,7 +59,7 @@ func TestDownloadRejectsHighRatioZipEntry(t *testing.T) {
 func TestDownloadBoundsErrorBody(t *testing.T) {
 	p := serveDownload(t, http.StatusBadGateway, bytes.Repeat([]byte("x"), 1<<20))
 
-	_, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip")
+	_, _, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip", subtitles.DownloadTarget{})
 	if err == nil {
 		t.Fatal("Download() error = nil, want an error")
 	}

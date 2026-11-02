@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-// barrierStore wraps memTokenStore and gates the FIRST RevokeTokenIfActive
-// call on `release` so both goroutines in the concurrent test can complete
-// their initial GetTokenByJTI lookup before either revoke fires. Without
-// this, the Go scheduler can serialize the test enough that goroutine B's
+// barrierStore wraps memTokenStore and gates the FIRST IssueTokens call on
+// `release` so both goroutines in the concurrent test can complete their
+// initial GetTokenByJTI lookup before either rotation fires. Without this,
+// the Go scheduler can serialize the test enough that goroutine B's
 // GetTokenByJTI sees A's already-revoked old JTI and 401s — which is a
-// real race-loser scenario in production but not the case the canonical's
-// documented "both succeed" semantics describe.
+// real race-loser scenario in production but not the case where both
+// requests reach the rotation.
 type barrierStore struct {
 	*memTokenStore
 	release    chan struct{}
@@ -25,12 +25,12 @@ type barrierStore struct {
 	gateClosed chan struct{}
 }
 
-func (b *barrierStore) RevokeTokenIfActive(ctx context.Context, jti string) (ABSToken, error) {
+func (b *barrierStore) IssueTokens(ctx context.Context, from TokenSource, tokens ...ABSToken) error {
 	b.gateOnce.Do(func() {
 		<-b.release
 		close(b.gateClosed)
 	})
-	return b.memTokenStore.RevokeTokenIfActive(ctx, jti)
+	return b.memTokenStore.IssueTokens(ctx, from, tokens...)
 }
 
 func TestHandleRefresh_ConcurrentRotations_OnlyOneSucceeds(t *testing.T) {
@@ -75,7 +75,7 @@ func TestHandleRefresh_ConcurrentRotations_OnlyOneSucceeds(t *testing.T) {
 		}()
 	}
 
-	// Give both goroutines time to reach the atomic revoke barrier, then
+	// Give both goroutines time to reach the rotation barrier, then
 	// release the gate so one rotation wins and the other sees a revoked JTI.
 	time.Sleep(50 * time.Millisecond)
 	close(gate.release)
@@ -110,26 +110,21 @@ func TestHandleRefresh_ConcurrentRotations_OnlyOneSucceeds(t *testing.T) {
 	}
 }
 
-// failingRevokeStore wraps memTokenStore but returns an error from
-// RevokeTokenByJTI. Used to exercise the partial-failure path in
-// handleRefresh: if the revoke of the old JTI errors, the new tokens have
-// already been persisted but the old token also remains valid — the
-// canonical accepts this trade rather than rolling back partial writes.
-type failingRevokeStore struct{ *memTokenStore }
+// failingIssueStore wraps memTokenStore but fails every IssueTokens call
+// without writing, as a rotation transaction that rolls back does.
+type failingIssueStore struct{ *memTokenStore }
 
-func (failingRevokeStore) RevokeTokenIfActive(context.Context, string) (ABSToken, error) {
-	return ABSToken{}, errors.New("revoke unavailable")
+func (failingIssueStore) IssueTokens(context.Context, TokenSource, ...ABSToken) error {
+	return errors.New("rotation unavailable")
 }
 
-// TestHandleRefresh_RevokeFailure_OldTokenStillValid covers the documented
-// partial-failure semantics: when revoke errors, handleRefresh returns 500
-// and the OLD refresh JTI is left untouched (still valid). The client can
-// retry with the same old token because no new tokens are persisted before
-// the atomic revoke succeeds.
-func TestHandleRefresh_RevokeFailure_OldTokenStillValid(t *testing.T) {
+// TestHandleRefresh_RotationFailure_OldTokenStillValid: when the rotation
+// fails, handleRefresh returns 500 and the OLD refresh JTI is left untouched
+// (still valid), so the client can retry with it.
+func TestHandleRefresh_RotationFailure_OldTokenStillValid(t *testing.T) {
 	cfg := &staticConfig{secret: []byte("test-secret-32-bytes-aaaaaaaaaaaaa")}
 	mem := newMemTokenStore()
-	store := failingRevokeStore{memTokenStore: mem}
+	store := failingIssueStore{memTokenStore: mem}
 
 	h := New(Dependencies{
 		Config:     cfg,
@@ -159,6 +154,6 @@ func TestHandleRefresh_RevokeFailure_OldTokenStillValid(t *testing.T) {
 	// Old JTI must remain unrevoked so the client can retry the rotation.
 	old, _ := mem.GetTokenByJTI(context.Background(), jti)
 	if old.RevokedAt != nil {
-		t.Errorf("old refresh JTI was revoked despite RevokeTokenByJTI error")
+		t.Errorf("old refresh JTI was revoked despite the rotation error")
 	}
 }

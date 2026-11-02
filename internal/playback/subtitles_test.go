@@ -1,7 +1,13 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +137,43 @@ func TestSRTAlignmentTagForVTTCueSettingsInvertsTheConversion(t *testing.T) {
 	}
 	if got := SRTAlignmentTagForVTTCueSettings("position:10% size:50%"); got != "" {
 		t.Errorf("settings the conversion never writes must not become a tag, got %q", got)
+	}
+}
+
+// FFmpeg has no "sub" input format, so a stored .sub must reach it under the
+// demuxer its cues name, and a .sub with no text cues must not start FFmpeg.
+func TestConvertToVTTWithFFmpegPicksTheSUBDemuxer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string // "" when FFmpeg must not run
+	}{
+		{"microdvd", []byte("{1}{1}25\n{25}{50}Hello\n"), "microdvd"},
+		{"vobsub", []byte{0x00, 0x00, 0x01, 0xba, 0x44, 0x00, 0x04, 0x00}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			argvFile := filepath.Join(dir, "argv")
+			ffmpeg := filepath.Join(dir, "ffmpeg")
+			writeExecutable(t, ffmpeg, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argvFile+"'\ncat >/dev/null\nprintf 'WEBVTT\\n\\n'\n")
+
+			_, err := ConvertToVTTWithFFmpeg(t.Context(), tc.data, "sub", ffmpeg)
+			raw, readErr := os.ReadFile(argvFile)
+			if tc.want == "" {
+				if err == nil || !errors.Is(readErr, fs.ErrNotExist) {
+					t.Fatalf("ConvertToVTTWithFFmpeg = %v, ffmpeg argv %q; want an error before ffmpeg runs", err, raw)
+				}
+				return
+			}
+			if err != nil || readErr != nil {
+				t.Fatalf("ConvertToVTTWithFFmpeg = %v (read argv: %v)", err, readErr)
+			}
+			if !strings.Contains(string(raw), "-f\n"+tc.want+"\n-i\npipe:0\n") {
+				t.Fatalf("ffmpeg argv %q, want -f %s for the stdin input", raw, tc.want)
+			}
+		})
 	}
 }

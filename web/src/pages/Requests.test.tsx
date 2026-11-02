@@ -2,11 +2,17 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { MediaRequest, RequestDiscoverySection, RequestMediaResult } from "@/api/types";
+import type {
+  MediaRequest,
+  RequestDiscoverRowRef,
+  RequestDiscoverySection,
+  RequestMediaResult,
+} from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   mine: [] as MediaRequest[],
   sections: [] as RequestDiscoverySection[],
+  rows: [] as RequestDiscoverRowRef[],
   cancel: vi.fn(),
   create: vi.fn(),
 }));
@@ -14,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/useRequests", () => {
   const idle = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
   return {
-    useRequestDiscovery: () => ({ ...idle, data: mocks.sections }),
+    useRequestDiscovery: () => ({ ...idle, data: { rows: mocks.rows, sections: mocks.sections } }),
     useDiscoverStudios: () => idle,
     useDiscoverNetworks: () => idle,
     useDiscoverGenres: () => idle,
@@ -32,7 +38,9 @@ vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
   useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
-vi.mock("@/components/BrandCarousel", () => ({ default: () => null }));
+vi.mock("@/components/BrandCarousel", () => ({
+  default: ({ title }: { title: string }) => <section aria-label={title} />,
+}));
 // Embla needs layout APIs jsdom lacks; MediaCarousel.test covers the real row.
 vi.mock("@/components/MediaCarousel", () => ({
   default: ({
@@ -104,6 +112,7 @@ beforeEach(() => {
   mocks.create.mockReset().mockResolvedValue({});
   mocks.mine = [];
   mocks.sections = [];
+  mocks.rows = [];
 });
 
 describe("Requests hub", () => {
@@ -139,8 +148,24 @@ describe("Requests hub", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Requests" })).toBeInTheDocument();
   });
 
-  it("links each Discover row with more pages to its full grid", () => {
+  it("lays the rows out in the server's order and links each with more pages to its full grid", () => {
+    mocks.rows = [
+      { key: "r_anime", type: "tmdb_discover", title: "Anime" },
+      { key: "networks", type: "networks", title: "On TV" },
+      { key: "trending_movies", type: "tmdb_chart", title: "Trending Movies" },
+      { key: "upcoming_movies", type: "tmdb_chart", title: "Upcoming Movies" },
+      { key: "on_air_series", type: "tmdb_chart", title: "On the Air" },
+      { key: "r_future", type: "something_new", title: "Unknown" },
+    ];
     mocks.sections = [
+      {
+        key: "r_anime",
+        title: "Anime",
+        page: 1,
+        total_pages: 3,
+        total_results: 60,
+        results: [result(3, "Frieren")],
+      },
       {
         key: "trending_movies",
         title: "Trending Movies",
@@ -168,6 +193,13 @@ describe("Requests hub", () => {
     ];
     renderAt("/requests");
 
+    expect(
+      screen.getAllByRole("region").map((region) => region.getAttribute("aria-label")),
+    ).toEqual(["Anime", "On TV", "Trending Movies", "Upcoming Movies"]);
+    expect(screen.getByRole("link", { name: "Explore all Anime" })).toHaveAttribute(
+      "href",
+      "/requests/discover/r_anime",
+    );
     const trending = screen.getByRole("region", { name: "Trending Movies" });
     expect(
       within(trending).getByRole("link", { name: "Explore all Trending Movies" }),

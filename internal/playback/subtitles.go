@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -89,67 +89,70 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	// We default to SRT as a safe text-based format.
 	outputFormat := "srt"
 
-	args := []string{
-		"-i", filePath,
-		"-map", fmt.Sprintf("0:s:%d", trackIndex),
-		"-f", outputFormat,
-		"pipe:1",
+	args := append([]string{"-i", filePath}, subtitleFormatOutputArgs(trackIndex, outputFormat)...)
+	data, err := runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, nil, trackIndex)
+	if err != nil {
+		return nil, "", err
 	}
-
-	ffmpeg := "ffmpeg"
-	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
-		ffmpeg = ffmpegPath[0]
-	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
-			err, truncateStderr(stderr.String()))
-	}
-
-	data := stdout.Bytes()
-	if len(data) == 0 {
-		return nil, "", fmt.Errorf("ffmpeg produced empty subtitle output for track %d", trackIndex)
-	}
-
 	return data, outputFormat, nil
 }
 
 // ExtractSubtitleWithFormat extracts a subtitle track from a media file in the
 // specified output format. Only "srt" and "ass" are allowed as output formats.
 func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex int, outputFormat string, ffmpegPath ...string) ([]byte, error) {
+	if err := checkExtractFormat(outputFormat); err != nil {
+		return nil, err
+	}
+	args := append([]string{"-i", filePath}, subtitleFormatOutputArgs(trackIndex, outputFormat)...)
+	return runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, nil, trackIndex)
+}
+
+func checkExtractFormat(outputFormat string) error {
 	switch outputFormat {
 	case "srt", "ass":
-	default:
-		return nil, fmt.Errorf("unsupported subtitle extraction format: %q (must be \"srt\" or \"ass\")", outputFormat)
+		return nil
 	}
+	return fmt.Errorf("unsupported subtitle extraction format: %q (must be \"srt\" or \"ass\")", outputFormat)
+}
 
-	args := []string{
-		"-i", filePath,
+// subtitleFormatOutputArgs are the output options of a buffered extract:
+// the track, converted by the format's default encoder.
+func subtitleFormatOutputArgs(trackIndex int, outputFormat string) []string {
+	return []string{
 		"-map", fmt.Sprintf("0:s:%d", trackIndex),
 		"-f", outputFormat,
 		"pipe:1",
 	}
+}
 
-	ffmpeg := "ffmpeg"
+func firstFFmpegPath(ffmpegPath []string) string {
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
-		ffmpeg = ffmpegPath[0]
+		return ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	return defaultFFmpegBinary
+}
+
+// runSubtitleExtract runs ffmpeg with args, feeding it in when set, and
+// returns its whole output.
+func runSubtitleExtract(ctx context.Context, ffmpeg string, args []string, in *SubtitlePacketInput, trackIndex int) ([]byte, error) {
+	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
-			err, truncateStderr(stderr.String()))
+	wait, err := startSubtitleCommand(ctx, cmd, in)
+	if err != nil {
+		return nil, fmt.Errorf("start ffmpeg: %w", err)
+	}
+	if waitErr, feedErr := wait(); waitErr != nil {
+		// A write that failed first, such as one refusing its packets, is
+		// why FFmpeg failed; callers look for it.
+		return nil, errors.Join(fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
+			waitErr, truncateStderr(stderr.String())), feedErr)
+	} else if feedErr != nil {
+		return nil, fmt.Errorf("write subtitle packets to ffmpeg: %w", feedErr)
 	}
 
 	data := stdout.Bytes()
@@ -163,7 +166,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 // LoadExternalSubtitleRaw reads an external subtitle file and returns its raw
 // contents without any conversion. Used for serving ASS/SSA files directly.
 func LoadExternalSubtitleRaw(subtitlePath string) ([]byte, error) {
-	data, err := os.ReadFile(subtitlePath)
+	data, err := fspath.ReadFile(subtitlePath)
 	if err != nil {
 		return nil, fmt.Errorf("read external subtitle: %w", err)
 	}
@@ -223,7 +226,7 @@ func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle, ffmpegPath ...string) ([]byte, error) {
 	switch strings.ToLower(sub.Format) {
 	case "srt", "vtt", "webvtt":
-		data, err := os.ReadFile(sub.Path)
+		data, err := fspath.ReadFile(sub.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read external subtitle: %w", err)
 		}
@@ -244,7 +247,7 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle,
 		if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 			ffmpeg = ffmpegPath[0]
 		}
-		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -271,11 +274,11 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle,
 // too large to be text (a VobSub .sub), or the copy fails; FFmpeg then reads
 // the original as before.
 func decodedSubtitleCopy(ctx context.Context, sub models.ExternalSubtitle) string {
-	info, err := os.Stat(sub.Path)
+	info, err := fspath.Stat(sub.Path)
 	if err != nil || info.Size() > subtitles.MaxUploadSize {
 		return ""
 	}
-	raw, err := os.ReadFile(sub.Path)
+	raw, err := fspath.ReadFile(sub.Path)
 	if err != nil {
 		return ""
 	}
@@ -312,15 +315,21 @@ func ConvertToVTT(input []byte, fromFormat string) ([]byte, error) {
 }
 
 // ConvertToVTTWithFFmpeg converts subtitle formats that require a real parser
-// (notably ASS/SSA) from in-memory data. It keeps downloaded subtitle
-// conversion on the same executable path as external sidecar conversion.
+// (notably ASS/SSA, and .sub through the demuxer subtitles.SUBDemuxer names)
+// from in-memory data. It keeps downloaded subtitle conversion on the same
+// executable path as external sidecar conversion.
 func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpegPath string) ([]byte, error) {
 	if converted, err := ConvertToVTT(input, fromFormat); err == nil {
 		return converted, nil
 	}
 	inputFormat := strings.ToLower(strings.TrimSpace(fromFormat))
-	if inputFormat == "ssa" {
+	switch inputFormat {
+	case "ssa":
 		inputFormat = "ass"
+	case string(subtitles.FormatSUB):
+		if inputFormat = subtitles.SUBDemuxer(input); inputFormat == "" {
+			return nil, errors.New("sub subtitle is neither MicroDVD nor SubViewer text")
+		}
 	}
 	if inputFormat == "" {
 		return nil, errors.New("subtitle format is required")
@@ -328,7 +337,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := fspath.CommandContext(ctx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", inputFormat, "-i", "pipe:0",
 		"-f", "webvtt", "pipe:1",

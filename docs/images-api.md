@@ -51,7 +51,9 @@ Within item detail this covers cast and crew headshots too: they follow the
 same 500px image. Without the parameter they are that 500px image as well.
 
 Without the parameter, an episode still standing in for a backdrop in a section
-hero or Continue Watching uses the widest still rung that fits, 1280px.
+hero or Continue Watching uses the widest still rung that fits, 1280px. On
+`/api/v2` a Continue Watching or Next Up episode card shows a still only when
+its season and series have no backdrop (see below).
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -166,6 +168,7 @@ GET /api/v2/images/capabilities
   },
   "season_list_artwork_param": "include_artwork",
   "episode_still_provenance": true,
+  "episode_parent_artwork": true,
   "extended_item_artwork": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
@@ -272,6 +275,33 @@ the server knows the image's source; an absent field means unknown, even when th
 capability is true. Clients that hide unwatched episode stills use them to keep
 series and season artwork visible. See
 [episode spoiler protection](catalog-api.md#episode-spoiler-protection).
+
+## Episode parent artwork
+
+`"episode_parent_artwork": true` means episode cards can carry their series'
+and season's artwork next to their own: `series_poster_url`,
+`series_backdrop_url` and `season_poster_url`, each with a matching
+`*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
+without fetching the episode's detail, since an episode card's `backdrop_url`
+is usually the episode still. In Continue Watching and Next Up rows,
+`/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
+the series backdrop when the season has none, and keep the still only when
+neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+`poster_width` and the backdrop field follows `backdrop_width`, like
+`poster_url` and `backdrop_url` on the same card.
+
+A season backdrop comes from a metadata provider that has one, or from an
+admin's pick, which locks the series' images. While they are unlocked,
+refreshing or identifying the series replaces the season backdrop with the
+provider's, or removes it when no provider has one. A pass that only fills
+missing metadata leaves a stored season backdrop alone.
+
+They appear on episode cards in Home and library sections (Continue Watching
+and Next Up included), catalog browse and search, Watch Tonight, and on episode
+detail (`getCatalogItem`). Each field is absent when the series or season has
+no such image. There is no season backdrop field; Continue Watching and Next Up
+rows show it as `backdrop_url`.
+The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
 

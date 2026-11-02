@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/clientclock"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -85,6 +86,17 @@ func (s *Service) RecordManualMarkWatched(ctx context.Context, userID int, profi
 
 func (s *Service) RecordManualMarkWatchedWithResult(ctx context.Context, userID int, profileID string, targets []LeafWatchTarget, watchedAt time.Time) (ManualMarkResult, error) {
 	return s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourceManual)
+}
+
+// RecordSpannedEpisodesWatched marks the later episodes of a completed
+// multi-episode file watched, recorded as playback like the play of its first
+// episode. Episodes the profile already completed are left alone.
+func (s *Service) RecordSpannedEpisodesWatched(ctx context.Context, userID int, profileID string, targets []LeafWatchTarget, watchedAt time.Time) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	_, err := s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourcePlayback)
+	return err
 }
 
 // RecordManualMarkUnwatched clears the targets' watched state and resume
@@ -376,6 +388,7 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {
+	watchedAt = clientclock.Clamp(watchedAt, time.Now().UTC())
 	_, err := s.recordMarkWatched(ctx, userID, profileID, []LeafWatchTarget{{MediaItemID: targetID}}, watchedAt, userstore.WatchHistorySourceJellycompat)
 	return err
 }
@@ -389,6 +402,7 @@ func (s *Service) RecordJellycompatMarkUnplayed(ctx context.Context, userID int,
 // jellycompat's series-mark-played path to collapse a per-episode loop into
 // one progress upsert plus per-episode history inserts (audit 2026-05-01 §2.7).
 func (s *Service) RecordJellycompatMarkPlayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string, watchedAt time.Time) error {
+	watchedAt = clientclock.Clamp(watchedAt, time.Now().UTC())
 	return s.recordMarkWatchedBatch(ctx, userID, profileID, targetIDs, watchedAt, userstore.WatchHistorySourceJellycompat)
 }
 
@@ -625,9 +639,7 @@ func formatWatchedAt(watchedAt time.Time) string {
 // mark-played path, a played mark adds history only when the leaf is not
 // already completed.
 func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
-	if edit.EventAt.IsZero() {
-		edit.EventAt = time.Now().UTC()
-	}
+	edit.EventAt = clientclock.Clamp(edit.EventAt, time.Now().UTC())
 	store, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return err

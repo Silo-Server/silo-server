@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -310,12 +311,49 @@ func TestItemRefreshPublishesScanCompleteAfterMetadataRefresh(t *testing.T) {
 	if refresher.contentID != "series-1" {
 		t.Fatalf("refreshed content = %q, want series-1", refresher.contentID)
 	}
+	var scanComplete, itemChanged bool
 	for _, event := range eventBus.events {
-		if event.Type == cache.EventScanComplete && event.Payload == "3" {
-			return
-		}
+		scanComplete = scanComplete || (event.Type == cache.EventScanComplete && event.Payload == "3")
+		itemChanged = itemChanged || (event.Type == cache.EventCatalogItemChanged && event.Payload == "series-1")
 	}
-	t.Fatalf("events = %#v, want scan_complete after metadata refresh", eventBus.events)
+	if !scanComplete || !itemChanged {
+		t.Fatalf("events = %#v, want scan_complete and catalog_item_changed for series-1 after metadata refresh", eventBus.events)
+	}
+}
+
+// Without Redis the event bus is a no-op, so the node that ran the refresh
+// evicts its own cached rails rather than relying on its subscriber.
+func TestItemRefreshEvictsLocalRailsWithoutAnEventBus(t *testing.T) {
+	t.Parallel()
+
+	executor := NewItemRefreshExecutor(
+		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
+		&itemRefreshTestFileRepo{},
+		&itemRefreshTestRootClaimRepo{},
+		&itemRefreshTestGroupClaimRepo{},
+		newItemRefreshTestSkippedRootRepo(),
+		nil,
+		nil,
+		&itemRefreshTestIngester{},
+		&itemRefreshTestScanRuns{},
+		&itemRefreshTestRefresher{},
+		&cache.NoopEventBus{},
+		nil,
+	)
+	var evicted []string
+	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
+
+	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
+		RequestedContentID: "episode-1",
+		RefreshContentID:   "series-1",
+		ScanFolderID:       3,
+		ScanPath:           "/media/show",
+	}, nil); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !slices.Equal(evicted, []string{"series-1", "episode-1"}) {
+		t.Fatalf("evicted = %v, want series-1 and episode-1", evicted)
+	}
 }
 
 func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {

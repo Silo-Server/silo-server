@@ -472,7 +472,7 @@ const h264StreamingLevel = 41
 func h264EncodeFacts(video models.VideoTrack, videoBitrateKbps int, source catalog.FileVersion) (profile string, level int) {
 	kbps := videoBitrateKbps
 	if kbps <= 0 {
-		kbps = playback.H264EquivalentKbps(source.Bitrate, source.CodecVideo)
+		kbps = compatSourceEncodeKbps(source, compatPrimaryVideoTrack(source), compatTargetVideoCodec)
 	}
 	// Not max: this package's max(value, fallback) returns any positive value.
 	level = playback.H264LevelFor(video.Width, video.Height, parseCompatFrameRate(video.FrameRate), kbps)

@@ -134,6 +134,56 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 }
 
+// A provider whose manifest asks for sharing starts with it on only when
+// markers.share_by_default is true. A new server whose admin never saved the
+// setup wizard's choice has no value stored and starts it off.
+func TestProviderConfigEnsureDefaultSharingDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, SettingShareByDefault)
+	})
+
+	installation := int(time.Now().UnixNano() % 1_000_000_000)
+	for i, tc := range []struct {
+		stored string // "" leaves the setting unset
+		want   bool
+	}{{"", false}, {"true", true}} {
+		id := PluginProviderID(installation+i, "markers")
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = $1`, id)
+		})
+		if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, SettingShareByDefault); err != nil {
+			t.Fatalf("clear setting: %v", err)
+		}
+		if tc.stored != "" {
+			if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, SettingShareByDefault, tc.stored); err != nil {
+				t.Fatalf("store setting: %v", err)
+			}
+		}
+
+		store := NewProviderConfigStore(pool)
+		if err := store.EnsureDefaultSharing(ctx, ProviderConfig{
+			Provider: id, FetchEnabled: true, FetchPriority: 5,
+			ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9,
+		}); err != nil {
+			t.Fatalf("EnsureDefaultSharing: %v", err)
+		}
+		if got, ok := store.Get(id); !ok || got.ContributeEnabled != tc.want || got.ContributeAutoLocal != tc.want || !got.FetchEnabled {
+			t.Errorf("share_by_default %q: provider = %+v (exists %v), want sharing %v", tc.stored, got, ok, tc.want)
+		}
+	}
+}
+
 // An admin edit to one setting keeps the stored value of every other one, so
 // an edit that waits on a sharing opt-out cannot turn sharing back on.
 func TestProviderConfigPatchKeepsConcurrentOptOutDB(t *testing.T) {

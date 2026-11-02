@@ -233,8 +233,8 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 }
 
 // EnsureDefaultSharing is Ensure for a row whose manifest asks for contribution
-// to start on. It starts with contribution and automatic sharing off when
-// markers.share_by_default is false. The setting read and the insert hold the
+// to start on. It starts with contribution and automatic sharing off unless
+// markers.share_by_default is true. The setting read and the insert hold the
 // lock StopDefaultSharingInTx takes, so an opt-out saved meanwhile either
 // commits first and this row starts off, or waits and turns this row off.
 func (s *ProviderConfigStore) EnsureDefaultSharing(ctx context.Context, c ProviderConfig) error {

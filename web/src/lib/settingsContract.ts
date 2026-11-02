@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 23;
+export const SETTINGS_REVISION = 24;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -232,6 +232,10 @@ export const SETTING_KEYS = {
   PLAYBACK_PREFERRED_QUALITY: "playback.preferred_quality",
   /** Show forced subtitles */
   PLAYBACK_SHOW_FORCED_SUBTITLES: "playback.show_forced_subtitles",
+  /** Show marker confidence */
+  PLAYBACK_SHOW_MARKER_CONFIDENCE: "playback.show_marker_confidence",
+  /** Show marker source */
+  PLAYBACK_SHOW_MARKER_SOURCE: "playback.show_marker_source",
   /** Subtitle appearance */
   PLAYBACK_SUBTITLE_APPEARANCE: "playback.subtitle_appearance",
   /** Preferred subtitle language */
@@ -841,6 +845,38 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
   },
+  "playback.show_marker_confidence": {
+    key: "playback.show_marker_confidence",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker confidence",
+    description:
+      "Show how confident the source is above the Skip Intro button. Each source rates on its own scale, so the percentage is only comparable within one source; turn the source line on to see which one it is.",
+    category: "playback",
+    control: "switch",
+  },
+  "playback.show_marker_source": {
+    key: "playback.show_marker_source",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker source",
+    description:
+      "Show where the skip came from above the Skip Intro button: Silo's own detection, a person, or the provider that supplied the marker.",
+    category: "playback",
+    control: "switch",
+  },
   "playback.subtitle_appearance": {
     key: "playback.subtitle_appearance",
     type: "object",
@@ -1358,7 +1394,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
     defaultValue: { poster_size: "standard", caption: "title_metadata" },
     label: "Media cards",
-    description: "Poster size and caption detail used by media cards.",
+    description: "Poster size used by media cards.",
     category: "appearance",
     control: "panel",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -223,7 +224,7 @@ func (h *ExternalSignInHandler) adminIdentityTarget(ctx context.Context, userID 
 	if err != nil {
 		return identityError(err)
 	}
-	if actorIsScopedAPIKey(ctx) && target.Role == models.RoleAdmin {
+	if apimw.IsScopedAPIKey(ctx) && target.Role == models.RoleAdmin {
 		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change an admin account's sign-in")
 	}
 	actor, err := requestOwnerActor(ctx, h.users)
@@ -243,7 +244,7 @@ func (h *ExternalSignInHandler) LinkAdminUserIdentity(ctx context.Context, userI
 	}
 	linked, err := h.identities.AdminLink(ctx, auth.AdminLinkInput{
 		UserID: userID, InstallationID: in.InstallationID, ActorID: actorUserID(ctx),
-		ScopedAPIKey: actorIsScopedAPIKey(ctx),
+		ScopedAPIKey: apimw.IsScopedAPIKey(ctx),
 		Identity: auth.ExternalIdentity{
 			Subject: in.ExternalSubject, Username: strings.TrimSpace(in.Username),
 			Email: strings.TrimSpace(in.Email), DisplayName: strings.TrimSpace(in.DisplayName),
@@ -260,7 +261,7 @@ func (h *ExternalSignInHandler) UnlinkAdminUserIdentity(ctx context.Context, use
 	if err := h.adminIdentityTarget(ctx, userID); err != nil {
 		return err
 	}
-	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx), actorIsScopedAPIKey(ctx)))
+	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx), apimw.IsScopedAPIKey(ctx)))
 }
 
 // TestAuthBinding runs the auth plugin's connection test on staged

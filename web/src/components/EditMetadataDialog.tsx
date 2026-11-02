@@ -60,7 +60,8 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   title: FIELD_NAME,
   sort_title: FIELD_NAME,
   original_title: FIELD_NAME,
-  tagline: FIELD_NAME,
+  // The server keeps the tagline under the overview lock.
+  tagline: FIELD_OVERVIEW,
   overview: FIELD_OVERVIEW,
   genres: FIELD_GENRES,
   studios: FIELD_STUDIOS,
@@ -240,10 +241,20 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     });
   }
 
-  function handleReset() {
-    refreshMutation.mutate({ item, mode: "quick" });
+  async function handleReset() {
     setShowResetConfirm(false);
+    // A refresh skips locked fields, so the locks must go first or the reset
+    // would keep every manual edit. If unlocking fails, the dialog stays open
+    // with the unsaved edits.
+    if (isLockable && (item.locked_fields?.length ?? 0) > 0) {
+      try {
+        await updateMutation.mutateAsync({ locked_fields: [] });
+      } catch {
+        return; // useUpdateItemMetadata already reported the failure.
+      }
+    }
     onOpenChange(false);
+    refreshMutation.mutate({ item, mode: "quick" });
   }
 
   function renderLockIcon(fieldName: string) {
@@ -674,6 +685,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowResetConfirm(true)}
+                  // A save or image apply still running could lock a field
+                  // again after the reset unlocks it.
+                  disabled={updateMutation.isPending || imageApplyPending}
                   className="text-muted-foreground hover:text-foreground"
                 >
                   Reset to Provider

@@ -75,7 +75,8 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 		CREATE TEMP TABLE episodes (content_id text PRIMARY KEY, series_id text, season_number integer, episode_number integer);
 		CREATE INDEX ON episodes (series_id, season_number, episode_number);
 		CREATE TEMP TABLE seasons (content_id text, series_id text, season_number integer);
-		CREATE TEMP TABLE media_files (id integer PRIMARY KEY, content_id text, episode_id text, media_folder_id integer, resolution text, missing_since timestamptz);
+		CREATE TEMP TABLE media_files (id integer PRIMARY KEY, content_id text, episode_id text, media_folder_id integer, resolution text, missing_since timestamptz,
+			multi_episode_start integer, multi_episode_end integer);
 		CREATE INDEX ON media_files (content_id);
 		CREATE INDEX ON media_files (episode_id);
 		CREATE TEMP TABLE user_watch_progress (user_id integer, profile_id text, media_item_id text,

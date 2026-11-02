@@ -50,7 +50,7 @@ type AdminDownloadPreparation struct {
 
 	Attempts            int                               `json:"attempts" minimum:"0"`
 	MaxAttempts         int                               `json:"max_attempts" minimum:"0"`
-	Error               string                            `json:"error,omitempty" doc:"Last attempt's failure, when there was one"`
+	Error               string                            `json:"error,omitempty" doc:"Last attempt's failure, when there was one; omitted for scoped API keys because it can quote file paths"`
 	CreatedAt           Instant                           `json:"created_at"`
 	StartedAt           *Instant                          `json:"started_at,omitempty" doc:"When the current or last attempt started"`
 	FailedAt            *Instant                          `json:"failed_at,omitempty" doc:"Present only when state is failed"`
@@ -180,8 +180,13 @@ func registerAdminDownloadPreparations(reg *Registry) {
 			Retrying: list.Counts.Retrying, Paused: list.Counts.Paused, FailedRecent: list.Counts.FailedRecent,
 		}
 		out.Body.Items = make([]AdminDownloadPreparation, 0, len(list.Items))
+		redact := scopedAPIKey(ctx)
 		for _, item := range list.Items {
-			out.Body.Items = append(out.Body.Items, adminDownloadPreparationOf(item))
+			view := adminDownloadPreparationOf(item)
+			if redact {
+				view.Error = ""
+			}
+			out.Body.Items = append(out.Body.Items, view)
 		}
 		return out, nil
 	})

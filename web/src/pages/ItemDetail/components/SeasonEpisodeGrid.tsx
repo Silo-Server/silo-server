@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -107,10 +108,12 @@ function SeasonEpisodeCard({
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
+  const unreadable = episodeFilesUnreadable(episode);
+  const playable = (episode.files ?? []).some((file) => !file.unreadable);
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
-      <div className="relative">
+      <div className="group/media relative">
         <ViewTransitionLink
           to={`/item/${episode.content_id}`}
           state={episodeLinkState}
@@ -140,6 +143,8 @@ function SeasonEpisodeCard({
                 variant="wide"
               />
             )}
+            {/* Hover dim behind the play button */}
+            {playable && <div className="media-card-hover-dim absolute inset-0" />}
             {hasPartialProgress && (
               <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
@@ -161,6 +166,9 @@ function SeasonEpisodeCard({
             )}
           </div>
         </ViewTransitionLink>
+        {playable && (
+          <CardPlayOverlay contentId={episode.content_id} title={episodeTitle} type="episode" />
+        )}
         <MediaItemMenu
           contentId={episode.content_id}
           mediaType="episode"
@@ -184,7 +192,7 @@ function SeasonEpisodeCard({
           episode={episode}
           hideOverview={hideOverview}
           badges={episode.user_data?.played && <WatchedCheckIndicator />}
-          notice={episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
+          notice={unreadable && <UnreadableFileBadge />}
         />
       </ViewTransitionLink>
     </div>

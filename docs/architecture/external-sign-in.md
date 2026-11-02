@@ -172,7 +172,12 @@ plugin.
 A local password sign-in rechecks the account, password hash and local sign-in
 policy while holding the account row lock in the transaction that creates its
 login session. Linking or revoking the account cannot leave an in-flight local
-sign-in with a new session after its credentials were retired.
+sign-in with a new session after its credentials were retired. A directory
+(credentials plugin) sign-in opens its session the way a completion code's
+redemption does (see Completion codes): account resolution commits first, then
+the session's transaction locks the account, rechecks that it is enabled, and
+locks the enabled installation and the linked identity. A disable or unlink
+that commits in between refuses the sign-in instead of missing its session.
 
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one

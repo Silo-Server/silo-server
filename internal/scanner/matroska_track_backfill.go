@@ -28,17 +28,20 @@ const (
 	matroskaTrackBackfillMaxTimeouts = 8
 	// matroskaTrackMatcherVersion is recorded with each check. Bump it when
 	// the matching rules change, so files checked under the old rules are
-	// read once more.
-	matroskaTrackMatcherVersion = 1
+	// read once more. Version 2 matches tracks FFprobe left without a codec
+	// to the ones the server reads through the index.
+	matroskaTrackMatcherVersion = 2
 )
 
-// matroskaNativeTrackCodecs are the subtitle codecs, as FFmpeg names them,
-// that a client plays from the stream by Matroska track number. Today that
-// client is Android, which renders these two; a file whose tracks without an
-// ID are all other codecs, such as PGS, gains nothing from a read. A file
-// skipped for its codecs has no check, so adding a codec here makes it a
-// candidate without a version bump.
-var matroskaNativeTrackCodecs = []string{ffmpegCodecSubRip, ffmpegCodecASS}
+// matroskaBackfillTrackCodecs are the subtitle codecs, as FFmpeg names them,
+// of the tracks a read can give an ID to: the two a client plays from the
+// stream by Matroska track number (today Android, which renders these two),
+// and none, a CodecID FFprobe doesn't recognize, which the match turns into
+// a track the server reads through the index (matroska.IndexOnlySubtitleCodec).
+// A file whose tracks without an ID are all other codecs, such as PGS, gains
+// nothing from a read. A file skipped for its codecs has no check, so adding
+// a codec here makes it a candidate without a version bump.
+var matroskaBackfillTrackCodecs = []string{ffmpegCodecSubRip, ffmpegCodecASS, ""}
 
 // SQL shared by the statements that record a check. matroskaTrackProbeMD5
 // hashes every column the match reads from the row: the video and audio
@@ -94,11 +97,12 @@ type MatroskaTrackBackfillResult struct {
 }
 
 // MatroskaTrackBackfiller records Matroska TrackNumbers on subtitle tracks
-// probed before the scanner read them. It reads only each file's Tracks
-// element and leaves the rest of the probe alone.
+// probed before the scanner read them, with the codec of a track FFprobe
+// couldn't name that the server reads through the index. It reads only each
+// file's Tracks element and leaves the rest of the probe alone.
 //
 // Candidates are present MKV files with a subtitle track in
-// matroskaNativeTrackCodecs that lacks a container track ID and no check
+// matroskaBackfillTrackCodecs that lacks a container track ID and no check
 // recorded for the row as it now stands. A pass is resumable by construction:
 // a file drops out once it is checked, and an interrupted pass resumes with
 // the files it did not reach. A check is recorded against the file's size and
@@ -232,7 +236,7 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 		  AND EXISTS (
 			SELECT 1 FROM jsonb_array_elements(mf.subtitle_tracks) t
 			WHERE COALESCE(t->>'container_track_id', '') = ''
-			  AND lower(t->>'codec') = ANY($3::text[])
+			  AND lower(COALESCE(t->>'codec', '')) = ANY($3::text[])
 		  )
 		  AND NOT EXISTS (
 			SELECT 1 FROM matroska_track_backfill_checks c
@@ -243,7 +247,7 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 			  AND c.probe_md5 = `+matroskaTrackProbeMD5+`
 		  )
 		ORDER BY mf.id
-		LIMIT $2`, afterID, b.batch, matroskaNativeTrackCodecs, matroskaTrackMatcherVersion)
+		LIMIT $2`, afterID, b.batch, matroskaBackfillTrackCodecs, matroskaTrackMatcherVersion)
 	if err != nil {
 		return nil, afterID, 0, fmt.Errorf("loading matroska track backfill candidates: %w", err)
 	}
@@ -324,49 +328,55 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	for i, track := range c.subtitleTracks {
 		subtitles[i] = matroskaSubtitleStream{Index: track.Index, Codec: track.Codec}
 	}
-	ids, err := matroskaSubtitleTrackIDs(tracks, c.videoTracks, c.audioTracks, subtitles)
+	matches, err := matroskaSubtitleTrackIDs(tracks, c.videoTracks, c.audioTracks, subtitles)
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: Matroska subtitle track numbers not recorded",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
 		return b.recordCheck(ctx, c, matroskaTrackOutcomeUnmatched)
 	}
 
+	// Each element's patch: the fields the match sets, or none.
+	patches := make([]map[string]any, len(c.subtitleTracks))
 	changed := false
 	for i, track := range c.subtitleTracks {
-		if track.ContainerTrackID != "" {
-			ids[i] = ""
+		patches[i] = map[string]any{}
+		if track.ContainerTrackID != "" || matches[i].ID == "" {
+			continue
 		}
-		if ids[i] != "" {
-			changed = true
+		patches[i]["container_track_id"] = matches[i].ID
+		if matches[i].IndexOnly {
+			patches[i]["codec"], patches[i]["index_only"] = matches[i].Codec, true
 		}
+		changed = true
 	}
 	if !changed {
 		return b.recordCheck(ctx, c, matroskaTrackOutcomeUnmatched)
 	}
-	// Set only container_track_id on each element, so fields this binary does
-	// not know survive. Write only over the exact row that was read: the same
-	// file revision and the same stored tracks. A scan that rewrote the row
-	// in the meantime already recorded its own IDs. The check is recorded
+	patchJSON, err := json.Marshal(patches)
+	if err != nil {
+		return 0, fmt.Errorf("encoding subtitle track patches for file %d: %w", c.id, err)
+	}
+	// Set only the matched fields on each element, so fields this binary
+	// does not know survive. Write only over the exact row that was read: the
+	// same file revision and the same stored tracks. A scan that rewrote the
+	// row in the meantime already recorded its own IDs. The check is recorded
 	// against the row as written, so a track left without an ID, such as a
 	// legacy S_ASS one, does not bring the file back.
 	tag, err := b.pool.Exec(ctx, `
 		WITH updated AS (
 			UPDATE media_files
 			SET subtitle_tracks = (
-				SELECT jsonb_agg(
-					CASE WHEN COALESCE(($6::text[])[e.ord::int], '') = '' THEN e.elem
-					     ELSE jsonb_set(e.elem, '{container_track_id}', to_jsonb(($6::text[])[e.ord::int]))
-					END ORDER BY e.ord)
+				SELECT jsonb_agg(e.elem || ($6::jsonb -> (e.ord::int - 1)) ORDER BY e.ord)
 				FROM jsonb_array_elements(media_files.subtitle_tracks) WITH ORDINALITY AS e(elem, ord)
 			    ),
 			    updated_at = NOW()
 			WHERE `+matroskaTrackRowAsRead+`
-			  AND jsonb_array_length(subtitle_tracks) = cardinality($6::text[])
+			  AND jsonb_array_length(subtitle_tracks) = jsonb_array_length($6::jsonb)
 			RETURNING id, file_size, file_modified_at, video_tracks, audio_tracks, subtitle_tracks
 		)`+matroskaTrackCheckInsert+`
 		SELECT id, $7::int, file_size, file_modified_at, `+matroskaTrackProbeMD5+` FROM updated`+
 		matroskaTrackCheckConflict,
-		c.id, c.size, c.normalizedModifiedAt(), c.subtitleJSON, c.probeMD5, ids, matroskaTrackMatcherVersion)
+		c.id, c.size, c.normalizedModifiedAt(), c.subtitleJSON, c.probeMD5, patchJSON, matroskaTrackMatcherVersion)
 	if err != nil {
 		return 0, fmt.Errorf("updating subtitle_tracks for file %d: %w", c.id, err)
 	}

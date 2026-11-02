@@ -68,7 +68,6 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 
 	args := []any{contentIDs}
 	conditions := []string{
-		"(mf.content_id = ANY($1) OR mf.episode_id = ANY($1))",
 		playableFileExists,
 		"g.group_key = ANY($1)",
 	}
@@ -77,8 +76,20 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 
 	// Filter through the existing content/episode indexes before expanding the
 	// requested groups. Sort narrow candidates, then fetch each winner's JSON.
+	// A multi-episode file also badges each later episode of its range.
 	query := fmt.Sprintf(`
-		WITH winners AS (
+		WITH served AS MATERIALIZED (
+			-- Collected once: inlined, the planner can rerun the union for
+			-- every media_files row it scans.
+			SELECT linked.id AS file_id, linked_group.group_key
+			FROM media_files linked
+			CROSS JOIN LATERAL (VALUES (linked.content_id), (linked.episode_id)) AS linked_group(group_key)
+			WHERE linked.content_id = ANY($1) OR linked.episode_id = ANY($1)
+			UNION ALL
+			SELECT mf.id, covered.content_id
+			FROM episodes covered`+spannedEpisodeJoinSQL+`
+			WHERE covered.content_id = ANY($1)
+		), winners AS (
 			SELECT DISTINCT ON (group_key) group_key, id
 			FROM (
 				SELECT
@@ -86,8 +97,8 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 					mf.id, mf.content_id, mf.episode_id,
 					%s AS resolution_rank,
 					%s AS range_rank
-				FROM media_files mf
-				CROSS JOIN LATERAL (VALUES (mf.content_id), (mf.episode_id)) AS g(group_key)
+				FROM served g
+				JOIN media_files mf ON mf.id = g.file_id
 				WHERE %s
 			) candidates
 			ORDER BY group_key, resolution_rank DESC, range_rank DESC, %s

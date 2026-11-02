@@ -5,6 +5,7 @@ import type {
   MediaRequest,
   MediaRequestOutcome,
   MediaRequestStatus,
+  RequestDiscoverLayout,
   RequestDiscoverySection,
   RequestListParams,
   RequestMediaDetail,
@@ -16,11 +17,9 @@ import type {
   RequestUserState,
 } from "@/api/types";
 import { v2, type V2Body } from "@/api/v2/request";
-import type { components, paths } from "@/api/v2/schema";
+import type { components } from "@/api/v2/schema";
 
 type Schemas = components["schemas"];
-type DiscoverSectionKey =
-  paths["/api/v2/requests/discover/{section}"]["get"]["parameters"]["path"]["section"];
 
 // The v2 request bodies stay close to v1 (the mobile clients consume them);
 // the adapters below only narrow the wire strings to the web's literal unions
@@ -133,16 +132,16 @@ function discoverSectionFromV2(s: Schemas["DiscoverSection"]): RequestDiscoveryS
   return { ...s, results: s.results.map(mediaResultFromV2) };
 }
 
-export function listDiscoverSectionsV2(): Promise<RequestDiscoverySection[]> {
-  return v2("GET /api/v2/requests/discover").then((c) => c.items.map(discoverSectionFromV2));
+export function listDiscoverSectionsV2(): Promise<RequestDiscoverLayout> {
+  return v2("GET /api/v2/requests/discover").then((c) => ({
+    rows: c.row_order,
+    sections: c.items.map(discoverSectionFromV2),
+  }));
 }
 
-export function getDiscoverSectionV2(
-  section: string,
-  page: number,
-): Promise<RequestDiscoverySection> {
-  return v2("GET /api/v2/requests/discover/{section}", {
-    path: { section: section as DiscoverSectionKey },
+export function getDiscoverRowV2(rowID: string, page: number): Promise<RequestDiscoverySection> {
+  return v2("GET /api/v2/requests/discover/rows/{row_id}", {
+    path: { row_id: rowID },
     query: { page },
   }).then(discoverSectionFromV2);
 }

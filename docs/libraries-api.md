@@ -36,9 +36,10 @@ deletion and metadata-refresh jobs return their canonical job URI in `Location`.
 ## Unmatched items
 
 `GET /api/v2/libraries/unmatched-items` (`listUnmatchedItems`) lists the items still
-`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items an
-administrator marked as intentionally unmatched; with `ignored=true` it lists only
-those, each with `ignored_at`. The cursor is bound to `q` and `ignored`. The frozen v1
+`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items in no
+library, such as one whose file was renamed away and that the scanner's file removal
+grace still holds. It also leaves out items an administrator marked as intentionally
+unmatched; with `ignored=true` it lists only those, each with `ignored_at`. The cursor is bound to `q` and `ignored`. The frozen v1
 listing also leaves ignored items out; its response shape is unchanged.
 
 `PUT /api/v2/libraries/unmatched-items/{content_id}/ignore` (`ignoreUnmatchedItem`)

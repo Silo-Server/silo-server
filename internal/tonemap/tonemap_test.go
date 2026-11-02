@@ -3,9 +3,14 @@ package tonemap
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -80,6 +85,7 @@ func TestResolveSourceClassifiesDolbyOnlyAndPreflightsAmbiguousMetadata(t *testi
 		{name: "reserved id with PQ VUI", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 7 }, want: SourcePQ, wantPreflight: true},
 		{name: "contradictory transfer", mutate: func(source *SourceMetadata) { source.ColorTransfer = "arib-std-b67" }, want: SourcePQ, wantPreflight: true},
 		{name: "missing color signaling", mutate: func(source *SourceMetadata) { source.ColorSpace = "" }, want: SourcePQ, wantPreflight: true},
+		{name: "full-range PQ base", mutate: func(source *SourceMetadata) { source.ColorRange = "pc" }, want: SourcePQFullRange, wantPreflight: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,6 +126,141 @@ func TestResolveSourceClassifiesHLGByPrimaries(t *testing.T) {
 			})
 			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
 				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
+			}
+		})
+	}
+}
+
+// TestResolveSourceClassifiesPQByRange verifies an explicit full-range tag
+// selects the full-range PQ kind, which decoded frames must then confirm,
+// while limited and missing ranges keep the limited-range kind.
+func TestResolveSourceClassifiesPQByRange(t *testing.T) {
+	tests := []struct {
+		name          string
+		dynamicRange  string
+		colorRange    string
+		want          SourceKind
+		wantPreflight bool
+	}{
+		{name: "HDR10 limited", dynamicRange: DynamicRangeHDR10, colorRange: "tv", want: SourcePQ},
+		{name: "HDR10 full", dynamicRange: DynamicRangeHDR10, colorRange: "pc", want: SourcePQFullRange, wantPreflight: true},
+		{name: "HDR10 jpeg", dynamicRange: DynamicRangeHDR10, colorRange: "jpeg", want: SourcePQFullRange, wantPreflight: true},
+		{name: "HDR10 untagged range", dynamicRange: DynamicRangeHDR10, colorRange: "", want: SourcePQ, wantPreflight: true},
+		{name: "HDR10+ full", dynamicRange: DynamicRangeHDR10Plus, colorRange: "pc", want: SourcePQFullRange, wantPreflight: true},
+		{name: "HLG full stays rejected by preflight", dynamicRange: DynamicRangeHLG, colorRange: "pc", want: SourceHLG, wantPreflight: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transfer := ColorTransferPQ
+			if tt.dynamicRange == DynamicRangeHLG {
+				transfer = ColorTransferHLG
+			}
+			got := ResolveSource(SourceMetadata{
+				DynamicRange: tt.dynamicRange,
+				ColorRange:   tt.colorRange, ColorPrimaries: "bt2020", ColorTransfer: transfer, ColorSpace: "bt2020nc",
+			})
+			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
+				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
+			}
+		})
+	}
+}
+
+// TestSoftwareToneMapReadsFullRangePQAtItsOwnLevels encodes one PQ BT.2020
+// picture at limited and at full range, classifies each from its stream tag,
+// and requires both software graphs to convert them to the same SDR picture.
+// So must a limited-range copy whose stream is tagged full range, as when a
+// container's range contradicts the bitstream. A graph that reads samples at
+// the wrong range stretches or flattens shadows and highlights.
+func TestSoftwareToneMapReadsFullRangePQAtItsOwnLevels(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffmpegRun := func(args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		output, err := exec.CommandContext(ctx, ffmpeg, append([]string{"-hide_banner", "-nostdin", "-y"}, args...)...).CombinedOutput()
+		return string(output), err
+	}
+	filters, err := ffmpegRun("-filters")
+	if err != nil {
+		t.Skipf("ffmpeg filters unavailable: %v", err)
+	}
+	for _, name := range []string{"zscale", "sidedata", "psnr"} {
+		if !FilterListingHas([]byte(filters), name) {
+			t.Skipf("ffmpeg lacks %s", name)
+		}
+	}
+	run := func(t *testing.T, args ...string) string {
+		t.Helper()
+		output, err := ffmpegRun(args...)
+		if err != nil {
+			t.Fatalf("ffmpeg %v: %v\n%s", args, err, output)
+		}
+		return output
+	}
+	dir := t.TempDir()
+	// testsrc2's RGB values, scaled to PQ code values up to 0.75, give a
+	// picture from black to about 1,000 nits, the peak the graphs map from,
+	// with saturated chroma.
+	sources := map[string]string{}
+	for _, levels := range []struct{ ffmpeg, zimg string }{{"tv", "limited"}, {"pc", "full"}} {
+		// Y4M carries the range into the decoded frames, as a bitstream does.
+		path := filepath.Join(dir, "source-"+levels.ffmpeg+".y4m")
+		run(t, "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=1,format=gbrp,lutrgb=r=val*0.75:g=val*0.75:b=val*0.75",
+			"-vf", "zscale=min=gbr:rin=full:pin=bt2020:tin=smpte2084:m=bt2020nc:p=bt2020:t=smpte2084:r="+levels.zimg+",format=yuv420p10le",
+			"-color_range", levels.ffmpeg, "-frames:v", "1", "-strict", "-1", path)
+		sources[levels.ffmpeg] = path
+	}
+	cases := []struct {
+		name, streamRange, source string
+	}{
+		{name: "limited range", streamRange: "tv", source: sources["tv"]},
+		{name: "full range", streamRange: "pc", source: sources["pc"]},
+		{name: "limited samples tagged full", streamRange: "pc", source: sources["tv"]},
+	}
+	psnr := regexp.MustCompile(`PSNR y:([0-9.]+|inf) u:([0-9.]+|inf) v:([0-9.]+|inf)`)
+	for _, filter := range []string{SoftwareFilterBT2390, SoftwareFilterHable} {
+		t.Run(filter, func(t *testing.T) {
+			if !FilterListingHas([]byte(filters), filter) {
+				t.Skipf("ffmpeg lacks %s", filter)
+			}
+			// Silo's graphs target Jellyfin FFmpeg; an older build may not
+			// know a filter option they use.
+			if output, err := ffmpegRun("-i", sources["tv"], "-vf", SoftwareFilter(SourcePQ, filter), "-f", "null", "-"); err != nil {
+				t.Skipf("ffmpeg cannot run the %s graph: %v\n%s", filter, err, output)
+			}
+			converted := make([]string, len(cases))
+			for i, tc := range cases {
+				resolution := ResolveSource(SourceMetadata{
+					DynamicRange: DynamicRangeHDR10,
+					ColorRange:   tc.streamRange, ColorPrimaries: "bt2020", ColorTransfer: ColorTransferPQ, ColorSpace: "bt2020nc",
+				})
+				converted[i] = filepath.Join(dir, filter+"-"+strconv.Itoa(i)+".nut")
+				run(t, "-i", tc.source, "-vf", SoftwareFilter(resolution.Kind, filter), "-frames:v", "1", "-c:v", "rawvideo", converted[i])
+			}
+			for i, tc := range cases[1:] {
+				match := psnr.FindStringSubmatch(run(t, "-i", converted[0], "-i", converted[i+1], "-lavfi", "psnr", "-f", "null", "-"))
+				if match == nil {
+					t.Fatalf("%s: ffmpeg reported no PSNR", tc.name)
+				}
+				// With Jellyfin FFmpeg 8.1.3 the copies agree to above 53 dB
+				// on every plane; reading full-range samples as limited range
+				// drops luma below 40 dB.
+				for p, plane := range []string{"y", "u", "v"} {
+					value := match[p+1]
+					if value == "inf" {
+						continue
+					}
+					db, err := strconv.ParseFloat(value, 64)
+					if err != nil {
+						t.Fatalf("%s: parse %s plane PSNR %q: %v", tc.name, plane, value, err)
+					}
+					if db < 48 {
+						t.Errorf("%s: %s plane PSNR = %.1f dB against the limited source, want at least 48", tc.name, plane, db)
+					}
+				}
 			}
 		})
 	}

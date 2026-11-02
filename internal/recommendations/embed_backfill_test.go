@@ -778,14 +778,36 @@ func TestEmbedMissingSkipsTheTextStalePass(t *testing.T) {
 	}
 }
 
-func TestBackfillStopsOnALockForAnotherModel(t *testing.T) {
-	calls := 0
-	store := newFakeEmbeddingStore("item")
-	store.lock = &EmbeddingLock{BaseURL: "http://embed.test", Model: "other-model", SourceDimensions: 8}
-	b := newTestBackfill(store, vectorsOf(8, &calls), nil)
-	err := b.run(context.Background(), true)
-	if err == nil || !strings.Contains(err.Error(), "reset required") || calls != 0 {
-		t.Fatalf("calls=%d error=%v", calls, err)
+// The lock follows the model, not the provider: the same model under a
+// vendor prefix through another address embeds and stores its vectors under
+// the lock's name, and another model stops the run.
+func TestBackfillHonorsTheLockModel(t *testing.T) {
+	for _, tc := range []struct {
+		name, lockModel string
+		wantStored      bool
+	}{
+		{name: "another model", lockModel: "other-model"},
+		{name: "same model through another provider", lockModel: "vendor/" + backfillTestModel, wantStored: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			store := newFakeEmbeddingStore("item")
+			store.lock = &EmbeddingLock{BaseURL: "http://other.test", Model: tc.lockModel, SourceDimensions: 8, StorageDimensions: CanonicalEmbeddingDimensions}
+			b := newTestBackfill(store, vectorsOf(8, &calls), nil)
+			err := b.run(context.Background(), true)
+			if !tc.wantStored {
+				if err == nil || !strings.Contains(err.Error(), "reset required") || calls != 0 {
+					t.Fatalf("calls=%d error=%v", calls, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := store.stored["item"].model; got != tc.lockModel {
+				t.Fatalf("stored model = %q, want %q", got, tc.lockModel)
+			}
+		})
 	}
 }
 

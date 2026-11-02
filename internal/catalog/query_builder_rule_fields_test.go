@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -84,6 +85,12 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "added_at", Op: "in_last", Value: "70000000h"},
 		{Field: "rating_imdb", Op: "gt", Value: "high"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
+		{Field: "watched", Op: "is", Value: "True"},
+		{Field: "in_progress", Op: "is", Value: "1"},
+		{Field: "favorited", Op: "is", Value: "yes"},
+		{Field: "in_watchlist", Op: "is", Value: 1.0},
+		{Field: "hdr", Op: "is", Value: " true"},
+		{Field: "dolby_vision", Op: "is", Value: nil},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
 		if _, _, err := NewQueryBuilder("mi").Build(def); err == nil {
@@ -110,6 +117,39 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 	}}}}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("expected well-formed values to validate, got %v", err)
+	}
+}
+
+func TestBooleanRuleStringValuesBuildAsBooleans(t *testing.T) {
+	// Released clients (Android TV v1.0.0-beta.27) send "true" and "false" as
+	// JSON strings. They keep working, and build exactly as the real booleans.
+	for _, field := range []string{"watched", "in_progress", "favorited", "in_watchlist", "hdr", "dolby_vision"} {
+		for _, value := range []bool{true, false} {
+			text := map[bool]string{true: "true", false: "false"}[value]
+			for _, match := range []string{"all", "any"} {
+				def := func(v any) QueryDefinition {
+					return QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: match, Rules: []QueryRule{{Field: field, Op: "is", Value: v}}}}}
+				}
+				if err := def(text).Validate(); err != nil {
+					t.Errorf("%s %q (%s): expected validation to accept it, got %v", field, text, match, err)
+				}
+				if err := validateCatalogOverlayQuery(CatalogRequest{Query: def(text)}, catalogPersonalRuleFields, catalogQuerySortFields(), false); err != nil {
+					t.Errorf("%s %q (%s): expected the catalog request to validate, got %v", field, text, match, err)
+				}
+				gotSQL, gotArgs, err := NewQueryBuilder("mi").WithUserScope(7, "profile-1").Build(def(text))
+				if err != nil {
+					t.Errorf("%s %q (%s): expected the builder to accept it, got %v", field, text, match, err)
+					continue
+				}
+				wantSQL, wantArgs, err := NewQueryBuilder("mi").WithUserScope(7, "profile-1").Build(def(value))
+				if err != nil {
+					t.Fatalf("%s %v (%s): %v", field, value, match, err)
+				}
+				if gotSQL != wantSQL || fmt.Sprintf("%#v", gotArgs) != fmt.Sprintf("%#v", wantArgs) {
+					t.Errorf("%s %q (%s): built %q %#v, want the boolean form %q %#v", field, text, match, gotSQL, gotArgs, wantSQL, wantArgs)
+				}
+			}
+		}
 	}
 }
 

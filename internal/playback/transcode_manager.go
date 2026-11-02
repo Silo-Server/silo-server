@@ -799,6 +799,8 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		ClientBuild:      normalizeClientMetadataValue(card.ClientBuild, 64),
 		ClientChannel:    normalizeClientMetadataValue(card.ClientChannel, 32),
 		ClientUserAgent:  normalizeClientMetadataValue(card.ClientUserAgent, 512),
+		DeviceID:         normalizeClientMetadataValue(card.DeviceID, 128),
+		DevicePlatform:   normalizeClientMetadataValue(card.DevicePlatform, 40),
 		IsJellyfinCompat: card.IsJellyfinCompat,
 		// The card carries no address; the media request rebuilding the
 		// session comes from the viewer's player.

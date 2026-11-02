@@ -16,9 +16,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -104,13 +107,6 @@ type targetImageCacheJobStore interface {
 	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
 }
 
-// imageCacheTargetCachedPathReader is optionally implemented by the job store
-// (ImageCacheJobRepository does) to expose the target's currently stored
-// cached path for the local-artwork unchanged-skip and stale-prefix cleanup.
-type imageCacheTargetCachedPathReader interface {
-	CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
-}
-
 // imageCacheBacklogReader is optional so lightweight processor fakes and
 // alternate stores do not need a database-backed count implementation.
 type imageCacheBacklogReader interface {
@@ -124,14 +120,8 @@ type LibraryRootResolver interface {
 	LibraryRootsForContent(ctx context.Context, contentID string) ([]string, error)
 }
 
-// ImagePrefixDeleter deletes cached image objects under a key prefix; used to
-// sweep the previous hashed local/ prefix after a successful re-cache.
-type ImagePrefixDeleter interface {
-	DeletePrefix(context.Context, string) (int, error)
-}
-
 type SeasonArtworkUpdater interface {
-	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error)
+	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
 type EpisodeStillUpdater interface {
@@ -178,11 +168,10 @@ type ImageCacheProcessor struct {
 	logger  *slog.Logger
 
 	// Local file:// artwork support. libraryRoots confines reads to the
-	// owning library's roots; prefixDeleter sweeps stale hashed prefixes.
-	// localCopies copies art this process discovered (CopyLocalArtwork).
-	libraryRoots  LibraryRootResolver
-	prefixDeleter ImagePrefixDeleter
-	localCopies   localArtworkCopies
+	// owning library's roots. localCopies copies art this process
+	// discovered (CopyLocalArtwork).
+	libraryRoots LibraryRootResolver
+	localCopies  localArtworkCopies
 	// workBudget bounds artwork jobs across drains, manual refreshes and
 	// discovery copies (SetWorkerBudget).
 	workBudget imageWorkBudget
@@ -211,16 +200,6 @@ func (p *ImageCacheProcessor) SetLibraryRootResolver(resolver LibraryRootResolve
 		return
 	}
 	p.libraryRoots = resolver
-}
-
-// SetImagePrefixDeleter wires the object store used to delete the previous
-// hashed local/ prefix after a successful local re-cache. Optional: without
-// it, stale prefixes are left behind (item deletion still sweeps them).
-func (p *ImageCacheProcessor) SetImagePrefixDeleter(deleter ImagePrefixDeleter) {
-	if p == nil {
-		return
-	}
-	p.prefixDeleter = deleter
 }
 
 // SetEnabled toggles artwork caching. When disabled the processor begins no
@@ -990,7 +969,7 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 		if p.targets.Seasons == nil {
 			return false, errors.New("missing season updater")
 		}
-		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, thumbhash)
+		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			return false, errors.New("missing season localization updater")
@@ -1051,7 +1030,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	// through an opened library root. A failure there first asks whether this
 	// server has the file's storage mounted at all; when it does not, the job
 	// waits for one that does (deferLocalJobWithoutStorage).
-	data, err := readConfinedLocalImage(localPath, roots)
+	data, err := readLocalImageOfTitle(ctx, p.libraryRoots, rootsContentID, localPath, roots)
 	if err != nil {
 		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
 			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
@@ -1060,26 +1039,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	// The target's current cached path drives the unchanged-skip (same hash →
-	// same key → nothing to sweep) and the stale-prefix cleanup below.
-	previousCachedPath := ""
-	if reader, ok := p.jobs.(imageCacheTargetCachedPathReader); ok {
-		previousCachedPath, err = reader.CurrentTargetCachedPath(ctx, job)
-		if err != nil {
-			p.logger.WarnContext(ctx, "metadata image cache: failed to read current cached path", "job_id", job.ID, "error", err)
-			previousCachedPath = ""
-		}
-	}
-
 	digest := sha256.Sum256(data)
 	discriminator := hex.EncodeToString(digest[:4])
 	if job.TargetType == ImageCacheTargetItemBackdrop {
 		// An item's backdrops share its key folder, and two sidecars can hold
 		// the same bytes. A hash of the sidecar's own path keeps each file's
-		// key apart from the primary's and every other file's, so the
-		// stale-prefix cleanup below never deletes art another backdrop shows,
-		// even after rows shift. A backdrop that moves to another row keeps
-		// its key.
+		// key apart from the primary's and every other file's, so each copy is
+		// replaced and retired on its own, even after rows shift. A backdrop
+		// that moves to another row keeps its key.
 		pathDigest := sha256.Sum256([]byte(localPath))
 		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
 	}
@@ -1112,10 +1079,11 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		processResult.outcome = "failed"
 		return processResult
 	}
+	// The target update displaces the previous copy, and the displacement
+	// trigger hands it to the artwork revision GC, which deletes it only once
+	// nothing references it. Deleting it here would break an admin pick of
+	// the same bytes, which shares this key, published since the update.
 	p.finishJobWithTargetUpdate(ctx, job, cachedPath, result.Thumbhash, &processResult)
-	if processResult.outcome == "succeeded" {
-		p.deleteStaleLocalPrefix(ctx, previousCachedPath, cachedPath)
-	}
 	return processResult
 }
 
@@ -1142,6 +1110,9 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("local image missing: %s", localPath)
 	}
+	if errors.Is(err, errLocalImageOutsideRoots) {
+		return nil, fmt.Errorf("%w: %w", localImageOutsideRootsError(localPath), errLocalImageEscapedRoots)
+	}
 	if err != nil {
 		return nil, localImageOutsideRootsError(localPath)
 	}
@@ -1162,6 +1133,257 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 		return nil, localImageOutsideRootsError(localPath)
 	}
 	return readLocalImageFile(localPath, root, rel)
+}
+
+// errLocalImageEscapedRoots marks an outside-roots failure for a path that is
+// inside a library root as written but leads out of every root through a
+// symlink, such as a per-title folder linked into another tree.
+var errLocalImageEscapedRoots = errors.New("a symlink leads out of the library roots")
+
+// catalogedFileLister lists the files the scanner cataloged for a title.
+// The image cache processor's LibraryRootResolver may implement it to let
+// local artwork through a title folder that is a symlink out of the library;
+// *catalog.FolderRepository does.
+type catalogedFileLister interface {
+	// CatalogedFilesUnder returns up to limit present media file paths of
+	// contentID (a title, or a series for its episodes' files) under dir
+	// that sort after after, in path order, as the scanner recorded them.
+	CatalogedFilesUnder(ctx context.Context, contentID, dir, after string, limit int) ([]string, error)
+}
+
+// catalogedFilePageSize is how many cataloged files are listed at a time
+// while looking for one that vouches for a folder. Usually the first one is
+// enough.
+const catalogedFilePageSize = 32
+
+// readLocalImageOfTitle reads a local image of contentID under roots with
+// readConfinedLocalImage. When the image's folder leads out of the roots
+// through a symlink and resolver can list cataloged files, it gets one more
+// chance through readCatalogedLocalImage.
+func readLocalImageOfTitle(ctx context.Context, resolver LibraryRootResolver, contentID, localPath string, roots []string) ([]byte, error) {
+	data, err := readConfinedLocalImage(localPath, roots)
+	if !errors.Is(err, errLocalImageEscapedRoots) {
+		return data, err
+	}
+	lister, ok := resolver.(catalogedFileLister)
+	if !ok || contentID == "" {
+		return nil, err
+	}
+	return readCatalogedLocalImage(ctx, lister, contentID, localPath, roots, err)
+}
+
+// readCatalogedLocalImage reads a local image whose folder leads out of the
+// library roots through a symlink, as a per-title folder linked into another
+// tree does. The scanner follows those links and catalogs the videos behind
+// them, so the image is trusted when a folder it sits in, below the library
+// root, also holds a file the scanner cataloged for the same title. That
+// folder is opened as a root, the cataloged file must be the same file
+// reached through it, and the image is read through it with the usual leaf
+// checks. Anything else keeps the outside-roots failure, escaped, unless
+// checking ran into an I/O error, which is reported as a read failure so the
+// job is retried as usual rather than parked.
+func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, contentID, localPath string, roots []string, escaped error) ([]byte, error) {
+	libraryRoot := ""
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if localImagePathWithinRoots(localPath, []string{root}) && len(root) > len(libraryRoot) {
+			libraryRoot = root
+		}
+	}
+	if libraryRoot == "" {
+		return nil, escaped
+	}
+	// ioErr is the first failure that says nothing about where the image is,
+	// such as a mount that stopped answering.
+	var ioErr error
+	noteIOErr := func(err error) {
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
+		}
+	}
+	untrusted := func() error {
+		if ioErr != nil {
+			return fmt.Errorf("local image read failed: checking cataloged files: %w", ioErr)
+		}
+		return escaped
+	}
+	resolvedImageDir, err := fspath.EvalSymlinks(filepath.Dir(localPath))
+	if err != nil {
+		noteIOErr(err)
+		return nil, untrusted()
+	}
+	for dir := filepath.Dir(localPath); dir != libraryRoot && localImagePathWithinRoots(dir, []string{libraryRoot}); dir = filepath.Dir(dir) {
+		// Only a folder the image physically sits in can vouch for it: one
+		// above the link that leads out holds the image only through that
+		// link.
+		resolvedDir, err := fspath.EvalSymlinks(dir)
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		if !localImagePathWithinRoots(resolvedImageDir, []string{resolvedDir}) {
+			continue
+		}
+		// Every cataloged file is tried, a page at a time, so the answer
+		// does not depend on which files happen to be listed first.
+		for after := ""; ; {
+			files, err := lister.CatalogedFilesUnder(ctx, contentID, dir, after, catalogedFilePageSize)
+			if err != nil {
+				return nil, fmt.Errorf("local image read failed: listing cataloged files: %w", err)
+			}
+			if len(files) == 0 {
+				break
+			}
+			data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir, files)
+			if trusted {
+				return data, err
+			}
+			noteIOErr(err)
+			if len(files) < catalogedFilePageSize {
+				break
+			}
+			after = files[len(files)-1]
+		}
+	}
+	return nil, untrusted()
+}
+
+// localFileIOError reports whether err is the operating system failing a
+// call on storage, such as a share that stopped answering, rather than a path
+// that is missing, forbidden, refused for leaving an opened folder, or no
+// longer shaped as cataloged (a file where a folder was, a link loop, a name
+// too long).
+func localFileIOError(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+	switch errno {
+	case syscall.ENOTDIR, syscall.ELOOP, syscall.ENAMETOOLONG:
+		return false
+	}
+	return true
+}
+
+// readLocalImageBesideCatalogedFile opens dir, which resolves to
+// resolvedDir, as a root and reads localPath through it when one of files,
+// cataloged paths under dir, is the same file inside the root as at its
+// cataloged path. The image's path inside the root comes from its resolved
+// path, as in readConfinedLocalImage, so a link inside the folder that stays
+// in it, absolute or not, doesn't stop the read. trusted reports whether a
+// file vouched for the folder; when none did, err is a storage failure met
+// while checking.
+func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir string, files []string) (data []byte, trusted bool, err error) {
+	imageRel, err := filepath.Rel(resolvedDir, filepath.Join(resolvedImageDir, filepath.Base(localPath)))
+	if err != nil || !filepath.IsLocal(imageRel) {
+		return nil, false, nil
+	}
+	root, err := os.OpenRoot(fspath.Decode(dir))
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = root.Close() }()
+	var ioErr error
+	noteIOErr := func(err error) {
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
+		}
+	}
+	for _, file := range files {
+		rel, err := filepath.Rel(dir, file)
+		if err != nil || !filepath.IsLocal(rel) {
+			continue
+		}
+		// A cataloged file behind a link out of the folder is no proof, and
+		// the link's target, which may be a stalled mount, is never touched.
+		rel, inFolder, err := pathInsideFolder(resolvedDir, rel)
+		if !inFolder {
+			noteIOErr(err)
+			continue
+		}
+		inside, err := root.Stat(fspath.Decode(rel))
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		cataloged, err := fspath.Stat(file)
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		if !fspath.SameFile(inside, cataloged) {
+			continue
+		}
+		data, err := readLocalImageFile(localPath, root, imageRel)
+		return data, true, err
+	}
+	return nil, false, ioErr
+}
+
+// maxFolderLinks bounds how many symlinks pathInsideFolder follows, so a
+// loop ends.
+const maxFolderLinks = 40
+
+// pathInsideFolder resolves rel, a path under the folder at resolvedDir (a
+// path with no symlinks), one component at a time without leaving the folder.
+// A symlink is read, not followed: its target, absolute or relative, must lie
+// inside the folder, and resolution carries on from there. A ".." steps back
+// from the link-free path resolved so far, as the kernel does after following
+// a link, and never above the folder. It returns the link-free path relative
+// to resolvedDir, or inFolder false when a link leads out of the folder, a
+// component is missing, or links loop; err is a failure met on the way. Only
+// paths inside the folder are ever looked at.
+func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, err error) {
+	sep := string(filepath.Separator)
+	pending := strings.Split(filepath.Clean(rel), sep)
+	links := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if resolved == "" {
+				return "", false, nil
+			}
+			if resolved = filepath.Dir(resolved); resolved == "." {
+				resolved = ""
+			}
+			continue
+		}
+		next := filepath.Join(resolved, part)
+		full := filepath.Join(resolvedDir, next)
+		info, err := fspath.Lstat(full)
+		if err != nil {
+			return "", false, err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		if links++; links > maxFolderLinks {
+			return "", false, nil
+		}
+		target, err := fspath.Readlink(full)
+		if err != nil {
+			return "", false, err
+		}
+		// A relative target carries on from the link's folder, resolved so
+		// far; an absolute one from the folder's root, which it must name
+		// as written. Its components are not cleaned, so a ".." after a link
+		// in it applies to where that link leads.
+		if filepath.IsAbs(target) {
+			prefix := strings.TrimSuffix(resolvedDir, sep) + sep
+			if target != resolvedDir && !strings.HasPrefix(target, prefix) {
+				return "", false, nil
+			}
+			target = strings.TrimPrefix(strings.TrimPrefix(target, resolvedDir), sep)
+			resolved = ""
+		}
+		pending = append(strings.Split(target, sep), pending...)
+	}
+	return resolved, resolved != "", nil
 }
 
 // openedLibraryRoot is a library root opened before the image path is
@@ -1204,14 +1426,14 @@ func closeLibraryRoots(opened []openedLibraryRoot) {
 // matching root failed to open, or a directory could not be stat'ed, so
 // nothing is known about confinement.
 func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
-	current, err := os.Stat(resolvedRoot)
+	current, err := fspath.Stat(resolvedRoot)
 	if err != nil {
 		return nil, err
 	}
 	var failure error
 	for _, root := range opened {
 		if root.handle == nil {
-			if info, err := os.Stat(root.path); err == nil && os.SameFile(info, current) && failure == nil {
+			if info, err := fspath.Stat(root.path); err == nil && fspath.SameFile(info, current) && failure == nil {
 				failure = root.err
 			}
 			continue
@@ -1221,34 +1443,11 @@ func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.
 			failure = cmp.Or(failure, err)
 			continue
 		}
-		if os.SameFile(info, current) {
+		if fspath.SameFile(info, current) {
 			return root.handle, nil
 		}
 	}
 	return nil, failure
-}
-
-// deleteStaleLocalPrefix removes the previous hashed local/ image prefix
-// after a re-cache stored the artwork under a different key.
-func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previousCachedPath, cachedPath string) {
-	previousCachedPath = strings.TrimSpace(previousCachedPath)
-	if p.prefixDeleter == nil ||
-		previousCachedPath == "" ||
-		previousCachedPath == cachedPath ||
-		!strings.HasPrefix(previousCachedPath, "local/") {
-		return
-	}
-	lastSlash := strings.LastIndex(previousCachedPath, "/")
-	if lastSlash <= 0 {
-		return
-	}
-	prefix := previousCachedPath[:lastSlash+1]
-	if strings.HasPrefix(cachedPath, prefix) {
-		return
-	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
-		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
-	}
 }
 
 // errLocalImageOutsideRoots is returned by localImagePathResolvedWithinRoots
@@ -1269,12 +1468,12 @@ func localImageOutsideRootsError(path string) error {
 // surfaces as fs.ErrNotExist for the caller to treat as a stable "missing"
 // failure via the reader; any other resolution failure fails closed.
 func localImagePathResolvedWithinRoots(path string, roots []string) (string, string, error) {
-	resolvedPath, err := filepath.EvalSymlinks(path)
+	resolvedPath, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", "", err
 	}
 	for _, root := range roots {
-		resolvedRoot, err := filepath.EvalSymlinks(strings.TrimSpace(root))
+		resolvedRoot, err := fspath.EvalSymlinks(strings.TrimSpace(root))
 		if err != nil {
 			continue
 		}
@@ -1327,7 +1526,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 			return fmt.Errorf("local image read failed: %w", err)
 		}
 	}
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1340,7 +1539,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	// Open through the root handle: it refuses any path that leaves the root,
 	// including through a directory swapped for a symlink after resolution,
 	// so confinement holds at the open itself.
-	file, err := root.Open(rel)
+	file, err := root.Open(fspath.Decode(rel))
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1351,7 +1550,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	}
 	// Reject unless the opened handle is the exact file the Lstat above
 	// inspected, so a leaf swapped between the two cannot be read instead.
-	if !os.SameFile(info, stat) {
+	if !fspath.SameFile(info, stat) {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
 	if !stat.Mode().IsRegular() {

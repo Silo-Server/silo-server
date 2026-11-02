@@ -49,45 +49,61 @@ func RevokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int) erro
 	return RevokeSignInsForUsersInTransaction(ctx, tx, []int{userID})
 }
 
+// RevokeOtherSignInsInTransaction is RevokeSignInsInTransaction except that
+// keepSessionID, the login session asking for it, stays signed in.
+func RevokeOtherSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keepSessionID string) error {
+	return revokeSignInsInTransaction(ctx, tx, []int{userID}, &keepSessionID)
+}
+
 // RevokeSignInsForUsersInTransaction is RevokeSignInsInTransaction for several
 // accounts at once, in a fixed number of statements however many there are.
 func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
+	return revokeSignInsInTransaction(ctx, tx, userIDs, nil)
+}
+
+// revokeSignInsInTransaction revokes every login session except
+// keepSessionID; nil keeps none.
+func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, keepSessionID *string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
+		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL
+		  AND id IS DISTINCT FROM $2::text`, userIDs, keepSessionID); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
-	if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
+	if _, err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	if err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
+	if _, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	return withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	_, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	return err
 }
 
-func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	if _, err := tx.Exec(ctx, `
+func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
 		UPDATE abs_sessions SET revoked_at = NOW()
-		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs); err != nil {
-		return fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
+		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // deleteJellyfinSessionsInTransaction deletes the accounts' stored
 // Jellyfin-compatible sessions, so no replica can load one again once the
 // transaction commits. Persistent compatibility lookups check the stored row;
 // the OnUserSessionsRevoked hook also discards replicas' cached copies.
-func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs); err != nil {
-		return fmt.Errorf("deleting Jellyfin-compatible sessions: %w", err)
+func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("deleting Jellyfin-compatible sessions: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // NewLinkToken mints a raw bearer token for an emailed or copied account link

@@ -6,7 +6,6 @@ import {
   type OverlayId,
   type PresetId,
 } from "@/lib/overlays";
-import type { CardCaption } from "@/lib/uiCustomization";
 import { watchlistTitleStatus } from "@/lib/watchlistTitles";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -59,12 +58,12 @@ function prefsWith(preset: PresetId, only?: OverlayId): CardOverlayPrefs {
 function renderCard(
   title: WatchlistTitle,
   overlayPrefs: CardOverlayPrefs | null,
-  options: { caption?: CardCaption; onRequest?: () => void; onRemove?: () => void } = {},
+  options: { onRequest?: () => void; onRemove?: () => void } = {},
 ): HTMLElement {
   const wrap = (children: ReactNode) => (
     <UICustomizationContext.Provider
       value={{
-        cardPresentation: { poster_size: "large", caption: options.caption ?? "title_metadata" },
+        cardPresentation: { poster_size: "large" },
         cardPresentationSource: "profile_client",
         primaryMenu: null,
         primaryMenuSource: "default",
@@ -113,13 +112,8 @@ describe("WatchlistTitleCard", () => {
   ];
 
   it.each(captionCases)("keeps the full status in the caption with %s", (_, prefs) => {
-    for (const caption of ["title_metadata", "title", "artwork"] as const) {
-      renderCard(downloading, prefs, { caption });
-      expect(screen.getByTestId("watchlist-title-caption").textContent).toMatch(
-        /^Downloading · 43%/,
-      );
-      cleanup();
-    }
+    renderCard(downloading, prefs);
+    expect(screen.getByTestId("watchlist-title-caption").textContent).toMatch(/^Downloading · 43%/);
   });
 
   it("draws the download bar only while overlays and the status badge are on", () => {

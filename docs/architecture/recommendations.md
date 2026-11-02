@@ -60,14 +60,31 @@ rebuilds the text in SQL, so the people ordering there must match Go's
 byte-wise sort (`COLLATE "C"` and the full sort key), and every SQL candidate
 is re-checked in Go before it counts against the 200-item quota.
 
+Embeddings use the AI provider `recommendations.embedding_provider_id` selects
+in the provider registry (see [AI provider authentication](ai-provider-authentication.md))
+and the model in `recommendations.embedding_model`. The engine is built at
+startup with the endpoint and model they resolve to; a changed choice applies
+after a restart. A new key for the provider it runs with applies on the next
+config reload, and only while the reloaded endpoint and model still match the
+running ones, so a key chosen for another endpoint never reaches this one.
+With no provider or model chosen, the catch-up stays idle and the nightly run
+fails with a message asking for one.
+
 The first stored vector writes the embedding lock (base URL, model, source and
-storage dimensions) in `server_settings`. Every later vector must match it.
+storage dimensions) in `server_settings`. Every later vector must come from the
+locked model with the locked dimensions. The lock belongs to the model, not the
+provider: the same model through another provider or address is accepted, and
+so is the same name behind a vendor prefix, so `google/gemini-embedding-001`
+through OpenRouter matches a `gemini-embedding-001` lock. Two different prefixes
+(`team-a/embed`, `team-b/embed`) name different models. Vectors from such a provider are stored
+under the lock's model name. The recorded base URL is informational.
 
 - A vector is checked before the lock is read or written: an empty vector or
   one wider than `embeddingvectors.CanonicalDimensions` (3072) ends the run,
   so an unusable model never pins the lock.
 - Vectors are zero-padded to 3072 for storage; cosine is unaffected.
-- Changing the model or base URL requires the admin embeddings reset, which
+- Switching to another model requires the admin embeddings reset; switching
+  the provider or its address does not, and applies at restart. The reset
   deletes the lock, embeddings, clusters and per-profile cached rows, and
   clears every taste vector, in one transaction while holding the embedding, taste and cache
   job claims and the stale sweep lock. Its transaction also takes the

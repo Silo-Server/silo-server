@@ -274,39 +274,43 @@ describe("HeroBanner", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("starts only the active and two adjacent backdrop requests, including wraparound", () => {
+  it("starts only the active and next backdrop requests, including wraparound", () => {
     const { container } = render(hero({ items: tenSlides() }));
+    const sources = () =>
+      Array.from(container.querySelectorAll("img"), (image) => image.getAttribute("src"));
     const images = Array.from(container.querySelectorAll("img"));
 
-    expect(images.map((image) => image.getAttribute("src"))).toEqual([
-      "/movie-0.jpg",
-      "/movie-1.jpg",
-      "/movie-9.jpg",
-    ]);
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg"]);
     expect(images[0]).toHaveAttribute("fetchpriority", "high");
-    expect(images.slice(1).every((image) => image.getAttribute("fetchpriority") === "low")).toBe(
-      true,
+    expect(images[1]).toHaveAttribute("fetchpriority", "low");
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-9.jpg"]);
+    expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
+      "src",
+      "/movie-9.jpg",
     );
   });
 
-  it("loads neighbors on next and previous navigation and preserves loaded backdrops", () => {
+  it("loads the next slide on navigation and preserves loaded backdrops", () => {
     const { container } = render(hero({ items: tenSlides() }));
-    const loadedNeighbor = container.querySelector('img[src="/movie-9.jpg"]')!;
-    fireEvent.load(loadedNeighbor);
+    const loadedFirst = container.querySelector('img[src="/movie-0.jpg"]')!;
+    fireEvent.load(loadedFirst);
     const sources = () =>
       Array.from(container.querySelectorAll("img"), (image) => image.getAttribute("src"));
 
     fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
-    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-2.jpg", "/movie-9.jpg"]);
-    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(loadedNeighbor);
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-2.jpg"]);
+    expect(container.querySelector('img[src="/movie-0.jpg"]')).toBe(loadedFirst);
     expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
       "src",
       "/movie-1.jpg",
     );
 
+    // Slides 1 and 2 never finished loading, so nothing retains them.
     fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
     fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
-    expect(sources()).toEqual(["/movie-0.jpg", "/movie-8.jpg", "/movie-9.jpg"]);
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-9.jpg"]);
     expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
       "src",
       "/movie-9.jpg",
@@ -336,32 +340,32 @@ describe("HeroBanner", () => {
     expect(image).toHaveClass("opacity-100");
     fireEvent.load(image);
     expect(image).toHaveClass("opacity-100");
-    expect(container.querySelectorAll("img")).toHaveLength(3);
+    expect(container.querySelectorAll("img")).toHaveLength(2);
   });
 
   it("does not eagerly load a replacement URL on a distant loaded slide", () => {
     const slides = tenSlides();
     const { container, rerender } = render(hero({ items: slides }));
-    const image = container.querySelector('img[src="/movie-9.jpg"]')!;
+    const image = container.querySelector('img[src="/movie-1.jpg"]')!;
     fireEvent.load(image);
-    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
     rerender(
       hero({
         items: slides.map((slide, index) =>
-          index === 9 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
+          index === 1 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
         ),
       }),
     );
 
     expect(container.querySelector('img[src="/replacement.jpg"]')).toBeNull();
-    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(image);
-    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    expect(container.querySelector('img[src="/movie-1.jpg"]')).toBe(image);
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
     const replacement = container.querySelector('img[src="/replacement.jpg"]');
     expect(replacement).toBe(image);
     expect(replacement).toHaveClass("opacity-100");
     fireEvent.load(replacement!);
     expect(replacement).toHaveClass("opacity-100");
-    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
     expect(container.querySelector('img[src="/replacement.jpg"]')).toBe(image);
   });
 

@@ -25,7 +25,7 @@ type AdminMarkerProvider struct {
 	ContributeEnabled        bool    `json:"contribute_enabled"`
 	ContributeAutoLocal      bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence  float64 `json:"contribute_min_confidence" minimum:"0" maximum:"1"`
-	DefaultContributeEnabled bool    `json:"default_contribute_enabled" doc:"The provider's plugin manifest turns sharing on when the provider is first configured, unless the markers.share_by_default server setting is false. Turning that setting off also turns sharing off for these providers."`
+	DefaultContributeEnabled bool    `json:"default_contribute_enabled" doc:"The provider's plugin manifest turns sharing on when the provider is first configured, if the markers.share_by_default server setting is true. Turning that setting off also turns sharing off for these providers."`
 }
 type AdminMarkerProviders struct {
 	Providers []AdminMarkerProvider `json:"providers"`
