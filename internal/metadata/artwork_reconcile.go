@@ -117,9 +117,6 @@ type ArtworkReconcileStats struct {
 	// re-checked by the sweep — so callers deciding whether the reconcile
 	// fully covered the catalog must look here, not at Errors.
 	SweepErrors int `json:"sweep_errors"`
-	// Repaired counts rows whose stored key is intact but a size its revision
-	// published is missing; regeneration is queued and the row keeps serving.
-	Repaired int `json:"repaired"`
 }
 
 // Artwork reconcile modes are serialized in task result data and checkpoints.
@@ -1117,7 +1114,6 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 	pkPredicate := keyEqualityPredicate(s.keyCols)
 	var pgBatch pgx.Batch
 	remoteByQueued := make([]bool, 0)
-	var repairs []string
 	for i, v := range verdicts {
 		stats.Checked++
 		switch {
@@ -1126,7 +1122,9 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			stats.SweepErrors++
 			slog.Warn("artwork reconcile: object check failed; leaving row untouched",
 				"surface", s.name, "key", batch[i].path, "error", v.err)
-		case v.missing:
+		case v.missing, v.variantMissing && batch[i].remoteSource:
+			// A provider source can make every size again, so a missing size
+			// resets the row as a missing stored key does.
 			row := batch[i]
 			args := make([]any, 0, len(row.keys)+1)
 			parsedKeys, err := s.parseKeys(row.keys)
@@ -1146,8 +1144,6 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			pgBatch.Queue(fmt.Sprintf(`UPDATE %s SET %s WHERE %s AND %s = $%d`,
 				s.table, set, pkPredicate, s.pathCol, len(args)), args...)
 			remoteByQueued = append(remoteByQueued, row.remoteSource)
-		case v.variantMissing && batch[i].remoteSource:
-			repairs = append(repairs, batch[i].path)
 		case v.variantMissing:
 			// Clearing the row would lose the stored original; only the
 			// source can make the missing size again.
@@ -1157,13 +1153,6 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 		default:
 			stats.Verified++
 		}
-	}
-	if len(repairs) > 0 {
-		queued, err := NewImageCacheJobRepository(r.pool).EnqueueArtworkRepair(ctx, repairs, len(repairs))
-		if err != nil {
-			return fmt.Errorf("artwork reconcile: queueing %s repair: %w", s.name, err)
-		}
-		stats.Repaired += queued
 	}
 	if pgBatch.Len() == 0 {
 		return nil

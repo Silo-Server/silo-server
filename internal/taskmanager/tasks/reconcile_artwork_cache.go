@@ -290,8 +290,8 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 	}
 
 	message := fmt.Sprintf(
-		"Verified %d cached images intact, queued %d with a missing size for repair, reset %d for an optional manual backfill, cleared %d without a re-downloadable source",
-		stats.Verified, stats.Repaired, stats.Requeued, stats.Cleared,
+		"Verified %d cached images intact, reset %d for an optional manual backfill, cleared %d without a re-downloadable source",
+		stats.Verified, stats.Requeued, stats.Cleared,
 	)
 	if stats.Mode == metadata.ArtworkReconcileModeBulkReset {
 		message = fmt.Sprintf(
