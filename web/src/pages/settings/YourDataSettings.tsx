@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Download, LoaderCircle, Upload } from "lucide-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import {
@@ -108,6 +108,7 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
 /** Settings → Your Data: download this profile's own data, or merge a download back in. */
 export default function YourDataSettings() {
   const { profile, selectProfile, verifyProfilePin } = useAuth();
+  const queryClient = useQueryClient();
   const context = captureProfileRequestContext();
   const fileInput = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<ProfileImportResult | null>(null);
@@ -159,7 +160,13 @@ export default function YourDataSettings() {
       setResult(null);
       setImportError(null);
     },
-    onSuccess: (imported) => setResult(imported),
+    onSuccess: (imported) => {
+      setResult(imported);
+      // An import can change settings, history, ratings, lists, and collections
+      // at once, and the server publishes no event for it: refetch whatever
+      // this profile has loaded.
+      void queryClient.invalidateQueries();
+    },
     onError: (error, { file }) => {
       if (needsPin(error))
         setAfterPin(() => () => importData.mutate({ file, target: requireContext() }));

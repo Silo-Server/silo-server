@@ -157,6 +157,10 @@ type applier struct {
 	// adminCollections caches how the accounts' data maps admin collection
 	// ids (collectionMap).
 	adminCollections map[string]string
+	// allowUnrated is access.unrated_content, read before each account's
+	// transaction: the policy reader takes a pool connection of its own,
+	// which the transaction may hold the last of.
+	allowUnrated bool
 }
 
 // applied is one item's outcome before its transaction commits.
@@ -201,6 +205,9 @@ func (a *applier) commit(ctx context.Context, next *SelectiveReport, message str
 // transaction; the restore continues with the next item.
 func (a *applier) apply(ctx context.Context, section, id string) error {
 	a.current++
+	if section == SectionUsers {
+		a.allowUnrated = a.s.opts.AllowUnratedContent != nil && a.s.opts.AllowUnratedContent(ctx)
+	}
 	var result applied
 	next := a.clone()
 	err := a.commit(ctx, next, "Restoring "+section, func(tx pgx.Tx) error {
