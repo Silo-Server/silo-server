@@ -116,6 +116,10 @@ func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, 
 // handful of queries per item — up to ~500 single fetches on app open. Returns
 // a map keyed by content_id; missing or non-audiobook ids are omitted.
 func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error) {
+	contentIDs, err := s.idsInALibrary(ctx, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("abs_media_store: get audiobooks: %w", err)
+	}
 	if len(contentIDs) == 0 {
 		return map[string]*models.MediaItem{}, nil
 	}
@@ -145,6 +149,22 @@ func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []str
 		out[b.ContentID] = b
 	}
 	return out, nil
+}
+
+// idsInALibrary returns the contentIDs that belong to at least one library.
+// GetAudiobooksByIDs hydrates listings, and progress keeps the IDs of books in
+// no library (held through the file removal grace), which an unrestricted
+// viewer's by-ID read would otherwise return. See catalog.InSomeLibraryWhere.
+func (s *ABSMediaStore) idsInALibrary(ctx context.Context, contentIDs []string) ([]string, error) {
+	if len(contentIDs) == 0 || s.Pool == nil {
+		return contentIDs, nil
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid WHERE `+catalog.InSomeLibraryWhere("cid"), contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load library memberships: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // ListAudiobooks returns a page of media_items with type='audiobook'.
@@ -377,14 +397,10 @@ func appendAudiobookAccessConditions(alias string, filter catalog.AccessFilter, 
 			*args = append(*args, filter.AllowedLibraryIDs)
 			*argIdx = *argIdx + 1
 		}
+	} else {
+		*conditions = append(*conditions, catalog.InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (
-				SELECT 1 FROM media_item_libraries mil_present
-				WHERE mil_present.content_id = %s.content_id
-			)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil_disabled
 			WHERE mil_disabled.content_id = %s.content_id

@@ -585,3 +585,40 @@ func TestFilesystemDeletePrefixReadsInBatches(t *testing.T) {
 		t.Fatalf("remaining = %v, %v; want the two stuck files", keys, err)
 	}
 }
+
+// cancelingReader cancels its write's context while handing over the last
+// bytes, as a deadline passing mid-write does.
+type cancelingReader struct {
+	data   []byte
+	cancel context.CancelFunc
+}
+
+func (r *cancelingReader) Read(p []byte) (int, error) {
+	r.cancel()
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, io.EOF
+}
+
+// TestFilesystemCanceledStreamIsNeverPublished: a write whose context ends
+// while it is writing closes and removes its temporary file and publishes
+// nothing, even when its reader finished.
+func TestFilesystemCanceledStreamIsNeverPublished(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	err = s.PutStream(ctx, "uploads/part", &cancelingReader{data: []byte("bytes"), cancel: cancel}, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PutStream = %v, want context.Canceled", err)
+	}
+	if _, err := s.Stat(context.Background(), "uploads/part"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a canceled write was published: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "uploads"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("left behind %v (%v)", entries, err)
+	}
+}

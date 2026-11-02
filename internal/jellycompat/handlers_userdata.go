@@ -219,7 +219,7 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("datePlayed"); played && raw != "" {
-		date, parseErr := time.Parse(time.RFC3339Nano, raw)
+		date, parseErr := parseJellyfinDate(raw)
 		if parseErr != nil {
 			writeError(w, 400, "BadRequest", "Invalid datePlayed")
 			return
@@ -242,6 +242,54 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.HandleGetUserData(w, r)
+}
+
+// jellyfinDateLayouts are client date forms Jellyfin accepts: the compact Emby
+// form its legacy datePlayed binder handles, then the ISO 8601 date, with or
+// without a time to the minute or second, fraction and offset, that its
+// default binder and JSON reader take. time.Parse accepts a fraction after the
+// seconds in any layout. A value without an offset is read as UTC, as Jellyfin
+// stores it.
+var jellyfinDateLayouts = []string{
+	"20060102150405",
+	time.RFC3339,
+	"2006-01-02T15:04:05Z0700",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04Z07:00",
+	"2006-01-02T15:04",
+	time.DateOnly,
+}
+
+// parseJellyfinDate reads a client-supplied date such as datePlayed,
+// LastPlayedDate, or MinPremiereDate.
+func parseJellyfinDate(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	var err error
+	for _, layout := range jellyfinDateLayouts {
+		date, parseErr := time.Parse(layout, raw)
+		if parseErr == nil {
+			return date, nil
+		}
+		err = parseErr
+	}
+	return time.Time{}, err
+}
+
+// clientDate is a JSON date in any form parseJellyfinDate accepts.
+type clientDate time.Time
+
+func (d *clientDate) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	date, err := parseJellyfinDate(raw)
+	if err != nil {
+		return err
+	}
+	*d = clientDate(date)
+	return nil
 }
 
 func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
@@ -373,14 +421,14 @@ func appendUniqueContentIDs(targets []string, seen map[string]struct{}, contentI
 
 // updateUserDataRequest uses pointers so omitted and null fields preserve state.
 type updateUserDataRequest struct {
-	PlaybackPositionTicks *int64     `json:"PlaybackPositionTicks"`
-	PlayedPercentage      *float64   `json:"PlayedPercentage"`
-	Played                *bool      `json:"Played"`
-	IsFavorite            *bool      `json:"IsFavorite"`
-	LastPlayedDate        *time.Time `json:"LastPlayedDate"`
-	PlayCount             *int       `json:"PlayCount"`
-	Rating                *float64   `json:"Rating"`
-	Likes                 *bool      `json:"Likes"`
+	PlaybackPositionTicks *int64      `json:"PlaybackPositionTicks"`
+	PlayedPercentage      *float64    `json:"PlayedPercentage"`
+	Played                *bool       `json:"Played"`
+	IsFavorite            *bool       `json:"IsFavorite"`
+	LastPlayedDate        *clientDate `json:"LastPlayedDate"`
+	PlayCount             *int        `json:"PlayCount"`
+	Rating                *float64    `json:"Rating"`
+	Likes                 *bool       `json:"Likes"`
 }
 
 func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Request) {
