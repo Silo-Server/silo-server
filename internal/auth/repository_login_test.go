@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"os"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -45,7 +44,8 @@ func TestUserWithoutEmailOrUsernameDB(t *testing.T) {
 	noEmail, noUsername := insert(&name, nil), insert(nil, &mail)
 
 	users := NewUserRepository(pool)
-	for id, want := range map[int][2]string{noEmail: {name, ""}, noUsername: {"", mail}} {
+	wantByID := map[int][2]string{noEmail: {name, ""}, noUsername: {"", mail}}
+	for id, want := range wantByID {
 		u, err := users.GetByID(ctx, id)
 		if err != nil || u.Username != want[0] || u.Email != want[1] {
 			t.Fatalf("GetByID(%d) = %+v, %v; want username %q, email %q", id, u, err, want[0], want[1])
@@ -57,11 +57,16 @@ func TestUserWithoutEmailOrUsernameDB(t *testing.T) {
 	}
 	listed := 0
 	for _, u := range all {
-		if slices.Contains(ids, u.ID) {
-			listed++
+		want, ok := wantByID[u.ID]
+		if !ok {
+			continue
+		}
+		listed++
+		if u.Username != want[0] || u.Email != want[1] {
+			t.Fatalf("List user %d = username %q, email %q; want username %q, email %q", u.ID, u.Username, u.Email, want[0], want[1])
 		}
 	}
-	if listed != 2 {
+	if listed != len(wantByID) {
 		t.Fatalf("List returned %d of the two accounts", listed)
 	}
 
