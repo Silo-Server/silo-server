@@ -88,6 +88,11 @@ func (r countingSeriesRepo) ListAvailableIDsBySeriesPage(_ context.Context, id s
 	return slicePage([]string{id + "-episode"}, offset, limit), nil
 }
 
+// ListBySeriesIDs serves the series rollups BrowseItems adds to the page.
+func (countingSeriesRepo) ListBySeriesIDs(context.Context, []string) (map[string][]*models.Episode, error) {
+	return map[string][]*models.Episode{}, nil
+}
+
 // A page without a total, such as Latest, checks series only until the page
 // is filled: each series costs episode reads.
 func TestConfiguredBrowseStateStopsCheckingSeriesOncePageIsFull(t *testing.T) {
