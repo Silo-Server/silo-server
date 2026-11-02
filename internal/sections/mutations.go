@@ -438,9 +438,12 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 	if s.Config == nil {
 		s.Config = json.RawMessage(`{}`)
 	}
+	// Collection parents are locked before the section row, the order
+	// Repository.attemptMutation takes them in, so an editor and this write
+	// cannot each hold one while waiting for the other.
 	var previous []string
 	if !create {
-		stored, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1 FOR UPDATE", s.ID))
+		stored, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1", s.ID))
 		if err != nil {
 			return err
 		}
@@ -448,6 +451,11 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 	}
 	if err := catalog.LockLibraryCollectionReferences(ctx, tx, previous, referencesOf([]*PageSection{s})); err != nil {
 		return err
+	}
+	if !create {
+		if err := lockSectionRow(ctx, tx, s.ID, previous); err != nil {
+			return err
+		}
 	}
 	r := &Repository{}
 	txCtx := context.WithValue(ctx, sectionTransactionKey{}, tx)
@@ -460,6 +468,19 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 	}
 	if s.Featured {
 		return r.clearFeaturedForSurface(txCtx, s.Scope, s.LibraryID, s.ID)
+	}
+	return nil
+}
+
+// lockSectionRow locks a section row after its collection parents. A
+// reference written since previous was read is locked as well.
+func lockSectionRow(ctx context.Context, tx pgx.Tx, id string, previous []string) error {
+	locked, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1 FOR UPDATE", id))
+	if err != nil {
+		return err
+	}
+	if current := referencesOf([]*PageSection{locked}); !slices.Equal(current, previous) {
+		return catalog.LockLibraryCollectionReferences(ctx, tx, current, nil)
 	}
 	return nil
 }

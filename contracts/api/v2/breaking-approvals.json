@@ -1,3 +1,634 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9d389b12bda178cde76ca75cb3ec20b706744453d4775aba3c6eb591d5fe5589",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2c9ebdf616ad772acd877cb599027b0430a0e6fd0a6a1bcdb4ba7983ff67defb",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "452b45d0e7eff47dc58a761d10b78144c36e552107ed3bcf2e96fd4be0398e8a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "76b17af06253ee04cbd2d5c7c047041b3dec8d0b526ef1a522401664122d7cec",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2c4cd32719e46020c332ce295f767c1b275a0be1c1c00245bebc3aecf50a1815",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "865e38ac1e5f60ff28609ba17604d498291649065df37de576a21e8911048c03",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2640295af1aef8200df045e7b5fc68f1072d8ed751a4c53720cd9792dffa812b",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "90d564eba8da4881e9f07ef19b5c14aac08061a6f6512ec076826031138cb04a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "startAdminBackupRestore",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ae895a41be4423df5028ebf3d5ab631bdf49c82140925b58340aeb312f61ec6b",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2990529a8d57f6a2d89802fbc9910f8cca2e7c8f9925c259552593feaef8dd37",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c247d9dece44587c41761c3899ad857d05cd80e8d70d7e24ba04b07d7a6fe25f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ff5eb7db8ca867ab350c7bfc7197295b65b1f678737e7b77b5771fa05fbf19ba",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6a01d10f5fe45b8b876a22a640c0c7db098922041f727bfefdf56b36abc103c9",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "8bcda9ecc6ce0e38ac191b056c556133926d9730ade0e50a9d4ca166d24266ec",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "afed47e2662e6f7e1739a434ed20a63326269ca928863a0f6889eca575403999",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5330f6518240d9384d94efc2c75ee55e18f46563a37ec15ca57ddb342c940182",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "1fd8ebc187127760e10c0f91bf5abbadf9480a4eba4ac3a5a02f808f68084f1e",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "8cd6eba6800e731a35b2475cf16866cf82528f2256e0227987a6c1f14d84b2df",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e9063c625cc4e79e14ad3b13b0cbeae5cab001ac3c07e4e3267cd46ee243d8b1",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b7ae22ce93e9aeb4e1b5b655b867ac36621958ae232a332c5e40bfcf0c5b0beb",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c3bc557bfc74590fbbbcce6a480141daacd4468b6329b4007c0e9e6475219eea",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ebf5dfc470231e4007894870b04595346ce482d27167257055ca706c6ddd8a76",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "eea7f3e008820d7ec8fd3789cc8e2ee9d152811e526c8cb81f8873b01e1bbe01",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "1b5492fb1e0992113dc43cea5a7dab47576f4c74d5210892149676ef97631390",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "12858fd269b51057ce6383b68c32b759e26fd9ee4d4c79f3747165571b7ccf82",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f31eb3ac6ef05e998f6be2e121495b2b73ee4762ad053b3b5eaff6af9ac0e07a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogExportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e9a71c306401761cb43fccb0b19b95ccc6e52777b92ff686688149c723b8e6bd",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "fe20780090637df88db88f92432bd72dc87e6f64399aff72d7a9c26a33406078",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9e5f43649eeeb15783414e6c21a9df6f2e8fcc5153a78b11d2d617c71abdb000",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d6ee0ab8dca32829d25c088bf3cf5e0dd686ec0b1fc9ec23682e722db1bff169",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "41f562d901f8622757aae97326e754fc505a509506d6b67c0a4ee020b1ce6322",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "14a170715ea52011c6565f6b928e506255421846c392aa921a957eb3af812685",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "7f07e2cc73432186104b005aaaa4d9986b4c8cd74eb0c5a379a6eb5b4eb19495",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ff81ba7938717fdf2121dda06860bf7a53a5d83a7d812944f960658fda057503",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "a02796dd4f7f28ba5ae8fc40212271bac46f04dbb60eb8ed21b1a48ddfc0413f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "dc12936356435fcfedc0c177f68573fc84c258930c3784360bb5cd0bb68ea03f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "7f3d42f2a704f57d6648196e8602098af27f1ffe5d59dd1e77c47629702f1d08",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "aa8d8d3939f52e18486d97c69071c243089b72daaef893179891f72aada85c7c",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "3d181f60bc5728a921ac0e97254baa23ac9e128f2cb40b1c2f464d72f1531726",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "75e1c2acf577d39182c02aabf61877e61bed91f1eeab8b89a932be4f1ae810cd",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2bc1f9e6856fb421df2080d2147757f74a5d34c1f0e0003584f3d01747844821",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "198fe7355c7bd6f80019a8c7dc7b980aa45c4bac77b6c25e5de2f5348b21339c",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "cddd197651818ec91ed6e29f9cf7c98097ab545a5d867562ab502e014426d99a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "be765b1c5a69d9c8efd55e3117d41c3f22b2c65b83ab8a6dbaa11d7c92e00ae5",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "refreshAdminItemMetadata",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "bb0393f2733dc6cda6e5276cd0b3d81059bd2387c1c39e32ed19de70cbea13b7",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "bc6db6d8761241e822c1d91e37e30ef524e1830dbeee7b7f61582c523bb79940",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5d7eea0378fe03e1b9ee26a011bf4bb1c30499a37dd6b9cccd221e5704bdf57e",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "86629f3932161b3441981fd78e957aa79653322cbf251950c390e3c3581876bb",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2af47f3b4357d668cfebfcbaa04c7ac85b12a2ec486c3074d73f9fedf809e47a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "dff071b65472e23f9191b5c4ba22a95b57a40d5d286914f4b0d220281e4919f9",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "8492f69d708b791419689270b4358f6b2ee5bfe9faaa8953a65e6a83443764a1",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "621d917dc24fa0d5e05436c68ca028e0a22f36110f242fa23d27d7157937964c",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "0c590460c46a43b6ca5c3e96261a27d7c651e571536402e4f70ea1ba7bf5adaf",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "listAdminJobs",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "09c86d51eeede6dc3008af09bf4670f7c8800ec4727afe25c4893c7671df2dd2",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f50b84a6f794185a52fb150912c7fd4e33fe6b7ebf91d4e70c96ad271c2682f1",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d7a6248132a7b84f9c85dd05d8ca887b75b9b5e6d4e6e044260050d56470c32f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4db49bd738def778466c242c782188a2b800c5ae3d2dfd068af44318b8b56508",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "571dc64139f59a78aed3d4248d3c2a8daefc8d837b1daa2c08dae44731ffceb9",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "8d5e2084abfde08698ccfa48685494215e65774726fa1c6d4eea2178f048660b",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "3c384fc449dfb5c2ed14808e36c27bb6ff9a51638cda3da900853aef60646a9f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5d5daa7c046815a92b35daa3c72318920ec56e51808d806cc92496768cf3677e",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d6e3ecf7e7d60e683f4325f6573079ed8dac620d7c446c3ec4b36e45b7bf45b0",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "getAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9f899b3e5e06625dbdb24bbcc29f7f2302bdbdd02803ceaf200b3c56f7adb769",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "7583736c4f06d2e62b352a4ae0eb7b42cf9e9728b15f72cd345e72114f4c803d",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5a17bc6ccd48247296c915f62cc7812c8cdddf547eb25cf19c248de636347ce3",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "984f852bee401a776b3f5b802b448ee6ee3a73bceb37d7e3b685ca878588c6e0",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f955dd8c03dbd88ffdfc099f7336ee4d63b24a4879f4f1d5ac5f47a684e18981",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4ab99888ee94b517f1460a7f7ac4c19999345b0f61237c4416e4773125567e3a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "74295bbda1d81b98feb7662172127e4b61221328495df17c551bdd45b038f260",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "aa20981aabc96136b7248c95e9f497b513283f4bde03470d4ce525e9e89e1ae8",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d897029d0cdc6edd8a2bd14098555d54f546798de46ce14b8153a24ac9f68a33",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ba8baffce9c8fee2e8b7ac4e8603a32e13ae09d503c5bc0b19f372afdc42b748",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "687d3b59608a6654407b217762a452bafceef40f0fd14339f65bf67d6ae19d80",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9ff8c50247c001f079ce3b03b190e9614351dc6c7cc14cd0fbd453079d14914b",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "028d685fc39bb04000ae74fb43102e4178fbd426e8f729cf694a315382a1ce59",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e797ab52e696f3482a2ee36d60cd422553641e72bb5393697a737d7c65c7a046",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "7d3ac094dc4c9ce8c9035d1736e116b981dd43bd767738ddb6d3457c2cc36553",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "220cb76a0285debec6c05fcf3fb99bafbffca67e468937328f63fd9264315e6c",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "ad2cd8816a324941fc28519498d796fb543c78062507fb2eecd4c46a7bbc9847",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b7f7347a3a3e06841aef79a833d59eec61e0189e8fddfd5d7bde8aa0ce3048b9",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "cancelAdminJob",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c8fc15d297e95ed4494c3936d222d20127879ba56947bd13e58d0d5c9c5ebb63",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "daafa24e36d211cd3f16d3ef6fe02c10c745dba1826d50b252498c51d88901e4",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "cfb179e3d80109e593c7aae044f8f3b70720bd17419c194fc6deaa25ed932472",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "a4e834c17c025128053a30d400b9a84ce34ded994f3cd0845513870838cee287",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4f63763e3e5900389a58a6e86e16e66428535d7e30eb9b028efdabe439b60529",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6fad1c54093e1fe0a5b444468ecfb61ee6a74cb0bb2071f7e0f97ad72bb43d65",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "484cd6bf6aa4879d59fa413e03569a3d9be0f40f0c08910f9b25956be1f29115",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "a1256e2fa7ce0a8e092dacaf565a4b3c2f8f5050b58fcaaee9bea5a4cce2b18f",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c1faaa074822a069dad4320007d113b00c67bb337612dfad64d00f4a34d2cf16",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    },
+    {
+      "operation_id": "createAdminStorageTransition",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "eba0cdb3d7d456155c3620b76da5da26b0021dda6f7aeb20972b4c2a52a4980a",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3399"
+    }
+  ]
 }
