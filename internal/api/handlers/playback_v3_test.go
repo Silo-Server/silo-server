@@ -2983,6 +2983,27 @@ func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing
 	}
 }
 
+// A per-account cap must not present as server capacity: a busy server means
+// wait, a spent allowance means stop the other session. Retrying still works
+// once that session ends, so both caps stay retryable.
+func TestSessionStartErrorV3SeparatesAccountLimitsFromServerCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		err       error
+		reason    string
+		retryable bool
+	}{
+		{err: playback.ErrTooManyStreams, reason: "stream_limit_reached", retryable: true},
+		{err: playback.ErrTooManyTranscodes, reason: "transcode_limit_reached", retryable: true},
+		{err: playback.ErrTranscodingDisabled, reason: "transcoding_disabled"},
+		{err: playback.ErrPlaybackNotAllowed, reason: "policy_denied"},
+	} {
+		got := sessionStartErrorV3(fmt.Errorf("wrapped: %w", tc.err))
+		if got == nil || got.reason != tc.reason || got.retryable != tc.retryable {
+			t.Fatalf("sessionStartErrorV3(%v) = %#v, want reason %q retryable %v", tc.err, got, tc.reason, tc.retryable)
+		}
+	}
+}
+
 func TestManifestStartupTimeoutWhileRunningIsPersistedIdempotently(t *testing.T) {
 	if playback.ManifestStartupTimeout != 30*time.Second {
 		t.Fatalf("manifest startup timeout = %v, want 30s", playback.ManifestStartupTimeout)
