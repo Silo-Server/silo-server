@@ -349,7 +349,7 @@ func scanMappingRow(s mappingRowScanner) (*UserMapping, error) {
 // enrichMapping looks up the Silo username and profile name for display purposes.
 func enrichMapping(ctx context.Context, r *Repository, m *UserMapping) (*UserMapping, error) {
 	_ = r.pool.QueryRow(ctx, `
-		SELECT u.username, COALESCE(p.name, '')
+		SELECT COALESCE(u.username, ''), COALESCE(p.name, '')
 		FROM users u
 		LEFT JOIN user_profiles p ON p.user_id = u.id AND p.id = $2
 		WHERE u.id = $1`, m.SiloUserID, m.SiloProfileID,

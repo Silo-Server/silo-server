@@ -381,7 +381,12 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 	if s.sessionsRevoked != nil {
 		s.sessionsRevoked(ctx, user.ID)
 	}
-	pair, loggedIn, err := s.sessions.Login(ctx, user.Username, password, deviceName, ip)
+	// An account may have only an email; sign-in resolves either.
+	login := user.Username
+	if login == "" {
+		login = user.Email
+	}
+	pair, loggedIn, err := s.sessions.Login(ctx, login, password, deviceName, ip)
 	if err != nil {
 		return nil, user, errors.Join(ErrSessionStart, err)
 	}
