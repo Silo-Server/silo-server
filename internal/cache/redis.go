@@ -43,6 +43,12 @@ const (
 
 	// ChannelEvents is the pub/sub channel for passive websocket events.
 	ChannelEvents = "silo:events"
+
+	// ChannelPlaybackControl carries playback control requests between API
+	// replicas and their replies (playback.ControlRelay). It is separate from
+	// ChannelPlayback so plugin event consumers and cache invalidators never
+	// see administrator commands.
+	ChannelPlaybackControl = "silo:playback:control"
 )
 
 // ---------------------------------------------------------------------------
@@ -67,6 +73,7 @@ const (
 	EventOperationalLogAppended      = "operational_log_appended"
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
+	EventPlaybackControlRelay        = "playback_control_relay"
 	// EventPluginsChanged is published on ChannelAdmin by the API server after
 	// every plugin lifecycle change (install, enable, disable, config save,
 	// auto-update, uninstall) so proxy nodes running resident plugins from the
@@ -290,7 +297,7 @@ func redisChannel(channel string, db int) string {
 // eventBusChannels are the channels a starting server subscribes to. Redis
 // refuses a subscription that the user's ACL does not grant, and a refused
 // subscription stops the start.
-var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelTranscodeMove, ChannelLogs, ChannelEvents}
+var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelTranscodeMove, ChannelPlaybackControl, ChannelLogs, ChannelEvents}
 
 // CheckEventBusChannels subscribes client to every event bus channel on its
 // database number, as a starting server does, and returns the error Redis
@@ -328,6 +335,14 @@ func (r *RedisEventBus) Publish(ctx context.Context, channel string, event Event
 	return r.client.Publish(ctx, redisChannel(channel, r.db), data).Err()
 }
 
+// PublishEvent publishes event on channel through client, the way the event
+// bus does, for a caller that needs its own client: one whose sockets honor
+// ctx's deadline (NewDeadlineRedisClientForRole).
+func PublishEvent(ctx context.Context, client *redis.Client, channel string, event Event) error {
+	data, _ := json.Marshal(event) // Event holds only strings.
+	return client.Publish(ctx, redisChannel(channel, client.Options().DB), data).Err()
+}
+
 // Subscribe creates a Redis pub/sub subscription on the given channel,
 // scoped to the bus's database number, and spawns a goroutine that delivers
 // incoming messages to the handler.
@@ -338,6 +353,7 @@ func (r *RedisEventBus) Subscribe(ctx context.Context, channel string, handler E
 	// Wait for the subscription to be confirmed.
 	if _, err := pubsub.Receive(subCtx); err != nil {
 		cancel()
+		_ = pubsub.Close()
 		return err
 	}
 
