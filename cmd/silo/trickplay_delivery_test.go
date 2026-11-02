@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 )
 
 func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
@@ -82,6 +83,15 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 				_ = resp.Body.Close()
 				if resp.StatusCode != http.StatusNotFound {
 					t.Fatalf("external delivery status = %d, want 404", resp.StatusCode)
+				}
+				// The service's delivery check sees the same miss, so the
+				// revision keeps the server route until the endpoint serves it.
+				checker, ok := deps.Blobs.Assets.(trickplay.DeliveryChecker)
+				if !ok {
+					t.Fatal("the assets store cannot check external delivery")
+				}
+				if served, err := checker.ObjectAvailable(t.Context(), key); err != nil || served {
+					t.Fatalf("lagging endpoint checked as served = %t, %v", served, err)
 				}
 			}
 			resolved := trickplayURLResolver(deps).ResolveURLs(t.Context(), []string{key})[key]

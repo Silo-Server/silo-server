@@ -25,6 +25,9 @@ type Manifest struct {
 	// Bandwidth is Jellyfin's bits-per-second estimate (see
 	// Recipe.Bandwidth).
 	Bandwidth int
+	// DeliveryScope is the external delivery scope the sheets were confirmed
+	// fetchable under, or empty.
+	DeliveryScope string
 }
 
 // revisionPrefix is the storage prefix of one revision of a file's sheets.
