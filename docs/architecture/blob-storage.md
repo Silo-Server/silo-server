@@ -14,7 +14,10 @@ artifacts, and profile avatars.
 
 - **Assets** — artwork, branding assets, intro/credit markers, chapter
   thumbnails, and downloaded subtitles. Carries the recorded storage identity.
-- **Operational** — diagnostic bundles, job artifacts, and profile avatars.
+- **Operational** — diagnostic bundles, job artifacts, profile avatars, and
+  backups on local storage ([backups.md](backups.md)). Every API server must
+  share it: any server can list, download, or delete a backup another server
+  wrote.
 
 These are separate because the public bucket can serve browsers directly under
 token auth and the private one never does. A configured private bucket owns the
@@ -36,6 +39,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+| `backups/…` | server backups and full-restore journals ([backups.md](backups.md)) |
 
 Kept embedded subtitle tracks come from users' media and are never delivered to
 browsers, so they are kept in the operational store, never in a bucket whose

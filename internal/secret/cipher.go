@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,6 +48,43 @@ const (
 	// dataKeyLen is the AES-256 key size.
 	dataKeyLen = 32
 )
+
+// keyCheckInfo domain-separates the backup key check value from the data key.
+// The value identifies a SECRET_KEY without revealing it: every backup
+// manifest records it, and `silo secret check` prints it for a key the
+// operator holds, so the two can be compared before a restore. Changing the
+// label changes every recorded value, so it is versioned like hkdfInfo.
+const keyCheckInfo = "silo/backup-key-check/v1"
+
+// keyCheckLen is the check value's length in bytes, 16 hex digits.
+const keyCheckLen = 8
+
+// KeyCheckValue derives the short, non-secret fingerprint of masterKey that
+// backups record: HKDF-SHA256 with keyCheckInfo, 8 bytes, written as 16
+// lowercase hex digits in groups of 4 ("1a2b-3c4d-5e6f-7a8b"). It applies the
+// same minimum length as New, so a key the server would refuse never gets a
+// value an operator could mistake for a real one.
+func KeyCheckValue(masterKey []byte) (string, error) {
+	sum, err := deriveFromMasterKey(masterKey, keyCheckInfo, keyCheckLen, "key check value")
+	if err != nil {
+		return "", err
+	}
+	digits := hex.EncodeToString(sum)
+	return digits[0:4] + "-" + digits[4:8] + "-" + digits[8:12] + "-" + digits[12:16], nil
+}
+
+// deriveFromMasterKey is HKDF-SHA256 over masterKey with info, refusing a key
+// shorter than New accepts. what names the derived value in errors.
+func deriveFromMasterKey(masterKey []byte, info string, length int, what string) ([]byte, error) {
+	if len(masterKey) < MinMasterKeyLen {
+		return nil, fmt.Errorf("secret: master key must be at least %d bytes, got %d", MinMasterKeyLen, len(masterKey))
+	}
+	key, err := hkdf.Key(sha256.New, masterKey, nil /* salt */, info, length)
+	if err != nil {
+		return nil, fmt.Errorf("secret: derive %s: %w", what, err)
+	}
+	return key, nil
+}
 
 // ErrUnknownVersion is returned by Decrypt when the envelope carries a version
 // this build does not understand. It is the forward-compatibility hook for a

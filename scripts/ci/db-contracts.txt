@@ -725,3 +725,15 @@
 # The artwork reconcile verify sweep and bulk reset leave bundled app-relative
 # collection posters alone: neither checks them against storage nor clears them.
 ./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
+
+# Backups: the full restore round trip (needs the PostgreSQL 18 client), the
+# manifest written last and the sweep, the cluster-wide subsystem lock, and
+# the published status of the operation holding it.
+./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestBackupWritesManifestLastDB
+./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
+./internal/backup TestLostLockSessionCancelsWorkDB
+./internal/backup TestListReportsThePublishedOperationDB
+./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
+./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB

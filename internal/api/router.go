@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -302,7 +303,10 @@ type Dependencies struct {
 	AdminDefaults        *config.AdminDefaults
 	RequestServerRestart func(ctx context.Context) error
 	StorageTransition    *storagetransition.Service
-	ServerRestartStatus  *handlers.ServerRestartStatusTracker
+	// Backups owns the Backups page: listing, back up now, delete, and
+	// downloads. Nil when no database is wired.
+	Backups             *backup.Service
+	ServerRestartStatus *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// MDBList) — the user-facing counterpart of CollectionService.
@@ -2926,6 +2930,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.StorageTransition != nil {
 		v2deps.AdminStorageTransition = deps.StorageTransition
+	}
+	if deps.Backups != nil {
+		v2deps.AdminBackups = deps.Backups
+		// Presigning destinations hand out storage URLs; the signer covers the
+		// ones that cannot, and expires links on the same schedule.
+		if deps.Config != nil {
+			v2deps.AdminBackupSigner = artworkurl.NewBackupObjectSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
+		}
 	}
 	if catalogSeedHandler != nil {
 		v2deps.AdminCatalogSources = catalogSeedHandler

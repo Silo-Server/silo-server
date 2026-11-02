@@ -221,6 +221,45 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// Backup settings (docs/architecture/backups.md). internal/backup reads them
+// live at each run, so none needs a restart.
+const (
+	// BackupEnabledSettingKey turns the nightly backup on. "Back up now" works
+	// either way.
+	BackupEnabledSettingKey = "backup.enabled"
+	// BackupTimeSettingKey is the server-local HH:MM the nightly backup starts.
+	BackupTimeSettingKey = "backup.time"
+	// BackupKeepSettingKey is how many nightly and manual backups rotation
+	// keeps, from MinBackupKeep to MaxBackupKeep.
+	BackupKeepSettingKey = "backup.keep"
+	// BackupIncludeIntroFingerprintsSettingKey keeps intro fingerprint data in
+	// the dump. Without it, intro detection analyzes a season again when its
+	// next episode arrives.
+	BackupIncludeIntroFingerprintsSettingKey = "backup.include_intro_fingerprints"
+	// BackupIncludeSubtitlesSettingKey copies downloaded subtitles into the
+	// backup's blobs.
+	BackupIncludeSubtitlesSettingKey = "backup.include_subtitles"
+	MinBackupKeep                    = 1
+	MaxBackupKeep                    = 60
+	DefaultBackupTime                = "04:00"
+	DefaultBackupKeep                = 7
+)
+
+// ParseBackupTime reads a backup.time value, "H:MM" or "HH:MM" on a 24-hour
+// clock.
+func ParseBackupTime(value string) (hour, minute int, ok bool) {
+	h, m, found := strings.Cut(strings.TrimSpace(value), ":")
+	if !found || len(h) < 1 || len(h) > 2 || len(m) != 2 {
+		return 0, 0, false
+	}
+	hour, errH := strconv.Atoi(h)
+	minute, errM := strconv.Atoi(m)
+	if errH != nil || errM != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	return hour, minute, true
+}
+
 // ServerLocalURLSettingKey is the API server's address on the local network,
 // for a deployment whose LAN advertisement cannot reach the network or names
 // the wrong port (Docker bridge networking). Signed-in clients read it from the
@@ -532,6 +571,12 @@ var adminSettingDefaults = map[string]string{
 
 	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
 	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
+
+	BackupEnabledSettingKey:                  "true",
+	BackupTimeSettingKey:                     DefaultBackupTime,
+	BackupKeepSettingKey:                     strconv.Itoa(DefaultBackupKeep),
+	BackupIncludeIntroFingerprintsSettingKey: "false",
+	BackupIncludeSubtitlesSettingKey:         "true",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -666,8 +711,18 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey,
+		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey:
 		return normalizeAdminBool(key, value)
+
+	case BackupTimeSettingKey:
+		hour, minute, ok := ParseBackupTime(value)
+		if !ok {
+			return "", fmt.Errorf("%s must be a 24-hour time such as 04:00", key)
+		}
+		return fmt.Sprintf("%02d:%02d", hour, minute), nil
+	case BackupKeepSettingKey:
+		return normalizeAdminInt(key, value, MinBackupKeep, MaxBackupKeep)
 
 	case AuthProviderRecheckIntervalSettingKey:
 		parsed, err := parseDuration(value)

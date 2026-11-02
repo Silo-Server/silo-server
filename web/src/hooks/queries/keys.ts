@@ -410,6 +410,7 @@ export const adminKeys = {
   sessions: () => ["admin", "sessions"] as const,
   downloadPreparations: () => ["admin", "downloadPreparations"] as const,
   downloadStorage: () => ["admin", "downloadStorage"] as const,
+  backups: () => ["admin", "backups"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,

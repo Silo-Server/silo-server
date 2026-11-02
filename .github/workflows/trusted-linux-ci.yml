@@ -676,6 +676,21 @@ jobs:
       - name: Migrate the test database
         run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
 
+      # The backup round trip runs pg_dump and pg_restore, which must be at
+      # least the server's major version; the runner image ships an older
+      # client.
+      - name: Install the PostgreSQL 18 client
+        run: |
+          if ! /usr/lib/postgresql/18/bin/pg_dump --version >/dev/null 2>&1; then
+            sudo install -d /etc/apt/keyrings
+            sudo curl -fsSL -o /etc/apt/keyrings/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+            echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt ${codename}-pgdg main" \
+              | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client-18
+          fi
+
       - name: Run the query-budget pins
         run: make test-db-pins
 

@@ -32,6 +32,10 @@ const (
 	jobArtifactDomain = "silo-job-artifact-url-v1"
 	jobArtifactLabel  = "job-artifact-v1"
 	jobArtifactRoute  = "/api/v2/admin/jobs/"
+	// A backup object's signed key is "<backup id>/objects/<name>".
+	backupObjectDomain = "silo-backup-object-url-v1"
+	backupObjectLabel  = "backup-object-v1"
+	backupObjectRoute  = "/api/v2/admin/backups/"
 )
 
 // Issuance windows. Clients and CDNs cache images by full URL, so every new URL
@@ -80,6 +84,16 @@ func NewSigner(jwtSecret string, ttl time.Duration) *Signer {
 func NewJobArtifactSigner(jwtSecret string, ttl time.Duration) *Signer {
 	return newSigner(jwtSecret, jobArtifactDomain, jobArtifactLabel, jobArtifactRoute, ttl)
 }
+
+// NewBackupObjectSigner signs downloads of one object of one backup from a
+// destination that cannot presign. Like a job artifact link, the browser
+// opens it with no Authorization header, so it authorizes itself.
+func NewBackupObjectSigner(jwtSecret string, ttl time.Duration) *Signer {
+	return newSigner(jwtSecret, backupObjectDomain, backupObjectLabel, backupObjectRoute, ttl)
+}
+
+// BackupObjectKey is the key a backup object link signs.
+func BackupObjectKey(backupID, name string) string { return backupID + "/objects/" + name }
 
 func newSigner(jwtSecret, domain, label, route string, ttl time.Duration) *Signer {
 	ttl = clampTTL(ttl, 4*time.Hour)

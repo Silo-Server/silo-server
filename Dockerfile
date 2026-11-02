@@ -68,6 +68,10 @@ ARG INTEL_IGC_VERSION=2.34.4
 ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
+# Backups run pg_dump and pg_restore on the API server (internal/backup), and
+# pg_dump must be at least the database server's major version, so the
+# PostgreSQL 18 client comes from the PostgreSQL apt repository, as the
+# omnibus image's server does.
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
@@ -75,8 +79,13 @@ RUN apt-get update && \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian trixie main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
+    install -d /etc/apt/keyrings && \
+    curl -fsSL -o /etc/apt/keyrings/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc arch=${TARGETARCH}] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
+    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk \
+      postgresql-client-18 && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 # Debian's Intel OpenCL runtime lags the media hardware supported by the

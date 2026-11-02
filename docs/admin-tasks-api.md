@@ -35,6 +35,11 @@ it. A library with a refresh job queued or running, or another refresh holding
 its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
+`backup` backs up the server daily at `backup.time` and on "Back up now"; its
+schedule follows that setting, so editing the task's triggers does not stick.
+A cluster-wide lock lets one server back up; the others record a skip. See
+[backups-api.md](backups-api.md#the-backup-task).
+
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
 by default: processed search index events, activity log, task history, autoscan
 events, expired login sessions, policy decision log, and notifications. The log steps also
