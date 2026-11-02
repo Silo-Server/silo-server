@@ -643,6 +643,10 @@ func buildPostCatalogLibraryScope(
 		nextArgIdx++
 	}
 
+	// Removed audiobooks remain in the catalog during the rename grace period.
+	// Keep them out of this legacy listing until a library links them again.
+	conditions = append(conditions, "(mi.type <> 'audiobook' OR "+catalog.InSomeLibraryWhere("mi.content_id")+")")
+
 	return conditions, args, nextArgIdx, false
 }
 
