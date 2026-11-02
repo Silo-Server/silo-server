@@ -1389,6 +1389,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
 		{name: "terminal debt for another reason restarts with the episode reason", fileDate: "2024-05-06", existing: &terminalCore, wantIncomplete: true, wantDue: true},
 		{name: "terminal debt with other reasons restarts its episode reason", fileDate: "2024-05-06", existing: &terminalMixed, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt for another reason ignores a date its last attempt saw", fileDate: "2024-05-05", existing: &terminalCore, wantIncomplete: true},
 		{name: "terminal debt with other reasons ignores a date its last attempt saw", fileDate: "2024-05-05", existing: &terminalMixed, wantIncomplete: true},
 		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
 		{name: "debt claimed after the sweep reads it is left to its claim", fileDate: "2024-05-06", existing: parked, claimAfterRead: true, wantIncomplete: true},
@@ -1431,7 +1432,8 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 					t.Errorf("claimed debt = %+v, want the claim's row kept", debt)
 				}
 			case tc.existing != nil && !tc.wantDue:
-				if debt == nil || debt.Priority != tc.existing.Priority || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
+				if debt == nil || debt.Priority != tc.existing.Priority || debt.ReasonMask != tc.existing.ReasonMask ||
+					debt.AttemptCount != tc.existing.AttemptCount || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
 					t.Errorf("parked debt changed: %+v", debt)
 				}
 			case tc.wantDue:

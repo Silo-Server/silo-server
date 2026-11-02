@@ -7186,15 +7186,15 @@ func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, s
 		// refreshes it, or the refresh holding it settles it, and this sweep
 		// may be running inside that refresh. The statement checks the row as
 		// it stands, so a claim or nudge since the read above wins.
-		restarted, err := s.refreshDebtRepo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, seriesID, airDate.AddDate(0, 0, 1), now.UTC())
+		_, err := s.refreshDebtRepo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, seriesID, airDate.AddDate(0, 0, 1), now.UTC())
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to restart terminal series refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)
 			return
 		}
-		if restarted {
-			return
-		}
+		// A rejected restart must keep its backoff too. RequestDue would
+		// otherwise bypass these guards for debt without the episode reason.
+		return
 	}
 	if debt != nil && hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
 		return
