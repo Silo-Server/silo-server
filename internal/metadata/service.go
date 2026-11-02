@@ -134,7 +134,7 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
-	RestartTerminalEpisodeDebt(ctx context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) (bool, error)
+	RestartTerminalEpisodeDebt(ctx context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) error
 	SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error)
 	DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error
 }
@@ -7182,11 +7182,11 @@ func (s *MetadataService) requestSeriesEpisodeListRefresh(ctx context.Context, s
 	if debt != nil && debt.AttemptCount >= refreshDebtEpisodeTerminalAttempts {
 		// newestUnstoredFileAirDate returns a parsed date, so this cannot fail.
 		airDate, _ := time.Parse(time.DateOnly, newestAirDate)
-		// The restart leaves a due or claimed row alone: the scheduler
-		// refreshes it, or the refresh holding it settles it, and this sweep
-		// may be running inside that refresh. The statement checks the row as
-		// it stands, so a claim or nudge since the read above wins.
-		_, err := s.refreshDebtRepo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, seriesID, airDate.AddDate(0, 0, 1), now.UTC())
+		// A due or claimed row gains the episode reason without changing its
+		// schedule or lease, so the refresh keeps the retry when settling core
+		// metadata. The reset guards check the row as it stands, so a claim or
+		// nudge since the read above wins.
+		err := s.refreshDebtRepo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, seriesID, airDate.AddDate(0, 0, 1), now.UTC())
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to restart terminal series refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)

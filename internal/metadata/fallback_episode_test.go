@@ -1432,7 +1432,7 @@ func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *tes
 					t.Errorf("claimed debt = %+v, want the claim's row kept", debt)
 				}
 			case tc.existing != nil && !tc.wantDue:
-				if debt == nil || debt.Priority != tc.existing.Priority || debt.ReasonMask != tc.existing.ReasonMask ||
+				if debt == nil || debt.Priority != tc.existing.Priority ||
 					debt.AttemptCount != tc.existing.AttemptCount || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
 					t.Errorf("parked debt changed: %+v", debt)
 				}

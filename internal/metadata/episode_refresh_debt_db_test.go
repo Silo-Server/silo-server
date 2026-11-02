@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -232,21 +233,19 @@ func TestRestartTerminalEpisodeDebtDB(t *testing.T) {
 			}
 
 			now := time.Now()
-			restarted, err := repo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, "series-1", now.AddDate(0, 0, tc.attemptedDays), now)
+			err = repo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, "series-1", now.AddDate(0, 0, tc.attemptedDays), now)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if restarted != tc.wantRestarted {
-				t.Fatalf("restarted = %t, want %t", restarted, tc.wantRestarted)
 			}
 			after, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !tc.wantRestarted {
-				if after.ReasonMask != before.ReasonMask || after.AttemptCount != before.AttemptCount ||
-					!after.NextRefreshAt.Equal(before.NextRefreshAt) || after.Priority != before.Priority {
-					t.Fatalf("row changed: %+v, was %+v", after, before)
+				if after.ReasonMask != before.ReasonMask|RefreshDebtReasonEpisodeIncomplete || after.AttemptCount != before.AttemptCount ||
+					!after.NextRefreshAt.Equal(before.NextRefreshAt) || after.Priority != before.Priority ||
+					!reflect.DeepEqual(after.LeaseExpiresAt, before.LeaseExpiresAt) {
+					t.Fatalf("rejected reset should only add the episode reason: after=%+v before=%+v", after, before)
 				}
 				return
 			}
@@ -254,6 +253,75 @@ func TestRestartTerminalEpisodeDebtDB(t *testing.T) {
 				after.Priority != refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete) || after.NextRefreshAt.After(now) ||
 				after.LastError != "not listed" {
 				t.Fatalf("restarted row = %+v, want reasons %d due now with no attempts", after, tc.reasonMask|RefreshDebtReasonEpisodeIncomplete)
+			}
+		})
+	}
+}
+
+// A core refresh must not settle away the only retry for an unlinked by-date
+// file when its due or leased debt cannot restart yet.
+func TestByDateEpisodeDebtSurvivesCoreRefreshDB(t *testing.T) {
+	for _, leased := range []bool{false, true} {
+		t.Run(fmt.Sprintf("leased=%t", leased), func(t *testing.T) {
+			pool, _ := episodeRefreshDebtTestPool(t)
+			repo := NewRefreshDebtRepository(pool)
+			h := newFallbackTestHarness()
+			h.service.refreshDebtRepo = repo
+			ctx := t.Context()
+			const seriesID = "series-daily-behind"
+			seedAirDateSeries(ctx, t, h, seriesID,
+				&models.Episode{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Wednesday", TvdbID: "1001", AirDate: mustDate(t, "2024-05-01")})
+			addAirDateFile(h, seriesID, 301, "/media/tv/Daily Show (2024)/Daily Show (2024) - 2024-05-06 - Episode.mkv")
+			_, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
+				(target_type, content_id, priority, reason_mask, next_refresh_at, last_attempt_at, attempt_count, lease_expires_at)
+				VALUES ('item', $1, 150, $2, NOW() - INTERVAL '1 minute', '2024-05-06 12:00:00+00', 5,
+				CASE WHEN $3 THEN NOW() + INTERVAL '15 minutes' ELSE NULL END)`, seriesID, RefreshDebtReasonCoreMetadataIncomplete, leased)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			after, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.AttemptCount != before.AttemptCount || after.Priority != before.Priority ||
+				!after.NextRefreshAt.Equal(before.NextRefreshAt) || !reflect.DeepEqual(after.LeaseExpiresAt, before.LeaseExpiresAt) {
+				t.Fatalf("sweep changed schedule or claim: before=%+v after=%+v", before, after)
+			}
+			if after.ReasonMask != RefreshDebtReasonCoreMetadataIncomplete|RefreshDebtReasonEpisodeIncomplete {
+				t.Errorf("sweep reasons = %d, want core and episode debt", after.ReasonMask)
+			}
+
+			// The provider completes core metadata but still omits the new episode.
+			item, err := h.itemRepo.GetByID(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item.TmdbID, item.Overview = "123", "Complete"
+			item.PosterPath, item.BackdropPath = testPosterPath, testBackdropPath
+			item.RatingTMDB = new(7.5)
+			if err := h.itemRepo.Upsert(ctx, item); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.syncRefreshDebtForItem(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			settled, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatalf("core refresh lost the episode retry: %v", err)
+			}
+			if settled.ReasonMask != RefreshDebtReasonEpisodeIncomplete || settled.AttemptCount != before.AttemptCount ||
+				settled.LeaseExpiresAt != nil || !settled.NextRefreshAt.After(time.Now()) {
+				t.Fatalf("settled debt = %+v, want episode retry with its backoff", settled)
 			}
 		})
 	}

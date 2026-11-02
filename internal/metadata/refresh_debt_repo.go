@@ -363,47 +363,45 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
-// RestartTerminalEpisodeDebt gives a target's terminal debt the
-// episode-incomplete reason with no attempts and makes it due at nextRefreshAt,
-// keeping its other reasons, and reports whether it did. It applies only while
-// the row has at least refreshDebtEpisodeTerminalAttempts attempts, is not due,
-// holds no live lease, and was last attempted before attemptedBefore; the
-// statement checks the row as it stands, so a nudge, a claim or a settle that
-// lands after the caller's read keeps the row.
+// RestartTerminalEpisodeDebt records the episode reason on an existing row.
+// It also resets terminal debt to nextRefreshAt with no attempts when the row
+// is not due or leased and was last attempted before attemptedBefore. Otherwise
+// only the reason changes, so a running refresh retains it when settling core
+// metadata. All conditions are evaluated against the current row atomically.
 func (r *RefreshDebtRepository) RestartTerminalEpisodeDebt(
 	ctx context.Context,
 	targetType string,
 	contentID string,
 	attemptedBefore time.Time,
 	nextRefreshAt time.Time,
-) (bool, error) {
+) error {
 	if err := r.requireConfigured(); err != nil {
-		return false, err
+		return err
 	}
 	targetType = NormalizeRefreshTargetType(targetType)
 	contentID = strings.TrimSpace(contentID)
 	if targetType == "" || contentID == "" {
-		return false, nil
+		return nil
 	}
 
-	tag, err := r.pool.Exec(ctx, `
+	const canRestart = `attempt_count >= $6 AND last_attempt_at < $7
+		AND next_refresh_at > NOW()
+		AND (lease_expires_at IS NULL OR lease_expires_at < NOW())`
+	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_refresh_debt
 		SET reason_mask = reason_mask | $3,
-			priority = GREATEST(priority, $4),
-			attempt_count = 0,
-			next_refresh_at = $5,
+			priority = CASE WHEN `+canRestart+` THEN GREATEST(priority, $4) ELSE priority END,
+			attempt_count = CASE WHEN `+canRestart+` THEN 0 ELSE attempt_count END,
+			next_refresh_at = CASE WHEN `+canRestart+` THEN $5 ELSE next_refresh_at END,
 			updated_at = NOW()
 		WHERE target_type = $1 AND content_id = $2
-		  AND attempt_count >= $6
-		  AND last_attempt_at < $7
-		  AND next_refresh_at > NOW()
-		  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+		  AND ((reason_mask & $3) = 0 OR (`+canRestart+`))
 	`, targetType, contentID, RefreshDebtReasonEpisodeIncomplete, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
 		nextRefreshAt.UTC(), refreshDebtEpisodeTerminalAttempts, attemptedBefore.UTC())
 	if err != nil {
-		return false, fmt.Errorf("restarting terminal episode refresh debt: %w", err)
+		return fmt.Errorf("recording terminal episode refresh debt: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return nil
 }
 
 // SnapshotEpisodeDebts captures short-lived PostgreSQL row-version tokens before

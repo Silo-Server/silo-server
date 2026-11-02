@@ -125,8 +125,10 @@ which has not aired anywhere yet. Existing episode-incomplete debt keeps its bac
 has used up its attempts, on the episode reason or any other, restarts with no attempts only for a
 file that aired on or after the day of the debt's last attempt. The restart updates the row in
 place, so its other reasons stay queued and restart their backoff with it, and it skips a row that
-is due or leased. `TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes` and
-`TestRestartTerminalEpisodeDebtDB` cover these rules.
+is due or leased. A rejected reset still records the episode reason without changing the
+schedule, attempts or lease, so settling a core-metadata refresh keeps the episode retry.
+`TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`,
+`TestRestartTerminalEpisodeDebtDB` and `TestByDateEpisodeDebtSurvivesCoreRefreshDB` cover these rules.
 
 ## A changed root waits for a rescan
 

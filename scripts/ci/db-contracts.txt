@@ -733,6 +733,7 @@
 # Restarting terminal series refresh debt for a newly aired by-date file keeps
 # the row's other reasons and leaves a due or leased row to its writer.
 ./internal/metadata TestRestartTerminalEpisodeDebtDB
+./internal/metadata TestByDateEpisodeDebtSurvivesCoreRefreshDB
 
 # The artwork reconcile verify sweep and bulk reset leave bundled app-relative
 # collection posters alone: neither checks them against storage nor clears them.

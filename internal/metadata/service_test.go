@@ -525,20 +525,23 @@ func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
-func (r *fakeRefreshDebtRepo) RestartTerminalEpisodeDebt(_ context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) (bool, error) {
+func (r *fakeRefreshDebtRepo) RestartTerminalEpisodeDebt(_ context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	debt, ok := r.debts[fakeRefreshDebtKey(targetType, contentID)]
-	now := time.Now()
-	if !ok || debt.AttemptCount < refreshDebtEpisodeTerminalAttempts || debt.LastAttemptAt == nil || !debt.LastAttemptAt.Before(attemptedBefore) ||
-		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
-		return false, nil
+	if !ok {
+		return nil
 	}
 	debt.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
+	now := time.Now()
+	if debt.AttemptCount < refreshDebtEpisodeTerminalAttempts || debt.LastAttemptAt == nil || !debt.LastAttemptAt.Before(attemptedBefore) ||
+		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
+		return nil
+	}
 	debt.Priority = max(debt.Priority, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete))
 	debt.AttemptCount = 0
 	debt.NextRefreshAt = nextRefreshAt
-	return true, nil
+	return nil
 }
 
 // fakeFileRepo implements FileContentUpdater with an in-memory store.
