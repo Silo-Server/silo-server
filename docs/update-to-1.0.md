@@ -79,7 +79,9 @@ unavailable.
   migrations have finished before deploying 1.0. The 1.0 startup guard refuses a database that has
   not reached the bridge's final migration version.
 - [ ] Back up PostgreSQL using the deployment's normal tested procedure, and verify that the
-  backup can be restored.
+  backup can be restored. Silo takes its own database backup before startup migrations when
+  backups are on (see [before upgrades](architecture/backups.md#before-upgrades)), but that copy
+  stays at the backup destination, by default on the same server, so keep an off-server copy too.
 - [ ] If `userdb.backend=sqlite` is configured, back up the local SQLite user store at
   `/var/lib/silo/userdb` with the same care and verify it can be restored. The bridge's one-way
   SQLite-to-Postgres import reads this data; losing the directory loses profiles and per-user

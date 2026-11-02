@@ -230,3 +230,17 @@ func validateBlobArchive(ctx context.Context, path string, physical func(store s
 		}
 	}
 }
+
+// blobsFor copies the referenced blobs into blobs.tar, except for a
+// database-only kind, which has none.
+func (s *Service) blobsFor(ctx context.Context, t target, kind Kind, key string, refs []blobRef, progress func(float64, string)) ([]ObjectEntry, blobCopyResult, error) {
+	if kind.databaseOnly() {
+		return nil, blobCopyResult{}, nil
+	}
+	progress(70, fmt.Sprintf("Copying %d referenced files", len(refs)))
+	entry, copied, err := s.writeBlobs(ctx, t, key, refs)
+	if err != nil {
+		return nil, copied, err
+	}
+	return []ObjectEntry{entry}, copied, nil
+}

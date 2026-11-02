@@ -24,6 +24,13 @@ applicable.
 Administrators take a backup before every release upgrade and verify that it can
 be restored. This applies to every upgrade, not only to major versions.
 
+Silo also backs up the database itself before it applies migrations at startup,
+unless backups are turned off (see [before upgrades](architecture/backups.md#before-upgrades)).
+That copy holds the database only, keeps the two newest, and sits at the backup
+destination, which by default is this server's own storage. It does not replace
+the administrator's verified backup, which should also include the files,
+configuration, and `SECRET_KEY`, and be kept off the server.
+
 Silo does not guarantee downgrade or in-place rollback compatibility between
 releases. A newer release may write or migrate data that an older release cannot
 read, and there is no supported in-place database downgrade. Recovery from a

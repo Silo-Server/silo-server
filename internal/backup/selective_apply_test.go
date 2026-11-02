@@ -89,6 +89,8 @@ func (l *memLocker) TryLock(context.Context) (Held, error) {
 	return &memHeld{l: l, lost: make(chan struct{})}, nil
 }
 
+func (l *memLocker) Lock(ctx context.Context, _ time.Duration) (Held, error) { return l.TryLock(ctx) }
+
 func (l *memLocker) Holder(context.Context) (LockSession, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -219,7 +221,7 @@ func TestQueuedRestoreKeepsItsSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil)
+	rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, false)
 	if !slices.Equal(rotated, []string{older}) || len(warnings) != 0 {
 		t.Fatalf("rotation with a queued restore = %v, %v; want only %s", rotated, warnings, older)
 	}
@@ -229,7 +231,7 @@ func TestQueuedRestoreKeepsItsSource(t *testing.T) {
 
 	// When the queue cannot be read, nothing is deleted.
 	activeErr = errors.New("database unavailable")
-	if rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil); len(rotated) != 0 || len(warnings) != 1 {
+	if rotated, _, warnings := svc.rotate(ctx, nil, tgt, "server", nil, false); len(rotated) != 0 || len(warnings) != 1 {
 		t.Fatalf("rotation without the queue = %v, %v", rotated, warnings)
 	}
 	if err := svc.Delete(ctx, source); err == nil || errors.Is(err, ErrBackupInUse) {

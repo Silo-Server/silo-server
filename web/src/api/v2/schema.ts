@@ -14353,7 +14353,7 @@ export interface components {
       /** @description Whether key_check is this server's. An encrypted backup that does not match cannot be previewed, restored, or downloaded decrypted here */
       key_matches: boolean;
       /** @enum {string} */
-      kind: "nightly" | "manual" | "before-restore";
+      kind: "nightly" | "manual" | "before-restore" | "before-upgrade";
       /** @description Where the backup folder is: a filesystem path on this server's storage, or s3://bucket/key in a bucket */
       location: string;
       missing_blobs: components["schemas"]["AdminBackupMissingBlob"][];
@@ -14459,7 +14459,7 @@ export interface components {
       finished_at?: string;
       id: string;
       /** @enum {string} */
-      kind: "nightly" | "manual" | "before-restore";
+      kind: "nightly" | "manual" | "before-restore" | "before-upgrade";
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

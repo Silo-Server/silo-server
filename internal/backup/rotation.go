@@ -9,6 +9,8 @@ const (
 	// beforeRestoreRetention keeps a before-restore copy, the recovery point
 	// for a full restore, for a week outside the nightly count.
 	beforeRestoreRetention = 7 * 24 * time.Hour
+	// beforeUpgradeKeep keeps the two newest before-upgrade copies.
+	beforeUpgradeKeep = 2
 	// incompleteSweepAge is how old an incomplete folder must be before the
 	// sweep deletes it.
 	incompleteSweepAge = 24 * time.Hour
@@ -34,8 +36,10 @@ type folder struct {
 //     that the newest copy without warnings is always kept, even when that
 //     keeps one more than keep, so repeated runs with missing blobs cannot
 //     rotate away the last copy that has every blob;
-//   - before-restore copies are deleted once older than seven days, and do
-//     not count toward keep.
+//   - before-restore copies are deleted once older than seven days;
+//   - before-upgrade copies keep the two newest.
+//
+// Neither special kind counts toward keep.
 func planRotation(folders []folder, keep int, now time.Time, pinned map[string]bool) []string {
 	if keep < 1 {
 		keep = 1
@@ -75,6 +79,11 @@ func planRotation(folders []folder, keep int, now time.Time, pinned map[string]b
 	}
 	for _, f := range byKind[KindBeforeRestore] {
 		if now.Sub(f.at) > beforeRestoreRetention {
+			drop(f)
+		}
+	}
+	for i, f := range byKind[KindBeforeUpgrade] {
+		if i >= beforeUpgradeKeep {
 			drop(f)
 		}
 	}

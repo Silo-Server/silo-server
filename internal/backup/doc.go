@@ -14,6 +14,10 @@
 //	  restore-set.tar the sections selective restore reads
 //	  manifest.json written last
 //
+// A before-upgrade backup (BeforeUpgrade) is db.dump and the manifest only:
+// it runs against the previous release's schema, so it reads nothing but
+// server_settings and the core inventory, and publishes no status.
+//
 // A folder without manifest.json is incomplete. The sweep deletes incomplete
 // folders older than 24 hours; nothing else ever reads one.
 //
@@ -27,7 +31,15 @@
 // never take it a second time. A lost lock session cancels the work holding
 // it; the incomplete folder it leaves is the sweep's.
 //
-// A restore holds the subsystem lock for its whole run and takes its
-// before-restore backup by calling Backup directly, never by acquiring the
-// lock again.
+// Lock order, for every caller now and later:
+//
+//  1. the before-upgrade wrapper lock (taken only around startup migrations,
+//     by database.MigrateAtStartup);
+//  2. SubsystemLockKey;
+//  3. goose's own migration lock.
+//
+// Ordinary operations never take the wrapper, and nothing takes the wrapper
+// while holding the subsystem lock. A restore holds the subsystem lock for its
+// whole run and takes its before-restore backup by calling Backup directly,
+// never by acquiring the lock again.
 package backup

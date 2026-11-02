@@ -198,11 +198,11 @@ func sameS3Account(a, b S3Config) bool {
 		strings.TrimSpace(a.AccessKey) == strings.TrimSpace(b.AccessKey)
 }
 
-// contentSettings reads what a backup includes: intro fingerprints and
-// downloaded subtitles.
-func (s *Service) contentSettings(ctx context.Context) (fingerprints, subtitles bool, err error) {
-	if fingerprints, err = s.settingBool(ctx, config.BackupIncludeIntroFingerprintsSettingKey, false); err != nil {
-		return false, false, err
+// contentSettings reads what a backup includes: intro fingerprints, and,
+// when it copies blobs, downloaded subtitles.
+func (s *Service) contentSettings(ctx context.Context, withBlobs bool) (fingerprints, subtitles bool, err error) {
+	if fingerprints, err = s.settingBool(ctx, config.BackupIncludeIntroFingerprintsSettingKey, false); err != nil || !withBlobs {
+		return fingerprints, false, err
 	}
 	subtitles, err = s.settingBool(ctx, config.BackupIncludeSubtitlesSettingKey, true)
 	return fingerprints, subtitles, err

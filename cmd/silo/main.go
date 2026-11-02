@@ -898,11 +898,17 @@ func main() {
 		return
 	}
 
+	// Every server that migrates runs the same sequence: wait for any other
+	// server's, back up the database when migrations are pending, then
+	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
+	migrationWait := database.MigrationWait()
+	startupMigrations := database.StartupOptions{
+		Wait:          migrationWait,
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait),
+	}
+
 	if *migrateOnly {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		migCancel()
-		if migErr != nil {
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
 		slog.Info("database migrations applied")
@@ -917,13 +923,9 @@ func main() {
 	// ciphertext; secondary nodes read whatever the primary encrypted.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		if migErr != nil {
-			migCancel()
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
-		migCancel()
 		slog.Info("database migrations applied")
 	}
 

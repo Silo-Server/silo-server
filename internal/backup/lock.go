@@ -31,6 +31,10 @@ const lockCheckInterval = 10 * time.Second
 type Locker interface {
 	// TryLock takes the lock without waiting, or returns ErrBusy.
 	TryLock(ctx context.Context) (Held, error)
+	// Lock takes the lock, waiting up to wait (indefinitely when zero or
+	// less) for its holder to release it; ErrBusy when the wait runs out.
+	// Only the sequence before startup migrations waits.
+	Lock(ctx context.Context, wait time.Duration) (Held, error)
 	// Holder reports the session that holds the lock, without taking it: a
 	// read that took the lock, even briefly, could make a nightly run skip.
 	Holder(ctx context.Context) (session LockSession, held bool, err error)
@@ -94,8 +98,6 @@ func (l PostgresLocker) TryLock(ctx context.Context) (Held, error) {
 	})
 }
 
-// Lock takes the lock, waiting up to wait (indefinitely when zero or less)
-// for its holder to release it; ErrBusy when the wait runs out.
 func (l PostgresLocker) Lock(ctx context.Context, wait time.Duration) (Held, error) {
 	return l.acquire(ctx, func(conn *pgx.Conn) (bool, error) {
 		if wait > 0 {

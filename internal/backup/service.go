@@ -374,10 +374,12 @@ type publishedOperation struct {
 }
 
 // beginOperation publishes op for the holder of held. Begin also records an
-// active operation left by a holder that died as an interrupted run.
+// active operation left by a holder that died as an interrupted run. A
+// before-upgrade backup publishes nothing: it runs against the previous
+// release's schema, which may have no status table.
 func (s *Service) beginOperation(ctx context.Context, held Held, op ActiveOperation) *publishedOperation {
 	p := &publishedOperation{store: s.opts.Status, held: held}
-	if p.store == nil || held == nil || p.lost(ctx) {
+	if p.store == nil || held == nil || op.Kind == KindBeforeUpgrade || p.lost(ctx) {
 		return p
 	}
 	op.Lock = held.Session()
@@ -430,7 +432,11 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	if err != nil {
 		return RunResult{}, err
 	}
-	includeFingerprints, includeSubtitles, err := s.contentSettings(ctx)
+	// A before-upgrade backup runs against the schema the previous release
+	// left: the dump and the core inventory only, which check each table
+	// before reading it. Migrations do not touch blobs.
+	withBlobs := !kind.databaseOnly()
+	includeFingerprints, includeSubtitles, err := s.contentSettings(ctx, withBlobs)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -451,7 +457,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	if err := tx.QueryRow(ctx, `SELECT pg_export_snapshot()`).Scan(&snapshot); err != nil {
 		return RunResult{}, fmt.Errorf("exporting the snapshot: %w", err)
 	}
-	facts, err := readSnapshot(ctx, tx, includeSubtitles)
+	facts, err := readSnapshot(ctx, tx, withBlobs, includeSubtitles)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -466,14 +472,13 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	}
 	created := folderTime(id, started)
 	closeSnapshot := sync.OnceFunc(func() { _ = tx.Rollback(ctx); conn.Release() })
-	objects, restoreSet, err := s.restoreSetFor(ctx, t, tx, closeSnapshot, serverID, id, created, progress)
+	objects, restoreSet, err := s.restoreSetFor(ctx, t, tx, closeSnapshot, kind, serverID, id, created, progress)
 	if err != nil {
 		return RunResult{}, err
 	}
 	objects = append([]ObjectEntry{dumpEntry}, objects...)
 
-	progress(70, fmt.Sprintf("Copying %d referenced files", len(facts.blobs)))
-	blobEntry, copied, err := s.writeBlobs(ctx, t, objectKey(serverID, id, t.name(BlobsName)), facts.blobs)
+	blobObjects, copied, err := s.blobsFor(ctx, t, kind, objectKey(serverID, id, t.name(BlobsName)), facts.blobs, progress)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -486,7 +491,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		AppliedMigrations: facts.applied,
 		PostgresVersion:   facts.postgresVersion, PgDumpVersion: tools.Version,
 		ExcludedTableData: excluded,
-		Objects:           append(objects, blobEntry),
+		Objects:           append(objects, blobObjects...),
 		RestoreSet:        restoreSet,
 		Encrypted:         t.key != nil,
 		KeyCheck:          s.opts.KeyCheck,
@@ -503,7 +508,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	if restoreSet != nil {
 		result.Omitted = restoreSet.Omitted
 	}
-	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, prep.held, t, serverID, pinned)
+	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, prep.held, t, serverID, pinned, withBlobs)
 	result.DurationMs = s.opts.Now().Sub(started).Milliseconds()
 	progress(100, "Backed up "+id)
 	return result, nil
@@ -666,10 +671,14 @@ func folderTime(id string, started time.Time) time.Time {
 	return started.UTC()
 }
 
-// restoreSetFor writes restore-set.tar from the snapshot and then calls
-// closeSnapshot: the dump has imported the snapshot, and the blob copies run
-// outside it.
-func (s *Service) restoreSetFor(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), serverID, id string, created time.Time, progress func(float64, string)) ([]ObjectEntry, *RestoreSetSummary, error) {
+// restoreSetFor writes restore-set.tar from the snapshot for every kind but
+// before-upgrade, which has none, and then calls closeSnapshot: the dump has
+// imported the snapshot, and the blob copies run outside it.
+func (s *Service) restoreSetFor(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), kind Kind, serverID, id string, created time.Time, progress func(float64, string)) ([]ObjectEntry, *RestoreSetSummary, error) {
+	if kind.databaseOnly() {
+		closeSnapshot()
+		return nil, nil, nil
+	}
 	progress(60, "Writing the restore set")
 	entry, summary, err := s.writeRestoreSet(ctx, t, tx, closeSnapshot, objectKey(serverID, id, t.name(RestoreSetName)),
 		restoreSetMeta{serverID: serverID, keyCheck: s.opts.KeyCheck, createdAt: created, version: buildinfo.Current().Display})
@@ -718,12 +727,14 @@ func (s *Service) writeRestoreSet(ctx context.Context, t target, tx pgx.Tx, clos
 	return entry, build.summary(), nil
 }
 
-// rotate runs rotation and the sweeps (incomplete folders, and expired and
-// orphaned uploads) after a manifest landed, under the subsystem lock.
-// pinned and the source of a queued or running restore are never rotated
-// away; when that restore cannot be read, nothing is. Failures are warnings:
-// the backup itself succeeded.
-func (s *Service) rotate(ctx context.Context, held Held, t target, serverID string, pinned map[string]bool) (rotated, swept, warnings []string) {
+// rotate runs rotation and the sweeps (incomplete folders, and with
+// sweepUploads expired and orphaned uploads) after a manifest landed, under
+// the subsystem lock. pinned and the source of a queued or running restore
+// are never rotated away; when that restore cannot be read, nothing is. A
+// before-upgrade backup skips the upload sweep: the schema it runs against
+// may predate the upload tables. Failures are warnings: the backup itself
+// succeeded.
+func (s *Service) rotate(ctx context.Context, held Held, t target, serverID string, pinned map[string]bool, sweepUploads bool) (rotated, swept, warnings []string) {
 	folders, err := s.folders(ctx, t, serverID)
 	if err != nil {
 		return nil, nil, []string{"rotation skipped: " + err.Error()}
@@ -762,8 +773,10 @@ func (s *Service) rotate(ctx context.Context, held Held, t target, serverID stri
 		}
 		swept = append(swept, id)
 	}
-	uploads, uploadWarnings := s.sweepUploads(ctx, true, held)
-	swept, warnings = append(swept, uploads...), append(warnings, uploadWarnings...)
+	if sweepUploads {
+		uploads, uploadWarnings := s.sweepUploads(ctx, true, held)
+		swept, warnings = append(swept, uploads...), append(warnings, uploadWarnings...)
+	}
 	for _, w := range warnings {
 		slog.WarnContext(ctx, "backup rotation", "component", "backup", "warning", w)
 	}
