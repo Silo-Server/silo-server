@@ -117,6 +117,9 @@ type ArtworkReconcileStats struct {
 	// re-checked by the sweep — so callers deciding whether the reconcile
 	// fully covered the catalog must look here, not at Errors.
 	SweepErrors int `json:"sweep_errors"`
+	// Unrecovered counts rows kept with a published size missing and no
+	// re-downloadable source; only a new upload can make that size again.
+	Unrecovered int `json:"unrecovered"`
 }
 
 // Artwork reconcile modes are serialized in task result data and checkpoints.
@@ -1149,7 +1152,7 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			// source can make the missing size again.
 			slog.WarnContext(ctx, "artwork reconcile: cached size missing with no re-downloadable source; left in place",
 				"surface", s.name, "key", batch[i].path, "row", strings.Join(batch[i].keys, "/"))
-			stats.Verified++
+			stats.Unrecovered++
 		default:
 			stats.Verified++
 		}

@@ -165,8 +165,8 @@ func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
 	if err := r.sweepSurface(ctx, surface, &stats, func(int) {}); err != nil {
 		t.Fatal(err)
 	}
-	if stats.Checked != 2 || stats.Requeued != 1 || stats.Cleared != 0 {
-		t.Fatalf("stats = %#v, want the provider poster reset and nothing cleared", stats)
+	if stats.Checked != 2 || stats.Requeued != 1 || stats.Unrecovered != 1 || stats.Verified != 0 || stats.Cleared != 0 {
+		t.Fatalf("stats = %#v, want the provider poster reset, the uploaded one reported, and nothing cleared", stats)
 	}
 	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded} {
 		var got string
