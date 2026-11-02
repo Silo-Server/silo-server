@@ -100,6 +100,11 @@ type SubtitleInventoryItemV3 struct {
 	// StoredSubtitleID identifies a stored track independently of its ordinal,
 	// delivery URL and support for timing correction.
 	StoredSubtitleID int `json:"stored_subtitle_id,omitempty" doc:"Stored subtitle row ID, matching subtitle_ready.subtitle_id. Present for downloaded, uploaded and generated tracks, including tracks without a URL or sync_key. Stable across inventory reordering; selection still uses combined_index."`
+	// downloadedSubtitleID is deliberately transient. A restored plan must
+	// resolve the current downloaded inventory before minting its URLs; the
+	// serialized StoredSubtitleID is client correlation metadata, not proof
+	// that the inventory was resolved for this response.
+	downloadedSubtitleID int
 }
 
 // BuildSubtitleInventoryV3 is the single normative implementation of the
@@ -161,6 +166,7 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 			entry.Language, firstNonEmptySubtitleLabelV3(entry.Label, entry.Language),
 			entry.Forced, false, entry.HearingImpaired)
 		item.StoredSubtitleID = entry.DownloadedSubtitleID
+		item.downloadedSubtitleID = entry.DownloadedSubtitleID
 		if source == SubtitleSourceDownloadedV3 && entry.DownloadedSubtitleID > 0 && subtitles.SupportsRetime(subtitles.SubtitleFormat(entry.Codec)) {
 			item.SyncKey = subtitles.StoredSyncKey(entry.DownloadedSubtitleID)
 		}
@@ -196,13 +202,13 @@ func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventor
 		previousURL := items[i].URL
 		ext := SubtitleSidecarExtV3(items[i].Codec, items[i].Source, clientFeatures)
 		items[i].URL = SubtitleStreamURLV3(sessionID, items[i].CombinedIndex, ext, file.ID)
-		if items[i].Source == SubtitleSourceDownloadedV3 && items[i].StoredSubtitleID > 0 {
+		if items[i].Source == SubtitleSourceDownloadedV3 && items[i].downloadedSubtitleID > 0 {
 			items[i].URL = DownloadedSubtitleStreamURLV3(
 				sessionID,
 				items[i].CombinedIndex,
 				ext,
 				file.ID,
-				items[i].StoredSubtitleID,
+				items[i].downloadedSubtitleID,
 			)
 		}
 		switch items[i].Source {
@@ -233,11 +239,12 @@ func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventor
 }
 
 // SubtitleInventoryNeedsDownloadedIdentityV3 reports whether an inventory was
-// restored from an older plan without the row IDs needed to mint stable
-// downloaded-subtitle URLs. Those plans are rebuilt from the repository.
+// restored from JSON and lost its transient downloaded row IDs. Restore
+// the current menu from the repository before minting its URLs; the selected
+// subtitle remains pinned separately by the executable recipe.
 func SubtitleInventoryNeedsDownloadedIdentityV3(items []SubtitleInventoryItemV3) bool {
 	for _, item := range items {
-		if item.Source == SubtitleSourceDownloadedV3 && item.StoredSubtitleID <= 0 {
+		if item.Source == SubtitleSourceDownloadedV3 && item.downloadedSubtitleID <= 0 {
 			return true
 		}
 	}

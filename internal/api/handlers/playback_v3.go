@@ -5079,8 +5079,9 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		frozenDownloaded = selected
 	}
 	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory, clientFeatures)
-	// Older stored plans lack downloaded row IDs. Rebuild only in that case;
-	// plans with identities stay on their original planning snapshot.
+	// A restored plan has client correlation IDs but no transient downloaded
+	// identities. Refresh its menu as before; fresh plans keep the inventory
+	// they just resolved, and the executable recipe pins the selected track.
 	if playback.SubtitleInventoryNeedsDownloadedIdentityV3(plan.Subtitle.Inventory) {
 		if h == nil || h.SubtitleRepo == nil {
 			return errors.New("the downloaded subtitle inventory is unavailable")
