@@ -82,6 +82,34 @@ export function SubtitleMenu({
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const [pendingDownload, setPendingDownload] = useState<{
+    id: string;
+    generation: number;
+  } | null>(null);
+  const downloadGeneration = useRef(0);
+  const profileId = playerConfig?.getProfileId();
+  const profileToken = playerConfig?.getProfileToken?.();
+  const authContext = playerConfig?.getAuthContext?.();
+
+  // A completed download may precede its inventory update. Never carry that
+  // selection into another viewing or over a newer subtitle choice.
+  useEffect(() => {
+    downloadGeneration.current++;
+    setPendingDownload(null);
+  }, [mediaFileId, sessionId, playerConfig, profileId, profileToken, authContext, activeIndex]);
+
+  useEffect(() => {
+    if (!pendingDownload || pendingDownload.generation !== downloadGeneration.current) return;
+    const track = tracks.find((candidate) =>
+      candidate.stored_subtitle_id
+        ? String(candidate.stored_subtitle_id) === pendingDownload.id
+        : syncKeyOf(candidate) === `stored-${pendingDownload.id}`,
+    );
+    if (!track) return;
+    setPendingDownload(null);
+    onSelect(track.index);
+  }, [pendingDownload, tracks, onSelect]);
+
   const sortedTracks = useMemo(() => sortSubtitlesBySource(tracks), [tracks]);
 
   // Discover whether the server has AI subtitle translation configured, so we
@@ -151,6 +179,7 @@ export function SubtitleMenu({
 
   const handleSelect = useCallback(
     (index: number | null) => {
+      setPendingDownload(null);
       onSelect(index);
       setOpen(false);
     },
@@ -426,14 +455,20 @@ export function SubtitleMenu({
         playerConfig &&
         createPortal(
           <SubtitleSearchModal
+            key={sessionId}
             mediaFileId={mediaFileId}
             playerConfig={playerConfig}
             isOpen={searchOpen}
             onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
-            onSubtitleDownloaded={(subtitle) => {
+            onSubtitleDownloaded={(subtitle, source) => {
               setSearchOpen(false);
-              if (subtitle) subtitleSync?.remember(subtitle);
+              if (subtitle) {
+                subtitleSync?.remember(subtitle);
+                if (source === "download") {
+                  setPendingDownload({ id: subtitle.id, generation: downloadGeneration.current });
+                }
+              }
               onRefreshSubtitles?.();
             }}
           />,

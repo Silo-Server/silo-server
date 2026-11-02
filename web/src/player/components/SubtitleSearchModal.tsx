@@ -17,7 +17,10 @@ interface SubtitleSearchModalProps {
    * Called with the stored subtitle a download or upload created, so the
    * player can show its automatic sync while it runs.
    */
-  onSubtitleDownloaded: (subtitle?: StoredSubtitle) => void;
+  onSubtitleDownloaded: (
+    subtitle: StoredSubtitle | undefined,
+    source: "download" | "upload",
+  ) => void;
   /** False hides the online-search section; manual upload stays available. */
   onlineSearchEnabled?: boolean;
 }
@@ -214,7 +217,7 @@ export function SubtitleSearchModal({
   );
 
   const handleUploadSuccess = useCallback(() => {
-    onSubtitleDownloaded(uploadedSubtitle.current);
+    onSubtitleDownloaded(uploadedSubtitle.current, "upload");
     handleClose();
   }, [onSubtitleDownloaded, handleClose]);
 
@@ -246,7 +249,7 @@ export function SubtitleSearchModal({
           },
         });
         if (!current()) return;
-        onSubtitleDownloaded(response?.subtitle);
+        onSubtitleDownloaded(response?.subtitle, "download");
         handleClose();
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : "Download failed");

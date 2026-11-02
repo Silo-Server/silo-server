@@ -536,6 +536,10 @@ supports no timing correction. Clients still select by `combined_index`;
 `stored_subtitle_id` correlates announcements with refreshed inventory entries.
 Older plans may omit it. The web player uses it to keep newly announced tracks
 out of automatic selection and falls back to the timing key on older servers.
+When this viewer completes a provider download in the web player, its response's
+stored subtitle ID selects the matching inventory entry, even if the event
+arrived first. Other viewers' additions and uploads only update the menu.
+A file or session change, or a newer subtitle choice, cancels a pending selection.
 
 Each playback inventory track that can be synced carries a `sync_key`
 (external and downloaded SRT, WebVTT, ASS, and SSA tracks): `stored-{id}` for a
