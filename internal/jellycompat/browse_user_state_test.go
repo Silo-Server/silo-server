@@ -77,6 +77,42 @@ func (r configuredSeriesRepo) ListAvailableIDsBySeriesPage(_ context.Context, id
 	return slicePage(r.pages[id], offset, limit), nil
 }
 
+// countingSeriesRepo counts the series whose episodes are read.
+type countingSeriesRepo struct {
+	episodeListSource
+	reads *int
+}
+
+func (r countingSeriesRepo) ListAvailableIDsBySeriesPage(_ context.Context, id string, limit, offset int) ([]string, error) {
+	*r.reads++
+	return slicePage([]string{id + "-episode"}, offset, limit), nil
+}
+
+// A page without a total, such as Latest, checks series only until the page
+// is filled: each series costs episode reads.
+func TestConfiguredBrowseStateStopsCheckingSeriesOncePageIsFull(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	browse := &stubBrowseSource{}
+	for i := range 100 {
+		id := fmt.Sprintf("series-%03d", i)
+		browse.items = append(browse.items, &models.MediaItem{ContentID: id, Type: "series", Title: id})
+	}
+	reads := 0
+	svc := &directContentService{browseRepo: browse, episodeRepo: countingSeriesRepo{reads: &reads}, storeProvider: compatTestUserStoreProvider{store: store}}
+	params := url.Values{"type": {"series"}, "is_played": {"false"}, "compose_state": {"true"}, "include_total": {"false"}, "offset": {"0"}, "limit": {"5"}}
+	result, err := svc.BrowseItems(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 5 || !result.HasMore {
+		t.Fatalf("page: %+v", result)
+	}
+	// Five for the page and one to know there are more.
+	if reads != 6 {
+		t.Fatalf("series checked = %d, want 6", reads)
+	}
+}
+
 func TestConfiguredSeriesPlayedUsesEpisodes(t *testing.T) {
 	store := newJellycompatUserStore(t)
 	now := time.Now().UTC()
@@ -87,11 +123,11 @@ func TestConfiguredSeriesPlayedUsesEpisodes(t *testing.T) {
 	}
 	svc := &directContentService{episodeRepo: configuredSeriesRepo{pages: map[string][]string{"incomplete": {"unplayed-episode"}, "done": {"done-episode"}}}}
 	items := []upstreamListItem{{ContentID: "incomplete", Type: "series"}, {ContentID: "done", Type: "series"}, {ContentID: "empty", Type: "series"}}
-	matches, err := svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(true)})
+	matches, err := svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(true)}, len(items))
 	if err != nil || !slices.Equal(matches, []bool{false, true, false}) {
 		t.Fatalf("series rollup: %v %v", matches, err)
 	}
-	matches, err = svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(false)})
+	matches, err = svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(false)}, len(items))
 	if err != nil || !slices.Equal(matches, []bool{true, false, true}) {
 		t.Fatalf("unplayed series: %v %v", matches, err)
 	}
@@ -124,7 +160,7 @@ func TestConfiguredBrowseStatePropagatesErrors(t *testing.T) {
 	for _, failure := range []string{"favorite", "progress", "history"} {
 		t.Run(failure, func(t *testing.T) {
 			store := failedBrowseStateStore{UserStore: newJellycompatUserStore(t), failure: failure}
-			_, err := (&directContentService{}).matchConfiguredUserState(t.Context(), store, "p1", []upstreamListItem{{ContentID: "movie", Type: "movie"}}, catalog.BrowseFilters{IsFavorite: true, IsPlayed: new(true)})
+			_, err := (&directContentService{}).matchConfiguredUserState(t.Context(), store, "p1", []upstreamListItem{{ContentID: "movie", Type: "movie"}}, catalog.BrowseFilters{IsFavorite: true, IsPlayed: new(true)}, 1)
 			if err == nil {
 				t.Fatal("state error hidden")
 			}
