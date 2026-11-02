@@ -1,0 +1,67 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Map the silo account onto PUID and PGID and give it access to any GPU
+# devices passed into the container.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+PUID="${PUID:-911}"
+PGID="${PGID:-911}"
+if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
+  echo "PUID and PGID must be numeric (got PUID=$PUID PGID=$PGID)" >&2
+  exit 1
+fi
+
+# Another account on the same uid would make the kernel report that name for
+# Silo's processes, which breaks PostgreSQL peer authentication.
+other="$(getent passwd "$PUID" | cut -d: -f1 || true)"
+if [[ -n "$other" && "$other" != "silo" ]]; then
+  echo "PUID $PUID is already used by the $other account in this image; choose another uid" >&2
+  exit 1
+fi
+
+[[ "$(id -g silo)" == "$PGID" ]] || groupmod -o -g "$PGID" silo
+[[ "$(id -u silo)" == "$PUID" ]] || usermod -o -u "$PUID" silo
+
+for g in video render; do
+  if getent group "$g" >/dev/null; then
+    usermod -aG "$g" silo
+  fi
+done
+
+# Devices bind-mounted from the host carry host group ids. Create a matching
+# group when none exists so the silo user can open them.
+for dev in /dev/dri/* /dev/nvidia*; do
+  [[ -c "$dev" ]] || continue
+  gid="$(stat -c %g "$dev")"
+  [[ "$gid" == 0 ]] && continue
+  group="$(getent group "$gid" | cut -d: -f1 || true)"
+  if [[ -z "$group" ]]; then
+    group="dev$gid"
+    groupadd -g "$gid" "$group"
+  fi
+  usermod -aG "$group" silo
+done
+
+# Silo reads the media as this account; the Compose stack's image ran it as
+# root. Check the media root and the folders in it, which is where a library
+# that only another account can read shows up.
+media="${MEDIA_CONTAINER_ROOT:-/mnt/media}"
+if [[ -d "$media" ]]; then
+  # find fails without printing when a directory above the media root keeps
+  # the account out.
+  unreadable="$(s6-setuidgid silo find "$media" -maxdepth 1 \( ! -readable -o -type d ! -executable \) -print -quit 2>/dev/null)" ||
+    unreadable="$media"
+  if [[ -n "$unreadable" ]]; then
+    warn "uid $PUID cannot read $unreadable; set PUID and PGID to an account that can read the media"
+  fi
+fi
+
+cat <<BANNER
+───────────────────────────────────────
+Silo omnibus
+silo uid: $(id -u silo)
+silo gid: $(id -g silo)
+───────────────────────────────────────
+BANNER

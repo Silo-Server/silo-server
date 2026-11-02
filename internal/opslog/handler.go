@@ -230,15 +230,15 @@ func snapshot(v any) any {
 // it, and anything unparseable fails closed.
 var urlInText = regexp.MustCompile(`(?i)https?://\S+`)
 
-// sanitizeURLToken removes the userinfo, query and fragment of a URL token.
-// Trailing quotes and punctuation, such as the `":` after a *url.Error's
-// quoted URL, stay outside the URL so they are neither escaped into its path
-// nor make it unparseable; a run of punctuation cannot hold a credential. A
-// token without @, ? or # cannot carry one either and is kept as written, the
-// same rule logredact uses for requested URLs.
+// sanitizeURLToken removes the userinfo, query and fragment of a URL token
+// and masks signed-token path segments. Trailing quotes and punctuation, such
+// as the `":` after a *url.Error's quoted URL, stay outside the URL so they
+// are neither escaped into its path nor make it unparseable; a run of
+// punctuation cannot hold a credential. A token with no part that can hold
+// one is kept as written, the same rule logredact uses for requested URLs.
 func sanitizeURLToken(token string) string {
-	raw := strings.TrimRight(token, `"'),.:;>]}`)
-	if !strings.ContainsAny(raw, "@?#") {
+	raw := strings.TrimRight(token, `"'),.:;>]}!`)
+	if !logredact.URLMayHoldCredential(raw) {
 		return token
 	}
 	return logredact.SanitizeURL(raw) + token[len(raw):]

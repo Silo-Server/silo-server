@@ -61,6 +61,18 @@ type ProgressReceiptV3 struct {
 	// caller's sample when applied or replayed, the newer stored sample when
 	// stale, nil when nothing has been applied yet.
 	Accepted *ProgressSampleV3
+	// Lifecycle is the pause or resume the applied sample made to the
+	// session's announced lifecycle state, committed with the sample; nil
+	// when the state did not change or the store keeps no lifecycle.
+	Lifecycle *LifecycleChangeV3
+}
+
+// LifecycleChangeV3 is a lifecycle pause transition an accepted progress
+// sample made: its sequence number, commit time and new pause state.
+type LifecycleChangeV3 struct {
+	Seq    int64
+	At     time.Time
+	Paused bool
 }
 
 // StopReceiptV3 is what a stop returns, and what every later stop of the same
@@ -151,6 +163,9 @@ type AttemptRecordV3 struct {
 	// A replica reaping a stale local copy compares it with its own activity
 	// clock, since requests can land on other replicas.
 	LastSampleAt time.Time
+	// CreatedAt is when the attempt row was saved, which is when its session
+	// started. SaveAttempt ignores it.
+	CreatedAt time.Time
 	// DesiredTracks is the audio and subtitle the viewer asked for, which
 	// can differ from CurrentPlan's selection after a version change had to
 	// fall back. Nil on rows written before it existed.
@@ -285,6 +300,7 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 		return ErrPlaybackAttemptExistsV3
 	}
 	record.LastSequence, record.LastSample, record.StoppedAt, record.StopID = 0, nil, nil, ""
+	record.CreatedAt = now
 	s.attempts[record.PlaybackAttemptID] = record
 	return nil
 }

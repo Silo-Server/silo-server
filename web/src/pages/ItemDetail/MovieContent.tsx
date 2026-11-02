@@ -13,6 +13,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
+import MovieBoxSetRow from "@/components/boxsets/MovieBoxSetRow";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -49,9 +50,12 @@ import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function MovieContent({
   item,
+  libraryId,
   showAdvisoryAge,
 }: {
   item: ItemDetail & { type: "movie" };
+  /** The page's ?libraryId= scope; the match and split dialogs search in it. */
+  libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -86,6 +90,11 @@ export default function MovieContent({
     markerCapabilities.data?.movie_credits === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
+  const scopedItem = useMemo(
+    () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
+    [item, libraryId],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
@@ -369,7 +378,7 @@ export default function MovieContent({
           {canCurateMetadata && (
             <MatchItemDialog
               key={item.content_id}
-              item={item}
+              item={scopedItem}
               open={matchOpen}
               onOpenChange={setMatchOpen}
               onReplaced={followReplacedItem}
@@ -378,7 +387,7 @@ export default function MovieContent({
           {canCurateMetadata && (
             <SplitItemDialog
               key={`split-${item.content_id}`}
-              item={item}
+              item={scopedItem}
               open={splitOpen}
               onOpenChange={setSplitOpen}
             />
@@ -408,12 +417,10 @@ export default function MovieContent({
         </>
       }
     >
-      {canCurateMetadata && (
-        <MediaLocations
-          title="Media locations"
-          versions={item.versions}
-          onShowMediaInfo={openMediaInfo}
-        />
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
+        </DetailSection>
       )}
 
       {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
@@ -421,11 +428,7 @@ export default function MovieContent({
 
       {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
-      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
-        <DetailSection title="Cast & Crew">
-          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
-        </DetailSection>
-      )}
+      <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
 
       {/* More Like This */}
       {similarLoading ? (
@@ -433,6 +436,14 @@ export default function MovieContent({
       ) : (
         similarData?.items &&
         similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
+      )}
+
+      {canCurateMetadata && (
+        <MediaLocations
+          title="Media locations"
+          versions={item.versions}
+          onShowMediaInfo={openMediaInfo}
+        />
       )}
     </DetailLayout>
   );

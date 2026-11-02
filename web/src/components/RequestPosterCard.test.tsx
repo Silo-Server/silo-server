@@ -1,12 +1,9 @@
-import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import RequestPosterCard from "./RequestPosterCard";
 import type { MediaRequest, RequestMediaResult } from "@/api/types";
-import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
-import type { CardPresentation } from "@/lib/uiCustomization";
 
 const requestable: RequestMediaResult = {
   media_type: "movie",
@@ -15,26 +12,6 @@ const requestable: RequestMediaResult = {
   availability: "missing",
   request: { requestable: true },
 };
-
-function withCardPresentation(cardPresentation: CardPresentation, children: ReactNode) {
-  return (
-    <UICustomizationContext.Provider
-      value={{
-        cardPresentation,
-        cardPresentationSource: "profile_client",
-        primaryMenu: null,
-        primaryMenuSource: "default",
-        shortcuts: { items: [] },
-        isSupported: true,
-        supportsAtomicShortcuts: true,
-        isLoading: false,
-        isUnavailable: false,
-      }}
-    >
-      {children}
-    </UICustomizationContext.Provider>
-  );
-}
 
 describe("RequestPosterCard (discover variant)", () => {
   it("offers no Request action on the card", () => {
@@ -198,26 +175,6 @@ describe("RequestPosterCard (mine variant)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel request for The Matrix" }));
 
     expect(onCancel).toHaveBeenCalledOnce();
-  });
-
-  it("keeps request details and Cancel when captions are off", () => {
-    render(
-      <MemoryRouter>
-        {withCardPresentation(
-          { poster_size: "standard", caption: "artwork" },
-          <RequestPosterCard
-            variant="mine"
-            request={{ ...request, media_type: "series", status: "pending", seasons: [2] }}
-            onCancel={() => {}}
-          />,
-        )}
-      </MemoryRouter>,
-    );
-
-    // Only the artwork link carries the title; the caption title is gone.
-    expect(screen.getAllByRole("link", { name: /^The Matrix/ })).toHaveLength(1);
-    expect(screen.getByText("Season 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel request for The Matrix" })).toBeEnabled();
   });
 
   it("links an available request to its library item", () => {

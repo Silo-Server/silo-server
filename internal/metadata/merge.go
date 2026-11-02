@@ -195,6 +195,7 @@ func MergeSeasonResult(source, target *SeasonResult, mode MergeMode) {
 	mergeScalar(&target.AirDate, source.AirDate, mode)
 	mergeScalar(&target.PosterPath, source.PosterPath, mode)
 	mergeScalar(&target.PosterThumbhash, source.PosterThumbhash, mode)
+	mergeScalar(&target.BackdropPath, source.BackdropPath, mode)
 }
 
 // MergeEpisodeResult merges source into target using the standard metadata

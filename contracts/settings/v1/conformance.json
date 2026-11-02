@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 23,
+  "manifest_revision": 24,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -1133,6 +1133,21 @@
         {"key": "playback.buffering_quality_mode", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": "never"}
       ],
       "expected": [{"key": "playback.buffering_quality_mode", "value": "never", "source": "profile_device"}]
+    },
+    {
+      "name": "marker_provenance_device_overrides_profile",
+      "description": "The two marker provenance toggles resolve independently: a device-scoped value wins where it is set, and the other key still follows the profile.",
+      "keys": ["playback.show_marker_confidence", "playback.show_marker_source"],
+      "context": {"profile_id": "p1", "device_id": "browser"},
+      "stored": [
+        {"key": "playback.show_marker_confidence", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "playback.show_marker_source", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "playback.show_marker_confidence", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
+      ],
+      "expected": [
+        {"key": "playback.show_marker_confidence", "value": false, "source": "profile_device"},
+        {"key": "playback.show_marker_source", "value": true, "source": "profile"}
+      ]
     }
   ]
 }

@@ -47,6 +47,18 @@ const (
 // nothing about whether any optional step was configured.
 const SetupCompletedSettingKey = "setup.completed"
 
+// DashboardHiddenAttentionSettingKey lists the setup notices (by health item
+// id, such as "email") an admin hid from the Dashboard's Needs attention
+// panel, as a JSON array of strings. It is server-wide, so a server that
+// deliberately runs without mail stops asking every admin. Only the web
+// client reads it; empty hides nothing.
+const DashboardHiddenAttentionSettingKey = "ui.dashboard.hidden_attention"
+
+const (
+	maxDashboardHiddenAttentionIDs   = 32
+	maxDashboardHiddenAttentionIDLen = 64
+)
+
 // CatalogScopeVersionsToLibrarySettingKey makes a library-scoped catalog read
 // (library_id on the v2 item, versions, and episode operations) return only
 // the files stored in that library. Off, the default, keeps every accessible
@@ -404,8 +416,6 @@ var adminSettingDefaults = map[string]string{
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
-	"recommendations.embedding_base_url":         "http://ollama:11434",
-	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
 	"recommendations.taste_profiles_cron":        "0 4 * * *",
 	"recommendations.cowatch_cron":               "30 4 * * *",
@@ -413,10 +423,10 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
 
-	"ai.base_url":                         "https://api.openai.com",
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
-	"ai.chat_model":                       "gpt-4o-mini",
+	AIServiceTierSettingKey:               "",
+	"ai.chat_model":                       "gpt-6-luna",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
 	"subtitle_ai.enabled":                 "false",
@@ -547,8 +557,6 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_key_prefix", "s3.operational_key_prefix"},
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
-	{"ai.base_url", "subtitle_ai.base_url"}, //nolint:goconst // Explicit compatibility pair.
-	{"ai.api_key", "subtitle_ai.api_key"},   //nolint:goconst // Explicit compatibility pair.
 	{"ai.chat_model", "subtitle_ai.chat_model"},
 }
 
@@ -851,9 +859,11 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
-		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+		return normalizeAdminEnum(key, value, "api_key", aiAuthModeChatGPT)
 	case "ai.reasoning_effort":
 		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+	case AIServiceTierSettingKey:
+		return normalizeAdminEnum(key, value, "", "priority", "ultrafast")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":
@@ -876,8 +886,16 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
-	case "ai.base_url", "ai.asr_base_url", "recommendations.embedding_base_url",
-		"server.public_url", "jellyfin_compat.public_url",
+	case legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; connect the provider in AI Services", key)
+	case legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting, legacyOpenAIEmbeddingModel,
+		legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; choose the embedding provider on Recommendations", key)
+	case AITextProviderSettingKey, AISpeechProviderSettingKey, EmbeddingProviderSettingKey:
+		return value, nil
+
+	case "server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
@@ -899,6 +917,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 			return "", fmt.Errorf("%s must be a valid email address", key)
 		}
 		return value, nil
+
+	case DashboardHiddenAttentionSettingKey:
+		return normalizeDashboardHiddenAttention(value)
 
 	case "defaults.card_overlays", "opslog.bucket_policies", "ui.admin_theme_vars":
 		if value == "" {
@@ -985,6 +1006,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 
 	effective := EffectiveAdminSettings(values)
 	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
+		return err
+	}
+	if err := ValidateAIProviderBindings(effective); err != nil {
 		return err
 	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {
@@ -1326,6 +1350,47 @@ func normalizeRatingSourceList(key, value string) (string, error) {
 		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
 	}
 	return strings.Join(sources, ","), nil
+}
+
+// normalizeDashboardHiddenAttention canonicalizes the hidden notice list:
+// trimmed, unique, non-empty ids in their original order. An empty list
+// stores as empty.
+func normalizeDashboardHiddenAttention(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	// Decode loosely and check each element: a []string target would take
+	// JSON null, at the top or as an element, without an error.
+	notStrings := fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	var ids []any
+	if err := json.Unmarshal([]byte(value), &ids); err != nil || ids == nil {
+		return "", notStrings
+	}
+	kept := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, element := range ids {
+		id, ok := element.(string)
+		if !ok {
+			return "", notStrings
+		}
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if len(id) > maxDashboardHiddenAttentionIDLen {
+			return "", fmt.Errorf("%s ids must be at most %d characters", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDLen)
+		}
+		seen[id] = true
+		kept = append(kept, id)
+	}
+	if len(kept) > maxDashboardHiddenAttentionIDs {
+		return "", fmt.Errorf("%s may list at most %d ids", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDs)
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	encoded, _ := json.Marshal(kept)
+	return string(encoded), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

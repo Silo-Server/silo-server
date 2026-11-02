@@ -61,6 +61,24 @@ func RunCleanup(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm
 
 // CleanupOnce runs a single activity log retention pass.
 func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm PartitionManager) int64 {
+	deleted := deleteExpiredActivity(ctx, pool, store, pm)
+	pruneLastActivity(ctx, pool)
+	return deleted
+}
+
+// pruneLastActivity keeps last activity a summary of the retained log: an
+// account whose every request has expired shows none, as it did when the
+// value was read from activity_log. Retention drops whole partitions, so the
+// boundary is the oldest row the log still holds, not the retention cutoff.
+func pruneLastActivity(ctx context.Context, pool *pgxpool.Pool) {
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM user_last_activity
+		WHERE last_active_at < COALESCE((SELECT min("timestamp") FROM activity_log), 'infinity')`); err != nil {
+		slog.WarnContext(ctx, "activitylog last activity cleanup error", "component", "activitylog", "error", err)
+	}
+}
+
+func deleteExpiredActivity(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm PartitionManager) int64 {
 	days := defaultRetention
 	if raw, err := store.Get(ctx, keyRetentionDays); err == nil && raw != "" {
 		if d := parseInt(raw); d > 0 {

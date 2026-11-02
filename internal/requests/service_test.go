@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -2012,6 +2013,10 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	if req == nil {
 		return nil, ErrNotFound
 	}
+	if req.RoutingFacts.Captured() {
+		out := *req
+		return &out, nil
+	}
 	if f.factsSet == nil {
 		f.factsSet = map[string]RoutingFacts{}
 	}
@@ -2020,6 +2025,51 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	req.IsAnime = facts.Anime
 	copy := *req
 	return &copy, nil
+}
+
+func (f *fakeStore) UpdateRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, false)
+}
+
+func (f *fakeStore) FillRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, true)
+}
+
+// mergeRoutingFacts merges facts into the stored ones key by key, as the
+// repository's jsonb concatenation does; keepStored keeps a key both hold.
+func (f *fakeStore) mergeRoutingFacts(id string, facts RoutingFacts, keepStored bool) (*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return nil, ErrNotFound
+	}
+	stored, patch := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	for target, from := range map[*map[string]json.RawMessage]RoutingFacts{&stored: req.RoutingFacts, &patch: facts} {
+		raw, err := json.Marshal(from)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, target); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range patch {
+		if _, held := stored[key]; !held || !keepStored {
+			stored[key] = value
+		}
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, err
+	}
+	var merged RoutingFacts
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, err
+	}
+	req.RoutingFacts = merged
+	out := *req
+	return &out, nil
 }
 
 func (f *fakeStore) ListTargets(_ context.Context, requestID string) ([]Target, error) {
@@ -2350,6 +2400,7 @@ type fakeTMDBClient struct {
 	externalIDCalls   []int
 	detail            *tmdb.MediaDetail
 	detailErr         error
+	detailCalls       int
 	discoverPage      *tmdb.MediaPage
 	discoverErr       error
 	searchMediaType   string
@@ -2361,7 +2412,7 @@ func (f *fakeTMDBClient) SearchMedia(_ context.Context, mediaType, _ string, _ i
 	return f.page, nil
 }
 
-func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.MediaPage, error) {
+func (f *fakeTMDBClient) ChartPage(context.Context, tmdb.ChartParams, int) (*tmdb.MediaPage, error) {
 	return f.page, nil
 }
 
@@ -2392,6 +2443,9 @@ func (f *fakeTMDBClient) GetExternalIDs(_ context.Context, _ string, id int) (*t
 }
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
+	f.mu.Lock()
+	f.detailCalls++
+	f.mu.Unlock()
 	return f.detail, f.detailErr
 }
 

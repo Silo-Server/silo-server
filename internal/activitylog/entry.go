@@ -18,6 +18,9 @@ type LogEntry struct {
 	StatusCode         int       `json:"status_code"`
 	UserAgent          string    `json:"user_agent"`
 	DurationMs         int       `json:"duration_ms"`
+	// Persisted marks a request whose audited mutation already stored its
+	// activity_log row; the consumer only records its last activity.
+	Persisted bool `json:"-"`
 }
 
 // Writer buffers log entries for asynchronous persistence.

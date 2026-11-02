@@ -35,7 +35,7 @@ type sessionRoleFixture struct {
 	decisionDown   atomic.Bool
 }
 
-func (f *sessionRoleFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+func (f *sessionRoleFixture) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
 	f.checks.Add(1)
 	authority := auth.SessionAuthority{Role: f.role.Load().(string), Purpose: models.SessionPurposeAccount}
 	if f.handoff.Load() {

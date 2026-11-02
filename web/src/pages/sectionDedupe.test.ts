@@ -99,6 +99,39 @@ describe("dropCrossSectionDuplicates", () => {
     });
   });
 
+  it("never takes a card from another row when a row loads the rest of its cards", () => {
+    const entries = [
+      layoutEntry("recent", "recently_added"),
+      layoutEntry("for-you", "taste_match"),
+    ];
+    const rows = (recent: string[], forYou: string[]) =>
+      new Map([
+        ["recent", section(entries[0]!, recent)],
+        ["for-you", section(entries[1]!, forYou)],
+      ]);
+
+    // Recent showed a and b; the rest of it repeats c, which For You shows.
+    const recentDone = dropCrossSectionDuplicates(
+      entries,
+      rows(["a", "b", "c", "e"], ["c", "d"]),
+      AVOID,
+      new Map([["recent", 2]]),
+    );
+    expect(itemIDs(recentDone)).toEqual({ recent: ["a", "b", "c", "e"], "for-you": ["c", "d"] });
+
+    // For You loads the rest after Recent did: its later cards skip what any row shows.
+    const bothDone = dropCrossSectionDuplicates(
+      entries,
+      rows(["a", "b", "c", "e"], ["c", "d", "e", "f"]),
+      AVOID,
+      new Map([
+        ["recent", 2],
+        ["for-you", 2],
+      ]),
+    );
+    expect(itemIDs(bothDone)).toEqual({ recent: ["a", "b", "c", "e"], "for-you": ["c", "d", "f"] });
+  });
+
   it("keeps unchanged sections as they are and changes nothing without avoid types", () => {
     const input = loaded(Object.keys(served));
     const result = dropCrossSectionDuplicates(layout, input, AVOID);

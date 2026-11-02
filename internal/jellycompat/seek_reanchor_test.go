@@ -35,6 +35,7 @@ func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 			container := "mp4"
 			if !tc.copy {
 				container = "ts"
+				version.CodecVideo = "mpeg2video"
 			}
 			body := fmt.Sprintf(`{"StartTimeTicks":9000000000,"EnableDirectPlay":false,"SubtitleStreamIndex":-1,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":%q,"VideoCodec":"h264","AudioCodec":"aac"}]}%s}`, container, tc.field)
 			req := httptest.NewRequest("POST", "/Items/"+item+"/PlaybackInfo"+tc.query, strings.NewReader(body))

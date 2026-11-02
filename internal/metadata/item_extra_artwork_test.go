@@ -114,7 +114,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		item := &models.MediaItem{}
 		carryItemOnlyArtwork(item, existing)
 		applyBestImages(item, nil, MergeFillEmpty, "en", "")
-		prepareItemImagesForQueue(item, existing, true)
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.BannerSourcePath != pending || item.BannerPath != "" {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
 		}
@@ -126,7 +126,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		const remote = "https://img.example/de-poster.jpg"
 		existing := &models.MediaItem{PosterSourcePath: remote}
 		item := &models.MediaItem{PosterSourcePath: remote}
-		prepareItemImagesForQueue(item, existing, true)
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.PosterSourcePath != "" {
 			t.Fatalf("poster source = %q, want it cleared", item.PosterSourcePath)
 		}
@@ -557,8 +557,8 @@ func (f *fakeItemBackdropUpdater) UpdateArtworkIfSourceMatches(_ context.Context
 
 // An item's backdrops share its key folder, and two sidecars can hold the same
 // bytes, so each backdrop's key carries a hash of its sidecar's path. Two rows
-// with identical images get different keys, re-caching one deletes only its
-// own stale prefix, and a backdrop that moves to another row keeps its key.
+// with identical images get different keys, and a backdrop that moves to
+// another row keeps its key.
 func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	root := t.TempDir()
 	first := writeLocalPoster(t, root)
@@ -566,22 +566,17 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	if err := os.WriteFile(second, []byte("poster-bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run := func(path, rowID, previous string) (*fakeByteImageCacher, *fakeItemBackdropUpdater, *fakePrefixDeleter) {
+	run := func(path, rowID string) (*fakeByteImageCacher, *fakeItemBackdropUpdater) {
 		t.Helper()
 		job := localArtworkJob("file://" + path)
 		job.TargetType = ImageCacheTargetItemBackdrop
 		job.TargetContentID = rowID
 		job.ImageType = ImageCacheImageBackdrop
-		jobs := &fakeLocalImageCacheJobs{
-			fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
-			currentCached:      previous,
-		}
+		jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}
 		cacher := &fakeByteImageCacher{thumbhash: "th"}
 		backdrops := &fakeItemBackdropUpdater{}
-		deleter := &fakePrefixDeleter{bucket: "images"}
 		p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{ItemBackdrops: backdrops})
 		p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
-		p.SetImagePrefixDeleter(deleter)
 		stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 		if err != nil {
 			t.Fatal(err)
@@ -589,11 +584,10 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 		if stats.Succeeded != 1 {
 			t.Fatalf("stats = %+v, failed text %q", stats, jobs.failedText)
 		}
-		return cacher, backdrops, deleter
+		return cacher, backdrops
 	}
 
-	const previous = "local/movies/movie-1/0badf00d-0badf00d/backdrop/original.old.webp"
-	cacher, backdrops, deleter := run(first, "42", previous)
+	cacher, backdrops := run(first, "42")
 	key := cacher.bytesReq[0].KeyDiscriminator
 	if len(key) != len("00000000-00000000") || key[8] != '-' {
 		t.Fatalf("KeyDiscriminator = %q, want <content hash>-<path hash>", key)
@@ -602,21 +596,16 @@ func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	if backdrops.id != 42 || backdrops.cached != want || backdrops.hash != "th" {
 		t.Fatalf("backdrop update = %+v, want row 42 at %q", backdrops, want)
 	}
-	if !slices.Equal(deleter.prefixes, []string{"local/movies/movie-1/0badf00d-0badf00d/backdrop/"}) {
-		t.Fatalf("deleted prefixes = %q", deleter.prefixes)
-	}
 
-	// Same bytes in another sidecar: another key, so neither re-cache can
-	// delete the other's files.
-	other, _, _ := run(second, "43", "")
+	// Same bytes in another sidecar: another key.
+	other, _ := run(second, "43")
 	if other.bytesReq[0].KeyDiscriminator == key || other.bytesReq[0].KeyDiscriminator[:8] != key[:8] {
 		t.Fatalf("keys %q and %q, want the same content hash and different path hashes", key, other.bytesReq[0].KeyDiscriminator)
 	}
-	// The same sidecar on another row keeps its key, and its current copy is
-	// not deleted.
-	moved, _, movedDeleter := run(first, "44", want)
-	if moved.bytesReq[0].KeyDiscriminator != key || len(movedDeleter.prefixes) != 0 {
-		t.Fatalf("moved backdrop key %q (want %q), deleted %q", moved.bytesReq[0].KeyDiscriminator, key, movedDeleter.prefixes)
+	// The same sidecar on another row keeps its key.
+	moved, _ := run(first, "44")
+	if moved.bytesReq[0].KeyDiscriminator != key {
+		t.Fatalf("moved backdrop key %q, want %q", moved.bytesReq[0].KeyDiscriminator, key)
 	}
 }
 
@@ -625,7 +614,7 @@ func TestProcessItemJobForExtraSlotUpdatesItem(t *testing.T) {
 	path := writeLocalPoster(t, root)
 	job := localArtworkJob("file://" + path)
 	job.ImageType = ImageCacheImageDisc
-	p, jobs, cacher, items, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, cacher, items := newLocalProcessorForTest(job, []string{root})
 	if _, err := p.RunOnce(context.Background(), "w1", 10, 1); err != nil {
 		t.Fatal(err)
 	}

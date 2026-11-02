@@ -36,7 +36,7 @@ type AuthHandler struct {
 
 type accountPasswordService interface {
 	PasswordChangeAvailable(ctx context.Context, userID int) (bool, error)
-	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -480,7 +480,7 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 	}
 
 	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
+	token, err := h.PluginLaunchToken(r.Context(), claims, apimw.GetProfileID(r.Context()))
 	if err != nil {
 		writeAPIError(w, err)
 		return

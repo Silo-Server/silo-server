@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -305,6 +306,71 @@ func TestHandleItems_BoxSetChildrenPagination(t *testing.T) {
 	}
 	if len(result.Items) != 1 || result.Items[0].Name != "Two" {
 		t.Fatalf("expected page [Two], got %+v", result.Items)
+	}
+}
+
+// Limit=0 asks only for TotalRecordCount (#2841). BoxSet children answer it
+// with no items and the total a paged request reports. The stored page in SQL
+// is covered by TestBoxSetChildrenPageVisibleMembersDB.
+func TestHandleItems_BoxSetChildrenCountOnly(t *testing.T) {
+	libraries := []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}
+	// m-2 is hidden from the viewer, so neither total counts it.
+	movies := &fakeBatchItemRepo{items: map[string]*models.MediaItem{
+		"m-1": {ContentID: "m-1", Type: "movie", Title: "One"},
+		"m-3": {ContentID: "m-3", Type: "movie", Title: "Three"},
+	}}
+	stored := func(*testing.T) (*ItemsHandler, string) {
+		h := newCollectionsTestHandler(&fakeCollectionSource{
+			collections: []*models.LibraryCollection{{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"}},
+			items: map[string][]*models.LibraryCollectionItem{"101": {
+				{CollectionID: "101", MediaItemID: "m-1", Position: 0},
+				{CollectionID: "101", MediaItemID: "m-2", Position: 1},
+				{CollectionID: "101", MediaItemID: "m-3", Position: 2},
+			}},
+		}, libraries, movies)
+		return h, h.codec.EncodeStringID(EncodedIDCollection, "101")
+	}
+	smart := func(*testing.T) (*ItemsHandler, string) {
+		h := newCollectionsTestHandler(&fakeCollectionSource{
+			collections: []*models.LibraryCollection{{ID: "210", LibraryID: 1, Title: "Smart", Visibility: "visible", CollectionType: "smart", QueryDefinition: json.RawMessage(`{}`)}},
+		}, libraries, movies)
+		h.queryExecutor = &fakeSmartExecutor{items: []*models.MediaItem{movies.items["m-1"], movies.items["m-3"]}}
+		return h, h.codec.EncodeStringID(EncodedIDCollection, "210")
+	}
+	episodes := func(t *testing.T) (*ItemsHandler, string) {
+		h, _, _, parentID := newSmartEpisodeFixture(t, "206",
+			&models.Episode{ContentID: "e-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Alpha"},
+			&models.Episode{ContentID: "e-2", SeasonNumber: 1, EpisodeNumber: 2, Title: "Bravo"},
+			&models.Episode{ContentID: "e-3", SeasonNumber: 1, EpisodeNumber: 3, Title: "Charlie"},
+		)
+		return h, parentID
+	}
+
+	for _, tc := range []struct {
+		name    string
+		fixture func(*testing.T) (*ItemsHandler, string)
+		query   string
+		total   int
+	}{
+		{"stored collection without a database pool", stored, "", 2},
+		{"smart collection in query order", smart, "", 2},
+		{"Play all leaves", newPlayAllFixture, "&Filters=IsNotFolder&Recursive=true", 6},
+		{"episode smart collection with SortBy", episodes, "&SortBy=SortName", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, parentID := tc.fixture(t)
+			target := "/Items?ParentId=" + parentID + tc.query
+			if paged := performItemsRequest(t, h, target+"&Limit=50"); paged.TotalRecordCount != tc.total {
+				t.Fatalf("paged total = %d, want %d", paged.TotalRecordCount, tc.total)
+			}
+			for _, startIndex := range []int{0, 1} {
+				counted := performItemsRequest(t, h, fmt.Sprintf("%s&StartIndex=%d&Limit=0", target, startIndex))
+				if counted.Items == nil || len(counted.Items) != 0 || counted.TotalRecordCount != tc.total || counted.StartIndex != startIndex {
+					t.Fatalf("Limit=0 at %d returned %v (total %d, StartIndex %d), want [] (total %d)",
+						startIndex, itemNames(counted.Items), counted.TotalRecordCount, counted.StartIndex, tc.total)
+				}
+			}
+		})
 	}
 }
 

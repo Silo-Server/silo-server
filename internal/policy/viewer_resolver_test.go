@@ -73,11 +73,14 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				MaxPlaybackQuality:   ptr("any"),
 				AccessPolicyRevision: 5,
 			},
+			// A nonzero PIN revision makes the scope comparison below cover
+			// ProfilePINRevision on both resolvers.
 			profile: &userstore.Profile{
 				ID:                        "prof-1",
 				MaxContentRating:          "PG-13",
 				MaxPlaybackQuality:        "4k",
 				PreferredMetadataLanguage: "fr",
+				PINRevision:               4,
 			},
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 			wantNilAllowed: true,

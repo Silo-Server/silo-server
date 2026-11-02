@@ -100,6 +100,18 @@ const (
 	// (a VOD keyframe plan or FFmpeg's EVENT playlist). Without it a remux
 	// keeps its sidecar. It exists only on /api/v2 (see NativeServerFeaturesV3).
 	FeatureHLSRemuxSubtitleRenditionsV3 = "hls_remux_subtitle_renditions_v1"
+	// FeatureHLSSubtitleRenditionsAllV3 extends FeatureHLSSubtitleRenditionsV3,
+	// which it requires, to every embedded text track: an opted-in client's
+	// server_transcode_hls plan, and server_remux_hls plan when it also lists
+	// FeatureHLSRemuxSubtitleRenditionsV3, lists each embedded text track the
+	// source's index can read as a WebVTT rendition of one SUBTITLES group,
+	// whose segments the server reads on demand. Those inventory rows carry
+	// hls_rendition; the plan's selected one is DEFAULT=YES and is also
+	// subtitle.hls_rendition. The client switches among them with its own
+	// media selection and reports it with a subtitle_track_changed replan,
+	// which keeps the stream. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
+	FeatureHLSSubtitleRenditionsAllV3 = "hls_subtitle_renditions_all_v1"
 	// FeaturePlanActiveQualityV3 tells a client the plan names the
 	// available_qualities entry it delivers in active_quality, so an absent
 	// active_quality means "no entry" rather than "a server that predates
@@ -163,6 +175,11 @@ const (
 // capabilities features list.
 const FeatureHLSVariableSubstitutionV3 = "hls_variable_substitution_v1"
 
+// FeatureCodecChannelCeilingsV3 tells a client that the server honors a
+// delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
+// features list.
+const FeatureCodecChannelCeilingsV3 = "codec_channel_ceilings_v1"
+
 // Worker transport features are protocol capabilities rather than media
 // transformations. They let route planning exclude an older worker before a
 // client is handed a URL that worker cannot serve.
@@ -190,6 +207,10 @@ const (
 	// whose subtitle playlist follows the keyframe plan or FFmpeg's EVENT
 	// playlist. Nodes with only hls_subtitle_rendition_v1 refuse it.
 	TransportFeatureHLSRemuxSubtitleRenditionV1 = "hls_remux_subtitle_rendition_v1"
+	// A transcode node that serves every listed embedded text track as an
+	// on-demand rendition (TranscodeOpts.SubtitleRenditionTracks), for an
+	// encode and a copy remux alike.
+	TransportFeatureHLSOnDemandSubtitleRenditionsV1 = "hls_on_demand_subtitle_renditions_v1"
 )
 
 // HLSSubtitleRenditionTransportFeatureV3 is the transport feature a node must
@@ -200,6 +221,21 @@ func HLSSubtitleRenditionTransportFeatureV3(targetVideoCodec string) string {
 		return TransportFeatureHLSRemuxSubtitleRenditionV1
 	}
 	return TransportFeatureHLSSubtitleRenditionV1
+}
+
+// HLSSubtitleRenditionTransportFeaturesV3 are the transport features a node
+// must advertise to run a planner result's subtitle renditions: the
+// rendition feature for its video target, and for on-demand renditions
+// TransportFeatureHLSOnDemandSubtitleRenditionsV1 too. Nil without one.
+func HLSSubtitleRenditionTransportFeaturesV3(result PlannerResultV3) []string {
+	if !result.SubtitleRendition {
+		return nil
+	}
+	features := []string{HLSSubtitleRenditionTransportFeatureV3(result.TargetVideoCodec)}
+	if len(result.SubtitleRenditionTracks) > 0 {
+		features = append(features, TransportFeatureHLSOnDemandSubtitleRenditionsV1)
+	}
+	return features
 }
 
 // Degradation warning codes reported by playback plans.
@@ -268,7 +304,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -633,6 +669,29 @@ const (
 	subtitleIdentityContainerV3 = "container_track_id"
 )
 
+// Native embedded subtitle limitations: renderer defects a client declares on a
+// native_embedded entry so the planner keeps the tracks that player would get
+// wrong off the native route. Honored on /api/v2, which advertises
+// FeatureNativeEmbeddedLimitationsV3.
+const (
+	// NativeEmbeddedLimitationForcedUnlistedV3: the player cannot select a
+	// track flagged Forced.
+	NativeEmbeddedLimitationForcedUnlistedV3 = "forced_unlisted"
+	// NativeEmbeddedLimitationHiddenTrackPreemptionV3: the player draws a track
+	// it does not list instead of the selected one when the file has a Forced
+	// track in the playing audio's language or a default-flagged bitmap track.
+	NativeEmbeddedLimitationHiddenTrackPreemptionV3 = "hidden_track_preemption"
+	// NativeEmbeddedLimitationLiteralOverrideTagsV3: the player prints ASS
+	// override tags such as {\an8} inside text cues instead of applying them.
+	NativeEmbeddedLimitationLiteralOverrideTagsV3 = "literal_override_tags"
+)
+
+// FeatureNativeEmbeddedLimitationsV3 tells a client the server honors
+// native_embedded limitations. A client that needs one must not send its
+// native_embedded entry to a server that does not advertise this. It exists
+// only on /api/v2 (see NativeServerFeaturesV3).
+const FeatureNativeEmbeddedLimitationsV3 = "native_embedded_limitations_v1"
+
 // NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
 // and codec set. Stream indexes and container track IDs are distinct namespaces.
 type NativeEmbeddedSubtitleCapabilityV3 struct {
@@ -641,6 +700,10 @@ type NativeEmbeddedSubtitleCapabilityV3 struct {
 	TrackIdentity   string   `json:"track_identity"`
 	ASSStyling      bool     `json:"ass_styling"`
 	FontAttachments bool     `json:"font_attachments"`
+	// Limitations narrows the entry to the tracks its player shows correctly.
+	// Planning skips an entry that names a value it does not know, rather than
+	// guess what that player gets wrong.
+	Limitations []string `json:"limitations,omitempty" maxItems:"16" minLength:"1" maxLength:"64" doc:"Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection."`
 }
 
 type DeliverySubtitleCapabilitiesV3 struct {
@@ -666,13 +729,20 @@ type DeliveryCapabilityV3 struct {
 	// player downmixes surround itself omits it. A source track above it is
 	// converted to AAC within the ceiling, on a video-copy remux when the
 	// video can be copied. Zero or less means unset.
-	MaxChannels       *int                           `json:"max_channels,omitempty"`
-	HDRDetails        *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
-	Subtitles         DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
-	Features          []string                       `json:"features"`
-	AuthHeaderRefresh bool                           `json:"auth_header_refresh"`
-	ValidatedClaims   []string                       `json:"validated_claims"`
-	Transformations   []TransformationV3             `json:"transformations"`
+	MaxChannels *int `json:"max_channels,omitempty"`
+	// MaxChannelsByCodec caps the channel count per audio codec, on top of
+	// MaxChannels: {"aac": 2} from a client that decodes AAC only in stereo
+	// but plays E-AC-3 5.1. A copied track above its codec's ceiling is
+	// converted, and an AAC conversion stays within the "aac" entry. Keys are
+	// codec names as in audio_decode_codecs; a value of zero or less means
+	// unset. Honored when the server advertises codec_channel_ceilings_v1.
+	MaxChannelsByCodec map[string]int                 `json:"max_channels_by_codec,omitempty" maxProperties:"32"`
+	HDRDetails         *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
+	Subtitles          DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
+	Features           []string                       `json:"features"`
+	AuthHeaderRefresh  bool                           `json:"auth_header_refresh"`
+	ValidatedClaims    []string                       `json:"validated_claims"`
+	Transformations    []TransformationV3             `json:"transformations"`
 }
 
 // ClientPlaybackContextV3 carries the client's execution context. Feature
@@ -995,13 +1065,25 @@ type EmbeddedSubtitleV3 struct {
 
 // HLSSubtitleRenditionV3 places the selected subtitle inside the plan's HLS
 // presentation: the stream URL is a multivariant playlist whose SUBTITLES
-// group GroupID holds the track as one WebVTT rendition named Name, segmented
-// on the video's own timeline.
+// group GroupID holds the track as a WebVTT rendition named Name, segmented
+// on the video's own timeline. Index is set when the group lists every
+// embedded text track (hls_subtitle_renditions_all_v1).
 type HLSSubtitleRenditionV3 struct {
 	GroupID  string `json:"group_id"`
 	Name     string `json:"name"`
 	Format   string `json:"format"`
 	MIMEType string `json:"mime_type"`
+	Index    int    `json:"index,omitempty" minimum:"1" doc:"1-based position of the rendition in its SUBTITLES group, set when the group lists every embedded text track (hls_subtitle_renditions_all_v1); equal to the selected inventory row's hls_rendition.index"`
+}
+
+// SubtitleInventoryHLSRenditionV3 places an inventory row's track in the
+// plan's HLS presentation, under hls_subtitle_renditions_all_v1: the
+// EXT-X-MEDIA of group GroupID named Name, at 1-based position Index in the
+// group (Roku names it webvtt/<index>).
+type SubtitleInventoryHLSRenditionV3 struct {
+	GroupID string `json:"group_id" doc:"The rendition's EXT-X-MEDIA GROUP-ID"`
+	Name    string `json:"name" doc:"The rendition's EXT-X-MEDIA NAME, unique in the group"`
+	Index   int    `json:"index" minimum:"1" doc:"1-based position of the rendition in its group, in inventory order"`
 }
 
 type SubtitleDecisionV3 struct {
@@ -1441,6 +1523,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 		if err := validateHDRCapabilitiesV3(delivery.HDRDetails); err != nil {
 			return err
 		}
+		if len(delivery.MaxChannelsByCodec) > 32 {
+			return errors.New("delivery capability exceeds supported size")
+		}
+		if len(delivery.MaxChannelsByCodec) > 0 {
+			byCodec := make(map[string]int, len(delivery.MaxChannelsByCodec))
+			for codec, channels := range delivery.MaxChannelsByCodec {
+				codec = normalizeCodecV3(codec)
+				if codec == "" || len(codec) > 64 || channels > 64 {
+					return errors.New("invalid delivery max_channels_by_codec")
+				}
+				// Spellings that name one codec keep the lowest ceiling; a
+				// ceiling beats an unset value (zero or less).
+				if existing, seen := byCodec[codec]; !seen || channels > 0 && (existing <= 0 || channels < existing) {
+					byCodec[codec] = channels
+				}
+			}
+			delivery.MaxChannelsByCodec = byCodec
+			ctx.Deliveries[name] = delivery
+		}
 		for _, values := range [][]string{delivery.Containers, delivery.VideoCodecs, delivery.AudioDecodeCodecs, delivery.AudioPassthroughCodecs, delivery.Features, delivery.ValidatedClaims} {
 			for _, value := range values {
 				if len(value) > 64 {
@@ -1465,6 +1566,19 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 					return errors.New("invalid native subtitle codec")
 				}
 				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
+			}
+			// Only the shape is validated: a value this server does not know
+			// disables its entry during planning instead of failing a request
+			// that a newer client may legitimately send.
+			if len(native.Limitations) > 16 {
+				return errors.New("native subtitle limitation list exceeds supported size")
+			}
+			for j, limitation := range native.Limitations {
+				limitation = strings.ToLower(strings.TrimSpace(limitation))
+				if limitation == "" || len(limitation) > 64 {
+					return errors.New("invalid native subtitle limitation")
+				}
+				native.Limitations[j] = limitation
 			}
 		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))
@@ -1602,13 +1716,14 @@ func HasFeatureV3(features []string, wanted string) bool {
 //     seek reanchor must reproduce the frozen plan's artifact exactly.
 //   - hls_subtitle_renditions_v1 decides whether the transcode's stream URL
 //     is a multivariant playlist carrying the subtitle or a media playlist
-//     beside a sidecar, and hls_remux_subtitle_renditions_v1 the same for a
-//     copy remux. A reused HLS transport keeps the shape it was built with,
-//     so the attempt has to keep the same answer.
+//     beside a sidecar, hls_remux_subtitle_renditions_v1 the same for a copy
+//     remux, and hls_subtitle_renditions_all_v1 whether it lists every
+//     embedded text track. A reused HLS transport keeps the shape it was
+//     built with, so the attempt has to keep the same answer.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeatureHLSRemuxSubtitleRenditionsV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSSubtitleRenditionsAllV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

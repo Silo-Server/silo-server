@@ -6,6 +6,8 @@ import (
 	"io"
 	"math"
 	"slices"
+
+	"github.com/Silo-Server/silo-server/internal/matroska"
 )
 
 // ErrIncompleteIndex means the file's Cues leave out some video keyframes.
@@ -15,13 +17,13 @@ import (
 var ErrIncompleteIndex = fmt.Errorf("%w: cues leave out video keyframes", ErrNoIndex)
 
 const (
-	idCueClusterPosition = 0xF1
-	idClusterTimestamp   = 0xE7
-	idSimpleBlock        = 0xA3
-	idBlockGroup         = 0xA0
-	idBlock              = 0xA1
-	idReferenceBlock     = 0xFB
-	idBlockDuration      = 0x9B
+	idCueClusterPosition = matroska.IDCueClusterPosition
+	idClusterTimestamp   = matroska.IDClusterTimestamp
+	idSimpleBlock        = matroska.IDSimpleBlock
+	idBlockGroup         = matroska.IDBlockGroup
+	idBlock              = matroska.IDBlock
+	idReferenceBlock     = matroska.IDReferenceBlock
+	idBlockDuration      = matroska.IDBlockDuration
 
 	// coverageSamples is how many cued clusters, spread through the file, have
 	// their keyframes checked against the Cues, each with the cluster after
@@ -65,7 +67,7 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks
 			if next >= segEnd {
 				break
 			}
-			id, _, _, err := readElementHeader(r, next)
+			id, _, _, err := matroska.ReadElementHeader(r, next)
 			if err != nil && !isShortRead(err) {
 				return fmt.Errorf("keyframes: read element at %d: %w", next, err)
 			}
@@ -82,7 +84,7 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks
 // keyframes in the cluster at off, and where the next element starts. It
 // reads element headers and the first bytes of each block, never the frames.
 func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *videoEnd) ([]uint64, int64, error) {
-	id, size, headerLen, err := readElementHeader(r, off)
+	id, size, headerLen, err := matroska.ReadElementHeader(r, off)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -103,7 +105,7 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 	at := off + headerLen
 	n := 0
 	for ; at < end && n < maxClusterChildren; n++ {
-		id, size, headerLen, err := readElementHeader(r, at)
+		id, size, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
 			if isShortRead(err) {
 				break
@@ -119,11 +121,11 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 		data := at + headerLen
 		switch id {
 		case idClusterTimestamp:
-			b, err := readElementData(r, data, size, 8)
+			b, err := matroska.ReadElementData(r, data, size, 8)
 			if err != nil {
 				return nil, 0, err
 			}
-			clusterTicks, haveTicks = readUint(b), true
+			clusterTicks, haveTicks = matroska.Uint(b), true
 		case idSimpleBlock:
 			track, rel, flags, err := readBlockHeader(r, data, size)
 			if err != nil {
@@ -181,7 +183,7 @@ func readBlockHeader(r io.ReaderAt, off, size int64) (track uint64, rel int64, f
 	if _, err := r.ReadAt(buf[:n], off); err != nil {
 		return 0, 0, 0, err
 	}
-	track, trackLen, ok := readVint(buf[:n], false)
+	track, trackLen, ok := matroska.ReadVint(buf[:n], false)
 	if !ok || int64(trackLen+3) > n {
 		return 0, 0, 0, fmt.Errorf("short block header at %d", off)
 	}
@@ -197,7 +199,7 @@ func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, ke
 	key = true
 	haveBlock := false
 	for at := off; at < end; {
-		id, childSize, headerLen, err := readElementHeader(r, at)
+		id, childSize, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
 			return 0, 0, false, 0, err
 		}
@@ -214,11 +216,11 @@ func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, ke
 		case idReferenceBlock:
 			key = false
 		case idBlockDuration:
-			b, err := readElementData(r, at+headerLen, childSize, 8)
+			b, err := matroska.ReadElementData(r, at+headerLen, childSize, 8)
 			if err != nil {
 				return 0, 0, false, 0, err
 			}
-			if d := readUint(b); d <= math.MaxInt64 {
+			if d := matroska.Uint(b); d <= math.MaxInt64 {
 				duration = int64(d)
 			}
 		}
@@ -298,7 +300,7 @@ func tailVideoEnd(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks []u
 		if n == maxTailElements {
 			return end, ErrIncompleteIndex
 		}
-		_, size, headerLen, err := readElementHeader(r, at)
+		_, size, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil || size == unknownSize {
 			break
 		}
@@ -309,7 +311,7 @@ func tailVideoEnd(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks []u
 		if n == maxTailElements {
 			return end, ErrIncompleteIndex
 		}
-		id, size, headerLen, err := readElementHeader(r, at)
+		id, size, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
 			if isShortRead(err) {
 				break
