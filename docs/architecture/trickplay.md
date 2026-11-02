@@ -251,7 +251,10 @@ is on and a private bucket gives an operational store separate from it
 use signed `/api/v2/artwork/...` URLs, and that route reads `trickplay/` keys
 from the operational store (`blobstore.Route`). The setting is read at startup.
 Changing it changes `store_identity`, so every published sheet stops serving
-and is made again in the new store (step 4 of [Reconcile](#reconcile)).
+and is made again in the new store (step 4 of [Reconcile](#reconcile)). A sheet
+missing from the sheet store is read from the other store
+(`trickplay.ReadStoreFor`), so URLs issued before the restart keep working
+until they expire.
 
 ## Reading previews
 

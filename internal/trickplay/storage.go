@@ -36,10 +36,7 @@ func StoreFor(stores blobstore.Stores, private bool) blobstore.Store {
 // the sweep lists the store new sheets go to.
 func BlobNamespaceFor(stores blobstore.Stores, sheets blobstore.Store) blobgc.Namespace {
 	ns := BlobNamespace()
-	other := stores.Operational
-	if sheets == stores.Operational {
-		other = stores.Assets
-	}
+	other := otherStore(stores, sheets)
 	if sheets == nil || other == nil || other == sheets {
 		if sheets != stores.Assets {
 			ns.Store = sheets
@@ -48,6 +45,23 @@ func BlobNamespaceFor(stores blobstore.Stores, sheets blobstore.Store) blobgc.Na
 	}
 	ns.Store = bothStores{current: sheets, previous: other}
 	return ns
+}
+
+// ReadStoreFor is the store the signed artwork route reads sheets from:
+// sheets, then the other store. After the setting changes, a published
+// revision stays in the other store until it is made again and the URLs
+// issued for it expire (see queueRevision), so a player that loaded its
+// manifest before the restart keeps its previews.
+func ReadStoreFor(stores blobstore.Stores, sheets blobstore.Store) blobstore.Store {
+	return blobstore.Fallback(sheets, otherStore(stores, sheets))
+}
+
+// otherStore is the store sheets are not written to, or nil without one.
+func otherStore(stores blobstore.Stores, sheets blobstore.Store) blobstore.Store {
+	if sheets == stores.Operational {
+		return stores.Assets
+	}
+	return stores.Operational
 }
 
 // bothStores deletes from the current store and the previous one, and reads

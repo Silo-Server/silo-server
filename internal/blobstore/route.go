@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 )
@@ -86,3 +87,34 @@ func (s routedStore) List(ctx context.Context, prefix, cursor string, limit int)
 
 func (s routedStore) Probe(ctx context.Context) error { return s.base.Probe(ctx) }
 func (s routedStore) Identity() string                { return s.base.Identity() }
+
+// Fallback returns a store that reads a key from secondary when primary does
+// not hold it. Writes, deletes, listing, Probe and Identity are primary's.
+// A nil secondary, or secondary equal to primary, returns primary unchanged.
+func Fallback(primary, secondary Store) Store {
+	if primary == nil || secondary == nil || secondary == primary {
+		return primary
+	}
+	return fallbackStore{Store: primary, secondary: secondary}
+}
+
+type fallbackStore struct {
+	Store
+	secondary Store
+}
+
+func (s fallbackStore) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
+	body, info, err := s.Store.Get(ctx, key)
+	if errors.Is(err, ErrNotFound) {
+		return s.secondary.Get(ctx, key)
+	}
+	return body, info, err
+}
+
+func (s fallbackStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
+	info, err := s.Store.Stat(ctx, key)
+	if errors.Is(err, ErrNotFound) {
+		return s.secondary.Stat(ctx, key)
+	}
+	return info, err
+}

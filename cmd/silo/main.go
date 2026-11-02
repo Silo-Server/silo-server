@@ -3295,8 +3295,9 @@ func main() {
 				deps.Trickplay = trickplayService
 				deps.TrickplayReader = trickplay.NewReader(deps.DB, trickplaySheets, trickplayURLResolver(&deps, trickplaySheets))
 				deps.TrickplayAdmin = trickplay.NewAdmin(deps.DB, trickplaySheets, trickplayService.Kick)
-				// The signed artwork route serves sheets too, wherever they are kept.
-				deps.ArtworkReads = blobstore.Route(deps.Blobs.Assets, trickplay.KeyRoot, trickplaySheets)
+				// The signed artwork route serves sheets too, wherever they are kept,
+				// including revisions left in the other store by a setting change.
+				deps.ArtworkReads = blobstore.Route(deps.Blobs.Assets, trickplay.KeyRoot, trickplay.ReadStoreFor(deps.Blobs, trickplaySheets))
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
