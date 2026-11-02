@@ -19,6 +19,7 @@
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
+./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
@@ -86,6 +87,14 @@
 # A subtree scan of a title folder deleted under a reachable library root
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
+
+# A subtree scan of a deleted book folder reconciles its files, except under a
+# configured root that is now an empty directory (a lost mount).
+./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
+
+# A monitored rename of a book folder keeps the book: the old path is
+# reconciled first, and the removal grace holds the book for the new path.
+./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.

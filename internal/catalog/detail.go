@@ -3011,15 +3011,10 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
+	} else {
+		*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = %s.content_id
-				)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`
 			NOT EXISTS (
 				SELECT 1 FROM media_item_libraries mil_disabled
