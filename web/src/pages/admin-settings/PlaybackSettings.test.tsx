@@ -156,8 +156,9 @@ describe("PlaybackSettings preview images tiering", () => {
       group = within(screen.getByRole("group", { name: "Preview images" }));
       expect(group.queryByText("Generate chapter thumbnails on")).toBeNull();
       expect(group.queryByText("Generate seek previews on")).toBeNull();
-      // Both selects join the seek preview worker count and the two HDR fields.
-      expect(group.getByRole("button", { name: "Advanced · 5 settings" })).toBeInTheDocument();
+      // Both selects join the seek preview worker count, the private storage
+      // toggle and the two HDR fields.
+      expect(group.getByRole("button", { name: "Advanced · 6 settings" })).toBeInTheDocument();
       collapsed.unmount();
     }
   });

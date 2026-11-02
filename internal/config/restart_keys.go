@@ -56,6 +56,8 @@ var restartRequiredKeys = map[string]bool{
 	playbackTranscodeDirSettingKey:       true,
 	downloadArtifactDirSettingKey:        true,
 	"playback.chapter_thumbnail_workers": true,
+	// The seek preview store is chosen when the trickplay service is built.
+	TrickplayPrivateStorageSettingKey: true,
 
 	// Scanner / matcher toggles captured at construction. Worker counts,
 	// batch size, metadata.cache_images, and mdblist.api_key hot-reload via

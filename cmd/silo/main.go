@@ -3277,7 +3277,8 @@ func main() {
 			if kept := keptSubtitleStore(deps.Blobs, deps.S3Public); kept != nil {
 				keptFiles.Store, keptStreams.Store = kept, kept
 			}
-			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace(), keptFiles}
+			trickplaySheets := trickplay.StoreFor(deps.Blobs, settings[trickplay.PrivateStorageSetting] == "true")
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespaceFor(deps.Blobs, trickplaySheets), keptFiles}
 			// Replaced chapter images and kept subtitle tracks are queued by key;
 			// the sweep lists by file.
 			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace(), keptStreams}, mediaImages...)
@@ -3288,12 +3289,14 @@ func main() {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
 			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
-			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
+			if trickplayService := trickplay.NewService(deps.DB, trickplaySheets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
 				deps.Trickplay = trickplayService
-				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
-				deps.TrickplayAdmin = trickplay.NewAdmin(deps.DB, deps.Blobs.Assets, trickplayService.Kick)
+				deps.TrickplayReader = trickplay.NewReader(deps.DB, trickplaySheets, trickplayURLResolver(&deps, trickplaySheets))
+				deps.TrickplayAdmin = trickplay.NewAdmin(deps.DB, trickplaySheets, trickplayService.Kick)
+				// The signed artwork route serves sheets too, wherever they are kept.
+				deps.ArtworkReads = blobstore.Route(deps.Blobs.Assets, trickplay.KeyRoot, trickplaySheets)
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
@@ -3926,7 +3929,7 @@ func main() {
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
 			AdminDefaults:        adminDefaults,
-			ArtworkHandler:       apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
+			ArtworkHandler:       apiv2.NewArtworkHandler(deps.ArtworkReadStore(), deps.ArtworkSigner, deps.ArtworkRepair),
 			Config:               cfg,
 			AppContext:           appCtx,
 			RegisterShutdownWork: registerShutdownWork,
@@ -4126,7 +4129,7 @@ func main() {
 	var absSrv *http.Server
 	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
 		absSrv = newAudiobookshelfListener(cfg.AudiobookshelfCompat.Listen, deps.ABSHandler,
-			apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair), ipResolver, networkAccess.Registry)
+			apiv2.NewArtworkHandler(deps.ArtworkReadStore(), deps.ArtworkSigner, deps.ArtworkRepair), ipResolver, networkAccess.Registry)
 	}
 
 	// Run non-critical startup work in the background so it doesn't delay the
@@ -4413,10 +4416,11 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 	return s3client.NewClient(cfg)
 }
 
-func trickplayURLResolver(deps *api.Dependencies) artworkurl.Resolver {
-	if deps.ArtworkDelivery.External {
+func trickplayURLResolver(deps *api.Dependencies, sheets blobstore.Store) artworkurl.Resolver {
+	if deps.ArtworkDelivery.External || sheets != deps.Blobs.Assets {
 		// An external read endpoint can lag behind the S3 write that published
-		// the manifest. The signed server route reads the storage API directly.
+		// the manifest, and a private bucket has no client-facing URL. The
+		// signed server route reads the storage API directly.
 		return artworkurl.NewServerResolver(deps.ArtworkSigner)
 	}
 	return deps.ArtworkResolver

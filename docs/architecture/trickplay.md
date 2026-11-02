@@ -235,15 +235,23 @@ A manifest is served only while all of these hold:
 
 - its library still has `trickplay_enabled` on;
 - the row has a published `revision`;
-- `store_identity` is the assets store's current identity;
+- `store_identity` is the sheet store's current identity;
 - the file is the one the sheets were made from: the same size, the same
   hash when both sides have one (a hash may be computed later or not at
   all), and a duration within two seconds (probes round differently).
 
 Sheets are stored at `trickplay/<media_files.id>/<revision>/<index>.<revision>.jpg`
-in the assets store. The revision repeats in the file name so that
+in the sheet store. The revision repeats in the file name so that
 `artworkkey.Revision` reads it: the artwork route then serves sheets as
 immutable, and signed sheet URLs stay stable for a day.
+
+The sheet store is the assets store, unless `playback.trickplay_private_storage`
+is on and a private bucket gives an operational store separate from it
+(`trickplay.StoreFor`). Sheets then live in the operational store, reads always
+use signed `/api/v2/artwork/...` URLs, and that route reads `trickplay/` keys
+from the operational store (`blobstore.Route`). The setting is read at startup.
+Changing it changes `store_identity`, so every published sheet stops serving
+and is made again in the new store (step 4 of [Reconcile](#reconcile)).
 
 ## Reading previews
 

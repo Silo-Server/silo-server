@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -556,5 +558,31 @@ func TestSheetsToneMapNamesTheSourceSignal(t *testing.T) {
 		if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
 			t.Errorf("%s: tone map %+v, want %+v", name, got, tt.want)
 		}
+	}
+}
+
+// Sheets published before the private storage setting last changed stay in
+// the other store until remade; collecting their revision must delete them
+// there, whichever way the setting moved.
+func TestBlobNamespaceForCollectsRevisionsInBothStores(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		t.Run(fmt.Sprint("private=", private), func(t *testing.T) {
+			stores := blobstore.Stores{Assets: blobstoretest.New(), Operational: blobstoretest.New()}
+			const sheet = "trickplay/7/3/0.jpg"
+			for _, store := range []blobstore.Store{stores.Assets, stores.Operational} {
+				if err := store.Put(t.Context(), sheet, []byte{1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ns := BlobNamespaceFor(stores, StoreFor(stores, private))
+			if _, err := ns.Store.DeletePrefix(t.Context(), "trickplay/7/3/"); err != nil {
+				t.Fatal(err)
+			}
+			for _, store := range []blobstore.Store{stores.Assets, stores.Operational} {
+				if _, err := store.Stat(t.Context(), sheet); !errors.Is(err, blobstore.ErrNotFound) {
+					t.Fatalf("%s still holds the collected sheet (err %v)", store.Identity(), err)
+				}
+			}
+		})
 	}
 }

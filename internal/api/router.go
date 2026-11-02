@@ -148,6 +148,7 @@ type Dependencies struct {
 	FrontendFS      fs.FS
 	S3Public        *s3client.Client // public assets bucket client (may be nil)
 	Blobs           blobstore.Stores // backend-neutral blob stores (assets and operational)
+	ArtworkReads    blobstore.Store  // what the signed artwork route reads; nil reads Blobs.Assets
 	ArtworkBackend  string           // resolved blob storage backend name
 	ArtworkDelivery ArtworkDelivery
 	ArtworkSigner   *artworkurl.Signer
@@ -5318,6 +5319,16 @@ func metadataAIConfigFromServer(cfg *config.Config) metadatatranslation.Config {
 	}
 }
 
+// ArtworkReadStore is the store the signed artwork route reads: the assets
+// store, routing any namespace kept elsewhere (seek previews in the private
+// bucket) to its own store.
+func (deps Dependencies) ArtworkReadStore() blobstore.Store {
+	if deps.ArtworkReads != nil {
+		return deps.ArtworkReads
+	}
+	return deps.Blobs.Assets
+}
+
 // v2Dependencies assembles the gates the v2 listener composes onto its
 // operations from the same middleware values the v1 groups use, so the two
 // surfaces cannot drift in authorization strength.
@@ -5335,7 +5346,7 @@ func v2Dependencies(
 		ViewerAccess:    viewer,
 		ActingAdmin:     actingAdmin,
 		PermissionGates: map[string]func(http.Handler) http.Handler{},
-		ArtworkStore:    deps.Blobs.Assets,
+		ArtworkStore:    deps.ArtworkReadStore(),
 		ArtworkBackend:  deps.ArtworkBackend,
 		ArtworkSigner:   deps.ArtworkSigner,
 		ArtworkRepair:   deps.ArtworkRepair,

@@ -46,6 +46,13 @@ while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
 index or demuxed instead. The blob collector and sweep reach them in whichever
 store holds them (`blobgc.Namespace.Store`).
 
+Trickplay sheets (`trickplay/…`) stay in the assets store unless
+`playback.trickplay_private_storage` moves them to the operational store (see
+[trickplay](trickplay.md#serving)). With both stores present, the trickplay
+namespace deletes a collected revision from both, since revisions published
+before the setting changed remain in the other store until remade; the sweep
+lists the store new sheets go to.
+
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
 `PluginProvider.Slug()` returns a plugin's capability ID unvalidated, so a

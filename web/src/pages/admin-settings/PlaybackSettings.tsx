@@ -83,6 +83,7 @@ const PREVIEW_PLACEMENT_KEYS = [
 
 const PREVIEW_ADVANCED_KEYS = [
   "playback.trickplay_workers",
+  "playback.trickplay_private_storage",
   "playback.chapter_thumbnail_hdr_policy",
   "playback.chapter_thumbnail_software_tone_map_enabled",
 ];
@@ -613,6 +614,16 @@ export default function PlaybackSettings() {
                 value={form.getValue("playback.trickplay_workers")}
                 onChange={(v) => form.setValue("playback.trickplay_workers", v)}
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
+              />
+            )}
+            {supportsTrickplay && (
+              <SettingField
+                label="Keep seek previews in the private bucket"
+                type="toggle"
+                description="Store seek previews in the private bucket set in Storage instead of the public one, and serve them through Silo. Useful when the public bucket charges per request. Does nothing without a private bucket. Changing it makes every seek preview again."
+                value={form.getValue("playback.trickplay_private_storage") || "false"}
+                onChange={(v) => form.setValue("playback.trickplay_private_storage", v)}
+                restartRequired={restartKeys.has("playback.trickplay_private_storage")}
               />
             )}
             {!showPreviewPlacement && trickplayExecutionField}

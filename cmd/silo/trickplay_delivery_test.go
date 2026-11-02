@@ -13,12 +13,17 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 )
 
 func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
-	for _, delivery := range []string{"local", "s3", s3client.URLAuthPublic, s3client.URLAuthCloudflareToken} {
+	// "private" keeps sheets in the private bucket while the assets bucket
+	// presigns direct URLs: the sheet exists only in the private store.
+	for _, delivery := range []string{"local", "s3", s3client.URLAuthPublic, s3client.URLAuthCloudflareToken, "private"} {
 		t.Run(delivery, func(t *testing.T) {
 			const key = "trickplay/42/123/0.123.jpg"
 			data := []byte{0xff, 0xd8, 0xff, 0xd9}
@@ -27,7 +32,7 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 					return
 				}
-				if r.Method != http.MethodGet || r.URL.Path != "/silo/"+key {
+				if r.Method != http.MethodGet || r.URL.Path != "/silo/"+key || delivery == "private" {
 					http.NotFound(w, r)
 					return
 				}
@@ -51,7 +56,7 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 					Endpoint: storage.URL, Bucket: "silo", Region: "us-east-1",
 					AccessKey: "fixture", SecretKey: "fixture", PathStyle: true,
 				}
-				if delivery != "s3" {
+				if delivery != "s3" && delivery != "private" {
 					s3Cfg.PublicEndpoint = lagging.URL
 					s3Cfg.URLAuth = delivery
 					s3Cfg.TokenSecret = "fixture-token-secret"
@@ -67,7 +72,17 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			external := delivery != "local" && delivery != "s3"
+			sheets := deps.Blobs.Assets
+			if delivery == "private" {
+				private := blobstoretest.New()
+				if err := private.Put(t.Context(), key, data); err != nil {
+					t.Fatal(err)
+				}
+				deps.Blobs.Operational = private
+				sheets = trickplay.StoreFor(deps.Blobs, true)
+				deps.ArtworkReads = blobstore.Route(deps.Blobs.Assets, trickplay.KeyRoot, sheets)
+			}
+			external := delivery != "local" && delivery != "s3" && delivery != "private"
 			if deps.ArtworkDelivery.External != external {
 				t.Fatalf("external delivery = %v, want %v", deps.ArtworkDelivery.External, external)
 			}
@@ -84,7 +99,7 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 					t.Fatalf("external delivery status = %d, want 404", resp.StatusCode)
 				}
 			}
-			resolved := trickplayURLResolver(deps).ResolveURLs(t.Context(), []string{key})[key]
+			resolved := trickplayURLResolver(deps, sheets).ResolveURLs(t.Context(), []string{key})[key]
 			if resolved.URL == "" || resolved.ExpiresAt == nil || time.Until(*resolved.ExpiresAt) < time.Hour {
 				t.Fatal("sheet URL missing or lost its configured lifetime")
 			}
@@ -101,7 +116,7 @@ func TestTrickplayDeliveryBypassesLaggingExternalEndpoint(t *testing.T) {
 				if u.IsAbs() || u.Path != "/api/v2/artwork/"+key || u.Query().Get("sig") == "" {
 					t.Fatal("native sheet did not use the signed server artwork route")
 				}
-				server := httptest.NewServer(apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, nil))
+				server := httptest.NewServer(apiv2.NewArtworkHandler(deps.ArtworkReadStore(), deps.ArtworkSigner, nil))
 				t.Cleanup(server.Close)
 				readURL = server.URL + resolved.URL
 				badQuery := u.Query()

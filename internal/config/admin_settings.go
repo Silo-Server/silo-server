@@ -193,6 +193,10 @@ const (
 // sheets. Changing it makes both again.
 const PreviewImageWidthSettingKey = "playback.preview_image_width"
 
+// TrickplayPrivateStorageSettingKey keeps seek-preview sheets in the private
+// bucket instead of the assets store. It is read at startup.
+const TrickplayPrivateStorageSettingKey = "playback.trickplay_private_storage"
+
 // Bounds of PreviewImageWidthSettingKey, in pixels. Widths are even.
 const (
 	DefaultPreviewImageWidth = 300
@@ -391,6 +395,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
 	"playback.trickplay_execution":                   "local",
+	TrickplayPrivateStorageSettingKey:                "false",
 	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
 	PlaybackTranscodeSoftwareToneMapSettingKey:       "true",
@@ -665,7 +670,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
-		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
+		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style", TrickplayPrivateStorageSettingKey,
 		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
 		return normalizeAdminBool(key, value)
 
