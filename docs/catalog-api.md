@@ -1004,7 +1004,8 @@ type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
 ones included, replaces a stored date with the one the provider sends now,
 because providers revise them. A date the provider stops sending is kept,
 except when Identify, or an NFO on a manual refresh, corrects the item's match:
-the new movie's dates replace the stored ones even when it has none.
+the new movie's dates replace the stored ones even when it has none. A bulk
+enrichment pass is not a refresh and only fills dates that are empty.
 Locking release dates on an item also locks them.
 
 ## Advisory age
