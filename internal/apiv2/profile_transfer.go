@@ -71,8 +71,8 @@ type ProfileImportData struct {
 type ProfileImportResult struct {
 	SameServer bool                `json:"same_server" doc:"The export came from this server; library references were kept only then"`
 	Data       []ProfileImportData `json:"data"`
-	Unmatched  []string            `json:"unmatched" doc:"Titles of items this server's catalog does not hold"`
-	Hidden     []string            `json:"hidden" doc:"Titles of items the profile may not see: outside its libraries, or above its content-rating or advisory limits"`
+	Unmatched  []string            `json:"unmatched" doc:"Titles of items left out: not in this server's catalog, or not available to this profile. The two are not told apart"`
+	Hidden     []string            `json:"hidden" doc:"Always empty: items the profile may not see are listed in unmatched, so an import cannot reveal what a hidden library holds"`
 }
 
 type ProfileImportOutput struct{ Body ProfileImportResult }

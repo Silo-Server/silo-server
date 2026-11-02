@@ -137,6 +137,9 @@ func (a *applier) applyAccount(ctx context.Context, tx pgx.Tx, sel UserSelection
 			return applied{}, err
 		}
 		report.Created = true
+		if doc.lockedCredentials > 0 {
+			item.Notes = append(item.Notes, "A password or PIN in the backup used a format or cost this server does not accept; it was replaced, so set a new one.")
+		}
 	}
 	// The account locks come first, before any profile is created or any
 	// data row written (userdata.Preparer).

@@ -93,7 +93,8 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
       ) : null}
       {result.unmatched.length > 0 ? (
         <p className="text-muted-foreground text-[13px] break-words">
-          Not in this server&apos;s library, so left out: {titleList(result.unmatched)}.
+          Not in this server&apos;s library or not available to this profile, so left out:{" "}
+          {titleList(result.unmatched)}.
         </p>
       ) : null}
       {result.hidden.length > 0 ? (

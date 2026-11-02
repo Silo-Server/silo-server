@@ -984,7 +984,10 @@ deeper than 32, or more than 64 MiB; each data type then applies its own
 strict checks. Items the profile may not see are left out and listed: outside
 its allowed libraries (libraries it hid itself still count as visible), or
 above its content-rating or advisory limits, through the same canonical
-filter; so are preferences of libraries it cannot see. Library references survive only on the server
+filter; so are preferences of libraries it cannot see. They are listed with
+the items this catalog does not hold, in one list (`unmatched`, with `hidden`
+always empty), so an import cannot tell a restricted profile which titles its
+hidden libraries hold. Library references survive only on the server
 that wrote the export. A page layout's reference to a personal collection maps
 to the collection the export's collections import matches; one to an admin
 collection survives only on the server that wrote the export, while that

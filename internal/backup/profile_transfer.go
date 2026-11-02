@@ -232,8 +232,9 @@ type ProfileImportScope struct {
 // ProfileImportResult is what an import did, per data type.
 type ProfileImportResult struct {
 	Data []ReportData
-	// Unmatched lists, by title, items this catalog does not hold; Hidden
-	// those the profile may not see here. Both were left out.
+	// Unmatched lists, by title, items left out because this catalog does
+	// not hold them or the profile may not see them; Hidden is always empty
+	// (see Import).
 	Unmatched []string
 	Hidden    []string
 	// SameServer is true when the export came from this server.
@@ -426,7 +427,10 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	result.Unmatched, result.Hidden = items.unmatchedTitles(), items.hiddenTitles()
+	// One list for both: telling "not here" from "here but hidden" would let
+	// a restricted profile probe which titles its hidden libraries hold.
+	// Both lists are titles the document itself names.
+	result.Unmatched, result.Hidden = leftOutTitles(items.unmatchedTitles(), items.hiddenTitles()), []string{}
 	return result, nil
 }
 
@@ -451,4 +455,14 @@ func transferCollections(tx pgx.Tx, target userdata.Target, collections json.Raw
 		}
 		return "", false, nil
 	}
+}
+
+// leftOutTitles merges title lists, sorted and without repeats.
+func leftOutTitles(lists ...[]string) []string {
+	out := []string{}
+	for _, list := range lists {
+		out = append(out, list...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
