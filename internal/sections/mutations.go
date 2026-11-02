@@ -228,24 +228,8 @@ func (r *Repository) attemptMutation(ctx context.Context, m sectionMutation, wri
 			return err
 		}
 	}
-	slices.SortFunc(surfaces, func(a, b sectionSurface) int {
-		if a.scope < b.scope {
-			return -1
-		}
-		if a.scope > b.scope {
-			return 1
-		}
-		return a.library - b.library
-	})
-	surfaces = slices.Compact(surfaces)
-	for _, surface := range surfaces {
-		if _, err := tx.Exec(ctx, `INSERT INTO page_section_scope_revisions(scope,library_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, surface.scope, surface.library); err != nil {
-			return err
-		}
-		var revision int64
-		if err := tx.QueryRow(ctx, `SELECT revision FROM page_section_scope_revisions WHERE scope=$1 AND library_id=$2 FOR UPDATE`, surface.scope, surface.library).Scan(&revision); err != nil {
-			return err
-		}
+	if err := lockSurfaces(ctx, tx, surfaces); err != nil {
+		return err
 	}
 	if err := write(context.WithValue(ctx, sectionTransactionKey{}, tx)); err != nil {
 		return err
@@ -438,24 +422,29 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 	if s.Config == nil {
 		s.Config = json.RawMessage(`{}`)
 	}
-	// Collection parents are locked before the section row, the order
-	// Repository.attemptMutation takes them in, so an editor and this write
-	// cannot each hold one while waiting for the other.
+	// Locks are taken in Repository.attemptMutation's order, so an editor
+	// and this write cannot each hold one the other waits for: collection
+	// parents, then the section rows the write touches in id order, then
+	// the scope revisions of their surfaces.
+	var stored *PageSection
 	var previous []string
+	surfaces := []sectionSurface{surfaceOf(s.Scope, s.LibraryID)}
 	if !create {
-		stored, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1", s.ID))
-		if err != nil {
+		var err error
+		if stored, err = scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1", s.ID)); err != nil {
 			return err
 		}
 		previous = referencesOf([]*PageSection{stored})
+		surfaces = append(surfaces, surfaceOf(stored.Scope, stored.LibraryID))
 	}
 	if err := catalog.LockLibraryCollectionReferences(ctx, tx, previous, referencesOf([]*PageSection{s})); err != nil {
 		return err
 	}
-	if !create {
-		if err := lockSectionRow(ctx, tx, s.ID, previous); err != nil {
-			return err
-		}
+	if err := lockWrittenRows(ctx, tx, s, create, previous); err != nil {
+		return err
+	}
+	if err := lockSurfaces(ctx, tx, surfaces); err != nil {
+		return err
 	}
 	r := &Repository{}
 	txCtx := context.WithValue(ctx, sectionTransactionKey{}, tx)
@@ -472,15 +461,72 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 	return nil
 }
 
-// lockSectionRow locks a section row after its collection parents. A
-// reference written since previous was read is locked as well.
-func lockSectionRow(ctx context.Context, tx pgx.Tx, id string, previous []string) error {
-	locked, err := scanSection(tx.QueryRow(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = $1 FOR UPDATE", id))
+// lockWrittenRows locks, in id order, the rows WriteSectionInTx writes:
+// the section itself unless it is new, and the sections a featured one
+// unfeatures on its surface. A collection the section came to reference
+// since previous was read is locked as well.
+func lockWrittenRows(ctx context.Context, tx pgx.Tx, s *PageSection, create bool, previous []string) error {
+	var ids []string
+	if !create {
+		ids = append(ids, s.ID)
+	}
+	if s.Featured {
+		rows, err := tx.Query(ctx, `SELECT id FROM page_sections WHERE scope = $1 AND library_id IS NOT DISTINCT FROM $2 AND featured AND id <> $3`,
+			s.Scope, surfaceOf(s.Scope, s.LibraryID).libraryArg(), s.ID)
+		if err != nil {
+			return err
+		}
+		featured, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		ids = append(ids, featured...)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, "SELECT "+sectionColumns+" FROM page_sections WHERE id = ANY($1) ORDER BY id FOR UPDATE", ids)
 	if err != nil {
 		return err
 	}
-	if current := referencesOf([]*PageSection{locked}); !slices.Equal(current, previous) {
-		return catalog.LockLibraryCollectionReferences(ctx, tx, current, nil)
+	locked, err := scanSections(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, row := range locked {
+		if row.ID != s.ID {
+			continue
+		}
+		if current := referencesOf([]*PageSection{row}); !slices.Equal(current, previous) {
+			return catalog.LockLibraryCollectionReferences(ctx, tx, current, nil)
+		}
+	}
+	return nil
+}
+
+// lockSurfaces locks the scope revision rows of surfaces, in one sorted
+// order, creating any that do not exist yet.
+func lockSurfaces(ctx context.Context, tx pgx.Tx, surfaces []sectionSurface) error {
+	surfaces = slices.Clone(surfaces)
+	slices.SortFunc(surfaces, func(a, b sectionSurface) int {
+		if a.scope < b.scope {
+			return -1
+		}
+		if a.scope > b.scope {
+			return 1
+		}
+		return a.library - b.library
+	})
+	surfaces = slices.Compact(surfaces)
+	for _, surface := range surfaces {
+		if _, err := tx.Exec(ctx, `INSERT INTO page_section_scope_revisions(scope,library_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, surface.scope, surface.library); err != nil {
+			return err
+		}
+		var revision int64
+		if err := tx.QueryRow(ctx, `SELECT revision FROM page_section_scope_revisions WHERE scope=$1 AND library_id=$2 FOR UPDATE`, surface.scope, surface.library).Scan(&revision); err != nil {
+			return err
+		}
 	}
 	return nil
 }
