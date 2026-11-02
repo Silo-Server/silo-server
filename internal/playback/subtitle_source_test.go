@@ -197,6 +197,36 @@ func TestServeExtractAnswersBusyWithoutADemux(t *testing.T) {
 	}
 }
 
+// FFmpeg can't demux an index-only track from the source, so a failed index
+// read is the answer: no fallback demuxes it, with or without a source to
+// read through.
+func TestServeExtractNeverDemuxesAnIndexOnlyTrack(t *testing.T) {
+	ref := *testEmbeddedRef
+	ref.Codec, ref.IndexOnly = "webvtt", true
+	for _, tc := range []struct {
+		name   string
+		source EmbeddedSubtitleSource
+		opts   StreamExtractOpts
+	}{
+		{"whole track", &fakeEmbeddedSource{whole: embeddedsub.ErrNoCues, format: "matroska"}, StreamExtractOpts{}},
+		{"window", &fakeEmbeddedSource{window: embeddedsub.ErrNoCues}, StreamExtractOpts{SeekSeconds: 30, DurationSeconds: 60}},
+		{"no source", nil, StreamExtractOpts{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, source := newTestCache(t)
+			if tc.source != nil {
+				c.SetEmbeddedSource(tc.source)
+			}
+			opts := tc.opts
+			opts.InputPath, opts.SourceCodec, opts.Embedded, opts.FFmpegPath = source, "webvtt", &ref, "ffmpeg-must-not-run"
+			err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, StreamExtractSubtitle)
+			if !errors.Is(err, ErrSubtitleIndexOnly) {
+				t.Fatalf("err = %v, want ErrSubtitleIndexOnly", err)
+			}
+		})
+	}
+}
+
 // A demux whose kept copy fails runs again without it and doesn't send the
 // viewer what it already has.
 func TestServeExtractRetriesADemuxWhoseCopyFailed(t *testing.T) {
@@ -715,6 +745,9 @@ func TestServeSUPWindowOrder(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("no warm after a window from the source")
 				}
+				// The warm still writes the .sup into the test's directory;
+				// it frees its slot once it has finished.
+				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
 			}
 		})
 	}

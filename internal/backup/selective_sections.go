@@ -127,6 +127,12 @@ func (p *planner) planHomeSection(ctx context.Context, e HomeSectionEntry, libMa
 	if e.LibraryID != nil {
 		libraries = append([]int{*e.LibraryID}, libraries...)
 	}
+	if c := e.Collection; c != nil {
+		// A carried collection is created in its own libraries
+		// (restoreManagedCollection), which its config may not name.
+		libraries = append(libraries, c.LibraryID)
+		libraries = append(libraries, libraryIDsOf(c.Libraries)...)
+	}
 	for _, id := range libraries {
 		if _, ok := libMap[id]; ok {
 			continue

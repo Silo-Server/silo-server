@@ -104,19 +104,21 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 	codec, source := entry.Codec, entry.Source
 	trackID := TrackIDV3(file.ID, trackKindSubtitleV3, index)
 	transportIndex := -1
+	indexOnly := false
 	if source == "embedded" {
 		transportIndex = index - len(file.ExternalSubtitles)
+		indexOnly = transportIndex < len(file.SubtitleTracks) && file.SubtitleTracks[transportIndex].IndexOnly
 	}
 	deliveryCaps := request.ClientPlaybackContext.Deliveries[deliveryClass]
 	text := isTextSubtitleV3(codec)
 	ass := IsASS(codec)
 	clientBitmap := isClientRenderableBitmapSubtitleV3(codec)
 	burnInBitmap := clientBitmap || normalizeCodecV3(codec) == "dvb_teletext"
-	if !text && !burnInBitmap {
+	if !subtitleCodecRoutableV3(codec) {
 		// Unknown codecs (arib_caption, ...) have no validated client render
 		// path and no validated burn-in filter; promising a silent burn-in
 		// would produce a plan the transcoder cannot honor.
-		return subtitleTerminalV3("subtitle_codec_unsupported", fmt.Sprintf("Subtitle format %s has no validated rendering or burn-in route.", codec))
+		return subtitleTerminalV3("subtitle_codec_unsupported", subtitleCodecUnsupportedMessageV3(codec))
 	}
 	if source == SubtitleSourceEmbeddedV3 {
 		if native, nativeCaps, ok := nativeEmbeddedSubtitleV3(file, request, deliveryClass, transportIndex, audioIndex, facts); ok {
@@ -164,7 +166,9 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 		}
 	}
 	if transcodeAllowed {
-		if source != "embedded" {
+		// Burn-in demuxes the track from the source, which FFmpeg can't do
+		// for an index-only track.
+		if source != "embedded" || indexOnly {
 			return subtitleTerminalV3("subtitle_burn_in_source_unsupported", "The selected subtitle source cannot be burned in by the installed transport.")
 		}
 		return SubtitlePolicyResultV3{
@@ -242,6 +246,23 @@ func isClientRenderableBitmapSubtitleV3(codec string) bool {
 	return NeedsBurnIn(codec)
 }
 
+// subtitleCodecRoutableV3 reports whether any route can show a track of
+// codec: a text track renders or converts, and a bitmap track renders or
+// burns in. Other codecs (arib_caption, a format the probe couldn't name)
+// have none.
+func subtitleCodecRoutableV3(codec string) bool {
+	return isTextSubtitleV3(codec) || isClientRenderableBitmapSubtitleV3(codec) || normalizeCodecV3(codec) == "dvb_teletext"
+}
+
+// subtitleCodecUnsupportedMessageV3 is the subtitle_codec_unsupported
+// terminal's message for codec.
+func subtitleCodecUnsupportedMessageV3(codec string) string {
+	if strings.TrimSpace(codec) == "" {
+		return "The subtitle track's format was not recognized, so it has no validated rendering or burn-in route."
+	}
+	return fmt.Sprintf("Subtitle format %s has no validated rendering or burn-in route.", codec)
+}
+
 func subtitleTerminalV3(reason, message string) SubtitlePolicyResultV3 {
 	return SubtitlePolicyResultV3{Decision: SubtitleDecisionV3{Mode: SubtitleOffV3}, SelectedIndex: -1, TransportIndex: -1, Terminal: &TerminalV3{Reason: reason, Message: message}}
 }
@@ -260,8 +281,10 @@ func nativeEmbeddedSubtitleV3(file *models.MediaFile, request StartRequestV3, de
 		return nil, none, false
 	}
 	track := file.SubtitleTracks[ordinal]
-	// Teletext and unknown codecs have no validated client render path.
-	if track.Index < 0 || !isTextSubtitleV3(track.Codec) && !isClientRenderableBitmapSubtitleV3(track.Codec) {
+	// Teletext and unknown codecs have no validated client render path, and
+	// a client's demuxer can't read an index-only track any more than the
+	// server's FFmpeg can.
+	if track.Index < 0 || track.IndexOnly || !isTextSubtitleV3(track.Codec) && !isClientRenderableBitmapSubtitleV3(track.Codec) {
 		return nil, none, false
 	}
 	if facts == nil {

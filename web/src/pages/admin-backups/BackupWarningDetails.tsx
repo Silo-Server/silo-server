@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
 import { Button } from "@/components/ui/button";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 import { Disclosure } from "./Disclosure";
@@ -169,18 +170,16 @@ function MissingFiles({ blobs }: { blobs: AdminBackup["missing_blobs"] }) {
 /** A backup's warnings as headlines with grouped details, and a plain-text copy for an issue. */
 export function BackupWarningDetails({ backup }: { backup: AdminBackup }) {
   const copy = () =>
-    navigator.clipboard
-      .writeText(
-        warningDetailsReport({
-          backupId: backup.id,
-          omitted: backup.restore_set_omitted,
-          missing: backup.missing_blobs,
-        }),
-      )
-      .then(
-        () => toast.success("Details copied"),
-        () => toast.error("Couldn't copy the details. Open each list and copy it by hand."),
-      );
+    copyTextToClipboard(
+      warningDetailsReport({
+        backupId: backup.id,
+        omitted: backup.restore_set_omitted,
+        missing: backup.missing_blobs,
+      }),
+    ).then(
+      () => toast.success("Details copied"),
+      () => toast.error("Couldn't copy the details. Open each list and copy it by hand."),
+    );
   return (
     <div className="min-w-0 space-y-3">
       <OmittedAccounts omitted={backup.restore_set_omitted} context="backup" />

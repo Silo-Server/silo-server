@@ -109,6 +109,9 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		}
 	} else if opts.InputPath == "" {
 		return errors.New("StreamExtractSubtitle: InputPath is required")
+	} else if opts.Embedded != nil && opts.Embedded.IndexOnly {
+		// Every fallback to demuxing the source ends here.
+		return fmt.Errorf("StreamExtractSubtitle: %w", ErrSubtitleIndexOnly)
 	}
 
 	bin := opts.FFmpegPath

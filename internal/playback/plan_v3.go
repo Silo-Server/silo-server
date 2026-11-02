@@ -1636,6 +1636,12 @@ func hlsSubtitleRenditionEligibleV3(input PlannerInputV3, subtitle SubtitlePolic
 		subtitle.Decision.Embedded != nil || !SubtitleRenditionCodecSupported(subtitle.Codec) {
 		return false
 	}
+	// The pipeline rendition is a WebVTT output of the stream's own FFmpeg,
+	// which can't demux an index-only track; on-demand renditions read it
+	// through the index instead.
+	if tracks := input.EffectiveFile.SubtitleTracks; subtitle.TransportIndex >= len(tracks) || tracks[subtitle.TransportIndex].IndexOnly {
+		return false
+	}
 	if subtitle.Decision.Mode != SubtitleRenderV3 && subtitle.Decision.Mode != SubtitleConvertV3 ||
 		IsASS(subtitle.Codec) && input.Request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
 		return false

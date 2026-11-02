@@ -101,7 +101,9 @@ func openBucket(b *BucketConfig, cipher *secret.Cipher, stamp, role string) (*Bu
 		}
 		plain, err := cipher.Decrypt(b.SealedSecretKey, journalSecretAAD(stamp, role))
 		if err != nil {
-			return nil, fmt.Errorf("reading the %s bucket credentials: %w; use the SECRET_KEY the restore ran with", role, err)
+			// The cause is not wrapped: Decrypt's errors can quote parts of
+			// the sealed value, and this one is printed.
+			return nil, fmt.Errorf("reading the %s bucket credentials: they do not open with this SECRET_KEY; use the SECRET_KEY the restore ran with", role)
 		}
 		out.SecretKey = plain
 	}

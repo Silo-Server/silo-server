@@ -572,3 +572,37 @@ func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
 		})
 	}
 }
+
+// FFmpeg can't demux an index-only track, so it can't ride the stream or be
+// burned in. The server's external delivery, which reads the index, is its
+// only route, and a batch demux of the file's text tracks leaves it out.
+func TestIndexOnlySubtitleIsDeliveredOnlyExternally(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		indexOnly bool
+		profile   []SubtitleProfile
+		external  bool
+		burnIn    bool
+	}{
+		{"embed and external", true, []SubtitleProfile{{Format: "vtt", Method: "Embed"}, {Format: "vtt", Method: "External"}}, true, false},
+		{"embed and external, readable track", false, []SubtitleProfile{{Format: "vtt", Method: "Embed"}, {Format: "vtt", Method: "External"}}, false, false},
+		{"encode only", true, []SubtitleProfile{{Format: "vtt", Method: "Encode"}}, false, false},
+		{"encode only, readable track", false, []SubtitleProfile{{Format: "vtt", Method: "Encode"}}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := testCompatVersion()
+			version.SubtitleTracks = []catalog.VersionSubtitleTrack{{Index: 3, Codec: "webvtt", IndexOnly: tc.indexOnly}}
+			source := testCompatSource(NewResourceIDCodec(), version)
+			source.CanBurnSubtitle = true
+			source.SelectedSubtitleStreamIndex = new(3)
+			applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: tc.profile}, false)
+			if source.SubtitleDeliveries[3].External != tc.external || source.SubtitleBurnIn != tc.burnIn {
+				t.Fatalf("delivery %+v, burn-in %v; want external %v, burn-in %v", source.SubtitleDeliveries[3], source.SubtitleBurnIn, tc.external, tc.burnIn)
+			}
+		})
+	}
+	file := &models.MediaFile{SubtitleTracks: []models.SubtitleTrack{{Codec: "webvtt", IndexOnly: true}, {Codec: "subrip"}}}
+	if got := compatTextSubtitleTracks(file); len(got) != 1 || got[0].Ordinal != 1 {
+		t.Fatalf("batch tracks = %+v, want only the SubRip track", got)
+	}
+}

@@ -144,7 +144,7 @@ type AdminBackupList struct {
 	DestinationAvailable bool                 `json:"destination_available"`
 	KeyCheck             string               `json:"key_check" doc:"This server's SECRET_KEY check value, 16 hex digits in groups of 4. It names the key without revealing it; silo secret check prints it for a key"`
 	Enabled              bool                 `json:"enabled" doc:"Whether nightly backups run (backup.enabled)"`
-	Busy                 bool                 `json:"busy" doc:"Whether a backup or restore holds the cluster-wide backup lock now"`
+	Busy                 bool                 `json:"busy" doc:"Whether a backup, delete, or selective restore holds the cluster-wide backup lock now"`
 	Active               *AdminBackupActive   `json:"active,omitempty" doc:"The operation holding the lock, started on any server"`
 	LastRun              *AdminBackupLastRun  `json:"last_run,omitempty" doc:"The latest backup run, including one that failed or was interrupted"`
 	Keep                 int                  `json:"keep" doc:"How many nightly and manual backups rotation keeps (backup.keep)"`
@@ -419,6 +419,11 @@ func registerAdminBackupObjectDownload(reg *Registry) {
 		sw.WriteHeader(http.StatusOK)
 		if _, err := io.Copy(sw, body); err != nil {
 			slog.WarnContext(r.Context(), "backup download interrupted", "component", "backup", "backup_id", id, "object", name)
+			// The 200 is already sent: abort the connection so the client
+			// sees a failed download rather than a complete short file.
+			if r.Context().Err() == nil {
+				panic(http.ErrAbortHandler)
+			}
 		}
 	}))
 }

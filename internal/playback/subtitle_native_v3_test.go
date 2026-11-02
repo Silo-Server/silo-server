@@ -20,6 +20,7 @@ func TestNativeEmbeddedSubtitleV3RequiresExactNegotiatedRoute(t *testing.T) {
 		{name: "feature absent", change: func(f *models.MediaFile, r *StartRequestV3, d *string) { r.ClientFeatures = nil }},
 		{name: "wrong container", change: func(f *models.MediaFile, r *StartRequestV3, d *string) { f.Container = "mp4" }},
 		{name: "wrong codec", change: func(f *models.MediaFile, r *StartRequestV3, d *string) { f.SubtitleTracks[0].Codec = "ass" }},
+		{name: "index-only track", change: func(f *models.MediaFile, r *StartRequestV3, d *string) { f.SubtitleTracks[0].IndexOnly = true }},
 		{name: "ambiguous stream index", change: func(f *models.MediaFile, r *StartRequestV3, d *string) {
 			f.SubtitleTracks = append(f.SubtitleTracks, f.SubtitleTracks[0])
 		}},

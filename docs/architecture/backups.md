@@ -176,8 +176,12 @@ other. On a local artwork backend that is the shared-volume requirement
 artwork already has in a multi-server deployment
 ([blob-storage.md](blob-storage.md)).
 
-Local backups hold the same data as the database, password hashes included,
-and sit in the data folder with the database's protection. Downloads are
+Local backups hold the same data as the database, password hashes included.
+The local destination writes them readable by the server's account only:
+`backups/` and every folder under it are 0700, each object 0600, where the
+store's own modes are 0755 and 0644. `backups/` is made private before an
+object is written, so a file is never readable by another account while it
+is written. Downloads are
 short-lived and scoped to one object: a presigned URL where the store can
 presign, or a link to `GET /api/v2/admin/backups/{id}/objects/{name}` signed
 under its own capability domain (`artworkurl.NewBackupObjectSigner`) where it
@@ -934,9 +938,13 @@ restores into a pre-created empty database and a separate directory laid out
 as a local store root, changing nothing in the live deployment. It needs no
 `CREATEDB` or rename privilege. After `pg_restore --exit-on-error
 --no-owner --no-privileges`, it verifies the schema version, the applied
-migrations, and the table inventory against the manifest. The target stays
-open for the operator to point `DATABASE_URL` and the artwork storage
-settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
+migrations, and the table inventory against the manifest. It then deletes
+the recorded storage identities (`artwork.storage_identity`,
+`storage.operational_identity`) from the target: they name the backed-up
+server's stores, so a server started on the copy would refuse the stores it
+is configured with. That server records its own on its first start or write.
+The target stays open for the operator to point `DATABASE_URL` and the
+artwork storage settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
 artwork, avatars, and branding will be missing. Separate mode clears no
 Redis: the live deployment may still be running on it, and which Redis a
 server on the restored database will use is not known here. The command
