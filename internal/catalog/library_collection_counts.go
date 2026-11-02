@@ -197,7 +197,7 @@ func buildCountVisibleStoredMembersSQL(collectionIDs []string, access AccessFilt
             FROM library_collection_items lci
             JOIN media_items mi ON mi.content_id = lci.media_item_id
             WHERE lci.collection_id = ANY($1)`)
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range listedItemAccessConditions(access, &args, &argIdx) {
 		sql.WriteString("\n            AND " + c)
 	}
 	// The catalog page a collection card opens never lists manga chapters.

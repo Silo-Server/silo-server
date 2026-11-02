@@ -17,8 +17,11 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
+./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
+./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
+./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
@@ -87,9 +90,33 @@
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
 
+# A subtree scan of a deleted book folder reconciles its files, except under a
+# configured root that is now an empty directory (a lost mount).
+./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
+
+# A monitored rename of a book folder keeps the book: the old path is
+# reconciled first, and the removal grace holds the book for the new path.
+./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.
 ./internal/catalog TestStaleMembershipRemovalLocksSeriesFirstDB
+
+# A subtree scan in a podcast library indexes the show folder with the podcast
+# scanner, keeps the show's content ID, and reconciles only that show, not a
+# library root nested inside it; a show being written survives another scan's
+# membership sweep, two scans of the same new show create it once, a show scan
+# that stops before its commit leaves no show behind and needs one connection,
+# a scan counts only the episodes it indexed, and a stale scan leaves an episode
+# another scan found new present and one it found removed missing.
+./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
+./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
+./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
+./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
+./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
+./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
+./internal/scanner TestScanSubtreeCountsOnlyTheEpisodesItIndexed
+./internal/scanner TestStalePodcastScanLeavesNewerCatalogStateAlone
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
@@ -102,6 +129,7 @@
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
+./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -191,6 +219,11 @@
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
 
+# The owning account resets an Apple installation whose key was lost; another
+# account is refused, and a registration queued behind the reset still binds.
+./internal/notifications TestApplePushInstallationResetDB
+./internal/notifications TestApplePushResetOrdersAgainstInFlightRegistrationDB
+
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
@@ -275,6 +308,7 @@
 ./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/keptsub TestKeptTrackRowsAndGarbageDB
@@ -369,7 +403,7 @@
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
-./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
+./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
 
 # A resumed play's measured watch time survives repeated finalizations and is
 # what admin watch totals count.
@@ -457,6 +491,11 @@
 # installation and user settings lists still answer with the row present.
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
+
+# An enabled plugin whose stored archive won't open stays in the installation
+# list, marked failed, leaves the user settings list working, and turning it off
+# returns its row.
+./internal/api/handlers TestPluginListsKeepWorkingWithAnUnreadableArchiveDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -722,9 +761,18 @@
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
 
+# Restarting terminal series refresh debt for a newly aired by-date file keeps
+# the row's other reasons and leaves a due or leased row to its writer.
+./internal/metadata TestRestartTerminalEpisodeDebtDB
+./internal/metadata TestByDateEpisodeDebtSurvivesCoreRefreshDB
+
 # The artwork reconcile verify sweep and bulk reset leave bundled app-relative
 # collection posters alone: neither checks them against storage nor clears them.
 ./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
+
+# Local artwork in a title folder linked out of the library is vouched for by
+# present cataloged files of the same title under that folder.
+./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB
 
 # Series watch counts answer only series the viewer may see (not podcast shows),
 # with the same counts from the SQL rollup and the per-episode fold.
