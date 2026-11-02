@@ -138,7 +138,7 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
 			return
 		}
-		entries, err = h.filterProgress(r.Context(), entries, libraryID)
+		entries, err = h.filterProgress(r.Context(), entries, libraryID, false)
 	} else {
 		entries, err = h.listProgressFrom(r.Context(), store, profileID, ProgressQuery{Status: status, LibraryID: libraryID, Limit: limit, Offset: offset})
 	}
@@ -172,9 +172,9 @@ type ProgressQuery struct {
 	Offset    int
 }
 
-// ListProgress is the status/pagination listing v1 GET /progress (without
-// ?since=) and v2 listProgress both serve: the store window, then the viewer
-// access and library filters. A failure is an *APIError.
+// ListProgress is the status/offset listing v1 GET /progress (without
+// ?since=) serves: the store window, then the viewer access and library
+// filters. A failure is an *APIError.
 func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileID string, q ProgressQuery) ([]userstore.WatchProgress, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -219,7 +219,7 @@ func (h *ProgressHandler) ListProgressPage(ctx context.Context, userID int, prof
 		if err != nil {
 			return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		}
-		kept, err := h.filterProgress(ctx, batch, libraryID)
+		kept, err := h.filterProgress(ctx, batch, libraryID, true)
 		if err != nil {
 			return nil, false, err
 		}
@@ -242,25 +242,30 @@ func (h *ProgressHandler) listProgressFrom(ctx context.Context, store userstore.
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 	}
-	return h.filterProgress(ctx, entries, q.LibraryID)
+	return h.filterProgress(ctx, entries, q.LibraryID, false)
 }
 
 // filterProgress drops the rows the viewer may not see, then the rows outside
-// the requested library.
-func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int) ([]userstore.WatchProgress, error) {
+// the requested library. everyViewer is the v2 listing's rule; the frozen v1
+// listings keep checking restricted viewers only, because their offset pages
+// fetch no replacement for a dropped row and would come back short.
+func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int, everyViewer bool) ([]userstore.WatchProgress, error) {
+	var err error
 	// Drop entries the viewer can't open before they reach the client, or the
 	// client fans out per-item detail fetches that 404: a dead Continue
 	// Watching tile it cannot clear. That covers items outside a restricted
-	// profile's scope (e.g. an XXX title) and, for every viewer, removed
-	// titles: deleting an item leaves its progress rows behind. The sync and
-	// bootstrap paths apply the same check.
-	if h.LibraryLookup == nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
-	}
-	scope, _ := access.GetScope(ctx)
-	entries, err := filterProgressEntriesByAccess(ctx, entries, scope, h.LibraryLookup)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+	// profile's scope (e.g. an XXX title) and, with everyViewer, removed
+	// titles: deleting an item leaves its progress rows behind. The v2 sync
+	// and bootstrap paths check every viewer the same way.
+	scope, ok := access.GetScope(ctx)
+	if everyViewer || (ok && (scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active())) {
+		if h.LibraryLookup == nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+		}
+		entries, err = filterProgressEntriesByAccess(ctx, entries, scope, h.LibraryLookup)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+		}
 	}
 
 	if libraryID > 0 {
