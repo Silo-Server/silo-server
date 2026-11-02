@@ -766,6 +766,9 @@ func (h *ItemsHandler) storedCollectionContentIDPage(ctx context.Context, sessio
 	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
 		return nil, 0, nil
 	}
+	// A member in no library (one the scanner's file removal grace holds)
+	// is gone from its library pages, so it is no child here either.
+	conditions = append(conditions, catalog.InSomeLibraryWhere("mi.content_id"))
 	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
 	from := "library_collection_items lci JOIN media_items mi ON mi.content_id = lci.media_item_id WHERE " + strings.Join(conditions, " AND ")
 

@@ -17,8 +17,10 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
+./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
+./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB

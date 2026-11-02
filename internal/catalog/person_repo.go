@@ -693,7 +693,7 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		args = append(args, query)
 		argIdx++
 	}
-	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx))
+	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx))
 	where := strings.Join(conditions, " AND ")
 	const columns = `id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 		photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
@@ -790,7 +790,11 @@ func personCreditVisibleSQL(personIDExpr string, types []string, scope personCre
 	}
 	// Episode access follows the parent series, while scope and excluded
 	// media types describe the credited item itself.
-	appendLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	if scope.Listed {
+		appendListedLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	} else {
+		appendLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	}
 	applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, args, argIdx)
 	applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, args, argIdx)
 	if scope.LibraryID > 0 {
@@ -822,9 +826,14 @@ func personCreditVisibleSQL(personIDExpr string, types []string, scope personCre
 // guest star belongs to the series' libraries. ContentID also matches the
 // credited item itself: a series scope covers its episodes' guest stars, and
 // an episode scope covers that episode's own credits.
+//
+// Listed counts only credits on items in a library, as people listings do; a
+// read by ID leaves it unset, so a person credited on a title the scanner's
+// file removal grace holds still opens, like the title itself.
 type personCreditScope struct {
 	LibraryID int
 	ContentID string
+	Listed    bool
 }
 
 // maxPersonConflictResolutions bounds how many external-id collisions a single
@@ -1779,13 +1788,15 @@ func (r *PersonRepository) ListByKind(ctx context.Context, contentID string, kin
 }
 
 // CountItemsByType returns the number of media items a person appears in,
-// grouped by item type (e.g. "movie", "series", "episode").
+// grouped by item type (e.g. "movie", "series", "episode"). It counts items in
+// a library, judged for an episode by its parent series.
 func (r *PersonRepository) CountItemsByType(ctx context.Context, personID int64) (map[string]int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT mi.type, COUNT(DISTINCT mi.content_id)
 		FROM item_people ip
 		JOIN media_items mi ON mi.content_id = ip.content_id
 		WHERE ip.person_id = $1
+		  AND `+InSomeLibraryWhere(`CASE WHEN mi.type = 'episode' THEN `+episodeParentSeriesIDExpr("mi.content_id")+` ELSE mi.content_id END`)+`
 		GROUP BY mi.type`, personID,
 	)
 	if err != nil {
@@ -1859,7 +1870,7 @@ type PersonSearchOptions struct {
 func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts PersonSearchOptions) ([]models.Person, int, error) {
 	args := []any{}
 	argIdx := 1
-	scope := personCreditScope{LibraryID: opts.LibraryID, ContentID: opts.ContentID}
+	scope := personCreditScope{LibraryID: opts.LibraryID, ContentID: opts.ContentID, Listed: true}
 	visible := personCreditVisibleSQL("p.id", videoCreditTypes, scope, opts.Filter, &args, &argIdx)
 	personConditions := []string{}
 	addName := func(clause, value string) {
