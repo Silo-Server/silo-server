@@ -46,7 +46,7 @@ export function ProfilesCard({
         profiles.data.map((profile, index) => (
           <ListRow
             key={profile.id}
-            leading={<InitialAvatar name={profile.name} seed={index} />}
+            leading={<InitialAvatar name={profile.name} seed={index} src={profile.avatar_url} />}
             title={profile.name}
             trailing={
               watching.has(profile.id)

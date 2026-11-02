@@ -565,6 +565,14 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 		{name: "server channel", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
 			return BuildServerChannelDiscordContent(digestContentGroups(10), false)
 		}},
+		// A request overview is client-supplied up to the ~1 MiB body cap;
+		// clipping it must not cost time proportional to its length.
+		{name: "request with a 1 MiB overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
+			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
+				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
+				Overview: strings.Repeat(digestOverview, 2000),
+			})
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -574,6 +582,24 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 			}
 			checkDiscordDigest(t, tc, payload)
 		})
+	}
+}
+
+// TestTruncateWithEllipsisKeepsRuneBoundary covers the byte limit falling
+// inside a multibyte rune: the cut backs up to the rune start.
+func TestTruncateWithEllipsisKeepsRuneBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		limit int
+		want  string
+	}{
+		{value: strings.Repeat("é", 10), limit: 10, want: "ééé…"}, // cut at byte 7, inside "é"
+		{value: strings.Repeat("申", 10), limit: 10, want: "申申…"},  // cut at byte 7, inside "申"
+		{value: "abcdefghijk", limit: 10, want: "abcdefg…"},
+	} {
+		if got := truncateWithEllipsis(tc.value, tc.limit); got != tc.want {
+			t.Errorf("truncateWithEllipsis(%q, %d) = %q, want %q", tc.value, tc.limit, got, tc.want)
+		}
 	}
 }
 

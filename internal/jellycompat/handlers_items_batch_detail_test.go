@@ -42,7 +42,7 @@ func (c *equivalencePageContent) GetItemDetail(_ context.Context, _ *Session, id
 	return &cp, nil
 }
 
-func (c *equivalencePageContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int) (map[string]*upstreamItemDetail, error) {
+func (c *equivalencePageContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	c.batchCalls++
 	if c.failBatch {
 		return nil, &HTTPError{StatusCode: 500, Message: "batch unavailable"}
@@ -171,7 +171,7 @@ func TestBatchListItemDetailsSkipsPerItemFallbackAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	details := h.batchListItemDetails(ctx, &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, []string{"movie-1", "episode-1"}, nil)
+	details := h.batchListItemDetails(ctx, &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, []string{"movie-1", "episode-1"}, nil, nil)
 	if content.batchCalls != 1 || content.perItemCalls != 0 || len(details) != 0 {
 		t.Fatalf("batchCalls=%d perItemCalls=%d details=%d after cancel; want 1, 0 and 0", content.batchCalls, content.perItemCalls, len(details))
 	}

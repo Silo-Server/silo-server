@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -319,6 +320,14 @@ func TestLongTitlePlaylistsCarryTheSignedQueryOnce(t *testing.T) {
 				return buildManifestForTest(t, &TranscodeSession{opts: encoded}, rawQuery)
 			},
 			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery, false),
+		},
+		{
+			// A quote cannot sit in a definition's quoted-string value.
+			name: "encoded transcode, query with a double quote",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, &TranscodeSession{opts: encoded}, rawQuery+`&x="`)
+			},
+			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery+"&x=%22", false),
 		},
 		{
 			name: "copy remux, complete keyframe playlist",
@@ -745,6 +754,27 @@ func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
 	}
 }
 
+// TestPlaybackManifestRefusesAnOversizedQuery covers both entry points the API
+// and the transcode node serve playlists through: a query that every URI would
+// repeat is refused past maxManifestQueryBytes instead of multiplied.
+func TestPlaybackManifestRefusesAnOversizedQuery(t *testing.T) {
+	session := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}}
+	for _, query := range []string{
+		"st=" + strings.Repeat("a", maxManifestQueryBytes),
+		// Under the bound as sent, over it once each quote is escaped.
+		"st=" + strings.Repeat(`"`, maxManifestQueryBytes/2),
+	} {
+		for name, build := range map[string]func(string, string) ([]byte, error){
+			"BuildPlaybackManifest":              session.BuildPlaybackManifest,
+			"BuildSourceAlignedPlaybackManifest": session.BuildSourceAlignedPlaybackManifest,
+		} {
+			if _, err := build("segment/", query); !errors.Is(err, ErrManifestQueryTooLong) {
+				t.Errorf("%s(%d-byte query) error = %v, want ErrManifestQueryTooLong", name, len(query), err)
+			}
+		}
+	}
+}
+
 func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
 	if !CanGenerateSyntheticManifest(100_000, 2) {
 		t.Fatal("historical 50,000-segment manifest should remain supported")
@@ -1006,6 +1036,38 @@ func TestWaitForSegment_RestartingSessionReturnsNotFoundInsteadOfTranscodeFailed
 	_, err := session.WaitForSegment("seg_00010.m4s", 5*time.Millisecond)
 	if !errors.Is(err, ErrSegmentNotFound) {
 		t.Fatalf("WaitForSegment error = %v, want ErrSegmentNotFound", err)
+	}
+}
+
+// A segment wait ends as soon as its request does, whether FFmpeg is running
+// or restarting, instead of polling until the timeout for a client that left.
+func TestWaitForOpenSegmentContextEndsWithTheRequest(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		restarting bool
+	}{
+		{name: "running"},
+		{name: "restarting", restarting: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				session := &TranscodeSession{outputDir: t.TempDir(), running: true}
+				if tt.restarting {
+					session.restarting = &restartFlight{done: make(chan struct{})}
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				time.AfterFunc(50*time.Millisecond, cancel)
+
+				started := time.Now()
+				_, err := session.WaitForOpenSegmentContext(ctx, "seg_00010.ts", 30*time.Second)
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("WaitForOpenSegmentContext error = %v, want context.Canceled", err)
+				}
+				if waited := time.Since(started); waited > 50*time.Millisecond {
+					t.Fatalf("wait returned %v after it started, want when the request ended at 50ms", waited)
+				}
+			})
+		})
 	}
 }
 

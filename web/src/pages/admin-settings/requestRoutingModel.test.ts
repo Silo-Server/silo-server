@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { PluginAdminForm, PluginAdminFormField, RequestIntegration } from "@/api/types";
-import type { RequestRoute, RequestRoutePreviewRule } from "@/api/v2/adminRequests";
+import type {
+  RequestRoute,
+  RequestRouteConditions,
+  RequestRoutePreviewRule,
+} from "@/api/v2/adminRequests";
 
 import {
   autoRuleName,
@@ -116,6 +120,9 @@ describe("rule sentences", () => {
     expect(ruleSentence({ company_ids: [10342] }, "movie")).toBe(
       "When a movie is made by studio 10342",
     );
+    expect(ruleSentence({ series_statuses: ["ended", "cancelled"] }, "series")).toBe(
+      "When a series is ended or cancelled",
+    );
   });
 
   it("names a rule from its conditions when the admin leaves the name blank", () => {
@@ -125,6 +132,11 @@ describe("rule sentences", () => {
       "Family, PG or lower",
     );
     expect(autoRuleName({ requester_user_ids: [2] }, "movie", users)).toBe("Requested by kid");
+    // A preset's set of statuses is named after the preset.
+    expect(
+      autoRuleName({ series_statuses: ["upcoming", "returning", "in_production"] }, "series"),
+    ).toBe("Continuing or upcoming");
+    expect(autoRuleName({ series_statuses: ["ended"] }, "series")).toBe("Ended");
   });
 
   it("reads a destination with names, not IDs, and only what it overrides", () => {
@@ -218,12 +230,13 @@ describe("the pass-through choice", () => {
 
 describe("condition rows", () => {
   it("round-trips includes, exclusions, years and a rating", () => {
-    const conditions = {
+    const conditions: RequestRouteConditions = {
       anime: false,
       genre_ids: [16],
       exclude_genre_ids: [27],
       exclude_original_languages: ["en"],
       year_from: 1990,
+      series_statuses: ["ended", "cancelled"],
       max_content_rating: "PG-13",
       requester_user_ids: [2],
     };
@@ -234,6 +247,7 @@ describe("condition rows", () => {
       "genre",
       "language",
       "year",
+      "status",
       "rating",
       "requester",
     ]);
@@ -300,6 +314,10 @@ describe("never-used rules", () => {
       false,
     );
     expect(conditionsCover({ max_content_rating: "PG" }, {})).toBe(false);
+    // A series has one status, so wanting Returning rules out Ended.
+    expect(
+      conditionsCover({ exclude_series_statuses: ["ended"] }, { series_statuses: ["returning"] }),
+    ).toBe(true);
   });
 
   it("needs the rule above to decide every copy the rule below decides", () => {
@@ -402,8 +420,11 @@ describe("how it was decided", () => {
   });
 
   it("lists the title's facts", () => {
-    expect(factsSentence({ ...facts, content_rating: "TV-Y7" }, "series")).toBe(
-      "English · United States · 2019 · Rated TV-Y7 · Animation",
+    expect(
+      factsSentence({ ...facts, content_rating: "TV-Y7", series_status: "returning" }, "series"),
+    ).toBe("English · United States · 2019 · Returning · Rated TV-Y7 · Animation");
+    expect(factsSentence(facts, "series")).toBe(
+      "English · United States · 2019 · Status unknown · No rating · Animation",
     );
     expect(factsSentence({ ...facts, anime: true }, "movie")).toBe(
       "anime · English · United States · 2019 · No rating · Animation",
@@ -481,6 +502,14 @@ describe("how it was decided", () => {
     ).toBe(
       "1. Rule — doesn't match: requested by anyone (wants kid); language is English (wants anything but English)",
     );
+    expect(
+      traceLine(
+        step({ route_name: "Ended", unmet_conditions: ["series_statuses"] }),
+        1,
+        { series_statuses: ["ended", "cancelled"] },
+        { ...ctx, facts: { ...facts, series_status: "returning" } },
+      ),
+    ).toBe("1. Ended — doesn't match: status is Returning (wants Ended or Cancelled)");
   });
 });
 

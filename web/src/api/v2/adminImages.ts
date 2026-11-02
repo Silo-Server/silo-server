@@ -43,3 +43,11 @@ export function applyAdminItemImage(id: string, request: ApplyItemImageRequest) 
     retryAuthentication: false,
   });
 }
+export type UploadItemImageType = "poster" | "backdrop" | "logo";
+export function uploadAdminItemImage(id: string, type: UploadItemImageType, image: File) {
+  return v2("POST /api/v2/admin/items/{id}/images/upload", {
+    path: { id },
+    form: { type, image },
+    retryAuthentication: false,
+  });
+}

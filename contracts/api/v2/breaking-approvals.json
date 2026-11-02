@@ -1,18 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "replaceAdminUserProfileSectionOverrides",
-      "change_id": "request-property-max-set",
-      "fingerprint": "ad0e4dfe3dbac0fb307918aac32bff7c46ff2255f4e2a1a99a970c15cff679ff",
-      "reason": "Pre-lock fix: an uncapped profile item_limit made every home load allocate buffers of that size, so one profile could exhaust server memory. The cap matches the admin section maximum of 500. The web editor caps at 100; silo-apple and silo-android never write section overrides.",
-      "approved_in": "#3050"
-    },
-    {
-      "operation_id": "replaceProfileSectionOverrides",
-      "change_id": "request-property-max-set",
-      "fingerprint": "28407764607e02fd70af193e2c444376eb743293f03fbb4e302a5a90a0740b74",
-      "reason": "Pre-lock fix: an uncapped profile item_limit made every home load allocate buffers of that size, so one profile could exhaust server memory. The cap matches the admin section maximum of 500. The web editor caps at 100; silo-apple and silo-android never write section overrides.",
-      "approved_in": "#3050"
-    }
-  ]
+  "approvals": []
 }

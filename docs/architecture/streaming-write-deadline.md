@@ -88,12 +88,13 @@ instead of nesting a new one. **If you change it, re-run the
 `strace -f -e trace=sendfile` comparison over a mounted router.** A byte-exact body and
 a correct `Range` status prove HTTP correctness, not sendfile.
 
-### chi's compressor is bypassed, not repaired
+### The compressor is bypassed on bulk routes
 
-chi's `middleware.Compress` cannot be fixed in place: `compressResponseWriter`
-implements `Unwrap`/`Flush`/`Hijack`/`Push` but **not** `ReadFrom`, and its handler
-wraps unconditionally — the encoder is chosen later, so even a non-compressible content
-type still gets a sendfile-killing wrapper.
+The listeners' compressor (`httpstream.CompressWithExclusions`) decides per response
+whether to encode, so its writer implements `Unwrap`/`Flush`/`Hijack`/`Push` but **not**
+`ReadFrom`, and it wraps every request it does not skip before the content type is
+known: even an identity response can need `Vary`. A non-compressible content type
+therefore gets a sendfile-killing wrapper too.
 
 It is bypassed on exact bulk-media routes via `httpstream.CompressExcept`, matching only
 the registered GET/HEAD methods with exact segment counts and exact casing. A *blanket*

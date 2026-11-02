@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 type artworkBackendSettings struct {
@@ -75,5 +77,36 @@ func TestCatalogModesEnforceBlobBackend(t *testing.T) {
 				t.Fatal("local backend did not share one store")
 			}
 		})
+	}
+}
+
+// Kept subtitle tracks never go to an assets bucket whose objects are
+// delivered outside the server's authorization.
+func TestKeptSubtitleStoreIsPrivate(t *testing.T) {
+	root := t.TempDir()
+	local, err := blobstore.NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets := blobstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: "https://s3.example", Bucket: "assets"}))
+	operational := blobstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: "https://s3.example", Bucket: "private"}))
+	client := func(auth string) *s3client.Client {
+		return s3client.NewClient(s3client.BucketConfig{Endpoint: "https://s3.example", Bucket: "assets", URLAuth: auth, PublicEndpoint: "https://cdn.example"})
+	}
+	for _, tc := range []struct {
+		name     string
+		stores   blobstore.Stores
+		assetsS3 *s3client.Client
+		want     blobstore.Store
+	}{
+		{"private bucket", blobstore.Stores{Assets: assets, Operational: operational}, client(s3client.URLAuthPublic), operational},
+		{"local root", blobstore.Stores{Assets: local, Operational: local}, nil, local},
+		{"presigned assets bucket only", blobstore.Stores{Assets: assets}, client(s3client.URLAuthPresigned), assets},
+		{"public assets bucket only", blobstore.Stores{Assets: assets}, client(s3client.URLAuthPublic), nil},
+		{"token-delivered assets bucket only", blobstore.Stores{Assets: assets}, client(s3client.URLAuthCloudflareToken), nil},
+	} {
+		if got := keptSubtitleStore(tc.stores, tc.assetsS3); got != tc.want {
+			t.Errorf("%s: kept in %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

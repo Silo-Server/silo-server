@@ -22,6 +22,15 @@ type AdminRateLimitAuthEndpoint struct {
 	RequestsPerMinute float64 `json:"requests_per_minute"`
 	Burst             int     `json:"burst"`
 }
+
+// AdminRateLimitSessionQuota is a token bucket per sign-in session. It counts
+// native API requests made with a session's access token; media transfer
+// routes, API keys and admins are not counted.
+type AdminRateLimitSessionQuota struct {
+	Mode            string  `json:"mode" enum:"off,log,enforce" doc:"off counts nothing; log counts and logs sessions over the quota but serves them; enforce refuses them with 429."`
+	RequestsPerHour float64 `json:"requests_per_hour" doc:"Rate the session's bucket refills at."`
+	Burst           int     `json:"burst" doc:"Requests the session's bucket holds when full."`
+}
 type AdminRateLimitConfig struct {
 	Enabled            bool                                  `json:"enabled"`
 	Backend            string                                `json:"backend"`
@@ -31,6 +40,7 @@ type AdminRateLimitConfig struct {
 	IPReqPerMinute     float64                               `json:"ip_requests_per_minute"`
 	IPBurst            int                                   `json:"ip_burst"`
 	AuthEndpoints      map[string]AdminRateLimitAuthEndpoint `json:"auth_endpoints"`
+	SessionQuota       AdminRateLimitSessionQuota            `json:"session_quota"`
 }
 type AdminRateLimitStatus struct {
 	Active         bool   `json:"active"`
@@ -50,6 +60,9 @@ type AdminRateLimitStatusOutput struct{ Body AdminRateLimitStatus }
 
 func adminRateLimitConfigOf(v handlers.AdminRateLimitConfigView) AdminRateLimitConfig {
 	out := AdminRateLimitConfig{Enabled: v.Enabled, Backend: v.Backend, GlobalReqPerSecond: v.GlobalReqPerSecond, IPReqPerSecond: v.IPReqPerSecond, IPReqPerMinute: v.IPReqPerMinute, IPBurst: v.IPBurst, Tiers: make(map[string]AdminRateLimitTier, len(v.Tiers)), AuthEndpoints: make(map[string]AdminRateLimitAuthEndpoint, len(v.AuthEndpoints))}
+	if v.SessionQuota != nil {
+		out.SessionQuota = AdminRateLimitSessionQuota(*v.SessionQuota)
+	}
 	for name, t := range v.Tiers {
 		out.Tiers[name] = AdminRateLimitTier{t.RequestsPerSecond, t.RequestsPerMinute, t.Burst}
 	}

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -333,6 +334,13 @@ func ApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, opts PostgresT
 	}
 	if !result.Reloaded {
 		return result, fmt.Errorf("pg_reload_conf returned false")
+	}
+
+	// ALTER SYSTEM rewrites a setting even when the server already runs with
+	// its value, so keep only the restart-only settings PostgreSQL has yet to
+	// apply. A role that cannot read pg_file_settings keeps the full list.
+	if pending, err := postgresSettingsPendingRestart(ctx, pool, result.RestartRequired); err == nil {
+		result.RestartRequired = pending
 	}
 
 	return result, nil
@@ -731,6 +739,73 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 	var requiresRestart bool
 	err := pool.QueryRow(ctx, "SELECT context = 'postmaster' FROM pg_settings WHERE name = $1", name).Scan(&requiresRestart)
 	return requiresRestart, err
+}
+
+// postgresSettingsPendingRestart returns, in order, the names whose configured
+// value differs from the one the server runs with. pg_file_settings re-reads
+// the configuration files and sets error on an entry the server cannot apply
+// without a restart. Only the last entry for a name counts: a restart applies
+// it, and an earlier entry whose name differs only in case is still compared
+// and can carry an error of its own. A setting no file sets any more returns
+// to its built-in default at the restart, so it is pending only while it runs
+// on another value.
+// A setting given on the postgres command line (-c) outranks every file, so a
+// restart keeps its running value and it is never pending.
+func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	// A syntax error or an unknown parameter name stops PostgreSQL before it
+	// compares any value, leaving every other entry without an error. Only an
+	// entry for a setting no file sets any more (no name, no file) may carry
+	// one then. A main file PostgreSQL cannot open also leaves an entry with no
+	// name and no file, but then no entry has a name, while ALTER SYSTEM has
+	// just written the tuned ones.
+	var unreadable bool
+	if err := pool.QueryRow(ctx, `
+SELECT NOT EXISTS (SELECT 1 FROM pg_file_settings f WHERE f.name IS NOT NULL)
+  OR EXISTS (
+  SELECT 1 FROM pg_file_settings f
+  WHERE f.error IS NOT NULL
+    AND (f.name IS NULL AND f.sourcefile IS NOT NULL
+      OR f.name IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_settings s WHERE lower(s.name) = lower(f.name))))`).Scan(&unreadable); err != nil {
+		return nil, err
+	}
+	if unreadable {
+		return nil, errors.New("postgres configuration files contain errors")
+	}
+	rows, err := pool.Query(ctx, `
+SELECT s.name
+FROM pg_settings s
+WHERE s.name = ANY($1::text[])
+  AND s.source <> 'command line'
+  AND CASE
+        WHEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name)
+          THEN (SELECT f.error IS NOT NULL FROM pg_file_settings f WHERE lower(f.name) = s.name ORDER BY f.seqno DESC LIMIT 1)
+        ELSE s.source = 'configuration file' AND s.setting IS DISTINCT FROM s.boot_val
+      END`, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := make(map[string]struct{}, len(names))
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pending[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range names {
+		if _, ok := pending[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 func postgresSettingExists(ctx context.Context, pool *pgxpool.Pool, name string) (bool, error) {

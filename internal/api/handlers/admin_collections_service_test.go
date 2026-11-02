@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,5 +86,52 @@ func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
+	}
+}
+
+// A variant that fails to delete must not leave an admin collection pointing
+// at partly deleted artwork: the reference is cleared first and the failed
+// cleanup only leaves orphans (issue #2419).
+func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: f.library, Title: "Broken artwork", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
+	})
+	for _, kind := range []string{collectionImagePoster, adminCollectionBackdrop} {
+		t.Run(kind, func(t *testing.T) {
+			dir := collectionImageDir(adminCollectionImagePrefix, created.ID, kind)
+			path := dir + "/original.0000000000000001.webp"
+			input := catalog.UpdateLibraryCollectionInput{ID: created.ID}
+			if kind == collectionImagePoster {
+				input.PosterURL = new(path)
+			} else {
+				input.BackdropURL = new(path)
+			}
+			if err := repo.Update(t.Context(), input); err != nil {
+				t.Fatal(err)
+			}
+			artwork := &partialDeleteStore{okKeys: 1, stubListDeleteStore: stubListDeleteStore{keys: []string{path, dir + "/w300.0000000000000001.webp"}}}
+			h.ArtworkStore = artwork
+
+			if err := h.DeleteAdminCollectionArtwork(t.Context(), created.ID, kind); err != nil {
+				t.Fatalf("DeleteAdminCollectionArtwork: %v", err)
+			}
+			got, err := h.adminCollectionImagePath(t.Context(), created.ID, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "" {
+				t.Fatalf("%s reference = %q, want cleared", kind, got)
+			}
+			if len(artwork.deleted) != 1 {
+				t.Fatalf("cleanup did not run after the clear: deleted %#v", artwork.deleted)
+			}
+		})
 	}
 }

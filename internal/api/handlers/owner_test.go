@@ -375,27 +375,14 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 		return h, store
 	}
 
+	// Minting is refused in the store, under the accounts' locks; see
+	// TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB.
 	h, store := newHandler()
-	_, err := h.CreateAdminAPIKey(claimsCtx(7), testOwnerID, "takeover", nil)
-	requireOwnerProtected(t, "admin mints owner key", err)
-	_, err = h.UpdateAdminAPIKeyTier(claimsCtx(7), 5, "elevated", auth.APIKeyPrecondition{})
+	_, err := h.UpdateAdminAPIKeyTier(claimsCtx(7), 5, "elevated", auth.APIKeyPrecondition{})
 	requireOwnerProtected(t, "admin retiers owner key", err)
 	requireOwnerProtected(t, "admin revokes owner key", h.DeleteAdminAPIKey(claimsCtx(7), 5, auth.APIKeyPrecondition{}))
-	if store.created || store.changed {
+	if store.changed {
 		t.Fatal("a refused key operation reached the store")
-	}
-	if _, err := h.CreateAdminAPIKey(claimsCtx(7), testAdminID, "takeover", nil); err == nil || store.created {
-		t.Fatalf("admin minting a key for another admin: %v", err)
-	}
-	if _, err := h.CreateAdminAPIKey(claimsCtx(7), 8, "ordinary", nil); err != nil || !store.created {
-		t.Fatalf("admin minting a key for another account: %v", err)
-	}
-	store.created = false
-	if _, err := h.CreateAdminAPIKey(claimsCtx(testOwnerID), testAdminID, "delegated", nil); err != nil || !store.created {
-		t.Fatalf("owner minting a key for another admin: %v", err)
-	}
-	if _, err := h.CreateAdminAPIKey(claimsCtx(testOwnerID), testOwnerID, "own", nil); err != nil {
-		t.Fatalf("owner minting its own key: %v", err)
 	}
 	if err := h.DeleteAdminAPIKey(claimsCtx(testOwnerID), 5, auth.APIKeyPrecondition{}); err != nil || !store.changed {
 		t.Fatalf("owner revoking its own key: %v", err)
@@ -406,7 +393,6 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 		name, method, path, body string
 		serve                    func(*APIKeyHandler, http.ResponseWriter, *http.Request)
 	}{
-		{"v1 create", http.MethodPost, "/api/v1/admin/api-keys", `{"label":"takeover","user_id":42}`, (*APIKeyHandler).HandleAdminCreateAPIKey},
 		{"v1 delete", http.MethodDelete, "/api/v1/admin/api-keys/5", "", (*APIKeyHandler).HandleAdminDeleteAPIKey},
 		{"v1 tier", http.MethodPut, "/api/v1/admin/api-keys/5/tier", `{"tier":"elevated"}`, (*APIKeyHandler).HandleAdminUpdateTier},
 	} {
@@ -417,8 +403,8 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
 		rec := httptest.NewRecorder()
 		tc.serve(h, rec, req)
-		if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || store.created || store.changed {
-			t.Errorf("%s: status = %d body %s, store touched %v", tc.name, rec.Code, rec.Body.String(), store.created || store.changed)
+		if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || store.changed {
+			t.Errorf("%s: status = %d body %s, store touched %v", tc.name, rec.Code, rec.Body.String(), store.changed)
 		}
 	}
 }

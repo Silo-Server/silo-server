@@ -106,13 +106,6 @@ type targetImageCacheJobStore interface {
 	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
 }
 
-// imageCacheTargetCachedPathReader is optionally implemented by the job store
-// (ImageCacheJobRepository does) to expose the target's currently stored
-// cached path for the local-artwork unchanged-skip and stale-prefix cleanup.
-type imageCacheTargetCachedPathReader interface {
-	CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
-}
-
 // imageCacheBacklogReader is optional so lightweight processor fakes and
 // alternate stores do not need a database-backed count implementation.
 type imageCacheBacklogReader interface {
@@ -126,14 +119,8 @@ type LibraryRootResolver interface {
 	LibraryRootsForContent(ctx context.Context, contentID string) ([]string, error)
 }
 
-// ImagePrefixDeleter deletes cached image objects under a key prefix; used to
-// sweep the previous hashed local/ prefix after a successful re-cache.
-type ImagePrefixDeleter interface {
-	DeletePrefix(context.Context, string) (int, error)
-}
-
 type SeasonArtworkUpdater interface {
-	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error)
+	UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
 type EpisodeStillUpdater interface {
@@ -180,11 +167,10 @@ type ImageCacheProcessor struct {
 	logger  *slog.Logger
 
 	// Local file:// artwork support. libraryRoots confines reads to the
-	// owning library's roots; prefixDeleter sweeps stale hashed prefixes.
-	// localCopies copies art this process discovered (CopyLocalArtwork).
-	libraryRoots  LibraryRootResolver
-	prefixDeleter ImagePrefixDeleter
-	localCopies   localArtworkCopies
+	// owning library's roots. localCopies copies art this process
+	// discovered (CopyLocalArtwork).
+	libraryRoots LibraryRootResolver
+	localCopies  localArtworkCopies
 	// workBudget bounds artwork jobs across drains, manual refreshes and
 	// discovery copies (SetWorkerBudget).
 	workBudget imageWorkBudget
@@ -213,16 +199,6 @@ func (p *ImageCacheProcessor) SetLibraryRootResolver(resolver LibraryRootResolve
 		return
 	}
 	p.libraryRoots = resolver
-}
-
-// SetImagePrefixDeleter wires the object store used to delete the previous
-// hashed local/ prefix after a successful local re-cache. Optional: without
-// it, stale prefixes are left behind (item deletion still sweeps them).
-func (p *ImageCacheProcessor) SetImagePrefixDeleter(deleter ImagePrefixDeleter) {
-	if p == nil {
-		return
-	}
-	p.prefixDeleter = deleter
 }
 
 // SetEnabled toggles artwork caching. When disabled the processor begins no
@@ -992,7 +968,7 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 		if p.targets.Seasons == nil {
 			return false, errors.New("missing season updater")
 		}
-		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, thumbhash)
+		return p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			return false, errors.New("missing season localization updater")
@@ -1062,26 +1038,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	// The target's current cached path drives the unchanged-skip (same hash →
-	// same key → nothing to sweep) and the stale-prefix cleanup below.
-	previousCachedPath := ""
-	if reader, ok := p.jobs.(imageCacheTargetCachedPathReader); ok {
-		previousCachedPath, err = reader.CurrentTargetCachedPath(ctx, job)
-		if err != nil {
-			p.logger.WarnContext(ctx, "metadata image cache: failed to read current cached path", "job_id", job.ID, "error", err)
-			previousCachedPath = ""
-		}
-	}
-
 	digest := sha256.Sum256(data)
 	discriminator := hex.EncodeToString(digest[:4])
 	if job.TargetType == ImageCacheTargetItemBackdrop {
 		// An item's backdrops share its key folder, and two sidecars can hold
 		// the same bytes. A hash of the sidecar's own path keeps each file's
-		// key apart from the primary's and every other file's, so the
-		// stale-prefix cleanup below never deletes art another backdrop shows,
-		// even after rows shift. A backdrop that moves to another row keeps
-		// its key.
+		// key apart from the primary's and every other file's, so each copy is
+		// replaced and retired on its own, even after rows shift. A backdrop
+		// that moves to another row keeps its key.
 		pathDigest := sha256.Sum256([]byte(localPath))
 		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
 	}
@@ -1114,10 +1078,11 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		processResult.outcome = "failed"
 		return processResult
 	}
+	// The target update displaces the previous copy, and the displacement
+	// trigger hands it to the artwork revision GC, which deletes it only once
+	// nothing references it. Deleting it here would break an admin pick of
+	// the same bytes, which shares this key, published since the update.
 	p.finishJobWithTargetUpdate(ctx, job, cachedPath, result.Thumbhash, &processResult)
-	if processResult.outcome == "succeeded" {
-		p.deleteStaleLocalPrefix(ctx, previousCachedPath, cachedPath)
-	}
 	return processResult
 }
 
@@ -1228,29 +1193,6 @@ func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.
 		}
 	}
 	return nil, failure
-}
-
-// deleteStaleLocalPrefix removes the previous hashed local/ image prefix
-// after a re-cache stored the artwork under a different key.
-func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previousCachedPath, cachedPath string) {
-	previousCachedPath = strings.TrimSpace(previousCachedPath)
-	if p.prefixDeleter == nil ||
-		previousCachedPath == "" ||
-		previousCachedPath == cachedPath ||
-		!strings.HasPrefix(previousCachedPath, "local/") {
-		return
-	}
-	lastSlash := strings.LastIndex(previousCachedPath, "/")
-	if lastSlash <= 0 {
-		return
-	}
-	prefix := previousCachedPath[:lastSlash+1]
-	if strings.HasPrefix(cachedPath, prefix) {
-		return
-	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
-		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
-	}
 }
 
 // errLocalImageOutsideRoots is returned by localImagePathResolvedWithinRoots

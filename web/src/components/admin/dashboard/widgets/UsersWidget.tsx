@@ -53,7 +53,9 @@ export function UsersWidget() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>User</TableHead>
+                {/* w-full + max-w-0 makes this column take the leftover width and
+                    clip long emails instead of widening the table. */}
+                <TableHead className="w-full max-w-0">User</TableHead>
                 <TableHead className="hidden sm:table-cell">Last active</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
@@ -76,7 +78,7 @@ export function UsersWidget() {
                     }
                   }}
                 >
-                  <TableCell>
+                  <TableCell className="w-full max-w-0">
                     <div className="flex items-center gap-2.5">
                       <div
                         className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"

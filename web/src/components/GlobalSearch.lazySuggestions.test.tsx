@@ -67,6 +67,7 @@ vi.mock("@/hooks/queries/useRequests", () => ({
     isError: false,
   }),
 }));
+vi.mock("@/hooks/queries/boxSets", () => ({ useBoxSetSearch: () => ({ data: [] }) }));
 vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: [], isFetching: false }),
 }));

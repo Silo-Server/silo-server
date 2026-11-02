@@ -49,6 +49,10 @@ import (
 // a subtitle rendition. Absent, master.m3u8 answers the multivariant playlist.
 const SubtitleRenditionQueryParam = "silo_rendition"
 
+// ErrSubtitleRenditionNotFound answers a playlist request that names a
+// rendition the session does not publish.
+var ErrSubtitleRenditionNotFound = errors.New("playback: no such subtitle rendition")
+
 const (
 	subtitleRenditionVideo     = "video"
 	subtitleRenditionSubtitles = "subtitles"
@@ -105,11 +109,22 @@ func SubtitleRenditionExecutable(totalDuration float64, segmentDuration int) boo
 }
 
 // subtitleRenditionActive is the single gate shared by the ffmpeg output, the
-// playlists, and segment serving, so they cannot disagree about a recipe.
+// playlists, and segment serving, so they cannot disagree about a recipe. It
+// covers both the single pipeline rendition and on-demand renditions
+// (subtitleRenditionsOnDemand).
 func subtitleRenditionActive(opts TranscodeOpts) bool {
-	return opts.SubtitleRendition && opts.SubtitleTrackIndex >= 0 && !opts.SubtitleBurnIn &&
-		SubtitleRenditionCodecSupported(opts.SubtitleCodec) &&
-		SubtitleRenditionExecutable(opts.TotalDuration, opts.SegmentDuration)
+	if !opts.SubtitleRendition || opts.SubtitleBurnIn || !SubtitleRenditionExecutable(opts.TotalDuration, opts.SegmentDuration) {
+		return false
+	}
+	return len(opts.SubtitleRenditionTracks) > 0 ||
+		opts.SubtitleTrackIndex >= 0 && SubtitleRenditionCodecSupported(opts.SubtitleCodec)
+}
+
+// subtitleRenditionsOnDemand reports whether an active rendition recipe lists
+// every text track as a rendition read through the source's index, so the
+// stream's ffmpeg writes no cues.
+func subtitleRenditionsOnDemand(opts TranscodeOpts) bool {
+	return len(opts.SubtitleRenditionTracks) > 0
 }
 
 // followsFFmpegPlaylist reports whether a session's video playlist is FFmpeg's
@@ -151,20 +166,28 @@ func appendSubtitleRenditionOutputArgs(args []string, opts TranscodeOpts) []stri
 	if cueFile == "" {
 		cueFile = subtitleCueFileName(0)
 	}
-	args = append(args,
-		"-y",
-		"-map", fmt.Sprintf("0:s:%d", opts.SubtitleTrackIndex),
-		"-c:s", "webvtt",
-		"-flush_packets", "1",
-		"-f", "webvtt",
-		filepath.Join(opts.OutputDir, cueFile),
-	)
+	onDemand := subtitleRenditionsOnDemand(opts)
+	if onDemand && !copyMuxShiftsVideo(opts) {
+		return args
+	}
+	args = append(args, "-y")
+	if !onDemand {
+		args = append(args,
+			"-map", fmt.Sprintf("0:s:%d", opts.SubtitleTrackIndex),
+			"-c:s", "webvtt",
+			"-flush_packets", "1",
+			"-f", "webvtt",
+			filepath.Join(opts.OutputDir, cueFile),
+		)
+	}
 	if !copyMuxShiftsVideo(opts) {
 		return args
 	}
 	// The generation's first video packet on the cues' clock, which the HLS
 	// mux shifts (copyMuxShiftsVideo) and this output does not. It is flushed
-	// at once, since FFmpeg keeps running.
+	// at once, since FFmpeg keeps running. On-demand renditions write no cue
+	// file but still need it, under the name the generation's cue file would
+	// have had.
 	return append(args,
 		"-map", "0:v:0",
 		"-c:v", "copy",
@@ -263,6 +286,10 @@ func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready
 // rather than answer a final empty document the player would keep.
 func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) ([]byte, error) {
 	opts := s.Opts()
+	if subtitleRenditionsOnDemand(opts) {
+		// Every track has segments of its own (subtitleTrackSegmentVTT).
+		return nil, ErrSegmentNotFound
+	}
 	started := time.Now()
 	deadline := started.Add(segmentWaitTimeout(opts.SegmentDuration))
 	poll := subtitleCuePollInterval
@@ -319,6 +346,12 @@ type subtitleCueWindow struct {
 	// muxShift is the span's observed muxShift, which the timestamp map adds.
 	muxShift       float64
 	observed, open bool
+	// restartGrid marks an encode's segment beyond the running generation's
+	// reach, whose video a seek restart on the grid will cut. Its window then
+	// starts no later than grid90k, the segment's start on that grid on the
+	// cue clock, so a cue on screen there is in it.
+	restartGrid bool
+	grid90k     int64
 }
 
 // subtitleSegmentWindow returns the window of segment segNum of the
@@ -339,6 +372,14 @@ func (s *TranscodeSession) subtitleSegmentWindow(ctx context.Context, file strin
 // come from the synthetic grid, the keyframe plan, or the playlist the span's
 // generation wrote. A segment whose duration is unknown takes the grid's.
 func (s *TranscodeSession) subtitleSegmentPlacement(span subtitleCueSpan, segNum int) subtitleCueWindow {
+	window, _ := s.subtitleSegmentPlacementKnown(span, segNum)
+	return window
+}
+
+// subtitleSegmentPlacementKnown is subtitleSegmentPlacement, also reporting
+// whether the segment's place is known rather than the grid's guess: always
+// on an encode's grid, and on a copy once its plan or playlist lists it.
+func (s *TranscodeSession) subtitleSegmentPlacementKnown(span subtitleCueSpan, segNum int) (subtitleCueWindow, bool) {
 	opts := s.Opts()
 	segDur := renditionSegmentDuration(opts)
 	grid := subtitleCueWindow{
@@ -351,7 +392,7 @@ func (s *TranscodeSession) subtitleSegmentPlacement(span subtitleCueSpan, segNum
 	case s.copyPlan != nil:
 		durations, final = s.copyPlan.durations[min(span.start, len(s.copyPlan.durations)):], true
 	case !strings.EqualFold(opts.TargetCodecVideo, "copy"):
-		return grid
+		return grid, true
 	case span.end >= 0:
 		durations, final = span.durations, span.final
 	default:
@@ -361,13 +402,13 @@ func (s *TranscodeSession) subtitleSegmentPlacement(span subtitleCueSpan, segNum
 	}
 	i := segNum - span.start
 	if i < 0 || i >= len(durations) {
-		return grid
+		return grid, false
 	}
 	window := subtitleCueWindow{duration: durations[i], open: final && i == len(durations)-1}
 	for _, d := range durations[:i] {
 		window.offset += d
 	}
-	return window
+	return window, true
 }
 
 // subtitleSpanOrigin returns the span that wrote cue file, with its origin and
@@ -531,10 +572,20 @@ func (s *TranscodeSession) readOutputFile(name string) ([]byte, error) {
 	return root.ReadFile(name)
 }
 
-// ServeSubtitleSegment writes subtitle segment segNum.
-func (s *TranscodeSession) ServeSubtitleSegment(w http.ResponseWriter, r *http.Request, segNum int) {
-	body, err := s.SubtitleSegmentVTT(r.Context(), segNum)
+// ServeSubtitleSegment writes the subtitle segment name names: a segment of
+// the pipeline rendition (sub_00012.vtt) or of an on-demand track
+// (sub_3_00012.vtt).
+func (s *TranscodeSession) ServeSubtitleSegment(w http.ResponseWriter, r *http.Request, name string) {
+	var body []byte
+	err := ErrSegmentNotFound
+	name = filepath.Base(name)
+	if track, segNum, ok := parseSubtitleTrackSegment(name); ok {
+		body, err = s.subtitleTrackSegmentVTT(r.Context(), track, segNum)
+	} else if segNum, ok := ParseSubtitleSegmentNumber(name); ok {
+		body, err = s.SubtitleSegmentVTT(r.Context(), segNum)
+	}
 	if err != nil && r.Context().Err() != nil {
+		http.Error(w, "segment not found", http.StatusNotFound)
 		return
 	}
 	if errors.Is(err, ErrSegmentNotFound) {
@@ -647,21 +698,13 @@ func parseSubtitleRenditionCues(cues []byte) []subtitleRenditionCue {
 // settings; a cue that spans segments is repeated in each, as HLS expects, and
 // players de-duplicate it.
 func subtitleSegmentDocument(opts TranscodeOpts, segNum int, window subtitleCueWindow, cues []byte) []byte {
-	if window.duration <= 0 {
-		segDur := renditionSegmentDuration(opts)
-		window.duration = float64(segDur)
-		window.open = segNum >= syntheticSegmentCount(opts.TotalDuration, segDur)-1
-	}
 	parsed := parseSubtitleRenditionCues(cues)
-	origin90k := int64(math.Round(window.origin * 90_000))
-	if window.observed && HLSOutputContainer(opts) == OutputContainerMPEGTS && len(parsed) > 0 {
-		origin90k = subtitleWindowEpoch(origin90k, parsed[0].from*90)
+	// Without cues there is nothing to cut, so the epoch need not be chosen.
+	firstCue90k := int64(math.Round(window.origin * 90_000))
+	if len(parsed) > 0 {
+		firstCue90k = parsed[0].from * 90
 	}
-	start90k := origin90k + int64(math.Round(window.offset*90_000))
-	end90k := start90k + int64(math.Round(window.duration*90_000))
-	if window.open {
-		end90k = math.MaxInt64
-	}
+	start90k, end90k := subtitleWindowBounds(opts, segNum, window, firstCue90k)
 
 	var out bytes.Buffer
 	out.WriteString("WEBVTT\n")
@@ -703,9 +746,13 @@ func subtitleCueTimestampMS(value string) (int64, error) {
 }
 
 // ParseSubtitleSegmentNumber reports the segment number of a subtitle
-// rendition segment name (sub_00012.vtt).
+// rendition segment name: the pipeline rendition's (sub_00012.vtt) or an
+// on-demand track's (sub_3_00012.vtt).
 func ParseSubtitleSegmentNumber(name string) (int, bool) {
 	name = filepath.Base(name)
+	if _, segNum, ok := parseSubtitleTrackSegment(name); ok {
+		return segNum, true
+	}
 	if !strings.HasPrefix(name, subtitleSegmentPrefix) || !strings.HasSuffix(name, subtitleSegmentExt) {
 		return 0, false
 	}
@@ -731,31 +778,48 @@ func (s *TranscodeSession) HasSubtitleRendition() bool {
 // media playlist it points at.
 func (s *TranscodeSession) buildSubtitleRenditionPlaylist(segPrefix, rawQuery string) ([]byte, error) {
 	rendition, query := splitSubtitleRenditionQuery(rawQuery)
-	switch rendition {
-	case subtitleRenditionVideo:
+	track, query := splitQueryParam(query, SubtitleRenditionTrackQueryParam)
+	opts := s.Opts()
+	switch {
+	case rendition == subtitleRenditionVideo:
 		return s.buildVideoPlaylist(segPrefix, query)
-	case subtitleRenditionSubtitles:
-		if !strings.EqualFold(s.Opts().TargetCodecVideo, "copy") {
-			return s.generateSyntheticPlaylist(segPrefix, query, subtitleSegmentPrefix, subtitleSegmentExt, false), nil
-		}
-		video, err := s.buildVideoPlaylist(segPrefix, query)
-		if err != nil {
-			return nil, err
-		}
-		return subtitlePlaylistFromVideo(video), nil
-	default:
-		return subtitleRenditionMultivariantPlaylist(s.Opts(), query), nil
+	case rendition == "":
+		return subtitleRenditionMultivariantPlaylist(opts, query), nil
+	case rendition != subtitleRenditionSubtitles:
+		return nil, ErrSubtitleRenditionNotFound
+	case !subtitleRenditionsOnDemand(opts) && track == "":
+		return s.buildSubtitlePlaylist(segPrefix, query, subtitleSegmentPrefix)
 	}
+	if number, ok := parseSubtitleRenditionTrack(track); ok && subtitleRenditionsOnDemand(opts) {
+		if _, listed := renditionTrack(opts, number); listed {
+			return s.buildSubtitlePlaylist(segPrefix, query, subtitleTrackSegmentPrefix(number))
+		}
+	}
+	return nil, ErrSubtitleRenditionNotFound
+}
+
+// buildSubtitlePlaylist is a subtitle media playlist whose segments are named
+// namePrefix and their number: the synthetic grid for an encode, the video
+// playlist's segments for a copy remux.
+func (s *TranscodeSession) buildSubtitlePlaylist(segPrefix, query, namePrefix string) ([]byte, error) {
+	if !strings.EqualFold(s.Opts().TargetCodecVideo, "copy") {
+		return s.generateSyntheticPlaylist(segPrefix, query, namePrefix, subtitleSegmentExt, false), nil
+	}
+	video, err := s.buildVideoPlaylist(segPrefix, query)
+	if err != nil {
+		return nil, err
+	}
+	return subtitlePlaylistFromVideo(video, namePrefix), nil
 }
 
 // subtitlePlaylistFromVideo turns a copy remux's video media playlist into
 // its subtitle playlist: every segment URI names the subtitle segment of the
-// same number (seg_00012.m4s?q becomes sub_00012.vtt?q) and the
-// initialization map goes. Every other line stays, so the two playlists list
-// the same segments with the same durations, media sequence, playlist type,
-// start, and end tag, whether the video playlist is the complete keyframe
-// plan or FFmpeg's growing EVENT playlist.
-func subtitlePlaylistFromVideo(video []byte) []byte {
+// same number (seg_00012.m4s?q becomes sub_00012.vtt?q for namePrefix sub_)
+// and the initialization map goes. Every other line stays, so the two
+// playlists list the same segments with the same durations, media sequence,
+// playlist type, start, and end tag, whether the video playlist is the
+// complete keyframe plan or FFmpeg's growing EVENT playlist.
+func subtitlePlaylistFromVideo(video []byte, namePrefix string) []byte {
 	lines := bytes.Split(video, []byte("\n"))
 	out := make([][]byte, 0, len(lines))
 	for _, line := range lines {
@@ -764,7 +828,7 @@ func subtitlePlaylistFromVideo(video []byte) []byte {
 			continue
 		}
 		if len(trimmed) > 0 && trimmed[0] != '#' {
-			line = subtitleSegmentURI(trimmed)
+			line = subtitleSegmentURI(trimmed, namePrefix)
 		}
 		out = append(out, line)
 	}
@@ -773,14 +837,14 @@ func subtitlePlaylistFromVideo(video []byte) []byte {
 
 // subtitleSegmentURI renames the segment a video segment URI names, keeping
 // its path prefix and query.
-func subtitleSegmentURI(uri []byte) []byte {
+func subtitleSegmentURI(uri []byte, namePrefix string) []byte {
 	path, query, hasQuery := bytes.Cut(uri, []byte("?"))
 	dir, name := path[:bytes.LastIndexByte(path, '/')+1], path[bytes.LastIndexByte(path, '/')+1:]
 	segNum, err := ParseSegmentNumber(string(name))
 	if err != nil {
 		return uri
 	}
-	renamed := fmt.Appendf(slices.Clone(dir), "%s%05d%s", subtitleSegmentPrefix, segNum, subtitleSegmentExt)
+	renamed := fmt.Appendf(slices.Clone(dir), "%s%05d%s", namePrefix, segNum, subtitleSegmentExt)
 	if hasQuery {
 		renamed = append(append(renamed, '?'), query...)
 	}
@@ -788,8 +852,9 @@ func subtitleSegmentURI(uri []byte) []byte {
 }
 
 // subtitleRenditionMultivariantPlaylist lists the stream as one variant whose
-// SUBTITLES group holds the selected track. Both URIs are master.m3u8
-// relative to itself, so the playlist works behind every relay path.
+// SUBTITLES group holds the selected track, or every on-demand track
+// (subtitleRenditionsPlaylist). Every URI is master.m3u8 relative to itself,
+// so the playlist works behind every relay path.
 // A copy remux's variant names opts.VideoRange: HLS reads a variant that names
 // no VIDEO-RANGE as SDR.
 func subtitleRenditionMultivariantPlaylist(opts TranscodeOpts, query string) []byte {
@@ -813,8 +878,12 @@ func subtitleRenditionMultivariantPlaylist(opts TranscodeOpts, query string) []b
 	buf.WriteString("#EXTM3U\n")
 	buf.WriteString("#EXT-X-VERSION:3\n")
 	buf.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
-	fmt.Fprintf(&buf, "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=%q,NAME=%q,DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI=%q\n",
-		SubtitleRenditionGroupID, SubtitleRenditionName, uri(subtitleRenditionSubtitles))
+	if subtitleRenditionsOnDemand(opts) {
+		buf.Write(subtitleRenditionsPlaylist(opts, uri))
+	} else {
+		fmt.Fprintf(&buf, "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=%q,NAME=%q,DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI=%q\n",
+			SubtitleRenditionGroupID, SubtitleRenditionName, uri(subtitleRenditionSubtitles))
+	}
 	fmt.Fprintf(&buf, "#EXT-X-STREAM-INF:BANDWIDTH=%d", (videoKbps+audioKbps)*1000)
 	if opts.VideoRange != "" {
 		buf.WriteString(",VIDEO-RANGE=" + opts.VideoRange)
@@ -870,18 +939,24 @@ func validCopyHLSVideoRange(opts TranscodeOpts) bool {
 // splitSubtitleRenditionQuery removes SubtitleRenditionQueryParam from a raw
 // query, keeping every other parameter byte-for-byte.
 func splitSubtitleRenditionQuery(rawQuery string) (rendition, rest string) {
+	return splitQueryParam(rawQuery, SubtitleRenditionQueryParam)
+}
+
+// splitQueryParam removes parameter key from a raw query, keeping every other
+// parameter byte-for-byte, and returns its value.
+func splitQueryParam(rawQuery, key string) (value, rest string) {
 	if rawQuery == "" {
 		return "", ""
 	}
 	kept := make([]string, 0, strings.Count(rawQuery, "&")+1)
 	for part := range strings.SplitSeq(rawQuery, "&") {
-		if key, value, _ := strings.Cut(part, "="); key == SubtitleRenditionQueryParam {
-			rendition = value
+		if name, v, _ := strings.Cut(part, "="); name == key {
+			value = v
 			continue
 		}
 		if part != "" {
 			kept = append(kept, part)
 		}
 	}
-	return rendition, strings.Join(kept, "&")
+	return value, strings.Join(kept, "&")
 }

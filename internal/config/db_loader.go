@@ -435,6 +435,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// AudiobookshelfCompat — dedicated listener for ABS client apps. Docker
 	// deployments publish :13378, so listen by default unless disabled.
+	// ABS_PORT moves it; see AudiobookshelfCompatConfig.WithBootstrapListen.
 	absCompatEnabled, err := boolOr(m, "audiobookshelf_compat.enabled", true)
 	if err != nil {
 		return nil, err
@@ -473,29 +474,24 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.JellyfinCompat.PlaybackSessionTTL = playbackSessionTTL
 
+	// AI provider registry: AI jobs resolve their endpoints from it below.
+	aiProviders, err := ParseAIProviderRegistry(m[AIProvidersSettingKey])
+	if err != nil {
+		return nil, err
+	}
+
 	// Recommendations
 	recsEnabled, err := boolOr(m, "recommendations.enabled", false)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Recommendations.Enabled = recsEnabled
-	legacyOpenAIConfigured := m["recommendations.openai_model"] != "" || m["recommendations.openai_api_key"] != "" || m["recommendations.embedding_provider"] == "openai"
-	cfg.Recommendations.EmbeddingBaseURL = stringOr(m, "recommendations.embedding_base_url", func() string {
-		if legacyOpenAIConfigured {
-			return "https://api.openai.com"
-		}
-		return "http://ollama:11434"
-	}())
-	cfg.Recommendations.EmbeddingModel = stringOr(m, "recommendations.embedding_model", func() string {
-		if model := m["recommendations.openai_model"]; model != "" {
-			return model
-		}
-		if m["recommendations.embedding_provider"] == "openai" {
-			return "text-embedding-3-small"
-		}
-		return "all-minilm"
-	}())
-	cfg.Recommendations.EmbeddingAuthToken = stringOr(m, "recommendations.embedding_auth_token", stringOr(m, "recommendations.openai_api_key", ""))
+	// The embedding endpoint and key come from the provider the binding
+	// names; with none, recommendations have no embedding model to run.
+	cfg.Recommendations.EmbeddingProviderID = strings.TrimSpace(m[EmbeddingProviderSettingKey])
+	cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingAuthToken, _ = aiProviders.Resolve(
+		cfg.Recommendations.EmbeddingProviderID, AICapabilityEmbeddings)
+	cfg.Recommendations.EmbeddingModel = strings.TrimSpace(m["recommendations.embedding_model"])
 	cfg.Recommendations.EmbeddingsCron = stringOr(m, "recommendations.embeddings_cron", "0 3 * * *")
 	cfg.Recommendations.EmbeddingsJobTimeout, err = durationOr(m, "recommendations.embeddings_job_timeout", 24*time.Hour)
 	if err != nil {
@@ -515,17 +511,18 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
 
-	// Shared AI endpoint (subtitle translation, metadata translation, Whisper
-	// ASR). The connection settings read ai.* with a fallback to the legacy
-	// subtitle_ai.* rows; the legacy rows are never renamed in SQL because
-	// encrypted values are GCM-bound to their setting key.
+	// Shared AI endpoints (subtitle translation, metadata translation, Whisper
+	// ASR), resolved from the provider each job selects in ai.providers. A
+	// binding to a missing provider leaves that job unconfigured; settings
+	// validation refuses to store one.
 	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
-	cfg.AI.BaseURL = stringOr(m, "ai.base_url", stringOr(m, "subtitle_ai.base_url", "https://api.openai.com"))
-	cfg.AI.APIKey = stringOr(m, "ai.api_key", stringOr(m, "subtitle_ai.api_key", ""))
-	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
-	cfg.AI.ASRBaseURL = stringOr(m, "ai.asr_base_url", "")
-	cfg.AI.ASRAPIKey = stringOr(m, "ai.asr_api_key", "")
+	cfg.AI.ServiceTier = ResolveAIServiceTier(m)
+	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
+	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
+	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-6-luna"))
+	cfg.AI.SpeechProviderID = strings.TrimSpace(m[AISpeechProviderSettingKey])
+	cfg.AI.ASRBaseURL, cfg.AI.ASRAPIKey, _ = aiProviders.Resolve(cfg.AI.SpeechProviderID, AICapabilitySpeech)
 	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")
 	aiMaxConcurrent, err := intOr(m, "ai.max_concurrent_jobs", 0)
 	if err != nil {

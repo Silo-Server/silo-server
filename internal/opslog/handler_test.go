@@ -93,6 +93,19 @@ func TestAttrValueErrorKeepsQuotedURLs(t *testing.T) {
 	}
 }
 
+// TestAttrValueErrorMasksSignedTokenBeforePunctuation checks that punctuation
+// ending a sentence does not hide a signed-token path segment it touches.
+func TestAttrValueErrorMasksSignedTokenBeforePunctuation(t *testing.T) {
+	const token = "eyJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uX2lkIjoic2VjcmV0In0.c2lnbmF0dXJl"
+	for _, end := range []string{"!", ".", ")"} {
+		err := errors.New("fetch https://node.example/stream/direct/" + token + end)
+		got, _ := attrValue(slog.AnyValue(err)).(string)
+		if want := "fetch https://node.example/stream/direct/[REDACTED]" + end; got != want {
+			t.Errorf("attrValue(%q ending) = %q, want %q", end, got, want)
+		}
+	}
+}
+
 func TestAttrValueErrorMasksQueryAfterQuoteInURL(t *testing.T) {
 	err := errors.New(`upload: PUT "https://bucket.s3.example.test/it's<1>.webp?X-Amz-Signature=deadbeef": AccessDenied`)
 	got, _ := attrValue(slog.AnyValue(err)).(string)

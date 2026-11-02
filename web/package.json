@@ -81,7 +81,7 @@
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.0",
-    "vite": "^6.4.4",
+    "vite": "^6.4.5",
     "vitest": "^4.1.11"
   },
   "pnpm": {

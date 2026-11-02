@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestJellyfinPersonReadsMatchNativeVisibilityPostgres pins the Jellyfin
@@ -215,4 +219,133 @@ func TestJellyfinPersonReadsMatchNativeVisibilityPostgres(t *testing.T) {
 			t.Fatalf("page %+v, total %d", page, total)
 		}
 	})
+}
+
+// TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres pins v2 people
+// search to exact names first, then name and ID order, with viewer access
+// applied in both groups before the limit, and the v1 bridge search to plain
+// name order. It also pins every people search to a plan for its own words:
+// no named statement is left for PostgreSQL to switch to a generic plan, which
+// checks the credits of every matching person before sorting them.
+func TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	ctx := t.Context()
+	token := "personrank" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	const (
+		exactVisible = iota
+		exactHidden
+		firstHidden
+		alice
+		bob
+	)
+	ids, visible := seedPersonSearchPeople(t, pool, token, []string{
+		exactVisible: strings.ToUpper(token),
+		exactHidden:  token,
+		firstHidden:  "0 " + token,
+		alice:        "A " + token,
+		bob:          "B " + token,
+	}, exactHidden, firstHidden)
+	// A generic plan must still answer correctly; the statement check below
+	// shows that the server never asks for one.
+	if _, err := pool.Exec(ctx, "SET plan_cache_mode = force_generic_plan"); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := NewPersonRepository(pool)
+	filter := AccessFilter{AllowedLibraryIDs: []int{visible}}
+	for _, tc := range []struct {
+		name   string
+		search func() ([]models.Person, error)
+		want   []int
+	}{
+		{"scoped, limit 2", func() ([]models.Person, error) {
+			return repo.SearchScoped(ctx, " "+token+" ", 2, MediaScopeVideo, filter)
+		}, []int{exactVisible, alice}},
+		{"scoped", func() ([]models.Person, error) { return repo.SearchScoped(ctx, token, 20, "", filter) }, []int{exactVisible, alice, bob}},
+		{"v1 bridge", func() ([]models.Person, error) { return repo.SearchAlphabetical(ctx, token, 20, filter) }, []int{alice, bob, exactVisible}},
+	} {
+		want := make([]int64, len(tc.want))
+		for i, index := range tc.want {
+			want[i] = ids[index]
+		}
+		// Past PostgreSQL's five custom plans for a named statement.
+		for range 7 {
+			people, err := tc.search()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]int64, len(people))
+			for i, p := range people {
+				got[i] = p.ID
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("%s: got %v, want %v", tc.name, got, want)
+			}
+		}
+	}
+	var named int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_prepared_statements
+		WHERE statement LIKE '%FROM people WHERE%' AND statement NOT LIKE '%pg_prepared_statements%'`).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != 0 {
+		t.Fatalf("people search retained %d named statements eligible for generic plans", named)
+	}
+}
+
+// seedPersonSearchPeople inserts one person per name, each credited on a movie
+// in a visible library, or in a second, hidden one for the hidden indexes, and
+// removes them all when the test ends. It returns the people's IDs in name
+// order and the visible library.
+func seedPersonSearchPeople(t *testing.T, pool *pgxpool.Pool, token string, names []string, hiddenIndexes ...int) ([]int64, int) {
+	t.Helper()
+	ctx := t.Context()
+	ids := make([]int64, len(names))
+	var visible, hidden int
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanup, `DELETE FROM item_people WHERE person_id = ANY($1)`, ids)
+		_, _ = pool.Exec(cleanup, `DELETE FROM people WHERE id = ANY($1)`, ids)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id LIKE $1`, token+"%")
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{visible, hidden})
+	})
+	for i, library := range []*int{&visible, &hidden} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies',$1,true) RETURNING id`, token).Scan(library); err != nil {
+			t.Fatal(err)
+		}
+		contentID := fmt.Sprintf("%s-%d", token, i)
+		exec(`INSERT INTO media_items(content_id,type,title) VALUES($1,'movie','Synthetic title')`, contentID)
+		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, contentID, *library)
+	}
+	baseID := time.Now().UnixNano()
+	for i, name := range names {
+		ids[i] = baseID + int64(i)
+		exec(`INSERT INTO people(id,name) VALUES($1,$2)`, ids[i], name)
+		credited := token + "-0"
+		if slices.Contains(hiddenIndexes, i) {
+			credited = token + "-1"
+		}
+		exec(`INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$1,1)`, ids[i], credited)
+	}
+	return ids, visible
 }
