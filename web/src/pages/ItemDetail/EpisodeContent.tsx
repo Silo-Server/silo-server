@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
+import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -63,12 +64,11 @@ export default function EpisodeContent({
   item: ItemDetail & { type: "episode" };
   /**
    * The page's ?libraryId= scope. Series, season and episode links keep it;
-   * Play does not, because playback always sees every version.
+   * Play does not, because playback always sees every version. The series
+   * overview fallback resolves its language in it.
    */
   libraryId?: number;
 }) {
-  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
-    useOnViewTranslation(item);
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -106,8 +106,23 @@ export default function EpisodeContent({
   // Keyed by episode so a reveal survives an on-view translation of the same
   // episode but not navigation to the next one.
   const [revealedOverviewId, setRevealedOverviewId] = useState<string | null>(null);
+  // An episode without a description shows its series' overview, in the
+  // language the series page shows in this library, and on-view translation
+  // follows it. It reveals nothing about the episode, so spoiler protection leaves it
+  // visible.
+  const hasOwnOverview = !!item.overview?.trim();
+  const { data: series } = useCatalogItemDetail(
+    hasOwnOverview ? undefined : item.series_id,
+    libraryId,
+  );
+  const overviewSource = hasOwnOverview ? item : series;
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(overviewSource);
   const overviewHidden =
-    hideOverviews && isEpisodeUnwatched(item.user_data) && revealedOverviewId !== item.content_id;
+    hasOwnOverview &&
+    hideOverviews &&
+    isEpisodeUnwatched(item.user_data) &&
+    revealedOverviewId !== item.content_id;
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -330,10 +345,12 @@ export default function EpisodeContent({
             </div>
           }
           scoreRow={<ScoreRow ratings={item.ratings} />}
-          overview={item.overview}
+          overview={overviewSource?.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
-          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          overviewMachineTranslated={hasMachineTranslation(
+            overviewSource?.machine_translated_fields,
+          )}
           overviewHidden={overviewHidden}
           onRevealOverview={() => setRevealedOverviewId(item.content_id)}
           crewLine={<HeroCrewLine crew={item.crew ?? []} />}
