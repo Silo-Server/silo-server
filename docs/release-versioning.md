@@ -54,10 +54,9 @@ tags that identify the same multi-platform image:
 | `latest` | Mutable pointer updated by successful default-branch publications. |
 | Full commit SHA | Exact source identity for the build. |
 
-The omnibus image, which bundles PostgreSQL, Redis, and Meilisearch, is
-published from the same build under `build-N-aio` and the commit SHA with
-`-aio` added. Its mutable pointer is `aio`, not `latest`, until it replaces the
-regular image there.
+The image bundles PostgreSQL, Redis, and Meilisearch. Earlier builds
+published it as `build-N-aio` and moved `aio`, while `build-N` and `latest`
+named an image without them; see [Omnibus image](architecture/omnibus-image.md#build).
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a `build-N`, commit-SHA tag, or image digest when a

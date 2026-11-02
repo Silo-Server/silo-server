@@ -425,6 +425,7 @@ var adminSettingDefaults = map[string]string{
 
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
+	AIServiceTierSettingKey:               "",
 	"ai.chat_model":                       "gpt-6-luna",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
@@ -861,6 +862,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "api_key", aiAuthModeChatGPT)
 	case "ai.reasoning_effort":
 		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+	case AIServiceTierSettingKey:
+		return normalizeAdminEnum(key, value, "", "priority", "ultrafast")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":

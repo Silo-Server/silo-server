@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type HistoryImportHandler struct {
@@ -80,7 +81,7 @@ const historyImportPermissionCheckFailed = "Failed to check profile permissions"
 type HistoryImportActor struct {
 	UserID        int
 	ProfileID     string
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // historyImportRequestActor uses the profile and PIN proof resolved by viewer
@@ -90,9 +91,9 @@ func historyImportRequestActor(r *http.Request) HistoryImportActor {
 	return HistoryImportActor{
 		UserID:    apimw.GetUserID(ctx),
 		ProfileID: apimw.GetProfileID(ctx),
-		VerifyProfile: func(profileID string) error {
-			if scope, ok := access.GetScope(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-				return nil
+		VerifyProfile: func(profile *userstore.Profile) error {
+			if scope, ok := access.GetScope(ctx); ok {
+				return scope.CheckProfileVerification(profile)
 			}
 			return access.ErrProfileUnverified
 		},
@@ -110,7 +111,7 @@ func (h *HistoryImportHandler) historyImportsForAnyProfile(ctx context.Context, 
 	}
 	verify := actor.VerifyProfile
 	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 	}
 	allowed, err := canManageHouseholdAs(ctx, store, actor.ProfileID, verify)
 	if errors.Is(err, access.ErrProfileUnverified) {

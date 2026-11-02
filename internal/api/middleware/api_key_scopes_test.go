@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -106,9 +108,15 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"users scope denies the scope catalog", users, http.MethodGet, "/api/v1/api-keys/scopes", false},
 		{"users scope denies non-numeric id", users, http.MethodGet, "/api/v1/admin/users/abc", false},
 
-		{"traversal cannot dodge the allowlist", users, http.MethodGet, "/api/v1/admin/settings/../users", true},
+		// The router reads these spellings as other routes than their cleaned
+		// or decoded forms, so a scoped key is refused them outright.
+		{"dot segments are refused", users, http.MethodGet, "/api/v1/admin/settings/../users", false},
 		{"traversal cannot reach unlisted route", users, http.MethodGet, "/api/v1/admin/users/42/../../settings", false},
-		{"double slash is cleaned before matching", users, http.MethodGet, "/api/v1//admin//users", true},
+		{"double slash is refused", users, http.MethodGet, "/api/v1//admin//users", false},
+		{"trailing slash is refused", users, http.MethodGet, "/api/v1/admin/users/", false},
+		{"encoded slash traversal is refused", users, http.MethodPut, "/api/v1/admin/settings/..%2Fusers%2F1", false},
+		{"needless escape is refused", users, http.MethodGet, "/api/v1/admin/users/%34%32", false},
+		{"unscoped keys keep encoded paths", nil, http.MethodPut, "/api/v1/admin/settings/a%2Fb", true},
 
 		{"groups read list", groups, http.MethodGet, "/api/v1/admin/access-groups", true},
 		{"groups read get", groups, http.MethodGet, "/api/v1/admin/access-groups/3", true},
@@ -200,6 +208,90 @@ func TestRequireAuthEnforcesAPIKeyScopes(t *testing.T) {
 	handler.ServeHTTP(rec, denied)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("out-of-scope route: status = %d, want 403", rec.Code)
+	}
+}
+
+// A scoped key must reach exactly the handler its allowlist judged. chi
+// routes on the escaped path and never cleans it, so this drives the real
+// root ServeMux, RequireAuth and a chi router with the settings route the
+// encoded-traversal report used: the users scope may update a user and must
+// never reach the settings handler, however the path is spelled.
+func TestRequireAuthScopedKeyReachesOnlyTheJudgedRoute(t *testing.T) {
+	key := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", Scopes: []string{auth.ScopeAdminUsers}}
+	owner := &models.User{ID: 7, Role: "admin", Enabled: true}
+	am := NewAuthMiddleware(nil, nil, &fakeAPIKeyValidator{key: key}, &fakeAPIKeyUserLoader{user: owner})
+
+	var reached []string
+	router := chi.NewRouter()
+	router.Group(func(r chi.Router) {
+		r.Use(am.RequireAuth)
+		r.Put("/api/v1/admin/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "users:"+chi.URLParam(r, "id"))
+		})
+		r.Put("/api/v1/admin/settings/{key}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "settings:"+chi.URLParam(r, "key"))
+		})
+		r.Put("/api/v2/admin/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "users:"+chi.URLParam(r, "id"))
+		})
+		r.Put("/api/v2/admin/settings/values/{key}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "settings:"+chi.URLParam(r, "key"))
+		})
+		// Stands in for any route whose last parameter spans segments.
+		r.Put("/api/v1/admin/settings/*", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "settings:"+chi.URLParam(r, "*"))
+		})
+	})
+	root := http.NewServeMux()
+	root.Handle("/api/", router)
+
+	tests := []struct {
+		target string
+		want   int
+		reach  string
+	}{
+		{"/api/v1/admin/users/1", http.StatusOK, "users:1"},
+		{"/api/v2/admin/users/1", http.StatusOK, "users:1"},
+		{"/api/v1/admin/settings/plain.key", http.StatusForbidden, ""},
+		{"/api/v1/admin/settings/..%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v1/admin/settings/attacker.key%2F..%2F..%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v1/admin/settings/%2E%2E%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v2/admin/settings/values/..%2F..%2Fusers%2F1", http.StatusForbidden, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			reached = nil
+			req := httptest.NewRequest(http.MethodPut, tt.target, nil)
+			req.Header.Set("Authorization", "Bearer sa_test")
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (reached %v)", rec.Code, tt.want, reached)
+			}
+			if got := strings.Join(reached, ","); got != tt.reach {
+				t.Fatalf("reached %q, want %q", got, tt.reach)
+			}
+		})
+	}
+
+	// The root mux redirects dot segments before the API router sees them,
+	// but RequireAuth must not lean on that: chi alone routes the literal
+	// segments to the settings catch-all, while the cleaned form is a users
+	// route.
+	for _, target := range []string{
+		"/api/v1/admin/settings/../users/1",
+		"/api/v1/admin/settings/./../users/1",
+	} {
+		t.Run("router only "+target, func(t *testing.T) {
+			reached = nil
+			req := httptest.NewRequest(http.MethodPut, target, nil)
+			req.Header.Set("Authorization", "Bearer sa_test")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || len(reached) != 0 {
+				t.Fatalf("status = %d, reached %v; want 403 and no handler", rec.Code, reached)
+			}
+		})
 	}
 }
 

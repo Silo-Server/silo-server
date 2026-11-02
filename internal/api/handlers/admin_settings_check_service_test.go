@@ -52,7 +52,7 @@ func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
 		"ai.chat_model":                 "test-model",
 	}}}
 	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
-	const want = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
+	const want = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
 	if err != nil || result.Success || result.Message != want {
 		t.Fatalf("result = %+v, err = %v; want %q", result, err, want)
 	}

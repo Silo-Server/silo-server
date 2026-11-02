@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from "react";
 import type {
   RateLimitAuthEndpointConfig,
   RateLimitConfig,
+  RateLimitSessionQuota,
   RateLimitTierConfig,
 } from "@/api/types";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
@@ -53,6 +54,18 @@ const DEFAULT_AUTH_ENDPOINT: RateLimitAuthEndpointConfig = {
   burst: 10,
 };
 
+const DEFAULT_SESSION_QUOTA: RateLimitSessionQuota = {
+  mode: "log",
+  requests_per_hour: 10000,
+  burst: 30000,
+};
+
+const SESSION_QUOTA_MODE_LABELS: Record<RateLimitSessionQuota["mode"], string> = {
+  off: "Off",
+  log: "Log only",
+  enforce: "Enforce",
+};
+
 const DEFAULT_CONFIG: RateLimitConfig = {
   enabled: true,
   backend: "memory",
@@ -74,6 +87,7 @@ const DEFAULT_CONFIG: RateLimitConfig = {
     device_poll: { requests_per_minute: 120, burst: 30 },
     autoscan_webhook: { requests_per_minute: 60, burst: 30 },
   },
+  session_quota: DEFAULT_SESSION_QUOTA,
 };
 
 const TIER_LABELS: Record<string, string> = {
@@ -216,6 +230,7 @@ export default function SecurityAccessSettings() {
             DEFAULT_AUTH_ENDPOINT,
         ]),
       ),
+      session_quota: serverConfig.session_quota ?? DEFAULT_SESSION_QUOTA,
     };
   }, [serverConfig]);
 
@@ -247,6 +262,13 @@ export default function SecurityAccessSettings() {
       if (isNaN(num) || num <= 0) return;
       field(num);
     };
+  }
+
+  function handleSessionQuotaChange(update: Partial<RateLimitSessionQuota>) {
+    updateConfigState((prev) => ({
+      ...prev,
+      session_quota: { ...(prev.session_quota ?? DEFAULT_SESSION_QUOTA), ...update },
+    }));
   }
 
   function handleTierChange(tier: string, field: keyof RateLimitTierConfig, value: number) {
@@ -329,6 +351,7 @@ export default function SecurityAccessSettings() {
     );
 
   const savingRateLimits = updateConfig.isPending;
+  const sessionQuota = config.session_quota ?? DEFAULT_SESSION_QUOTA;
 
   return (
     <div className="flex h-full flex-col">
@@ -454,6 +477,60 @@ export default function SecurityAccessSettings() {
               ),
             }}
           />
+
+          <SettingsSubheading>Per sign-in session</SettingsSubheading>
+          <SettingFieldRow
+            label="Hourly request quota"
+            htmlFor="session-quota-mode"
+            description="Each sign-in session gets a bucket of requests that refills over the hour, which stops a client that stays under the limits above all day. Playback, downloads, admins and API keys don't count. Log only records sessions that run out; Enforce refuses them until the bucket refills. The dashboard's Busiest API clients card shows which sessions make the most requests."
+          >
+            <Select
+              value={sessionQuota.mode}
+              onValueChange={(value) =>
+                handleSessionQuotaChange({ mode: value as RateLimitSessionQuota["mode"] })
+              }
+              disabled={savingRateLimits}
+            >
+              <SelectTrigger id="session-quota-mode" className={SETTINGS_CONTROL_WIDTH}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(SESSION_QUOTA_MODE_LABELS).map(([mode, label]) => (
+                  <SelectItem key={mode} value={mode}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingFieldRow>
+          <SettingFieldRow
+            label="Quota size"
+            htmlFor="session-quota-rph"
+            description="Requests the bucket refills per hour, and how many it holds when full. A full bucket must refill within a week."
+          >
+            <div className="flex flex-wrap items-end justify-end gap-2.5">
+              <RateBox
+                id="session-quota-rph"
+                caption="Per hour"
+                disabled={savingRateLimits || sessionQuota.mode === "off"}
+                field={{
+                  value: sessionQuota.requests_per_hour,
+                  onChange: setNumber((num) =>
+                    handleSessionQuotaChange({ requests_per_hour: num }),
+                  ),
+                }}
+              />
+              <RateBox
+                id="session-quota-burst"
+                caption="Burst"
+                disabled={savingRateLimits || sessionQuota.mode === "off"}
+                field={{
+                  value: sessionQuota.burst,
+                  onChange: setNumber((num) => handleSessionQuotaChange({ burst: num })),
+                }}
+              />
+            </div>
+          </SettingFieldRow>
 
           <SettingsSubheading>API key tiers</SettingsSubheading>
           {Object.keys(TIER_LABELS).map((tier) => {

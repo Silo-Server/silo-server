@@ -60,9 +60,10 @@ func TestHEVCNegotiationRejectsStaleH264Recipe(t *testing.T) {
 	source := testRemoteTranscodeSource()
 	source.TargetVideoCodec = compatVideoCodecHEVC
 	stale := playback.NewRecipeCard(7, "profile", source.FileID, "", playback.TranscodeOpts{
-		TargetCodecVideo: compatTargetVideoCodec,
-		TargetCodecAudio: compatTargetAudioCodec,
-		AudioTrackIndex:  compatAudioTrackIndexOrDefault(source),
+		TargetCodecVideo:  compatTargetVideoCodec,
+		TargetCodecAudio:  compatTargetAudioCodec,
+		AudioTrackIndex:   compatAudioTrackIndexOrDefault(source),
+		RequireAudioTrack: true,
 	})
 	if compatRecipeMatchesSource(&stale, source) {
 		t.Fatal("HEVC source accepted stale H264 reconstruction recipe")

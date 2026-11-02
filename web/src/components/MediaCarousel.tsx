@@ -49,6 +49,11 @@ interface MediaCarouselProps {
   onViewAll?: () => void;
   /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
   viewAllHref?: string;
+  /**
+   * The slide to show, such as the item the page is about. The carousel jumps
+   * to it again whenever it changes, as when the page moves to another item.
+   */
+  startSlide?: number;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -65,6 +70,11 @@ interface MediaCarouselProps {
    */
   compact?: boolean;
   windowing?: MediaCarouselWindowing;
+  /**
+   * Called when the last slide comes within one viewport width of view, for a
+   * row that loads more of itself; it may fire again as the row scrolls.
+   */
+  onNearEnd?: () => void;
 }
 
 /**
@@ -91,11 +101,13 @@ const CarouselSlideList = memo(function CarouselSlideList({
   className,
   windowInitialCount,
   windowPlaceholderClassName,
+  onNearEnd,
 }: {
   slides: CarouselSlide[];
   className: string;
   windowInitialCount?: number;
   windowPlaceholderClassName?: string;
+  onNearEnd?: () => void;
 }) {
   const windowed = windowInitialCount !== undefined && windowPlaceholderClassName !== undefined;
   const [mountedCount, setMountedCount] = useState(() =>
@@ -153,6 +165,24 @@ const CarouselSlideList = memo(function CarouselSlideList({
     };
   }, [filling, total]);
 
+  useEffect(() => {
+    const list = listRef.current;
+    const viewport = list?.parentElement;
+    const last = list?.lastElementChild;
+    if (!onNearEnd || !viewport || !last || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onNearEnd();
+      },
+      // A whole row ahead: the rest of the row is a network read.
+      { root: viewport, rootMargin: "0px 100%" },
+    );
+    observer.observe(last);
+    return () => observer.disconnect();
+    // slides, not only total: a row reread at the same size (a cancelled
+    // completion) re-arms the observer, which reports again if still near.
+  }, [onNearEnd, slides]);
+
   return (
     <ul ref={listRef} role="list" className={className}>
       {slides.map((slide, index) =>
@@ -184,14 +214,25 @@ export default function MediaCarousel({
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
   viewAllHref,
+  startSlide,
   headerActions,
   edgePadding = true,
   compact = false,
   windowing,
+  onNearEnd,
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  useEffect(() => {
+    if (!emblaApi || startSlide === undefined) return;
+    // Slides scroll in groups, so jump to the snap whose group holds the slide.
+    const snap = emblaApi
+      .internalEngine()
+      .slideRegistry.findIndex((slides) => slides.includes(startSlide));
+    if (snap >= 0) emblaApi.scrollTo(snap, true);
+  }, [emblaApi, startSlide]);
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
@@ -233,7 +274,7 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
               <h2 className={titleClass}>
@@ -302,6 +343,7 @@ export default function MediaCarousel({
             className={listClassName}
             windowInitialCount={windowing?.initialCount}
             windowPlaceholderClassName={windowing?.placeholderClassName}
+            onNearEnd={onNearEnd}
           />
         </div>
 

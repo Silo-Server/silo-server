@@ -220,6 +220,24 @@ func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
 	}
 }
 
+// The strip is packaged as fMP4, so a client that lists HEVC for MPEG-TS HLS
+// only, and cannot take a progressive remux of HEVC, must not be handed one.
+func TestPlaybackInfoSkipsStripForTSOnlyClient(t *testing.T) {
+	handler, routeID := newDVStripHandler(t, true)
+	body := androidTVRangeProfile(androidTVDVProfile8Disabled...)
+	body = strings.Replace(body, `,{"AudioCodec":"aac,ac3,eac3","Container":"mp4","Context":"Streaming","Protocol":"hls","Type":"Video","VideoCodec":"hevc,h264"}`, "", 1)
+	body = strings.Replace(body, `"VideoCodec":"h264,hevc,av1"`, `"VideoCodec":"h264,av1"`, 1)
+	if strings.Contains(body, `"Container":"mp4"`) || strings.Contains(body, "h264,hevc,av1") {
+		t.Fatal("fixture still lists fMP4 HLS or HEVC direct play")
+	}
+
+	rr := servePlaybackInfo(handler, routeID, body)
+
+	if rr.Code != http.StatusBadRequest || strings.Contains(rr.Body.String(), "remux-dv-v1") {
+		t.Fatalf("status = %d body = %s, want no fMP4 strip route", rr.Code, rr.Body.String())
+	}
+}
+
 func TestPlaybackInfoSkipsStripWhenRPUCannotBeStripped(t *testing.T) {
 	handler, routeID := newDVStripHandler(t, true)
 	handler.compatDVRPUProbe = func(context.Context, string) bool { return false }

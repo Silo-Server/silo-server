@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { LANGUAGES } from "@/player/utils/languageNames";
 
-import { LIBRARY_TYPES } from "./libraryTypes";
+import { BOX_SET_MIN_MOVIE_OPTIONS, LIBRARY_TYPES } from "./libraryTypes";
 import {
   REALTIME_MONITORING_SETTINGS_PATH,
   realtimeMonitoringNeedsAttention,
@@ -335,6 +335,86 @@ function ProviderLevelSection({
   );
 }
 
+// The offered sizes, plus a saved size outside them so it stays selected.
+function boxSetMinMovieOptions(current: number): number[] {
+  return [...new Set<number>([...BOX_SET_MIN_MOVIE_OPTIONS, current])].sort((a, b) => a - b);
+}
+
+export function BoxSetFields({ form }: { form: LibraryFormController }) {
+  return (
+    <div className="border-border bg-surface rounded-xl border p-3.5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label htmlFor="box-sets-enabled">Box sets</Label>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            Group movies that TMDB lists in the same collection, such as the Harry Potter films,
+            into one box set in this library. Your files and watch history stay as they are.
+          </p>
+        </div>
+        <Switch
+          id="box-sets-enabled"
+          checked={form.boxSetsEnabled}
+          onCheckedChange={form.setBoxSetsEnabled}
+        />
+      </div>
+      {form.boxSetsEnabled && (
+        <div className="border-border mt-3 space-y-3 border-t pt-3">
+          <div className="space-y-1.5">
+            <Label id="box-set-min-movies-label">Minimum movies in a box set</Label>
+            <div
+              role="radiogroup"
+              aria-labelledby="box-set-min-movies-label"
+              className="border-border inline-flex gap-0.5 rounded-full border p-0.5"
+            >
+              {boxSetMinMovieOptions(form.boxSetMinMovies).map((count) => {
+                const selected = form.boxSetMinMovies === count;
+                return (
+                  <button
+                    key={count}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => form.setBoxSetMinMovies(count)}
+                    className={cn(
+                      "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                      selected
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {count}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              A box set needs at least this many of its movies in this library. With fewer, the
+              movies show on their own.
+            </p>
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="box-sets-in-search">Show box sets in search</Label>
+              <p className="text-muted-foreground text-xs">
+                List a matching box set first in search results, with its movies after it.
+              </p>
+            </div>
+            <Switch
+              id="box-sets-in-search"
+              checked={form.boxSetsInSearch}
+              onCheckedChange={form.setBoxSetsInSearch}
+            />
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Box sets appear once Silo has looked up your movies&apos; collections, which runs in the
+            background after you save.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MetadataFields({ form }: { form: LibraryFormController }) {
   return (
     <div className="space-y-5">
@@ -372,6 +452,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         />
       </div>
       {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
+      {form.settingSupport.boxSets && <BoxSetFields form={form} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
           <Label>Trailer &amp; extras types</Label>

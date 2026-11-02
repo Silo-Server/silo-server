@@ -41,7 +41,18 @@ recent-activity view. GET `/api/v2/subtitles/ai/jobs/{job_id}` returns `job` aft
 checking access to that job's media file. Job, media-file and result-subtitle IDs
 are strings; `result_subtitle_id` is null until a result exists. Track indices
 remain numbers. Creation and update times are UTC instants with millisecond
-precision. Failures expose a safe summary instead of upstream diagnostics.
+precision. A failed job's `error_message` is a viewer-facing reason that names
+the cause: the provider is unreachable, unavailable, timed out, rejected the
+credentials or the request, is rate limiting, needs billing, does not know the
+model, refused oversized audio or subtitle text, or returned unusable output; the
+connected ChatGPT account can't share its plan usage; or the audio has no speech,
+the file has no audio, the source track is not text, has no lines, or is no
+longer available. Only provider requests are classified this way; storage,
+database and ffmpeg failures report a generic server reason. Provider responses
+and file details stay in the server log. Jobs that failed before reasons were
+classified report a generic reason or the billing notice. The live
+`subtitle_translation_failed` event carries the same reason, and bridge job
+reads return the same reason as v2. Players show it as-is.
 
 GET `/api/v2/subtitles/ai/quota` returns `limited`, `limit`, `used`, `remaining` and
 `period`. The budget belongs to the account. An admin account acting through a
@@ -360,8 +371,8 @@ There is no Jellyfin AI creation counterpart. Production activation and account
 enrollment are unchanged.
 
 Speech-provider credit or spend-limit failures end the job without retrying a
-permanent quota error. Job reads expose an actionable billing notice without
-provider response details. Temporary rate limits retain bounded retries, and
+permanent quota error. Job reads and the live failure event expose an
+actionable billing notice without provider response details. Temporary rate limits retain bounded retries, and
 cancellation during backoff preserves the provider failure for diagnosis.
 Incremental transcription retries extraction from the beginning only when the
 initial seek produced no audio; a provider failure after audio extraction does

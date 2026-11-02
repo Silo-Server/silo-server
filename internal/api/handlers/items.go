@@ -359,6 +359,8 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	// BoxSet describes a box set card (type box_set). Served by v2 only.
+	BoxSet *BoxSetView `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -2513,9 +2515,9 @@ func (t watchedTarget) seriesID() string {
 	return ""
 }
 
-// lookupWatchedTarget finds a movie, ebook, series, season or episode and
-// checks the viewer's access without loading a season's or series' episodes.
-// Any other item type is not found.
+// lookupWatchedTarget finds a movie, audiobook, ebook, series, season or
+// episode and checks the viewer's access without loading a season's or
+// series' episodes. Any other item type is not found.
 func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string, filter catalog.AccessFilter) (watchedTarget, error) {
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	switch {
@@ -2524,7 +2526,7 @@ func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string
 			return watchedTarget{}, err
 		}
 		switch item.Type {
-		case itemTypeMovie, itemTypeEbook, "series":
+		case itemTypeMovie, itemTypeAudiobook, itemTypeEbook, "series":
 			return watchedTarget{Type: item.Type, Item: item}, nil
 		default:
 			return watchedTarget{}, catalog.ErrItemNotFound
@@ -2576,6 +2578,18 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		return itemTypeMovie, seriesID, []watchedLeafTarget{{
 			ContentID:       target.Item.ContentID,
 			DurationSeconds: h.contentDurationSeconds(ctx, target.Item.ContentID, "", target.Item.Runtime),
+		}}, nil
+	case itemTypeAudiobook:
+		var duration float64
+		if played {
+			duration, err = h.audiobookDurationSeconds(ctx, target.Item.ContentID, target.Item.Runtime, filter)
+			if err != nil {
+				return "", "", nil, err
+			}
+		}
+		return itemTypeAudiobook, seriesID, []watchedLeafTarget{{
+			ContentID:       target.Item.ContentID,
+			DurationSeconds: duration,
 		}}, nil
 	case itemTypeEbook:
 		// Ebooks have no playback duration; read state is keyed off
@@ -2651,6 +2665,44 @@ func mediaFileDurationSeconds(files []*models.MediaFile, episodeID string, fallb
 	return 0
 }
 
+// audiobookDurationSeconds is a book's whole length: an audiobook is often
+// split into several files, so its length is the sum of its present files,
+// not the first file's. The scanner can attach several copies of one recording
+// (another folder, format or library) to the same book; each copy is one
+// recording root, and the book counts the longest accessible copy. The catalog runtime is
+// only a fallback for a book whose files report no duration.
+func (h *ItemsHandler) audiobookDurationSeconds(ctx context.Context, contentID string, fallbackRuntimeMinutes int, filter catalog.AccessFilter) (float64, error) {
+	var files []*models.MediaFile
+	if h.fileRepo != nil {
+		var err error
+		if files, err = h.fileRepo.GetByContentID(ctx, contentID); err != nil {
+			return 0, err
+		}
+	}
+	files = catalog.FilterMediaFilesByAccess(files, filter)
+	type copyRoot struct {
+		folderID int
+		root     string
+	}
+	byCopy := map[copyRoot]int{}
+	longest := 0
+	for _, file := range files {
+		if file == nil || file.Duration <= 0 {
+			continue
+		}
+		key := copyRoot{file.MediaFolderID, file.CanonicalRootPath}
+		byCopy[key] += file.Duration
+		longest = max(longest, byCopy[key])
+	}
+	if longest > 0 {
+		return float64(longest), nil
+	}
+	if fallbackRuntimeMinutes > 0 {
+		return float64(fallbackRuntimeMinutes * 60), nil
+	}
+	return 0, nil
+}
+
 func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, episodeID string, fallbackRuntimeMinutes int) float64 {
 	if h.fileRepo == nil {
 		if fallbackRuntimeMinutes > 0 {
@@ -2687,8 +2739,9 @@ func (h *ItemsHandler) requestCanViewFilePaths(r *http.Request) bool {
 	return h.canViewFilePaths(r.Context())
 }
 
-// canViewFilePaths reports whether the caller may see on-disk paths: admins
-// always, other accounts when their stored flag allows it.
+// canViewFilePaths reports whether the caller may see on-disk paths: the
+// acting admin always, any other caller when the account's effective
+// permissions, after the access group's mask, include metadata curation.
 func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 	claims := apimw.GetClaims(ctx)
 	if claims == nil {
@@ -2696,8 +2749,8 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 	}
 	if claims.Role == "admin" {
 		// Only the acting admin sees paths by role. Another profile on the
-		// admin's account needs metadata curation assigned to the account,
-		// the bar the curation gate holds it to.
+		// admin's account falls through: it needs metadata curation assigned
+		// to the account, the bar the curation gate holds it to.
 		actingAdmin, err := apimw.ActingAdmin(ctx)
 		if err != nil {
 			slog.WarnContext(ctx, "checking file path visibility for an admin account", "component", "api", "user_id", claims.UserID, "error", err)
@@ -2706,7 +2759,6 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		if actingAdmin {
 			return true
 		}
-		return h.hasAssignedMetadataCuration(ctx, claims.UserID)
 	}
 	if h == nil || h.UserRepo == nil {
 		return false
@@ -2716,20 +2768,22 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "checking file path visibility permissions", "component", "api", "user_id", claims.UserID, "error", err)
 		return false
 	}
-	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+	return hasMaskedMetadataCuration(ctx, user, h.AccessGroups)
 }
 
-// hasAssignedMetadataCuration reports whether the account has metadata
-// curation assigned explicitly, not by its admin role. A failed lookup fails
-// closed.
-func (h *ItemsHandler) hasAssignedMetadataCuration(ctx context.Context, userID int) bool {
-	if h == nil || h.UserRepo == nil {
+// hasMaskedMetadataCuration reports whether an enabled account holds
+// metadata_curation after its access group's permission mask, as the metadata
+// curation gate resolves it. A failed group lookup fails closed.
+func hasMaskedMetadataCuration(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
+	// The group mask can only remove permissions, so an account without the
+	// grant skips the group lookup.
+	if user == nil || !user.Enabled || !slices.Contains(user.Permissions, string(auth.PermissionMetadataCuration)) {
 		return false
 	}
-	user, err := h.UserRepo.GetByID(ctx, userID)
+	effective, err := access.EffectivePolicyForUser(ctx, user, groups)
 	if err != nil {
-		slog.WarnContext(ctx, "checking file path visibility permissions", "component", "api", "user_id", userID, "error", err)
+		slog.WarnContext(ctx, "resolving metadata curation policy", "component", "api", "user_id", user.ID, "error", err)
 		return false
 	}
-	return user != nil && user.Enabled && auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
+	return slices.Contains(auth.PolicyPermissions(effective), string(auth.PermissionMetadataCuration))
 }

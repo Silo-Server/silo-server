@@ -57,7 +57,7 @@ func (r *Resolver) resolve(req *http.Request) (net.IP, bool) {
 
 	// If the connecting IP is not a trusted proxy, ignore forwarding headers.
 	if !r.isTrusted(remoteIP) {
-		return remoteIP, hasForwardingHeaders(req.Header)
+		return remoteIP, HasForwardingHeaders(req.Header)
 	}
 
 	if ip, forwarded := r.forwardedFor(req.Header.Values("X-Forwarded-For")); ip != nil {
@@ -70,7 +70,7 @@ func (r *Resolver) resolve(req *http.Request) (net.IP, bool) {
 		}
 	}
 
-	return remoteIP, hasForwardingHeaders(req.Header)
+	return remoteIP, HasForwardingHeaders(req.Header)
 }
 
 // forwardedFor walks the X-Forwarded-For lines right to left and returns the
@@ -112,10 +112,10 @@ func hasForwardedEntry(values []string) bool {
 	return false
 }
 
-// hasForwardingHeaders reports whether the request names a forwarded client
+// HasForwardingHeaders reports whether the request names a forwarded client
 // in any header the resolver knows of. Forwarded (RFC 7239) is never parsed
 // for an address, but its presence still shows the peer is a forwarder.
-func hasForwardingHeaders(h http.Header) bool {
+func HasForwardingHeaders(h http.Header) bool {
 	return hasForwardedEntry(h.Values("X-Forwarded-For")) ||
 		hasForwardedEntry(h.Values("X-Real-IP")) ||
 		hasForwardedEntry(h.Values("Forwarded"))

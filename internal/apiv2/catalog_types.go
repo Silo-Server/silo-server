@@ -19,7 +19,7 @@ import (
 type CatalogItem struct {
 	ContentID              string                    `json:"content_id" doc:"Deterministic catalog identifier" example:"movie:heat-1995"`
 	PlayContentID          string                    `json:"play_content_id,omitempty" doc:"The item to play when the card is a series or season; absent when the item plays itself"`
-	Type                   string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode" example:"movie"`
+	Type                   string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse" example:"movie"`
 	Title                  string                    `json:"title" example:"Heat"`
 	SeriesID               string                    `json:"series_id,omitempty" doc:"Owning series of an episode or season"`
 	SeriesTitle            string                    `json:"series_title,omitempty"`
@@ -75,12 +75,13 @@ type CatalogItem struct {
 	// series backdrop without fetching the episode's detail. There is no
 	// season backdrop member; Continue Watching and Next Up rows carry it as
 	// backdrop_url (withResumeEpisodeBackdrop).
-	SeriesPosterURL         string `json:"series_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it"`
-	SeriesPosterThumbhash   string `json:"series_poster_thumbhash,omitempty" doc:"On an episode card: the series poster's ThumbHash"`
-	SeriesBackdropURL       string `json:"series_backdrop_url,omitempty" format:"uri-reference" doc:"On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it"`
-	SeriesBackdropThumbhash string `json:"series_backdrop_thumbhash,omitempty" doc:"On an episode card: the series backdrop's ThumbHash"`
-	SeasonPosterURL         string `json:"season_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it"`
-	SeasonPosterThumbhash   string `json:"season_poster_thumbhash,omitempty" doc:"On an episode card: the season poster's ThumbHash"`
+	SeriesPosterURL         string         `json:"series_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it"`
+	SeriesPosterThumbhash   string         `json:"series_poster_thumbhash,omitempty" doc:"On an episode card: the series poster's ThumbHash"`
+	SeriesBackdropURL       string         `json:"series_backdrop_url,omitempty" format:"uri-reference" doc:"On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it"`
+	SeriesBackdropThumbhash string         `json:"series_backdrop_thumbhash,omitempty" doc:"On an episode card: the series backdrop's ThumbHash"`
+	SeasonPosterURL         string         `json:"season_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it"`
+	SeasonPosterThumbhash   string         `json:"season_poster_thumbhash,omitempty" doc:"On an episode card: the season poster's ThumbHash"`
+	BoxSet                  *CatalogBoxSet `json:"box_set,omitempty" doc:"The box set a box_set card stands for; open it with getCatalogBoxSet"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -257,6 +258,9 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
+	}
+	if v.BoxSet != nil {
+		item.BoxSet = new(catalogBoxSetOf(*v.BoxSet))
 	}
 	if m := v.SortMetrics; m != nil {
 		metrics := CatalogItemSortMetrics{ReleaseDate: calendarDatePtr(m.ReleaseDate), RuntimeMinutes: m.RuntimeMinutes, Resolution: m.Resolution, BitrateKbps: m.BitrateKbps,

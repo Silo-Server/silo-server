@@ -9,6 +9,7 @@ package aitranslate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ type Request struct {
 	// untranslated, for continuity across batch boundaries.
 	ContextNeighbors int
 }
+
+// ErrInvalidModelResponse reports a batch the model kept answering with
+// unparsable or incomplete JSON after every format retry.
+var ErrInvalidModelResponse = errors.New("invalid model response")
 
 // maxFormatRetries is how many times a batch is re-asked after the model
 // returns unparsable or incomplete JSON. Transport/API errors are retried
@@ -157,7 +162,7 @@ func translateBatch(ctx context.Context, chat ChatFn, req Request, noun string, 
 		return out, nil
 	}
 
-	return nil, fmt.Errorf("invalid model response after %d attempts: %w", maxFormatRetries+1, lastErr)
+	return nil, fmt.Errorf("%w after %d attempts: %w", ErrInvalidModelResponse, maxFormatRetries+1, lastErr)
 }
 
 // buildIndexedJSON renders texts as a JSON object {"1":..., "2":...} keyed by

@@ -26,6 +26,7 @@ const (
 	// encrypted value. Do not rename it: the ciphertext is bound to this name.
 	AIProvidersSettingKey      = "ai.providers"
 	AITextProviderSettingKey   = "ai.text_provider_id"
+	AIServiceTierSettingKey    = "ai.service_tier"
 	AISpeechProviderSettingKey = "ai.speech_provider_id"
 	// EmbeddingProviderSettingKey is read once at startup, like every
 	// recommendations.* setting: the engine and its embedding lock are built
@@ -238,6 +239,24 @@ func ResolveAIEndpoint(values map[string]string, bindingKey string, capability A
 	}
 	baseURL, apiKey, _ = registry.Resolve(strings.TrimSpace(values[bindingKey]), capability)
 	return baseURL, apiKey
+}
+
+// ResolveAIServiceTier applies the saved tier only to an OpenAI API-key text
+// provider. Keeping the setting when switching providers must not send it to
+// another provider or consume a ChatGPT plan at an API billing tier.
+func ResolveAIServiceTier(values map[string]string) string {
+	if values["ai.auth_mode"] == aiAuthModeChatGPT {
+		return ""
+	}
+	registry, err := ParseAIProviderRegistry(values[AIProvidersSettingKey])
+	if err != nil {
+		return ""
+	}
+	provider, ok := registry.Find(strings.TrimSpace(values[AITextProviderSettingKey]))
+	if !ok || provider.Type != AIProviderOpenAI || !provider.Supports(AICapabilityChat) {
+		return ""
+	}
+	return values[AIServiceTierSettingKey]
 }
 
 var aiProviderIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)

@@ -1,13 +1,17 @@
-# Silo omnibus image: the regular Silo image plus PostgreSQL, and optional Redis
-# and Meilisearch, in one container supervised by s6-overlay. Each service runs
-# as its own user and keeps its data under /config/<service>.
+# Silo's Docker image: the base Silo image (the root Dockerfile) plus
+# PostgreSQL, and optional Redis and Meilisearch, in one container supervised
+# by s6-overlay. Each service runs as its own user and keeps its data under
+# /config/<service>.
 #
-# CI builds this on the regular image of the same commit, so both images run
+# CI builds this on the base image of the same commit, so both images run
 # the same Silo binary against the same libraries, FFmpeg build, and GPU
-# runtimes. This file adds only what the regular image does not carry. The
+# runtimes. This file adds only what the base image does not carry. The
 # base changes on every build, so no layer here outlives a package update.
 
-ARG SILO_IMAGE=ghcr.io/silo-server/silo-server:latest
+# The base image of one commit: CI passes the <full SHA>-base tag it pushed,
+# and a local build names one the same way. No tag follows the newest base, so
+# the default is a placeholder on a reserved domain that never resolves.
+ARG SILO_IMAGE=set-silo-image.invalid/silo-server:base
 FROM ${SILO_IMAGE}
 ARG TARGETARCH
 ARG S6_OVERLAY_VERSION=3.2.3.2
@@ -85,7 +89,7 @@ RUN set -eu; \
     echo "${meili_sha}  /usr/local/bin/meilisearch" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/meilisearch
 
-# Silo's state moves under /config: /var/lib/silo, which the regular image
+# Silo's state moves under /config: /var/lib/silo, which the base image
 # creates, becomes a link to /config/silo.
 RUN rm -rf /var/lib/silo && \
     mkdir -p /config && \
@@ -106,5 +110,5 @@ ENV PATH="/usr/lib/postgresql/${PG_MAJOR}/bin:${PATH}" \
 
 VOLUME /config
 
-# The ports and the health check come from the regular image.
+# The ports and the health check come from the base image.
 ENTRYPOINT ["/init"]

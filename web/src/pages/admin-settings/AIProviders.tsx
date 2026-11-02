@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -18,9 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
-  useAIProviderModels,
   useAIProviders,
   useCheckAIProvider,
   useCreateAIProvider,
@@ -34,12 +32,7 @@ import {
 import { AI_CAPABILITY_LABELS, hostLabel, providerOptions } from "@/lib/aiProviders";
 import { cn } from "@/lib/utils";
 
-import {
-  SETTINGS_CONTROL_WIDTH,
-  SettingField,
-  SettingFieldRow,
-  SettingFieldStatus,
-} from "./SettingField";
+import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 
 // ---------------------------------------------------------------------------
 // Shared labels
@@ -81,71 +74,6 @@ export function CapabilityChips({ capabilities }: { capabilities: AICapability[]
 
 function usedByLabel(usedBy: string[]): string {
   return usedBy.map((job) => JOB_LABELS[job] ?? job).join(" and ");
-}
-
-// ---------------------------------------------------------------------------
-// Model field
-// ---------------------------------------------------------------------------
-
-/**
- * A model name with the selected provider's listed models as suggestions. The
- * list is a convenience: providers that do not list models, or list them
- * without saying which are which, still take any typed name.
- */
-export function ModelField({
-  label,
-  description,
-  providerID,
-  kind,
-  value,
-  onChange,
-  onCommit,
-  placeholder,
-}: {
-  label: string;
-  description?: ReactNode;
-  providerID: string;
-  kind: AICapability;
-  value: string;
-  onChange: (value: string) => void;
-  /** Called when the field loses focus, for pages that save each field. */
-  onCommit?: () => void;
-  placeholder?: string;
-}) {
-  const inputID = useId();
-  const listID = useId();
-  const models = useAIProviderModels(providerID);
-  const suggestions = (models.data?.models ?? []).filter((model) => model.kind === kind);
-  const status =
-    providerID === "" ? undefined : models.isError ? (
-      <span className="text-muted-foreground text-xs">
-        Could not load the provider&rsquo;s models; type the name.
-      </span>
-    ) : suggestions.length > 0 ? (
-      <span className="text-muted-foreground text-xs">
-        {suggestions.length} suggested by the provider
-      </span>
-    ) : undefined;
-  return (
-    <SettingFieldRow label={label} htmlFor={inputID} description={description} status={status}>
-      <Input
-        id={inputID}
-        list={listID}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onCommit}
-        placeholder={placeholder}
-        autoComplete="off"
-        spellCheck={false}
-        className={cn(SETTINGS_CONTROL_WIDTH, "font-mono text-[13px]")}
-      />
-      <datalist id={listID}>
-        {suggestions.map((model) => (
-          <option key={model.id} value={model.id} />
-        ))}
-      </datalist>
-    </SettingFieldRow>
-  );
 }
 
 // ---------------------------------------------------------------------------

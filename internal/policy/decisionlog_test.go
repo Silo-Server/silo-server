@@ -3,11 +3,15 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/partman"
 )
 
 type fakeDecisionLogDB struct {
@@ -197,5 +201,41 @@ func testScopeInput() ScopeInput {
 		ProfileMaxQuality:    "1080p",
 		ProfileMaxRating:     "PG-13",
 		AccessPolicyRevision: 7,
+	}
+}
+
+type fakeDecisionLogPartitions struct {
+	dropErr        error
+	defaultDeleted int64
+}
+
+func (f fakeDecisionLogPartitions) EnsureFuturePartitions(context.Context) error { return nil }
+
+func (f fakeDecisionLogPartitions) DropExpiredPartitions(context.Context, time.Time) ([]string, error) {
+	return nil, f.dropErr
+}
+
+func (f fakeDecisionLogPartitions) DeleteExpiredRowsFromDefault(context.Context, time.Time) (int64, error) {
+	return f.defaultDeleted, nil
+}
+
+func TestCleanupDecisionLogsOnceAfterAFailedDrop(t *testing.T) {
+	broken := errors.New("drop failed")
+	for _, tc := range []struct {
+		name    string
+		dropErr error
+		want    error
+	}{
+		// A busy table is retried next run; the row deletes still prune this one.
+		{"busy table", fmt.Errorf("drop partition p: %w", partman.ErrPartitionBusy), nil},
+		{"other error", broken, broken},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The row-delete fallback must not drop the default partition's count.
+			deleted, err := CleanupDecisionLogsOnce(t.Context(), nil, nil, fakeDecisionLogPartitions{dropErr: tc.dropErr, defaultDeleted: 3})
+			if !errors.Is(err, tc.want) || deleted != 3 {
+				t.Fatalf("got %d rows, %v; want 3 rows, %v", deleted, err, tc.want)
+			}
+		})
 	}
 }
