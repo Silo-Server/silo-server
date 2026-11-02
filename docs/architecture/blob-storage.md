@@ -495,12 +495,11 @@ objects without passing through the server. Objects removed there outside
 Silo, such as after bucket loss or a restore onto a bucket the collectors have
 since cleaned, are recovered by running `reconcile_artwork_cache` by hand. Its
 verify sweep checks each row's stored key and every other size the revision
-published, and treats a missing size like a missing stored key wherever
-something can make it again: provider artwork is reset to its source for the
-backfill to cache again, and sidecar and generated artwork is cleared for a
-refresh or rebuild. An uploaded image missing only another size is kept and
-reported instead, since clearing it would lose the original and nothing else
-can make the size again.
+published. Provider artwork missing either is reset to its source for the
+backfill to cache again. Other artwork is cleared only when its stored key is
+gone; when only another size is missing, the intact original is kept and
+reported, since clearing an upload loses it and a refresh does not restore a
+locked sidecar or generated image.
 Seek-preview sheets are the one asset that confirms delivery through an
 external read endpoint before clients read them there (see
 [trickplay](trickplay.md)).

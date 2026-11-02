@@ -132,10 +132,10 @@ func TestArtworkReconcileBulkResetVerifiesUploadsDB(t *testing.T) {
 }
 
 // Catalog reads trust the publication manifest, so the verify sweep checks every
-// size a revision published, not only the stored key. A poster missing one size
-// is reset or cleared like a missing stored key when something can make it
-// again: a provider poster is reset to its source and a sidecar one is cleared
-// for a refresh. An uploaded poster keeps its row, since nothing else can.
+// size a revision published, not only the stored key. A provider poster missing
+// one size is reset to its source like a missing stored key. Uploaded and
+// sidecar posters keep their intact originals and are reported: clearing an
+// upload loses it, and a refresh does not restore a locked sidecar.
 func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
 	pool := storedArtworkReleaseTestPool(t)
 	ctx := t.Context()
@@ -168,10 +168,10 @@ func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
 	if err := r.sweepSurface(ctx, surface, &stats, func(int) {}); err != nil {
 		t.Fatal(err)
 	}
-	if stats.Checked != 3 || stats.Requeued != 1 || stats.Cleared != 1 || stats.Unrecovered != 1 || stats.Verified != 0 {
-		t.Fatalf("stats = %#v, want the provider poster reset, the sidecar one cleared, and the upload reported", stats)
+	if stats.Checked != 3 || stats.Requeued != 1 || stats.Cleared != 0 || stats.Unrecovered != 2 || stats.Verified != 0 {
+		t.Fatalf("stats = %#v, want the provider poster reset and the other two kept and reported", stats)
 	}
-	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded, "sidecar": ""} {
+	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded, "sidecar": sidecar} {
 		var got string
 		if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, id).Scan(&got); err != nil {
 			t.Fatal(err)
