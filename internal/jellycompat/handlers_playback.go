@@ -2508,7 +2508,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			message = "This stream exceeds the server bitrate limit, and no compliant transcoding route is available"
 		}
 		// Clients rarely surface this body, so record why each version was
-		// refused (issue #2683).
+		// refused (issue #2683). The HLS containers and HEVC encoding say why
+		// no encode fit: H.264 is encoded only into MPEG-TS segments, so a
+		// profile that lists only fMP4 needs HEVC (#3215).
+		hlsContainers := profile.hlsVideoTranscodingContainers()
 		for _, source := range sources {
 			slog.InfoContext(r.Context(), "jellycompat playback info found no route", "component", "jellycompat",
 				"content_id", detail.ContentID, "media_source_id", source.ID, "message", message,
@@ -2516,9 +2519,19 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				"video_codec", source.Version.CodecVideo, "audio_codec", compatSourceAudioCodec(source),
 				"source_bitrate_kbps", source.Version.Bitrate, "max_streaming_bitrate", req.MaxStreamingBitrate,
 				"server_bitrate_cap_kbps", req.serverBitrateCapKbps,
+				"hls_transcoding_containers", hlsContainers, "hevc_encoding", allowHEVCEncoding,
 			)
 		}
-		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
+		if req.serverBitrateCapKbps > 0 {
+			writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
+			return
+		}
+		// Answer as Jellyfin does when nothing can play, so the client shows an
+		// error instead of waiting on a failed request (#3215).
+		writeJSON(w, http.StatusOK, playbackInfoResponseDTO{
+			MediaSources: []mediaSourceDTO{},
+			ErrorCode:    playbackErrorNoCompatibleStream,
+		})
 		return
 	}
 

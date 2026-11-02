@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -251,6 +252,22 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 		}
 	}
 	return false
+}
+
+// hlsVideoTranscodingContainers lists the containers of the profile's HLS
+// video transcoding profiles, for logging why no encode fit.
+func (p DeviceProfile) hlsVideoTranscodingContainers() []string {
+	var containers []string
+	for _, profile := range p.TranscodingProfiles {
+		if !matchesVideoType(profile.Type) || !strings.EqualFold(strings.TrimSpace(profile.Protocol), compatHLSPathSegment) {
+			continue
+		}
+		container := strings.ToLower(strings.TrimSpace(profile.Container))
+		if container != "" && !slices.Contains(containers, container) {
+			containers = append(containers, container)
+		}
+	}
+	return containers
 }
 
 // SupportsTranscoding reports whether the client advertises HLS transcoding.
