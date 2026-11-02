@@ -90,6 +90,30 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	w.lastPaused = paused
 }
 
+// Credit records a sample from a player that reports how many seconds it
+// played since its previous sample, such as an Audiobookshelf sync's
+// timeListened. That time is credited instead of being inferred from the
+// position, so a seek within the interval does not discard what was played
+// around it, and a fast playback rate is not mistaken for one. It is capped at
+// the time that passed plus reporting slack, so a sample cannot claim more
+// than its interval held. start is when the play began, which bounds a first
+// sample.
+func (w *WatchTime) Credit(position, listened float64, start, now time.Time) {
+	position, listened = max(position, 0), max(listened, 0)
+	if !w.Measured {
+		w.Measured = true
+		w.StartPosition = max(position-listened, 0)
+		w.Since = start
+		w.Until = start
+	}
+	elapsed := secondsBetween(w.Until, now)
+	w.PlayedSeconds += min(listened, elapsed+watchTimeSlackSeconds)
+	w.Until = now
+	w.lastPosition = position
+	w.lastPaused = false
+	w.pausedAt = time.Time{}
+}
+
 // Pause records that the player confirmed a pause at now without reporting
 // where it held. If the next sample is still paused, it supplies that
 // position: the advance to it is judged against the playing time before now,
