@@ -206,10 +206,12 @@ access_key, secret_key, path_style}` tests a bucket the way backups use it:
 `HeadBucket`, then it writes and deletes a test object under
 `<key_prefix>/backups/`. It saves nothing and answers `200` with `{ok,
 step, message}`: `ok: true` and "Connected. Silo wrote and deleted a test
-file.", or `ok: false` with the `step` that failed (`endpoint`: the address
-cannot be reached; `credentials`: the keys were refused; `bucket`: no such
-bucket, or the wrong region; `permission`: the keys cannot write or delete
-under the folder) and what to check. The backend's own message is never
+file.", `ok: true` with a message saying old backups stay until the bucket's
+lifecycle rules remove them when the bucket refuses the delete, or `ok:
+false` with the `step` that failed (`endpoint`: the address cannot be
+reached; `credentials`: the keys were refused; `bucket`: no such bucket, or
+the wrong region; `permission`: the keys cannot write under the folder) and
+what to check. The backend's own message is never
 returned. An omitted `secret_key` uses the stored `backup.s3.secret_key`, but
 only when `endpoint` and `access_key` are the stored ones, so a test cannot
 send the stored secret elsewhere.

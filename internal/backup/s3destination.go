@@ -63,12 +63,19 @@ const defaultPartSize = 8 << 20
 // maxPartSize is the largest part S3 accepts.
 const maxPartSize = 5 << 30
 
+// unknownSizePartSize is the part size when no earlier backup says how
+// large objects get: 10,000 parts of 64 MiB hold about 640 GiB. Parts are
+// sent one at a time, so it is also the most an upload buffers.
+const unknownSizePartSize = 64 << 20
+
 // partSizeFor is the part size that holds an object of twice expected bytes
 // in 9,000 parts, leaving room for growth, rounded up to a whole MiB and
-// never below the default.
+// never below the default. With nothing to go by (a first backup, or one
+// after every earlier one failed) it is unknownSizePartSize, so a large
+// installation's first backup can complete.
 func partSizeFor(expected int64) int64 {
 	if expected <= 0 {
-		return defaultPartSize
+		return unknownSizePartSize
 	}
 	need := (2*expected + 8_999) / 9_000
 	need = (need + (1<<20 - 1)) &^ (1<<20 - 1)
@@ -237,7 +244,10 @@ func TestS3(ctx context.Context, c S3Config) S3TestResult {
 	if err := client.DeleteObject(ctx, c.Bucket, probeKey); err != nil {
 		result := s3TestFailure(err, S3StepPermission)
 		if result.Step == S3StepPermission {
-			result.Message = "Silo wrote a test file but couldn't delete it. Backups need permission to delete, so old copies can be rotated away."
+			// A bucket that keeps objects until its own lifecycle rules
+			// expire them refuses deletes; backups still work there, and
+			// rotation records the deletes it was refused (rotate).
+			return S3TestResult{OK: true, Message: "Connected. Silo wrote a test file but this bucket refuses deletes, so old backups stay until the bucket's lifecycle rules remove them."}
 		}
 		return result
 	}

@@ -825,8 +825,22 @@ func readManifest(ctx context.Context, t target, key string) (*Manifest, error) 
 	if err != nil {
 		return nil, err
 	}
-	return ParseManifest(data)
+	m, err := ParseManifest(data)
+	if err != nil {
+		return nil, err
+	}
+	if t.Encrypted() && !m.Encrypted {
+		return nil, ErrPlaintextInBucket
+	}
+	return m, nil
 }
+
+// ErrPlaintextInBucket refuses a manifest that says its backup is not
+// encrypted where every backup is. The manifest is the one object a backup
+// leaves in plaintext: anyone who can write the bucket could otherwise pass
+// off a dump and restore set of their own, with hashes they chose, which
+// only the encryption of every other object (keyed by SECRET_KEY) rules out.
+var ErrPlaintextInBucket = errors.New("a backup in a bucket must be encrypted, and this manifest says it is not; it was not written by this server")
 
 // target is the destination one operation uses, read from the settings when
 // it starts, and the key its new objects are encrypted with: nil stores

@@ -15080,7 +15080,7 @@ export interface components {
       message: string;
       ok: boolean;
       /**
-       * @description The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write and delete under the folder
+       * @description The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write under the folder; a bucket that refuses only the delete passes, and its lifecycle rules remove old backups
        * @enum {string}
        */
       step?: "endpoint" | "credentials" | "bucket" | "permission";

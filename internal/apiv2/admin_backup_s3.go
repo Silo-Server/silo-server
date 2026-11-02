@@ -27,7 +27,7 @@ type AdminBackupS3TestInput struct {
 // 200 with ok false: the test ran, and the bucket answered (or did not).
 type AdminBackupS3TestResult struct {
 	OK      bool   `json:"ok"`
-	Step    string `json:"step,omitempty" enum:"endpoint,credentials,bucket,permission" doc:"The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write and delete under the folder"`
+	Step    string `json:"step,omitempty" enum:"endpoint,credentials,bucket,permission" doc:"The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write under the folder; a bucket that refuses only the delete passes, and its lifecycle rules remove old backups"`
 	Message string `json:"message" doc:"What happened, for display: Connected. Silo wrote and deleted a test file. or what failed"`
 }
 

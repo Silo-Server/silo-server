@@ -87,6 +87,8 @@ func TestPartSizeGrowsWithThePreviousBackup(t *testing.T) {
 	for _, c := range []struct{ previous, want int64 }{
 		{1 << 30, defaultPartSize},
 		{1 << 40, 234 << 20},
+		// No earlier backup: room for a large first one.
+		{0, unknownSizePartSize},
 	} {
 		// Twice the previous size must fit in fewer parts than S3 allows.
 		if got := partSizeFor(c.previous); got != c.want || got*s3client.MaxUploadParts < 2*c.previous {

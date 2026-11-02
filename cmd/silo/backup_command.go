@@ -527,6 +527,9 @@ func openBackupSource(ctx context.Context, from string, so sourceOptions, out io
 	if !remote && !m.Encrypted {
 		return &backup.Source{Dir: from, Manifest: m}, tools, validate, func() {}, nil
 	}
+	if remote && !m.Encrypted {
+		return fail(backup.ErrPlaintextInBucket)
+	}
 	var key *backup.ArchiveKey
 	if len(so.masterKey) > 0 {
 		if key, err = backup.NewArchiveKey(so.masterKey); err != nil {
