@@ -723,9 +723,12 @@ jobs:
           fi
           key="$RUNNER_TEMP/pgdg.asc"
           curl -fsSL --retry 3 -o "$key" https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          fingerprint="$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" && !n++ { print $10 }')"
-          if [ "$fingerprint" != B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 ]; then
-            echo "::error::The PGDG signing key has fingerprint '$fingerprint', not the published one"
+          # apt trusts every key in the file, so it must hold exactly one
+          # primary key, PGDG's. A key's fpr record follows its pub or sub
+          # record; only the pub ones are primary keys.
+          fingerprints="$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "pub" { primary = 1 } $1 == "fpr" { if (primary) print $10; primary = 0 }')"
+          if [ "$fingerprints" != B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 ]; then
+            echo "::error::The PGDG key file holds primary keys '${fingerprints//$'\n'/ }', not only the published one"
             exit 1
           fi
           sudo install -D -m 0644 "$key" /etc/apt/keyrings/pgdg.asc
