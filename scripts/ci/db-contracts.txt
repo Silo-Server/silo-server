@@ -646,11 +646,13 @@
 ./internal/plugins TestInstallationStoreUpdateFailureDB
 
 # What a screen gates a plugin's per-account setting on: only global config
-# entries that still carry a value count, a cleared entry does not, and one read
-# covering several installations keeps their answers apart.
+# entries that still carry a value count, a cleared entry does not, one read
+# covering several installations keeps their answers apart, and an entry the
+# server cannot open leaves the other installations' answers intact.
 ./internal/plugins TestListConfiguredGlobalConfigKeysCountsOnlyFilledInEntries
 ./internal/plugins TestListConfiguredGlobalConfigKeysTreatsAnEmptyObjectAsUnset
 ./internal/plugins TestListConfiguredGlobalConfigKeysTreatsBlankStringsAsUnset
+./internal/plugins TestListConfiguredGlobalConfigKeysIsolatesAnUnreadableEntry
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
