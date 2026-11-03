@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -284,6 +285,30 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	}
 	if rec := serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{}`, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing secret = %d", rec.Code)
+	}
+}
+
+// TestQuickConnectToDeletedProfileKeepsNoSession: a collection that read
+// the approved profile before a delete removed it, and stored its session
+// after the delete purged the profile's sessions, is refused and keeps no
+// session.
+func TestQuickConnectToDeletedProfileKeepsNoSession(t *testing.T) {
+	service := &fakeQuickConnect{collect: &auth.DeviceLoginPollResult{
+		Status:      auth.DeviceLoginStatusApproved,
+		TokenPair:   &auth.TokenPair{AccessToken: "native-access", RefreshToken: "native-refresh", ExpiresIn: 3600, SessionID: "login-1"},
+		User:        &models.User{ID: 7, Username: "alice"},
+		ProfileID:   "deleted",
+		ProfileName: "Deleted",
+	}}
+	store := NewSessionStore(time.Hour, time.Now)
+	stores := profileStoreProvider{store: &profileStore{profiles: []userstore.Profile{{ID: "kids", Name: "Kids"}}}}
+	resolver := NewLoginResolver(nil, stores, store, nil, nil).WithQuickConnect(service)
+
+	if _, err := resolver.ResolveQuickConnect(context.Background(), "SECRET"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("collection for a deleted profile = %v, want ErrProfileNotFound", err)
+	}
+	if session, ok := store.Get(quickConnectSessionToken("SECRET")); ok {
+		t.Fatalf("deleted profile kept session %+v", session)
 	}
 }
 

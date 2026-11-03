@@ -169,21 +169,29 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	if err := r.sessions.Put(session); err != nil {
 		return nil, err
 	}
-	// A profile deleted while this sign-in ran has already had its sessions
-	// purged, so re-read it and drop the session just written.
-	current, err := store.GetProfile(ctx, profile.ID)
+	if err := r.keepIfProfileExists(ctx, store, session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+// keepIfProfileExists re-reads the profile of a session the sign-in has just
+// written. A profile deleted while the sign-in ran has already had its
+// sessions purged, so the session is dropped and the sign-in refused.
+func (r *LoginResolver) keepIfProfileExists(ctx context.Context, store userstore.UserStore, session Session) error {
+	current, err := store.GetProfile(ctx, session.ProfileID)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("re-reading profile: %w", err), r.dropSession(ctx, session.Token))
+		return errors.Join(fmt.Errorf("re-reading profile: %w", err), r.dropSession(ctx, session.Token))
 	}
 	if current == nil {
 		// A failed delete may leave the session behind, so it is not reported
 		// as a plain refusal, and its storage error stays off the response.
 		if err := r.dropSession(ctx, session.Token); err != nil {
-			return nil, fmt.Errorf("dropping the session of a deleted profile: %w", err)
+			return fmt.Errorf("dropping the session of a deleted profile: %w", err)
 		}
-		return nil, ErrProfileNotFound
+		return ErrProfileNotFound
 	}
-	return &session, nil
+	return nil
 }
 
 // dropSession deletes a session the sign-in has just written. The delete
@@ -233,6 +241,15 @@ func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) 
 		return nil, mapAuthError(err)
 	}
 	if session != nil {
+		// Collection read the profile before the session committed, so a
+		// delete in between may have purged the profile's sessions already.
+		store, err := r.storeProvider.ForUser(ctx, session.StreamAppUserID)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("opening user store: %w", err), r.dropSession(ctx, session.Token))
+		}
+		if err := r.keepIfProfileExists(ctx, store, *session); err != nil {
+			return nil, err
+		}
 		return session, nil
 	}
 	if result.Status != auth.DeviceLoginStatusConsumed {
