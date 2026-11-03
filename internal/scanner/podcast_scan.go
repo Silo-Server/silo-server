@@ -136,6 +136,13 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 		}
 		return result, nil
 	}
+	// A narrower scope the walk skips, such as a hidden folder inside a show,
+	// is not widened to the whole show.
+	if filepath.Clean(subtreePath) != showPath {
+		if _, ignored, err := scanRootIgnoreRules(subtreePath, folder.Paths); err == nil && ignored {
+			return result, nil
+		}
+	}
 
 	// Lstat, like the full scan's directory listing: a full scan only treats
 	// real directories under the root as shows, so a subtree scan must not
