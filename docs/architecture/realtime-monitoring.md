@@ -208,8 +208,10 @@ directories the scanner would enter (`walkTree`). They skip:
   `lost+found`. Files and directories with these names are also
   dropped from events before tracking, and a rename from an ignored name
   (`movie.mkv.part` to `movie.mkv`) counts as a move in.
-- The scanner's other ignored directory names, also case-insensitive:
-  `@Recycle`, `.Trash`, `$RECYCLE.BIN`, `.deleted`, `.inbound`, `.downloads`.
+- Every directory the scanner skips by name (`scanner.SkippedDirName`): any
+  hidden (dot-prefixed) directory, and `@Recycle` and `$RECYCLE.BIN`
+  (case-insensitive). See
+  [scanner ignore files](scanner-ignore-files.md#hidden-and-housekeeping-directories).
 - A directory holding a regular `.nomedia` file, or a regular `.ignore` file
   without a valid pattern, is skipped with everything below it. The decision
   is the scanner's own (`scanner.DirSkipped`, see
