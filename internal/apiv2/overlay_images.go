@@ -34,10 +34,9 @@ const overlayImageFormOverhead = 64 << 10
 const overlayImageContentSecurityPolicy = "default-src 'none'; sandbox"
 
 const (
-	overlayImageRefParam  = "ref"
-	overlayImageFileField = "body.file"
-	contentTypeOptions    = "X-Content-Type-Options"
-	mediaTypeWebP         = "image/webp"
+	overlayImageRefParam = "ref"
+	contentTypeOptions   = "X-Content-Type-Options"
+	mediaTypeWebP        = "image/webp"
 )
 
 type AdminOverlayImageForm struct {
@@ -111,7 +110,7 @@ func registerOverlayImages(reg *Registry) {
 			form := in.RawBody.Data()
 			if form == nil || !form.File.IsSet {
 				return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: overlayImageFileField, Code: codeRequired, Detail: "an image file is required"})
+					WithErrors(ProblemError{Location: locationBodyFile, Code: codeRequired, Detail: detailImageFileRequired})
 			}
 			tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds the 4 MiB limit.")
 			if form.File.Size > overlays.MaxImageUploadBytes {
@@ -131,7 +130,7 @@ func registerOverlayImages(reg *Registry) {
 			case errors.Is(err, overlays.ErrInvalidImageName):
 				return nil, overlayImageValidation("body.name", "a name of 1 to 64 characters is required")
 			case errors.Is(err, overlays.ErrUnsupportedImage):
-				return nil, overlayImageValidation(overlayImageFileField, "the file is not a PNG, JPEG or WebP image Silo can read")
+				return nil, overlayImageValidation(locationBodyFile, "the file is not a PNG, JPEG or WebP image Silo can read")
 			case errors.Is(err, overlays.ErrImageTooLarge):
 				return nil, tooLarge
 			case errors.Is(err, overlays.ErrImageLibraryFull):
