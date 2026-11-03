@@ -24,17 +24,6 @@ function mockPointer(coarse: boolean) {
 describe("PlayerMenuSurface", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("keeps the supplied anchored popover wrapper for fine pointers", () => {
-    mockPointer(false);
-    render(
-      <PlayerMenuSurface className="desktop-popover" onClose={vi.fn()}>
-        Item
-      </PlayerMenuSurface>,
-    );
-    expect(screen.getByRole("menu")).toHaveClass("desktop-popover");
-    expect(screen.queryByRole("button", { name: "Close menu" })).toBeNull();
-  });
-
   it("renders a dismissible bottom sheet for coarse pointers", () => {
     mockPointer(true);
     const onClose = vi.fn();

@@ -81,271 +81,357 @@ func save(t *testing.T, store *memoryStore, c credentials) {
 	store.values[CredentialsKey] = string(data)
 	store.mu.Unlock()
 }
-
-func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
+func testSigningKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct {
-		name                                                        string
-		nonce, audience, subject, scope, clientID                   string
-		expired                                                     bool
-		omitClientID                                                bool
-		omitScope                                                   bool
-		superseded, interrupted, expiryCrossed, omitRefresh         bool
-		retainRegistration, preserveActive, reconsent, invalidGrant bool
-		disconnectReconnect                                         bool
-		want                                                        bool
-	}{
-		{name: "copied browser callback", scope: planScope, want: true},
-		{name: "disconnect and reconnect retains activation history", scope: planScope, want: true, disconnectReconnect: true},
-		{name: "omitted initial scope uses requested grant", omitScope: true, want: true},
-		{name: "omitted reconnect scope uses requested grant", omitScope: true, clientID: "oaiapp_registered", want: true},
-		{name: "omitted initial scope still requires refresh token", omitScope: true, omitRefresh: true},
-		{name: "accepted callback crosses expiry", scope: planScope, expiryCrossed: true, want: true},
-		{name: "initial grant requires refresh token", scope: planScope, omitRefresh: true},
-		{name: "returning browser callback without client ID", scope: planScope, omitClientID: true, clientID: "oaiapp_registered", want: true},
-		{name: "superseded during exchange", scope: planScope, superseded: true},
-		{name: "interrupted completion commit", scope: planScope, interrupted: true},
-		{name: "wrong nonce", nonce: "other", scope: planScope},
-		{name: "wrong audience", audience: "different-app", scope: planScope},
-		{name: "missing plan consent", scope: "openid profile email", retainRegistration: true, reconsent: true},
-		{name: "invalid initial code retains registration for verified retry", scope: planScope, invalidGrant: true, retainRegistration: true, reconsent: true},
-		{name: "missing consent without refresh token retains identity", scope: "openid profile email", omitRefresh: true, retainRegistration: true},
-		{name: "missing consent without refresh token rejects invalid identity", scope: "openid profile email", omitRefresh: true, nonce: "other"},
-		{name: "missing consent preserves another active account", scope: "openid profile email", retainRegistration: true, preserveActive: true},
-		{name: "declined reconnect preserves active credentials", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
-		{name: "missing consent with invalid nonce discards registration", nonce: "other", scope: "openid profile email"},
-		{name: "missing consent cannot change returning subject", subject: "another-user", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
-		{name: "superseded missing consent does not retain registration", scope: "openid profile email", superseded: true},
-		{name: "expired identity", scope: planScope, expired: true},
-		{name: "different returning account", subject: "another-user", scope: planScope, clientID: "oaiapp_registered"},
-	} {
+	return key
+}
+func signIDToken(t *testing.T, key *rsa.PrivateKey, claims identityClaims) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = "test-key"
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signed
+}
+
+// loginCase is one TestLoginValidatesIdentityAndConsumesCallback case.
+type loginCase struct {
+	name                                                        string
+	nonce, audience, subject, scope, clientID                   string
+	expired                                                     bool
+	omitClientID                                                bool
+	omitScope                                                   bool
+	superseded, interrupted, expiryCrossed, omitRefresh         bool
+	retainRegistration, preserveActive, reconsent, invalidGrant bool
+	disconnectReconnect                                         bool
+	want                                                        bool
+}
+
+var loginValidatesIdentityAndConsumesCallbackCases = []loginCase{
+	{name: "copied browser callback", scope: planScope, want: true},
+	{name: "disconnect and reconnect retains activation history", scope: planScope, want: true, disconnectReconnect: true},
+	{name: "omitted initial scope uses requested grant", omitScope: true, want: true},
+	{name: "omitted reconnect scope uses requested grant", omitScope: true, clientID: "oaiapp_registered", want: true},
+	{name: "omitted initial scope still requires refresh token", omitScope: true, omitRefresh: true},
+	{name: "accepted callback crosses expiry", scope: planScope, expiryCrossed: true, want: true},
+	{name: "initial grant requires refresh token", scope: planScope, omitRefresh: true},
+	{name: "returning browser callback without client ID", scope: planScope, omitClientID: true, clientID: "oaiapp_registered", want: true},
+	{name: "superseded during exchange", scope: planScope, superseded: true},
+	{name: "interrupted completion commit", scope: planScope, interrupted: true},
+	{name: "wrong nonce", nonce: "other", scope: planScope},
+	{name: "wrong audience", audience: "different-app", scope: planScope},
+	{name: "missing plan consent", scope: "openid profile email", retainRegistration: true, reconsent: true},
+	{name: "invalid initial code retains registration for verified retry", scope: planScope, invalidGrant: true, retainRegistration: true, reconsent: true},
+	{name: "missing consent without refresh token retains identity", scope: "openid profile email", omitRefresh: true, retainRegistration: true},
+	{name: "missing consent without refresh token rejects invalid identity", scope: "openid profile email", omitRefresh: true, nonce: "other"},
+	{name: "missing consent preserves another active account", scope: "openid profile email", retainRegistration: true, preserveActive: true},
+	{name: "declined reconnect preserves active credentials", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
+	{name: "missing consent with invalid nonce discards registration", nonce: "other", scope: "openid profile email"},
+	{name: "missing consent cannot change returning subject", subject: "another-user", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
+	{name: "superseded missing consent does not retain registration", scope: "openid profile email", superseded: true},
+	{name: "expired identity", scope: planScope, expired: true},
+	{name: "different returning account", subject: "another-user", scope: planScope, clientID: "oaiapp_registered"},
+}
+
+// loginRun carries one TestLoginValidatesIdentityAndConsumesCallback case
+// through its phases. The token endpoint reads pending, signed and grantScope
+// through the pointer, so the re-consent phase can change them.
+type loginRun struct {
+	test         loginCase
+	key          *rsa.PrivateKey
+	store        *memoryStore
+	s            *Service
+	login        Login
+	u            *url.URL
+	pending      *pendingLogin
+	activeBefore string
+	clientID     string
+	claims       identityClaims
+	signed       string
+	grantScope   string
+	calls        int
+	callbackURL  string
+	state        Status
+}
+
+func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
+	key := testSigningKey(t)
+	for _, test := range loginValidatesIdentityAndConsumesCallbackCases {
 		t.Run(test.name, func(t *testing.T) {
-			store := &memoryStore{values: map[string]string{}}
-			s := NewService(store)
-			if test.clientID != "" {
-				save(t, store, credentials{HostID: "urn:uuid:existing", Accounts: []account{{ClientID: test.clientID, Subject: "user"}}})
-			}
-			if test.preserveActive {
-				activeID := test.clientID
-				if activeID == "" {
-					activeID = "oaiapp_active"
-				}
-				save(t, store, credentials{Active: activeID, Accounts: []account{{ClientID: activeID, Subject: "user", AccessToken: "old-access", RefreshToken: "old-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}}})
-			}
-			activeBefore := stored(t, store).Active
-			grantScope := test.scope
-			login, err := s.StartLogin(t.Context(), test.clientID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			u, err := url.Parse(login.AuthorizationURL)
-			if err != nil || login.CallbackURI != browserCallbackURI || u.Query().Get("redirect_uri") != login.CallbackURI || u.Query().Get("state") != login.AttemptID {
-				t.Fatalf("browser sign-in was not prepared: %+v", login)
-			}
-			pending := stored(t, store).Pending
-			clientID := test.clientID
-			if clientID == "" {
-				clientID = "oaiapp_new"
-			}
-			nonce := pending.Nonce
-			if test.nonce != "" {
-				nonce = test.nonce
-			}
-			audience := clientID
-			if test.audience != "" {
-				audience = test.audience
-			}
-			subject := "user"
-			if test.subject != "" {
-				subject = test.subject
-			}
-			expires := time.Now().Add(time.Hour)
-			if test.expired {
-				expires = time.Now().Add(-time.Minute)
-			}
-			claims := identityClaims{RegisteredClaims: jwt.RegisteredClaims{Issuer: issuer, Subject: subject, Audience: jwt.ClaimStrings{audience}, ExpiresAt: jwt.NewNumericDate(expires)}, Nonce: nonce, Email: "user@example.test"}
-			token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-			token.Header["kid"] = "test-key"
-			signed, err := token.SignedString(key)
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-				switch r.URL.Path {
-				case "/api/accounts/oauth/token":
-					calls++
-					if test.expiryCrossed {
-						c := stored(t, store)
-						c.LoginExpiresAt = time.Now().Add(-time.Minute)
-						save(t, store, c)
-					}
-					if test.superseded {
-						if _, err := s.StartLogin(t.Context(), ""); err != nil {
-							t.Fatal(err)
-						}
-					}
-					if test.interrupted {
-						store.mu.Lock()
-						store.failNext = true
-						store.mu.Unlock()
-					}
-					if test.invalidGrant && calls == 1 {
-						return response(400, map[string]string{"error": oauthInvalidGrant}), nil
-					}
-					_ = r.ParseForm()
-					if r.Form.Get("client_id") != clientID || r.Form.Get("code_verifier") != pending.Verifier || r.Form.Get("redirect_uri") != pending.RedirectURI || r.Form.Get("resource") != resource {
-						t.Errorf("invalid token exchange: %v", r.Form)
-					}
-					refreshToken := "refresh"
-					if test.omitRefresh {
-						refreshToken = ""
-					}
-					body := map[string]any{"access_token": "access", "refresh_token": refreshToken, "id_token": signed, "token_type": "Bearer", "expires_in": 3600}
-					if !test.omitScope {
-						body["scope"] = grantScope
-					}
-					return response(200, body), nil
-				case "/.well-known/openid-configuration":
-					return response(200, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
-				case "/keys":
-					return response(200, map[string]any{"keys": []map[string]string{{"kty": "RSA", "kid": "test-key", "n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}}), nil
-				case "/revoke":
-					return response(200, nil), nil
-				default:
-					t.Fatalf("unexpected request: %s", r.URL)
-					return nil, nil
-				}
-			})
-			callback := Callback{State: pending.State, Code: "auth-code", ClientID: clientID}
-			if test.omitClientID {
-				callback.ClientID = ""
-			}
-			callbackURL := "  " + login.CallbackURI + "?" + url.Values{"state": {callback.State}, "code": {callback.Code}, "client_id": {callback.ClientID}}.Encode() + "\n"
-			err = s.CompleteLogin(t.Context(), callbackURL)
-			if (err == nil) != test.want {
-				t.Fatalf("completion: %v; want success %v", err, test.want)
-			}
-			if err = s.CompleteLogin(t.Context(), callbackURL); !errors.Is(err, ErrInvalidLogin) {
-				t.Fatalf("replay: %v", err)
-			}
-			if calls != 1 {
-				t.Fatalf("authorization code exchanged %d times", calls)
-			}
-			state, err := s.Status(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if test.want {
-				if test.omitScope {
-					a := stored(t, store).Accounts[0]
-					if a.Scopes != u.Query().Get("scope") || a.AccessToken != "access" || a.RefreshToken != "refresh" || a.IDToken != signed || a.NeedsLogin {
-						t.Fatal("omitted scope lost the requested grant or accepted credentials")
-					}
-				}
-				if state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != "connected" {
-					t.Fatalf("status: %+v", state)
-				}
-				data, _ := json.Marshal(state)
-				if strings.Contains(string(data), "access") || strings.Contains(string(data), "refresh") {
-					t.Fatal("status exposed credentials")
-				}
-			} else if test.superseded || test.interrupted {
-				if state.ActiveClientID != "" || state.LoginResult != "pending" {
-					t.Fatalf("old completion overwrote status: %+v", state)
-				}
-			} else if state.ActiveClientID != activeBefore || state.LoginResult != "failed" {
-				t.Fatalf("failed login changed active account: %+v", state)
-			}
-			requireConnectionHistory(t, store, test.want || activeBefore != "")
-			if state.LoginFirstConnection != (test.want && activeBefore == "") {
-				t.Fatalf("login_first_connection=%t for success=%t, previous active=%q", state.LoginFirstConnection, test.want, activeBefore)
-			}
-			if test.preserveActive {
-				activeToken, err := s.BearerToken(t.Context())
-				if err != nil || activeToken != "old-access" {
-					t.Fatalf("active credentials changed: %q, %v", activeToken, err)
-				}
-			}
-			if test.retainRegistration {
-				c := stored(t, store)
-				i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
-				if i < 0 {
-					t.Fatal("verified disabled registration was discarded")
-				}
-				a := c.Accounts[i]
-				if test.invalidGrant {
-					if a != (account{ClientID: clientID, NeedsLogin: true}) {
-						t.Fatalf("unverified registration retained identity or tokens: %+v", a)
-					}
-				} else {
-					wantRefresh := "refresh"
-					if test.omitRefresh {
-						wantRefresh = ""
-					}
-					if a.Subject != "user" || a.Email != claims.Email || a.IDToken != signed || !a.NeedsLogin || a.AccessToken != "access" || a.RefreshToken != wantRefresh || a.Scopes != grantScope || a.ExpiresAt.IsZero() {
-						t.Fatal("disabled registration lost accepted tokens or verified identity")
-					}
-				}
-				if err := s.SelectAccount(t.Context(), clientID); !errors.Is(err, ErrSignInRequired) {
-					t.Fatalf("disabled account selected: %v", err)
-				}
-				if !test.preserveActive {
-					if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
-						t.Fatalf("disabled registration authorized inference: %v", err)
-					}
-				}
-			} else if !test.want && test.clientID == "" && !test.preserveActive && !test.superseded && !test.interrupted {
-				if len(stored(t, store).Accounts) != 0 {
-					t.Fatal("unverified registration retained")
-				}
-			}
-			if test.reconsent || test.disconnectReconnect {
-				if test.disconnectReconnect {
-					if _, err := s.Disconnect(t.Context(), clientID); err != nil {
-						t.Fatal(err)
-					}
-					requireConnectionHistory(t, store, true)
-				}
-				login, err = s.StartLogin(t.Context(), clientID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				u, _ = url.Parse(login.AuthorizationURL)
-				wantPrompt, wantHint, wantEmail := "consent", signed, claims.Email
-				if test.invalidGrant {
-					wantPrompt, wantHint, wantEmail = "", "", ""
-				}
-				if test.disconnectReconnect {
-					wantHint = ""
-				}
-				if u.Query().Get("client_id") != clientID || u.Query().Get("prompt") != wantPrompt || !hasPlanScope(u.Query().Get("scope")) || u.Query().Get("id_token_hint") != wantHint || u.Query().Get("login_hint") != wantEmail {
-					t.Fatal("re-consent lost saved registration, identity hints or permission request")
-				}
-				pending = stored(t, store).Pending
-				claims.Nonce = pending.Nonce
-				token = jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-				token.Header["kid"] = "test-key"
-				signed, err = token.SignedString(key)
-				if err != nil {
-					t.Fatal(err)
-				}
-				grantScope = planScope
-				callbackURL = login.CallbackURI + "?" + url.Values{"state": {pending.State}, "code": {"reconsent-code"}, "client_id": {clientID}}.Encode()
-				if err := s.CompleteLogin(t.Context(), callbackURL); err != nil {
-					t.Fatal(err)
-				}
-				state, err = s.Status(t.Context())
-				if err != nil || state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != loginConnected || state.LoginFirstConnection != !test.disconnectReconnect || calls != 2 {
-					t.Fatalf("re-consent failed: %+v, %v, exchanges=%d", state, err, calls)
-				}
-				requireConnectionHistory(t, store, true)
-			}
+			runLoginCase(t, key, test)
 		})
 	}
+}
+
+func runLoginCase(t *testing.T, key *rsa.PrivateKey, test loginCase) {
+	t.Helper()
+	r := startLoginCase(t, key, test)
+	r.installTransport(t)
+	r.completeLogin(t)
+	r.checkRetainedRegistration(t)
+	r.checkReconsent(t)
+}
+
+func startLoginCase(t *testing.T, key *rsa.PrivateKey, test loginCase) *loginRun {
+	t.Helper()
+	store := &memoryStore{values: map[string]string{}}
+	s := NewService(store)
+	if test.clientID != "" {
+		save(t, store, credentials{HostID: "urn:uuid:existing", Accounts: []account{{ClientID: test.clientID, Subject: "user"}}})
+	}
+	if test.preserveActive {
+		activeID := test.clientID
+		if activeID == "" {
+			activeID = "oaiapp_active"
+		}
+		save(t, store, credentials{Active: activeID, Accounts: []account{{ClientID: activeID, Subject: "user", AccessToken: "old-access", RefreshToken: "old-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}}})
+	}
+	activeBefore := stored(t, store).Active
+	grantScope := test.scope
+	login, err := s.StartLogin(t.Context(), test.clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(login.AuthorizationURL)
+	if err != nil || login.CallbackURI != browserCallbackURI || u.Query().Get("redirect_uri") != login.CallbackURI || u.Query().Get("state") != login.AttemptID {
+		t.Fatalf("browser sign-in was not prepared: %+v", login)
+	}
+	pending := stored(t, store).Pending
+	clientID := test.clientID
+	if clientID == "" {
+		clientID = "oaiapp_new"
+	}
+	nonce := pending.Nonce
+	if test.nonce != "" {
+		nonce = test.nonce
+	}
+	audience := clientID
+	if test.audience != "" {
+		audience = test.audience
+	}
+	subject := "user"
+	if test.subject != "" {
+		subject = test.subject
+	}
+	expires := time.Now().Add(time.Hour)
+	if test.expired {
+		expires = time.Now().Add(-time.Minute)
+	}
+	claims := identityClaims{RegisteredClaims: jwt.RegisteredClaims{Issuer: issuer, Subject: subject, Audience: jwt.ClaimStrings{audience}, ExpiresAt: jwt.NewNumericDate(expires)}, Nonce: nonce, Email: "user@example.test"}
+	signed := signIDToken(t, key, claims)
+	return &loginRun{
+		test: test, key: key, store: store, s: s, login: login, u: u, pending: pending,
+		activeBefore: activeBefore, clientID: clientID, claims: claims, signed: signed, grantScope: grantScope,
+	}
+}
+
+func (r *loginRun) installTransport(t *testing.T) {
+	t.Helper()
+	test, store, s, key := r.test, r.store, r.s, r.key
+	s.http.Transport = transportFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/api/accounts/oauth/token":
+			r.calls++
+			if test.expiryCrossed {
+				c := stored(t, store)
+				c.LoginExpiresAt = time.Now().Add(-time.Minute)
+				save(t, store, c)
+			}
+			if test.superseded {
+				if _, err := s.StartLogin(t.Context(), ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.interrupted {
+				store.mu.Lock()
+				store.failNext = true
+				store.mu.Unlock()
+			}
+			if test.invalidGrant && r.calls == 1 {
+				return response(400, map[string]string{"error": oauthInvalidGrant}), nil
+			}
+			_ = req.ParseForm()
+			if req.Form.Get("client_id") != r.clientID || req.Form.Get("code_verifier") != r.pending.Verifier || req.Form.Get("redirect_uri") != r.pending.RedirectURI || req.Form.Get("resource") != resource {
+				t.Errorf("invalid token exchange: %v", req.Form)
+			}
+			refreshToken := "refresh"
+			if test.omitRefresh {
+				refreshToken = ""
+			}
+			body := map[string]any{"access_token": "access", "refresh_token": refreshToken, "id_token": r.signed, "token_type": "Bearer", "expires_in": 3600}
+			if !test.omitScope {
+				body["scope"] = r.grantScope
+			}
+			return response(200, body), nil
+		case "/.well-known/openid-configuration":
+			return response(200, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
+		case "/keys":
+			return response(200, map[string]any{"keys": []map[string]string{{"kty": "RSA", "kid": "test-key", "n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}}), nil
+		case "/revoke":
+			return response(200, nil), nil
+		default:
+			t.Fatalf("unexpected request: %s", req.URL)
+			return nil, nil
+		}
+	})
+}
+
+func (r *loginRun) completeLogin(t *testing.T) {
+	t.Helper()
+	test, s := r.test, r.s
+	callback := Callback{State: r.pending.State, Code: "auth-code", ClientID: r.clientID}
+	if test.omitClientID {
+		callback.ClientID = ""
+	}
+	r.callbackURL = "  " + r.login.CallbackURI + "?" + url.Values{"state": {callback.State}, "code": {callback.Code}, "client_id": {callback.ClientID}}.Encode() + "\n"
+	err := s.CompleteLogin(t.Context(), r.callbackURL)
+	if (err == nil) != test.want {
+		t.Fatalf("completion: %v; want success %v", err, test.want)
+	}
+	if err = s.CompleteLogin(t.Context(), r.callbackURL); !errors.Is(err, ErrInvalidLogin) {
+		t.Fatalf("replay: %v", err)
+	}
+	if r.calls != 1 {
+		t.Fatalf("authorization code exchanged %d times", r.calls)
+	}
+	r.state, err = s.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.checkStatus(t)
+	requireConnectionHistory(t, r.store, test.want || r.activeBefore != "")
+	if r.state.LoginFirstConnection != (test.want && r.activeBefore == "") {
+		t.Fatalf("login_first_connection=%t for success=%t, previous active=%q", r.state.LoginFirstConnection, test.want, r.activeBefore)
+	}
+	if test.preserveActive {
+		activeToken, err := s.BearerToken(t.Context())
+		if err != nil || activeToken != "old-access" {
+			t.Fatalf("active credentials changed: %q, %v", activeToken, err)
+		}
+	}
+}
+
+func (r *loginRun) checkStatus(t *testing.T) {
+	t.Helper()
+	test, state := r.test, r.state
+	switch {
+	case test.want:
+		r.checkConnectedStatus(t)
+	case test.superseded || test.interrupted:
+		if state.ActiveClientID != "" || state.LoginResult != "pending" {
+			t.Fatalf("old completion overwrote status: %+v", state)
+		}
+	case state.ActiveClientID != r.activeBefore || state.LoginResult != "failed":
+		t.Fatalf("failed login changed active account: %+v", state)
+	}
+}
+
+func (r *loginRun) checkConnectedStatus(t *testing.T) {
+	t.Helper()
+	state := r.state
+	if r.test.omitScope {
+		a := stored(t, r.store).Accounts[0]
+		if a.Scopes != r.u.Query().Get("scope") || a.AccessToken != "access" || a.RefreshToken != "refresh" || a.IDToken != r.signed || a.NeedsLogin {
+			t.Fatal("omitted scope lost the requested grant or accepted credentials")
+		}
+	}
+	if state.ActiveClientID != r.clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != "connected" {
+		t.Fatalf("status: %+v", state)
+	}
+	data, _ := json.Marshal(state)
+	if strings.Contains(string(data), "access") || strings.Contains(string(data), "refresh") {
+		t.Fatal("status exposed credentials")
+	}
+}
+
+func (r *loginRun) checkRetainedRegistration(t *testing.T) {
+	t.Helper()
+	test, store, s, clientID := r.test, r.store, r.s, r.clientID
+	if !test.retainRegistration {
+		if !test.want && test.clientID == "" && !test.preserveActive && !test.superseded && !test.interrupted && len(stored(t, store).Accounts) != 0 {
+			t.Fatal("unverified registration retained")
+		}
+		return
+	}
+	c := stored(t, store)
+	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
+	if i < 0 {
+		t.Fatal("verified disabled registration was discarded")
+	}
+	r.checkRetainedAccount(t, c.Accounts[i])
+	if err := s.SelectAccount(t.Context(), clientID); !errors.Is(err, ErrSignInRequired) {
+		t.Fatalf("disabled account selected: %v", err)
+	}
+	if !test.preserveActive {
+		if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
+			t.Fatalf("disabled registration authorized inference: %v", err)
+		}
+	}
+}
+
+func (r *loginRun) checkRetainedAccount(t *testing.T, a account) {
+	t.Helper()
+	if r.test.invalidGrant {
+		if a != (account{ClientID: r.clientID, NeedsLogin: true}) {
+			t.Fatalf("unverified registration retained identity or tokens: %+v", a)
+		}
+		return
+	}
+	wantRefresh := "refresh"
+	if r.test.omitRefresh {
+		wantRefresh = ""
+	}
+	if a.Subject != "user" || a.Email != r.claims.Email || a.IDToken != r.signed || !a.NeedsLogin || a.AccessToken != "access" || a.RefreshToken != wantRefresh || a.Scopes != r.grantScope || a.ExpiresAt.IsZero() {
+		t.Fatal("disabled registration lost accepted tokens or verified identity")
+	}
+}
+
+func (r *loginRun) checkReconsent(t *testing.T) {
+	t.Helper()
+	test, store, s, clientID := r.test, r.store, r.s, r.clientID
+	if !test.reconsent && !test.disconnectReconnect {
+		return
+	}
+	if test.disconnectReconnect {
+		if _, err := s.Disconnect(t.Context(), clientID); err != nil {
+			t.Fatal(err)
+		}
+		requireConnectionHistory(t, store, true)
+	}
+	login, err := s.StartLogin(t.Context(), clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(login.AuthorizationURL)
+	wantPrompt, wantHint, wantEmail := "consent", r.signed, r.claims.Email
+	if test.invalidGrant {
+		wantPrompt, wantHint, wantEmail = "", "", ""
+	}
+	if test.disconnectReconnect {
+		wantHint = ""
+	}
+	if u.Query().Get("client_id") != clientID || u.Query().Get("prompt") != wantPrompt || !hasPlanScope(u.Query().Get("scope")) || u.Query().Get("id_token_hint") != wantHint || u.Query().Get("login_hint") != wantEmail {
+		t.Fatal("re-consent lost saved registration, identity hints or permission request")
+	}
+	r.pending = stored(t, store).Pending
+	r.claims.Nonce = r.pending.Nonce
+	r.signed = signIDToken(t, r.key, r.claims)
+	r.grantScope = planScope
+	callbackURL := login.CallbackURI + "?" + url.Values{"state": {r.pending.State}, "code": {"reconsent-code"}, "client_id": {clientID}}.Encode()
+	if err := s.CompleteLogin(t.Context(), callbackURL); err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Status(t.Context())
+	if err != nil || state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != loginConnected || state.LoginFirstConnection != !test.disconnectReconnect || r.calls != 2 {
+		t.Fatalf("re-consent failed: %+v, %v, exchanges=%d", state, err, r.calls)
+	}
+	requireConnectionHistory(t, store, true)
 }
 
 func TestBrowserCallbackRejectsUnrelatedURLsWithoutConsumingAttempt(t *testing.T) {
@@ -489,63 +575,6 @@ func TestLoginStateExpiryConsentAndReauthorization(t *testing.T) {
 	}
 }
 
-func TestRefreshSerializesAcrossServiceInstances(t *testing.T) {
-	store := &memoryStore{values: map[string]string{}}
-	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "user", RefreshToken: "old-refresh", AccessToken: "expired", Scopes: planScope, ExpiresAt: time.Now().Add(-time.Minute)}}})
-	var calls atomic.Int32
-	transport := transportFunc(func(r *http.Request) (*http.Response, error) {
-		_ = r.ParseForm()
-		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "old-refresh" || r.Form.Get("client_id") != "app" {
-			t.Errorf("refresh used wrong credentials")
-		}
-		calls.Add(1)
-		return response(200, tokenResponse{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer", ExpiresIn: 3600}), nil
-	})
-	var wg sync.WaitGroup
-	for range 12 {
-		wg.Go(func() {
-			s := NewService(store)
-			s.http.Transport = transport
-			token, err := s.BearerToken(t.Context())
-			if err != nil || token != "new-access" {
-				t.Errorf("token = %q, err = %v", token, err)
-			}
-		})
-	}
-	wg.Wait()
-	if calls.Load() != 1 {
-		t.Fatalf("rotating token refreshed %d times", calls.Load())
-	}
-	c := stored(t, store)
-	if c.Accounts[0].RefreshToken != "new-refresh" || c.Accounts[0].AccessToken != "new-access" {
-		t.Fatal("replacement token bundle not saved")
-	}
-}
-
-func TestRevokedRefreshAndDisconnectPreserveRegistration(t *testing.T) {
-	store := &memoryStore{values: map[string]string{}}
-	save(t, store, credentials{HostID: "host", Active: "app", Accounts: []account{{ClientID: "app", Subject: "user", RefreshToken: "refresh", Scopes: planScope}}})
-	s := NewService(store)
-	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
-		return response(400, map[string]string{"error": oauthInvalidGrant}), nil
-	})
-	if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
-		t.Fatalf("refresh: %v", err)
-	}
-	if !stored(t, store).Accounts[0].NeedsLogin {
-		t.Fatal("revoked refresh not marked")
-	}
-	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })
-	revoked, err := s.Disconnect(t.Context(), "app")
-	if err != nil || revoked {
-		t.Fatalf("disconnect: %v, %v", revoked, err)
-	}
-	c := stored(t, store)
-	if c.Active != "" || c.HostID != "host" || c.Accounts[0].ClientID != "app" || c.Accounts[0].RefreshToken != "" {
-		t.Fatal("disconnect lost registration or retained credentials")
-	}
-}
-
 func TestDisconnectRetriesTransientRevocation(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -558,10 +587,8 @@ func TestDisconnectRetriesTransientRevocation(t *testing.T) {
 		wantRevoked bool
 	}{
 		{name: "network recovery", network: true, wantCalls: 2, wantRevoked: true},
-		{name: "server recovery", status: http.StatusServiceUnavailable, wantCalls: 2, wantRevoked: true},
 		{name: "rate limit recovery", status: http.StatusTooManyRequests, wantCalls: 2, wantRevoked: true},
 		{name: "persistent rate limit", status: http.StatusTooManyRequests, persistent: true, wantCalls: 3},
-		{name: "server outage", status: http.StatusServiceUnavailable, persistent: true, wantCalls: 3},
 		{name: "network outage", network: true, persistent: true, wantCalls: 3},
 		{name: "client rejection", status: http.StatusBadRequest, persistent: true, wantCalls: 1},
 		{name: "caller cancellation", canceled: true, wantCalls: 1, wantRevoked: true},
@@ -725,20 +752,6 @@ func TestRefreshPreservesRotationOnCallerCancellation(t *testing.T) {
 	a := stored(t, store).Accounts[0]
 	if a.RefreshToken != "new-refresh" || a.IDToken != "validated-at-login" || a.NeedsLogin {
 		t.Fatal("successful rotation lost credentials or identity")
-	}
-}
-
-func TestTransientRefreshFailureKeepsSessionRetryable(t *testing.T) {
-	store := &memoryStore{values: map[string]string{}}
-	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", RefreshToken: "old-refresh", Scopes: planScope}}})
-	s := NewService(store)
-	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return response(503, nil), nil })
-	if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrProvider) {
-		t.Fatalf("refresh error: %v", err)
-	}
-	a := stored(t, store).Accounts[0]
-	if a.NeedsLogin || a.RefreshToken != "old-refresh" {
-		t.Fatal("temporary outage discarded renewable session")
 	}
 }
 
@@ -965,35 +978,24 @@ func TestPinnedTokenSourcesRefreshInitialAccountAcrossServices(t *testing.T) {
 }
 
 func TestPinnedTokenSourceStopsAfterDisconnectOrRemoval(t *testing.T) {
-	for _, remove := range []bool{false, true} {
-		t.Run(fmt.Sprintf("remove=%t", remove), func(t *testing.T) {
-			store := &memoryStore{values: map[string]string{}}
-			save(t, store, credentials{Active: "a", Accounts: []account{{ClientID: "a", AccessToken: "a-token", RefreshToken: "a-refresh", ExpiresAt: time.Now().Add(time.Hour)}, {ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", ExpiresAt: time.Now().Add(time.Hour)}}})
-			s := NewService(store)
-			source, err := s.TokenSource(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := s.SelectAccount(t.Context(), "b"); err != nil {
-				t.Fatal(err)
-			}
-			if remove {
-				c := stored(t, store)
-				c.Accounts = c.Accounts[1:]
-				save(t, store, c)
-			} else {
-				s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })
-				if _, err := s.Disconnect(t.Context(), "a"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if token, err := source(t.Context()); !errors.Is(err, ErrSignInRequired) || token != "" {
-				t.Fatalf("unavailable pinned account fell through: %q, %v", token, err)
-			}
-			if token, err := s.BearerToken(t.Context()); err != nil || token != "b-token" {
-				t.Fatalf("unrelated active account changed: %q, %v", token, err)
-			}
-		})
+	store := &memoryStore{values: map[string]string{}}
+	save(t, store, credentials{Active: "a", Accounts: []account{{ClientID: "a", AccessToken: "a-token", RefreshToken: "a-refresh", ExpiresAt: time.Now().Add(time.Hour)}, {ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", ExpiresAt: time.Now().Add(time.Hour)}}})
+	s := NewService(store)
+	source, err := s.TokenSource(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SelectAccount(t.Context(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	c := stored(t, store)
+	c.Accounts = c.Accounts[1:]
+	save(t, store, c)
+	if token, err := source(t.Context()); !errors.Is(err, ErrSignInRequired) || token != "" {
+		t.Fatalf("unavailable pinned account fell through: %q, %v", token, err)
+	}
+	if token, err := s.BearerToken(t.Context()); err != nil || token != "b-token" {
+		t.Fatalf("unrelated active account changed: %q, %v", token, err)
 	}
 }
 

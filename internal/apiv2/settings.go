@@ -852,7 +852,7 @@ type EffectiveSettingsQuery struct {
 	DeviceID       string   `query:"device_id" maxLength:"128" doc:"Another registered device of the profile to resolve for; absent means the declared device" example:"tv-1"`
 	LibraryIDs     []ID     `query:"library_ids,explode" maxItems:"200" doc:"Libraries whose profile_library values take part, one library_ids parameter per id" example:"[\"3\"]"`
 	SeriesIDs      []string `query:"series_ids,explode" maxItems:"200" doc:"Series whose profile_series values take part, one series_ids parameter per id" example:"[\"tv:12345\"]"`
-	ClientFamily   string   `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	ClientFamily   string   `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; optional, and absence skips the profile_client layer" example:"tv"`
 	DeviceHeader   string   `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
 	DeviceName     string   `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
 	DevicePlatform string   `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`
@@ -923,7 +923,7 @@ type EffectiveSettingsBatch struct {
 // profile_id, device_id, library_ids or series_ids parameters of
 // listEffectiveSettings; v1 read those on the batch route and ignored them.
 type EffectiveSettingsBatchTarget struct {
-	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; optional, and absence skips the profile_client layer" example:"tv"`
 	DeviceHeader   string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
 	DeviceName     string `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
 	DevicePlatform string `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`

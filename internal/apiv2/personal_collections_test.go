@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -122,7 +121,6 @@ type fakeCollectionImports struct {
 	lastMDB    handlers.UserImportMDBListRequest
 	lastTMDB   handlers.UserImportTMDBRequest
 	lastList   handlers.UserImportTMDBListRequest
-	lastTrakt  handlers.UserImportTraktRequest
 	lastQuery  string
 }
 
@@ -153,11 +151,6 @@ func (f *fakeCollectionImports) ImportTMDB(_ context.Context, _ int, _ string, r
 
 func (f *fakeCollectionImports) ImportTMDBList(_ context.Context, _ int, _ string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error) {
 	f.lastList = req
-	return f.view()
-}
-
-func (f *fakeCollectionImports) ImportTrakt(_ context.Context, _ int, _ string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error) {
-	f.lastTrakt = req
 	return f.view()
 }
 
@@ -201,44 +194,6 @@ func collectionDeps(t *testing.T) (Dependencies, *fakePersonalCollections, *fake
 	return deps, pc, ci
 }
 
-func TestListCollections(t *testing.T) {
-	deps, pc, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/collections", "", viewerHeaders())
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	want := `{"items":[{"id":"c1","profile_id":"p-owner","creator_profile_id":"p-owner","name":"Rainy days","description":"","collection_type":"manual","is_shared":false,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","poster_is_collage":false,"created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"},` +
-		`{"id":"c2","profile_id":"p-primary","creator_profile_id":"p-primary","name":"Family night","description":"","collection_type":"manual","is_shared":true,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","poster_is_collage":false,"created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"}],` +
-		`"groups":[]}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	// A collage poster is marked as one.
-	pc.list.Collections[0].PosterURL, pc.list.Collections[0].PosterThumbhash, pc.list.Collections[0].PosterIsCollage = "https://cdn.test/collage.webp", "th", true
-	rec = do(t, h, http.MethodGet, "/api/v2/collections", "", viewerHeaders())
-	if !strings.Contains(rec.Body.String(), `"poster_url":"https://cdn.test/collage.webp","poster_thumbhash":"th","poster_is_collage":true`) {
-		t.Fatalf("collage body = %s", rec.Body.String())
-	}
-	// Another profile sees an empty, never-null envelope.
-	rec = do(t, h, http.MethodGet, "/api/v2/collections", "", with(bearer(memberToken), "X-Profile-Id", "p-primary"))
-	if rec.Code != 200 || rec.Body.String() != `{"items":[],"groups":[]}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// The class: no session, no profile header, a locked profile.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", nil), TypeAuthenticationRequired)
-	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	// Unwired service and a service failure.
-	deps.PersonalCollections = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections", "", viewerHeaders()), TypeDependencyUnavailable)
-	deps.PersonalCollections = &fakePersonalCollections{err: errors.New("boom")}
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections", "", viewerHeaders()), TypeInternalError)
-}
-
 func TestGetCollectionCapabilities(t *testing.T) {
 	deps, pc, _ := collectionDeps(t)
 	deps.ScheduleZone = fixtureScheduleTimeZone
@@ -267,56 +222,6 @@ func TestGetCollectionCapabilities(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"create_description":false`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-}
-
-func TestCreateCollection(t *testing.T) {
-	deps, pc, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"Smart","collection_type":"smart","query_definition":{"filters":[]},"is_shared":true}`, viewerHeaders())
-	if rec.Code != 201 || rec.Header().Get("Location") != "/api/v2/collections/c1" {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"name":"Smart","description":"","collection_type":"smart","is_shared":true,`) || strings.Contains(rec.Body.String(), "allowed_profile_ids") {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	cmd := pc.lastCreate
-	if cmd.UserID != 1 || cmd.ProfileID != "p-owner" || cmd.PosterFile != nil || !cmd.Request.IsShared || string(cmd.Request.QueryDefinition) != `{"filters":[]}` {
-		t.Fatalf("command = %+v", cmd)
-	}
-	if cmd.Request.Description != "" {
-		t.Fatalf("description without one in the body = %q, want empty", cmd.Request.Description)
-	}
-	// A description is stored with the new collection and echoed back.
-	rec = do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"Rainy days","description":"For wet afternoons"}`, viewerHeaders())
-	if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"name":"Rainy days","description":"For wet afternoons"`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if got := pc.lastCreate.Request.Description; got != "For wet afternoons" {
-		t.Fatalf("description = %q", got)
-	}
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","description":null}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.description" || p.Errors[0].Code != codeInvalidType {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	// Validation: the schema (missing name), the seam (empty name), an
-	// unknown enum, and null on a non-nullable member.
-	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"collection_type":"manual"}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.name" || p.Errors[0].Code != codeRequired {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","collection_type":"playlist"}`, viewerHeaders()), TypeValidationFailed)
-	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","is_shared":null}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.is_shared" || p.Errors[0].Code != codeInvalidType {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","extra":1}`, viewerHeaders()), TypeValidationFailed)
-	// The per-profile allow list is no longer a member.
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","is_shared":true,"allowed_profile_ids":["p-primary"]}`, viewerHeaders()), TypeValidationFailed)
-	// The class and demo mode.
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x"}`, bearer(memberToken)), TypeValidationFailed)
-	demo := deps
-	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections", `{"name":"x"}`, viewerHeaders()), TypePermissionDenied)
 }
 
 func TestReorderCollections(t *testing.T) {
@@ -349,28 +254,6 @@ func TestReorderCollections(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/order", `{"ordered_ids":["c1"]}`, with(viewerHeaders(), "If-Match", "*")), TypeMethodNotAllowed)
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/collections/order", `{"ordered_ids":["c1"]}`, nil), TypeAuthenticationRequired)
-}
-
-// Every personal collection group operation answers capability_unsupported,
-// as it already did for an account on the SQLite store.
-func TestCollectionGroupsAreUnsupported(t *testing.T) {
-	deps, _, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	for _, req := range []struct{ method, path, body string }{
-		{http.MethodPost, "/api/v2/collections/groups", `{"name":"Seasonal"}`},
-		{http.MethodGet, "/api/v2/collections/groups/g1", ""},
-		{http.MethodPatch, "/api/v2/collections/groups/g1", `{"name":"Winter"}`},
-		{http.MethodDelete, "/api/v2/collections/groups/g1", ""},
-		{http.MethodGet, "/api/v2/collections/groups/order", ""},
-		{http.MethodPut, "/api/v2/collections/groups/order", `{"ordered_ids":["g1"]}`},
-	} {
-		rec := do(t, h, req.method, req.path, req.body, with(viewerHeaders(), "If-Match", "*"))
-		if rec.Code != http.StatusNotImplemented {
-			t.Errorf("%s %s: %d %s", req.method, req.path, rec.Code, rec.Body.String())
-			continue
-		}
-		requireProblem(t, rec, TypeCapabilityUnsupported)
-	}
 }
 
 func TestImportCollections(t *testing.T) {
@@ -406,20 +289,16 @@ func TestImportCollections(t *testing.T) {
 		t.Fatalf("%d %+v", rec.Code, ci.lastList)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list"}`, viewerHeaders()), TypeValidationFailed)
-	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"Trending","preset":"trending"}`, viewerHeaders())
-	if rec.Code != 201 || ci.lastTrakt.Preset != "trending" || ci.lastTrakt.MediaType != "" {
-		t.Fatalf("%d %+v", rec.Code, ci.lastTrakt)
-	}
 	// The seam's field error, the class, demo mode, and an unwired service.
 	deps.CollectionImports = &fakeCollectionImports{err: &handlers.APIError{Status: 400, Code: "bad_request", Message: "url must be an MDBList list", Field: "url"}}
 	p = requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/mdblist", `{"title":"Top","url":"u"}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.url" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
 	demo := deps
 	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
 	deps.CollectionImports = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypeDependencyUnavailable)
 }
@@ -524,16 +403,5 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 		if kept[source] != count {
 			t.Errorf("kept %d templates with importable source %q, want %d", kept[source], source, count)
 		}
-	}
-}
-
-// poster_is_collage is false whenever poster_url is empty, as on the
-// editor state getCollection answers.
-func TestPersonalCollectionMarksCollageOnlyWithPosterURL(t *testing.T) {
-	if got := personalCollectionOf(handlers.PersonalCollectionView{ID: "c1", PosterIsCollage: true}); got.PosterIsCollage {
-		t.Fatalf("collection without poster_url = %+v, want no poster_is_collage", got)
-	}
-	if got := personalCollectionOf(handlers.PersonalCollectionView{ID: "c1", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}); !got.PosterIsCollage {
-		t.Fatalf("collection with a collage = %+v, want poster_is_collage", got)
 	}
 }

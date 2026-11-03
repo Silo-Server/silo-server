@@ -207,7 +207,7 @@ func uploadCollectionImageVariants(
 	// Revision the key by content so replacement artwork lands on a new key,
 	// and therefore a new public URL, rather than overwriting a fixed key that
 	// stays cached by the CDN and browsers (issue #1258). Revisions stay in the
-	// imageType directory, so removeCollectionImageVariants still clears every
+	// imageType directory, so deleting an admin collection still clears every
 	// one of them by that prefix.
 	basePath := collectionImageDir(prefix, collectionID, imageType)
 	return putCollectionImageVariants(ctx, store, basePath, collectionImageRevision(fileData), widths, fileData)
@@ -287,13 +287,13 @@ func collectionCollageDir(prefix, collectionID string) string {
 }
 
 // removeReplacedCollectionImageVersion deletes the variants of the revision
-// that a replacement superseded, identified from the previously stored path. It
-// runs after the new revision is committed, and currentPath is the path the row
-// holds on a fresh read at cleanup time.
+// that a replacement or clear superseded, identified from the previously
+// stored path. It runs after the change is committed, and currentPath is the
+// path the row holds on a fresh read at cleanup time.
 //
-// Only the superseded revision is removed, never "everything but the new
-// revision", so a concurrent replacement that committed its own revision is
-// never deleted. The revision is skipped when the row still points at it
+// Only the superseded revision is removed, never "everything but the current
+// revision", so a concurrent upload that committed its own revision is never
+// deleted. The revision is skipped when the row still points at it
 // (currentPath), which guards against a concurrent restore of the same content:
 // re-uploading the old bytes reuses the old keys, so deleting them would strip
 // the artwork the row now references. A legacy fixed key (no revision) selects
@@ -334,13 +334,14 @@ func removeReplacedCollectionImageVersion(
 	return nil
 }
 
-// cleanUpReplacedCollectionImage runs after a replacement image is committed.
-// It reads the path the row now holds and removes the revision oldPath named.
-// Callers upload the replacement under its own revision and commit it before
-// calling this, so a failed upload or update leaves the stored artwork intact.
-// Failures here only log: the committed artwork is intact and the worst case
-// is an orphaned revision. The replacement is already committed, so cleanup
-// outlives a canceled request, bounded by collectionImageCleanupTimeout.
+// cleanUpReplacedCollectionImage runs after a replacement image or a clear is
+// committed. It reads the path the row now holds and removes the revision
+// oldPath named. Callers commit the new reference (a new revision, or empty)
+// before calling this, so a failed upload, update, or delete never leaves the
+// row pointing at missing or partly deleted artwork (issue #2419). Failures
+// here only log: the worst case is an orphaned revision. The change is already
+// committed, so cleanup outlives a canceled request, bounded by
+// collectionImageCleanupTimeout.
 func cleanUpReplacedCollectionImage(
 	ctx context.Context,
 	store blobstore.Store,
@@ -359,36 +360,26 @@ func cleanUpReplacedCollectionImage(
 	}
 }
 
+// removeDeletedCollectionArtwork deletes a deleted collection's whole artwork
+// directory: every image revision and collage. The row delete has committed,
+// so the cleanup outlives a canceled request, bounded by
+// collectionImageCleanupTimeout, and a failure only logs.
+func removeDeletedCollectionArtwork(ctx context.Context, store blobstore.Store, prefix, collectionID string) {
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectionImageCleanupTimeout)
+	defer cancel()
+	if _, err := store.DeletePrefix(ctx, fmt.Sprintf("%s/%s/", prefix, collectionID)); err != nil {
+		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "prefix", prefix, "error", err)
+	}
+}
+
 // isCollectionImageKeyIn reports whether key is an object directly inside dir
 // (which carries a trailing slash).
 func isCollectionImageKeyIn(dir, key string) bool {
 	name, ok := strings.CutPrefix(key, dir)
 	return ok && name != "" && !strings.Contains(name, "/")
-}
-
-// removeCollectionImageVariants deletes every stored variant for the given
-// collection / imageType under the supplied S3 prefix.
-func removeCollectionImageVariants(
-	ctx context.Context,
-	store blobstore.Store,
-	prefix, collectionID, imageType string,
-) error {
-	if store == nil {
-		return nil
-	}
-	p := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
-	items, _, err := store.List(ctx, p, "", 0)
-	if err != nil {
-		return fmt.Errorf("listing objects: %w", err)
-	}
-	keys := make([]string, 0, len(items))
-	for _, item := range items {
-		keys = append(keys, item.Key)
-	}
-	if _, err := store.Delete(ctx, keys); err != nil {
-		return fmt.Errorf("deleting collection variants: %w", err)
-	}
-	return nil
 }
 
 // collectionCollageComposer composes collection collages from title posters
@@ -400,22 +391,24 @@ type collectionCollageComposer struct {
 	prefix     string
 	store      blobstore.Store
 	posters    itemPosterSigner
+	signer     *artworkurl.Signer
 	httpClient *http.Client
 }
 
 // NewPersonalCollectionCollageGenerator composes personal collection
 // collages and stores them beside their uploaded posters. It returns nil
 // when artwork storage or poster signing is not configured, which leaves
-// personal collections without collages. A nil httpClient uses
-// newCollectionImageClient.
-func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, httpClient *http.Client) catalog.CollageGenerator {
+// personal collections without collages. signer is the artwork URL signer
+// that local storage resolves posters with; nil when storage serves its own
+// URLs. A nil httpClient uses newCollectionImageClient.
+func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, signer *artworkurl.Signer, httpClient *http.Client) catalog.CollageGenerator {
 	if store == nil || posters == nil {
 		return nil
 	}
 	if httpClient == nil {
 		httpClient = newCollectionImageClient()
 	}
-	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, httpClient: httpClient}
+	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, signer: signer, httpClient: httpClient}
 }
 
 // ComposeCollectionCollage fetches the source posters, composes them and
@@ -473,11 +466,24 @@ func (c collectionCollageComposer) CollectionCollagePath(collectionID, key strin
 }
 
 // fetchImage downloads an image from a resolved URL. The URL is a catalog
-// title's poster as the server resolved it: a direct URL to the artwork
-// store, which may be on the local network, or a metadata provider's URL that
-// was not cached, which is untrusted. artworkurl.FetchContext tells them
-// apart, and netguard refuses blocked addresses either way.
+// title's poster as the server resolved it. Local artwork storage resolves
+// posters to this server's own signed artwork route, a root-relative URL that
+// is read from the store directly, as offline downloads do. Otherwise it is a
+// direct URL to the artwork store, which may be on the local network, or a
+// metadata provider's URL that was not cached, which is untrusted.
+// artworkurl.FetchContext tells those apart, and netguard refuses blocked
+// addresses either way.
 func (c collectionCollageComposer) fetchImage(ctx context.Context, imageURL string) ([]byte, error) {
+	if c.store != nil && c.signer != nil {
+		if key, ok := c.signer.SignedKey(imageURL, time.Now()); ok {
+			body, _, err := c.store.Get(ctx, key)
+			if err != nil {
+				return nil, fmt.Errorf("reading stored poster: %w", err)
+			}
+			defer func() { _ = body.Close() }()
+			return io.ReadAll(io.LimitReader(body, collectionImageMaxBytes))
+		}
+	}
 	if c.httpClient == nil {
 		return nil, errors.New("collage downloads have no HTTP client")
 	}

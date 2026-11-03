@@ -26,5 +26,6 @@ import (
 // degrades every profile's metadata language would otherwise be
 // indistinguishable from "nobody set a preference".
 func PreferredMetadataLanguage(ctx context.Context, store userstore.UserStore, profileID string) string {
-	return ResolveViewerPreferences(ctx, store, profileID).PreferredMetadataLanguage
+	// catalog.metadata_language declares no admin_default.
+	return ResolveViewerPreferences(ctx, store, nil, profileID).PreferredMetadataLanguage
 }

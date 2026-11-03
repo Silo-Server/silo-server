@@ -93,7 +93,7 @@ describe("ready-made picks", () => {
           TRENDING_WEEK,
           template({ id: "discover", source: "tmdb_discover" }),
           template({ id: "franchise", source: "tmdb_collection" }),
-          template({ id: "trakt", source: "trakt", requires_profile: true }),
+          template({ ...TRENDING_WEEK, id: "for-you", requires_profile: true }),
           template({ id: "byo", source: "mdblist", mdblist: { url: "" } }),
         ],
       },

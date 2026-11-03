@@ -161,7 +161,7 @@ func TestAutoUpdateInstallsRequiredPluginsOnLaterChecks(t *testing.T) {
 // recorded.
 func TestAutoUpdateSummaryMasksCredentialsInFailures(t *testing.T) {
 	var summary AutoUpdateSummary
-	summary.recordFailure("process plugin update %s: %v", "silo.example",
+	summary.recordFailuref("process plugin update %s: %v", "silo.example",
 		errors.New("rpc error: code = Unauthenticated desc = api_key=sk-live-123 rejected"))
 	if summary.FailedOperations != 1 || len(summary.Failures) != 1 {
 		t.Fatalf("summary = %+v, want one recorded failure", summary)

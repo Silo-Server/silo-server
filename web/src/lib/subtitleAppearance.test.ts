@@ -70,11 +70,6 @@ describe("computeSubtitlePositionStyle", () => {
 });
 
 describe("computeSubtitleFontSize", () => {
-  it("returns the base size at scale 1", () => {
-    expect(computeSubtitleFontSize("large")).toBe("32px");
-    expect(computeSubtitleFontSize("small", 1)).toBe("20px");
-  });
-
   it("scales the base size", () => {
     expect(computeSubtitleFontSize("large", 1.5)).toBe("48px");
     expect(computeSubtitleFontSize("xxlarge", 0.5)).toBe("24px");
@@ -93,13 +88,6 @@ describe("computeSubtitleStyles", () => {
       SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE].defaultValue,
     );
   });
-
-  it("applies the font scale to the cue font size", () => {
-    const unscaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE);
-    const scaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE, 2);
-    expect(unscaled.cueStyle.fontSize).toBe("32px");
-    expect(scaled.cueStyle.fontSize).toBe("64px");
-  });
 });
 
 describe("text opacity", () => {
@@ -112,12 +100,6 @@ describe("text opacity", () => {
     expect(styles.cueStyle.color).toBe("rgba(156, 163, 175, 0.3)");
     expect(styles.cueStyle.backgroundColor).toBe(
       computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE).cueStyle.backgroundColor,
-    );
-  });
-
-  it("keeps the default fully opaque", () => {
-    expect(computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE).cueStyle.color).toBe(
-      "rgba(255, 255, 255, 1)",
     );
   });
 

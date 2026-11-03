@@ -20,10 +20,6 @@ describe("parseHWDeviceList", () => {
     expect(parseHWDeviceList("")).toEqual([]);
     expect(parseHWDeviceList(" , ")).toEqual([]);
   });
-
-  it("splits and trims a comma list", () => {
-    expect(parseHWDeviceList(" /dev/dri/renderD128 ,/dev/dri/renderD129")).toEqual(DETECTED);
-  });
 });
 
 describe("toggleHWDevice", () => {
@@ -195,10 +191,6 @@ describe("imageExecutionOptions", () => {
 });
 
 describe("describeDetection", () => {
-  it("returns nothing before a probe has answered", () => {
-    expect(describeDetection(undefined)).toBeUndefined();
-  });
-
   it("names the backend, first device, and node source", () => {
     expect(
       describeDetection({

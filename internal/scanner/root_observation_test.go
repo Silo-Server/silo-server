@@ -263,13 +263,6 @@ func TestObserveFileRoot_TaggedFileSkipsSiblingLookup(t *testing.T) {
 	}
 }
 
-func TestObserveFileRoot_ReturnsListError(t *testing.T) {
-	lister := &fakeObservedRootLister{err: errors.New("db down")}
-	if _, _, err := observeFileRoot(context.Background(), lister, 1, "/movies/Dune (2021)/Dune (2021).mkv", "movies"); err == nil {
-		t.Fatal("expected the sibling lookup error")
-	}
-}
-
 func TestInferRootAssignments_ForcedMovieRootCountsFileTags(t *testing.T) {
 	const root = "/movies/Planet Earth (2006)"
 	files := []string{

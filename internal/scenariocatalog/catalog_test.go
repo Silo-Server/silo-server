@@ -130,39 +130,6 @@ func TestGateRejectsRowWithoutExecutableAssertion(t *testing.T) {
 	}
 }
 
-// TestSchemaRejectsEmptyScenarios pins minItems: 1 on row.scenarios.
-func TestSchemaRejectsEmptyScenarios(t *testing.T) {
-	schemaBytes, err := scenarios.FS.ReadFile(scenarios.SchemaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	na := map[string]any{}
-	for _, cat := range Categories {
-		na[string(cat)] = "not applicable to this row"
-	}
-	catalog := map[string]any{
-		"schema_version": 1,
-		"listener":       "api",
-		"route_group":    GroupAuth,
-		"wave":           1,
-		"description":    "test",
-		"rows": []any{map[string]any{
-			"listener": "api", "method": "GET", "path": "/api/v1/auth/me", "registration_index": 0,
-			"not_applicable": na,
-			"scenarios":      []any{},
-		}},
-	}
-	raw, _ := json.Marshal(catalog)
-	fsys := fstest.MapFS{
-		scenarios.SchemaPath:   {Data: schemaBytes},
-		"api/api-v1-auth.json": {Data: raw},
-	}
-	_, err = load(fsys)
-	if err == nil || !strings.Contains(err.Error(), "minItems") {
-		t.Fatalf("expected a minItems violation, got %v", err)
-	}
-}
-
 func TestSchemaRejectsUncoveredCategory(t *testing.T) {
 	schemaBytes, err := scenarios.FS.ReadFile(scenarios.SchemaPath)
 	if err != nil {

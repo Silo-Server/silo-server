@@ -41,8 +41,9 @@ const (
 	FieldImages
 	FieldAirSchedule
 	FieldVideos
-	// FieldReleaseDates locks Year, ReleaseDate, and First/LastAirDate so a
-	// refresh (or an NFO at priority 1) cannot overwrite manual corrections.
+	// FieldReleaseDates locks Year, ReleaseDate, the home release dates, and
+	// First/LastAirDate so a refresh (or an NFO at priority 1) cannot
+	// overwrite manual corrections.
 	FieldReleaseDates
 )
 
@@ -78,6 +79,9 @@ type ProcessRequest struct {
 	// durableProviderIDs is the item's stored provider-ID rows as loaded,
 	// before any request IDs are merged with them.
 	durableProviderIDs map[string]string
+	// identityCorrection is set when an Identify, or an NFO on a manual
+	// refresh, corrects the item's stored match (identityChoiceCorrects).
+	identityCorrection bool
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
@@ -87,6 +91,9 @@ type ProcessRequest struct {
 	// ones, and like an enrichment write it leaves identity, refresh
 	// bookkeeping, videos, seasons and episodes alone.
 	localReapply bool
+	// fallback is the fallback-language text processInternal fetched for the
+	// gaps its providers left; mergeAndPersist applies it to a base-row write.
+	fallback *fallbackText
 }
 
 // writesFieldsOnly reports whether the request merges provider fields into an
@@ -218,7 +225,7 @@ type SearchResult struct {
 // TitleAlias is a provider-confirmed title for the same work.
 type TitleAlias struct {
 	Title    string `json:"title"`
-	Language string `json:"language,omitempty"`
+	Language string `json:"language,omitempty" doc:"Language of the alias as the provider reports it, usually ISO 639-1"`
 	Kind     string `json:"kind"`
 	Provider string `json:"provider,omitempty"`
 }
@@ -286,6 +293,13 @@ type MetadataResult struct {
 	TitleAliasesComplete bool
 	TitleLanguage        string
 	TitleIsFallback      bool
+	// OverviewLanguage is the language of Overview and Tagline when a provider
+	// reported them in a language other than the requested one; empty means
+	// the requested language or unknown.
+	OverviewLanguage string
+	// taglineLanguage is OverviewLanguage of the provider Tagline came from,
+	// which need not be the one Overview came from.
+	taglineLanguage string
 	// titleAliasProviders records whether each contributing provider declared
 	// its aliases to be an authoritative snapshot. False means merge-only,
 	// which is the safe default for legacy plugins and partial responses.
@@ -327,6 +341,11 @@ type MetadataResult struct {
 	BackdropPath      string
 	BackdropThumbhash string
 	LogoPath          string
+	// DigitalReleaseDate and PhysicalReleaseDate are a movie's earliest
+	// digital and physical (disc) releases in any country, YYYY-MM-DD. The
+	// calendar lists the movie on the earlier of the two.
+	DigitalReleaseDate  string
+	PhysicalReleaseDate string
 	// Series-specific
 	ReleaseDate  string
 	SeasonCount  int
@@ -507,15 +526,21 @@ type EpisodesRequest struct {
 
 // SeasonResult carries season data from a provider.
 type SeasonResult struct {
-	ContentID        string
-	SeasonNumber     int
-	Title            string
-	Overview         string
+	ContentID    string
+	SeasonNumber int
+	Title        string
+	Overview     string
+	// TitleLanguage and OverviewLanguage follow MetadataResult.OverviewLanguage.
+	TitleLanguage    string
+	OverviewLanguage string
 	AirDate          string
 	PosterPath       string
 	PosterSourcePath string
 	PosterThumbhash  string
-	Episodes         []EpisodeResult
+	// BackdropPath is the season's landscape art, a provider path. Seasons
+	// take no local backdrop.
+	BackdropPath string
+	Episodes     []EpisodeResult
 
 	// remotePosterPath keeps the best remote poster when a local sidecar
 	// poster won the merge (preferLocalSeasonPoster). Local art belongs to the
@@ -527,20 +552,26 @@ type SeasonResult struct {
 
 // EpisodeResult carries episode data from a provider.
 type EpisodeResult struct {
-	ContentID       string
-	ProviderIDs     map[string]string
-	SeasonNumber    int
-	EpisodeNumber   int
-	Title           string
-	Overview        string
-	AirDate         string
-	Runtime         int
-	Ratings         Ratings
-	StillPath       string
-	StillSourcePath string
-	StillThumbhash  string
+	ContentID     string
+	ProviderIDs   map[string]string
+	SeasonNumber  int
+	EpisodeNumber int
+	Title         string
+	Overview      string
+	// TitleLanguage and OverviewLanguage follow MetadataResult.OverviewLanguage.
+	TitleLanguage    string
+	OverviewLanguage string
+	AirDate          string
+	Runtime          int
+	Ratings          Ratings
+	StillPath        string
+	StillSourcePath  string
+	StillThumbhash   string
 
 	// stillFallback is the remote still a local one displaced while results
 	// merged; the episode shows it until the local copy is cached.
 	stillFallback string
+	// titleLocal marks a title from the library's own files, which stands
+	// even when it looks like a numbered stand-in.
+	titleLocal bool
 }

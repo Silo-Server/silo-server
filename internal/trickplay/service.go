@@ -115,6 +115,7 @@ type Service struct {
 	extractor Extractor
 	owner     string
 	limiter   *mediasample.Limiter
+	delivery  *externalDelivery
 	logger    *slog.Logger
 	wake      chan struct{}
 	reconcile chan struct{}
@@ -190,6 +191,9 @@ func (s *Service) ReconcileSoon() {
 func (s *Service) Start(ctx context.Context) {
 	go s.dispatch(ctx)
 	go s.reconcileOnRequest(ctx)
+	if s.delivery != nil {
+		go s.confirmDelivery(ctx)
+	}
 }
 
 func (s *Service) reconcileOnRequest(ctx context.Context) {
@@ -351,8 +355,9 @@ type inputError struct{ err error }
 func (e *inputError) Error() string { return "input not readable here: " + e.err.Error() }
 func (e *inputError) Unwrap() error { return e.err }
 
-// errNoNode is a job that must run on a transcode node when none is
-// available.
+// errNoNode is a job that must run on a transcode node when no node ran it:
+// every eligible node was busy, unreachable, failed mid-request, could not
+// list its capabilities, or could not read the file.
 var errNoNode = errors.New("no transcode node can make trickplay sheets")
 
 // heartbeat renews the lease until ctx ends, and cancels the work with
@@ -446,6 +451,17 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		published.Refined += result.SheetFrames.Refined
 		published.Decoder = result.Decoder
 		start += len(chunk)
+	}
+	if s.delivery != nil {
+		// A revision the endpoint does not serve yet still publishes; readers
+		// sign the server route for it until a later check confirms it.
+		delivered, err := s.delivered(ctx, job.FileID, revision, len(published.SheetBytes))
+		if err != nil && ctx.Err() == nil {
+			s.logger.InfoContext(ctx, "trickplay delivery check failed", "file_id", job.FileID, "error", err)
+		}
+		if delivered {
+			published.DeliveryScope = s.delivery.scope
+		}
 	}
 	ok, err := s.queue.Publish(ctx, job.FileID, job.LeaseToken, revision, published)
 	if err != nil {

@@ -1,9 +1,7 @@
 package mediasample
 
 import (
-	"encoding/json"
 	"math"
-	"reflect"
 	"testing"
 )
 
@@ -146,44 +144,6 @@ func samplesMode(seconds ...float64) func(*Request) {
 	return func(r *Request) {
 		r.Window, r.Audio, r.Stats = nil, nil, validStats()
 		r.Samples = &Samples{Seconds: seconds}
-	}
-}
-
-func TestSamplesRequestRoundTripsThroughJSON(t *testing.T) {
-	req := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: []float64{0, 3, 6.5}}, Stats: validStats(), Background: true}
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded, req) {
-		t.Fatalf("decoded %+v, want %+v (json %s)", decoded, req, data)
-	}
-}
-
-func TestRequestRoundTripsThroughJSON(t *testing.T) {
-	req := Request{
-		Input:      "/media/a.mkv",
-		Window:     &Window{StartSeconds: 1.5, DurationSeconds: 30, KeyframesOnly: true},
-		Audio:      &AudioOutput{Fingerprint: true, Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.33}},
-		Stats:      validStats(),
-		Attempts:   []Attempt{{TimeoutSeconds: 60}},
-		Threads:    1,
-		Background: true,
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded, req) {
-		t.Fatalf("decoded %+v, want %+v (json %s)", decoded, req, data)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 )
 
 var proxyMediaRoutes = []streamtelemetry.MediaRoute{
+	proxyRoute(http.MethodGet, "/stream/bandwidth-probe/{token}", streamtelemetry.ClassTransfer, false),
 	proxyRoute(http.MethodGet, "/stream/direct/{token}", streamtelemetry.ClassPlayback, true),
 	proxyRoute(http.MethodHead, "/stream/direct/{token}", streamtelemetry.ClassPlayback, true),
 	proxyRoute(http.MethodGet, "/stream/remux/{token}", streamtelemetry.ClassPlayback, true),

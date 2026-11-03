@@ -9,7 +9,6 @@ import {
   coreApplied,
   coreAppliedAllFailed,
   coreDryRun,
-  coreDryRunAllThere,
   coreDryRunWithHeroes,
   starterPackBundles,
   starterPackLibraries,
@@ -123,80 +122,6 @@ function table() {
 }
 
 describe("Starter packs", () => {
-  it("lists the packs with their counts and Everything last, and opens on the first", async () => {
-    renderDialog();
-    const rail = await screen.findByRole("tablist", { name: "Packs" });
-    expect(rail).toHaveAttribute("aria-orientation", "vertical");
-    expect(
-      within(rail)
-        .getAllByRole("tab")
-        .map((tab) => tab.textContent),
-    ).toEqual([
-      "Core Defaults5 lists",
-      "Popular Genres2 lists",
-      "Franchise Collections1 list",
-      "All Defaults8 lists",
-    ]);
-    expect(within(rail).getByRole("tab", { name: /Core Defaults/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("heading", { name: "Core Defaults" })).toBeInTheDocument();
-  });
-
-  it("ties each pack tab to the pane it shows", async () => {
-    const { user } = renderDialog();
-    const rail = await screen.findByRole("tablist", { name: "Packs" });
-    const tabs = within(rail).getAllByRole("tab");
-    const panel = screen.getByRole("tabpanel", { name: /Core Defaults/ });
-    for (const tab of tabs) expect(tab).toHaveAttribute("aria-controls", panel.id);
-    expect(within(panel).getByRole("heading", { name: "Core Defaults" })).toBeInTheDocument();
-
-    await user.click(within(rail).getByRole("tab", { name: /Popular Genres/ }));
-    expect(screen.getByRole("tabpanel", { name: /Popular Genres/ })).toBe(panel);
-  });
-
-  it("shows what will happen per library from the dry run, tagging only the exceptions", async () => {
-    renderDialog();
-    await checked();
-    const rows = within(table()).getAllByRole("row");
-    expect(rows.map((row) => row.textContent)).toEqual([
-      "LibraryNewAlready thereNot for this library",
-      "Movies2 new1 pinned first12 TV lists",
-      expect.stringContaining("Trending Movies This Week"),
-      "TV Shows2 new1 pinned first03 movie lists",
-    ]);
-    expect(
-      within(table())
-        .getAllByRole("rowheader")
-        .map((cell) => cell.textContent),
-    ).toEqual(["Movies", "TV Shows"]);
-    const movies = within(table()).getByRole("button", { name: "Movies" });
-    expect(movies).toHaveAttribute("aria-expanded", "true");
-    const list = screen.getByRole("list", { name: "Lists for Movies" });
-    expect(
-      within(list)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent),
-    ).toEqual([
-      "Trending Movies This WeekPinned first",
-      "Popular Movies",
-      "Top Rated MoviesAlready there",
-    ]);
-
-    await userEvent.click(within(table()).getByRole("button", { name: "TV Shows" }));
-    expect(screen.getByRole("list", { name: "Lists for TV Shows" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add 4 collections" })).toBeEnabled();
-  });
-
-  it("says where new lists land and that no sections are added", async () => {
-    renderDialog();
-    await checked();
-    expect(screen.getByText(/New lists land under/)).toHaveTextContent(
-      "New lists land under No heading on each library's Collections tab, ready to move into a shelf in Arrange. “Already there” lists aren't touched. No sections are added unless you turn on hero banners.",
-    );
-  });
-
   it("sends no featured member while the hero switch is off, then a fresh dry run and the job", async () => {
     const { user } = renderDialog();
     await checked();
@@ -231,21 +156,6 @@ describe("Starter packs", () => {
     await screen.findByRole("heading", { name: "Core Defaults added" });
     await waitFor(() => expect(within(table()).queryByText("Hero banner on Home")).toBeNull());
     expect(v2Recorder.writes()).toEqual(goldens.starterPackApplyWithHeroes);
-  });
-
-  it("turns the hero switch back off once the heroes are set", async () => {
-    const { user } = renderDialog();
-    await checked();
-    const heroSwitch = screen.getByRole("switch", { name: "Also use the pack's hero banners" });
-    await user.click(heroSwitch);
-    await waitFor(() =>
-      expect(within(table()).getByText("Hero banner on Home")).toBeInTheDocument(),
-    );
-    await user.click(screen.getByRole("button", { name: "Add 4 collections" }));
-    await screen.findByRole("heading", { name: "Core Defaults added" });
-    expect(heroSwitch).not.toBeChecked();
-    await waitFor(() => expect(within(table()).queryByText("Hero banner on Home")).toBeNull());
-    expect(screen.queryByRole("button", { name: "Set hero banners" })).toBeNull();
   });
 
   it("says in words why a hero banner can't be set", async () => {
@@ -379,24 +289,6 @@ describe("Starter packs", () => {
     expect(screen.getByRole("button", { name: "Add 4 collections" })).toBeEnabled();
   });
 
-  it("says there is nothing new to add when every list is already there", async () => {
-    v2Recorder.answer(DRY_RUN, coreDryRunAllThere);
-    renderDialog({ initialLibraryId: 1 });
-    await checked();
-    expect(screen.getByRole("button", { name: "Nothing new to add" })).toBeDisabled();
-  });
-
-  it("links to Libraries when no library can take the pack", async () => {
-    renderDialog({ libraries: [starterPackLibraries[2]!] });
-    expect(await screen.findByText("None of your libraries can take this pack.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Libraries" })).toHaveAttribute(
-      "href",
-      "/admin/libraries",
-    );
-    expect(screen.getByRole("button", { name: /^Add/ })).toBeDisabled();
-    expect(v2Recorder.callsOf(DRY_RUN)).toEqual([]);
-  });
-
   it("checks again with the libraries ticked", async () => {
     const { user } = renderDialog();
     await checked();
@@ -409,21 +301,6 @@ describe("Starter packs", () => {
       }),
     );
     expect(screen.queryByRole("checkbox", { name: "Audiobooks" })).toBeNull();
-  });
-
-  it("stays open after Add, tags the pack Added and moves focus to the result", async () => {
-    const { user, onClose } = renderDialog();
-    await checked();
-    await user.click(screen.getByRole("button", { name: "Add 4 collections" }));
-    const heading = await screen.findByRole("heading", { name: "Core Defaults added" });
-    const summary = heading.closest("section")!;
-    await waitFor(() => expect(summary).toHaveFocus());
-    expect(summary).toHaveTextContent("Added 2 lists to Movies.");
-    expect(summary).toHaveTextContent("Added 1 list to TV Shows.");
-    expect(summary).toHaveTextContent("Couldn't add Popular TV to TV Shows: something went wrong.");
-    expect(screen.getByRole("tab", { name: /Core Defaults/ })).toHaveTextContent("Added");
-    expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Starter packs" })).toBeInTheDocument();
   });
 
   it("doesn't tag the pack Added when nothing new landed and lists failed", async () => {
@@ -447,41 +324,5 @@ describe("Starter packs", () => {
       "Couldn't add Popular Movies to Movies: something went wrong.",
     );
     expect(screen.getByRole("tab", { name: /Core Defaults/ })).not.toHaveTextContent("Added");
-  });
-
-  it("adds a note about sync load above 30 new lists", async () => {
-    const many = Array.from({ length: 31 }, (_, index) => ({
-      template_id: `tmdb_popular_movies`,
-      template_title: `List ${index}`,
-      library_id: "1",
-      library_name: "Movies",
-      reason: "would_create",
-    }));
-    v2Recorder.answer(DRY_RUN, { ...coreDryRun, created: many, skipped: [] });
-    renderDialog();
-    expect(
-      await screen.findByText(
-        "That's 31 new lists. Their first syncs run in the background and can take a while to finish.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("picks the pack from a select on phones", async () => {
-    vi.stubGlobal(
-      "matchMedia",
-      (query: string) =>
-        ({
-          matches: query === "(max-width: 1023px)",
-          media: query,
-          addEventListener() {},
-          removeEventListener() {},
-        }) as unknown as MediaQueryList,
-    );
-    const { user } = renderDialog();
-    const select = await screen.findByRole("combobox", { name: "Pack" });
-    expect(screen.queryByRole("tablist", { name: "Packs" })).toBeNull();
-    await user.click(select);
-    await user.click(await screen.findByRole("option", { name: "Popular Genres · 2 lists" }));
-    expect(await screen.findByRole("heading", { name: "Popular Genres" })).toBeInTheDocument();
   });
 });

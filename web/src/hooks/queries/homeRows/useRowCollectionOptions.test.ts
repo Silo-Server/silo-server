@@ -23,23 +23,6 @@ describe("admin collection options", () => {
     { id: 2, name: "Kids" },
   ];
 
-  it("offers visible library collections with their poster, count and type", () => {
-    expect(adminCollectionOptions([collection("a")], libraries)).toEqual([
-      {
-        id: "a",
-        title: "Collection a",
-        source: "library",
-        group: "Movies",
-        library_id: 1,
-        library_name: "Movies",
-        collection_type: "manual",
-        item_count: 4,
-        poster_url: "/a.jpg",
-        poster_thumbhash: "hash-a",
-      },
-    ]);
-  });
-
   it("leaves out hidden collections, which a row could not show", () => {
     const options = adminCollectionOptions(
       [collection("shown"), collection("hidden", { visibility: "hidden" })],

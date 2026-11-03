@@ -13,13 +13,13 @@ export function ShowsSummary({
   sectionType: string;
   label: string;
   sentence: string;
-  /** Omitted when the kind cannot change (legacy Trakt rows). */
+  /** Omitted when the kind cannot change (a server row on Settings > Home Screen). */
   onChange?: () => void;
 }) {
   const group = rowKindGroup(sectionType);
   const Icon = KIND_ICONS[sectionType] ?? GROUP_ICONS[group];
   return (
-    <div className="grid gap-2">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
       <span className="text-sm font-medium">Shows</span>
       <div className="border-border flex items-center gap-3 rounded-xl border py-2.5 pr-3 pl-2.5">
         <span

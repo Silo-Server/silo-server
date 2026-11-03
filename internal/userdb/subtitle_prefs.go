@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -87,7 +88,7 @@ func getSubtitlePreference(exec preferenceSettingsExecutor, profileID, seriesID 
 		&showForcedSubtitles,
 		&pref.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

@@ -1,15 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { v2 } from "@/api/v2/request";
 import {
-  connectWatchProviderAPIKey,
-  fetchWatchProviders,
   fetchWatchProviderConnection,
-  fetchWatchProviderSyncRuns,
-  pollWatchProviderDeviceAuth,
-  startWatchProviderDeviceAuth,
-  triggerWatchProviderSync,
-  updateWatchProviderConnection,
-  deleteWatchProviderConnection,
   syncRunFinished,
   type WatchProviderSyncRun,
 } from "./watchProviders";
@@ -31,59 +23,9 @@ describe("watch provider v2 queries", () => {
       options?.onResponse?.(new Response(null, { headers: { ETag: '"version-1"' } }));
       return { import_watched_enabled: true } as never;
     });
-    expect(await fetchWatchProviderConnection("trakt")).toMatchObject({
+    expect(await fetchWatchProviderConnection("simkl")).toMatchObject({
       connected: true,
       etag: '"version-1"',
-    });
-  });
-
-  it("unwraps provider and bounded activity collections", async () => {
-    await expect(fetchWatchProviders()).resolves.toEqual({ providers: [] });
-    await expect(fetchWatchProviderSyncRuns("trakt")).resolves.toEqual({ runs: [] });
-    expect(v2).toHaveBeenLastCalledWith("GET /api/v2/watch-providers/{provider}/sync-runs", {
-      path: { provider: "trakt" },
-      query: { limit: 10 },
-    });
-  });
-  it("passes credentials in typed bodies and keeps provider keys as path values", async () => {
-    await expect(startWatchProviderDeviceAuth("trakt")).resolves.toMatchObject({
-      id: "auth-1",
-      user_code: "PUBLIC",
-    });
-    await pollWatchProviderDeviceAuth("trakt", "auth-1");
-    expect(v2).toHaveBeenLastCalledWith("POST /api/v2/watch-providers/{provider}/auth/poll", {
-      path: { provider: "trakt" },
-      body: { auth_session_id: "auth-1" },
-    });
-    await connectWatchProviderAPIKey("plugin:4:floppy", "token", { floppy: { region: "test" } });
-    expect(v2).toHaveBeenLastCalledWith("POST /api/v2/watch-providers/{provider}/auth/api-key", {
-      path: { provider: "plugin:4:floppy" },
-      body: { api_key: "token", connection_config: { floppy: { region: "test" } } },
-    });
-    await updateWatchProviderConnection("trakt", { scrobble_enabled: true }, '"version-1"');
-    expect(v2).toHaveBeenLastCalledWith("PATCH /api/v2/watch-providers/{provider}/connection", {
-      path: { provider: "trakt" },
-      body: { scrobble_enabled: true },
-      headers: { "If-Match": '"version-1"' },
-      onResponse: expect.any(Function),
-    });
-    await updateWatchProviderConnection(
-      "simkl",
-      { connection_settings: { track_rewatches: true } },
-      '"version-2"',
-    );
-    expect(v2).toHaveBeenLastCalledWith("PATCH /api/v2/watch-providers/{provider}/connection", {
-      path: { provider: "simkl" },
-      body: { connection_settings: { track_rewatches: true } },
-      headers: { "If-Match": '"version-2"' },
-      onResponse: expect.any(Function),
-    });
-    await deleteWatchProviderConnection("trakt");
-    expect(v2).toHaveBeenLastCalledWith("DELETE /api/v2/watch-providers/{provider}/connection", {
-      path: { provider: "trakt" },
-    });
-    await expect(triggerWatchProviderSync("trakt")).resolves.toMatchObject({
-      run: { id: "run-1" },
     });
   });
 });

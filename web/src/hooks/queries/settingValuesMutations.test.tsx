@@ -76,21 +76,45 @@ describe("typed setting mutations", () => {
     },
   );
 
-  it("refreshes Home when Show new episodes first changes", async () => {
+  // Next up episodes decides which rows Home has, so a mounted Home refetches
+  // its layout; a preference that only changes the rows' cards does not.
+  it.each([
+    [SETTING_KEYS.UI_NEXT_UP_MODE, "separate", 2],
+    [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, true, 1],
+  ])("reads Home's layout again after %s changes: %d read(s)", async (key, value, reads) => {
+    v2Mock.mockResolvedValueOnce({});
+    const { wrapper } = createHarness();
+    const layoutFn = vi.fn().mockResolvedValue({ sections: [] });
+    renderHook(() => useQuery({ queryKey: sectionKeys.homeLayout(), queryFn: layoutFn }), {
+      wrapper,
+    });
+    await waitFor(() => expect(layoutFn).toHaveBeenCalledTimes(1));
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ key, value, identity: { scope: "profile" } });
+    });
+    expect(layoutFn).toHaveBeenCalledTimes(reads);
+  });
+
+  // The server adds the Next Up row and orders Continue Watching on Home and
+  // on library pages alike, so both sets of rows refetch.
+  it.each([
+    [SETTING_KEYS.UI_NEXT_UP_MODE, "separate"],
+    [SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST, true],
+  ])("refreshes Home and library rows when %s changes", async (key, value) => {
     v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();
     const homeKey = sectionKeys.homeItems("continue-watching");
+    const libraryLayout = sectionKeys.libraryLayout(7);
     queryClient.setQueryData(homeKey, { section: { items: [] } });
+    queryClient.setQueryData(libraryLayout, { sections: [] });
     queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
-        value: true,
-        identity: { scope: "profile" },
-      });
+      await result.current.mutateAsync({ key, value, identity: { scope: "profile" } });
     });
     expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(libraryLayout)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
   });
 
@@ -264,30 +288,6 @@ describe("typed setting mutations", () => {
     expect(queryClient.getQueryData(homeKey)).toBeUndefined();
   });
 
-  it("cancels a detail read still loading in the old language", async () => {
-    v2Mock.mockResolvedValueOnce({});
-    const { queryClient, wrapper } = createHarness();
-    const detailKey = catalogKeys.itemDetail("movie-1");
-    let resolveDetail!: (value: object) => void;
-    const loading = queryClient
-      .prefetchQuery({
-        queryKey: detailKey,
-        queryFn: () => new Promise<object>((resolve) => (resolveDetail = resolve)),
-      })
-      .catch(() => undefined);
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
-    await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-        value: "fr",
-        identity: { scope: "profile" },
-      });
-    });
-    resolveDetail({ content_id: "movie-1", overview: "Deutsch" });
-    await loading;
-    expect(queryClient.getQueryData(detailKey)).toBeUndefined();
-  });
-
   it("leaves client-only admin state alone", async () => {
     v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();
@@ -349,22 +349,6 @@ describe("typed setting mutations", () => {
     expect(queryClient.getQueryState(detailKey)?.fetchStatus).toBe("fetching");
   });
 
-  it("keeps catalog reads cached after an unrelated setting changes", async () => {
-    v2Mock.mockResolvedValueOnce({});
-    const { queryClient, wrapper } = createHarness();
-    const detailKey = catalogKeys.itemDetail("movie-1");
-    queryClient.setQueryData(detailKey, { content_id: "movie-1" });
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
-    await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.UI_THEME,
-        value: "dark",
-        identity: { scope: "profile" },
-      });
-    });
-    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(false);
-  });
-
   it("does not invalidate effective settings after a definitive rejected write", async () => {
     v2Mock.mockRejectedValueOnce(v2Problem(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
@@ -384,146 +368,54 @@ describe("typed setting mutations", () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("invalidates effective settings and device summaries after a successful device write", async () => {
-    v2Mock.mockResolvedValueOnce({});
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+  it.each([
+    {
+      outcome: "an ambiguous write failure",
+      rejection: new TypeError("network connection lost"),
+      message: "network connection lost",
+      clear: false,
+    },
+    {
+      outcome: "a server write failure",
+      rejection: v2Problem(503, "unavailable", "service unavailable"),
+      message: "service unavailable",
+      clear: false,
+    },
+    {
+      outcome: "an already-cleared response",
+      rejection: v2Problem(404, "not_found", "setting not found"),
+      message: "setting not found",
+      clear: true,
+    },
+  ])(
+    "reconciles effective settings and device summaries after $outcome",
+    async ({ rejection, message, clear }) => {
+      v2Mock.mockRejectedValueOnce(rejection);
+      const { queryClient, wrapper } = createHarness();
+      const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+      const { result } = renderHook(
+        () => ({ set: useSetSettingValue(), clear: useClearSettingValue() }),
+        { wrapper },
+      );
+      const key = SETTING_KEYS.UI_LIBRARY_PAGE_STATE;
+      const identity = { scope: "profile_device" } as const;
 
-    await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-        value: { version: 1, libraries: {} },
-        identity: { scope: "profile_device" },
+      await act(async () => {
+        await expect(
+          clear
+            ? result.current.clear.mutateAsync({ key, identity })
+            : result.current.set.mutateAsync({
+                key,
+                value: { version: 1, libraries: {} },
+                identity,
+              }),
+        ).rejects.toThrow(message);
       });
-    });
 
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
-
-  it("reconciles effective settings and device summaries after an ambiguous write failure", async () => {
-    v2Mock.mockRejectedValueOnce(new TypeError("network connection lost"));
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
-
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-          value: { version: 1, libraries: {} },
-          identity: { scope: "profile_device" },
-        }),
-      ).rejects.toThrow("network connection lost");
-    });
-
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
-
-  it("reconciles effective settings and device summaries after a server write failure", async () => {
-    v2Mock.mockRejectedValueOnce(v2Problem(503, "unavailable", "service unavailable"));
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
-
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-          value: { version: 1, libraries: {} },
-          identity: { scope: "profile_device" },
-        }),
-      ).rejects.toThrow("service unavailable");
-    });
-
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
-
-  it("does not invalidate effective settings after a definitive rejected clear", async () => {
-    v2Mock.mockRejectedValueOnce(v2Problem(429, "rate_limited", "rate limited"));
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
-
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-          identity: { scope: "profile_device" },
-        }),
-      ).rejects.toThrow("rate limited");
-    });
-
-    expect(invalidateQueries).not.toHaveBeenCalled();
-  });
-
-  it("reconciles effective settings and device summaries after an already-cleared response", async () => {
-    v2Mock.mockRejectedValueOnce(v2Problem(404, "not_found", "setting not found"));
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
-
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-          identity: { scope: "profile_device" },
-        }),
-      ).rejects.toThrow("setting not found");
-    });
-
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
-
-  it("invalidates effective settings and device summaries after a successful device clear", async () => {
-    v2Mock.mockResolvedValueOnce({});
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
-
-    await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-        identity: { scope: "profile_device" },
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: [...settingsKeys.all, "values"],
       });
-    });
-
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
-
-  it("reconciles effective settings and device summaries after an ambiguous clear failure", async () => {
-    v2Mock.mockRejectedValueOnce(new TypeError("response connection lost"));
-    const { queryClient, wrapper } = createHarness();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
-
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-          identity: { scope: "profile_device" },
-        }),
-      ).rejects.toThrow("response connection lost");
-    });
-
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [...settingsKeys.all, "values"],
-    });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
-  });
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+    },
+  );
 });

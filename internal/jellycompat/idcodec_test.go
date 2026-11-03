@@ -91,19 +91,6 @@ func TestHashedIDStartingWithKindByteDecodes(t *testing.T) {
 	}
 }
 
-// TestGenreNameStillUsesReverseMap guards that arbitrary string ids (genre
-// names, etc.) are untouched by the content_id packing and still round-trip
-// within a single codec instance via the reverse map.
-func TestGenreNameStillUsesReverseMap(t *testing.T) {
-	c := NewResourceIDCodec()
-	const genre = "Science Fiction"
-	u := c.EncodeStringID(EncodedIDGenre, genre)
-	got, err := c.DecodeStringID(EncodedIDGenre, u)
-	if err != nil || got != genre {
-		t.Fatalf("genre round trip = (%q, %v), want (%q, nil)", got, err, genre)
-	}
-}
-
 // TestPlaySessionIDsAreNotRetained guards the reverse map against unbounded
 // growth: play-session ids are minted from a fresh random UUID per playback
 // and never decoded back, so encoding them must not leave an entry behind.

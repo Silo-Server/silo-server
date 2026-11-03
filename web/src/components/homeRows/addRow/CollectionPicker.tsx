@@ -29,7 +29,6 @@ export function CollectionPicker({
   onPick,
   onPageIds,
   pageLabel,
-  locked = false,
 }: {
   collections: RowCollections;
   /** The collection the row shows now, or "". */
@@ -38,8 +37,6 @@ export function CollectionPicker({
   /** Collections a row on this page already shows. */
   onPageIds: ReadonlySet<string>;
   pageLabel: string;
-  /** A legacy Trakt row: the server refuses a different collection. */
-  locked?: boolean;
 }) {
   const labelId = useId();
   const [query, setQuery] = useState("");
@@ -100,11 +97,7 @@ export function CollectionPicker({
             ))}
           </div>
         </div>
-        {locked ? (
-          <p className="text-muted-foreground border-border border-b px-4 py-2.5 text-[13px]">
-            This row follows a Trakt list, so its collection can't change.
-          </p>
-        ) : missing ? (
+        {missing ? (
           <p
             role="status"
             className="border-warning/40 bg-warning/10 border-b px-4 py-2.5 text-[13px]"
@@ -116,7 +109,6 @@ export function CollectionPicker({
           <RadioGroup
             aria-labelledby={labelId}
             value={value}
-            disabled={locked}
             onValueChange={(id) => {
               const picked = options.find((option) => option.id === id);
               if (picked) onPick(picked);

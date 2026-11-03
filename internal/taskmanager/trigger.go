@@ -30,3 +30,9 @@ type Trigger interface {
 	Config() TriggerConfig
 	C() <-chan struct{}
 }
+
+// SpreadableTrigger is a trigger that accepts its task's start spread. The
+// manager sets it before Start.
+type SpreadableTrigger interface {
+	SetStartSpread(spread time.Duration)
+}

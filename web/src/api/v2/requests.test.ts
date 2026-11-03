@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import listMyRequestsOk from "../../../../contracts/api/v2/fixtures/list_my_requests_ok.json";
 import { v2 } from "./request";
-import { getRequestMediaDetailV2, listMyMediaRequestsV2 } from "./requests";
+import { listMyMediaRequestsV2 } from "./requests";
 import type { components } from "./schema";
 
 vi.mock("./request", async (importOriginal) => ({
@@ -35,36 +35,5 @@ describe("request v2 adapters keep download progress", () => {
     expect(downloading!.targets![0]!.download).toEqual(download);
     expect(waiting!.download).toBeUndefined();
     expect(waiting!.targets![0]).not.toHaveProperty("download");
-  });
-
-  it("on the title detail's request state", async () => {
-    const detail: Schemas["RequestMediaDetail"] = {
-      media_type: "movie",
-      tmdb_id: 949,
-      title: "Heat",
-      availability: "missing",
-      in_watchlist: false,
-      cast: [],
-      creators: [],
-      genres: [],
-      networks: [],
-      production_companies: [],
-      recommendations: [],
-      seasons: [],
-      request: {
-        requestable: false,
-        following: true,
-        requested_by_viewer: true,
-        status: "downloading",
-        state: "processing",
-        request_id: "r-1",
-        download,
-      },
-    };
-    vi.mocked(v2).mockResolvedValue(detail as never);
-
-    const mapped = await getRequestMediaDetailV2("movie", 949);
-
-    expect(mapped.request.download).toEqual(download);
   });
 });

@@ -14,6 +14,7 @@ import (
 // error text echoes the token as a store error message could, so the test
 // also covers the error being sanitized before it is logged.
 type failingSessionRepo struct {
+	session    *Session
 	failUpsert bool
 	failUpdate bool
 	failGet    bool
@@ -28,6 +29,7 @@ func (r *failingSessionRepo) Upsert(_ context.Context, session Session) error {
 	if r.failUpsert {
 		return r.storeErr("upsert", session.Token)
 	}
+	r.session = &session
 	return nil
 }
 
@@ -41,6 +43,10 @@ func (r *failingSessionRepo) UpdateByToken(_ context.Context, session Session) e
 func (r *failingSessionRepo) GetByToken(_ context.Context, token string, _ time.Time) (*Session, error) {
 	if r.failGet {
 		return nil, r.storeErr("load", token)
+	}
+	if r.session != nil && r.session.Token == token {
+		session := *r.session
+		return &session, nil
 	}
 	return nil, ErrSessionNotFound
 }
@@ -90,7 +96,9 @@ func TestSessionStoreFailureLogsOmitFullToken(t *testing.T) {
 			message: "jellycompat session store delete failed",
 			run: func(t *testing.T, repo *failingSessionRepo, store *SessionStore, _ func(time.Duration)) {
 				repo.failDelete = true
-				store.Delete(token)
+				if err := store.Delete(token); err == nil {
+					t.Fatal("Delete did not return the storage failure")
+				}
 			},
 		},
 	}

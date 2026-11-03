@@ -572,12 +572,7 @@ export default function Login() {
           {oauthProviders.length > 0 && (
             <div className="space-y-2">
               {oauthProviders.map((entry) => (
-                <Button
-                  key={entry.id}
-                  asChild
-                  variant="outline"
-                  className="w-full justify-start gap-3"
-                >
+                <Button key={entry.id} asChild variant="outline" className="w-full gap-3">
                   <a href={startHref(entry.installation_id ?? "")} onClick={() => clearSignedOut()}>
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
                     <span>{entry.display_name}</span>
@@ -607,17 +602,7 @@ export default function Login() {
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-baseline justify-between gap-2">
-                  <Label htmlFor="password">Password</Label>
-                  {forgotPasswordShown && (
-                    <Link
-                      to={forgotPasswordHref}
-                      className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  )}
-                </div>
+                <Label htmlFor="password">Password</Label>
                 <PasswordInput
                   id="password"
                   value={password}
@@ -625,6 +610,16 @@ export default function Login() {
                   autoComplete="current-password"
                   required
                 />
+                {forgotPasswordShown && (
+                  <div className="flex justify-end">
+                    <Link
+                      to={forgotPasswordHref}
+                      className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                )}
               </div>
               {(credentialProviders.length > 1 || hasDirectoryProvider) && (
                 <div className="space-y-2">

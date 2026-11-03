@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -83,6 +85,22 @@ type discoverFetcher interface {
 
 type discoverPresigner interface {
 	PresignURL(ctx context.Context, path string, variant string) string
+	PresignURLsWithExpiry(ctx context.Context, paths []string, variant string) map[string]catalog.ResolvedImageURL
+}
+
+// featuredCardArtwork resolves recommendation cards' artwork in one batch,
+// keyed by content ID, through the resolver home sections use.
+func (h *RecommendationsHandler) featuredCardArtwork(ctx context.Context, items map[string]*models.MediaItem, art imagesize.Request) map[string]sectionItemImageURLs {
+	if h.DetailSvc == nil || len(items) == 0 {
+		return nil
+	}
+	cards := make([]featuredArtworkCard[string], 0, len(items))
+	for _, id := range slices.Sorted(maps.Keys(items)) {
+		if mi := items[id]; mi != nil {
+			cards = append(cards, featuredArtworkCard[string]{key: mi.ContentID, item: mi})
+		}
+	}
+	return resolveFeaturedArtwork(ctx, h.DetailSvc, cards, art)
 }
 
 // NewRecommendationsHandler creates a new RecommendationsHandler.
@@ -107,6 +125,17 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 		}
 		h.accessibleIDs = recsRepo
 		h.cardsRepo = recsRepo
+	}
+	return h
+}
+
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the handler. Its signal reads then ask the store instead of the
+// Postgres tables.
+func (h *RecommendationsHandler) WithUserStoreOutsidePostgres(outside bool) *RecommendationsHandler {
+	if h != nil {
+		h.signals.WithUserStoreOutsidePostgres(outside)
 	}
 	return h
 }
@@ -440,7 +469,34 @@ func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.R
 		writeAPIError(w, err)
 		return
 	}
+	for i := range resp.Rows {
+		for j := range resp.Rows[i].Items {
+			resp.Rows[i].Items[j] = resp.Rows[i].Items[j].v1RecommendationCard()
+		}
+	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// v1RecommendationCard is the card as the frozen v1 recommendation and Watch
+// Tonight routes send it. The shared mapper also fills the poster badge
+// fields, which v1 never sent on these cards; v2 reads them from the service.
+// An upcoming event drops the home release badges, which are v2 only.
+func (c sectionItemResponse) v1RecommendationCard() sectionItemResponse {
+	c.Runtime, c.Studios, c.Networks, c.ContentRating, c.ShowStatus = 0, nil, nil, "", ""
+	if c.UpcomingEvent != nil {
+		event := *c.UpcomingEvent
+		event.Badges = v1CalendarBadges(event.Badges)
+		c.UpcomingEvent = &event
+	}
+	return c
+}
+
+// v1WatchTonightCard is v1RecommendationCard for Watch Tonight, whose v1
+// cards always sent keywords as null.
+func (c sectionItemResponse) v1WatchTonightCard() sectionItemResponse {
+	c = c.v1RecommendationCard()
+	c.Keywords = nil
+	return c
 }
 
 // HandleSection handles GET /recommendations/section/{kind} and
@@ -469,6 +525,9 @@ func (h *RecommendationsHandler) HandleSection(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		writeAPIError(w, err)
 		return
+	}
+	for i := range resp.Items {
+		resp.Items[i] = resp.Items[i].v1RecommendationCard()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -532,6 +591,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 	scoredItems []recommendations.ScoredItem,
 	enrichment *itemEnrichment,
 	upcomingEvents map[string]upcomingEventResponse,
+	artwork map[string]sectionItemImageURLs,
 ) []sectionItemResponse {
 	out := make([]sectionItemResponse, 0, len(scoredItems))
 	for _, scored := range scoredItems {
@@ -539,36 +599,10 @@ func (h *RecommendationsHandler) buildSectionItems(
 		if !ok || mi == nil {
 			continue
 		}
-		item := sectionItemResponse{
-			ContentID:              mi.ContentID,
-			Type:                   mi.Type,
-			Title:                  mi.Title,
-			Year:                   mi.Year,
-			Genres:                 mi.Genres,
-			Keywords:               mi.Keywords,
-			Status:                 mi.Status,
-			RatingIMDB:             mi.RatingIMDB,
-			RatingTMDB:             mi.RatingTMDB,
-			RatingRTCritic:         mi.RatingRTCritic,
-			RatingRTAudience:       mi.RatingRTAudience,
-			OriginalLanguage:       mi.OriginalLanguage,
-			Overview:               mi.Overview,
-			PosterThumbhash:        mi.PosterThumbhash,
-			BackdropThumbhash:      mi.BackdropThumbhash,
-			PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
-			BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
-		}
-		if item.Genres == nil {
-			item.Genres = []string{}
-		}
-		if item.Keywords == nil {
-			item.Keywords = []string{}
-		}
-		if h.DetailSvc != nil {
-			item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-			item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-			item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
-		}
+		item := sectionItemFromMediaItem(mi)
+		urls := artwork[mi.ContentID]
+		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+		item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 		if enrichment.overlays != nil {
 			item.OverlaySummary = enrichment.overlays[mi.ContentID]
 		}

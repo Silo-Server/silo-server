@@ -83,14 +83,31 @@ Web, Apple, and Android clients converge on the room the same way:
 |---|---|
 | Clock offset | Ping on connect, every 2 seconds until 4 samples, then every 15 seconds. Use the offset of the fastest of the last 8 round trips. |
 | Drift up to 0.4 s | No correction. |
-| Drift 0.4–5 s, playing | Pitch-preserved playback rate of `1 ± clamp(drift / 25, 0.01, 0.04)` in 0.5 percent steps, until within 0.1 s. |
+| Drift 0.4–5 s, playing | Pitch-preserved playback rate of `1 ± clamp(drift / 25, 0.01, 0.04)` in 0.5 percent steps, until within 0.1 s. A player that does not correct by rate uses the in-place seek below instead. |
+| Drift over 1 s, playing, not correcting by rate | One seek to media reachable without rebuilding the stream, aimed ahead of the room by the drift the previous such seek left (at most 2 s, which keeps a host inside the host band). A led target outside the buffer falls back to the room position, and a server correction whose room position is outside it takes a budgeted load (see below); the drift loop never loads. A seek that leaves more than 1 s doubles the wait before the next, from 1 up to 16 s. Drift up to 1 s stays. |
 | Drift over 5 s, playing | Seek to buffered media, or a budgeted load (see below). |
-| Not playing when a play or pause runs | Seek first only for drift over 5 s, or over 1 s when the target is reachable without rebuilding the stream. |
+| Not playing when a play or pause runs | Seek first only for drift over 5 s, or over 1 s when the target is reachable without rebuilding the stream. When the room is playing, the Apple client seeks once more before it plays if the first seek left it more than 0.4 s behind, aimed ahead by that seek's duration. |
 
 Each client keeps the last command it ran as its room reference and measures
 drift against it about twice a second. That loop only changes the rate; it
-never seeks. Rate and play state change when a command executes, never when it
-arrives, and users cannot change playback speed in a room.
+never seeks, except on a player that does not correct by rate. Rate and play
+state change when a command executes, never when it arrives, and users cannot
+change playback speed in a room.
+
+On the web, a member's player does not start playback on its own: it waits
+paused until a command has the room playing. A play that executes while the
+player's stream is still starting, before it has playable media, takes effect
+once it does, from the room's position at that moment, and a stream that fails
+before its first frame is rebuilt at that position.
+
+A player does not correct by rate when the rate cannot take effect or cannot be
+watched smoothly. Android measures the playhead while it nudges and stops
+nudging a mount that plays on at 1x (tunneled playback, passthrough audio, or a
+device too slow to decode faster than real time); Android TV tunnels by default.
+Apple TV never nudges: with the display matched to the title's frame rate, a
+rate even 1 percent off 1x drops or repeats frames for as long as it runs, and
+some routes ignore the rate. Both then correct by the in-place seek in the
+table, which stays inside the server's 1 second band.
 
 The server corrects a member whose reports stay more than 1 second from the
 room, or whose pause state differs, and repeats a correction at most every 10
@@ -153,8 +170,9 @@ miss the scene.
 - Stalls shorter than 2 seconds stay local. Clients report buffering only
   after 2 seconds without playable media, and the viewer converges on the room
   by playback rate. It sends no position reports while its element is
-  stalled, or while its media is unplayable and a readiness acknowledgement is
-  pending, because a stalled position is not a decision.
+  stalled, while its media is unplayable and a readiness acknowledgement is
+  pending, or while its media is unplayable in a playing room, because a
+  stalled position is not a decision.
 - A longer stall pauses the room for at most the 10-second waiting deadline,
   and the overlay names who everyone is waiting for. When a guest stalls, the
   room pauses where it is; only that guest is sent a seek to that point, and
@@ -197,7 +215,8 @@ server applies the same limits and a reconnect through another server does not
 reset them.
 
 Catching up is bounded on every client. Drift up to 5 seconds converges by
-playback rate, and a larger correction to media that is already buffered seeks
+playback rate, or by an in-place seek on a player that does not correct by
+rate, and a larger correction to media that is already buffered seeks
 at once. A correction that has to load new media, by a range request or a stream rebuild,
 lands late by its load time; chasing the advancing room with a fresh load on
 every correction never converges. Only one such load runs at a time. The next

@@ -19,6 +19,13 @@ func TestPostgresProfilePINRevision(t *testing.T) {
 	})
 }
 
+func TestPostgresProfilePINRevisionTransactions(t *testing.T) {
+	storetest.RunProfilePINRevisionTransactions(t, func(t *testing.T) userstore.UserStore {
+		pool, userID := newConstraintTestUser(t)
+		return newStore(pool, userID)
+	})
+}
+
 // The account-wide access_policy_revision keeps its existing bumps: scope
 // caches, events-socket access_changed and policy evaluation still read it.
 // Only the profile token stopped depending on it.
@@ -48,7 +55,7 @@ func TestPostgresProfileEditsStillBumpAccountRevision(t *testing.T) {
 	if got := accountRevision(); got != before+1 {
 		t.Fatalf("kid rating edit: account revision = %d, want %d", got, before+1)
 	}
-	if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PIN: str("1234")}); err != nil {
+	if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PINHash: str("hash-of-1234")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := accountRevision(); got != before+2 {
@@ -73,8 +80,8 @@ func TestPostgresRawPINWriteAdvancesPINRevision(t *testing.T) {
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "parent", Name: "Parent"}); err != nil {
 		t.Fatal(err)
 	}
-	pin := "1234"
-	if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	pin := "hash-of-1234"
+	if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PINHash: &pin}); err != nil {
 		t.Fatal(err)
 	}
 	load := func() *userstore.Profile {

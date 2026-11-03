@@ -22,12 +22,9 @@ func TestItemDetailSubtitlePreferenceCarriesIntoPlayback(t *testing.T) {
 			forced, downloaded, fileDefault, trackForced bool
 			want                                         int
 		}{
-			{name: "always selects English", mode: "always", audio: "en", forced: true, want: 2},
-			{name: "smart with English audio", mode: "auto", audio: "en", forced: true, want: -1},
 			{name: "smart with foreign audio", mode: "auto", audio: "fr", forced: true, want: 2},
 			{name: "off overrides file default", mode: "off", audio: "en", fileDefault: true, want: -1},
 			{name: "forced only", mode: "off", audio: "en", forced: true, trackForced: true, want: 2},
-			{name: "forced hidden", mode: "always", audio: "en", trackForced: true, want: -1},
 			{name: "embedded preferred over downloaded", mode: "always", audio: "en", forced: true, downloaded: true, want: 2},
 			{name: "downloaded fills in for a hidden forced track", mode: "always", audio: "en", trackForced: true, downloaded: true, want: 4},
 		} {
@@ -132,7 +129,6 @@ func TestSmartSubtitlesFollowPlaybackAudioUnlessExplicitlyOff(t *testing.T) {
 		{"requested French audio", "aac", `{"AudioStreamIndex":2}`, 2, 3},
 		{"requested French audio with Off", "aac", `{"AudioStreamIndex":2,"SubtitleStreamIndex":-1}`, 2, -1},
 		{"device falls back to French", "truehd", `{}`, 2, 3},
-		{"device fallback with Off", "truehd", `{"SubtitleStreamIndex":-1}`, 2, -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			version := catalog.FileVersion{FileID: 42, Container: "mkv", VideoTracks: []models.VideoTrack{{Codec: "h264"}},

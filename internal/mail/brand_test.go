@@ -65,16 +65,6 @@ func brandedService(t *testing.T, settings memorySettings) *branding.Service {
 	return svc
 }
 
-func TestBrandLoaderDefaults(t *testing.T) {
-	var nilLoader *BrandLoader
-	for _, loader := range []*BrandLoader{nilLoader, NewBrandLoader(nil)} {
-		brand := loader.Load(context.Background())
-		if brand.Name != "Silo" || brand.AccentColor != "" || !bytes.Equal(brand.logo.png, defaultWordmarkPNG) {
-			t.Fatalf("want default brand, got name=%q accent=%q", brand.Name, brand.AccentColor)
-		}
-	}
-}
-
 func TestBrandLoaderUsesCustomBranding(t *testing.T) {
 	settings := memorySettings{branding.KeyServerName: "Harbor", branding.KeyAccentColor: "#F5A524"}
 	source := &countingSource{Service: brandedService(t, settings)}

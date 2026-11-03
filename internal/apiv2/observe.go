@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
@@ -106,6 +107,7 @@ func RecordV1Tombstone(method string) { v1TombstoneRequests.WithLabelValues(meth
 // request moves through the router, and the observe middleware reports once
 // the response is written.
 type observation struct {
+	db          *queryattr.Request
 	operationID string
 	pathPattern string
 	errorCode   string
@@ -135,8 +137,9 @@ func observe(next http.Handler) http.Handler {
 			span.SetAttributes(attribute.String("http.request.method", methodLabel(r.Method)))
 		}
 		defer span.End()
+		ctx, db := queryattr.StartRequest(ctx)
 		r = r.WithContext(ctx)
-		o := &observation{operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
+		o := &observation{db: db, operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
@@ -275,6 +278,7 @@ func report(r *http.Request, o *observation, status int, hijacked bool, bodyByte
 	if o.userID != nil {
 		attrs = append(attrs, "user_id", *o.userID)
 	}
+	attrs = append(attrs, o.db.LogAttrs()...)
 	slog.InfoContext(r.Context(), "apiv2 request", attrs...)
 }
 
@@ -293,8 +297,8 @@ func methodLabel(method string) string {
 }
 
 // statusClass buckets a status for the metric label. A response that was
-// never written (the client left before the buffered body flushed) is
-// "abandoned" rather than a fabricated code.
+// never written, or a server error whose client went away, is "abandoned"
+// rather than a fabricated code.
 func statusClass(status int) string {
 	if status == 0 {
 		return "abandoned"

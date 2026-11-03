@@ -6,7 +6,6 @@
  * and the form shows none selected instead of guessing. Applying a variant
  * changes only the discriminator keys and keeps every other key.
  */
-import { isTraktConfig } from "@/lib/sectionTypes";
 import { NOT_OFFERED_FOR_NEW_ROWS, retiredKindLabel, rowKindLabel } from "./catalog";
 
 type Config = Record<string, unknown>;
@@ -36,8 +35,10 @@ export interface VariantFamily {
 const HOLIDAY_THEMES = [
   "halloween",
   "christmas",
+  "new_year",
   "valentines",
   "st_patricks",
+  "easter",
   "thanksgiving",
   "summer_blockbuster",
   "saturday_morning",
@@ -47,7 +48,9 @@ const HOLIDAY_THEMES = [
 export const SEASONAL_THEME_LABELS: Readonly<Record<string, string>> = {
   valentines: "Valentine's Day",
   st_patricks: "St. Patrick's Day",
+  easter: "Easter",
   thanksgiving: "Thanksgiving",
+  new_year: "New Year's",
   christmas: "Christmas",
   halloween: "Halloween",
   saturday_morning: "Saturday morning cartoons",
@@ -74,12 +77,25 @@ function inferSeasonal(config: Config): string | null {
       : "se_auto";
   }
   if (themes === undefined && config.theme === "family_movie_night") return "se_family_movie_night";
+  // Only Holidays shows custom holidays, so a row with nothing else is Holidays.
+  if (
+    themes === undefined &&
+    typeof config.theme !== "string" &&
+    Array.isArray(config.custom_holidays)
+  ) {
+    return "se_auto";
+  }
   return null;
 }
 
 function applySeasonal(config: Config, option: VariantOption): Config {
   const { theme: _legacy, ...rest } = config;
-  return { ...rest, enabled_themes: [...(option.values.enabled_themes as string[])] };
+  // Custom holidays outrank every theme and only the Holidays variant shows
+  // them or the holidays' own dates, so a Family movie night row must not keep
+  // any out of sight.
+  const { custom_holidays: _custom, theme_dates: _dates, ...familyNight } = rest;
+  const base = option.presetKey === "se_family_movie_night" ? familyNight : rest;
+  return { ...base, enabled_themes: [...(option.values.enabled_themes as string[])] };
 }
 
 function inferSpotlight(config: Config): string | null {
@@ -377,23 +393,9 @@ export function showsLabel(sectionType: string, config: Config): string {
   return holiday ? `${rowKindLabel(sectionType)} (${holiday} only)` : rowKindLabel(sectionType);
 }
 
-/**
- * Rows whose kind cannot change: the server refuses config changes on legacy
- * Trakt rows.
- */
-export function kindLocked(config: Config): boolean {
-  return isTraktConfig(config);
-}
-
-/**
- * Rows whose variant cannot change: legacy Trakt rows, and Continue Reading
- * (ebooks, beta), which has no preset.
- */
+/** Rows whose variant cannot change: Continue Reading (ebooks, beta), which has no preset. */
 export function variantLocked(sectionType: string, config: Config): boolean {
-  return (
-    kindLocked(config) ||
-    (sectionType === "continue_watching" && config.continue_type === "reading")
-  );
+  return sectionType === "continue_watching" && config.continue_type === "reading";
 }
 
 const SUMMARY_CHIPS = 3;

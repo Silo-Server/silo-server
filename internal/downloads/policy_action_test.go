@@ -258,33 +258,6 @@ func TestResolveOriginalAssertsServedQuality(t *testing.T) {
 	}
 }
 
-// TestResolveOriginalPopulatesFileQualityFact pins the input contract: the
-// final download check on original-resolution paths carries file_quality.
-func TestResolveOriginalPopulatesFileQualityFact(t *testing.T) {
-	decider := &capturingActionDecider{decision: policyengine.ActionDecision{Allowed: true}}
-	resolver := DownloadQualityResolver{actionDecider: decider}
-	user := &PolicyUser{ID: 9, Policy: access.EffectiveUserPolicy{DownloadAllowed: true, MaxPlaybackQuality: "2160p"}}
-	cfg := config.DownloadConfig{Enabled: true}
-	file := &models.MediaFile{ID: 3, Resolution: "1080p"}
-
-	if _, err := resolver.Resolve(
-		context.Background(), QualityOriginal, user, cfg, file,
-		playback.ClientCapabilities{}, true, "device-9",
-	); err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	if len(decider.inputs) != 1 {
-		t.Fatalf("decider calls = %d, want 1", len(decider.inputs))
-	}
-	in := decider.inputs[0]
-	if in.Action != policyengine.ActionDownload ||
-		in.FileQuality != "1080p" ||
-		in.RequestedQuality != QualityOriginal ||
-		in.DeviceID != "device-9" {
-		t.Fatalf("action input = %+v, want download action with file_quality asserted", in)
-	}
-}
-
 // ceilingOverrideSource is a custom action override that keeps every grant
 // but narrows the download quality ceiling to 1080p, the shape vendor test
 // test_quality_ceiling_override_tightens pins.

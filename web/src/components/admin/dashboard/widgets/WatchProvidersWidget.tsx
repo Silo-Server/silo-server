@@ -12,9 +12,8 @@ import { SectionError } from "../feedback";
  * The watch-provider subsystem is pluggable, so this reads the server's
  * per-provider breakdown rather than any one provider's fields: built-in
  * providers and ones a plugin registers at runtime are the same kind of row.
- * The widget keeps the one-line-per-provider strip shape it had as a
- * Trakt-only tile — it sits in a 1-row slot by default and scrolls once there
- * are more providers than fit.
+ * One line per provider: it sits in a 1-row slot by default and scrolls once
+ * there are more providers than fit.
  */
 export function WatchProvidersWidget() {
   const statsQuery = useAdminStats();

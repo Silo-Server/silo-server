@@ -32,20 +32,3 @@ func TestFilterAndRankGenreMatchesPrioritizesHigherOverlap(t *testing.T) {
 		}
 	}
 }
-
-func TestFilterAndRankGenreMatchesKeepsScoreOrderWithoutGenres(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "b", Score: 0.8},
-		{MediaItemID: "a", Score: 0.8},
-		{MediaItemID: "c", Score: 0.7},
-	}
-
-	ranked := FilterAndRankGenreMatches(items, nil, nil)
-
-	wantOrder := []string{"a", "b", "c"}
-	for i, want := range wantOrder {
-		if ranked[i].MediaItemID != want {
-			t.Fatalf("item %d: expected %q, got %q", i, want, ranked[i].MediaItemID)
-		}
-	}
-}

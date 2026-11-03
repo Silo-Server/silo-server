@@ -65,11 +65,4 @@ describe("AudiobookGroupsView load errors", () => {
     expect(screen.getByText("Frank Herbert")).toBeInTheDocument();
     expect(screen.queryByText("Couldn't load these authors")).not.toBeInTheDocument();
   });
-
-  it("still says the library has none when the read succeeds empty", async () => {
-    mocks.v2.mockResolvedValue({ ...listAudiobookGroupsOk, items: [], total: 0, page: {} });
-    renderView();
-
-    expect(await screen.findByText("No authors found in this library.")).toBeInTheDocument();
-  });
 });

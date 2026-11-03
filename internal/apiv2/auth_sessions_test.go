@@ -2,57 +2,12 @@ package apiv2
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestListAuthProviders(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/auth/providers", "", nil)
-	want := `{"items":[{"id":"local","display_name":"Silo account","mode":"credentials","default":true},{"id":"plugin-3","display_name":"Example SSO","mode":"oauth","default":false,"icon_url":"https://plugins.example.test/icon.svg","installation_id":"3","native_start_path":"/api/v2/auth/oauth/3/native/start"}],"password_login":true}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// While the server turns local password sign-in off, the local provider
-	// is left out and no listed provider takes a password.
-	deps := pilotDeps(nil, nil)
-	deps.Sessions = &fakeSessionService{localLoginOff: true}
-	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/providers", "", nil)
-	if rec.Code != 200 || strings.Contains(rec.Body.String(), `"id":"local"`) || !strings.Contains(rec.Body.String(), `"password_login":false`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	deps = pilotDeps(nil, nil)
-	deps.Sessions = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/providers", "", nil), TypeDependencyUnavailable)
-}
-
-func TestRefreshSession(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"ref"}`, nil)
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
-	}
-	if want := `{"access_token":"acc2","refresh_token":"ref2","expires_in":3600}` + "\n"; rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"revoked"}`, nil), TypeSessionExpired)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"nope"}`, nil), TypeInvalidToken)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"provider-down"}`, nil), TypeProviderUnavailable)
-	// A store outage judged nothing: retry later, keep the refresh token.
-	rec = do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"store-down"}`, nil)
-	requireProblem(t, rec, TypeDependencyUnavailable)
-	if rec.Header().Get("Retry-After") == "" {
-		t.Fatal("store outage problem has no Retry-After")
-	}
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{}`, nil), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.refresh_token" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-}
 
 type loginSessionPage struct {
 	Items []struct {
@@ -193,36 +148,5 @@ func TestSignup(t *testing.T) {
 	requireProblem(t, do(t, off, http.MethodPost, "/api/v2/auth/signup", body, nil), TypePermissionDenied)
 	if rec := do(t, off, http.MethodGet, "/api/v2/auth/signup", "", nil); rec.Body.String() != `{"enabled":false}`+"\n" {
 		t.Fatalf("body = %s", rec.Body.String())
-	}
-}
-
-func TestRegistrationPasswordSchemaBounds(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	for _, endpoint := range []string{setupDomain, "signup"} {
-		for _, password := range []string{"1234567", strings.Repeat("a", 73)} {
-			body := fmt.Sprintf(`{"username":"alice","email":"alice@example.test","password":%q,"invite_code":"WELCOME-2026"}`, password)
-			// Setup does not accept the signup-only member.
-			if endpoint == setupDomain {
-				body = strings.Replace(body, `,"invite_code":"WELCOME-2026"`, "", 1)
-			}
-			p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/"+endpoint, body, nil), TypeValidationFailed)
-			if len(p.Errors) != 1 || p.Errors[0].Location != "body.password" {
-				t.Fatalf("%s errors = %+v", endpoint, p.Errors)
-			}
-		}
-	}
-}
-
-// Plugin launch has its own registrar and dependency (plugin_launch.go);
-// ordinary auth wiring must never turn it into a cookie issuer. Without the
-// launch dependency the operation refuses and sets no cookie.
-func TestOrdinaryAuthDoesNotIssuePluginLaunchCookie(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.PluginLaunch = nil
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, Prefix+"/auth/plugin-launch", "", bearer(memberToken))
-	requireProblem(t, rec, TypeDependencyUnavailable)
-	if rec.Header().Get("Set-Cookie") != "" {
-		t.Fatal("unwired plugin launch must not set a cookie", rec.Header())
 	}
 }

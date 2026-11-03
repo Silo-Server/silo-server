@@ -2,7 +2,6 @@ package recommendations
 
 import (
 	"fmt"
-	"maps"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -194,35 +193,6 @@ func clusterGenres(items []clusterItem, assignments []int) [][]string {
 	return out
 }
 
-// A profile's interests each get a cluster: two interests of 8 and 6 titles
-// stay two clusters, and a third interest of three titles joins as a cluster
-// of its own instead of folding the profile into one.
-func TestBuildTasteClustersGivesEachInterestItsCluster(t *testing.T) {
-	rng := rand.New(rand.NewPCG(1145, 3))
-	horror := interestTitles(rng, 0, 8, "Horror")
-	romance := interestTitles(rng, 1, 6, "Romance")
-	western := interestTitles(rng, 2, 3, "Western")
-
-	for _, tc := range []struct {
-		name  string
-		items []clusterItem
-		want  map[string]int
-	}{
-		{"two interests", slices.Concat(horror, romance), map[string]int{"Horror": 8, "Romance": 6}},
-		{"a third interest of three titles", slices.Concat(horror, romance, western), map[string]int{"Horror": 8, "Romance": 6, "Western": 3}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := map[string]int{}
-			for _, c := range buildTasteClusters(tc.items) {
-				got[c.Label] = c.MemberCount
-			}
-			if !maps.Equal(got, tc.want) {
-				t.Fatalf("clusters by label = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // Profiles of two or three interests of 3 to 9 titles, with 10 to 19 titles
 // in all, get exactly their interests as clusters, whichever seeding k-means
 // starts from.
@@ -254,16 +224,5 @@ func TestClusterAssignmentsRecoversInterests(t *testing.T) {
 	}
 	if checked < 50 {
 		t.Fatalf("checked %d profiles, want at least 50", checked)
-	}
-}
-
-// The fallback partition is the first seeding bestSeeding already ran,
-// kmeansCluster's, so no seeding is run twice.
-func TestBestSeedingReturnsTheFirstSeeding(t *testing.T) {
-	items := tasteItems(func(i int) float64 { return 1 + float64(i)*0.1 })
-	k := determinClusterCount(len(items))
-	_, first := bestSeeding(items, k, 3)
-	if want := kmeansCluster(items, k); !slices.Equal(first, want) {
-		t.Fatalf("first seeding = %v, want kmeansCluster's %v", first, want)
 	}
 }

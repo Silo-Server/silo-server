@@ -42,6 +42,7 @@ SELECT legacy.profile_id, legacy.value, legacy.created_at, legacy.updated_at
 	if err != nil {
 		return fmt.Errorf("reading sidebar pins for navigation shortcut migration: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
 	type source struct {
 		profileID, raw, createdAt, updatedAt string
 	}
@@ -49,11 +50,11 @@ SELECT legacy.profile_id, legacy.value, legacy.created_at, legacy.updated_at
 	for rows.Next() {
 		var entry source
 		if err := rows.Scan(&entry.profileID, &entry.raw, &entry.createdAt, &entry.updatedAt); err != nil {
-			_ = rows.Close()
 			return fmt.Errorf("scanning sidebar pins for navigation shortcut migration: %w", err)
 		}
 		sources = append(sources, entry)
 	}
+	// Close before the inserts below; the deferred Close is then a no-op.
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("closing sidebar pins migration rows: %w", err)
 	}

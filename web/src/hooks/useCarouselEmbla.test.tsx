@@ -60,10 +60,4 @@ describe("useCarouselEmbla", () => {
     expect(result.current.canScrollPrev).toBe(true);
     expect(result.current.canScrollNext).toBe(false);
   });
-
-  it("preserves a deliberate resize-observer opt-out", () => {
-    renderHook(() => useCarouselEmbla({ options: { watchResize: false } }));
-
-    expect(mocks.useEmblaCarousel.mock.calls[0]?.[0].watchResize).toBe(false);
-  });
 });

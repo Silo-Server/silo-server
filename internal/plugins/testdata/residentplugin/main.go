@@ -2,7 +2,7 @@
 // supervisor and the network access admin API: it declares
 // network_access_provider.v1 (so the host treats it as resident), answers
 // Connect/Disconnect/GetStatus from an in-memory state, and exits with status
-// 3 as soon as the file named by SILO_TEST_PLUGIN_EXIT_FILE exists, so a test
+// 3 as soon as a file named exit-now appears next to its binary, so a test
 // can make it crash on demand.
 package main
 
@@ -10,6 +10,7 @@ import (
 	"context"
 	_ "embed"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -81,16 +82,15 @@ func (p *provider) GetStatus(ctx context.Context, _ *pluginv1.NetworkAccessGetSt
 }
 
 func main() {
-	if exitFile := os.Getenv("SILO_TEST_PLUGIN_EXIT_FILE"); exitFile != "" {
-		go func() {
-			for {
-				if _, err := os.Stat(exitFile); err == nil {
-					os.Exit(3)
-				}
-				time.Sleep(25 * time.Millisecond)
+	exitFile := filepath.Join(filepath.Dir(os.Args[0]), "exit-now")
+	go func() {
+		for {
+			if _, err := os.Stat(exitFile); err == nil {
+				os.Exit(3)
 			}
-		}()
-	}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}()
 	sdkruntime.ServeManifest(manifestJSON, version, sdkruntime.CapabilityServers{
 		NetworkAccessProvider: &provider{},
 	})

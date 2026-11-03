@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/schemas/playback-v3/v3/route-event.schema.json",
   "title": "Silo Playback Protocol v3 Route Event",
-  "description": "Request body of POST /api/v1/playback/route-event: one event object, not a batch. Bounds mirror validRouteEventV3 in internal/api/handlers/playback_v3.go. The endpoint is telemetry, so the server rejects a malformed event rather than half-recording it; every bound here is a rejection, and the two behaviours that are not rejections — unknown diagnostics keys being dropped, long diagnostics values being truncated — are described rather than constrained.",
+  "description": "Request body of POST /api/v1/playback/route-event: one event object, not a batch. Bounds mirror validRouteEventV3 in internal/api/handlers/playback_v3.go. The endpoint is telemetry, so the server rejects a malformed event rather than half-recording it; every bound here is a rejection, and the two behaviours that are not rejections \u2014 unknown diagnostics keys being dropped, long diagnostics values being truncated \u2014 are described rather than constrained.",
   "type": "object",
   "required": [
     "protocol_version",
@@ -52,7 +52,8 @@
         "runtime_correction_succeeded",
         "runtime_correction_failed",
         "seek_reanchor_requested",
-        "seek_reanchored"
+        "seek_reanchored",
+        "plan_summary"
       ]
     },
     "failure_classification": {
@@ -84,7 +85,7 @@
     },
     "diagnostics": {
       "type": "object",
-      "description": "Free-form key/value detail. The server keeps only keys on its allowlist and silently drops the rest, and trims each surviving value to 256 characters, so an unknown key or a long value is not a rejection — but more than 32 entries is.",
+      "description": "Free-form key/value detail. The server keeps only keys on its allowlist and silently drops the rest, and trims each surviving value to 256 characters, so an unknown key or a long value is not a rejection \u2014 but more than 32 entries is.",
       "maxProperties": 32,
       "additionalProperties": {
         "type": "string"

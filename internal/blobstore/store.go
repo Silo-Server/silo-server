@@ -11,11 +11,16 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 var (
 	ErrNotFound   = errors.New("blobstore: object not found")
 	ErrInvalidKey = errors.New("blobstore: invalid key")
+	// ErrThrottled is in the chain when an S3 backend kept rate limiting a call
+	// after the client's own retries. The request may succeed after a pause.
+	ErrThrottled = s3client.ErrThrottled
 )
 
 const (

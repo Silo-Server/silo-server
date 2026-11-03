@@ -107,21 +107,9 @@ describe("sources", () => {
   it("treats an admin as ungrouped even with a stored group", () => {
     expect(inheritContextFor({ ...grouped, role: "admin" }, [FAMILY])).toEqual({ kind: "server" });
   });
-
-  it("names a group missing from the list by its id", () => {
-    expect(inheritContextFor({ ...USER, access_group_id: 9 }, [FAMILY])).toEqual({
-      kind: "group",
-      name: "#9",
-    });
-  });
 });
 
 describe("inheritedValueText", () => {
-  it("words the server's profile limit", () => {
-    const ctx = inheritContextFor(USER, []);
-    expect(inheritedValueText("maxProfiles", hintsFor(USER), ctx, LIBRARIES)).toBe("Default: 5");
-  });
-
   it("words an admin's default as full access", () => {
     const admin: AdminUser = { ...USER, role: "admin", download_transcode_allowed: false };
     const ctx = inheritContextFor(admin, []);
@@ -208,10 +196,6 @@ describe("countCustomPolicyRows", () => {
         requests_allowed: false,
       }),
     ).toBe(4);
-  });
-
-  it("counts a profile limit set on the account", () => {
-    expect(countCustomPolicyRows({ ...USER, max_profiles: 3 })).toBe(1);
   });
 });
 

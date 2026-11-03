@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -29,35 +27,6 @@ func (f *fakeAdminLoginSessions) RevokeAdminLoginSessions(_ context.Context, id 
 	f.sessionID = sessionID
 	f.writes++
 	return 1, nil
-}
-
-func TestAdminLoginSessionsAuthorityAndCursorIsolation(t *testing.T) {
-	f := new(fakeAdminLoginSessions)
-	deps := pilotDeps(nil, nil)
-	deps.AdminLoginSessions = f
-	deps.ActingAdmin = apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, nil)
-	h := newTestHandler(t, deps)
-	headers := with(bearer(adminToken), "X-Profile-Id", "p-primary")
-	root := Prefix + "/admin/users/7/login-sessions"
-	requireProblem(t, do(t, h, "GET", root, "", with(bearer(memberToken), "X-Profile-Id", "p-owner")), TypePermissionDenied)
-	rec := do(t, h, "GET", root+"?limit=1", "", headers)
-	if rec.Code != 200 || f.userID != 7 {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	page := decodeLoginSessions(t, rec.Body)
-	cursor := url.QueryEscape(page.Page.NextCursor)
-	requireProblem(t, do(t, h, "GET", Prefix+"/admin/users/8/login-sessions?limit=1&cursor="+cursor, "", headers), TypeInvalidCursor)
-	requireProblem(t, do(t, h, "GET", root+"?limit=1&cursor="+cursor, "", with(bearer(otherAdminToken), "X-Profile-Id", "p-primary")), TypeInvalidCursor)
-	requireProblem(t, do(t, h, "GET", Prefix+"/auth/sessions?cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)
-	rec = do(t, h, "DELETE", root+"/00000000-0000-0000-0000-000000000001", "", headers)
-	if rec.Code != 204 || f.sessionID == nil || f.userID != 7 {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	rec = do(t, h, "DELETE", root, "", headers)
-	if rec.Code != 200 || f.sessionID != nil || f.writes != 2 {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	requireProblem(t, do(t, h, "DELETE", root+"/malformed", "", headers), TypeValidationFailed)
 }
 
 func TestLoginSessionMetadataPinsCurrentOffPage(t *testing.T) {

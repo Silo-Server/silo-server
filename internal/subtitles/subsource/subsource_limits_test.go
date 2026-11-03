@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -48,7 +49,7 @@ func TestDownloadExtractsZippedSubtitle(t *testing.T) {
 	vtt := "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n"
 	p := serveDownload(t, "application/zip", zipArchive(t, "movie.vtt", strings.NewReader(vtt)))
 
-	data, format, err := p.Download(t.Context(), "42")
+	data, format, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -61,7 +62,7 @@ func TestDownloadReturnsPlainSubtitle(t *testing.T) {
 	srt := "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
 	p := serveDownload(t, "application/x-subrip", []byte(srt))
 
-	data, format, err := p.Download(t.Context(), "42")
+	data, format, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -73,7 +74,7 @@ func TestDownloadReturnsPlainSubtitle(t *testing.T) {
 func TestDownloadRejectsOversizedResponse(t *testing.T) {
 	p := serveDownload(t, "application/x-subrip", make([]byte, subtitles.MaxProviderResponseSize+1))
 
-	if _, _, err := p.Download(t.Context(), "42"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -82,7 +83,7 @@ func TestDownloadRejectsHighRatioZipEntry(t *testing.T) {
 	archive := zipArchive(t, "movie.srt", io.LimitReader(zeros{}, 64<<20))
 	p := serveDownload(t, "application/zip", archive)
 
-	if _, _, err := p.Download(t.Context(), "42"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -92,4 +93,26 @@ type zeros struct{}
 func (zeros) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
+}
+
+func TestDownloadRefusesRedirectOffTheAPIHost(t *testing.T) {
+	var otherHits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		otherHits.Add(1)
+		_, _ = w.Write([]byte("1\n00:00:01,000 --> 00:00:02,000\noff host\n"))
+	}))
+	defer other.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	defer api.Close()
+
+	if _, _, err := New(Config{APIKey: "synthetic", BaseURL: api.URL}).Download(t.Context(), "42", subtitles.DownloadTarget{}); err == nil {
+		t.Fatal("download followed an off-host redirect")
+	}
+	// The key travels in a header that Go keeps on a redirect to another
+	// host, so the other host must never be asked.
+	if n := otherHits.Load(); n != 0 {
+		t.Fatalf("off-host server received %d requests", n)
+	}
 }

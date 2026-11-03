@@ -2,14 +2,13 @@ package metadata
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -189,254 +188,141 @@ func TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync(t *
 	}
 }
 
-type failureDuringEpisodeListRepo struct {
-	*orderedDebtEpisodeRepo
-	recordFailure func(context.Context) error
-}
-
-func (r *failureDuringEpisodeListRepo) ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error) {
-	episodes, err := r.orderedDebtEpisodeRepo.ListBySeries(ctx, seriesID)
-	if err != nil {
-		return nil, err
-	}
-	// The completeness snapshot is already read when another refresh finishes.
-	if err := r.recordFailure(ctx); err != nil {
-		return nil, err
-	}
-	return episodes, nil
-}
-
-func TestRefreshSeriesEpisodeMetadataStateRetainsFailureAfterEpisodeSnapshot(t *testing.T) {
-	for _, existing := range []bool{false, true} {
-		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
-			pool, _ := episodeRefreshDebtTestPool(t)
-			ctx := t.Context()
-			debts := NewRefreshDebtRepository(pool)
-			now := time.Now().UTC().Truncate(time.Microsecond)
-			if _, err := pool.Exec(ctx, `INSERT INTO episodes VALUES ('complete', 'series'), ('unchanged', 'series')`); err != nil {
+// TestRestartTerminalEpisodeDebtDB covers restarting terminal series debt for
+// a newly aired by-date file: the row keeps its other reasons and only
+// restarts while it is terminal, not due, unleased, and last attempted before
+// the file aired, as checked when the statement runs.
+func TestRestartTerminalEpisodeDebtDB(t *testing.T) {
+	pool, _ := episodeRefreshDebtTestPool(t)
+	repo := NewRefreshDebtRepository(pool)
+	ctx := t.Context()
+	pending := RefreshDebtReasonCoreMetadataIncomplete | RefreshDebtReasonTrailersRequested | RefreshDebtReasonProviderArtwork
+	for _, tc := range []struct {
+		name          string
+		reasonMask    int64
+		attempts      int
+		set           string
+		attemptedDays int
+		wantRestarted bool
+	}{
+		{name: "parked episode debt", reasonMask: RefreshDebtReasonEpisodeIncomplete, attempts: refreshDebtEpisodeTerminalAttempts, wantRestarted: true},
+		{name: "terminal debt for other reasons", reasonMask: pending, attempts: 5, wantRestarted: true},
+		{name: "attempts left", reasonMask: pending, attempts: refreshDebtEpisodeTerminalAttempts - 1},
+		{name: "due", reasonMask: pending, attempts: 5, set: `next_refresh_at = NOW() - INTERVAL '1 minute'`},
+		{name: "leased", reasonMask: pending, attempts: 5, set: `lease_expires_at = NOW() + INTERVAL '15 minutes'`},
+		{name: "attempted after the file aired", reasonMask: pending, attempts: 5, attemptedDays: -2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `DELETE FROM metadata_refresh_debt`); err != nil {
 				t.Fatal(err)
 			}
-			if err := debts.MarkTargetFailure(ctx, RefreshTargetEpisode, "unchanged", 300,
-				RefreshDebtReasonEpisodeIncomplete, now, 1, "old failure"); err != nil {
+			if _, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
+				(target_type, content_id, priority, reason_mask, next_refresh_at, last_attempt_at, attempt_count, last_error)
+				VALUES ('item', 'series-1', 50, $1, NOW() + INTERVAL '30 days', NOW() - INTERVAL '1 day', $2, 'not listed')`,
+				tc.reasonMask, tc.attempts); err != nil {
 				t.Fatal(err)
 			}
-			if existing {
-				if err := debts.MarkTargetFailure(ctx, RefreshTargetEpisode, "complete", 300,
-					RefreshDebtReasonEpisodeIncomplete, now, 1, "old failure"); err != nil {
+			if tc.set != "" {
+				if _, err := pool.Exec(ctx, `UPDATE metadata_refresh_debt SET `+tc.set); err != nil {
 					t.Fatal(err)
 				}
 			}
-			items := newFakeItemRepo()
-			items.items["series"] = &models.MediaItem{ContentID: "series"}
-			episodes := &failureDuringEpisodeListRepo{
-				orderedDebtEpisodeRepo: &orderedDebtEpisodeRepo{episodes: []*models.Episode{
-					{ContentID: "complete", SeriesID: "series", Title: "Complete", TmdbID: "123"},
-					{ContentID: "unchanged", SeriesID: "series", Title: "Complete", TmdbID: "456"},
-				}},
-				recordFailure: func(ctx context.Context) error {
-					return debts.MarkTargetFailure(ctx, RefreshTargetEpisode, "complete", 300,
-						RefreshDebtReasonEpisodeIncomplete, now.Add(time.Hour), 2, "newer provider failure")
-				},
-			}
-			service := &MetadataService{itemRepo: items, episodeRepo: episodes, refreshDebtRepo: debts}
-			service.refreshSeriesEpisodeMetadataState(ctx, "series", now)
-			debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "complete")
+			before, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
 			if err != nil {
-				t.Fatalf("newer retry was lost: %v", err)
+				t.Fatal(err)
 			}
-			if debt.AttemptCount != 2 || debt.LastError != "newer provider failure" || !debt.NextRefreshAt.Equal(now.Add(time.Hour)) {
-				t.Fatalf("newer retry = %#v", debt)
+
+			now := time.Now()
+			err = repo.RestartTerminalEpisodeDebt(ctx, RefreshTargetItem, "series-1", now.AddDate(0, 0, tc.attemptedDays), now)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if _, err := debts.GetTarget(ctx, RefreshTargetEpisode, "unchanged"); !errors.Is(err, ErrRefreshDebtNotFound) {
-				t.Fatalf("unchanged complete debt error = %v, want ErrRefreshDebtNotFound", err)
+			after, err := repo.GetTarget(ctx, RefreshTargetItem, "series-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantRestarted {
+				if after.ReasonMask != before.ReasonMask|RefreshDebtReasonEpisodeIncomplete || after.AttemptCount != before.AttemptCount ||
+					!after.NextRefreshAt.Equal(before.NextRefreshAt) || after.Priority != before.Priority ||
+					!reflect.DeepEqual(after.LeaseExpiresAt, before.LeaseExpiresAt) {
+					t.Fatalf("rejected reset should only add the episode reason: after=%+v before=%+v", after, before)
+				}
+				return
+			}
+			if after.ReasonMask != tc.reasonMask|RefreshDebtReasonEpisodeIncomplete || after.AttemptCount != 0 ||
+				after.Priority != refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete) || after.NextRefreshAt.After(now) ||
+				after.LastError != "not listed" {
+				t.Fatalf("restarted row = %+v, want reasons %d due now with no attempts", after, tc.reasonMask|RefreshDebtReasonEpisodeIncomplete)
 			}
 		})
 	}
 }
 
-func TestDeleteEpisodeDebtsRetainsSameTransactionRewrite(t *testing.T) {
-	pool, _ := episodeRefreshDebtTestPool(t)
-	ctx := t.Context()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO metadata_refresh_debt (target_type, content_id, next_refresh_at)
-		VALUES ('episode', 'complete', NOW())`); err != nil {
-		t.Fatal(err)
-	}
-	// Both writes have the same xmin and NOW(). Only the tuple location changes.
-	var version string
-	if err := tx.QueryRow(ctx, `SELECT xmin::text || ':' || ctid::text FROM metadata_refresh_debt
-		WHERE target_type = 'episode' AND content_id = 'complete'`).Scan(&version); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE metadata_refresh_debt SET last_error = 'newer provider failure',
-		updated_at = NOW() WHERE target_type = 'episode' AND content_id = 'complete'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	debts := NewRefreshDebtRepository(pool)
-	if err := debts.DeleteEpisodeDebts(ctx, []string{"complete"}, map[string]string{"complete": version}); err != nil {
-		t.Fatal(err)
-	}
-	debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "complete")
-	if err != nil || debt.LastError != "newer provider failure" {
-		t.Fatalf("rewritten debt = %#v, error = %v", debt, err)
-	}
-}
+// A core refresh must not settle away the only retry for an unlinked by-date
+// file when its due or leased debt cannot restart yet.
+func TestByDateEpisodeDebtSurvivesCoreRefreshDB(t *testing.T) {
+	for _, leased := range []bool{false, true} {
+		t.Run(fmt.Sprintf("leased=%t", leased), func(t *testing.T) {
+			pool, _ := episodeRefreshDebtTestPool(t)
+			repo := NewRefreshDebtRepository(pool)
+			h := newFallbackTestHarness()
+			h.service.refreshDebtRepo = repo
+			ctx := t.Context()
+			const seriesID = "series-daily-behind"
+			seedAirDateSeries(ctx, t, h, seriesID,
+				&models.Episode{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Wednesday", TvdbID: "1001", AirDate: mustDate(t, "2024-05-01")})
+			addAirDateFile(h, seriesID, 301, "/media/tv/Daily Show (2024)/Daily Show (2024) - 2024-05-06 - Episode.mkv")
+			_, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
+				(target_type, content_id, priority, reason_mask, next_refresh_at, last_attempt_at, attempt_count, lease_expires_at)
+				VALUES ('item', $1, 150, $2, NOW() - INTERVAL '1 minute', '2024-05-06 12:00:00+00', 5,
+				CASE WHEN $3 THEN NOW() + INTERVAL '15 minutes' ELSE NULL END)`, seriesID, RefreshDebtReasonCoreMetadataIncomplete, leased)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			after, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.AttemptCount != before.AttemptCount || after.Priority != before.Priority ||
+				!after.NextRefreshAt.Equal(before.NextRefreshAt) || !reflect.DeepEqual(after.LeaseExpiresAt, before.LeaseExpiresAt) {
+				t.Fatalf("sweep changed schedule or claim: before=%+v after=%+v", before, after)
+			}
+			if after.ReasonMask != RefreshDebtReasonCoreMetadataIncomplete|RefreshDebtReasonEpisodeIncomplete {
+				t.Errorf("sweep reasons = %d, want core and episode debt", after.ReasonMask)
+			}
 
-func TestDeleteEpisodeDebtsRetainsConcurrentUpdateWhileDeleteWaits(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A private schema lets the updater, deleter and lock observer use separate
-	// connections without touching deployment data. This test needs migrations.
-	schema := fmt.Sprintf("episode_debt_wait_%d", time.Now().UnixNano())
-	config.ConnConfig.RuntimeParams["search_path"] = schema
-	config.MaxConns = 2
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	quotedSchema := pgx.Identifier{schema}.Sanitize()
-	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+quotedSchema); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-		if _, err := pool.Exec(cleanupCtx, "DROP SCHEMA "+quotedSchema+" CASCADE"); err != nil {
-			t.Errorf("cleaning up test schema: %v", err)
-		}
-	})
-	if _, err := pool.Exec(ctx, `CREATE TABLE metadata_refresh_debt (LIKE public.metadata_refresh_debt INCLUDING ALL);
-		CREATE TABLE episodes (content_id TEXT PRIMARY KEY, series_id TEXT NOT NULL);
-		INSERT INTO episodes VALUES ('complete', 'series')`); err != nil {
-		t.Fatal(err)
-	}
-	debts := NewRefreshDebtRepository(pool)
-	if err := debts.MarkTargetFailure(ctx, RefreshTargetEpisode, "complete", 300,
-		RefreshDebtReasonEpisodeIncomplete, time.Now(), 1, "old failure"); err != nil {
-		t.Fatal(err)
-	}
-	versions, err := debts.SnapshotEpisodeDebts(ctx, "series")
-	if err != nil {
-		t.Fatal(err)
-	}
-	deleterConfig := config.Copy()
-	deleterConfig.MaxConns = 1
-	deleterPool, err := pgxpool.NewWithConfig(ctx, deleterConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(deleterPool.Close)
-	var deleterPID int
-	if err := deleterPool.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&deleterPID); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	updaterPID := tx.Conn().PgConn().PID()
-	if _, err := tx.Exec(ctx, `UPDATE metadata_refresh_debt SET last_error = 'newer provider failure',
-		attempt_count = 2 WHERE target_type = 'episode' AND content_id = 'complete'`); err != nil {
-		t.Fatal(err)
-	}
-	deleted := make(chan error, 1)
-	go func() {
-		deleted <- NewRefreshDebtRepository(deleterPool).DeleteEpisodeDebts(ctx, []string{"complete"}, versions)
-	}()
-	for {
-		select {
-		case err := <-deleted:
-			t.Fatalf("DELETE finished before waiting for the updater: %v", err)
-		default:
-		}
-		var waiting bool
-		if err := pool.QueryRow(ctx, `SELECT $1::int = ANY(pg_blocking_pids($2::int))`, updaterPID, deleterPID).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting {
-			break
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-deleted:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "complete")
-	if err != nil || debt.LastError != "newer provider failure" || debt.AttemptCount != 2 {
-		t.Fatalf("concurrent retry = %#v, error = %v", debt, err)
-	}
-}
-
-func TestRenewClaimsExtendsOnlyTheClaimStillHeld(t *testing.T) {
-	pool, _ := episodeRefreshDebtTestPool(t)
-	ctx := t.Context()
-	claimedAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
-	reclaimedAt := claimedAt.Add(5 * time.Minute)
-	// held: still under this claim. reclaimed: another claimant took it after
-	// the lease lapsed. settled: its refresh already cleared the claim.
-	if _, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
-		(target_type, content_id, next_refresh_at, claimed_at, lease_expires_at) VALUES
-		('episode', 'held', NOW(), $1, NOW() + interval '1 minute'),
-		('episode', 'reclaimed', NOW(), $2, NOW() + interval '1 minute'),
-		('season', 'settled', NOW(), NULL, NULL)`, claimedAt, reclaimedAt); err != nil {
-		t.Fatal(err)
-	}
-
-	debts := NewRefreshDebtRepository(pool)
-	err := debts.RenewClaims(ctx,
-		[]string{RefreshTargetEpisode, RefreshTargetEpisode, RefreshTargetSeason},
-		[]string{"held", "reclaimed", "settled"},
-		[]time.Time{claimedAt, claimedAt, claimedAt},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	leaseLeft := func(targetType, contentID string) *time.Duration {
-		t.Helper()
-		var left *time.Duration
-		var seconds *float64
-		if err := pool.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW())::float8
-			FROM metadata_refresh_debt WHERE target_type = $1 AND content_id = $2`, targetType, contentID).Scan(&seconds); err != nil {
-			t.Fatal(err)
-		}
-		if seconds != nil {
-			d := time.Duration(*seconds * float64(time.Second))
-			left = &d
-		}
-		return left
-	}
-	if left := leaseLeft(RefreshTargetEpisode, "held"); left == nil || *left < RefreshDebtLeaseDuration-time.Minute {
-		t.Fatalf("held lease left = %v, want about %s", left, RefreshDebtLeaseDuration)
-	}
-	if left := leaseLeft(RefreshTargetEpisode, "reclaimed"); left == nil || *left > 2*time.Minute {
-		t.Fatalf("reclaimed lease left = %v, want the other claim's lease untouched", left)
-	}
-	if left := leaseLeft(RefreshTargetSeason, "settled"); left != nil {
-		t.Fatalf("settled lease left = %v, want no lease", *left)
+			// The provider completes core metadata but still omits the new episode.
+			item, err := h.itemRepo.GetByID(ctx, seriesID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item.TmdbID, item.Overview = "123", "Complete"
+			item.PosterPath, item.BackdropPath = testPosterPath, testBackdropPath
+			item.RatingTMDB = new(7.5)
+			if err := h.itemRepo.Upsert(ctx, item); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.service.syncRefreshDebtForItem(ctx, seriesID); err != nil {
+				t.Fatal(err)
+			}
+			settled, err := repo.Get(ctx, seriesID)
+			if err != nil {
+				t.Fatalf("core refresh lost the episode retry: %v", err)
+			}
+			if settled.ReasonMask != RefreshDebtReasonEpisodeIncomplete || settled.AttemptCount != before.AttemptCount ||
+				settled.LeaseExpiresAt != nil || !settled.NextRefreshAt.After(time.Now()) {
+				t.Fatalf("settled debt = %+v, want episode retry with its backoff", settled)
+			}
+		})
 	}
 }

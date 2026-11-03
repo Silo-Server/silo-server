@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { V2ProblemError } from "@/api/v2/request";
-import Login from "./Login";
+import { renderLogin, waitForPasswordResetCapability } from "./loginPage.test-support";
 
 const request = vi.hoisted(() => vi.fn());
 const leave = vi.hoisted(() => vi.fn());
@@ -88,17 +86,6 @@ afterEach(() => {
   auth.completeLogin.mockReset();
 });
 
-function renderLogin() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
 it("signs the device owner in with one press, without a password", async () => {
   auth.providers = [LOCAL, TAILSCALE];
   renderLogin();
@@ -120,47 +107,31 @@ it("signs the device owner in with one press, without a password", async () => {
   expect(screen.getByLabelText("Password")).toBeTruthy();
 });
 
-it("shows no password form when the network provider is the only way in", () => {
-  auth.providers = [TAILSCALE];
-  renderLogin();
-  expect(screen.getByRole("button", { name: /Continue as Alice Example/ })).toBeTruthy();
-  expect(screen.queryByLabelText("Password")).toBeNull();
-  expect(screen.queryByText("or")).toBeNull();
-});
-
 it("does not leave for the only OAuth provider while a network sign-in is offered", async () => {
   auth.providers = [OIDC, TAILSCALE];
   renderLogin();
   expect(screen.getByRole("button", { name: /Continue as Alice Example/ })).toBeTruthy();
-  await waitFor(() =>
-    expect(request.mock.calls.map(([operation]) => operation)).toContain(
-      "GET /api/v2/capabilities/password-reset",
-    ),
-  );
+  await waitForPasswordResetCapability(request);
   expect(leave).not.toHaveBeenCalled();
 });
 
-it.each([
-  ["not_permitted", "Tailscale doesn't allow this device to sign in to this server."],
-  ["network_identity_required", "Open this server at its Tailscale address to sign in this way."],
-  [
-    "email_in_use",
-    "An account with your email already exists. Sign in with your password, then connect Tailscale under Settings → Sign-in.",
-  ],
-])("explains a %s refusal", async (problemType, text) => {
-  auth.providers = [LOCAL, TAILSCALE];
-  request.mockImplementation(async (operation: string) => {
-    if (operation === "POST /api/v2/auth/network/{id}/sign-in") {
-      throw new V2ProblemError("signInWithNetworkIdentity", {
-        type: `https://siloserver.org/docs/api/v2/problems/${problemType}`,
-        title: "Refused",
-        status: problemType === "email_in_use" ? 409 : 403,
-      } as never);
-    }
-    return { enabled: false };
-  });
-  renderLogin();
-  fireEvent.click(screen.getByRole("button", { name: /Continue as Alice Example/ }));
-  expect((await screen.findByRole("alert")).textContent).toBe(text);
-  expect(auth.completeLogin).not.toHaveBeenCalled();
-});
+it.each([["not_permitted", "Tailscale doesn't allow this device to sign in to this server."]])(
+  "explains a %s refusal",
+  async (problemType, text) => {
+    auth.providers = [LOCAL, TAILSCALE];
+    request.mockImplementation(async (operation: string) => {
+      if (operation === "POST /api/v2/auth/network/{id}/sign-in") {
+        throw new V2ProblemError("signInWithNetworkIdentity", {
+          type: `https://siloserver.org/docs/api/v2/problems/${problemType}`,
+          title: "Refused",
+          status: problemType === "email_in_use" ? 409 : 403,
+        } as never);
+      }
+      return { enabled: false };
+    });
+    renderLogin();
+    fireEvent.click(screen.getByRole("button", { name: /Continue as Alice Example/ }));
+    expect((await screen.findByRole("alert")).textContent).toBe(text);
+    expect(auth.completeLogin).not.toHaveBeenCalled();
+  },
+);

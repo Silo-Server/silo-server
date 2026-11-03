@@ -35,7 +35,10 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 		strings.Join(transformations, ","),
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
+	parts = appendHLSSubtitleRenditionsIdentityV3(parts, plan.Subtitle.Inventory)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
+	parts = appendSegmentContainerIdentityV3(parts, plan.EffectiveRecipe.SegmentContainer)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts, PlanRecipeVersionV3)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
@@ -66,7 +69,10 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 		strings.Join(transformations, ","),
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
+	parts = appendHLSSubtitleRenditionsIdentityV3(parts, plan.Subtitle.Inventory)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
+	parts = appendSegmentContainerIdentityV3(parts, plan.EffectiveRecipe.SegmentContainer)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts,
 		outputContextID,
@@ -78,9 +84,36 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 	return fmt.Sprintf("v3:%016x", h.Sum64())
 }
 
+// appendHLSSubtitleRenditionsIdentityV3 keeps a plan that lists embedded text
+// tracks as on-demand renditions apart from the plan that doesn't, whatever
+// it selects: the stream's playlists differ. It names the rows by combined
+// index. Plans without them keep their historical identity.
+func appendHLSSubtitleRenditionsIdentityV3(parts []string, inventory []SubtitleInventoryItemV3) []string {
+	var rows []string
+	for _, item := range inventory {
+		if item.HLSRendition != nil {
+			rows = append(rows, strconv.Itoa(item.CombinedIndex))
+		}
+	}
+	if len(rows) == 0 {
+		return parts
+	}
+	return append(parts, "hls_subtitle_renditions="+strings.Join(rows, ","))
+}
+
 func appendVideoSampleEntryIdentityV3(parts []string, sampleEntry string) []string {
 	if sampleEntry = strings.ToLower(strings.TrimSpace(sampleEntry)); sampleEntry != "" {
 		return append(parts, "sample_entry="+sampleEntry)
+	}
+	return parts
+}
+
+// appendSegmentContainerIdentityV3 keeps an MPEG-TS copy remux apart from the
+// fMP4 one: its plan id names the output directory, so the two never share
+// segments. Plans without it keep their historical identity.
+func appendSegmentContainerIdentityV3(parts []string, container string) []string {
+	if container = strings.ToLower(strings.TrimSpace(container)); container != "" {
+		return append(parts, "segment_container="+container)
 	}
 	return parts
 }
@@ -118,4 +151,14 @@ func appendEmbeddedSubtitleIdentityV3(parts []string, embedded *EmbeddedSubtitle
 		return parts
 	}
 	return append(parts, "embedded_subtitle="+strconv.Itoa(embedded.StreamIndex)+":"+embedded.ContainerTrackID)
+}
+
+// appendHLSSubtitleRenditionIdentityV3 keeps a rendition plan distinct from
+// the sidecar plan for the same track, so a failed rendition can fall back.
+// Plans without one keep their historical identity.
+func appendHLSSubtitleRenditionIdentityV3(parts []string, rendition *HLSSubtitleRenditionV3) []string {
+	if rendition == nil {
+		return parts
+	}
+	return append(parts, "hls_subtitle_rendition="+rendition.GroupID+":"+rendition.Format)
 }

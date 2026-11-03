@@ -17,6 +17,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -284,5 +285,5 @@ func (h *Handler) handlePublicFeedFile(w http.ResponseWriter, r *http.Request) {
 	// capability and there is no authenticated caller, so the subject is the
 	// feed's owner rather than whoever fetched it.
 	attachABSTransfer(r.Context(), f.UserID, f.ProfileID, mf.ID)
-	http.ServeFile(w, r, mf.FilePath)
+	http.ServeFile(w, r, fspath.Decode(mf.FilePath))
 }

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -17,9 +18,8 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
+import EpisodeCardCaption from "./EpisodeCardCaption";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
-import MachineTranslatedLabel from "./MachineTranslatedLabel";
-import { hasMachineTranslation } from "./machineTranslation";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -108,10 +108,12 @@ function SeasonEpisodeCard({
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
+  const unreadable = episodeFilesUnreadable(episode);
+  const playable = (episode.files ?? []).some((file) => !file.unreadable);
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
-      <div className="relative">
+      <div className="group/media relative">
         <ViewTransitionLink
           to={`/item/${episode.content_id}`}
           state={episodeLinkState}
@@ -141,6 +143,8 @@ function SeasonEpisodeCard({
                 variant="wide"
               />
             )}
+            {/* Hover dim behind the play button */}
+            {playable && <div className="media-card-hover-dim absolute inset-0" />}
             {hasPartialProgress && (
               <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
@@ -162,6 +166,9 @@ function SeasonEpisodeCard({
             )}
           </div>
         </ViewTransitionLink>
+        {playable && (
+          <CardPlayOverlay contentId={episode.content_id} title={episodeTitle} type="episode" />
+        )}
         <MediaItemMenu
           contentId={episode.content_id}
           mediaType="episode"
@@ -181,36 +188,12 @@ function SeasonEpisodeCard({
         state={episodeLinkState}
         className="block"
       >
-        <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
-          <span>Episode {episode.episode_number}</span>
-          {episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
-          {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
-        </div>
-        <p className="text-foreground truncate text-sm font-semibold">{episodeTitle}</p>
-        <div className="mt-1.5 space-y-1">
-          <div className="text-muted-foreground flex items-center gap-2 text-xs">
-            {episode.runtime > 0 && <span>{episode.runtime}m</span>}
-            {episode.air_date && (
-              <span>
-                {new Intl.DateTimeFormat(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }).format(new Date(episode.air_date))}
-              </span>
-            )}
-            {episode.overview &&
-              !hideOverview &&
-              hasMachineTranslation(episode.machine_translated_fields) && (
-                <MachineTranslatedLabel compact />
-              )}
-          </div>
-          {episode.overview && !hideOverview && (
-            <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">
-              {episode.overview}
-            </p>
-          )}
-        </div>
+        <EpisodeCardCaption
+          episode={episode}
+          hideOverview={hideOverview}
+          badges={episode.user_data?.played && <WatchedCheckIndicator />}
+          notice={unreadable && <UnreadableFileBadge />}
+        />
       </ViewTransitionLink>
     </div>
   );

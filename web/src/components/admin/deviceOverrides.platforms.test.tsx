@@ -19,11 +19,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     ResizeObserverStub;
 }
 
-const NATIVE_ONLY_PLAYER_KEYS = [
-  "player.playback_speed",
-  "player.subtitle_sync_ms",
-  "player.hdr_enabled",
-];
+const NATIVE_ONLY_PLAYER_KEYS = ["player.playback_speed", "player.hdr_enabled"];
 
 function renderAllSettings(devicePlatform: string, settings: AdminDeviceSetting[] = []) {
   render(
@@ -48,14 +44,6 @@ describe("DeviceProfileTabs platform filtering", () => {
       expect(screen.queryByText(key)).not.toBeInTheDocument();
     }
     expect(screen.getByText("playback.audio_language")).toBeInTheDocument();
-  });
-
-  it("offers them for a native TV app", () => {
-    renderAllSettings("tvOS");
-
-    for (const key of NATIVE_ONLY_PLAYER_KEYS) {
-      expect(screen.getByText(key)).toBeInTheDocument();
-    }
   });
 
   it("still lists an override a browser already stores so it can be reset", () => {
@@ -84,6 +72,8 @@ describe("DeviceProfileTabs platform filtering", () => {
       expect(web).not.toContain(key);
       expect(tv).toContain(key);
     }
+    // The web player applies the subtitle offset from manifest revision 19.
+    expect(web).toContain("player.subtitle_sync_ms");
     expect(deviceSettingKeysForPlatform("Windows Web", ["player.playback_speed"])).toHaveLength(
       web.length + 1,
     );

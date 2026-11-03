@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type historyImportActiveLister interface {
@@ -97,7 +100,7 @@ type EventsHandler struct {
 // authority, including the current role of its account;
 // auth.SessionRepository implements it.
 type sessionRoleChecker interface {
-	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string, userID int) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // SetSessionRoles makes the v1 events socket recheck its login session. The
@@ -162,8 +165,8 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	// Browsers cannot set custom headers on websocket handshakes, so profile
 	// identity arrives as a short-lived single-use ticket minted via
-	// POST /events/ws-ticket. A connection without a ticket stays unbound and
-	// simply cannot subscribe to the profile-scoped notifications channel.
+	// POST /events/ws-ticket. An unbound connection cannot subscribe to
+	// notifications or receive profile-addressed state and settings events.
 	var bound notifications.Ticket
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
 		binding, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
@@ -184,7 +187,7 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Admin channels and other accounts' events follow the acting profile, as
+	// Admin channels follow the acting profile, as
 	// on the v2 socket: another profile on an admin's account connects with
 	// the user role. A handshake that declares no profile acts as the profile
 	// its ticket was minted for, which the viewer gate verified then. Either
@@ -288,7 +291,7 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 // failed acting-admin decision counts as lost, so a connection holding the
 // administrator channels fails closed like the HTTP routes and reconnects.
 func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
-	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID)
+	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID, claims.UserID)
 	// A remote-playback handoff never holds a v1 socket.
 	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
 		return true
@@ -302,7 +305,9 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 
 // serveWebSocket runs one events connection. When accessChanged closes, the
 // loop tells the client its access changed and closes the connection with
-// EventsCloseAccessChanged; a nil channel never fires.
+// EventsCloseAccessChanged; a nil channel never fires. Only the v2 handshake
+// passes one: the bridge socket never sends access_changed, and never
+// receives V2Only events either.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -390,7 +395,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	go func() {
 		defer close(readDone)
 		for {
-			_, data, readErr := conn.ReadMessage()
+			_, data, readErr := wsconn.ReadMessage(conn, maxEventsFrameBytes)
 			if readErr != nil {
 				return
 			}
@@ -471,7 +476,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 			if !ok {
 				return
 			}
-			if _, subscribed := subscriptions[env.Channel]; !subscribed {
+			if _, subscribed := subscriptions[env.Channel]; !subscribed || (env.V2Only && accessChanged == nil) {
 				continue
 			}
 			if !allowsEventForClaims(claims, boundProfileID, env) {
@@ -687,14 +692,25 @@ func parseDeclaredChannels(query url.Values) ([]evt.EventChannel, bool) {
 }
 
 // allowedChannelsForClaims is allowedChannelsForRole, less the household
-// channels a remote-playback handoff may not see: history imports cover every
-// profile on the account.
+// channels a remote-playback handoff may not see (history imports cover every
+// profile on the account), and narrowed to its scopes for a scoped API key.
 func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
 	if claims.IsRemotePlayback() {
 		return []evt.EventChannel{evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelUserSettings, evt.ChannelNotifications}
 	}
+	if len(claims.APIKeyScopes) > 0 {
+		if claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) {
+			return slices.Clone(monitorKeyChannels)
+		}
+		return nil
+	}
 	return allowedChannelsForRole(claims.Role)
 }
+
+// monitorKeyChannels are what an admin:monitor:read key may subscribe to:
+// live sessions and catalog changes. Jobs carry artifact URLs and request
+// payloads and scans carry library paths, which monitoring never reads.
+var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}
 
 func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{
@@ -730,6 +746,26 @@ func allowsEventForClaims(claims *auth.Claims, boundProfileID string, env evt.En
 		return boundProfileID != "" &&
 			env.UserID == claims.UserID &&
 			env.ProfileID == boundProfileID
+	}
+	switch env.Channel {
+	case evt.ChannelUserState:
+		// Personal state never inherits the administrator's account-wide reach.
+		if env.UserID <= 0 || env.UserID != claims.UserID || boundProfileID == "" || env.ProfileID != boundProfileID {
+			return false
+		}
+	case evt.ChannelUserSettings:
+		// An administrator default reaches every viewer: it names no account
+		// or profile and carries the key, never a value.
+		if env.AllViewers && env.UserID == 0 && env.ProfileID == "" {
+			return true
+		}
+		// An empty profile identifies an account-scoped settings change.
+		if env.UserID <= 0 || env.UserID != claims.UserID {
+			return false
+		}
+		if env.ProfileID != "" && (boundProfileID == "" || env.ProfileID != boundProfileID) {
+			return false
+		}
 	}
 	if env.UserID > 0 && claims.Role != "admin" && env.UserID != claims.UserID {
 		return false
@@ -773,7 +809,7 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil || h.notifications == nil || boundProfileID == "" {
 			return json.RawMessage("[]"), nil
 		}
-		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), boundProfileID, 25)
+		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), claims.UserID, boundProfileID, 25)
 		if err != nil {
 			return nil, err
 		}

@@ -25,9 +25,9 @@ const (
 type directScanRunRepository interface {
 	Create(ctx context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error)
 	Start(ctx context.Context, id string) (*models.ScanRun, error)
-	TouchHeartbeat(ctx context.Context, id string) error
-	Complete(ctx context.Context, id string, result *events.ScanRunResult) (*models.ScanRun, error)
-	Fail(ctx context.Context, id string, errorMessage string) (*models.ScanRun, error)
+	TouchHeartbeat(ctx context.Context, id string, startedAt *time.Time) error
+	Complete(ctx context.Context, id string, startedAt *time.Time, result *events.ScanRunResult) (*models.ScanRun, error)
+	Fail(ctx context.Context, id string, startedAt *time.Time, errorMessage string) (*models.ScanRun, error)
 	MarkCancelled(ctx context.Context, id string) (*models.ScanRun, bool, error)
 }
 
@@ -46,7 +46,7 @@ func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun,
 	if run == nil {
 		return func() {}
 	}
-	runID := run.ID
+	runID, startedAt := run.ID, run.StartedAt
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -59,7 +59,7 @@ func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun,
 				return
 			case <-ticker.C:
 				touchCtx, touchCancel := context.WithTimeout(ctx, directScanHeartbeatTimeout)
-				err := repo.TouchHeartbeat(touchCtx, runID)
+				err := repo.TouchHeartbeat(touchCtx, runID, startedAt)
 				touchCancel()
 				if err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("direct scan heartbeat failed", "scan_id", runID, "error", err)
@@ -129,7 +129,7 @@ func completeDirectScan(ctx context.Context, repo directScanRunRepository, run *
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
 	defer cancel()
-	if _, err := repo.Complete(finishCtx, run.ID, scanRunResultFromIngest(result)); err != nil {
+	if _, err := repo.Complete(finishCtx, run.ID, run.StartedAt, scanRunResultFromIngest(result)); err != nil {
 		return fmt.Errorf("complete scan run: %w", err)
 	}
 	return nil
@@ -141,7 +141,7 @@ func failDirectScan(ctx context.Context, repo directScanRunRepository, run *mode
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
 	defer cancel()
-	if _, err := repo.Fail(finishCtx, run.ID, scanErr.Error()); err != nil {
+	if _, err := repo.Fail(finishCtx, run.ID, run.StartedAt, scanErr.Error()); err != nil {
 		return errors.Join(scanErr, fmt.Errorf("fail scan run: %w", err))
 	}
 	return scanErr

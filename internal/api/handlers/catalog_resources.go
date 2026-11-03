@@ -10,6 +10,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -225,7 +226,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(ctx context.Context, v It
 		season,
 		episodes,
 		h.items.getAggregateUserData(ctx, v, episodes),
-		filter.ImageSize,
+		filter.ImageSizeFor(imagesize.SlotPoster),
 	)
 	return &catalog.ItemDetail{
 		ContentID:         seasonID,

@@ -30,6 +30,9 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
+	// ErrSuggestionLimitReached refuses a new suggestion in a room that
+	// already holds maxRoomSuggestions.
+	ErrSuggestionLimitReached = errors.New("watch together room suggestion limit reached")
 	// ErrNotVoteWinner preserves the v1 winner-only promotion contract.
 	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
 	// ErrNoVotesCast is returned by VoteWinner when nobody has voted yet, so
@@ -2958,8 +2961,7 @@ func (s *Service) Vote(
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
 
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
+	if _, _, err := s.getOrLoadLiveRoom(ctx, roomID); err != nil {
 		return nil, err
 	}
 
@@ -2982,8 +2984,7 @@ func (s *Service) Vote(
 	}
 
 	s.mu.Lock()
-	live = s.rooms[roomID]
-	if live != nil {
+	if live := s.rooms[roomID]; live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
 		s.sendDispatches(ctx, dispatches)
@@ -3006,8 +3007,7 @@ func (s *Service) Unvote(
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
 
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
+	if _, _, err := s.getOrLoadLiveRoom(ctx, roomID); err != nil {
 		return nil, err
 	}
 
@@ -3030,8 +3030,7 @@ func (s *Service) Unvote(
 	}
 
 	s.mu.Lock()
-	live = s.rooms[roomID]
-	if live != nil {
+	if live := s.rooms[roomID]; live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
 		s.sendDispatches(ctx, dispatches)

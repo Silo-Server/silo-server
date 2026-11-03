@@ -4,7 +4,11 @@ import {
   deleteAdminSettingValue,
   captureAdminSettingAuthority,
 } from "@/api/v2/adminAccountSettings";
-import { listAdminDevices, getAdminDevice } from "@/api/v2/adminDevices";
+import {
+  listAdminDevices,
+  getAdminDevice,
+  resetAdminDeviceLearnedLimit,
+} from "@/api/v2/adminDevices";
 import { V2ProblemError } from "@/api/v2/request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -627,5 +631,28 @@ export function useImpersonateUser() {
       profileContext: ReturnType<typeof captureAdminUserAuthority>;
     }) => impersonateAdminUser(id, profileContext),
     gcTime: 0,
+  });
+}
+
+export function useResetAdminDeviceLearnedLimit() {
+  const queryClient = useQueryClient();
+  const authority = captureAdminUserAuthority();
+  return useMutation({
+    retry: false,
+    mutationFn: ({
+      userId,
+      deviceId,
+      connectionId,
+    }: {
+      userId: number;
+      deviceId: string;
+      connectionId: string;
+    }) => resetAdminDeviceLearnedLimit(userId, deviceId, connectionId, authority),
+    // Returned so the button stays disabled until the refreshed detail lands.
+    onSuccess: (_data, variables) =>
+      queryClient.invalidateQueries({
+        queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
+      }),
+    onError: () => toast.error("Failed to clear learned limit"),
   });
 }

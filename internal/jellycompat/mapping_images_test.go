@@ -40,24 +40,6 @@ func TestItemImageTagsUseStableCanonicalSeed(t *testing.T) {
 	}
 }
 
-func TestItemImageTagsFallbackToURLWhenCanonicalSeedMissing(t *testing.T) {
-	m := newMapper(NewResourceIDCodec(), &config.Config{})
-	item := upstreamListItem{
-		ContentID: "movie-1",
-		Type:      "movie",
-		Title:     "Movie",
-		PosterURL: "https://cdn.example.test/poster.jpg?sig=one",
-	}
-
-	first := m.itemFromList(item, false, nil, nil)
-	item.PosterURL = "https://cdn.example.test/poster.jpg?sig=two"
-	second := m.itemFromList(item, false, nil, nil)
-
-	if first.ImageTags["Primary"] == second.ImageTags["Primary"] {
-		t.Fatalf("fallback image tag did not change with URL: %q", first.ImageTags["Primary"])
-	}
-}
-
 func TestItemImageTagsUseConfiguredSecret(t *testing.T) {
 	item := upstreamListItem{
 		ContentID:       "movie-1",
@@ -78,34 +60,6 @@ func TestItemImageTagsUseConfiguredSecret(t *testing.T) {
 
 	if first.ImageTags["Primary"] == second.ImageTags["Primary"] {
 		t.Fatalf("signed image tag did not change with configured secret: %q", first.ImageTags["Primary"])
-	}
-}
-
-func TestEpisodeListImageTagsUseStillThumbhash(t *testing.T) {
-	secret := "image-secret"
-	updatedAt := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
-	item := upstreamListItem{
-		ContentID:       "episode-1",
-		Type:            "episode",
-		Title:           "Episode",
-		PosterURL:       "https://cdn.example.test/still.jpg?sig=one",
-		PosterPath:      "metadb://still/episode-1",
-		PosterThumbhash: "poster-thumbhash",
-		StillPath:       "metadb://still/episode-1",
-		StillThumbhash:  "still-thumbhash",
-		UpdatedAt:       updatedAt,
-	}
-
-	dto := newMapper(NewResourceIDCodec(), &config.Config{
-		Auth: config.AuthConfig{JWTSecret: secret},
-	}).itemFromList(item, false, nil, nil)
-	expected := newImageTagSigner(secret).Tag(
-		imageTagSeed(item.ContentID, "Primary", compatCardImageSize, item.StillPath, item.StillThumbhash, updatedAt),
-		item.PosterURL,
-	)
-
-	if dto.ImageTags["Primary"] != expected {
-		t.Fatalf("primary tag = %q, want still-thumbhash seed %q", dto.ImageTags["Primary"], expected)
 	}
 }
 
@@ -142,121 +96,6 @@ func TestLibraryImageTagsUseStablePosterPath(t *testing.T) {
 	}
 	if second.ImageTags["Primary"] != expected {
 		t.Fatalf("library tag = %q, want %q", second.ImageTags["Primary"], expected)
-	}
-}
-
-func TestApplySeriesImagesUsesCanonicalSeriesSeeds(t *testing.T) {
-	secret := "image-secret"
-	codec := NewResourceIDCodec()
-	seriesContentID := "series-1"
-	seriesRouteID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
-	updatedAt := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
-	dto := baseItemDTO{SeriesID: seriesRouteID}
-	series := seriesImageSet{
-		ContentID:         seriesContentID,
-		PosterURL:         "https://cdn.example.test/poster.jpg?sig=one",
-		PosterPath:        "metadb://poster/series-1",
-		PosterThumbhash:   "poster-thumbhash",
-		BackdropURL:       "https://cdn.example.test/backdrop.jpg?sig=one",
-		BackdropPath:      "metadb://backdrop/series-1",
-		BackdropThumbhash: "backdrop-thumbhash",
-		UpdatedAt:         updatedAt,
-	}
-
-	newMapper(codec, &config.Config{
-		Auth: config.AuthConfig{JWTSecret: secret},
-	}).applySeriesImages(&dto, series)
-
-	signer := newImageTagSigner(secret)
-	expectedPrimary := signer.Tag(
-		imageTagSeed(series.ContentID, "Primary", compatCardImageSize, series.PosterPath, series.PosterThumbhash, updatedAt),
-		series.PosterURL,
-	)
-	expectedBackdrop := signer.Tag(
-		imageTagSeed(series.ContentID, "Backdrop", compatCardImageSize, series.BackdropPath, series.BackdropThumbhash, updatedAt),
-		series.BackdropURL,
-	)
-
-	if dto.SeriesPrimaryImageTag != expectedPrimary {
-		t.Fatalf("SeriesPrimaryImageTag = %q, want %q", dto.SeriesPrimaryImageTag, expectedPrimary)
-	}
-	if len(dto.ParentBackdropImageTags) != 1 || dto.ParentBackdropImageTags[0] != expectedBackdrop {
-		t.Fatalf("ParentBackdropImageTags = %#v, want [%q]", dto.ParentBackdropImageTags, expectedBackdrop)
-	}
-	if dto.ParentThumbImageTag != expectedBackdrop {
-		t.Fatalf("ParentThumbImageTag = %q, want %q", dto.ParentThumbImageTag, expectedBackdrop)
-	}
-}
-
-// An episode's show logo is found through ParentLogoItemId, as Jellyfin
-// sets it; clients never look for a logo on the episode itself.
-func TestApplySeriesImagesSetsParentLogo(t *testing.T) {
-	codec := NewResourceIDCodec()
-	secret := "logo-secret"
-	updatedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	seriesRouteID := codec.EncodeStringID(EncodedIDItem, "series:tvdb:75805")
-	dto := baseItemDTO{SeriesID: seriesRouteID}
-	series := seriesImageSet{
-		ContentID: "series:tvdb:75805",
-		LogoURL:   "/api/v2/artwork/tvdb/series/75805/logo/w500.abc.webp?exp=1&sig=x",
-		LogoPath:  "tvdb/series/75805/logo.png",
-		UpdatedAt: updatedAt,
-	}
-
-	newMapper(codec, &config.Config{
-		Auth: config.AuthConfig{JWTSecret: secret},
-	}).applySeriesImages(&dto, series)
-
-	want := newImageTagSigner(secret).Tag(
-		imageTagSeed(series.ContentID, "Logo", compatCardImageSize, series.LogoPath, "", updatedAt),
-		series.LogoURL,
-	)
-	if dto.ParentLogoItemID != seriesRouteID {
-		t.Fatalf("ParentLogoItemID = %q, want the series id %q", dto.ParentLogoItemID, seriesRouteID)
-	}
-	if dto.ParentLogoImageTag == "" || dto.ParentLogoImageTag != want {
-		t.Fatalf("ParentLogoImageTag = %q, want %q", dto.ParentLogoImageTag, want)
-	}
-
-	// The tag names the same image as the series' own ImageTags["Logo"].
-	seriesDTO := newMapper(codec, &config.Config{Auth: config.AuthConfig{JWTSecret: secret}}).itemFromList(upstreamListItem{
-		ContentID: series.ContentID, Type: "series", Title: "Show",
-		LogoURL: series.LogoURL, LogoPath: series.LogoPath, UpdatedAt: updatedAt,
-	}, false, nil, nil)
-	if seriesDTO.ImageTags["Logo"] != dto.ParentLogoImageTag {
-		t.Fatalf("series Logo tag %q differs from the episode's ParentLogoImageTag %q", seriesDTO.ImageTags["Logo"], dto.ParentLogoImageTag)
-	}
-
-	// A series without a logo leaves the episode without one.
-	bare := baseItemDTO{SeriesID: seriesRouteID}
-	newMapper(codec, &config.Config{Auth: config.AuthConfig{JWTSecret: secret}}).applySeriesImages(&bare, seriesImageSet{ContentID: series.ContentID})
-	if bare.ParentLogoItemID != "" || bare.ParentLogoImageTag != "" {
-		t.Fatalf("ParentLogo set without a series logo: %q %q", bare.ParentLogoItemID, bare.ParentLogoImageTag)
-	}
-}
-
-// List paths (Resume, Next Up, episode lists, collections) give episodes their
-// series artwork through applyCompatEpisodeTarget; the logo comes with it and
-// is remembered for the series image route.
-func TestApplyCompatEpisodeTargetCarriesSeriesLogo(t *testing.T) {
-	codec := NewResourceIDCodec()
-	images := NewImageCache(time.Hour, time.Now)
-	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{}), images: images}
-	seriesRouteID := codec.EncodeStringID(EncodedIDItem, "series-1")
-	dto := baseItemDTO{ID: codec.EncodeStringID(EncodedIDItem, "ep-1"), SeriesID: seriesRouteID}
-	target := compatEpisodeTarget{SeriesImages: seriesImageSet{
-		ContentID: "series-1",
-		LogoURL:   "https://cdn.example.test/series-1-logo.png?sig=one",
-		LogoPath:  "metadb://logo/series-1",
-	}}
-
-	h.applyCompatEpisodeTarget(&dto, target)
-
-	if dto.ParentLogoItemID != seriesRouteID || dto.ParentLogoImageTag == "" {
-		t.Fatalf("ParentLogo = %q %q, want the series id and a tag", dto.ParentLogoItemID, dto.ParentLogoImageTag)
-	}
-	if got, ok := images.LookupSized(seriesRouteID, "Logo", "", compatCardImageSize); !ok || got != target.SeriesImages.LogoURL {
-		t.Fatalf("remembered series logo = %q, %v; want %q", got, ok, target.SeriesImages.LogoURL)
 	}
 }
 

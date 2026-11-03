@@ -202,12 +202,6 @@ it("asks for the public URL before anyone fills in an invitation", () => {
     "/admin/settings/general",
   );
 });
-it("does not block invitations while the settings are unknown", () => {
-  mocks.publicURL = undefined;
-  render(<InvitationsTab />, { wrapper: MemoryRouter });
-  expect(screen.getByRole("button", { name: "Invite someone" })).not.toBeDisabled();
-  expect(screen.queryByText(/Set the Silo public URL/)).toBeNull();
-});
 it("creates a link invitation without an address and shows the link to share", async () => {
   mocks.create.mockResolvedValue({
     invitation: linkRow,

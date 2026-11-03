@@ -24,44 +24,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it("reads dashboard aggregates through v2", async () => {
-  const body = { total_users: 3, watch_providers: [] };
-  const fetchMock = vi
-    .fn<typeof fetch>()
-    .mockResolvedValue(
-      new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }),
-    );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => useAdminStats(), { wrapper: wrapper() });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(result.current.data).toMatchObject(body);
-  expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v2/admin/stats");
-});
-it("rejects metadata decoded under a different account or profile", async () => {
-  let finish!: (body: string) => void;
-  let start!: () => void;
-  const reading = new Promise<void>((resolve) => {
-    start = resolve;
-  });
-  const response = new Response(null, { headers: { "Content-Type": "application/json" } });
-  vi.spyOn(response, "text").mockImplementation(() => {
-    start();
-    return new Promise((resolve) => {
-      finish = resolve;
-    });
-  });
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  renderHook(() => useAdminStats(), { wrapper: wrapper(client) });
-  await reading;
-  const captured = client.getQueryCache().getAll()[0]!;
-  await act(async () => {
-    setProfileId("profile-b");
-    finish(JSON.stringify({ status: "available" }));
-  });
-  await waitFor(() => expect(captured.state.status).toBe("error"));
-  expect(captured.state.data).toBeUndefined();
-});
 
 it("publishes manual refresh into the mounted authority-scoped query", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

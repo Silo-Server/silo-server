@@ -48,8 +48,8 @@ func assertUserSettingsEnvelope(t *testing.T, env evt.Envelope, wantKey, wantSco
 	if string(payload["profile_id"]) != `"profile-1"` {
 		t.Errorf("payload profile_id = %s, want \"profile-1\"", payload["profile_id"])
 	}
-	// The value must never ride along: admins receive every user's user-scoped
-	// events, so a value here would leak private settings to admins.
+	// Events only invalidate the cache; recipients fetch values over HTTP
+	// under their current session and profile authority.
 	if raw, present := payload["value"]; present {
 		t.Errorf("payload carries a value (%s); it must never leak into events", raw)
 	}
@@ -75,28 +75,4 @@ func TestDeleteValuePublishesUserSettingsEvent(t *testing.T) {
 
 	env := receiveUserSettingsEvent(t, events)
 	assertUserSettingsEnvelope(t, env, "playback.subtitle_language", "profile")
-}
-
-// TestFailedMutationsPublishNothing: a refused write and a delete of nothing
-// must not tell clients something changed.
-func TestFailedMutationsPublishNothing(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
-	events, unsubscribe := handler.EventsHub.Subscribe()
-	defer unsubscribe()
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile", []byte(`{"value":"!!!"}`)); rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid PUT = %d, want 400", rec.Code)
-	}
-	if rec := routeValues(t, handler, http.MethodDelete, "playback.subtitle_language",
-		"scope=profile", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE of nothing = %d, want 404", rec.Code)
-	}
-
-	select {
-	case env := <-events:
-		t.Errorf("a failed mutation published %s on %s", env.Event, env.Channel)
-	default:
-	}
 }

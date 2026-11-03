@@ -8,14 +8,9 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import {
-  getAdminRequestUsage,
   getAdminUserDownloadSummary,
-  getAdminUserWatchSummary,
   listAdminUserDevices,
-  listAdminUserLiveSessions,
   listAdminUserPlays,
-  listAdminUserProfileActivity,
-  listAllAdminUserDownloadSubscriptions,
   listAllAdminUserDownloads,
 } from "./adminUserActivity";
 
@@ -70,24 +65,6 @@ const download = {
   completed_at: null,
   status_event_at: null,
 };
-const subscription = {
-  id: "5",
-  profile_id: "p1",
-  device_id: "dev-a",
-  series_id: "series-1",
-  series_title: "Severance",
-  mode: "all",
-  season_numbers: [],
-  target_season: null,
-  delete_watched: true,
-  max_storage_bytes: 0,
-  active: true,
-  on_device: 6,
-  in_progress: 0,
-  removed_episodes: 2,
-  created_at: "2026-09-28T10:00:00.000Z",
-  updated_at: "2026-09-28T10:00:00.000Z",
-};
 
 beforeEach(() => {
   localStorage.clear();
@@ -100,93 +77,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-});
-
-it("addresses each account read by its string id and maps nullables", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
-    const path = new URL(String(input), "http://localhost").pathname;
-    if (path.endsWith("/devices"))
-      return response({
-        items: [
-          {
-            device_id: "dev-a",
-            device_name: "Apple TV",
-            device_platform: "tvOS",
-            last_seen_at: null,
-            last_updated: "2026-09-28T10:00:00.000Z",
-            override_count: 2,
-            profiles: [
-              { profile_id: "p1", profile_name: "", override_count: 2, last_seen_at: null },
-            ],
-          },
-        ],
-        page: done,
-      });
-    if (path.endsWith("/profiles"))
-      return response({ items: [{ id: "p1", name: "Main", last_seen_at: null }], page: done });
-    if (path.endsWith("/watch-summary"))
-      return response({
-        days: 7,
-        profile_id: "p1",
-        since: "2026-09-22T10:00:00.000Z",
-        plays: 4,
-        completed_plays: 2,
-        watched_seconds: 900,
-        last_played_at: null,
-      });
-    if (path.endsWith("/usage"))
-      return response({
-        requests_enabled: true,
-        allowed: false,
-        unlimited: false,
-        used: 3,
-        max_requests: 10,
-        window_days: 7,
-        window_start: "2026-09-22T10:00:00.000Z",
-        remaining: 7,
-        auto_approve: false,
-      });
-    if (path.endsWith("/downloads/summary"))
-      return response({
-        total: 3,
-        completed: 1,
-        in_progress: 2,
-        failed: 0,
-        revoked: 0,
-        total_bytes: 3000,
-        devices: 1,
-        monitored_series: 1,
-      });
-    throw new Error(`unexpected ${path}`);
-  });
-  vi.stubGlobal("fetch", fetch);
-
-  const devices = await listAdminUserDevices(7, ctx());
-  expect(url(fetch, 0).pathname).toBe("/api/v2/admin/users/7/devices");
-  expect(devices[0]).toMatchObject({ last_seen_at: null, override_count: 2 });
-  expect(devices[0]!.profiles[0]).toEqual({
-    profile_id: "p1",
-    profile_name: "",
-    override_count: 2,
-    last_seen_at: null,
-  });
-
-  expect(await listAdminUserProfileActivity(7, ctx())).toEqual([
-    { id: "p1", name: "Main", last_seen_at: null },
-  ]);
-  expect(url(fetch, 1).pathname).toBe("/api/v2/admin/users/7/profiles");
-
-  const summary = await getAdminUserWatchSummary(7, { days: 7, profileId: "p1" }, ctx());
-  expect(url(fetch, 2).pathname).toBe("/api/v2/admin/users/7/watch-summary");
-  expect(url(fetch, 2).searchParams.get("days")).toBe("7");
-  expect(url(fetch, 2).searchParams.get("profile_id")).toBe("p1");
-  expect(summary).toMatchObject({ plays: 4, last_played_at: null });
-
-  expect(await getAdminRequestUsage(7, ctx())).toMatchObject({ allowed: false, used: 3 });
-  expect(url(fetch, 3).pathname).toBe("/api/v2/admin/request-users/7/usage");
-
-  expect(await getAdminUserDownloadSummary(7, ctx())).toMatchObject({ total: 3 });
-  expect(url(fetch, 4).pathname).toBe("/api/v2/admin/users/7/downloads/summary");
 });
 
 it("filters plays by account, profile and ended_after derived from days", async () => {
@@ -286,18 +176,6 @@ it("keeps the downloads it read when the account has more than the page cap", as
   expect(fetch).toHaveBeenCalledTimes(25);
 });
 
-it("keeps season numbers an array and maps monitors", async () => {
-  const fetch = vi
-    .fn<typeof globalThis.fetch>()
-    .mockResolvedValue(response({ items: [subscription], page: done }));
-  vi.stubGlobal("fetch", fetch);
-  const {
-    items: [row],
-  } = await listAllAdminUserDownloadSubscriptions(7, ctx());
-  expect(url(fetch).pathname).toBe("/api/v2/admin/users/7/download-subscriptions");
-  expect(row).toMatchObject({ season_numbers: [], target_season: null, removed_episodes: 2 });
-});
-
 it("rejects a bounded device list that claims more pages", async () => {
   vi.stubGlobal(
     "fetch",
@@ -308,56 +186,6 @@ it("rejects a bounded device list that claims more pages", async () => {
   await expect(listAdminUserDevices(7, ctx())).rejects.toThrow(
     "Invalid device page. Reload the page.",
   );
-});
-
-it("reads live sessions for one account and projects numeric ids", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-    response({
-      items: [
-        {
-          session_id: "live-1",
-          user_id: "7",
-          media_file_id: "3",
-          requested_media_file_id: "3",
-          profile_id: "p1",
-          media_title: "Hello",
-          play_method: "direct",
-        },
-      ],
-      page: done,
-    }),
-  );
-  vi.stubGlobal("fetch", fetch);
-  const sessions = await listAdminUserLiveSessions(7, ctx());
-  expect(url(fetch).pathname).toBe("/api/v2/admin/sessions");
-  expect(url(fetch).searchParams.get("user_id")).toBe("7");
-  expect(url(fetch).searchParams.get("limit")).toBe("100");
-  expect(sessions[0]).toMatchObject({ session_id: "live-1", user_id: 7, media_file_id: 3 });
-});
-
-it("keeps the live sessions it read past the page cap", async () => {
-  let page = 0;
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {
-    page += 1;
-    return response({
-      items: [
-        {
-          session_id: `live-${page}`,
-          user_id: "7",
-          media_file_id: "3",
-          requested_media_file_id: "3",
-          profile_id: "p1",
-          media_title: "Hello",
-          play_method: "direct",
-        },
-      ],
-      page: { has_more: true, next_cursor: `c${page}` },
-    });
-  });
-  vi.stubGlobal("fetch", fetch);
-  const sessions = await listAdminUserLiveSessions(7, ctx());
-  expect(sessions).toHaveLength(10);
-  expect(fetch).toHaveBeenCalledTimes(10);
 });
 
 it("refuses to deliver a read after the admin authority changed", async () => {

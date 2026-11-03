@@ -38,6 +38,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -165,6 +166,16 @@ func ForMovie(ids ProviderIDs) (string, bool) {
 		return "", false
 	}
 	return kindMovie + sep + provider + sep + id, true
+}
+
+// AnchorPrecedence returns the providers whose IDs anchor an item of itemType,
+// in the order ForMovie and ForSeries try them: TVDB first for a series,
+// TMDB first for anything else.
+func AnchorPrecedence(itemType string) []string {
+	if strings.EqualFold(strings.TrimSpace(itemType), kindSeries) {
+		return slices.Clone(seriesProviderPrecedence)
+	}
+	return slices.Clone(movieProviderPrecedence)
 }
 
 // ForSeries returns the deterministic content_id for a series, or ("", false)

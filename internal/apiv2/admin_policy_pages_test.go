@@ -20,7 +20,7 @@ func testAdminPolicyPages(t *testing.T, pool *pgxpool.Pool, h http.Handler, docu
 		if err := pool.QueryRow(ctx, `INSERT INTO policy_documents(domain,name,enabled) VALUES('action',$1,false) RETURNING id`, fmt.Sprintf("Policy pagination fixture %d", i)).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _, _ = pool.Exec(ctx, `DELETE FROM policy_documents WHERE id=$1`, id) }()
+		defer func() { _, _ = pool.Exec(ctx, `DELETE FROM policy_documents WHERE id=$1`, id) }() //nolint:gocritic,revive // each fixture row is removed when the test returns
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO policy_document_versions(document_id,version_number,rego_source,source_sha256,compiled_ok) SELECT $1,n,'fixture','fixture',false FROM generate_series(3,7) AS n`, string(document)); err != nil {
 		t.Fatal(err)

@@ -404,7 +404,10 @@ function NotificationsInbox() {
       </div>
 
       {showSeries ? (
-        <NotifiedSeriesList onOpenPreferences={() => setPreferencesOpen(true)} />
+        <NotifiedSeriesList
+          onOpenPreferences={() => setPreferencesOpen(true)}
+          canMute={capability?.series?.mute === true}
+        />
       ) : (
         <>
           {markAllRead.isError && (

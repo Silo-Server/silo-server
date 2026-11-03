@@ -64,6 +64,9 @@ type MarkWatchedTarget struct {
 	// EventAt preserves an explicitly supplied progress date while the write
 	// timestamp advances independently. Nil retains normal manual-mark timing.
 	EventAt *time.Time
+	// RecordRewatch marks a completed target that has a resume position again,
+	// recording its play; otherwise a completed target is left as it is.
+	RecordRewatch bool
 }
 
 // WatchedBatchWriter is an optional store capability: mark every target

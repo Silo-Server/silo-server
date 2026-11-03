@@ -7,7 +7,7 @@ type APIKey struct {
 	ID         int64
 	UserID     int
 	Label      string
-	Key        string // full key including "sa_" prefix
+	Key        string // creation-only bearer; empty on authentication reads
 	RateTier   string
 	Scopes     []string // empty = unscoped (full access as the owning user)
 	CreatedAt  time.Time

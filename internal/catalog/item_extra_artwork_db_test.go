@@ -3,28 +3,11 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func newExtraArtworkTestPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // noFileVersions is a FileVersionFetcher for items without files.
 type noFileVersions struct{}
@@ -41,7 +24,7 @@ func (noFileVersions) GetByEpisodeID(context.Context, string) ([]*models.MediaFi
 // item projection, and the image cache writes each slot only while the row
 // still holds the source it read.
 func TestItemExtraArtworkSlotsRoundTripDB(t *testing.T) {
-	pool := newExtraArtworkTestPool(t)
+	pool := newTestPool(t)
 	ctx := context.Background()
 	repo := NewItemRepository(pool)
 	contentID := fmt.Sprintf("extra-art-%d", time.Now().UnixNano())
@@ -102,7 +85,7 @@ func TestItemExtraArtworkSlotsRoundTripDB(t *testing.T) {
 }
 
 func TestItemBackdropRepositoryDB(t *testing.T) {
-	pool := newExtraArtworkTestPool(t)
+	pool := newTestPool(t)
 	ctx := context.Background()
 	items := NewItemRepository(pool)
 	repo := NewItemBackdropRepository(pool)
@@ -203,7 +186,7 @@ func TestItemBackdropRepositoryDB(t *testing.T) {
 // A cache job that writes a backdrop row while a refresh replaces the item's
 // backdrops finishes first, and the copy it wrote moves with its source.
 func TestItemBackdropReplaceWaitsForCacheWriteDB(t *testing.T) {
-	pool := newExtraArtworkTestPool(t)
+	pool := newTestPool(t)
 	ctx := context.Background()
 	items := NewItemRepository(pool)
 	repo := NewItemBackdropRepository(pool)

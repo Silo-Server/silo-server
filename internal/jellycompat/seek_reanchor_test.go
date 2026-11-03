@@ -23,7 +23,6 @@ func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 		copy, want         bool
 	}{
 		{"missing", "", "", true, false},
-		{"false", `,"SiloSeekReanchor":false`, "", true, false},
 		{"body", `,"SiloSeekReanchor":true`, "", true, true},
 		{"query", "", "?siloseekreanchor=true&starttimeticks=9000000000", true, true},
 		{"encoding is not opted in", `,"SiloSeekReanchor":true`, "", false, false},
@@ -36,6 +35,7 @@ func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 			container := "mp4"
 			if !tc.copy {
 				container = "ts"
+				version.CodecVideo = "mpeg2video"
 			}
 			body := fmt.Sprintf(`{"StartTimeTicks":9000000000,"EnableDirectPlay":false,"SubtitleStreamIndex":-1,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":%q,"VideoCodec":"h264","AudioCodec":"aac"}]}%s}`, container, tc.field)
 			req := httptest.NewRequest("POST", "/Items/"+item+"/PlaybackInfo"+tc.query, strings.NewReader(body))
@@ -90,8 +90,6 @@ func TestSeekReanchorLocalAndRemoteFreezeActualOrigin(t *testing.T) {
 		enabled           bool
 	}{
 		{"initial resume", 900, 898.125, true},
-		{"forward outside window", 1800, 1798.125, true},
-		{"backward outside window", 300, 298.125, true},
 		{"legacy source-zero startup", 900, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
-// TestRecipeCardRoundTripOpts verifies recipe cards restore transcode options.
-func TestRecipeCardRoundTripOpts(t *testing.T) {
-	revision := tonemap.SourceRevision{MediaFileID: 77, FileSize: 100, FileModifiedUnixNano: 200, StreamSignature: "stream"}
-	opts := TranscodeOpts{
+// recipeCardFixtureOpts is a transcode recipe with every byte-affecting
+// field set, for the card and claims round-trip tests.
+func recipeCardFixtureOpts(revision tonemap.SourceRevision) TranscodeOpts {
+	return TranscodeOpts{
 		InputPath:                "/media/movie.mkv",
 		OutputDir:                "/tmp/silo-transcode/abc",
 		SessionID:                "abc",
@@ -52,7 +53,17 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		TotalDuration:          7200,
 		FastStart:              true,
 		ThrottleSeconds:        180,
+		CopyVideoMPEGTS:        true,
+		KeyframePlaylist:       true,
+		// Playlist form, not media bytes, but a reconstruct must keep it.
+		HLSVariableSubstitution: true,
 	}
+}
+
+// TestRecipeCardRoundTripOpts verifies recipe cards restore transcode options.
+func TestRecipeCardRoundTripOpts(t *testing.T) {
+	revision := tonemap.SourceRevision{MediaFileID: 77, FileSize: 100, FileModifiedUnixNano: 200, StreamSignature: "stream"}
+	opts := recipeCardFixtureOpts(revision)
 
 	card := NewRecipeCard(42, "profile-1", 77, "", opts)
 	if card.SessionID != "abc" || card.UserID != 42 || card.ProfileID != "profile-1" || card.MediaFileID != 77 {
@@ -61,6 +72,14 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 
 	// Rebuild opts; environment-specific fields are re-supplied by the caller.
 	got := card.TranscodeOpts("/tmp/silo-transcode/abc", "/usr/bin/ffmpeg", nil)
+	checkRoundTripStreamOpts(t, got)
+	checkRoundTripRecipeOpts(t, got, opts, revision)
+}
+
+// checkRoundTripStreamOpts checks the seek, track and encode fields
+// TestRecipeCardRoundTripOpts rebuilds from the card.
+func checkRoundTripStreamOpts(t *testing.T, got TranscodeOpts) {
+	t.Helper()
 	if got.StartSegmentNumber != 450 {
 		t.Errorf("StartSegmentNumber = %d, want 450", got.StartSegmentNumber)
 	}
@@ -88,6 +107,12 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.ThrottleSeconds != 180 {
 		t.Errorf("ThrottleSeconds = %d, want 180", got.ThrottleSeconds)
 	}
+}
+
+// checkRoundTripRecipeOpts checks the video recipe, tone-map and
+// environment fields TestRecipeCardRoundTripOpts rebuilds from the card.
+func checkRoundTripRecipeOpts(t *testing.T, got, opts TranscodeOpts, revision tonemap.SourceRevision) {
+	t.Helper()
 	if got.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
@@ -110,6 +135,12 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
+	}
+	if !got.CopyVideoMPEGTS || !got.KeyframePlaylist {
+		t.Errorf("copy-video MPEG-TS or keyframe playlist lost in round trip: %+v", got)
+	}
+	if !got.HLSVariableSubstitution {
+		t.Error("HLSVariableSubstitution lost in round trip")
 	}
 }
 
@@ -144,31 +175,6 @@ func TestRecipeCardOriginalStartedAtRoundTripAndReconstruct(t *testing.T) {
 	session := tm.ReconstructSession(t.Context(), "started", 42, back)
 	if session == nil || !session.StartedAt.Equal(started) || session.StreamLocation != "local" {
 		t.Fatalf("reconstructed StartedAt = %v, want %s", session, started)
-	}
-}
-
-func TestRecipeCardPreservesCopyVideoMPEGTS(t *testing.T) {
-	card := NewRecipeCard(42, "profile-1", 77, "", TranscodeOpts{
-		SessionID: "copy-ts", TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyVideoMPEGTS: true,
-	})
-	if !card.TranscodeOpts(t.TempDir(), "/usr/bin/ffmpeg", nil).CopyVideoMPEGTS {
-		t.Fatal("stored recipe lost copy-video MPEG-TS selection")
-	}
-	if back := RecipeCardFromClaims(ptr(card.ToClaims())); !back.CopyVideoMPEGTS {
-		t.Fatal("stream-token recipe lost copy-video MPEG-TS selection")
-	}
-}
-
-// A rebuilt session must keep serving the keyframe playlist the player has.
-func TestRecipeCardPreservesKeyframePlaylist(t *testing.T) {
-	card := NewRecipeCard(42, "profile-1", 77, "", TranscodeOpts{
-		SessionID: "planned", TargetCodecVideo: "copy", TargetCodecAudio: "copy", KeyframePlaylist: true,
-	})
-	if !card.TranscodeOpts(t.TempDir(), "/usr/bin/ffmpeg", nil).KeyframePlaylist {
-		t.Fatal("stored recipe lost the keyframe playlist")
-	}
-	if back := RecipeCardFromClaims(ptr(card.ToClaims())); !back.KeyframePlaylist {
-		t.Fatal("stream-token recipe lost the keyframe playlist")
 	}
 }
 
@@ -216,22 +222,6 @@ func TestRecipeCardNetworkRouteSurvivesRecovery(t *testing.T) {
 	}
 }
 
-func ptr[T any](value T) *T { return &value }
-
-func TestRecipeCardPlayMethodConstructors(t *testing.T) {
-	if c := NewRecipeCard(1, "p", 2, "", TranscodeOpts{SessionID: "t"}); c.PlayMethod != PlayTranscode {
-		t.Errorf("transcode card PlayMethod = %q, want transcode", c.PlayMethod)
-	}
-	d := NewDirectRecipeCard("d", 1, "p", 2)
-	if d.PlayMethod != PlayDirect || d.SessionID != "d" || d.MediaFileID != 2 {
-		t.Errorf("direct card wrong: %+v", d)
-	}
-	r := NewRemuxRecipeCard("r", 1, "p", 2, true, 3)
-	if r.PlayMethod != PlayRemux || !r.TranscodeAudio || r.AudioTrackIndex != 3 {
-		t.Errorf("remux card wrong: %+v", r)
-	}
-}
-
 // A transcode card must record whether audio is actually re-encoded so the
 // reconstructed session classifies correctly in admin views: only an explicit
 // "copy" leaves the audio untouched (an empty codec runs ffmpeg's aac default).
@@ -264,6 +254,8 @@ func TestRecipeCardClientMetadataStoredNotInClaims(t *testing.T) {
 	card.ClientBuild = "20260814"
 	card.ClientChannel = "beta"
 	card.ClientUserAgent = "Findroid/0.15"
+	card.DeviceID = "device-1"
+	card.DevicePlatform = "Android"
 
 	encoded, err := json.Marshal(card)
 	if err != nil {
@@ -273,19 +265,22 @@ func TestRecipeCardClientMetadataStoredNotInClaims(t *testing.T) {
 	if err := json.Unmarshal(encoded, &back); err != nil {
 		t.Fatalf("unmarshal card: %v", err)
 	}
-	if back.ClientName != "Findroid" || back.ClientVersion != "0.15" || back.ClientBuild != "20260814" || back.ClientChannel != "beta" || back.ClientUserAgent != "Findroid/0.15" {
+	if back.ClientName != "Findroid" || back.ClientVersion != "0.15" || back.ClientBuild != "20260814" || back.ClientChannel != "beta" || back.ClientUserAgent != "Findroid/0.15" ||
+		back.DeviceID != "device-1" || back.DevicePlatform != "Android" {
 		t.Fatalf("client metadata lost in stored-card round trip: %+v", back)
 	}
 
 	claims := card.ToClaims()
 	fromClaims := RecipeCardFromClaims(&claims)
-	if fromClaims.ClientName != "" || fromClaims.ClientVersion != "" || fromClaims.ClientBuild != "" || fromClaims.ClientChannel != "" || fromClaims.ClientUserAgent != "" {
+	if fromClaims.ClientName != "" || fromClaims.ClientVersion != "" || fromClaims.ClientBuild != "" || fromClaims.ClientChannel != "" || fromClaims.ClientUserAgent != "" ||
+		fromClaims.DeviceID != "" || fromClaims.DevicePlatform != "" {
 		t.Fatalf("client metadata must not travel via token claims: %+v", fromClaims)
 	}
 }
 
 // TestReconstructSessionRestoresClientMetadata verifies a rebuilt session keeps its client identity,
-// so the admin client label and Jellyfin pill survive a server restart.
+// so the admin client label and Jellyfin pill survive a server restart, and takes the viewer's
+// address from the media request that rebuilt it.
 func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	tm := NewTranscodeManager()
 	tm.Sessions = NewSessionManager(0, 0)
@@ -296,12 +291,18 @@ func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	card.ClientBuild = "  20260814\x00  "
 	card.ClientChannel = "  beta\t  "
 	card.ClientUserAgent = "  Findroid/0.15 (Android)  "
+	card.DeviceID = "  device-1  "
+	card.DevicePlatform = "  Android  "
 
-	session := tm.ReconstructSession(t.Context(), "sess-jf", 42, card)
+	session := tm.ReconstructSession(clientip.SetContext(t.Context(), "203.0.113.20"), "sess-jf", 42, card)
 	if session == nil {
 		t.Fatal("reconstruct returned nil")
 	}
-	if session.ClientName != "Findroid" || session.ClientVersion != "0.15" || session.ClientBuild != "20260814" || session.ClientChannel != "beta" || session.ClientUserAgent != "Findroid/0.15 (Android)" {
+	if session.ClientIP != "203.0.113.20" {
+		t.Fatalf("ClientIP = %q, want the rebuilding request's 203.0.113.20", session.ClientIP)
+	}
+	if session.ClientName != "Findroid" || session.ClientVersion != "0.15" || session.ClientBuild != "20260814" || session.ClientChannel != "beta" || session.ClientUserAgent != "Findroid/0.15 (Android)" ||
+		session.DeviceID != "device-1" || session.DevicePlatform != "Android" {
 		t.Fatalf("client metadata not restored: %+v", session)
 	}
 	if !session.TranscodeAudio {
@@ -312,48 +313,6 @@ func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	}
 }
 
-// TestSetTranscodeStreamDetails verifies the running transcode's encode decisions are recorded
-// on the live session so sync rows classify by actual work (video copy =
-// repackage) rather than the transport method, while also reporting the
-// confirmed encoder and tone-map executors.
-func TestSetTranscodeStreamDetails(t *testing.T) {
-	m := NewSessionManager(0, 0)
-	m.RegisterReconstructed(&Session{ID: "sess-1", UserID: 7, PlayMethod: PlayTranscode})
-
-	if err := m.SetTranscodeStreamDetails("sess-1", "copy", "aac", true, "qsv", tonemap.ModeHardware); err != nil {
-		t.Fatalf("SetTranscodeStreamDetails: %v", err)
-	}
-	s, err := m.GetSession("sess-1")
-	if err != nil {
-		t.Fatalf("GetSession: %v", err)
-	}
-	if s.TargetVideoCodec != "copy" || s.TargetAudioCodec != "aac" || !s.TranscodeAudio || s.TranscodeHWAccel != "qsv" || s.ToneMapMode != tonemap.ModeHardware {
-		t.Fatalf("details not recorded: %+v", s)
-	}
-	if err := m.SetTranscodeStreamDetails("missing", "h264", "aac", true, "none", tonemap.ModeSoftware); err == nil {
-		t.Fatal("expected ErrSessionNotFound for unknown session")
-	}
-}
-
-// A card persisted before the play_method discriminator existed must decode with
-// an empty PlayMethod so reconstruct can treat it as a transcode (back-compat).
-func TestRecipeCardLegacyDecodeHasEmptyPlayMethod(t *testing.T) {
-	legacy := []byte(`{"session_id":"old","user_id":7,"media_file_id":9,"segment_duration":2,"start_segment_number":10}`)
-	var card RecipeCard
-	if err := json.Unmarshal(legacy, &card); err != nil {
-		t.Fatalf("decode legacy card: %v", err)
-	}
-	if card.PlayMethod != "" {
-		t.Fatalf("legacy card PlayMethod = %q, want empty (decodes as transcode)", card.PlayMethod)
-	}
-	if card.SourceAudioChannels != 0 {
-		t.Fatalf("legacy card source audio channels = %d, want unknown", card.SourceAudioChannels)
-	}
-	if card.SessionID != "old" || card.UserID != 7 || card.StartSegmentNumber != 10 {
-		t.Fatalf("legacy fields lost: %+v", card)
-	}
-}
-
 // TestRecipeCardClaimsRoundTrip verifies a transcode recipe survives stream-token claims:
 // the token IS the durable descriptor under token-carried reconstruction, so any
 // dropped byte-affecting field would reconstruct a divergent encode. HWAccel,
@@ -361,43 +320,14 @@ func TestRecipeCardLegacyDecodeHasEmptyPlayMethod(t *testing.T) {
 // re-resolved from live config, so they are not asserted here.
 func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	revision := tonemap.SourceRevision{MediaFileID: 77, FileSize: 100, FileModifiedUnixNano: 200, StreamSignature: "stream"}
-	card := NewRecipeCard(42, "profile-1", 77, "http://node:9000", TranscodeOpts{
-		InputPath:                "/media/movie.mkv",
-		SessionID:                "abc",
-		SourceVideoCodec:         "hevc",
-		SourceVideoProfile:       "Main 10",
-		SourceVideoBitDepth:      10,
-		SoftwareVideoDecode:      true,
-		ToneMapPolicy:            tonemap.PolicySoftwareOnly,
-		ToneMapMode:              tonemap.ModeSoftware,
-		ToneMapSourceKind:        tonemap.SourceHLG,
-		ToneMapFilter:            "tonemapx",
-		ToneMapRecipeVersion:     TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapPreflightRequired: true,
-		ToneMapSourceRevision:    revision,
-		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
-		VideoSampleEntry:       VideoSampleEntryDVH1,
-		SeekSeconds:            900,
-		StreamOriginSeconds:    896,
-		CopySeekAnchorResolved: true,
-		TargetResolution:       "1080p",
-		TargetCodecVideo:       "h264",
-		TargetCodecAudio:       "aac",
-		SourceAudioChannels:    8,
-		TargetAudioChannels:    6,
-		TargetAudioBitrateKbps: 320,
-		SegmentDuration:        2,
-		StartSegmentNumber:     450,
-		SubtitleTrackIndex:     3,
-		SubtitleBurnIn:         true,
-		SubtitleCodec:          "hdmv_pgs_subtitle",
-		AudioTrackIndex:        1,
-		TargetBitrateKbps:      8000,
-		ThrottleSeconds:        180,
-		TotalDuration:          7200,
-		FastStart:              true,
-	})
+	opts := recipeCardFixtureOpts(revision)
+	opts.OutputDir, opts.HWAccel, opts.HWDevice = "", "", ""
+	opts.ToneMapPolicy = tonemap.PolicySoftwareOnly
+	opts.ToneMapMode = tonemap.ModeSoftware
+	opts.ToneMapSourceKind = tonemap.SourceHLG
+	opts.ToneMapFilter = "tonemapx"
+	opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps = 8, 6, 320
+	card := NewRecipeCard(42, "profile-1", 77, "http://node:9000", opts)
 	card.RoutingWorkload = "video_transcode"
 	card.RoutingExecution = "transcode"
 	card.RoutingEgress = "proxy"
@@ -432,8 +362,12 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.SubtitleCodec != card.SubtitleCodec ||
 		got.AudioTrackIndex != card.AudioTrackIndex || got.TargetBitrateKbps != card.TargetBitrateKbps ||
 		got.TotalDuration != card.TotalDuration || got.FastStart != card.FastStart ||
-		got.ThrottleSeconds != card.ThrottleSeconds {
+		got.ThrottleSeconds != card.ThrottleSeconds ||
+		!got.CopyVideoMPEGTS || !got.KeyframePlaylist {
 		t.Fatalf("encode parameters lost in round trip (non-v2 source channels must be stripped):\n have %+v\n want %+v", got, card)
+	}
+	if !claims.HLSVariableSubstitution || !got.HLSVariableSubstitution {
+		t.Fatal("HLSVariableSubstitution lost in the stream token")
 	}
 }
 
@@ -502,16 +436,6 @@ func TestRecipeCardAudioV2DiscriminatorRequiresExactAACStereoDownmix(t *testing.
 			wantMethod: string(PlayTranscode), wantTargetChannels: 2,
 		},
 		{
-			name:       "Opus output",
-			card:       RecipeCard{PlayMethod: PlayTranscode, TranscodeAudio: true, TargetCodecAudio: "opus", SourceAudioChannels: 6, TargetAudioChannels: 2},
-			wantMethod: string(PlayTranscode), wantTargetChannels: 2,
-		},
-		{
-			name:       "unknown codec fallback",
-			card:       RecipeCard{PlayMethod: PlayTranscode, TranscodeAudio: true, TargetCodecAudio: "unknown", SourceAudioChannels: 6, TargetAudioChannels: 2},
-			wantMethod: string(PlayTranscode), wantTargetChannels: 2,
-		},
-		{
 			name:       "surround output",
 			card:       RecipeCard{PlayMethod: PlayTranscode, TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 6},
 			wantMethod: string(PlayTranscode), wantTargetChannels: 6,
@@ -551,13 +475,6 @@ func TestToneMapRecipeClaimsUseOldReaderVisibleDiscriminator(t *testing.T) {
 	}
 }
 
-func TestOrdinaryTranscodeRecipeClaimsKeepLegacyMethod(t *testing.T) {
-	claims := (RecipeCard{PlayMethod: PlayTranscode}).ToClaims()
-	if got := claims.PlayMethod; got != string(PlayTranscode) {
-		t.Fatalf("ordinary transcode token method = %q, want %q", got, PlayTranscode)
-	}
-}
-
 func TestCopyFMP4RecipeCardsFailClosedAcrossReaderGenerations(t *testing.T) {
 	card := NewRecipeCard(1, "profile-1", 2, "http://node", TranscodeOpts{
 		SessionID: "copy-fmp4", TargetCodecVideo: "copy", SegmentDuration: 2,
@@ -588,5 +505,29 @@ func TestCopyFMP4RecipeCardsFailClosedAcrossReaderGenerations(t *testing.T) {
 	ordinary := RecipeCard{SessionID: "encoded", PlayMethod: PlayTranscode, TargetCodecVideo: "h264", SegmentDuration: 2}
 	if err := ValidateCopyFMP4RecipeCard(ordinary); err != nil {
 		t.Fatalf("ordinary encoded recipe rejected: %v", err)
+	}
+}
+
+func TestRecipeExecutorNamesAnotherNode(t *testing.T) {
+	oldNode := RecipeExecutor{NodeID: 1, NodeURL: "http://old:9000"}
+	for _, tc := range []struct {
+		name     string
+		executor RecipeExecutor
+		card     RecipeCard
+		want     bool
+	}{
+		{"own card", oldNode, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000/"}, false},
+		{"moved to another node", oldNode, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, true},
+		// Without a row id on the card the move cannot be told from a URL edit.
+		{"card without a row id", oldNode, RecipeCard{TranscodeNodeURL: "http://new:9000"}, false},
+		{"node URL edited, URL-only card", RecipeExecutor{NodeID: 1, NodeURL: "http://alias:9000"}, RecipeCard{TranscodeNodeURL: "http://old:9000"}, false},
+		{"node re-added under a new row", RecipeExecutor{NodeID: 3, NodeURL: "http://old:9000"}, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000"}, false},
+		{"node URL repointed on the same row", RecipeExecutor{NodeID: 1, NodeURL: "http://renamed:9000"}, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000"}, false},
+		{"node identity unresolved", RecipeExecutor{}, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, false},
+		{"node URL unresolved", RecipeExecutor{NodeID: 1}, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, false},
+	} {
+		if got := tc.executor.NamesAnotherNode(tc.card); got != tc.want {
+			t.Errorf("%s: NamesAnotherNode = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

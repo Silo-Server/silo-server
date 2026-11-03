@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -34,6 +35,16 @@ var (
 	ErrJobNotCancellable                 = errors.New("admin job is not cancellable")
 	ErrStorageTransitionAlreadyCommitted = errors.New("storage transition already committed")
 )
+
+// cancellableJobTypes are the job types RequestCancellation accepts. Every v2
+// job resource that reports such a job as cancelable accepts its cancellation.
+var cancellableJobTypes = []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}
+
+// IsCancellableJobType reports whether jobs of this type accept cancellation
+// while queued or running.
+func IsCancellableJobType(jobType string) bool {
+	return slices.Contains(cancellableJobTypes, jobType)
+}
 
 type ActiveJobConflictError struct {
 	Job *models.AdminJob
@@ -846,7 +857,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	job, err := scanAdminJob(r.pool.QueryRow(ctx, `UPDATE admin_jobs
  SET cancel_requested = true, updated_at = CASE WHEN cancel_requested THEN updated_at ELSE NOW() END
  WHERE id = $1 AND job_type = ANY($2) AND status IN ('queued', 'running')
-	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}))
+	 RETURNING `+adminJobColumns, id, cancellableJobTypes))
 	if err == nil {
 		return job, nil
 	}
@@ -857,7 +868,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	if err != nil {
 		return nil, err
 	}
-	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition || job.JobType == JobTypeImageCacheCleanup) && job.Status == StatusCancelled {
+	if IsCancellableJobType(job.JobType) && job.Status == StatusCancelled {
 		return job, nil
 	}
 	return nil, ErrJobNotCancellable

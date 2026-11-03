@@ -126,6 +126,9 @@ func (e *Engine) applyValidation(ctx context.Context, sourceMeta *ItemMetadata, 
 				candTitles[id] = titleYear{title: title, year: year}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate titles failed; validating without them", "component", "recommendations", "error", err)
+		}
 	}
 
 	var validated []ScoredItem
@@ -212,6 +215,9 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 				candStudios[id] = studios
 			}
 		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate studios failed; assigning reasons without them", "component", "recommendations", "error", err)
+		}
 	}
 
 	sourcePeople := allPeople[sourceItemID]
@@ -232,6 +238,6 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 }
 
 func (e *Engine) ensureEmbeddingLockConfig(ctx context.Context) error {
-	_, err := checkEmbeddingLockConfig(ctx, e.repo, e.cfg.EmbeddingBaseURL, e.cfg.EmbeddingModel)
+	_, err := checkEmbeddingLockConfig(ctx, e.repo, e.cfg.EmbeddingModel)
 	return err
 }

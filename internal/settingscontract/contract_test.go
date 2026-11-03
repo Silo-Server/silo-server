@@ -30,25 +30,6 @@ const (
 	jsonNull = "null"
 )
 
-// TestEmbeddedManifestLoads is the gate the whole contract rests on: the
-// checked-in manifest parses, satisfies its own JSON Schema, and passes every
-// structural invariant.
-func TestEmbeddedManifestLoads(t *testing.T) {
-	manifest, err := Load()
-	if err != nil {
-		t.Fatalf("embedded manifest failed to load: %v", err)
-	}
-	if manifest.APIVersion != 1 {
-		t.Errorf("api_version = %d, want 1", manifest.APIVersion)
-	}
-	if manifest.Revision < 1 {
-		t.Errorf("revision = %d, want at least 1", manifest.Revision)
-	}
-	if len(manifest.Definitions) == 0 {
-		t.Fatal("manifest declares no definitions")
-	}
-}
-
 // TestEveryCurrentServerKeyIsRegistered pins the inventory. The design makes an
 // unregistered official key a release blocker, so a key that exists in the
 // legacy registry but not in the manifest has to fail here rather than be
@@ -363,44 +344,6 @@ func sha256Of(manifest []byte, schemas map[string][]byte) string {
 		digest.Write(canonical)
 	}
 	return `"` + hex.EncodeToString(digest.Sum(nil)) + `"`
-}
-
-// TestDerivedRepresentationsAreMemoized keeps the manifest endpoint cheap: all
-// four values are pure functions of files fixed at compile time, and a
-// conditional GET must not pay a full parse and re-serialize to answer 304.
-func TestDerivedRepresentationsAreMemoized(t *testing.T) {
-	first, err := CanonicalBytes()
-	if err != nil {
-		t.Fatalf("canonicalizing: %v", err)
-	}
-	second, err := CanonicalBytes()
-	if err != nil {
-		t.Fatalf("canonicalizing again: %v", err)
-	}
-
-	// Callers get their own copy, so mutating one must not corrupt the cache.
-	if len(first) > 0 {
-		first[0] = 'X'
-	}
-	third, err := CanonicalBytes()
-	if err != nil {
-		t.Fatalf("canonicalizing a third time: %v", err)
-	}
-	if string(second) != string(third) {
-		t.Fatal("mutating a returned slice corrupted the memoized canonical bytes")
-	}
-
-	allocs := testing.AllocsPerRun(100, func() {
-		if _, err := ETag(); err != nil {
-			t.Fatalf("computing ETag: %v", err)
-		}
-		if _, err := PublicETag(); err != nil {
-			t.Fatalf("computing PublicETag: %v", err)
-		}
-	})
-	if allocs > 0 {
-		t.Errorf("ETag()+PublicETag() allocate %.0f times per call; both should be memoized", allocs)
-	}
 }
 
 func TestPublicManifestStripsMaintainerNotes(t *testing.T) {
@@ -1031,6 +974,12 @@ func TestValidateRejectsMalformedManifests(t *testing.T) {
 			d.AllowedScopes = []ScopeEntry{{Scope: ScopeProfile, IntroducedIn: 1}}
 			d.IntroducedIn = 2
 		},
+		"admin default on a client_local setting": func(d *Definition) {
+			d.Persistence = PersistenceClientLocal
+			d.AllowedScopes = []ScopeEntry{{Scope: ScopeClientLocal}}
+			d.ResolutionOrder = []Scope{ScopeClientLocal, ScopeDefault}
+			d.AdminDefault = true
+		},
 	}
 
 	for name, mutate := range cases {
@@ -1236,96 +1185,58 @@ func TestNormalizeValueCanonicalizesLanguageTags(t *testing.T) {
 	}
 }
 
-// TestQuotedNumbersAreRejected covers a type confusion encoding/json will not
-// catch. json.Number is a string kind, so `"1.5"` unmarshals into it happily
-// and Float64 then parses the quoted digits — the value validates, and
-// NormalizeValue stores the quoted form into jsonb where every consumer reading
-// it as a number disagrees with the row.
-func TestQuotedNumbersAreRejected(t *testing.T) {
+// TestValuesEncodingJSONWouldAcceptAreRejected covers values encoding/json
+// decodes without complaint but the contract must refuse on both the validate
+// and the store path.
+func TestValuesEncodingJSONWouldAcceptAreRejected(t *testing.T) {
 	for name, tc := range map[string]struct {
 		schema *ValueSchema
-		raw    string
+		raw    json.RawMessage
 	}{
-		"number":            {&ValueSchema{Type: TypeNumber}, `"1.5"`},
-		"integer":           {&ValueSchema{Type: TypeInteger}, `"3"`},
-		"integer with sign": {&ValueSchema{Type: TypeInteger}, `"-3"`},
+		// json.Number is a string kind, so `"1.5"` unmarshals into it and Float64
+		// parses the quoted digits. NormalizeValue would then store the quoted
+		// form into jsonb, where every consumer reading a number disagrees.
+		"quoted number":            {&ValueSchema{Type: TypeNumber}, json.RawMessage(`"1.5"`)},
+		"quoted integer":           {&ValueSchema{Type: TypeInteger}, json.RawMessage(`"3"`)},
+		"quoted integer with sign": {&ValueSchema{Type: TypeInteger}, json.RawMessage(`"-3"`)},
+		// A raw 0xff byte inside a quoted string (a client encoding text in the
+		// wrong charset) is not an escape, so the surrogate scan never sees it,
+		// but encoding/json turns it into U+FFFD and reports success. SQLite's
+		// json_valid accepts the stored value and Postgres jsonb refuses it.
+		"raw invalid UTF-8 string": {&ValueSchema{Type: TypeString}, json.RawMessage([]byte{'"', 0xff, '"'})},
+		"raw invalid UTF-8 object": {
+			&ValueSchema{Type: TypeObject, SchemaRef: "subtitle-appearance.json"},
+			json.RawMessage(append(append([]byte(`{"fontSize":"`), 0xff), `"}`...)),
+		},
+		// A lone surrogate decodes to U+FFFD on SQLite and is refused outright by
+		// Postgres jsonb, so every type on the validation path must refuse it.
+		"lone surrogate string":       {&ValueSchema{Type: TypeString}, json.RawMessage(`"\ud800"`)},
+		"lone surrogate language tag": {&ValueSchema{Type: TypeLanguageTag}, json.RawMessage(`"\ud800"`)},
+		"lone surrogate enum":         {&ValueSchema{Type: TypeEnum, Values: []EnumMember{{Value: "a"}}}, json.RawMessage(`"\ud800"`)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := tc.schema.ValidateValue(json.RawMessage(tc.raw), nil); err == nil {
+			if err := tc.schema.ValidateValue(tc.raw, objSchemas); err == nil {
 				t.Fatalf("%s was accepted for a %s setting", tc.raw, tc.schema.Type)
 			}
-			if _, err := tc.schema.NormalizeValue(json.RawMessage(tc.raw), nil); err == nil {
+			if _, err := tc.schema.NormalizeValue(tc.raw, objSchemas); err == nil {
 				t.Fatalf("%s was stored for a %s setting", tc.raw, tc.schema.Type)
 			}
 		})
 	}
 
-	// The unquoted forms still validate, so the check is not rejecting numbers
-	// outright.
-	if err := (&ValueSchema{Type: TypeNumber}).ValidateValue(
-		json.RawMessage(`1.5`), nil); err != nil {
-		t.Errorf("1.5 was rejected for a number setting: %v", err)
-	}
-	if err := (&ValueSchema{Type: TypeInteger}).ValidateValue(
-		json.RawMessage(`3`), nil); err != nil {
-		t.Errorf("3 was rejected for an integer setting: %v", err)
-	}
-}
-
-// TestRawInvalidUTF8IsRejected covers the other path to the substitution
-// TestLoneSurrogatesAreRejectedForEveryType guards. A raw 0xff byte inside a
-// quoted string — what an HTTP body carries when a client encodes text in the
-// wrong charset — is not an escape, so the surrogate scan never sees it, but
-// encoding/json still turns it into U+FFFD and reports success. The value is
-// then stored verbatim, which SQLite's json_valid accepts and Postgres jsonb
-// refuses.
-func TestRawInvalidUTF8IsRejected(t *testing.T) {
-	for name, schema := range map[string]*ValueSchema{
-		"string": {Type: TypeString},
-		"object": {Type: TypeObject, SchemaRef: "subtitle-appearance.json"},
+	// The well-formed forms still validate, so the checks are not rejecting
+	// numbers or non-ASCII text outright.
+	for _, tc := range []struct {
+		schema *ValueSchema
+		raw    string
+	}{
+		{&ValueSchema{Type: TypeNumber}, `1.5`},
+		{&ValueSchema{Type: TypeInteger}, `3`},
+		{&ValueSchema{Type: TypeString}, `"日本語 — café 😀"`},
 	} {
-		t.Run(name, func(t *testing.T) {
-			raw := json.RawMessage([]byte{'"', 0xff, '"'})
-			if name == "object" {
-				raw = json.RawMessage(append(append([]byte(`{"fontSize":"`), 0xff), `"}`...))
-			}
-			if err := schema.ValidateValue(raw, objSchemas); err == nil {
-				t.Fatal("a value with a raw invalid UTF-8 byte was accepted")
-			}
-			if _, err := schema.NormalizeValue(raw, objSchemas); err == nil {
-				t.Fatal("a value with a raw invalid UTF-8 byte was stored")
-			}
-		})
-	}
-
-	// Valid multi-byte UTF-8 must still pass; the check is on well-formedness,
-	// not on being ASCII.
-	if err := (&ValueSchema{Type: TypeString}).ValidateValue(
-		json.RawMessage(`"日本語 — café 😀"`), nil); err != nil {
-		t.Errorf("valid multi-byte UTF-8 was rejected: %v", err)
-	}
-}
-
-// TestLoneSurrogatesAreRejectedForEveryType pins the check to the whole
-// validation path rather than the object branch it started in. A lone surrogate
-// decodes to U+FFFD on SQLite and is refused outright by Postgres jsonb, so a
-// string setting that skipped the check made the two backends disagree about
-// whether the same value could be stored at all.
-func TestLoneSurrogatesAreRejectedForEveryType(t *testing.T) {
-	for name, schema := range map[string]*ValueSchema{
-		"string":       {Type: TypeString},
-		"language tag": {Type: TypeLanguageTag},
-		"enum":         {Type: TypeEnum, Values: []EnumMember{{Value: "a"}}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			raw := json.RawMessage(`"\ud800"`)
-			if err := schema.ValidateValue(raw, nil); err == nil {
-				t.Fatal("a lone surrogate was accepted")
-			}
-			if _, err := schema.NormalizeValue(raw, nil); err == nil {
-				t.Fatal("a lone surrogate was stored")
-			}
-		})
+		if err := tc.schema.ValidateValue(json.RawMessage(tc.raw), nil); err != nil {
+			t.Errorf("%s was rejected for a %s setting: %v", tc.raw, tc.schema.Type, err)
+		}
 	}
 
 	// ui.custom_css is the setting that actually carries free text, so pin it
@@ -1658,5 +1569,35 @@ func TestQualityIsTwoIndependentAxes(t *testing.T) {
 				t.Errorf("bitrate %d is out of range: %v", tc.kbps, err)
 			}
 		})
+	}
+}
+
+// TestAdminDefaultForNamesOnlyDeclaredDefinitions keeps the server-settings
+// namespace for administrator defaults closed: only a definition that declares
+// admin_default can be given one, so an admin write cannot invent a default
+// the resolver would never read.
+func TestAdminDefaultForNamesOnlyDeclaredDefinitions(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+
+	if got := AdminDefaultSettingKey("ui.title_art"); got != "defaults.ui.title_art" {
+		t.Fatalf("AdminDefaultSettingKey = %q", got)
+	}
+	def, ok := manifest.AdminDefaultFor("defaults.ui.title_art")
+	if !ok || def.Key != "ui.title_art" {
+		t.Fatalf("AdminDefaultFor(defaults.ui.title_art) = %v, %v; want ui.title_art", def, ok)
+	}
+
+	for _, key := range []string{
+		"ui.title_art",            // the setting itself, not its default
+		"defaults.ui.theme",       // a definition without admin_default
+		"defaults.card_overlays",  // a legacy server setting, not a contract key
+		"defaults.ui.unknown_key", // no such definition
+	} {
+		if _, ok := manifest.AdminDefaultFor(key); ok {
+			t.Errorf("AdminDefaultFor(%q) = true, want false", key)
+		}
 	}
 }

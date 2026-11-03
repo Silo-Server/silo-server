@@ -12,13 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
-import { COLLECTION_MAX_ITEMS } from "@/lib/collectionTemplates";
-import {
-  COLLECTION_SOURCE_ORDER,
-  collectionDefaultSortOptions,
-  selectValueToSortConfig,
-  sortConfigToSelectValue,
-} from "@/lib/collectionSortConfig";
+import { COLLECTION_SOURCE_ORDER } from "@/lib/collectionSortConfig";
 import {
   MANUAL_ORDER_LINE,
   NO_LIMIT,
@@ -53,18 +47,25 @@ function directionLabels(field: string): Record<QuerySortOrder, string> {
 }
 
 /** "Title A–Z", "Date Added, newest first": a stored default sort, as the stored-sort line names it. */
-function sortLabel(field: string, order: string | undefined): string {
+function sortLabel(field: string, order: QuerySortOrder): string {
   const name = QUERY_SORT_OPTIONS.find((option) => option.value === field)?.label ?? field;
-  const direction =
-    directionLabels(field)[
-      order === "asc" || order === "desc" ? order : getDefaultQuerySortOrder(field)
-    ];
+  const direction = directionLabels(field)[order];
   return ALPHABETICAL.has(field) ? `${name} ${direction}` : `${name}, ${direction.toLowerCase()}`;
 }
 
-function storedDefaultSort(sortConfig: Record<string, unknown> | undefined) {
+/** A sort_config's field ("" keeps the source order) and direction, the field's default when unset. */
+function storedSort(sortConfig: Record<string, unknown> | undefined) {
   const field = typeof sortConfig?.field === "string" ? sortConfig.field.trim() : "";
-  return field ? sortLabel(field, sortConfig?.order as string | undefined) : null;
+  const order: QuerySortOrder =
+    sortConfig?.order === "asc" || sortConfig?.order === "desc"
+      ? sortConfig.order
+      : getDefaultQuerySortOrder(field);
+  return { field, order };
+}
+
+function storedDefaultSort(sortConfig: Record<string, unknown> | undefined) {
+  const { field, order } = storedSort(sortConfig);
+  return field ? sortLabel(field, order) : null;
 }
 
 /** Commits the typed limit: blank is no limit; anything not a positive whole number keeps the old one. */
@@ -88,8 +89,6 @@ export type OrderBlockProps =
       onSortChange: (sortConfig: Record<string, unknown>) => void;
       onLimitChange: (limit: number | undefined) => void;
       allowPersonalized: boolean;
-      /** Max titles shown but fixed, as on a legacy Trakt list. */
-      limitLocked?: boolean;
     }
   | {
       mode: "smart";
@@ -104,7 +103,8 @@ export type OrderBlockProps =
  * The last block of a Contents panel: how the titles are ordered. Manual is a
  * read-only line; Smart picks a sort, its direction and a maximum, and shows a
  * stored default sort (which wins over them) with Clear; a Synced list picks
- * the sort viewers land on and how many of the list's titles it keeps.
+ * the sort viewers land on, its direction, and how many of the list's titles
+ * it keeps.
  */
 export function OrderBlock(props: OrderBlockProps) {
   if (props.mode === "synced") return <SyncedOrder {...props} />;
@@ -221,29 +221,23 @@ function SmartOrder({
 function MaxTitlesInput({
   limit,
   placeholder,
-  max,
-  disabled,
   onCommit,
 }: {
   limit: number | undefined;
   placeholder: string;
-  max?: number;
-  disabled?: boolean;
   onCommit: (input: HTMLInputElement) => void;
 }) {
   return (
-    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-50">
+    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
         key={limit ?? ""}
         type="number"
         min={1}
-        max={max}
         step={1}
         aria-label="Max titles"
         placeholder={placeholder}
         defaultValue={limit ?? ""}
-        disabled={disabled}
-        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 disabled:opacity-100"
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
@@ -265,20 +259,19 @@ function SyncedOrder({
   onSortChange,
   onLimitChange,
   allowPersonalized,
-  limitLocked,
 }: Extract<OrderBlockProps, { mode: "synced" }>) {
   const id = useId();
   const shownRatingSources = useShownRatingSources();
-  const value = sortConfigToSelectValue(sortConfig);
-  const options = collectionDefaultSortOptions(
-    allowPersonalized,
+  const { field, order } = storedSort(sortConfig);
+  const options = getQuerySortOptions({
+    includePersonalized: allowPersonalized,
     shownRatingSources,
-    value.split(":")[0],
-  );
+    keepSortField: field,
+  });
+  const directions = directionLabels(field);
 
   function commitLimit(input: HTMLInputElement) {
-    const typed = parsedLimit(input.value, limit);
-    const next = typed === undefined ? undefined : Math.min(typed, COLLECTION_MAX_ITEMS);
+    const next = parsedLimit(input.value, limit);
     input.value = next === undefined ? "" : String(next);
     if (next !== limit) onLimitChange(next);
   }
@@ -291,26 +284,50 @@ function SyncedOrder({
       <h3 id={`${id}-heading`} className="text-[14.5px] font-semibold">
         Order
       </h3>
-      <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Select value={value} onValueChange={(next) => onSortChange(selectValueToSortConfig(next))}>
+      <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <Select
+          value={field || COLLECTION_SOURCE_ORDER}
+          onValueChange={(next) =>
+            onSortChange(
+              next === COLLECTION_SOURCE_ORDER
+                ? {}
+                : { field: next, order: getDefaultQuerySortOrder(next) },
+            )
+          }
+        >
           <SelectTrigger aria-label="Default sort" className="h-11 w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={COLLECTION_SOURCE_ORDER}>List order</SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.value === COLLECTION_SOURCE_ORDER ? "List order" : option.label}
+                {option.label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <MaxTitlesInput
-          limit={limit}
-          placeholder="Whole list"
-          max={COLLECTION_MAX_ITEMS}
-          disabled={limitLocked}
-          onCommit={commitLimit}
-        />
+        {/* The list's own order has one direction: the one its source publishes. */}
+        <Select
+          value={field ? order : COLLECTION_SOURCE_ORDER}
+          disabled={!field}
+          onValueChange={(next) => onSortChange({ field, order: next })}
+        >
+          <SelectTrigger aria-label="Direction" className="h-11 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {field ? (
+              <>
+                <SelectItem value="desc">{directions.desc}</SelectItem>
+                <SelectItem value="asc">{directions.asc}</SelectItem>
+              </>
+            ) : (
+              <SelectItem value={COLLECTION_SOURCE_ORDER}>As listed</SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        <MaxTitlesInput limit={limit} placeholder="Whole list" onCommit={commitLimit} />
       </div>
       <p className="text-muted-foreground text-[13px]">
         {SYNCED_ORDER_HELP} {ORDER_HELP}

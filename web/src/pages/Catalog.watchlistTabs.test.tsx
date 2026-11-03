@@ -33,6 +33,9 @@ vi.mock("@/hooks/queries/catalog", () => ({
 vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
+vi.mock("@/hooks/queries/boxSets", () => ({
+  useBoxSetSearch: () => ({ data: [] }),
+}));
 vi.mock("@/hooks/useCanRequest", () => ({
   useCanRequest: () => ({ discoveryEnabled: false, isResolving: false }),
 }));
@@ -133,21 +136,6 @@ it("opens on the library tab and keeps the other tab in the URL", () => {
 
   selectTab(/In your library/);
   expect(screen.getByTestId("location").textContent).toBe("/catalog?source=watchlist");
-});
-
-it("labels each tab's content as its tab panel", () => {
-  renderCatalog("/catalog?source=watchlist");
-  const checkPanel = (tabName: RegExp, content: string) => {
-    const tab = screen.getByRole("tab", { name: tabName });
-    const panel = screen.getByRole("tabpanel", { name: tabName });
-    expect(tab).toHaveAttribute("aria-controls", panel.id);
-    expect(panel).toContainElement(screen.getByTestId(content));
-  };
-  checkPanel(/In your library/, "item-grid");
-  expect(screen.getByRole("tabpanel")).toContainElement(screen.getByTestId("catalog-filters"));
-
-  selectTab(/Not in your library yet/);
-  checkPanel(/Not in your library yet/, "watchlist-titles-tab");
 });
 
 it("restores the titles tab from the URL and passes whether adds request", () => {

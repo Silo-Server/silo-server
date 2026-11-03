@@ -22,6 +22,7 @@ import (
 // so the handlers can be exercised without a database.
 type APIKeyStore interface {
 	Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error)
+	CreateAsActor(ctx context.Context, actorID, userID int, label string, scopes []string) (*models.APIKey, error)
 	ListByUser(ctx context.Context, userID int) ([]*models.APIKeyMetadataWithUsage, error)
 	ListByUserAdmin(ctx context.Context, userID int) ([]*models.APIKeyMetadataWithUsage, error)
 	ListAll(ctx context.Context) ([]*models.APIKeyMetadataWithUser, error)
@@ -37,8 +38,9 @@ type APIKeyStore interface {
 // APIKeyHandler handles API key management endpoints.
 type APIKeyHandler struct {
 	repo APIKeyStore
-	// Owners, when set, keeps other admins from minting, revoking or
-	// retiering keys on the server Owner's account.
+	// Owners, when set, keeps other admins from revoking or retiering keys on
+	// the server Owner's account. Minting a key for another account always
+	// applies the same rule, in the store, under the accounts' locks.
 	Owners ownerTargetChecker
 	// Stores and ProfileTokens hold personal key creation to the household
 	// manager (canManageHouseholdAs). A key skips profile PIN verification, so
@@ -54,18 +56,8 @@ type APIKeyHandler struct {
 // which on an admin account is the acting admin. verify confirms a PIN-locked
 // primary profile and returns access.ErrProfileUnverified when it is not.
 // The admin-role check stays with the callers, which run it first.
-func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profileID string) error) (bool, error) {
-	if h.Stores == nil {
-		return false, nil
-	}
-	store, err := h.Stores.ForUser(ctx, userID)
-	if err != nil {
-		return false, fmt.Errorf("opening user store: %w", err)
-	}
-	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
-	}
-	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
+func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
+	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
 }
 
 // checkOwnerAccount refuses the admin key operations on the Owner's account
@@ -213,9 +205,13 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	}
 	// The admin acts only through the account's primary profile, verified
 	// when it has a PIN; a child profile on the admin's account may not mint
-	// a key that would skip every profile's PIN.
-	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileToken(r, h.Stores, h.ProfileTokens, profileID)
+	// a key that would skip every profile's PIN. The body is read first so a
+	// PIN change during a slow upload revokes the proof.
+	if !readHouseholdRequestBody(w, r) {
+		return
+	}
+	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 	})
 	if err != nil {
 		writeProfileManagementPermissionError(w, err)
@@ -443,12 +439,11 @@ func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.R
 	if req.UserID != nil {
 		targetUserID = *req.UserID
 	}
-	if err := h.checkOwnerAccount(r.Context(), targetUserID); err != nil {
+	key, err := h.createAsActor(r.Context(), targetUserID, req.Label, scopes)
+	if _, refused := errors.AsType[*APIError](err); refused {
 		writeAPIError(w, err)
 		return
 	}
-
-	key, err := h.repo.Create(r.Context(), targetUserID, req.Label, scopes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
@@ -472,10 +467,16 @@ func (h *APIKeyHandler) CreateAdminAPIKey(ctx context.Context, userID int, label
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAPIKeyCreation, err)
 	}
-	if err := h.checkOwnerAccount(ctx, userID); err != nil {
-		return nil, err
-	}
-	return h.repo.Create(ctx, userID, label, normalized)
+	return h.createAsActor(ctx, userID, label, normalized)
+}
+
+// createAsActor mints a key on account userID for the request's account,
+// refusing it under the Owner rules in the transaction that inserts it, so a
+// concurrent promotion or ownership transfer cannot leave an admin holding a
+// key it may no longer mint.
+func (h *APIKeyHandler) createAsActor(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
+	key, err := h.repo.CreateAsActor(ctx, actorUserID(ctx), userID, label, scopes)
+	return key, ownerError(err)
 }
 
 func (h *APIKeyHandler) GetAdminAPIKey(ctx context.Context, id int64) (*APIKeyConfiguration, error) {

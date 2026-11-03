@@ -231,7 +231,9 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 		if row == nil {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_missing", "delivery row missing", nil, "", nil)
 		}
-		if row.ProfileID != device.ProfileID {
+		// A device re-registered under another profile, or under one with the
+		// same ID on another account, no longer gets the old owner's delivery.
+		if row.UserID != device.UserID || row.ProfileID != device.ProfileID {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "device_reassigned", "push device reassigned", nil, "", nil)
 		}
 	}

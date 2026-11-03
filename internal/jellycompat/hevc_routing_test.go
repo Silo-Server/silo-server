@@ -23,6 +23,8 @@ func TestPlaybackInfoHEVCUsesAllowedExecutors(t *testing.T) {
 		localHEVC bool
 		remote    []playback.TransformationV3
 		unhealthy bool
+		// h264Limit adds an H.264 VideoBitrate limit the HEVC profile lacks.
+		h264Limit bool
 		want      string
 	}{
 		{name: "worker only ignores local HEVC", execution: config.PlaybackExecutionWorkerOnly, localHEVC: true, want: "h264"},
@@ -31,6 +33,7 @@ func TestPlaybackInfoHEVCUsesAllowedExecutors(t *testing.T) {
 		{name: "API only uses local HEVC", execution: config.PlaybackExecutionAPIOnly, localHEVC: true, want: "hevc"},
 		{name: "wrong worker recipe", execution: config.PlaybackExecutionWorkerOnly, localHEVC: true, remote: []playback.TransformationV3{wrongVersion}, want: "h264"},
 		{name: "unhealthy worker", execution: config.PlaybackExecutionWorkerOnly, remote: []playback.TransformationV3{hevc}, unhealthy: true, want: "h264"},
+		{name: "H.264 fallback keeps its own limits", execution: config.PlaybackExecutionWorkerOnly, h264Limit: true, want: "h264"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, routeID := newSubtitleSelectionHandler(t)
@@ -48,7 +51,11 @@ func TestPlaybackInfoHEVCUsesAllowedExecutors(t *testing.T) {
 			node := dvStripNode(t, "http://worker.invalid", tc.remote...)
 			node.Healthy = !tc.unhealthy
 			handler.NodePlanner = dvStripNodePlanner{compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{node.URL}}, nodes: map[string]*nodepool.Node{node.URL: node}}
-			response := postPlaybackInfo(t, handler, routeID, `{"EnableDirectPlay":false,"EnableDirectStream":false,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"mp4","VideoCodec":"hevc","AudioCodec":"aac"},{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]}}`)
+			codecProfiles := ""
+			if tc.h264Limit {
+				codecProfiles = `,"CodecProfiles":[{"Type":"Video","Codec":"h264","Conditions":[{"Condition":"LessThanEqual","Property":"VideoBitrate","Value":"4000000","IsRequired":true}]}]`
+			}
+			response := postPlaybackInfo(t, handler, routeID, `{"EnableDirectPlay":false,"EnableDirectStream":false,"MaxStreamingBitrate":20000000,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"mp4","VideoCodec":"hevc","AudioCodec":"aac"},{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]`+codecProfiles+`}}`)
 			stored, ok := handler.playbackStore.Get(response.PlaySessionID)
 			if !ok || len(stored.MediaSources) != 1 {
 				t.Fatalf("missing negotiated source: %+v", stored)
@@ -56,6 +63,9 @@ func TestPlaybackInfoHEVCUsesAllowedExecutors(t *testing.T) {
 			source := stored.MediaSources[0]
 			if source.TargetVideoCodec != tc.want || !source.SupportsTranscoding {
 				t.Fatalf("target=%q transcode=%v, want %q with a playable route", source.TargetVideoCodec, source.SupportsTranscoding, tc.want)
+			}
+			if tc.h264Limit && source.TargetBitrateKbps != 4000 {
+				t.Fatalf("H.264 fallback targets %d kb/s, want the 4000 kb/s limit", source.TargetBitrateKbps)
 			}
 			wantContainer := "ts"
 			if tc.want == "hevc" {

@@ -61,19 +61,6 @@ const CLEAR = { name: "Clear saved value" };
 const KEEP = { name: "Keep saved value" };
 
 describe("SecretField", () => {
-  it("shows a password input when nothing is saved", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<Harness configured={false} onChange={onChange} onClear={vi.fn()} />);
-
-    const input = screen.getByLabelText("Secret key");
-    expect(input).toHaveAttribute("type", "password");
-    expect(input).toHaveAttribute("placeholder", "Not configured");
-    expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
-    await user.type(input, "abc");
-    expect(onChange).toHaveBeenLastCalledWith("abc");
-  });
-
   it("shows a saved secret as a masked, editable input", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

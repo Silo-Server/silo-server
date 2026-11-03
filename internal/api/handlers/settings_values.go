@@ -78,6 +78,13 @@ func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
 	h.libraryLookup = lookup
 }
 
+// SetAdminDefaults lets the administrator's server-wide defaults stand in for
+// contract defaults on definitions that declare admin_default. Without it every
+// effective default comes from the contract.
+func (h *SettingValuesHandler) SetAdminDefaults(settings settingsresolve.ServerSettings) {
+	h.resolver = settingsresolve.New(h.contract).WithAdminDefaults(settings)
+}
+
 // SetLanguageSuggestionSource wires deployment-observed original languages
 // into effective metadata-language responses. The contract option set remains
 // the stable floor; a missing source or failed catalog lookup simply returns
@@ -115,6 +122,13 @@ const fieldValues = "values"
 // its host-parameter budget is shared with the keys — 999 on older builds — so
 // the request boundary keeps a crafted batch from failing resolution outright.
 const maxEffectiveContentIDs = 200
+
+// maxResponseValueBytes bounds the stored values one v2 settings read returns.
+// v2 answers a repeated key once per mention, and the batch answers every key
+// in every context, so one large stored document (up to the 1 MiB write body)
+// could otherwise be copied 20,000 times into a single buffered response.
+// Real reads, a few KiB of values per context, stay far below it.
+const maxResponseValueBytes = 16 << 20
 
 // maxShortcutMutationRetries bounds contention retries while still making a
 // normal burst of edits effectively wait-free for clients. Each failed CAS

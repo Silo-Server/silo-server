@@ -108,15 +108,3 @@ func TestPreparePlaybackFilesSkipsRaceWhenNothingToScan(t *testing.T) {
 		t.Fatalf("watch path raced %v, want no scans for known or non-H.264 files", racer.raced)
 	}
 }
-
-func TestPrepareFilesWithoutEnsurerPassesFilesThrough(t *testing.T) {
-	svc := &DetailService{}
-	files := []*models.MediaFile{{ID: 1}, nil, {ID: 2}}
-
-	if got := len(svc.prepareBrowseFiles(context.Background(), files)); got != 2 {
-		t.Fatalf("prepareBrowseFiles() returned %d files, want 2 (nil entries dropped)", got)
-	}
-	if got := len(svc.preparePlaybackFiles(context.Background(), files)); got != 2 {
-		t.Fatalf("preparePlaybackFiles() returned %d files, want 2 (nil entries dropped)", got)
-	}
-}

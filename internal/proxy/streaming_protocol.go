@@ -59,7 +59,7 @@ func ProtocolStreaming() []workerprotocol.Operation {
 			switch mount.kind {
 			case kindRemux, kindAudio, kindIdentity:
 				op.Parameters = append(op.Parameters, &huma.Param{Name: seekQuery, In: queryParameter, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Existing progressive seek interpretation; proxy-local and remote-node validation differ."})
-				op.Description += "Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. "
+				op.Description += "Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. "
 				if mount.kind == kindRemux {
 					op.Description += "Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. "
 				}

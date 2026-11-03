@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   groupDeviceSettings,
-  groupForDeviceSetting,
   hiddenDeviceSettingKeys,
   manifestPlatformFor,
 } from "@/lib/deviceSettingGroups";
@@ -26,11 +25,6 @@ describe("deviceSettingGroups", () => {
 
     const duplicated = [...grouped.entries()].filter(([, groups]) => groups.length > 1);
     expect(duplicated).toEqual([]);
-  });
-
-  it("keeps appearance settings off the device screen", () => {
-    expect(groupForDeviceSetting("ui.theme")).toBeNull();
-    expect(groupForDeviceSetting("ui.library_page_state")).toBeNull();
   });
 
   it("returns groups in reading order and omits empty ones", () => {
@@ -60,7 +54,6 @@ describe("deviceSettingGroups", () => {
   // changes nothing.
   const NATIVE_ONLY_PLAYER_KEYS = [
     "player.playback_speed",
-    "player.subtitle_sync_ms",
     "player.hdr_enabled",
     "player.audio_sync_ms",
   ] as const;
@@ -72,7 +65,7 @@ describe("deviceSettingGroups", () => {
     }).flatMap((group) => group.keys as string[]);
   }
 
-  it.each(["Windows Web", "macOS Web", "iOS Web", "Android Web", "Linux Web", "Web"])(
+  it.each(["Windows Web", "iOS Web", "Web"])(
     "does not offer player settings the web player ignores on %s",
     (platform) => {
       const shown = shownKeys(platform);

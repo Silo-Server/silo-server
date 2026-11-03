@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,9 +33,9 @@ func NewPoolForRole(ctx context.Context, cfg config.DatabaseConfig, role string)
 	if cfg.MaxConnections > 0 {
 		poolCfg.MaxConns = int32(cfg.MaxConnections)
 	}
-	poolCfg.AfterConnect = disableUnconfiguredJIT
+	poolCfg.AfterConnect = prepareConnection
 
-	poolCfg.ConnConfig.Tracer = postgresTracer{role: role}
+	poolCfg.ConnConfig.Tracer = postgresTracer{role: role, attribute: queryattr.Initialize()}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating connection pool: %w", err)
@@ -47,6 +48,14 @@ func NewPoolForRole(ctx context.Context, cfg config.DatabaseConfig, role string)
 
 	postgresPools.add(pool, role)
 	return pool, nil
+}
+
+// prepareConnection sets up each new pool connection.
+func prepareConnection(ctx context.Context, conn *pgx.Conn) error {
+	if err := disableUnconfiguredJIT(ctx, conn); err != nil {
+		return err
+	}
+	return registerVectorTypes(ctx, conn)
 }
 
 // disableUnconfiguredJIT turns JIT off for the session unless something

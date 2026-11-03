@@ -3,6 +3,7 @@ package markers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -294,15 +295,15 @@ func TestPopulationDoesNotMarkFailedStorageFresh(t *testing.T) {
 func TestRegistryPreservesEveryRangeFromWinningProvider(t *testing.T) {
 	registry := NewRegistry(nil)
 	_ = registry.Register(&fakeProvider{id: "preferred", result: Result{Markers: []Marker{
-		{Kind: MarkerKindCredits, Start: 900 * time.Second, End: 950 * time.Second},
-		{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second},
+		{Kind: MarkerKindCredits, Start: 1900 * time.Second, End: 1950 * time.Second},
+		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1850 * time.Second},
 	}}})
-	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 600 * time.Second, End: 999 * time.Second, Confidence: 1}}}})
+	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second}}}})
 	result, ok, err := populateRegistryForTest(t.Context(), registry)
 	if err != nil || !ok || len(result.Markers) != 2 {
 		t.Fatalf("multi-range merge: %+v, %v", result, err)
 	}
-	if result.Markers[0].Start != 800*time.Second || result.Markers[1].Start != 900*time.Second || result.Markers[0].ProviderID != "preferred" {
+	if result.Markers[0].Start != 1800*time.Second || result.Markers[1].Start != 1900*time.Second || result.Markers[0].ProviderID != "preferred" {
 		t.Fatalf("merged ranges: %+v", result.Markers)
 	}
 }
@@ -324,6 +325,30 @@ func TestPopulationStoredPlaybackToggleDoesNotBlockExplicitRefresh(t *testing.T)
 	}
 	if provider.calls != 1 {
 		t.Fatal("explicit refresh did not fetch")
+	}
+}
+
+// Only stored provider markers tell a manual save what a player was shown; in
+// on_demand mode each replica keeps the answers it showed to itself.
+func TestPopulationShowsStoredMarkers(t *testing.T) {
+	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{}, nil }}
+	for _, tc := range []struct {
+		name    string
+		storage OnlineStorage
+		mode    string
+		want    bool
+	}{
+		{"stored", OnlineStorageStored, "online", true},
+		{"on demand", OnlineStorageOnDemand, "online", false},
+		{"on demand, online lookups off", OnlineStorageOnDemand, "local", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := populationFixture(t, tc.storage, provider)
+			service.opts.Settings.(populationSettings)[SettingMode] = tc.mode
+			if got, err := service.ShowsStoredMarkers(t.Context()); err != nil || got != tc.want {
+				t.Fatalf("ShowsStoredMarkers = %v, %v; want %v", got, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -783,4 +808,31 @@ func TestPopulationHoldsAreCapped(t *testing.T) {
 			t.Fatalf("holds=%d, want %d without the first", len(service.holds), markerMemoryLimit)
 		}
 	})
+}
+
+func TestPopulationIdentityTracksEpisodeIDsButNotTitle(t *testing.T) {
+	file := &models.MediaFile{ID: 7, Duration: 3600}
+	base := ExternalIDs{Kind: ItemKindEpisode, TvdbID: "121361", SeasonNumber: 1, EpisodeNumber: 1}
+	withoutEpisode := populationIdentity(file, base, nil)
+
+	retitled := base
+	retitled.EpisodeTitle = "Winter Is Coming"
+	if got := populationIdentity(file, retitled, nil); got != withoutEpisode {
+		t.Fatal("an episode title changed the lookup identity")
+	}
+	matched := base
+	matched.Episode = EpisodeIDs{TvdbID: "3254641"}
+	if got := populationIdentity(file, matched, nil); got == withoutEpisode {
+		t.Fatal("an episode TVDB ID left the lookup identity unchanged")
+	}
+	// An item without episode IDs, such as a movie, keeps the identity it had
+	// before the field existed, so upgrading does not invalidate its cached
+	// lookups.
+	payload, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "Episode\"") {
+		t.Fatalf("identity payload %s names an empty episode", payload)
+	}
 }

@@ -523,7 +523,7 @@ export default function LibrarySettings() {
   useEffect(() => {
     // Keep the editable local order in sync with the latest saved setting.
     // This supports optimistic updates and rollback without changing behavior.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the saved setting into editable state
     setDisabledLibraryIDs(
       libraries
         ? sortLibrariesByOrder(libraries, savedDisabledLibraryIDs)
@@ -533,7 +533,7 @@ export default function LibrarySettings() {
 
   useEffect(() => {
     if (!libraries) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the saved order into editable state
     setOrderedLibraries(
       savedLibraryOrder.length > 0 ? applyLibraryOrder(libraries, savedLibraryOrder) : libraries,
     );

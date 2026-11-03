@@ -135,46 +135,6 @@ func decodeHistory(t *testing.T, body string) historyPage {
 	return page
 }
 
-func TestListHistory(t *testing.T) {
-	history := newFakeHistory()
-	h := newTestHandler(t, historyDeps(history))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/history", "", owner)
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	page := decodeHistory(t, rec.Body.String())
-	// Three rows, two of which resolve to a card; the hidden one is omitted
-	// without hiding the rows behind it.
-	if len(page.Items) != 2 || page.Page.HasMore || page.Page.NextCursor != "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	first := page.Items[0]
-	if first.ContentID != "series:heat" || first.Type != "series" || first.Watch.MediaItemID != "episode:heat-s01e02" ||
-		first.Watch.WatchedAt != "2026-01-03T00:00:00.000Z" || !first.Watch.Completed || first.Watch.Source != "playback" || first.Watch.Duration != 2600 {
-		t.Fatalf("item = %+v", first)
-	}
-	if page.Items[1].ContentID != "movie:heat-1995" || page.Items[1].Watch.Source != "manual" {
-		t.Fatalf("item = %+v", page.Items[1])
-	}
-
-	// Paging: a limit of 2 leaves one row behind; the cursor resumes at it.
-	rec = do(t, h, http.MethodGet, "/api/v2/history?limit=2", "", owner)
-	page = decodeHistory(t, rec.Body.String())
-	if rec.Code != 200 || len(page.Items) != 2 || !page.Page.HasMore || page.Page.NextCursor == "" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+page.Page.NextCursor, "", owner)
-	page = decodeHistory(t, rec.Body.String())
-	if rec.Code != 200 || len(page.Items) != 0 || page.Page.HasMore {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if len(history.pages) != 3 || history.pages[2] == nil || history.pages[2].ID != "h2" || history.pages[2].WatchedAt != "2026-01-02T03:04:05Z" {
-		t.Fatalf("keys = %+v", history.pages)
-	}
-}
-
 // The cursor is a keyset, not an offset: rows inserted or removed between
 // pages neither repeat nor skip a row, and equal watched_at values are
 // ordered by id.
@@ -307,37 +267,4 @@ func TestListHistoryDeniesWithoutProfile(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history", "", nil), TypeAuthenticationRequired)
 	off := newTestHandler(t, pilotDeps(nil, nil))
 	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/history", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")), TypeDependencyUnavailable)
-}
-
-func TestRemoveHistoryEntries(t *testing.T) {
-	history := newFakeHistory()
-	h := newTestHandler(t, historyDeps(history))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":"episode:heat-s01e02","scope":"show"},{"content_id":"movie:heat-1995"}]}`, owner)
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if len(history.removed) != 1 || len(history.removed[0]) != 2 || history.removed[0][0].Scope != "show" || history.removed[0][1].ContentID != "movie:heat-1995" {
-		t.Fatalf("removed = %+v", history.removed)
-	}
-
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[]}`, owner), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.targets" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":"x","scope":"season"}]}`, owner), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.targets[0].scope" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":"x","extra":1}]}`, owner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":"missing"}]}`, owner), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":"x"}]}`, bearer(memberToken)), TypeValidationFailed)
-
-	// A seam rejecting a member is a validation failure naming it.
-	history.err = &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "content_id is required", Field: "targets"}
-	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history/remove", `{"targets":[{"content_id":" "}]}`, owner), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.targets" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
 }

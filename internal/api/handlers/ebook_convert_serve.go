@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -21,13 +22,15 @@ import (
 const ConversionHeader = "X-Silo-Ebook-Conversion"
 
 // EbookConverter produces (and caches) a converted EPUB for a source file.
-// Implemented by *ebookconvert.Cache; an interface here for testability.
+// Implemented by *ebookconvert.Cache; an interface here for testability. Both
+// methods hand back the verified cache entry already open, so the handler
+// serves exactly what the cache checked; the caller closes it.
 type EbookConverter interface {
-	GetOrConvert(ctx context.Context, srcPath string, key ebookconvert.SourceKey) (string, error)
+	GetOrConvert(ctx context.Context, srcPath string, key ebookconvert.SourceKey) (*os.File, error)
 	// Lookup reports a cached conversion WITHOUT converting (used by HEAD so a
-	// metadata probe never kicks off a full conversion): a path on hit, a
-	// non-nil error for a negatively-cached source, else a miss.
-	Lookup(key ebookconvert.SourceKey) (string, error, bool)
+	// metadata probe never kicks off a full conversion): the open entry on hit,
+	// a non-nil error for a negatively-cached source, else a miss.
+	Lookup(key ebookconvert.SourceKey) (*os.File, error, bool)
 }
 
 // EbookConversion bundles the converter with the admin-flag predicate. A nil
@@ -69,11 +72,11 @@ func (h *EbookReaderHandler) serveEbook(w http.ResponseWriter, r *http.Request, 
 			return h.serveKindleHead(w, r, file, key)
 		}
 
-		epubPath, err := h.Conversion.Converter.GetOrConvert(r.Context(), file.FilePath, key)
+		epub, err := h.Conversion.Converter.GetOrConvert(r.Context(), file.FilePath, key)
 		switch {
 		case err == nil:
-			if serveErr := serveConvertedEpub(w, r, file, epubPath, key); serveErr != nil {
-				// Produced but unservable (open/stat) — honor the contract, not a 500.
+			if serveErr := serveConvertedEpub(w, r, file, epub, key); serveErr != nil {
+				// Produced but unservable (stat) — honor the contract, not a 500.
 				return h.serveRawKindleFallback(w, r, file)
 			}
 			return nil
@@ -110,10 +113,10 @@ func (h *EbookReaderHandler) serveRawKindleFallback(w http.ResponseWriter, r *ht
 //     the body and the authoritative DRM/failure verdict, which then populates
 //     the (positive or negative) cache that subsequent HEADs read.
 func (h *EbookReaderHandler) serveKindleHead(w http.ResponseWriter, r *http.Request, file *models.MediaFile, key ebookconvert.SourceKey) error {
-	path, lookupErr, ok := h.Conversion.Converter.Lookup(key)
+	epub, lookupErr, ok := h.Conversion.Converter.Lookup(key)
 	switch {
 	case ok:
-		if serveErr := serveConvertedEpub(w, r, file, path, key); serveErr != nil {
+		if serveErr := serveConvertedEpub(w, r, file, epub, key); serveErr != nil {
 			return h.serveRawKindleFallback(w, r, file)
 		}
 		return nil
@@ -132,7 +135,7 @@ func (h *EbookReaderHandler) serveKindleHead(w http.ResponseWriter, r *http.Requ
 // validator can never disagree with the cache) with a revalidate policy that
 // keeps clients/proxies from serving a stale representation.
 func setConvertedEpubHeaders(w http.ResponseWriter, file *models.MediaFile, key ebookconvert.SourceKey) {
-	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
+	name := fspath.Display(strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath))) + ".epub"
 	w.Header().Set("Content-Type", "application/epub+zip")
 	w.Header().Set("Content-Disposition", inlineContentDisposition(name))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -141,14 +144,10 @@ func setConvertedEpubHeaders(w http.ResponseWriter, file *models.MediaFile, key 
 	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
 }
 
-// serveConvertedEpub serves the cached EPUB with EPUB headers (see
-// setConvertedEpubHeaders). For a HEAD, ServeContent emits the headers and
-// Content-Length without a body.
-func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.MediaFile, epubPath string, key ebookconvert.SourceKey) error {
-	f, err := os.Open(epubPath)
-	if err != nil {
-		return fmt.Errorf("opening converted epub: %w", err)
-	}
+// serveConvertedEpub serves the open cached EPUB f with EPUB headers (see
+// setConvertedEpubHeaders) and closes it. For a HEAD, ServeContent emits the
+// headers and Content-Length without a body.
+func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.MediaFile, f *os.File, key ebookconvert.SourceKey) error {
 	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil {

@@ -350,7 +350,7 @@ func queryAdminPlaybackActivity(ctx context.Context, pool *pgxpool.Pool, hours i
 
 	// profiles_active_24h deliberately excludes imported and provider-synced
 	// history so the tile means "watched on this server", not "appeared in
-	// someone's Trakt backlog". Manual marks stay in: they are on-server
+	// someone's provider backlog". Manual marks stay in: they are on-server
 	// actions.
 	row := tx.QueryRow(ctx, adminPlaybackSessionsCTE+`,
 		reliability AS (

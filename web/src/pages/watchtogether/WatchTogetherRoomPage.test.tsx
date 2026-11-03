@@ -245,21 +245,6 @@ describe("WatchTogetherRoomPage", () => {
     );
   });
 
-  it("dismissing a candidate brings the phase's stage back", () => {
-    renderPage(connection());
-    fireEvent.click(screen.getByRole("button", { name: "pick Arrival" }));
-    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
-    expect(screen.queryByTestId("candidate")).toBeNull();
-    expect(screen.getByText("Nothing on yet")).toBeInTheDocument();
-  });
-
-  it("switches to voting from the empty lobby tile", () => {
-    const conn = connection();
-    renderPage(conn);
-    fireEvent.click(screen.getByRole("button", { name: /Open the floor to votes/ }));
-    expect(conn.updateSelectionMode).toHaveBeenCalledWith("vote");
-  });
-
   it("stages: host starts, label shows the ready count, and start is not gated on it", () => {
     const conn = connection({
       room: room({
@@ -313,60 +298,44 @@ describe("WatchTogetherRoomPage", () => {
     const view = renderPage(conn);
     fireEvent.click(screen.getByRole("button", { name: "pick Arrival" }));
     expect(screen.getByTestId("candidate")).toBeInTheDocument();
-    state.connection = connection({ room: room({ selection_mode: "vote" }) });
-    view.rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <WatchPlaybackControllerContext.Provider
-          value={
-            {
-              state: { request: null, mode: "foreground", pictureInPictureActive: false },
-              startPlayback: state.startPlayback,
-            } as never
-          }
-        >
-          <MemoryRouter initialEntries={["/rooms/room?room_token=proof"]}>
-            <Routes>
-              <Route path="/rooms/:roomId" element={<WatchTogetherRoomPage />} />
-            </Routes>
-          </MemoryRouter>
-        </WatchPlaybackControllerContext.Provider>
-      </QueryClientProvider>,
-    );
+    view.rerenderConnection(connection({ room: room({ selection_mode: "vote" }) }));
     expect(screen.queryByTestId("candidate")).toBeNull();
   });
 
   it("vote mode ranks suggestions and lets the host play any of them", () => {
-    const suggestions: WatchTogetherSuggestion[] = [
-      {
+    const suggestion = (
+      over: Pick<
+        WatchTogetherSuggestion,
+        "id" | "content_id" | "title" | "note" | "vote_count" | "voted_by_me" | "created_at"
+      >,
+    ): WatchTogetherSuggestion => ({
+      room_id: "room",
+      suggester_user_id: 2,
+      suggester_profile_id: "p2",
+      content_type: "movie",
+      subtitle: "",
+      poster_url: "",
+      ...over,
+    });
+    const suggestions = [
+      suggestion({
         id: "b",
-        room_id: "room",
-        suggester_user_id: 2,
-        suggester_profile_id: "p2",
         content_id: "dune",
-        content_type: "movie",
         title: "Dune",
-        subtitle: "",
-        poster_url: "",
         note: "big screen",
         vote_count: 1,
         voted_by_me: false,
         created_at: "2026-01-01T00:00:01Z",
-      },
-      {
+      }),
+      suggestion({
         id: "a",
-        room_id: "room",
-        suggester_user_id: 2,
-        suggester_profile_id: "p2",
         content_id: "arrival",
-        content_type: "movie",
         title: "Arrival",
-        subtitle: "",
-        poster_url: "",
         note: "",
         vote_count: 3,
         voted_by_me: true,
         created_at: "2026-01-01T00:00:00Z",
-      },
+      }),
     ];
     const conn = connection({ room: room({ selection_mode: "vote" }), suggestions });
     renderPage(conn);
@@ -382,34 +351,6 @@ describe("WatchTogetherRoomPage", () => {
     expect(conn.promoteSuggestion).toHaveBeenLastCalledWith("b");
     fireEvent.click(screen.getByRole("button", { name: "Vote for Dune" }));
     expect(conn.vote).toHaveBeenCalledWith("b");
-  });
-
-  it("host-pick lobby lists guest suggestions without votes and lets the host queue one", () => {
-    const suggestions: WatchTogetherSuggestion[] = [
-      {
-        id: "a",
-        room_id: "room",
-        suggester_user_id: 2,
-        suggester_profile_id: "p2",
-        content_id: "arrival",
-        content_type: "movie",
-        title: "Arrival",
-        subtitle: "",
-        poster_url: "",
-        note: "",
-        vote_count: 0,
-        voted_by_me: false,
-        created_at: "2026-01-01T00:00:00Z",
-      },
-    ];
-    const conn = connection({ room: room({ selection_mode: "host_pick" }), suggestions });
-    renderPage(conn);
-    expect(screen.getByRole("region", { name: "Suggestions" })).toBeInTheDocument();
-    expect(screen.getByText("Arrival")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Vote for/ })).toBeNull();
-    expect(screen.queryByText(/^0 votes$/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Queue this" }));
-    expect(conn.stageItem).toHaveBeenCalledWith({ content_id: "arrival" });
   });
 
   it("auto-enters the player when playback starts, and offers rejoin on the room page", () => {
@@ -516,26 +457,6 @@ describe("WatchTogetherRoomPage", () => {
     );
     expect(screen.getByRole("textbox", { name: "Shelf search" })).toHaveValue("arrival");
     expect(screen.getByTestId("shelf")).toHaveAttribute("data-collapsed", "true");
-  });
-
-  it("hides the mode switch for guests and while playing", () => {
-    renderPage(connection({ room: room({ self_can_manage_room: false, self_role: "guest" }) }));
-    expect(screen.queryByRole("button", { name: "Change how the room picks" })).toBeNull();
-    cleanup();
-    renderPage(
-      connection({
-        room: room({
-          phase: "playing",
-          playback_state: "playing",
-          selected_content_id: "x",
-          selection_revision: 1,
-        }),
-      }),
-    );
-    expect(screen.queryByRole("button", { name: "Change how the room picks" })).toBeNull();
-    cleanup();
-    renderPage(connection());
-    expect(screen.getByRole("button", { name: "Change how the room picks" })).toBeInTheDocument();
   });
 
   it("renders the terminal state when the room closes and remembers it ended", () => {

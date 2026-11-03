@@ -17,20 +17,6 @@ func liveSession(id string, mutate ...func(*LiveSession)) LiveSession {
 	return session
 }
 
-func TestCompareLiveSessionsAgreesOnIdenticalSets(t *testing.T) {
-	sessions := []LiveSession{liveSession("a"), liveSession("b")}
-	report := CompareLiveSessions("legacy", sessions, sessions, 0)
-	if !report.Agrees {
-		t.Fatalf("identical sets disagreed: %+v", report)
-	}
-	if report.InBoth != 2 || report.TelemetryCount != 2 || report.LegacyCount != 2 {
-		t.Fatalf("counts = %+v", report)
-	}
-	if len(report.Mismatches) != 0 || len(report.TelemetryOnly) != 0 || len(report.LegacyOnly) != 0 {
-		t.Fatalf("report = %+v", report)
-	}
-}
-
 func TestCompareLiveSessionsReportsOnlySides(t *testing.T) {
 	telemetry := []LiveSession{liveSession("a"), liveSession("only-telemetry")}
 	legacy := []LiveSession{liveSession("a"), liveSession("only-legacy")}

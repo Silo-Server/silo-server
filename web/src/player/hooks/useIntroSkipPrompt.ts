@@ -306,7 +306,7 @@ export function useIntroSkipPrompt({
       clearPrompt();
     });
   }, [clearPrompt, currentTime, enabled, intro, introKey, mode, startPrompt]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  /* eslint-enable react-hooks/set-state-in-effect -- ends the playback-position exception */
 
   useEffect(
     () => () => {

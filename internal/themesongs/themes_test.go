@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -184,20 +184,27 @@ func TestOpenRefusesEscapingSymlink(t *testing.T) {
 	}
 }
 
-func TestThemeAudioExtensionsExcludeVideo(t *testing.T) {
-	for _, ext := range []string{"mp3", "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac"} {
-		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/opening." + strings.ToUpper(ext)} {
-			owner, ok := OwnerDirectory(path)
-			if !ok || owner != "/show" || Container(path) != ext || !strings.HasPrefix(ContentType(ext), "audio/") {
-				t.Errorf("audio theme %q: owner=%q ok=%v container=%q", path, owner, ok, Container(path))
-			}
-		}
+// Catalog paths are fspath-encoded; Open must reach a theme whose owner
+// directory and file name are not UTF-8.
+func TestOpenEncodedNonUTF8Path(t *testing.T) {
+	owner := filepath.Join(t.TempDir(), "B\xe5rd")
+	if err := os.Mkdir(owner, 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
 	}
-	for _, ext := range []string{"mkv", "mp4", "webm", "srt", "jpg"} {
-		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/file." + ext} {
-			if owner, ok := OwnerDirectory(path); ok || Container(path) != "" {
-				t.Errorf("non-audio %q was classified as theme owned by %q", path, owner)
-			}
-		}
+	path := filepath.Join(owner, "theme-music", "Ylvis\xe5ker.mp3")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Open(File{OwnerPath: fspath.Encode(owner), Path: fspath.Encode(path), Size: info.Size(), Modified: info.ModTime().Truncate(time.Microsecond)})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	_ = f.Close()
 }

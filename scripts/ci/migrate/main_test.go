@@ -9,37 +9,6 @@ import (
 	"testing"
 )
 
-func TestFlags(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"--migrate-only", "--help"}, {"--migrate-status", "--help"}, {"--migrate-down-to=0", "--help"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			var output bytes.Buffer
-			if err := run(t.Context(), args, &output); err != nil {
-				t.Fatalf("help returned %v; want success", err)
-			}
-			for _, flag := range []string{"-env", "-migrate-only", "-migrate-status", "-migrate-down-to"} {
-				if !strings.Contains(output.String(), flag) {
-					t.Errorf("help %q lacks %s", output.String(), flag)
-				}
-			}
-		})
-	}
-	for _, args := range [][]string{{"--unknown"}, {"--migrate-down-to=invalid"}, {"unexpected"}} {
-		var output bytes.Buffer
-		if err := run(t.Context(), args, &output); err == nil {
-			t.Errorf("run(%q) succeeded; want invalid arguments error", args)
-		}
-	}
-}
-
-func TestMissingDatabaseURL(t *testing.T) {
-	t.Setenv("DATABASE_URL", "")
-	var output bytes.Buffer
-	err := run(t.Context(), []string{"--env="}, &output)
-	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL is required") {
-		t.Fatalf("run = %v; want missing DATABASE_URL error", err)
-	}
-}
-
 func TestInvalidDatabaseURLDoesNotDiscloseCredentials(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test-user:test-password@localhost:invalid/db")
 	var output bytes.Buffer

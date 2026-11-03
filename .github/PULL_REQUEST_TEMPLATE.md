@@ -64,6 +64,7 @@ identified".
 
 - [ ] I read and can explain the complete diff.
 - [ ] This pull request addresses one concern.
+- [ ] Each test this pull request adds meets "Decide what to test" in CONTRIBUTING.md.
 - [ ] The Evidence section shows every change a user can see, or says there is none.
 
 ## AI Disclosure

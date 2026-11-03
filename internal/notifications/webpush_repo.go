@@ -85,14 +85,16 @@ func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription)
 	// Reassignment keeps the row id, so undelivered attempts enqueued for the
 	// previous owner would otherwise be sent to the new owner's browser once
 	// the retry worker reclaims them. Cancel them before the ownership flips.
+	// The owner is the account profile: a same-ID profile on another account
+	// is a different owner.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM web_push_delivery_attempts
 		WHERE outcome IN ('pending', 'retrying')
 		  AND subscription_id IN (
 			SELECT id FROM web_push_subscriptions
-			WHERE endpoint = $1 AND profile_id <> $2
+			WHERE endpoint = $1 AND (user_id <> $2 OR profile_id <> $3)
 		  )`,
-		sub.Endpoint, sub.ProfileID); err != nil {
+		sub.Endpoint, sub.UserID, sub.ProfileID); err != nil {
 		return nil, fmt.Errorf("purge reassigned web push attempts: %w", err)
 	}
 
@@ -121,27 +123,32 @@ func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription)
 	return saved, nil
 }
 
-// ListByProfile returns a profile's subscriptions for the settings UI.
-func (r *WebPushRepository) ListByProfile(ctx context.Context, profileID string) ([]WebPushSubscription, error) {
+// ListByProfile returns an account profile's subscriptions for the settings
+// UI. Profile IDs repeat across accounts, so management queries match the
+// account too.
+func (r *WebPushRepository) ListByProfile(ctx context.Context, userID int, profileID string) ([]WebPushSubscription, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+webPushColumns+` FROM web_push_subscriptions WHERE profile_id = $1 ORDER BY created_at`,
-		profileID)
+		`SELECT `+webPushColumns+` FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2 ORDER BY created_at`,
+		userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("list web push subscriptions: %w", err)
 	}
 	return scanWebPushSubscriptions(rows)
 }
 
-// ListEnabledByProfiles loads enabled subscriptions keyed by profile, inside
-// the fanout transaction (outbox enqueue).
-func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) (map[string][]WebPushSubscription, error) {
-	out := make(map[string][]WebPushSubscription, len(profileIDs))
-	if len(profileIDs) == 0 {
+// ListEnabledByProfiles loads enabled subscriptions keyed by account and
+// profile (profile IDs repeat across accounts), inside the delivery's
+// transaction (outbox enqueue).
+func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]WebPushSubscription, error) {
+	out := make(map[profileKey][]WebPushSubscription, len(profiles))
+	if len(profiles) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx,
-		`SELECT `+webPushColumns+` FROM web_push_subscriptions WHERE profile_id = ANY($1) AND enabled`,
-		profileIDs)
+		`SELECT `+webPushColumns+` FROM web_push_subscriptions
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled`,
+		userIDs, profileIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled web push subscriptions: %w", err)
 	}
@@ -150,7 +157,8 @@ func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 		return nil, err
 	}
 	for _, sub := range subs {
-		out[sub.ProfileID] = append(out[sub.ProfileID], sub)
+		key := profileKey{sub.UserID, sub.ProfileID}
+		out[key] = append(out[key], sub)
 	}
 	return out, nil
 }
@@ -167,10 +175,10 @@ func (r *WebPushRepository) getByIDUnscoped(ctx context.Context, id string) (*We
 	return sub, nil
 }
 
-// Delete removes one subscription scoped to the profile. Idempotent.
-func (r *WebPushRepository) Delete(ctx context.Context, profileID, id string) error {
+// Delete removes one subscription scoped to the account profile. Idempotent.
+func (r *WebPushRepository) Delete(ctx context.Context, userID int, profileID, id string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM web_push_subscriptions WHERE profile_id = $1 AND id = $2`, profileID, id)
+		`DELETE FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2 AND id = $3`, userID, profileID, id)
 	return err
 }
 
@@ -193,10 +201,10 @@ func (r *WebPushRepository) deleteGone(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteAllForProfile removes a deleted profile's subscriptions.
-func (r *WebPushRepository) DeleteAllForProfile(ctx context.Context, profileID string) error {
+// DeleteAllForProfile removes a deleted account profile's subscriptions.
+func (r *WebPushRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM web_push_subscriptions WHERE profile_id = $1`, profileID)
+		`DELETE FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
 }
 
@@ -320,11 +328,11 @@ func (r *WebPushRepository) DeleteOldAttempts(ctx context.Context, now time.Time
 
 // ListPage returns at most limit records in stable creation order. Callers may
 // request one lookahead row; this read does not alter delivery state.
-func (r *WebPushRepository) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
-	query := `SELECT ` + webPushColumns + ` FROM web_push_subscriptions WHERE profile_id = $1`
-	args := []any{profile}
+func (r *WebPushRepository) ListPage(ctx context.Context, userID int, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
+	query := `SELECT ` + webPushColumns + ` FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2`
+	args := []any{userID, profile}
 	if after != nil {
-		query += ` AND (created_at, id) > ($2, $3)`
+		query += ` AND (created_at, id) > ($3, $4)`
 		args = append(args, after.CreatedAt, after.ID)
 	}
 	query += fmt.Sprintf(" ORDER BY created_at, id LIMIT $%d", len(args)+1)

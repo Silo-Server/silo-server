@@ -30,12 +30,14 @@ const (
 
 // All S3 clients share this pool. The SDK's dial, TLS and keep-alive defaults
 // are kept, along with its restriction to method-preserving redirects.
+var sharedTransportValue = awshttp.NewBuildableClient().WithTransportOptions(func(tr *http.Transport) {
+	tr.MaxConnsPerHost = s3MaxConnsPerHost
+	tr.MaxIdleConnsPerHost = s3MaxConnsPerHost
+	tr.MaxIdleConns = s3MaxIdleConns
+}).GetTransport()
+
 var sharedHTTPClientValue = &http.Client{
-	Transport: awshttp.NewBuildableClient().WithTransportOptions(func(tr *http.Transport) {
-		tr.MaxConnsPerHost = s3MaxConnsPerHost
-		tr.MaxIdleConnsPerHost = s3MaxConnsPerHost
-		tr.MaxIdleConns = s3MaxIdleConns
-	}).GetTransport(),
+	Transport: sharedTransportValue,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		// Setting CheckRedirect replaces net/http's default, so keep its hop limit.
 		if len(via) >= maxRedirects {
@@ -53,8 +55,8 @@ var sharedHTTPClientValue = &http.Client{
 
 // Delivery URLs retain normal browser redirect behavior while sharing the
 // storage connection pool. S3 uploads must never become GETs after a redirect.
-var sharedDeliveryHTTPClient = &http.Client{Transport: sharedHTTPClientValue.Transport}
+var sharedDeliveryHTTPClient = &http.Client{Transport: sharedTransportValue}
 
 func sharedHTTPClient() *http.Client { return sharedHTTPClientValue }
 
-func sharedTransport() *http.Transport { return sharedHTTPClientValue.Transport.(*http.Transport) }
+func sharedTransport() *http.Transport { return sharedTransportValue }

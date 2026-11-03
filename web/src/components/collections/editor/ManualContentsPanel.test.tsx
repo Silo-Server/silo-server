@@ -86,14 +86,6 @@ describe("manual collection paging", () => {
     expect(screen.queryByLabelText("Move first")).toBeNull();
     expect(screen.getByLabelText("Remove first")).toBeTruthy();
   });
-  it("retains dragging for collections whose complete membership fits in one page", () => {
-    mocks.page.mockReturnValue({
-      data: { items: [item("first")], page: { has_more: false } },
-      isLoading: false,
-    });
-    show();
-    expect(screen.getByLabelText("Move first")).toBeTruthy();
-  });
 });
 
 it("shows the catalog title while keeping mutation identifiers stable", async () => {

@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { Minus, Plus } from "lucide-react";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
@@ -16,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSubtitleAppearanceSetting } from "@/hooks/queries/subtitleAppearance";
+import { SUBTITLE_SYNC_MAX_MS, useSubtitleSyncSetting } from "@/hooks/queries/subtitleSync";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
@@ -40,7 +42,7 @@ import { toast } from "sonner";
 
 import { ResetButton } from "./ResetButton";
 
-/* Languages and subtitle behavior are profile preferences; a device tunes only appearance. */
+/* Languages, subtitle behavior and subtitle appearance are profile preferences. */
 /**
  * The behavior modes come from the contract rather than a literal list, so a
  * member added to the manifest appears here without a matching edit.
@@ -183,12 +185,12 @@ function SettingRow({ label, description, labelForControl = true, children }: Se
 export default function SubtitleAppearanceSettings() {
   const {
     appearance: effectiveSettings,
-    hasDeviceOverride,
+    isCustomized,
     save: saveAppearance,
     reset: resetAppearance,
     isSaving,
-    isResetting,
   } = useSubtitleAppearanceSetting();
+  const subtitleSync = useSubtitleSyncSetting();
   const { data: profileValues } = useEffectiveSettings({ keys: PROFILE_KEYS });
   const {
     save: saveProfileDefault,
@@ -265,13 +267,13 @@ export default function SubtitleAppearanceSettings() {
     }
   }
 
-  // Clears this device's own look, so the profile's (or the built-in) one
-  // applies again. Any unsaved edits go with it.
+  // Clears the profile's look (and this browser's own copy), so the built-in
+  // one applies on every device again. Any unsaved edits go with it.
   async function handleResetAppearance() {
     try {
       await resetAppearance();
       discardLocalChanges();
-      toast.success("Subtitle appearance reset");
+      toast.success("Subtitle appearance reset to the default");
     } catch {
       toast.error("Failed to reset subtitle appearance");
     }
@@ -313,7 +315,7 @@ export default function SubtitleAppearanceSettings() {
     <div className="space-y-6">
       <PageHeader
         title="Language & Subtitles"
-        subtitle="The languages this profile prefers, when subtitles appear, and how they look on this device."
+        subtitle="The languages this profile prefers, when subtitles appear, and how they look."
       />
 
       <SettingsGroup title="Language">
@@ -435,12 +437,12 @@ export default function SubtitleAppearanceSettings() {
 
       <SettingsGroup
         title="Preview"
-        description="How subtitles look on this device. Your other devices keep their own look."
+        description="How subtitles look for this profile on every device."
         actions={
-          hasDeviceOverride ? (
+          isCustomized ? (
             <ResetButton
-              label="Reset subtitle appearance on this device"
-              disabled={isResetting || isSaving}
+              label="Reset subtitle appearance to the default"
+              disabled={isSaving}
               onClick={() => void handleResetAppearance()}
             />
           ) : null
@@ -649,6 +651,92 @@ export default function SubtitleAppearanceSettings() {
           )}
         </SettingRow>
       </SettingsGroup>
+
+      <SettingsGroup
+        title="Timing"
+        description="Shift every subtitle earlier or later. Applies to this profile on every device."
+      >
+        <SettingRow
+          label="Subtitle offset"
+          labelForControl={false}
+          description="Negative values show subtitles earlier, positive values later."
+        >
+          {({ labelId, descriptionId }) => (
+            <SubtitleOffsetControl
+              labelId={labelId}
+              descriptionId={descriptionId}
+              valueMs={subtitleSync.offsetMs}
+              disabled={!subtitleSync.isLoaded || subtitleSync.isSaving}
+              onChange={(ms) =>
+                subtitleSync.save(ms).catch(() => toast.error("Failed to save subtitle offset"))
+              }
+            />
+          )}
+        </SettingRow>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+const SUBTITLE_OFFSET_STEP_MS = 100;
+
+function formatSubtitleOffset(ms: number): string {
+  if (ms === 0) return "0 ms";
+  return `${ms > 0 ? "+" : "−"}${Math.abs(ms)} ms`;
+}
+
+function SubtitleOffsetControl({
+  labelId,
+  descriptionId,
+  valueMs,
+  disabled,
+  onChange,
+}: {
+  labelId: string;
+  descriptionId: string;
+  valueMs: number;
+  disabled: boolean;
+  onChange: (ms: number) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={descriptionId}
+      className="flex items-center gap-1"
+    >
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Show subtitles ${SUBTITLE_OFFSET_STEP_MS} ms earlier`}
+        disabled={disabled || valueMs <= -SUBTITLE_SYNC_MAX_MS}
+        onClick={() => onChange(valueMs - SUBTITLE_OFFSET_STEP_MS)}
+      >
+        <Minus className="h-4 w-4" />
+      </Button>
+      <output
+        aria-live="polite"
+        className="min-w-[5.5rem] text-center font-mono text-sm tabular-nums"
+      >
+        {formatSubtitleOffset(valueMs)}
+      </output>
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Show subtitles ${SUBTITLE_OFFSET_STEP_MS} ms later`}
+        disabled={disabled || valueMs >= SUBTITLE_SYNC_MAX_MS}
+        onClick={() => onChange(valueMs + SUBTITLE_OFFSET_STEP_MS)}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={disabled || valueMs === 0}
+        onClick={() => onChange(0)}
+      >
+        Reset
+      </Button>
     </div>
   );
 }

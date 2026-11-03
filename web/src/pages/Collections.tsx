@@ -35,7 +35,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import type { Collection, LibraryTabCollection } from "@/api/types";
+import type { Collection, LibraryTabCollection, ServerCollectionsLibrary } from "@/api/types";
 import { CalmPage } from "@/components/calm/CalmPage";
 import { PillSwitcher } from "@/components/calm/PillSwitcher";
 import { CollectionActionsMenu } from "@/components/collections/CollectionActionsMenu";
@@ -46,6 +46,7 @@ import {
   type SyncAttention,
 } from "@/components/collections/editor/CollectionMetaLine";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -57,10 +58,13 @@ import {
   useSetCollectionShared,
 } from "@/hooks/queries/collections";
 import { useProfiles } from "@/hooks/queries/profiles";
+import { useServerCollectionCards } from "@/hooks/queries/serverCollectionCards";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDialogSearchParam } from "@/hooks/useDialogSearchParam";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useLoadMoreFocus } from "@/hooks/useLoadMoreFocus";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { personalDeleteDescription, unshareConsequence } from "@/lib/collections/copy";
 import { NEW_COLLECTION_DIALOG } from "@/lib/collections/dialogs";
@@ -652,8 +656,9 @@ function SortableCollectionCard({
 const ALL_LIBRARIES = "all";
 
 /**
- * Server collections: library pills, one row of cards, and See all for the
- * chosen library. Hidden only when no library has any, so one-profile accounts see it too.
+ * Server collections: library pills, then every collection of the chosen
+ * library, or of every library mixed together under All. Hidden only when no
+ * library has any, so one-profile accounts see it too.
  */
 function ServerCollectionsSection() {
   const { data, isLoading } = useServerCollections();
@@ -668,44 +673,10 @@ function ServerCollectionsSection() {
     );
   if (libraries.length === 0) return null;
 
-  const library =
-    libraries.length === 1
-      ? libraries[0]
-      : libraries.find((entry) => String(entry.library_id) === selected);
-  // All libraries: every library's cards in library order, each collection
-  // once. A collection in several libraries opens across all of them, so its
-  // card carries no library (and so no sidebar pin, which needs one).
-  const libraryCount = new Map<string, number>();
-  for (const entry of libraries) {
-    for (const collection of entry.collections) {
-      libraryCount.set(collection.id, (libraryCount.get(collection.id) ?? 0) + 1);
-    }
-  }
-  const seen = new Set<string>();
-  const cards = (library ? [library] : libraries).flatMap((entry) =>
-    entry.collections.flatMap((collection) => {
-      if (seen.has(collection.id)) return [];
-      seen.add(collection.id);
-      const inSeveral = !library && (libraryCount.get(collection.id) ?? 0) > 1;
-      return [{ collection, libraryId: inSeveral ? undefined : entry.library_id }];
-    }),
-  );
+  const picked = libraries.find((entry) => String(entry.library_id) === selected);
+  const library = libraries.length === 1 ? libraries[0] : picked;
   return (
-    <CollectionsSection
-      id="server-collections"
-      title="Server collections"
-      action={
-        library ? (
-          <Link
-            to={`/library/${library.library_id}?tab=collections`}
-            aria-label={`See all ${library.total_count} ${library.library_name} collections`}
-            className="text-sm font-medium underline-offset-4 hover:underline"
-          >
-            See all {library.total_count}
-          </Link>
-        ) : null
-      }
-    >
+    <CollectionsSection id="server-collections" title="Server collections">
       {libraries.length > 1 ? (
         <PillSwitcher
           label="Library"
@@ -720,13 +691,64 @@ function ServerCollectionsSection() {
           onChange={setSelected}
         />
       ) : null}
-      {/* One row: as many cards as the grid has columns. */}
-      <ul
-        className={cn(
-          POSTER_GRID,
-          "max-sm:[&>li:nth-child(n+4)]:hidden max-lg:[&>li:nth-child(n+6)]:hidden [&>li:nth-child(n+8)]:hidden",
-        )}
-      >
+      <ServerCollectionsGrid
+        libraries={library ? [library] : libraries}
+        loadOnScroll={picked === undefined}
+      />
+    </CollectionsSection>
+  );
+}
+
+/**
+ * Every server collection of these libraries in one grid. The aggregated
+ * answer carries only each library's first 20, so the rest come from the
+ * libraries' Collections tabs, which list the same collections in the same
+ * order. A picked library loads its rest straight away. The page's default
+ * view (All, or a lone library) loads one library's rest at a time, each time
+ * the end of the grid nears the viewport or the viewer presses Load more, so
+ * opening the page reads only the capped answer unless the grid is short.
+ * Every library's first 20 come before any library's rest. If a list fails,
+ * that library's first 20 stay with a link to its Collections tab; if a list
+ * already on screen fails to refresh, it stays with a notice offering Try
+ * again. Pressing Load more moves focus to the first card it added, or to
+ * the library's link when its list failed and nothing is left to load.
+ */
+function ServerCollectionsGrid({
+  libraries,
+  loadOnScroll,
+}: {
+  libraries: ServerCollectionsLibrary[];
+  loadOnScroll: boolean;
+}) {
+  const { cards, loading, next, failed, refreshFailed, loadNext } = useServerCollectionCards(
+    libraries,
+    loadOnScroll,
+  );
+  const sentinelRef = useIntersectionObserver({
+    onIntersect: loadNext,
+    enabled: loadOnScroll && !loading && next !== undefined,
+  });
+  const { listRef, buttonRef, fallbackRef, press } = useLoadMoreFocus<HTMLUListElement>(
+    loading,
+    cards.length,
+  );
+  const pressLoadMore = () => {
+    if (loading || !next) return;
+    press();
+    loadNext();
+  };
+  return (
+    <>
+      {refreshFailed.map(({ library, error, retry, retrying }) => (
+        <RefreshFailedNotice
+          key={library.library_id}
+          message={`Couldn't refresh the collections in ${library.library_name}.`}
+          error={error}
+          onRetry={retry}
+          retrying={retrying}
+        />
+      ))}
+      <ul ref={listRef} className={POSTER_GRID}>
         {cards.map(({ collection, libraryId }) => (
           <li key={collection.id}>
             <CollectionPosterCard
@@ -738,6 +760,38 @@ function ServerCollectionsSection() {
           </li>
         ))}
       </ul>
-    </CollectionsSection>
+      {loading ? <PosterGridSkeleton /> : null}
+      {next || (loadOnScroll && loading) ? (
+        // Scrolling near it presses it; it stays for keyboard and screen
+        // reader users, who may read the grid without scrolling. It stays
+        // mounted while a library's rest loads so a press keeps its focus,
+        // and is aria-disabled rather than disabled, which would drop focus.
+        <div ref={sentinelRef} className="flex justify-center">
+          <Button
+            ref={buttonRef}
+            variant="outline"
+            size="sm"
+            className="aria-disabled:opacity-50"
+            aria-disabled={loading || undefined}
+            onClick={pressLoadMore}
+          >
+            Load more
+          </Button>
+        </div>
+      ) : null}
+      {failed.length > 0 ? (
+        <div ref={fallbackRef} className="flex flex-wrap gap-x-4 gap-y-1">
+          {failed.map((entry) => (
+            <Link
+              key={entry.library_id}
+              to={`/library/${entry.library_id}?tab=collections`}
+              className="text-sm font-medium underline-offset-4 hover:underline"
+            >
+              See all {entry.total_count} in {entry.library_name}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -18,7 +18,18 @@ const FIELD_KEYS: Record<string, { primary?: string[]; more?: string[] }> = {
   anniversaries: { more: ["milestone_years"] },
   taste_match: { more: ["genre"] },
   editorial_spotlight: { more: ["auto_rotate", "rotation_cadence", "subject"] },
-  seasonal_themed: { primary: ["enabled_themes", "theme_titles", "theme", "mode"] },
+  seasonal_themed: {
+    primary: [
+      "enabled_themes",
+      "theme_titles",
+      "vibes",
+      "theme_dates",
+      "source",
+      "custom_holidays",
+      "theme",
+      "mode",
+    ],
+  },
 };
 
 export function paramFieldKeys(sectionType: string): string[] {
@@ -36,9 +47,14 @@ export function hasParamFields(
   if (slot === "primary") {
     if (LIBRARY_FILTER_SECTION_TYPES.has(sectionType)) return !onLibraryPage;
     if (sectionType === "seasonal_themed") {
-      // Holidays, or a legacy single-holiday row, whose list starts from that holiday.
+      // Holidays (or a legacy single-holiday row, whose list starts from that
+      // holiday) and Family movie night, which picks a vibe.
       const variant = variantOf(sectionType, config);
-      return variant === "se_auto" || (variant === null && typeof config.theme === "string");
+      return (
+        variant === "se_auto" ||
+        variant === "se_family_movie_night" ||
+        (variant === null && typeof config.theme === "string")
+      );
     }
   }
   return Boolean(FIELD_KEYS[sectionType]?.[slot]);

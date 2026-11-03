@@ -44,15 +44,29 @@ const (
 	warnJellyfinResumeUnavailable         = "fetching Jellyfin resume positions failed"
 	warnJellyfinFavoritesUnavailable      = "fetching Jellyfin favorites failed"
 	warnJellyfinFavoriteSeriesUnavailable = "fetching Jellyfin series metadata for favorites failed"
+	// warnJellyfinLookbackUnsorted reports a lookback run that read the full
+	// played history because the server did not return plays newest first, or
+	// the list kept moving while the run read it.
+	warnJellyfinLookbackUnsorted = "jellyfin played items were not newest first or kept moving; read the full played history"
 
 	embyFavoritesUnavailableSummary      = "Emby favorites couldn't be read, so none were imported."
 	embySeriesUnavailableSummary         = "Emby show details couldn't be read, so some episodes may be unmatched."
 	embyResumeListUnavailableSummary     = "Emby's Continue Watching couldn't be read, so titles hidden there may appear in Continue Watching."
 	continueWatchingNotReconciledSummary = "Shows hidden from the source's Continue Watching couldn't all be hidden here, so some may appear in Continue Watching."
 
+	// Plex warnings keep the upstream error after their fixed text, so the
+	// summaries below parse only the leading part.
+	warnPlexSectionUnavailable         = "failed to fetch %s %s from section %q: %v" // watched|in-progress, noun, title, error
+	warnPlexWatchlistUnavailablePrefix = "watchlist fetch failed: "
+	warnPlexUnresolvedIDsMarker        = ": could not resolve external ids for "
+	plexWatchlistIDScope               = "watchlist"
+	plexAdminHistoryIDScope            = "plex admin history"
+	warnPlexSeriesMetadataUnavailable  = "failed to fetch series metadata for %d of %d series"
+
 	jellyfinResumeUnavailableSummary         = "Jellyfin in-progress items couldn't be read, so partly watched titles may be missing."
 	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so some favorites may be missing."
 	jellyfinFavoriteSeriesUnavailableSummary = "Jellyfin show details couldn't be read, so some favorite episodes may be unmatched."
+	jellyfinLookbackUnsortedSummary          = "Jellyfin didn't list plays newest first, or its list kept changing during the read, so this run read the full played history instead of only the lookback window."
 )
 
 // hiddenHistoryWarning is the stored diagnostic for records this profile keeps
@@ -95,6 +109,9 @@ func PublicWarning(diagnostic string) string {
 			"Not imported (%d): you removed these titles from this profile's history, and the source didn't say when they were played.",
 			count)
 	}
+	if summary, ok := publicPlexWarning(diagnostic); ok {
+		return summary
+	}
 	switch {
 	case diagnostic == warnEmbyFavoritesUnavailable, strings.HasPrefix(diagnostic, legacyEmbyFavoritesPrefix):
 		return embyFavoritesUnavailableSummary
@@ -110,8 +127,49 @@ func PublicWarning(diagnostic string) string {
 		return jellyfinFavoritesUnavailableSummary
 	case diagnostic == warnJellyfinFavoriteSeriesUnavailable:
 		return jellyfinFavoriteSeriesUnavailableSummary
+	case diagnostic == warnJellyfinLookbackUnsorted:
+		return jellyfinLookbackUnsortedSummary
 	}
 	return GenericRunWarning
+}
+
+// publicPlexWarning summarizes the Plex diagnostics. Each names what the run
+// left out, so a user knows a completed run is partial and worth re-running.
+func publicPlexWarning(diagnostic string) (string, bool) {
+	var state, noun, section string
+	if n, _ := fmt.Sscanf(diagnostic, strings.TrimSuffix(warnPlexSectionUnavailable, ": %v"), &state, &noun, &section); n == 3 &&
+		(noun == "movies" || noun == "episodes") {
+		switch state {
+		case "watched":
+			return fmt.Sprintf("Plex section %q couldn't be read, so its watched %s weren't imported.", section, noun), true
+		case "in-progress":
+			return fmt.Sprintf("Plex section %q couldn't be read, so its partly watched %s weren't imported.", section, noun), true
+		}
+	}
+	if strings.HasPrefix(diagnostic, warnPlexWatchlistUnavailablePrefix) {
+		return "Your Plex watchlist couldn't be read, so it wasn't imported.", true
+	}
+	var missing, total int
+	// The second count covers only the items that needed a lookup, so the
+	// summary leaves it out.
+	if scope, counts, ok := strings.Cut(diagnostic, warnPlexUnresolvedIDsMarker); ok {
+		if n, _ := fmt.Sscanf(counts, "%d of %d", &missing, &total); n == 2 {
+			switch {
+			case scope == plexWatchlistIDScope && missing == 1:
+				return "Plex couldn't identify 1 watchlist title, so it wasn't added to the watchlist.", true
+			case scope == plexWatchlistIDScope:
+				return fmt.Sprintf("Plex couldn't identify %d watchlist titles, so they weren't added to the watchlist.", missing), true
+			case scope == plexAdminHistoryIDScope && missing == 1:
+				return "Plex couldn't identify 1 played title, so it stays unmatched.", true
+			case scope == plexAdminHistoryIDScope:
+				return fmt.Sprintf("Plex couldn't identify %d played titles, so they stay unmatched.", missing), true
+			}
+		}
+	}
+	if n, _ := fmt.Sscanf(diagnostic, warnPlexSeriesMetadataUnavailable, &missing, &total); n == 2 {
+		return fmt.Sprintf("Plex show details couldn't be read for %d of %d shows, so some of their episodes may be unmatched.", missing, total), true
+	}
+	return "", false
 }
 
 var unmatchedSummaries = map[string]bool{

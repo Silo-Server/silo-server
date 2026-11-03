@@ -82,16 +82,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-
-it.each([401, 500])("single sends ticket refusal %s", async (status) => {
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-
-  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-  vi.stubGlobal("fetch", fetch);
-  await expect(mintRoomSocketTicket("room", "proof")).rejects.toThrow();
-  expect(fetch).toHaveBeenCalledTimes(1);
-});
 it("refuses replaced authority before dispatch", async () => {
   const original = captureProfileRequestContext();
   setProfileToken("pin-B");

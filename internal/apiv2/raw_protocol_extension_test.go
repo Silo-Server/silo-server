@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
 func rawProtocolFixture(method, protocol string, class Class) RawOperation {
@@ -155,6 +156,7 @@ func TestRawProtocolWebSocketRealUpgradeAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = response.Body.Close() }()
 	defer conn.Close()
 	if response.StatusCode != 101 || response.Header.Get("Upgrade") != "websocket" || response.Header.Get("Sec-WebSocket-Accept") == "" {
 		t.Fatal(response.StatusCode, response.Header)

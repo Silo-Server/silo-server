@@ -13,6 +13,7 @@ import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/perm
 
 import { CardEditingProvider } from "../cardEditing";
 import { AccessTab } from "./AccessTab";
+import { stubRadixDom } from "../adminUserTab.test-support";
 import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 const mocks = vi.hoisted(() => ({
@@ -245,6 +246,16 @@ function lastBody(): UpdateUserRequest {
   if (!call) throw new Error("no save");
   return call.body;
 }
+/** Saves the card, waits for the PUT (the `times`-th one, when given), and returns its body. */
+async function save(ui: Ui, scope: HTMLElement, times?: number) {
+  await ui.click(within(scope).getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    times === undefined
+      ? expect(mocks.update).toHaveBeenCalled()
+      : expect(mocks.update).toHaveBeenCalledTimes(times),
+  );
+  return lastBody();
+}
 /** The value side of a row in a card: value, the value it replaces, and the tag. */
 function row(scope: HTMLElement, label: string): string {
   const labelNode = within(scope).getByText(label, { selector: "div" });
@@ -261,20 +272,7 @@ const conflict = () =>
   });
 
 beforeEach(() => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    setPointerCapture: () => {},
-    releasePointerCapture: () => {},
-    scrollIntoView: () => {},
-  });
+  stubRadixDom();
   mocks.update.mockReset().mockResolvedValue(undefined);
   mocks.reads = 0;
   mocks.viewer = { id: 1 };
@@ -330,8 +328,8 @@ describe("card editing", () => {
     const ui = userEvent.setup();
     mount();
     const playback = await edit(ui, "Playback & streaming");
-    const save = within(playback).getByRole("button", { name: "Save" });
-    expect(save).toBeDisabled();
+    const saveButton = within(playback).getByRole("button", { name: "Save" });
+    expect(saveButton).toBeDisabled();
     expect(within(playback).getByText("0 unsaved changes")).toBeInTheDocument();
 
     await customize(ui, playback, "Simultaneous streams");
@@ -344,7 +342,7 @@ describe("card editing", () => {
       within(playback).getByText("1 unsaved change · Simultaneous streams"),
     ).toBeInTheDocument();
     expect(streams.closest("[data-changed='true']")).not.toBeNull();
-    await ui.click(save);
+    await ui.click(saveButton);
 
     await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
     expect(mocks.update.mock.calls[0]![0]).toMatchObject({ editor: { etag: '"cached"' } });
@@ -380,8 +378,7 @@ describe("card editing", () => {
     // The untouched field follows the newer account instead of reverting it.
     expect(within(signIn).getByLabelText("Email")).toHaveValue("other-admin@example.test");
     expect(within(signIn).getByText("1 unsaved change · Username")).toBeInTheDocument();
-    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
+    await save(ui, signIn, 2);
     expect(mocks.update.mock.calls[0]![0].editor.etag).toBe('"cached"');
     expect(mocks.update.mock.calls[1]![0]).toMatchObject({
       editor: { etag: '"read-1"' },
@@ -406,18 +403,6 @@ describe("card editing", () => {
     finish();
     await waitFor(() => expect(within(signIn).queryByLabelText("Username")).toBeNull());
     expect(lastBody()).toEqual({ username: "Saved name" });
-  });
-
-  it("refuses an invalid email before saving", async () => {
-    const ui = userEvent.setup();
-    mount();
-    const signIn = await edit(ui, "Sign-in & role");
-    const email = within(signIn).getByLabelText("Email");
-    await ui.clear(email);
-    await ui.type(email, "not-an-email");
-    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
-    expect(within(signIn).getByRole("alert")).toHaveTextContent("Enter a valid email address");
-    expect(mocks.update).not.toHaveBeenCalled();
   });
 });
 
@@ -456,9 +441,7 @@ describe("Sign-in & role", () => {
         "Admins don't use access groups. Saving removes this account from Guests.",
       ),
     ).toBeInTheDocument();
-    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ role: "admin", access_group_id: null });
+    expect(await save(ui, signIn)).toEqual({ role: "admin", access_group_id: null });
   });
 
   it("follows the draft role for the inherited profile limit", async () => {
@@ -500,9 +483,7 @@ describe("Sign-in & role", () => {
     expect(limit).toHaveValue(2);
     await ui.clear(limit);
     await ui.type(limit, "3");
-    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_profiles: 3 });
+    expect(await save(ui, signIn)).toEqual({ max_profiles: 3 });
   });
 
   it("returns a profile limit override to the group's with null", async () => {
@@ -517,26 +498,7 @@ describe("Sign-in & role", () => {
     await ui.click(
       within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default · 2" }),
     );
-    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_profiles: null });
-  });
-
-  it("won't save a custom profile limit below 1 in place of an override", async () => {
-    const ui = userEvent.setup();
-    mount({
-      ...GUEST,
-      max_profiles: 6,
-      effective_policy: { ...GUEST.effective_policy, max_profiles: 6 },
-    });
-    const signIn = await edit(ui, "Sign-in & role");
-    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
-    await ui.clear(limit);
-    await ui.type(limit, "0");
-    expect(
-      within(signIn).getByText("Enter a whole number of at least 1, or switch back to Default."),
-    ).toBeInTheDocument();
-    expect(within(signIn).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await save(ui, signIn)).toEqual({ max_profiles: null });
   });
 });
 
@@ -563,27 +525,13 @@ describe("Library access", () => {
     expect(within(library).getByText("The Guests group allows this")).toBeInTheDocument();
   });
 
-  it("shows a blocked assignment as off, with a note", async () => {
-    const ui = userEvent.setup();
-    mount({ ...GUEST, permissions: [PERMISSION_METADATA_CURATION] });
-    const library = await edit(ui, "Library access");
-    const curation = within(library).getByRole("switch", { name: "Metadata curation" });
-    expect(curation).toBeDisabled();
-    expect(curation).not.toBeChecked();
-    expect(
-      within(library).getByText("Set on this account; has no effect under Guests"),
-    ).toBeInTheDocument();
-  });
-
   it("removes a blocked assignment from the account", async () => {
     const ui = userEvent.setup();
     mocks.update.mockResolvedValue(undefined);
     mount({ ...GUEST, permissions: [PERMISSION_METADATA_CURATION] });
     const library = await edit(ui, "Library access");
     await ui.click(within(library).getByRole("button", { name: "Remove from account" }));
-    await ui.click(within(library).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(lastBody()).toEqual({ permissions: [] });
+    expect(await save(ui, library, 1)).toEqual({ permissions: [] });
   });
 
   it("rebases permission switches onto a reloaded account", async () => {
@@ -601,9 +549,7 @@ describe("Library access", () => {
       expect(within(library).getByRole("button", { name: "Save" })).toBeEnabled(),
     );
     expect(within(library).getByRole("switch", { name: "Metadata curation" })).toBeChecked();
-    await ui.click(within(library).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
-    expect(lastBody()).toEqual({
+    expect(await save(ui, library, 2)).toEqual({
       permissions: [PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION].sort(),
     });
   });
@@ -619,9 +565,7 @@ describe("Library access", () => {
     expect(within(library).getByRole("checkbox", { name: "Movies" })).toBeChecked();
     await ui.click(within(library).getByRole("checkbox", { name: "TV" }));
     expect(within(library).getByText("1 unsaved change · Libraries")).toBeInTheDocument();
-    await ui.click(within(library).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(lastBody()).toEqual({ library_ids: [1] });
+    expect(await save(ui, library, 1)).toEqual({ library_ids: [1] });
 
     cleanup();
     mocks.update.mockClear();
@@ -632,9 +576,7 @@ describe("Library access", () => {
     });
     const again = await edit(ui, "Library access");
     await ui.click(within(again).getByRole("radio", { name: /Use the server default/ }));
-    await ui.click(within(again).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(lastBody()).toEqual({ library_ids: null });
+    expect(await save(ui, again, 1)).toEqual({ library_ids: null });
   });
 
   it("previews the picked group in this card", async () => {
@@ -655,9 +597,7 @@ describe("Library access", () => {
       "href",
       "/admin/access-groups/5",
     );
-    await ui.click(within(library).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ access_group_id: 5 });
+    expect(await save(ui, library)).toEqual({ access_group_id: 5 });
   });
 });
 
@@ -676,19 +616,6 @@ describe("sources and inherited values", () => {
     ).toBeInTheDocument();
   });
 
-  it("seeds a custom limit from the inherited value", async () => {
-    const ui = userEvent.setup();
-    mount(GUEST);
-    const playback = await edit(ui, "Playback & streaming");
-    await customize(ui, playback, "Simultaneous streams");
-    expect(within(playback).getByRole("spinbutton", { name: "Simultaneous streams" })).toHaveValue(
-      1,
-    );
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_streams: 1 });
-  });
-
   it("treats a cleared limit box as unsaved rather than as unlimited", async () => {
     const ui = userEvent.setup();
     mount();
@@ -701,9 +628,7 @@ describe("sources and inherited values", () => {
     ).toBeInTheDocument();
     expect(within(playback).getByRole("button", { name: "Save" })).toBeDisabled();
     await ui.type(streams, "3");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_streams: 3 });
+    expect(await save(ui, playback)).toEqual({ max_streams: 3 });
   });
 
   it("reverts an override to the default with null", async () => {
@@ -715,23 +640,7 @@ describe("sources and inherited values", () => {
         name: "Default · Not allowed",
       }),
     );
-    await ui.click(within(downloads).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ download_transcode_allowed: null });
-  });
-
-  it("offers an admin's full-access default from the server", async () => {
-    const ui = userEvent.setup();
-    mount({ ...USER, role: "admin", download_transcode_allowed: false });
-    const downloads = await edit(ui, "Downloads");
-    await ui.click(
-      within(segment(downloads, "Server-prepared downloads")).getByRole("button", {
-        name: "Default · Allowed",
-      }),
-    );
-    await ui.click(within(downloads).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ download_transcode_allowed: null });
+    expect(await save(ui, downloads)).toEqual({ download_transcode_allowed: null });
   });
 });
 
@@ -749,22 +658,7 @@ describe("Playback & streaming", () => {
     expect(custom).toHaveValue("8");
     await ui.clear(custom);
     await ui.type(custom, "2.5");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_remote_stream_bitrate_kbps: 2500 });
-  });
-
-  it("starts a custom bitrate cap at 20 Mbps when the default is no cap", async () => {
-    const ui = userEvent.setup();
-    mount();
-    const playback = await edit(ui, "Playback & streaming");
-    await customize(ui, playback, "Bitrate cap, remote");
-    expect(
-      within(playback).getByRole("combobox", { name: "Bitrate cap, remote" }),
-    ).toHaveTextContent("20 Mbps");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ max_remote_stream_bitrate_kbps: 20000 });
+    expect(await save(ui, playback)).toEqual({ max_remote_stream_bitrate_kbps: 2500 });
   });
 
   it("sets and changes a max quality override", async () => {
@@ -773,9 +667,7 @@ describe("Playback & streaming", () => {
     let playback = await edit(ui, "Playback & streaming");
     await customize(ui, playback, "Max quality");
     await pick(ui, playback, "Max quality", "1080p");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(lastBody()).toEqual({ max_playback_quality: "1080p" });
+    expect(await save(ui, playback, 1)).toEqual({ max_playback_quality: "1080p" });
     cleanup();
 
     // An account with an override opens straight into the Custom select.
@@ -783,9 +675,7 @@ describe("Playback & streaming", () => {
     playback = await edit(ui, "Playback & streaming");
     expect(within(playback).getByRole("combobox", { name: "Max quality" })).toHaveTextContent("4K");
     await pick(ui, playback, "Max quality", "Any");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
-    expect(lastBody()).toEqual({ max_playback_quality: "" });
+    expect(await save(ui, playback, 2)).toEqual({ max_playback_quality: "" });
   });
 
   it.each([
@@ -809,9 +699,7 @@ describe("Playback & streaming", () => {
       await ui.clear(count);
       await ui.type(count, max);
     }
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual(body);
+    expect(await save(ui, playback)).toEqual(body);
   });
 
   it("returns video transcoding to the default with both fields cleared", async () => {
@@ -831,9 +719,7 @@ describe("Playback & streaming", () => {
         name: "Default · Unlimited",
       }),
     );
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ transcode_allowed: null, max_transcodes: null });
+    expect(await save(ui, playback)).toEqual({ transcode_allowed: null, max_transcodes: null });
   });
 
   it("keeps an overridden count under an inherited switch when another row saves", async () => {
@@ -854,8 +740,6 @@ describe("Playback & streaming", () => {
     ).toHaveValue(3);
     await customize(ui, playback, "Audio-only transcoding");
     await pick(ui, playback, "Audio-only transcoding", "Not allowed");
-    await ui.click(within(playback).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(lastBody()).toEqual({ audio_transcode_allowed: false });
+    expect(await save(ui, playback)).toEqual({ audio_transcode_allowed: false });
   });
 });

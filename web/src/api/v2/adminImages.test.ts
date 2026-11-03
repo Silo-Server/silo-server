@@ -2,7 +2,7 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
-import { getAdminItemImages, applyAdminItemImage } from "./adminImages";
+import { getAdminItemImages, uploadAdminItemImage } from "./adminImages";
 beforeEach(() => {
   installPolicyStorageMocks();
   setAccessToken("test-account");
@@ -68,20 +68,25 @@ it("refuses image results when authority changes during decoding", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
   await expect(getAdminItemImages("item-1")).rejects.toThrow();
 });
-it("does not refresh or replay an image publication after401", async () => {
+it("uploads the image and its slot as a multipart form", async () => {
   const mock = vi.fn().mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        type: "https://siloserver.org/docs/api/v2/problems/authentication_required",
-        status: 401,
-        title: "Unauthorized",
-      }),
-      { status: 401, headers: { "Content-Type": "application/problem+json" } },
-    ),
+    jsonResponse({
+      content_id: "item-1",
+      stored_path: "local/movies/item-1/poster",
+      thumbhash: "",
+    }),
   );
   vi.stubGlobal("fetch", mock);
-  await expect(
-    applyAdminItemImage("item-1", { original_url: "source", type: "poster", provider_id: "p" }),
-  ).rejects.toThrow();
-  expect(mock).toHaveBeenCalledTimes(1);
+  const file = new File(["png"], "poster.png", { type: "image/png" });
+  const out = await uploadAdminItemImage("item-1", "backdrop", file);
+  expect(out.stored_path).toBe("local/movies/item-1/poster");
+  const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+  expect(String(url)).toContain("/api/v2/admin/items/item-1/images/upload");
+  expect(init.method).toBe("POST");
+  expect(init.body).toBeInstanceOf(FormData);
+  const form = init.body as FormData;
+  expect(form.get("type")).toBe("backdrop");
+  expect(form.get("image")).toBeInstanceOf(Blob);
+  // The browser sets the multipart boundary itself.
+  expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
 });

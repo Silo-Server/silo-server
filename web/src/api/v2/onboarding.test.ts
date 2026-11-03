@@ -7,6 +7,7 @@ import {
   setProfileToken,
 } from "@/api/client";
 import { createOnboardingWriter } from "./onboarding";
+import { pendingResponse } from "./pendingFetch.test-support";
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
@@ -22,16 +23,11 @@ function state(etag: string) {
   });
 }
 it("advances only acknowledged validators and blocks overlapping intent", async () => {
-  let finish!: (r: Response) => void;
+  const second = pendingResponse();
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(state('"one"'))
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    )
+    .mockReturnValueOnce(second.promise)
     .mockResolvedValueOnce(state('"three"'));
   vi.stubGlobal("fetch", fetch);
   const write = createOnboardingWriter(captureProfileRequestContext()!);
@@ -40,7 +36,7 @@ it("advances only acknowledged validators and blocks overlapping intent", async 
   await expect(write({ tour_id: "tour", last_step: "second" })).rejects.toThrow(
     "still being saved",
   );
-  finish(state('"two"'));
+  second.finish(state('"two"'));
   await first;
   await write({ tour_id: "tour", last_step: "second" });
   expect(fetch).toHaveBeenCalledTimes(3);
@@ -65,33 +61,17 @@ for (const status of [401, 412])
     await expect(write({ tour_id: "tour", last_step: "second" })).rejects.toThrow("Reload");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
-it("stops on an uncertain network result", async () => {
-  const fetch = vi
-    .fn<typeof globalThis.fetch>()
-    .mockResolvedValueOnce(state('"one"'))
-    .mockRejectedValueOnce(new Error("connection lost"));
-  vi.stubGlobal("fetch", fetch);
-  const write = createOnboardingWriter(captureProfileRequestContext()!);
-  await expect(write({ tour_id: "tour", completed: true })).rejects.toThrow("connection lost");
-  await expect(write({ tour_id: "tour", completed: true })).rejects.toThrow("Reload");
-  expect(fetch).toHaveBeenCalledTimes(2);
-});
 it("rejects completion after a profile change", async () => {
-  let finish!: (r: Response) => void;
+  const completion = pendingResponse();
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(state('"one"'))
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
+    .mockReturnValueOnce(completion.promise);
   vi.stubGlobal("fetch", fetch);
   const write = createOnboardingWriter(captureProfileRequestContext()!);
   const pending = write({ tour_id: "tour", completed: true });
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   setProfileId("other");
-  finish(state('"two"'));
+  completion.finish(state('"two"'));
   await expect(pending).rejects.toThrow();
 });

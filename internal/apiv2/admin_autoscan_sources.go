@@ -30,7 +30,7 @@ type AdminAutoscanSource struct {
 	LastRunAt               *Instant                   `json:"last_run_at,omitempty"`
 	LastError               *string                    `json:"last_error,omitempty"`
 	WebhookConfigured       bool                       `json:"webhook_configured"`
-	WebhookURL              string                     `json:"webhook_url,omitempty"`
+	WebhookURL              string                     `json:"webhook_url,omitempty" format:"uri-reference"`
 	WebhookSecretSuffix     string                     `json:"webhook_secret_suffix,omitempty"`
 	WebhookLastReceivedAt   *Instant                   `json:"webhook_last_received_at,omitempty"`
 	WebhookLastErrorAt      *Instant                   `json:"webhook_last_error_at,omitempty"`

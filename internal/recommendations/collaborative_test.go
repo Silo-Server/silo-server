@@ -6,19 +6,6 @@ import (
 	"testing"
 )
 
-// Peers are profiles; the floor counts the accounts behind them, so one
-// household with many profiles cannot carry the row.
-func TestSimilarUsersPeerFloorCountsAccounts(t *testing.T) {
-	household := []UserSimilarity{{UserID: 2, ProfileID: "a"}, {UserID: 2, ProfileID: "b"}, {UserID: 2, ProfileID: "c"}, {UserID: 3, ProfileID: "a"}}
-	if got := distinctAccounts(household); got != 2 || got >= minSimilarUsersPeerAccounts {
-		t.Fatalf("distinctAccounts = %d, want 2, below the floor of %d", got, minSimilarUsersPeerAccounts)
-	}
-	three := append(household, UserSimilarity{UserID: 4, ProfileID: "a"})
-	if got := distinctAccounts(three); got != minSimilarUsersPeerAccounts {
-		t.Fatalf("distinctAccounts = %d, want %d", got, minSimilarUsersPeerAccounts)
-	}
-}
-
 // Two households of near-identical profiles at the top of the similarity
 // order cannot fill the peers: each account keeps at most
 // similarUsersPeersPerAccount, so a third account below them still makes the

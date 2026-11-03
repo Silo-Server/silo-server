@@ -23,6 +23,7 @@ import {
   requireNotificationAuthority,
   listNotifications,
   listNotificationSeries,
+  setNotificationSeriesMuted,
   type NotifiedSeriesOptions,
   type NotifiedSeriesStatus,
   unreadNotificationCount,
@@ -119,6 +120,38 @@ export function useNotificationSeries(
     enabled: enabled && context !== null,
     retry: false,
   });
+}
+/** Mutes or unmutes one series, then reloads both series lists: the series
+ * moves between them. A mute offers Undo, since the row leaves the view. */
+export function useSetNotificationSeriesMuted() {
+  const queryClient = useQueryClient();
+  const context = captureNotificationAuthority();
+  const mutation = useMutation({
+    mutationFn: ({ seriesId, muted }: { seriesId: string; title: string; muted: boolean }) =>
+      setNotificationSeriesMuted(seriesId, muted, context),
+    retry: false,
+    onSettled: () => {
+      const scope = notificationScope(context);
+      for (const status of ["active", "inactive"] as const)
+        void queryClient.invalidateQueries({
+          queryKey: notificationInboxKeys.series(status, scope),
+        });
+    },
+    onSuccess: (_data, variables) => {
+      if (!variables.muted) return;
+      toast.success(`Muted ${variables.title}`, {
+        action: {
+          label: "Undo",
+          onClick: () => mutation.mutate({ ...variables, muted: false }),
+        },
+      });
+    },
+    onError: (error, variables) => {
+      if (error instanceof StaleApiRequestContextError) return;
+      toast.error(variables.muted ? "Failed to mute the series" : "Failed to unmute the series");
+    },
+  });
+  return mutation;
 }
 export function useUnreadNotificationCount(enabled = true) {
   const context = captureProfileRequestContext();

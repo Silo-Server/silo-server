@@ -209,7 +209,7 @@ func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 		mu.Unlock()
 		unblock := sync.OnceFunc(func() { close(gate) })
 		// Also release handlers if waitFor fails before the normal release.
-		defer unblock()
+		defer unblock() //nolint:gocritic,revive // every round must release its handlers if the test stops early
 
 		var wg sync.WaitGroup
 		for range 3 * s3MaxConnsPerHost {

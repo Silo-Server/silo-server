@@ -9,80 +9,58 @@ import (
 	"time"
 )
 
-func TestCleanupReportsDeletesRowBeforeBlobAndToleratesMissingObject(t *testing.T) {
-	ops := []string{}
-	repo := &fakeCleanupRepo{
-		retention: []Report{
-			testCleanupReport("r1", 7, StateReady, "diagnostics/7/r1.tar.gz"),
-			testCleanupReport("r2", 7, StateReady, "diagnostics/7/r2.tar.gz"),
-		},
-		ops: &ops,
-	}
-	store := &fakeCleanupStore{
-		bucket:      "private",
-		missingKeys: map[string]bool{"diagnostics/7/r1.tar.gz": true},
-		ops:         &ops,
-	}
-
+// runCleanup runs CleanupReports with the default settings at a fixed clock.
+func runCleanup(t *testing.T, repo CleanupRepository, store ObjectStore) CleanupResult {
+	t.Helper()
 	result, err := CleanupReports(context.Background(), repo, store, Settings{
 		RetentionDays:   30,
 		MaxBytesPerUser: DefaultMaxBytesPerUser,
 	}, CleanupOptions{
 		Now:    func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) },
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatalf("CleanupReports: %v", err)
 	}
-	if result.RetentionReportsDeleted != 2 {
-		t.Fatalf("RetentionReportsDeleted = %d, want 2", result.RetentionReportsDeleted)
-	}
-	wantOps := []string{
-		"delete-row:r1",
-		"delete-object:diagnostics/7/r1.tar.gz",
-		"delete-row:r2",
-		"delete-object:diagnostics/7/r2.tar.gz",
-	}
-	assertStrings(t, ops, wantOps)
+	return result
 }
 
-func TestCleanupReportsTreatsBlobFailureAsNonFatal(t *testing.T) {
-	ops := []string{}
-	repo := &fakeCleanupRepo{
-		retention: []Report{
-			testCleanupReport("r1", 7, StateReady, "diagnostics/7/r1.tar.gz"),
-			testCleanupReport("r2", 7, StateReady, "diagnostics/7/r2.tar.gz"),
-		},
-		ops: &ops,
-	}
-	store := &fakeCleanupStore{
-		bucket:     "private",
-		deleteErrs: map[string]error{"diagnostics/7/r1.tar.gz": errors.New("s3 access denied")},
-		ops:        &ops,
-	}
+// Retention deletes each row before its blob. A blob that is already missing,
+// or whose delete fails, does not abort the run or roll back the row: it is
+// logged for orphan cleanup to reap, both rows count as deleted, and no error
+// is surfaced.
+func TestCleanupReportsDeletesRowBeforeBlob(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store fakeCleanupStore
+	}{
+		{"missing object", fakeCleanupStore{missingKeys: map[string]bool{"diagnostics/7/r1.tar.gz": true}}},
+		{"blob delete fails", fakeCleanupStore{deleteErrs: map[string]error{"diagnostics/7/r1.tar.gz": errors.New("s3 access denied")}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ops := []string{}
+			repo := &fakeCleanupRepo{
+				retention: []Report{
+					testCleanupReport("r1", 7, StateReady, "diagnostics/7/r1.tar.gz"),
+					testCleanupReport("r2", 7, StateReady, "diagnostics/7/r2.tar.gz"),
+				},
+				ops: &ops,
+			}
+			store := tc.store
+			store.bucket, store.ops = "private", &ops
 
-	result, err := CleanupReports(context.Background(), repo, store, Settings{
-		RetentionDays:   30,
-		MaxBytesPerUser: DefaultMaxBytesPerUser,
-	}, CleanupOptions{
-		Now:    func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) },
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
-	// r1's row is deleted first, so its blob delete failing does not abort the
-	// run or roll back the row: it is logged for orphan cleanup to reap, both
-	// rows count as deleted, and no error is surfaced.
-	if err != nil {
-		t.Fatalf("CleanupReports: %v", err)
+			result := runCleanup(t, repo, &store)
+			if result.RetentionReportsDeleted != 2 {
+				t.Fatalf("RetentionReportsDeleted = %d, want 2", result.RetentionReportsDeleted)
+			}
+			assertStrings(t, ops, []string{
+				"delete-row:r1",
+				"delete-object:diagnostics/7/r1.tar.gz",
+				"delete-row:r2",
+				"delete-object:diagnostics/7/r2.tar.gz",
+			})
+		})
 	}
-	if result.RetentionReportsDeleted != 2 {
-		t.Fatalf("RetentionReportsDeleted = %d, want 2", result.RetentionReportsDeleted)
-	}
-	assertStrings(t, ops, []string{
-		"delete-row:r1",
-		"delete-object:diagnostics/7/r1.tar.gz",
-		"delete-row:r2",
-		"delete-object:diagnostics/7/r2.tar.gz",
-	})
 }
 
 func TestCleanupReportsCleansStaleReceiving(t *testing.T) {
@@ -95,13 +73,7 @@ func TestCleanupReportsCleansStaleReceiving(t *testing.T) {
 	}
 	store := &fakeCleanupStore{bucket: "private", ops: &ops}
 
-	result, err := CleanupReports(context.Background(), repo, store, Settings{
-		RetentionDays:   30,
-		MaxBytesPerUser: DefaultMaxBytesPerUser,
-	}, CleanupOptions{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err != nil {
-		t.Fatalf("CleanupReports: %v", err)
-	}
+	result := runCleanup(t, repo, store)
 	if result.StaleReportsDeleted != 1 {
 		t.Fatalf("StaleReportsDeleted = %d, want 1", result.StaleReportsDeleted)
 	}
@@ -124,16 +96,7 @@ func TestCleanupReportsDeletesRowsWhenStorageUnavailable(t *testing.T) {
 		ops: &ops,
 	}
 
-	result, err := CleanupReports(context.Background(), repo, nil, Settings{
-		RetentionDays:   30,
-		MaxBytesPerUser: DefaultMaxBytesPerUser,
-	}, CleanupOptions{
-		Now:    func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) },
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
-	if err != nil {
-		t.Fatalf("CleanupReports: %v", err)
-	}
+	result := runCleanup(t, repo, nil)
 	if result.RetentionReportsDeleted != 1 || result.StaleReportsDeleted != 1 {
 		t.Fatalf("result = %#v, want one retention and one stale deletion", result)
 	}
@@ -164,13 +127,7 @@ func TestCleanupReportsDeletesUnmatchedObjects(t *testing.T) {
 		ops: &ops,
 	}
 
-	result, err := CleanupReports(context.Background(), repo, store, Settings{
-		RetentionDays:   30,
-		MaxBytesPerUser: DefaultMaxBytesPerUser,
-	}, CleanupOptions{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err != nil {
-		t.Fatalf("CleanupReports: %v", err)
-	}
+	result := runCleanup(t, repo, store)
 	if result.OrphanObjectsDeleted != 2 {
 		t.Fatalf("OrphanObjectsDeleted = %d, want 2", result.OrphanObjectsDeleted)
 	}
@@ -199,13 +156,7 @@ func TestCleanupReportsOnlyDeletesBundleShapedOrphans(t *testing.T) {
 		ops: &ops,
 	}
 
-	result, err := CleanupReports(context.Background(), repo, store, Settings{
-		RetentionDays:   30,
-		MaxBytesPerUser: DefaultMaxBytesPerUser,
-	}, CleanupOptions{Logger: slog.New(slog.DiscardHandler)})
-	if err != nil {
-		t.Fatalf("CleanupReports: %v", err)
-	}
+	result := runCleanup(t, repo, store)
 	if want := []string{"diagnostics/7/orphan.tar.gz"}; !sameStrings(store.deleted, want) || result.OrphanObjectsDeleted != 1 {
 		t.Fatalf("deleted objects = %v (count %d), want %v", store.deleted, result.OrphanObjectsDeleted, want)
 	}

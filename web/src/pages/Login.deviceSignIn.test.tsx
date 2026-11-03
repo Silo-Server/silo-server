@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Login from "./Login";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderLogin } from "./loginPage.test-support";
 
 const request = vi.hoisted(() => vi.fn());
 const leave = vi.hoisted(() => vi.fn());
@@ -84,17 +82,6 @@ afterEach(() => {
   request.mockReset();
   leave.mockReset();
 });
-
-function renderLogin() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
 
 const cancels = () =>
   request.mock.calls.filter(([operation]) => operation === "POST /api/v2/auth/device/cancel");

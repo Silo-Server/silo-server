@@ -56,10 +56,6 @@ func (s *SQLiteUserStore) DeleteProfile(_ context.Context, id string) error {
 	return DeleteProfile(s.db, id)
 }
 
-func (s *SQLiteUserStore) VerifyPIN(_ context.Context, profileID, pin string) (bool, error) {
-	return VerifyPIN(s.db, profileID, pin)
-}
-
 // --- Progress ---
 
 func (s *SQLiteUserStore) UpdateProgress(_ context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
@@ -180,6 +176,10 @@ func (s *SQLiteUserStore) VisibleHistoryTimestamps(_ context.Context, profileID 
 
 func (s *SQLiteUserStore) RemoveHistoryItems(_ context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	return RemoveHistoryItems(s.db, profileID, mediaItemIDs, removedAt)
+}
+
+func (s *SQLiteUserStore) ClearWatchedState(_ context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error {
+	return ClearWatchedState(s.db, profileID, mediaItemIDs, clearedAt)
 }
 
 func (s *SQLiteUserStore) DeleteHistoryBySource(_ context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {

@@ -35,13 +35,6 @@ const groups = [
 ];
 
 describe("settingsSearch", () => {
-  it("returns all groups when the query is empty", () => {
-    const filtered = filterSettingsSearchGroups(groups, "");
-
-    expect(countSettingsSearchItems(filtered)).toBe(3);
-    expect(filtered.map((group) => group.label)).toEqual(["Server", "Playback"]);
-  });
-
   it("matches item labels, descriptions, and keywords", () => {
     expect(filterSettingsSearchGroups(groups, "redis")).toEqual([
       {

@@ -70,19 +70,19 @@ func TestVariantMatrix(t *testing.T) {
 		"poster": {
 			Small:    "w300",
 			Medium:   "w500",
-			Large:    "w780",
+			Large:    "w1000",
 			Original: "original",
 		},
 		"still": {
 			Small:    "w300",
 			Medium:   "w500",
-			Large:    "w780",
+			Large:    "w1280",
 			Original: "original",
 		},
 		"backdrop": {
 			Small:    "w300",
 			Medium:   "w1920",
-			Large:    "w1920",
+			Large:    "w2560",
 			Original: "original",
 		},
 		"logo": {
@@ -161,35 +161,6 @@ func TestPluginVariant(t *testing.T) {
 	for size, wantVariant := range want {
 		if got := PluginVariant(size); got != wantVariant {
 			t.Errorf("PluginVariant(%q) = %q, want %q", size, got, wantVariant)
-		}
-	}
-}
-
-func TestNextLower(t *testing.T) {
-	tests := []struct {
-		imageType string
-		variant   string
-		want      string
-		wantOK    bool
-	}{
-		{"poster", "w780", "w500", true},
-		{"poster", "w500", "w300", true},
-		{"poster", "w300", "", false},
-		{"still", "w780", "w500", true},
-		{"logo", "w1280", "w500", true},
-		{"logo", "w500", "", false},
-		{"backdrop", "w1920", "w1280", true},
-		{"backdrop", "w1280", "w300", true},
-		{"backdrop", "w300", "", false},
-		{"profile", "w500", "w300", true},
-		{"poster", "original", "", false},
-		{"poster", "", "", false},
-		{"poster", "wide", "", false},
-	}
-	for _, tt := range tests {
-		got, ok := NextLower(tt.imageType, tt.variant)
-		if got != tt.want || ok != tt.wantOK {
-			t.Errorf("NextLower(%q, %q) = (%q, %v), want (%q, %v)", tt.imageType, tt.variant, got, ok, tt.want, tt.wantOK)
 		}
 	}
 }

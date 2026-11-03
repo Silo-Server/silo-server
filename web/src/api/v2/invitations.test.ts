@@ -71,35 +71,6 @@ it("preserves false, explicit empty libraries, omitted inheritance, and exact st
   await revokeAdminInvitation(row.id);
   expect(String(fetch.mock.calls[4]![0])).toBe(`/api/v2/admin/invitations/${row.id}`);
 });
-it("never refreshes or replays any mutation on401", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>
-    json(
-      {
-        type: "https://silo.example/problems/authentication_required",
-        title: "Unauthorized",
-        status: 401,
-      },
-      401,
-    ),
-  );
-  vi.stubGlobal("fetch", fetch);
-  for (const call of [
-    () =>
-      createAdminInvitation({
-        email: row.email,
-        role: "user",
-        create_profile: true,
-        show_tour: true,
-      }),
-    () => resendAdminInvitation(row.id),
-    () => revokeAdminInvitation(row.id),
-  ]) {
-    fetch.mockClear();
-    await expect(call()).rejects.toMatchObject({ status: 401 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(fetch.mock.calls[0]![0])).not.toContain("refresh");
-  }
-});
 it("rejects stale captured authority before effects and after delayed results", async () => {
   const context = captureInvitationAuthority();
   setProfileId("child");

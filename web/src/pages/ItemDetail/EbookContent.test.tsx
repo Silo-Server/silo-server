@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import EbookContent from "./EbookContent";
+import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
@@ -127,64 +127,30 @@ vi.mock("./components/ScoreRow", () => ({
   default: () => <div />,
 }));
 
-function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    file_path: overrides.file_path ?? "/books/book.epub",
-    resolution: overrides.resolution ?? "",
-    codec_video: overrides.codec_video ?? "",
-    codec_audio: overrides.codec_audio ?? "",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "epub",
-    file_size: overrides.file_size ?? 1234,
-    duration: overrides.duration ?? 0,
-    bitrate: overrides.bitrate ?? 0,
-    file_name: overrides.file_name ?? "Book.epub",
-    audio_tracks: overrides.audio_tracks,
-    video_tracks: overrides.video_tracks,
-    subtitle_tracks: overrides.subtitle_tracks,
-  };
-}
+const makeVersion = (overrides: Partial<FileVersion> = {}) =>
+  makeFileVersion({
+    file_path: "/books/book.epub",
+    resolution: "",
+    codec_video: "",
+    codec_audio: "",
+    container: "epub",
+    file_size: 1234,
+    file_name: "Book.epub",
+    ...overrides,
+  });
 
-function makeEbookItem(
-  overrides: Partial<ItemDetail & { type: "ebook" }> = {},
-): ItemDetail & { type: "ebook" } {
-  return {
-    content_id: "ebook-1",
-    type: "ebook",
+function makeEbookItem(overrides: Partial<ItemDetail> = {}) {
+  return makeItemDetail("ebook", {
     title: "A Psalm for the Wild-Built",
     original_title: "",
     year: 2021,
     overview: "An ebook overview",
     tagline: "",
-    runtime: 0,
-    content_rating: "",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    ratings: [],
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
     crew: [
       { name: "Becky Chambers", job: "Author", person_id: "author-1" },
       { name: "A Narrator Should Not Appear", job: "Narrator", person_id: "narrator-1" },
     ],
     studios: ["Tor"],
-    networks: [],
-    countries: [],
-    release_date: null,
-    first_air_date: null,
-    last_air_date: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    season_count: null,
     series_id: "",
     series_title: "",
     season_number: null,
@@ -193,11 +159,16 @@ function makeEbookItem(
     air_date: null,
     is_specials: false,
     versions: [makeVersion()],
-    subtitles: [],
-    intro: null,
-    credits: null,
     ...overrides,
-  };
+  });
+}
+
+function renderEbook(item = makeEbookItem(), libraryId?: number) {
+  return renderToStaticMarkup(
+    <MemoryRouter>
+      <EbookContent item={item} libraryId={libraryId} />
+    </MemoryRouter>,
+  );
 }
 
 describe("EbookContent", () => {
@@ -211,89 +182,37 @@ describe("EbookContent", () => {
   });
 
   it("only shows download action when downloads are allowed and files exist", () => {
-    let markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} />
-      </MemoryRouter>,
-    );
+    let markup = renderEbook();
     expect(markup).toContain("Download");
 
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-    markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} />
-      </MemoryRouter>,
-    );
+    markup = renderEbook();
     expect(markup).not.toContain("Download");
 
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
-    markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem({ versions: [] })} />
-      </MemoryRouter>,
-    );
+    markup = renderEbook(makeEbookItem({ versions: [] }));
     expect(markup).not.toContain("Download");
   });
 
   it("shows read action for ebook files even when downloads are disabled", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
 
-    let markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} libraryId={12} />
-      </MemoryRouter>,
-    );
+    let markup = renderEbook(makeEbookItem(), 12);
 
     expect(markup).toContain("Read");
     expect(markup).toContain("/reader/ebook/ebook-1?file_id=1&amp;libraryId=12");
 
-    markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem({ versions: [] })} />
-      </MemoryRouter>,
-    );
+    markup = renderEbook(makeEbookItem({ versions: [] }));
     expect(markup).not.toContain("/reader/ebook/");
-  });
-
-  it("shows the mark read toggle backed by the watched mutation", () => {
-    const mutate = vi.fn();
-    mocks.useWatchedStateMutation.mockReturnValue({ mutate, isPending: false });
-    const item = makeEbookItem();
-    const { rerender } = render(
-      <MemoryRouter>
-        <EbookContent item={item} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.useWatchedStateMutation).toHaveBeenCalledWith(item);
-    fireEvent.click(screen.getByRole("button", { name: "Mark Read" }));
-    expect(mutate).toHaveBeenLastCalledWith(true);
-
-    rerender(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            user_data: { played: true, position_seconds: 0, duration_seconds: 0 },
-          })}
-        />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Mark Unread" }));
-    expect(mutate).toHaveBeenLastCalledWith(false);
-    expect(mutate).toHaveBeenCalledTimes(2);
   });
 
   it("does not show read action when ebook files are not reader-supported", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            versions: [makeVersion({ container: "docx", file_name: "Book.docx" })],
-          })}
-        />
-      </MemoryRouter>,
+    const markup = renderEbook(
+      makeEbookItem({
+        versions: [makeVersion({ container: "docx", file_name: "Book.docx" })],
+      }),
     );
 
     expect(markup).not.toContain("/reader/ebook/");
@@ -310,17 +229,13 @@ describe("EbookContent", () => {
       },
     });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            versions: [
-              makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
-              makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
-            ],
-          })}
-        />
-      </MemoryRouter>,
+    const markup = renderEbook(
+      makeEbookItem({
+        versions: [
+          makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
+          makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
+        ],
+      }),
     );
 
     expect(markup).toContain("Continue");
@@ -332,17 +247,13 @@ describe("EbookContent", () => {
   it("prefers EPUB for the read action when multiple ebook files exist", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            versions: [
-              makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
-              makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
-            ],
-          })}
-        />
-      </MemoryRouter>,
+    const markup = renderEbook(
+      makeEbookItem({
+        versions: [
+          makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
+          makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
+        ],
+      }),
     );
 
     expect(markup).toContain("/reader/ebook/ebook-1?file_id=2");

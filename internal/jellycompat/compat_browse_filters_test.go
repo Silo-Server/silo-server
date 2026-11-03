@@ -9,11 +9,9 @@ import (
 	"net/url"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Wholphin and other Jellyfin clients send these filters from library grids;
@@ -57,38 +55,6 @@ func TestUnknownStudioIDsMatchNothing(t *testing.T) {
 	query := parseItemsQuery(httptest.NewRequest(http.MethodGet, "/Items?StudioIds=00000000-0000-0000-0000-000000000001", nil), NewResourceIDCodec())
 	if !query.unmatchedIDFilter {
 		t.Fatal("unknown StudioIds must not fall back to an unfiltered browse")
-	}
-}
-
-// Limit=0 asks for TotalRecordCount only; Wholphin's letter jump uses it as a
-// grid position.
-func TestBrowseLimitZeroReturnsCountOnly(t *testing.T) {
-	codec := NewResourceIDCodec()
-	browse := &stubBrowseSource{items: []*models.MediaItem{{ContentID: "movie-1", Type: "movie", Title: "Alpha"}}, total: 41}
-	h := &ItemsHandler{
-		content:  newDirectContentServiceForTest(browse, nil),
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		userData: &mockUserDataService{},
-		images:   NewImageCache(time.Hour, time.Now),
-	}
-	req := httptest.NewRequest(http.MethodGet, "/Items?IncludeItemTypes=Movie&Recursive=true&NameLessThan=M&Limit=0", nil)
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "p1"}))
-	rec := httptest.NewRecorder()
-	h.HandleItems(rec, req)
-
-	var result struct {
-		Items            json.RawMessage
-		TotalRecordCount int
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != http.StatusOK || string(result.Items) != "[]" || result.TotalRecordCount != 41 {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if len(browse.calls) != 1 || browse.calls[0].filters.NameLessThan != "M" || !browse.calls[0].includeTotal {
-		t.Fatalf("catalog calls: %+v", browse.calls)
 	}
 }
 

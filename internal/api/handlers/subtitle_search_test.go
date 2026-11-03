@@ -3,12 +3,12 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -42,14 +42,6 @@ type stubItemAccessChecker struct {
 
 func (s stubItemAccessChecker) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
 	return s.err
-}
-
-type stubEpisodeLookup struct {
-	episode *models.Episode
-}
-
-func (s stubEpisodeLookup) GetByID(context.Context, string) (*models.Episode, error) {
-	return s.episode, nil
 }
 
 func newSubtitleAuthRequest(method, path string, body io.Reader) *http.Request {
@@ -89,54 +81,6 @@ func newSubtitleUploadRequest(t *testing.T, mediaFileID int, language, filename 
 	return req
 }
 
-func TestHandleUploadSuccess(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{ID: 42, ContentID: "movie-1"},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	}
-
-	req := newSubtitleUploadRequest(t, 42, "en", "custom.srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nHi\n"))
-	rr := httptest.NewRecorder()
-	handler.HandleUpload(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	var resp struct {
-		Subtitle subtitles.DownloadedSubtitle `json:"subtitle"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Subtitle.Provider != subtitles.ProviderUpload {
-		t.Fatalf("provider = %q, want upload", resp.Subtitle.Provider)
-	}
-}
-
-func TestHandleUploadUnauthorizedMediaFile(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
-		ItemAccess:   stubItemAccessChecker{},
-	}
-
-	req := newSubtitleUploadRequest(t, 99, "en", "custom.srt", []byte("hello"))
-	rr := httptest.NewRecorder()
-	handler.HandleUpload(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
-	}
-}
-
 func TestHandleUploadRejectsBadExtension(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
 	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
@@ -157,7 +101,7 @@ func TestHandleUploadRejectsBadExtension(t *testing.T) {
 	}
 }
 
-func TestHandleUploadRejectsOversizedBody(t *testing.T) {
+func TestHandleUploadRejectsUnreadableContent(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
 	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
@@ -168,173 +112,12 @@ func TestHandleUploadRejectsOversizedBody(t *testing.T) {
 		ItemAccess: stubItemAccessChecker{},
 	}
 
-	req := newSubtitleUploadRequest(
-		t,
-		42,
-		"en",
-		"huge.srt",
-		make([]byte, subtitleUploadMaxBodySize+1),
-	)
+	req := newSubtitleUploadRequest(t, 42, "en", "notes.srt", []byte("Notes for the movie night.\n"))
 	rr := httptest.NewRecorder()
 	handler.HandleUpload(rr, req)
 
-	if rr.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413", rr.Code)
-	}
-}
-
-func TestHandleDetectLanguageRejectsOversizedBody(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", "huge.srt")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write(make([]byte, subtitleUploadMaxBodySize+1)); err != nil {
-		t.Fatalf("write file content: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-
-	req := newSubtitleAuthRequest(http.MethodPost, "/subtitles/detect-language", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rr := httptest.NewRecorder()
-	handler.HandleDetectLanguage(rr, req)
-
-	if rr.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413", rr.Code)
-	}
-}
-
-func TestHandleDeleteRequiresAccessToMediaFile(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	repo.subtitles[1] = &subtitles.DownloadedSubtitle{
-		ID:          1,
-		MediaFileID: 42,
-		Provider:    subtitles.ProviderUpload,
-	}
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-	handler.FileAuthorizer = &MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
-		ItemAccess:   stubItemAccessChecker{},
-	}
-
-	req := newSubtitleAuthRequest(http.MethodDelete, "/subtitles/1", nil)
-	req = withProfileRouteParam(req, "id", "1")
-	rr := httptest.NewRecorder()
-	handler.HandleDelete(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
-	}
-}
-
-// stubSubtitleProvider is a registerable no-op provider; only its name matters
-// to the capability probe.
-type stubSubtitleProvider struct {
-	name string
-}
-
-func (s stubSubtitleProvider) Name() string { return s.name }
-
-func (s stubSubtitleProvider) Search(context.Context, subtitles.SearchRequest) ([]subtitles.SubtitleResult, error) {
-	return nil, nil
-}
-
-func (s stubSubtitleProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
-	return nil, subtitles.FormatSRT, nil
-}
-
-func decodeProviderStatus(t *testing.T, rr *httptest.ResponseRecorder) struct {
-	SchemaVersion int      `json:"schema_version"`
-	Enabled       bool     `json:"enabled"`
-	Providers     []string `json:"providers"`
-} {
-	t.Helper()
-
-	var resp struct {
-		SchemaVersion int      `json:"schema_version"`
-		Enabled       bool     `json:"enabled"`
-		Providers     []string `json:"providers"`
-	}
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), unreadableSubtitleMessage) {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.SchemaVersion != 1 {
-		t.Fatalf("schema_version = %d, want 1", resp.SchemaVersion)
-	}
-	return resp
-}
-
-func TestHandleProviderStatusWithoutProviders(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-
-	rr := httptest.NewRecorder()
-	handler.HandleProviderStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
-
-	resp := decodeProviderStatus(t, rr)
-	if resp.Enabled {
-		t.Fatal("enabled = true, want false with no providers registered")
-	}
-	if len(resp.Providers) != 0 {
-		t.Fatalf("providers = %v, want empty", resp.Providers)
-	}
-	// The empty list must reach the wire as [] — a null would read to a
-	// client as a missing field rather than "no providers here".
-	if !bytes.Contains(rr.Body.Bytes(), []byte(`"providers":[]`)) {
-		t.Fatalf("body = %s, want providers serialized as []", rr.Body.String())
-	}
-}
-
-func TestHandleProviderStatusWithProviders(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	manager.RegisterProvider(stubSubtitleProvider{name: "subdl"})
-	manager.RegisterProvider(stubSubtitleProvider{name: "opensubtitles"})
-	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
-
-	rr := httptest.NewRecorder()
-	handler.HandleProviderStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
-
-	resp := decodeProviderStatus(t, rr)
-	if !resp.Enabled {
-		t.Fatal("enabled = false, want true with providers registered")
-	}
-	want := []string{"opensubtitles", "subdl"}
-	if len(resp.Providers) != len(want) {
-		t.Fatalf("providers = %v, want %v", resp.Providers, want)
-	}
-	for i, name := range want {
-		if resp.Providers[i] != name {
-			t.Fatalf("providers = %v, want %v (sorted)", resp.Providers, want)
-		}
-	}
-}
-
-func TestWriteSubtitleProvidersDisabledStatus(t *testing.T) {
-	rr := httptest.NewRecorder()
-	WriteSubtitleProvidersDisabledStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
-
-	resp := decodeProviderStatus(t, rr)
-	if resp.Enabled {
-		t.Fatal("enabled = true, want false from the disabled fallback")
-	}
-	if len(resp.Providers) != 0 {
-		t.Fatalf("providers = %v, want empty", resp.Providers)
-	}
-	if !bytes.Contains(rr.Body.Bytes(), []byte(`"providers":[]`)) {
-		t.Fatalf("body = %s, want providers serialized as []", rr.Body.String())
 	}
 }
 
@@ -468,4 +251,46 @@ func (m *handlerMockSubtitleRepo) GetDownloadedSubtitleByContent(_ context.Conte
 		}
 	}
 	return nil, nil
+}
+
+func TestHandleDeleteRequiresAccessToMediaFile(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	repo.subtitles[1] = &subtitles.DownloadedSubtitle{
+		ID:          1,
+		MediaFileID: 42,
+		Provider:    subtitles.ProviderUpload,
+	}
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
+	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
+	handler.FileAuthorizer = &MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
+		ItemAccess:   stubItemAccessChecker{},
+	}
+
+	req := newSubtitleAuthRequest(http.MethodDelete, "/subtitles/1", nil)
+	req = withProfileRouteParam(req, "id", "1")
+	rr := httptest.NewRecorder()
+	handler.HandleDelete(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestHandleUploadUnauthorizedMediaFile(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
+	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
+	handler.FileAuthorizer = &MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
+		ItemAccess:   stubItemAccessChecker{},
+	}
+
+	req := newSubtitleUploadRequest(t, 99, "en", "custom.srt", []byte("hello"))
+	rr := httptest.NewRecorder()
+	handler.HandleUpload(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
 }

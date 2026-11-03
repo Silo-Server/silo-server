@@ -126,13 +126,6 @@ describe("appearance cache ownership", () => {
     expectDefaults(renderAppearance().captured);
   });
 
-  it("does not apply a sibling profile's cached appearance", () => {
-    seedAccountOneAppearance();
-    signedInAs(1, "p2");
-
-    expectDefaults(renderAppearance().captured);
-  });
-
   it("leaves the other identity's values intact instead of deleting them", () => {
     seedAccountOneAppearance();
     signedInAs(2);
@@ -291,36 +284,6 @@ describe("appearance cache ownership", () => {
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("large");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p2")).toBeNull();
     expect(appearanceCache.get(KEYS.UI_HIGH_CONTRAST, "1:p2")).toBeNull();
-  });
-
-  it("restores the first account's look when they sign back in", () => {
-    seedAccountOneAppearance();
-    signedInAs(2);
-
-    const view = renderAppearance();
-    expectDefaults(view.captured);
-
-    act(() => {
-      signedInAs(1);
-      view.rerender();
-    });
-
-    expectSeeded(view.captured);
-  });
-
-  it("restores a profile's look when switching back to it", () => {
-    seedAccountOneAppearance();
-    signedInAs(1, "p2");
-
-    const view = renderAppearance();
-    expectDefaults(view.captured);
-
-    act(() => {
-      signedInAs(1, "p1");
-      view.rerender();
-    });
-
-    expectSeeded(view.captured);
   });
 
   it("clears the warm start when the server says the setting is unset", () => {

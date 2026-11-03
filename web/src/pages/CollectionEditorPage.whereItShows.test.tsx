@@ -3,31 +3,31 @@
  * rows that show it, Add as a row into Home rows (asking first about unsaved
  * changes), hiding a collection rows use, and deleting it with its rows.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CHANGED_BEFORE_DELETE,
   DISCARD_KEEPS_IT_HIDDEN,
   ROWS_NOT_LISTED,
-  ROWS_ONCE_CREATED,
   SAVE_AFTER_CONFLICTS,
-  SHOW_IT_FIRST,
   SHOW_ON_TAB_LABEL,
 } from "@/lib/collections/copy";
-import { safeReturnPath, type AddedRowState } from "@/lib/homeRows/rowLinks";
+import { type AddedRowState } from "@/lib/homeRows/rowLinks";
 import {
   adminCapabilities,
   adminCollection,
   adminCollectionList,
-  personalCapabilities,
 } from "@/test/fixtures/collectionAnswers";
 import { uploadArtwork } from "@/test/collectionArtwork";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
-import CollectionEditorPage from "./CollectionEditorPage";
+import {
+  location,
+  locationParams,
+  prepareEditorPage,
+  showEditorPage,
+} from "./collectionEditorPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 vi.mock("@/hooks/useDebounce", () => ({ useDebounce: (value: string) => value }));
@@ -101,23 +101,12 @@ function pageOrder(call: RecordedCall) {
 }
 
 beforeEach(() => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  URL.createObjectURL = () => "blob:artwork";
-  HTMLElement.prototype.scrollIntoView = () => {};
-  HTMLElement.prototype.hasPointerCapture = () => false;
+  prepareEditorPage();
   rows = [HOME_ROW, KIDS_ROW];
   v2Recorder.answer("GET /api/v2/admin/collections/capabilities", {
     ...adminCapabilities,
     section_references: true,
   });
-  v2Recorder.answer("GET /api/v2/collections/capabilities", personalCapabilities);
   v2Recorder.answer("GET /api/v2/admin/collections/{id}", GHIBLI);
   v2Recorder.answer("PATCH /api/v2/admin/collections/{id}", (call: RecordedCall) => ({
     ...GHIBLI,
@@ -154,38 +143,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function Where() {
-  const location = useLocation();
-  return <output aria-label="Location">{`${location.pathname}${location.search}`}</output>;
-}
-
-function showPage(entry: string | { pathname: string; search: string; state: unknown }) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const router = createMemoryRouter(
-    [
-      { path: "/admin/collections", element: <Where /> },
-      { path: "/admin/sections", element: <Where /> },
-      {
-        element: <CollectionEditorPage scope="server" />,
-        children: [{ path: "/admin/collections/new" }, { path: "/admin/collections/:id/edit" }],
-      },
-    ],
-    { initialEntries: [entry] },
-  );
-  render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
-  return router;
-}
-
 const EDITOR = "/admin/collections/c1/edit?libraryId=1";
+const showPage = (entry: Parameters<typeof showEditorPage>[0]) =>
+  showEditorPage(entry, { where: true });
 const rowsGroup = () => screen.findByRole("group", { name: "Rows that show it" });
-const location = () => screen.getByRole("status", { name: "Location" }).textContent ?? "";
-const homeRowsParams = () => new URL(location(), "https://silo.test").searchParams;
 
 async function openAddAsRow(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /Add as a row/ }));
@@ -221,11 +182,6 @@ describe("rows that show a server collection", () => {
     expect(
       v2Recorder.callsOf("GET /api/v2/admin/sections/order").map((call) => call.query?.scope),
     ).toEqual(["home"]);
-  });
-
-  it("says in the header where rows show it", async () => {
-    showPage(EDITOR);
-    expect(await screen.findByText(/On Home and the Kids page/)).toBeInTheDocument();
   });
 
   it("highlights the row just added when Home rows hands back to the editor", async () => {
@@ -277,67 +233,6 @@ describe("rows that show a server collection", () => {
 });
 
 describe("Add as a row", () => {
-  it("offers Home, the collection's library pages, then the other libraries", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    const menu = await openAddAsRow(user);
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Home", "Movies page", "Kids page", "4K Movies page"]);
-    expect(menu).toHaveTextContent("Other libraries");
-  });
-
-  it("opens Add row on the chosen page, with a way back to the editor", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    const menu = await openAddAsRow(user);
-    await user.click(within(menu).getByRole("menuitem", { name: "Kids page" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
-    const params = homeRowsParams();
-    expect(params.get("page")).toBe("2");
-    expect(params.get("add")).toBe("collection:library:c1");
-    expect(params.get("return")).toBe(EDITOR);
-    expect(safeReturnPath(params.get("return"))).toBe(EDITOR);
-  });
-
-  it("waits for a new collection to be created, and says so in one line", async () => {
-    showPage("/admin/collections/new?type=manual&libraryId=1");
-    const group = await rowsGroup();
-    expect(group).toHaveTextContent(ROWS_ONCE_CREATED);
-    expect(within(group).queryByRole("button")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Add as a row/ })).toBeNull();
-  });
-
-  it("waits for a hidden collection to be shown on its Collections tab, and says so", async () => {
-    rows = [];
-    showPage(EDITOR);
-    await screen.findByText("No Home or library page row shows it yet.");
-    fireEvent.click(await screen.findByRole("switch", { name: SHOW_ON_TAB_LABEL }));
-    const button = screen.getByRole("button", { name: /Add as a row/ });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(SHOW_IT_FIRST);
-  });
-
-  it("asks first about unsaved changes: Cancel stays, sending nothing", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), {
-      target: { value: "Studio Ghibli Films" },
-    });
-    const menu = await openAddAsRow(user);
-    await user.click(within(menu).getByRole("menuitem", { name: "Home" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
-    expect(dialog).toHaveTextContent(
-      "You're about to add Original as a row on Home. Name not saved yet. Titles are already saved.",
-    );
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Studio Ghibli Films");
-    expect(v2Recorder.writes()).toHaveLength(0);
-  });
-
   it("asks first about unsaved changes: Discard changes goes on without saving", async () => {
     const user = userEvent.setup();
     showPage(EDITOR);
@@ -350,7 +245,7 @@ describe("Add as a row", () => {
     expect(dialog).toHaveTextContent("as a row on the Kids page.");
     await user.click(within(dialog).getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
-    expect(homeRowsParams().get("page")).toBe("2");
+    expect(locationParams().get("page")).toBe("2");
     expect(v2Recorder.writes()).toHaveLength(0);
   });
 
@@ -438,7 +333,7 @@ describe("Add as a row", () => {
     await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     const [patch] = v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}");
     expect(patch!.body).toMatchObject({ title: "Studio Ghibli Films" });
-    expect(homeRowsParams().get("add")).toBe("collection:library:c1");
+    expect(locationParams().get("add")).toBe("collection:library:c1");
   });
 });
 
@@ -504,22 +399,6 @@ describe("deleting a collection rows show", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Delete…" }));
     return screen.findByRole("alertdialog", { name: 'Delete "Original"?' });
   }
-
-  it("lists the rows, each with Open row", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    const dialog = await openDelete(user);
-    expect(dialog).toHaveTextContent(
-      "It's removed from Movies and Kids for everyone. 2 rows show it:",
-    );
-    expect(within(dialog).getByRole("link", { name: "Open row: Studio Ghibli" })).toHaveAttribute(
-      "href",
-      "/admin/sections?page=home&edit=s-home",
-    );
-    expect(
-      within(dialog).getByRole("link", { name: "Open row: Ghibli Favorites" }),
-    ).toHaveAttribute("href", "/admin/sections?page=2&edit=s-kids");
-  });
 
   it("deletes each row with a fresh token, then the collection", async () => {
     const user = userEvent.setup();

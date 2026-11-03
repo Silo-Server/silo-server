@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -24,6 +26,18 @@ func (h *SubtitleSearchHandler) DownloadStoredSubtitle(ctx context.Context, acce
 }
 
 func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, req subtitles.DownloadRequest) (*subtitles.DownloadedSubtitle, error) {
+	// A season-pack result is one archive for every episode; the file's own
+	// episode decides which entry is stored.
+	if h.mediaResolver != nil {
+		meta, err := h.mediaResolver.GetMediaFileWithMetadata(ctx, req.MediaFileID)
+		if err != nil {
+			slog.ErrorContext(ctx, "subtitle download metadata lookup failed", "component", "api", "media_file_id", req.MediaFileID, "error", err)
+			return nil, apiError(http.StatusInternalServerError, "download_error", "Failed to download subtitle")
+		}
+		if meta != nil {
+			req.Target = subtitles.DownloadTarget{Season: meta.Season, Episode: meta.Episode, EndEpisode: meta.EpisodeEnd}
+		}
+	}
 	sub, err := h.manager.Download(ctx, req)
 	if err != nil {
 		if errors.Is(err, subtitles.ErrUnknownProvider) {
@@ -34,7 +48,12 @@ func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, 
 			slog.WarnContext(ctx, "subtitle download refused malformed result id", "component", "api", "provider", req.ProviderName)
 			return nil, fieldError("subtitle_id", "subtitle_id is not a result ID this provider returns").WithCause(err)
 		}
-		slog.ErrorContext(ctx, "subtitle download failed", "component", "api", "provider", req.ProviderName, "subtitle_id", req.SubtitleID, "error", err)
+		// A client can resend a SubDL ID issued while result IDs still carried
+		// a signed query string, and provider errors can quote a request URL or
+		// an upstream body; keep credentials from either out of the log.
+		loggedID, _, _ := strings.Cut(req.SubtitleID, "?")
+		slog.ErrorContext(ctx, "subtitle download failed", "component", "api", "provider", req.ProviderName, "subtitle_id", loggedID,
+			"error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
 		return nil, apiError(http.StatusInternalServerError, "download_error", "Failed to download subtitle")
 	}
 	h.requestAutoSync(ctx, sub)

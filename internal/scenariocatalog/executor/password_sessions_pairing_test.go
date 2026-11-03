@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/auth"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 )
 
@@ -187,13 +188,13 @@ func (e *Env) checkPasswordSessionMutation(t *testing.T, id string, before, afte
 			if err := json.Unmarshal(current[i]["password_hash"], &newHash); err != nil {
 				t.Fatal(err)
 			}
-			user := *e.users[fixtureMember]
-			user.PasswordHash = oldHash
-			if !auth.CheckPassword(&user, memberPass) || auth.CheckPassword(&user, "fixture-rotated-pw1") {
+			matches := func(hash, password string) bool {
+				return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+			}
+			if !matches(oldHash, memberPass) || matches(oldHash, "fixture-rotated-pw1") {
 				t.Fatal("wrong initial credential state")
 			}
-			user.PasswordHash = newHash
-			if oldHash == newHash || auth.CheckPassword(&user, memberPass) || !auth.CheckPassword(&user, "fixture-rotated-pw1") {
+			if oldHash == newHash || matches(newHash, memberPass) || !matches(newHash, "fixture-rotated-pw1") {
 				t.Fatal("password transition invalid")
 			}
 			var oldRevision, newRevision int64

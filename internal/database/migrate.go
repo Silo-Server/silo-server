@@ -68,7 +68,13 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer provider.Close()
 
-	return applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval)
+	if err := applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval); err != nil {
+		return err
+	}
+	// Connections look up the vector types when they open. On a new database
+	// the migrations create them, so reconnect for the binary codecs.
+	pool.Reset()
+	return nil
 }
 
 // MigrateDownTo rolls back every migration newer than version, newest first.

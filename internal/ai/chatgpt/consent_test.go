@@ -1,18 +1,13 @@
 package chatgpt
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
 	"errors"
 	"net/http"
 	"testing"
 )
 
 func TestLoginWithoutPlanConsentBlocksInferenceAndRevokesAcceptedSession(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	f := newIdentityRetryFixture(t, key)
 	f.tokens.Scope = "openid profile email"
 	f.transport(t, nil)

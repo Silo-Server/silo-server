@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { launchDirectDownload } from "./directDownloads";
+import { pendingResponse } from "./pendingFetch.test-support";
 
 const LINK_URL = "/api/v2/direct-download?file_id=42&dl=synthetic-link";
 
@@ -63,73 +64,28 @@ describe("direct download navigation", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
-  it.each(["account", "profile", "pin", "closed"])(
-    "refuses a late link after %s authority changes",
-    async (kind) => {
-      let resolve!: (r: Response) => void;
-      const fetch = vi.fn<typeof globalThis.fetch>(
-        () =>
-          new Promise<Response>((r) => {
-            resolve = r;
-          }),
-      );
-      vi.stubGlobal("fetch", fetch);
-      let current = true;
-      const pending = launchDirectDownload(42, () => current);
-      await vi.waitFor(() => expect(resolve).toBeDefined());
-      if (kind === "account") setAccessToken("replacement");
-      if (kind === "profile") setProfileId("profile-two");
-      if (kind === "pin") setProfileToken("pin-two");
-      if (kind === "closed") current = false;
-      resolve(linkResponse());
-      await expect(pending).rejects.toThrow();
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(click).not.toHaveBeenCalled();
-    },
-  );
-  it.each(["account", "profile", "pin", "closed"])(
-    "refuses a late probe after %s authority changes",
-    async (kind) => {
-      let resolve!: (r: Response) => void;
-      vi.stubGlobal(
-        "fetch",
-        vi
-          .fn<typeof globalThis.fetch>()
-          .mockResolvedValueOnce(linkResponse())
-          .mockImplementationOnce(
-            () =>
-              new Promise<Response>((r) => {
-                resolve = r;
-              }),
-          ),
-      );
-      let current = true;
-      const pending = launchDirectDownload(42, () => current);
-      await vi.waitFor(() => expect(resolve).toBeDefined());
-      if (kind === "account") setAccessToken("replacement");
-      if (kind === "profile") setProfileId("profile-two");
-      if (kind === "pin") setProfileToken("pin-two");
-      if (kind === "closed") current = false;
-      resolve(new Response(null, { status: 200 }));
-      await expect(pending).rejects.toThrow();
-      expect(click).not.toHaveBeenCalled();
-    },
-  );
-  it("does not probe or navigate when the server refuses the link", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          type: "https://siloserver.org/problems/not-found",
-          title: "Not Found",
-          status: 404,
-          detail: "File not found.",
-        }),
-        { status: 404, headers: { "Content-Type": "application/problem+json" } },
-      ),
-    );
+  // The link check runs after the mint and the probe check after the HEAD
+  // probe; each stage refuses every kind of authority change.
+  it.each(
+    (["link", "probe"] as const).flatMap((stage) =>
+      (["account", "profile", "pin", "closed"] as const).map((kind) => [stage, kind] as const),
+    ),
+  )("refuses a late %s after %s authority changes", async (stage, kind) => {
+    const late = pendingResponse();
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    if (stage === "link") fetch.mockReturnValue(late.promise);
+    else fetch.mockResolvedValueOnce(linkResponse()).mockReturnValueOnce(late.promise);
     vi.stubGlobal("fetch", fetch);
-    await expect(launchDirectDownload(42, () => true)).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    let current = true;
+    const pending = launchDirectDownload(42, () => current);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(stage === "link" ? 1 : 2));
+    if (kind === "account") setAccessToken("replacement");
+    if (kind === "profile") setProfileId("profile-two");
+    if (kind === "pin") setProfileToken("pin-two");
+    if (kind === "closed") current = false;
+    late.finish(stage === "link" ? linkResponse() : new Response(null, { status: 200 }));
+    await expect(pending).rejects.toThrow();
+    if (stage === "link") expect(fetch).toHaveBeenCalledTimes(1);
     expect(click).not.toHaveBeenCalled();
   });
   it.each([403, 500])("does not navigate or replay refused/uncertain status %s", async (status) => {

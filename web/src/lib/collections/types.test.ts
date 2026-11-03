@@ -13,7 +13,6 @@ const stored: Array<[string, Record<string, unknown> | undefined, string]> = [
   ["manual", undefined, "Manual"],
   ["smart", undefined, "Smart"],
   ["mdblist", { mode: "mdblist_json" }, "Synced list · MDBList"],
-  ["trakt", { mode: "trakt_preset" }, "Synced list · Trakt (legacy)"],
   ["tmdb", undefined, "Synced list · TMDB chart"],
   ["tmdb", { mode: "" }, "Synced list · TMDB chart"],
   ["tmdb", { mode: "tmdb_preset" }, "Synced list · TMDB chart"],

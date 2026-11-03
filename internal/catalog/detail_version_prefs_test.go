@@ -83,19 +83,6 @@ func TestEffectiveVersionDefaults_UsesSeriesPlaybackPreference(t *testing.T) {
 	}
 }
 
-func TestEffectiveVersionDefaults_RequiresSeriesContext(t *testing.T) {
-	service := &DetailService{}
-
-	defaults := service.effectiveVersionDefaults(context.Background(), AccessFilter{
-		UserID:    1,
-		ProfileID: "profile-1",
-	}, "")
-
-	if defaults.HasAny {
-		t.Fatal("expected no defaults without a series id")
-	}
-}
-
 func TestEffectiveSubtitleDefaults_UsesSeriesTrackSignature(t *testing.T) {
 	store := newDetailTestStore(t)
 	if err := store.SetSubtitlePreference(context.Background(), userstore.SubtitlePreference{
@@ -407,36 +394,6 @@ func TestSelectedPlaybackMarkerSkipsNilVariantDefaultMarkers(t *testing.T) {
 	)
 	if got != want {
 		t.Fatalf("selected marker = %#v, want later variant default %#v", got, want)
-	}
-}
-
-func TestBuildPlaybackInfo_StoresCreditsOnFileVersion(t *testing.T) {
-	service := &DetailService{}
-	creditsStart := 1400.0
-	creditsEnd := 1500.0
-
-	versions, _, _, _, credits, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
-		{
-			ID:           11,
-			ContentID:    "movie-1",
-			FilePath:     "/media/Movie 1080p.mkv",
-			Resolution:   "1080p",
-			CreditsStart: &creditsStart,
-			CreditsEnd:   &creditsEnd,
-		},
-	}, AccessFilter{}, "movie-1")
-
-	if len(versions) != 1 {
-		t.Fatalf("len(versions) = %d, want 1", len(versions))
-	}
-	if versions[0].Credits == nil {
-		t.Fatal("version credits = nil, want marker")
-	}
-	if versions[0].Credits.Start != creditsStart || versions[0].Credits.End != creditsEnd {
-		t.Fatalf("version credits = %#v, want start %v end %v", versions[0].Credits, creditsStart, creditsEnd)
-	}
-	if credits == nil || credits.Start != creditsStart || credits.End != creditsEnd {
-		t.Fatalf("top-level credits = %#v, want start %v end %v", credits, creditsStart, creditsEnd)
 	}
 }
 

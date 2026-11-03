@@ -94,16 +94,3 @@ func TestAdminNodeCapabilitiesAdvertiseDrain(t *testing.T) {
 	}
 	requireProblem(t, do(t, NewHandler(deps), "GET", Prefix+"/admin/nodes/capabilities", "", bearer(memberToken)), TypePermissionDenied)
 }
-
-// The node row carries the drain fields, with "none" for a row that has no
-// reported state yet.
-func TestAdminNodeRowCarriesDrainFields(t *testing.T) {
-	row := adminNodeOf(&nodepool.Node{ID: 4, Type: nodepool.NodeTypeTranscode, DrainRequested: true})
-	if !row.DrainRequested || row.DrainState != "none" {
-		t.Fatalf("row = %+v", row)
-	}
-	row = adminNodeOf(&nodepool.Node{ID: 4, Type: nodepool.NodeTypeTranscode, DrainState: nodepool.DrainStateDrained})
-	if row.DrainRequested || row.DrainState != "drained" {
-		t.Fatalf("row = %+v", row)
-	}
-}

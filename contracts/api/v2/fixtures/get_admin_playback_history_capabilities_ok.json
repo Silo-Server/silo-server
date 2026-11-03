@@ -1,0 +1,21 @@
+{
+  "revision": "1966162d2977d6d9b3adbd4bf5e7af19e29a0e73c17f58f9d4cf71d7f9d62c56",
+  "state": "available",
+  "allowed": true,
+  "available": true,
+  "ended_before": true,
+  "watch_measurement": true,
+  "client_ip": true,
+  "device_identity": true,
+  "client_identity": true,
+  "stream_decisions": true,
+  "end_reason": true,
+  "end_reason_values": [
+    "stopped",
+    "terminated",
+    "expired",
+    "aborted",
+    "replaced"
+  ],
+  "lifecycle_seq": true
+}

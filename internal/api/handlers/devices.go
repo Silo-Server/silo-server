@@ -1,16 +1,20 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -35,6 +39,10 @@ type DeviceHandler struct {
 	// parent. Nil means that parent's whole-household read is simply
 	// unavailable — never that it is unguarded.
 	ProfileTokens *access.ProfileTokenService
+
+	// Connections, when set, deletes a device's playback connection rows
+	// with its last registration. Nil (as in tests) leaves them to retention.
+	Connections *connectionstore.Store
 }
 
 func NewDeviceHandler(provider userstore.UserStoreProvider) *DeviceHandler {
@@ -237,14 +245,15 @@ func (h *DeviceHandler) removeDevice(w http.ResponseWriter, r *http.Request, for
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear device settings")
 		return
 	}
+	userID := apimw.GetUserID(r.Context())
 	if forget && isRegistry {
 		if err := registry.ForgetDevice(r.Context(), profileID, deviceID); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to forget device")
 			return
 		}
+		forgetPlaybackConnections(r.Context(), h.Connections, registry, userID, []string{deviceID})
 	}
 
-	userID := apimw.GetUserID(r.Context())
 	for _, key := range keys {
 		publishUserSettingsEvent(r.Context(), h.EventsHub, userID, profileID,
 			key, string(settingscontract.ScopeProfileDevice))
@@ -263,6 +272,33 @@ func (h *DeviceHandler) removeDevice(w http.ResponseWriter, r *http.Request, for
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// forgetPlaybackConnections deletes the playback connection rows of each named
+// device that no profile on the account registers any more. Callers run it
+// after the deletion of a registration commits, so of two concurrent deletions
+// the one that checks last sees both and deletes the rows. The registry is the
+// account's user store, Postgres or SQLite. A failure is only logged: the
+// registration is already gone, and retention removes the rows.
+func forgetPlaybackConnections(ctx context.Context, connections *connectionstore.Store, registry userstore.DeviceRegistry, userID int, devices []string) {
+	if connections == nil || registry == nil || len(devices) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	registered, err := registry.ListDevices(ctx)
+	if err == nil {
+		var unregistered []string
+		for _, device := range devices {
+			if !slices.ContainsFunc(registered, func(entry userstore.DeviceEntry) bool { return entry.DeviceID == device }) {
+				unregistered = append(unregistered, device)
+			}
+		}
+		err = connections.DeleteDevices(ctx, userID, unregistered)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "playback connection cleanup failed after device removal", "component", "api", "user_id", userID, "error", err)
+	}
 }
 
 type deviceKey struct {

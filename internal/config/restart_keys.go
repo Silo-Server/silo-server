@@ -67,10 +67,8 @@ var restartRequiredKeys = map[string]bool{
 	"matcher.enable_tv_series_root_queue":  true,
 	"matcher.enable_tv_series_group_queue": true,
 
-	// External API clients built once at startup. watchsync.trakt.client_id is
-	// deliberately absent: the collection adapter re-reads it from the settings
-	// repo before each upstream call (atomic setter on the shared client), and
-	// the watch-sync OAuth flows always read both credentials live.
+	// External API clients built once at startup. The watch-sync client
+	// credentials are deliberately absent: the OAuth flows read them live.
 	"tmdb.api_key": true,
 
 	// The LAN discovery responder starts once with the API listener.

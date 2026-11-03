@@ -107,7 +107,7 @@ func (h *CatalogHandler) HandleGetAudiobookGroups(w http.ResponseWriter, r *http
 
 // audiobookGroupsView renders a page of groups with presigned cover stacks.
 func (h *CatalogHandler) audiobookGroupsView(ctx context.Context, result catalog.AudiobookGroupsResult, filter catalog.AccessFilter) audiobookGroupsResponse {
-	resolvedPosters := h.resolveAudiobookGroupPosterURLs(ctx, result.Groups, filter.ImageSize)
+	resolvedPosters := h.resolveAudiobookGroupPosterURLs(ctx, result.Groups, filter.ImageSizeFor(imagesize.SlotPoster))
 	resp := audiobookGroupsResponse{
 		Total:      result.Total,
 		Next:       result.Next,
@@ -118,7 +118,7 @@ func (h *CatalogHandler) audiobookGroupsView(ctx context.Context, result catalog
 	for _, g := range result.Groups {
 		posterURLs := make([]string, 0, len(g.PosterPaths))
 		for _, path := range g.PosterPaths {
-			if resolved := resolvedPosters[sizedCardPath(path, artworkkey.ImagePoster, filter.ImageSize)]; resolved.URL != "" {
+			if resolved := resolvedPosters[sizedCardPath(path, artworkkey.ImagePoster, filter.ImageSizeFor(imagesize.SlotPoster))]; resolved.URL != "" {
 				posterURLs = append(posterURLs, resolved.URL)
 			}
 		}

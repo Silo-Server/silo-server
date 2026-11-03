@@ -64,14 +64,15 @@ func (s *SQLiteUserStore) RemoveDeviceSettings(ctx context.Context, profileID, d
 		if err != nil {
 			return err
 		}
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var key string
 			if err := rows.Scan(&key); err != nil {
-				_ = rows.Close()
 				return err
 			}
 			keys = append(keys, key)
 		}
+		// Close before the deletes below; the deferred Close is then a no-op.
 		if err := rows.Close(); err != nil {
 			return err
 		}

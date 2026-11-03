@@ -2,12 +2,15 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAdminServerSettings: vi.fn(),
   useAdminSensitiveStatus: vi.fn(),
   useRecommendationsStatus: vi.fn(),
+  useAIProviderModels: vi.fn(),
   checkConnectionMutateAsync: vi.fn(),
   updateMutate: vi.fn(),
   updateMutateAsync: vi.fn(),
@@ -16,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   triggerCowatchMutate: vi.fn(),
   triggerRecommendationsMutate: vi.fn(),
   resetMutateAsync: vi.fn(),
-  resetPending: false,
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -61,9 +63,31 @@ vi.mock("@/hooks/queries/admin/recommendations", () => ({
     mutate: (...args: unknown[]) => mocks.triggerRecommendationsMutate(...args),
   }),
   useResetEmbeddings: () => ({
-    isPending: mocks.resetPending,
+    isPending: false,
     mutateAsync: (...args: unknown[]) => mocks.resetMutateAsync(...args),
   }),
+}));
+
+vi.mock("@/hooks/queries/admin/aiProviders", () => ({
+  useAIProviders: () => ({
+    isLoading: false,
+    data: {
+      providers: [
+        {
+          id: "box",
+          type: "custom",
+          name: "Embedding box",
+          base_url: "http://localhost:9999",
+          has_api_key: true,
+          capabilities: ["embeddings"],
+          used_by: ["embeddings"],
+        },
+      ],
+      types: [],
+    },
+  }),
+  useAIProviderModels: () => mocks.useAIProviderModels(),
+  useRefreshAIProviders: () => vi.fn(),
 }));
 
 import AdminRecommendations from "./AdminRecommendations";
@@ -129,33 +153,19 @@ describe("AdminRecommendations", () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    mocks.useAdminServerSettings.mockReset();
-    mocks.useAdminSensitiveStatus.mockReset();
-    mocks.useRecommendationsStatus.mockReset();
-    mocks.checkConnectionMutateAsync.mockReset();
-    mocks.updateMutate.mockReset();
-    mocks.updateMutateAsync.mockReset();
-    mocks.triggerEmbeddingsMutate.mockReset();
-    mocks.triggerTasteProfilesMutate.mockReset();
-    mocks.triggerCowatchMutate.mockReset();
-    mocks.triggerRecommendationsMutate.mockReset();
-    mocks.resetMutateAsync.mockReset();
-    mocks.resetPending = false;
-    mocks.toastSuccess.mockReset();
-    mocks.toastError.mockReset();
+    for (const mock of Object.values(mocks)) mock.mockReset();
 
     mocks.useAdminServerSettings.mockReturnValue({
       data: {
         "recommendations.enabled": "true",
-        "recommendations.embedding_base_url": "http://localhost:9999",
+        "recommendations.embedding_provider_id": "box",
         "recommendations.embedding_model": "custom-model",
       },
       isLoading: false,
     });
-    mocks.useAdminSensitiveStatus.mockReturnValue({
-      data: { configured: ["recommendations.embedding_auth_token"] },
-    });
+    mocks.useAdminSensitiveStatus.mockReturnValue({ data: { configured: [] } });
     mocks.useRecommendationsStatus.mockReturnValue({ data: undefined });
+    mocks.useAIProviderModels.mockReturnValue({ data: { models: [] } });
     mocks.checkConnectionMutateAsync.mockResolvedValue({
       success: true,
       message: "Embedding connection successful.",
@@ -176,44 +186,13 @@ describe("AdminRecommendations", () => {
     });
   }
 
-  it("applies a provider preset to the embedding settings", async () => {
-    mocks.updateMutateAsync.mockResolvedValueOnce({
-      values: {
-        "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com/canonical",
-        "recommendations.embedding_model": "canonical-gemini-model",
-      },
-      restart_required: true,
-    });
-    await render();
-
-    await click(findButton(container, "Gemini"));
-
-    expect(mocks.updateMutateAsync).toHaveBeenCalledOnce();
-    expect(mocks.updateMutateAsync).toHaveBeenCalledWith({
-      "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com",
-      "recommendations.embedding_model": "gemini-embedding-001",
-    });
-
-    const baseUrlInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_base_url"]',
-    );
-    const modelInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_model"]',
-    );
-
-    expect(baseUrlInput?.value).toBe("https://generativelanguage.googleapis.com/canonical");
-    expect(modelInput?.value).toBe("canonical-gemini-model");
-  });
-
   it("checks the current unsaved embedding draft", async () => {
     await render();
 
-    const tokenInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_auth_token"]',
-    );
-    expect(tokenInput).toBeTruthy();
+    const modelInput = within(container).getByLabelText<HTMLInputElement>("Model");
+    expect(modelInput?.value).toBe("custom-model");
 
-    await changeInput(tokenInput, "draft-token");
+    await changeInput(modelInput, "draft-model");
 
     await click(findButton(container, "Check Connection"));
 
@@ -222,14 +201,57 @@ describe("AdminRecommendations", () => {
       body: {
         values: {
           "recommendations.enabled": "true",
-          "recommendations.embedding_base_url": "http://localhost:9999",
-          "recommendations.embedding_model": "custom-model",
-          "recommendations.embedding_auth_token": "draft-token",
+          "recommendations.embedding_provider_id": "box",
+          "recommendations.embedding_model": "draft-model",
         },
-        dirty_keys: ["recommendations.embedding_auth_token"],
+        dirty_keys: ["recommendations.embedding_model"],
       },
     });
   });
+
+  it.each([false, true])(
+    "saves one completed model edit when the picker is cancelled: %s",
+    async (cancel) => {
+      if (!HTMLElement.prototype.hasPointerCapture)
+        HTMLElement.prototype.hasPointerCapture = () => false;
+      if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {};
+      mocks.useAIProviderModels.mockReturnValue({
+        data: { models: [{ id: "listed-model", kind: "embeddings" }] },
+      });
+      let finishSave!: (result: {
+        values: Record<string, string>;
+        restart_required: boolean;
+      }) => void;
+      mocks.updateMutateAsync.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve;
+          }),
+      );
+      const user = userEvent.setup();
+      await render();
+      const field = within(container).getByLabelText<HTMLInputElement>("Model");
+      await user.clear(field);
+      await user.type(field, "typed-model");
+      await user.click(within(container).getByRole("combobox", { name: "Choose model" }));
+      if (cancel) await user.keyboard("{Escape}");
+      else await user.click(within(document.body).getByRole("option", { name: "listed-model" }));
+      expect(mocks.updateMutateAsync).not.toHaveBeenCalled();
+      expect(field).toHaveFocus();
+      const chosen = cancel ? "typed-model" : "listed-model";
+      expect(field).toHaveValue(chosen);
+      await user.tab();
+      await user.tab();
+      expect(mocks.updateMutateAsync).toHaveBeenCalledTimes(1);
+      await act(async () =>
+        finishSave({
+          values: { "recommendations.embedding_model": chosen },
+          restart_required: false,
+        }),
+      );
+      expect(field).toHaveValue(chosen);
+    },
+  );
 
   it("shows each job's last run, the newest cached row and a lock conflict", async () => {
     const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -290,13 +312,6 @@ describe("AdminRecommendations", () => {
     );
   });
 
-  it("shows no lock warning when the lock matches", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    await render();
-
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
   it("resets embeddings only after confirmation and reports the result", async () => {
     mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
     mocks.resetMutateAsync.mockResolvedValue({
@@ -320,65 +335,18 @@ describe("AdminRecommendations", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
-  it("does not reset when the confirmation is cancelled", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    await render();
-
-    await click(findButton(container, "Reset embeddings"));
-    const dialog = document.body.querySelector('[role="alertdialog"]');
-    await click(findButton(dialog as HTMLElement, "Cancel"));
-
-    expect(mocks.resetMutateAsync).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
-  });
-
-  it("reports a failed reset", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    mocks.resetMutateAsync.mockRejectedValue(
-      new Error("Recommendation work that uses embeddings is running on this or another server."),
-    );
-    await render();
-
-    await click(findButton(container, "Reset embeddings"));
-    await click(
-      findButton(
-        document.body.querySelector('[role="alertdialog"]') as HTMLElement,
-        "Reset embeddings",
-      ),
-    );
-
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "Recommendation work that uses embeddings is running on this or another server.",
-    );
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
-  });
-
-  it.each(["embeddings", "taste_profiles", "recommendations"] as const)(
-    "disables the reset while the %s job runs",
-    async (job) => {
-      mocks.useRecommendationsStatus.mockReturnValue({
-        data: statusWith({ [job]: { running: true, count: 1 } }),
-      });
-      await render();
-
-      expect(findButton(container, "Reset embeddings")?.disabled).toBe(true);
-    },
-  );
-
-  it("keeps the reset available while only co-watch runs", async () => {
+  it.each([
+    ["embeddings", true],
+    ["taste_profiles", true],
+    ["recommendations", true],
+    // The reset stays available while only co-watch runs.
+    ["cowatch", false],
+  ] as const)("while the %s job runs, the reset's disabled state is %s", async (job, disabled) => {
     mocks.useRecommendationsStatus.mockReturnValue({
-      data: statusWith({ cowatch: { running: true, count: 1 } }),
+      data: statusWith({ [job]: { running: true, count: 1 } }),
     });
     await render();
 
-    expect(findButton(container, "Reset embeddings")?.disabled).toBe(false);
-  });
-
-  it("disables the reset while a reset is in flight", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    mocks.resetPending = true;
-    await render();
-
-    expect(findButton(container, "Reset embeddings")?.disabled).toBe(true);
+    expect(findButton(container, "Reset embeddings")?.disabled).toBe(disabled);
   });
 });

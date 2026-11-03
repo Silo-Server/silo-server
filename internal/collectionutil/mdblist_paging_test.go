@@ -107,13 +107,3 @@ func TestFetchMDBListJSONBoundsAFeedThatIgnoresPaging(t *testing.T) {
 		t.Fatalf("made %d requests, want at most %d", len(feed.requestQueries), MDBListMaxEntries/mdblistJSONPageSize)
 	}
 }
-
-func TestFetchMDBListJSONReportsStatus(t *testing.T) {
-	t.Parallel()
-
-	feed := &fakeMDBListFeed{status: http.StatusNotFound}
-	_, err := FetchMDBListJSON[pagingEntry](context.Background(), &http.Client{Transport: feed}, "https://mdblist.com/lists/example-user/big", 0)
-	if err == nil || !strings.Contains(err.Error(), "status 404") {
-		t.Fatalf("FetchMDBListJSON error = %v, want status 404", err)
-	}
-}

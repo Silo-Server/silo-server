@@ -543,9 +543,11 @@ export function useWatchTogetherPlaybackSync({
         // quiet until it plays again so the room neither corrects nor follows
         // a stream that cannot move. While recovery is pending the same holds
         // when paused: the server would take a report that matches the room
-        // as recovery, and only the guarded ready above may end it.
+        // as recovery, and only the guarded ready above may end it. It also
+        // holds for a paused element without playable media in a playing room:
+        // the room's play is waiting for that media, so "paused" is no choice.
         if (
-          (!video.paused || retryReadiness) &&
+          (!video.paused || retryReadiness || transportCommand?.playback_state === "playing") &&
           video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
         ) {
           return;

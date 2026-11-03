@@ -202,9 +202,9 @@ func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, p
 }
 
 // ListInbox returns inbox rows newest-first for the profile.
-func (r *DeliveryRepository) ListInbox(ctx context.Context, profileID string, unreadOnly bool, limit int, before *Cursor) ([]DeliveryRow, error) {
-	conditions := []string{"d.profile_id = $1"}
-	args := []any{profileID}
+func (r *DeliveryRepository) ListInbox(ctx context.Context, userID int, profileID string, unreadOnly bool, limit int, before *Cursor) ([]DeliveryRow, error) {
+	conditions := []string{"d.user_id = $1 AND d.profile_id = $2"}
+	args := []any{userID, profileID}
 	if unreadOnly {
 		conditions = append(conditions, "d.read_at IS NULL")
 	}
@@ -226,14 +226,14 @@ func (r *DeliveryRepository) ListInbox(ctx context.Context, profileID string, un
 // ListSync returns rows ascending from the cursor for forward sync (the
 // mobile wake-fetch endpoint). A nil cursor returns the most recent page
 // (still ascending) so first-time callers get a cursor to persist.
-func (r *DeliveryRepository) ListSync(ctx context.Context, profileID string, since *Cursor, limit int) ([]DeliveryRow, error) {
+func (r *DeliveryRepository) ListSync(ctx context.Context, userID int, profileID string, since *Cursor, limit int) ([]DeliveryRow, error) {
 	if since != nil {
 		rows, err := r.pool.Query(ctx,
 			deliveryRowSelect+`
-			WHERE d.profile_id = $1 AND (d.created_at, d.id) > ($2, $3)
+			WHERE d.user_id = $1 AND d.profile_id = $2 AND (d.created_at, d.id) > ($3, $4)
 			ORDER BY d.created_at ASC, d.id ASC
-			LIMIT $4`,
-			profileID, since.CreatedAt, since.ID, limit)
+			LIMIT $5`,
+			userID, profileID, since.CreatedAt, since.ID, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list sync: %w", err)
 		}
@@ -242,11 +242,11 @@ func (r *DeliveryRepository) ListSync(ctx context.Context, profileID string, sin
 	// No cursor: most recent page, returned in ascending order.
 	rows, err := r.pool.Query(ctx, `
 		SELECT * FROM (`+deliveryRowSelect+`
-			WHERE d.profile_id = $1
+			WHERE d.user_id = $1 AND d.profile_id = $2
 			ORDER BY d.created_at DESC, d.id DESC
-			LIMIT $2
+			LIMIT $3
 		) recent ORDER BY recent.created_at ASC, recent.id ASC`,
-		profileID, limit)
+		userID, profileID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list sync: %w", err)
 	}
@@ -254,9 +254,9 @@ func (r *DeliveryRepository) ListSync(ctx context.Context, profileID string, sin
 }
 
 // GetByID returns one delivery scoped to the profile; (nil, nil) when absent.
-func (r *DeliveryRepository) GetByID(ctx context.Context, profileID, id string) (*DeliveryRow, error) {
+func (r *DeliveryRepository) GetByID(ctx context.Context, userID int, profileID, id string) (*DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,
-		deliveryRowSelect+` WHERE d.profile_id = $1 AND d.id = $2`, profileID, id)
+		deliveryRowSelect+` WHERE d.user_id = $1 AND d.profile_id = $2 AND d.id = $3`, userID, profileID, id)
 	if err != nil {
 		return nil, fmt.Errorf("get delivery: %w", err)
 	}
@@ -349,10 +349,10 @@ func (r *DeliveryRepository) HasTransactionalForUserSince(ctx context.Context, u
 // watermark, ascending. A non-zero until excludes rows created at or after it
 // (digest window upper edge). Runs inside the channel worker's claim
 // transaction so the rows read are the rows the advanced watermark covers.
-func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
+func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx, userID int, profileID string, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
 	query := deliveryRowSelect + `
-		WHERE d.profile_id = $1 AND (d.created_at, d.id) > ($2, $3)`
-	args := []any{profileID, since.CreatedAt, since.ID}
+		WHERE d.user_id = $1 AND d.profile_id = $2 AND (d.created_at, d.id) > ($3, $4)`
+	args := []any{userID, profileID, since.CreatedAt, since.ID}
 	if !until.IsZero() {
 		args = append(args, until)
 		query += fmt.Sprintf(" AND d.created_at < $%d", len(args))
@@ -369,14 +369,14 @@ func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx,
 // HasForProfileSince reports whether the profile has any delivery newer than
 // the given watermark. Cheap pre-check (index-only) so account-channel sweeps
 // do not open a claim transaction for idle profiles every pass.
-func (r *DeliveryRepository) HasForProfileSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
+func (r *DeliveryRepository) HasForProfileSince(ctx context.Context, userID int, profileID string, since Cursor) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM notification_deliveries
-			WHERE profile_id = $1 AND (created_at, id) > ($2, $3)
+			WHERE user_id = $1 AND profile_id = $2 AND (created_at, id) > ($3, $4)
 		)`,
-		profileID, since.CreatedAt, since.ID,
+		userID, profileID, since.CreatedAt, since.ID,
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check profile deliveries since watermark: %w", err)
@@ -387,14 +387,14 @@ func (r *DeliveryRepository) HasForProfileSince(ctx context.Context, profileID s
 // HasTransactionalForProfileSince reports whether the profile has any
 // transactional delivery (digest-bypassing request-status notice; see
 // transactionalDeliveryTypes) newer than the given watermark.
-func (r *DeliveryRepository) HasTransactionalForProfileSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
+func (r *DeliveryRepository) HasTransactionalForProfileSince(ctx context.Context, userID int, profileID string, since Cursor) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM notification_deliveries
-			WHERE profile_id = $1 AND (created_at, id) > ($2, $3) AND type = ANY($4)
+			WHERE user_id = $1 AND profile_id = $2 AND (created_at, id) > ($3, $4) AND type = ANY($5)
 		)`,
-		profileID, since.CreatedAt, since.ID, transactionalDeliveryTypes,
+		userID, profileID, since.CreatedAt, since.ID, transactionalDeliveryTypes,
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check profile transactional deliveries since watermark: %w", err)
@@ -403,13 +403,13 @@ func (r *DeliveryRepository) HasTransactionalForProfileSince(ctx context.Context
 }
 
 // RecentUnread returns the newest unread rows for the websocket snapshot.
-func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string, limit int) ([]DeliveryRow, error) {
+func (r *DeliveryRepository) RecentUnread(ctx context.Context, userID int, profileID string, limit int) ([]DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,
 		deliveryRowSelect+`
-		WHERE d.profile_id = $1 AND d.read_at IS NULL
+		WHERE d.user_id = $1 AND d.profile_id = $2 AND d.read_at IS NULL
 		ORDER BY d.created_at DESC, d.id DESC
-		LIMIT $2`,
-		profileID, limit)
+		LIMIT $3`,
+		userID, profileID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("recent unread: %w", err)
 	}
@@ -417,23 +417,23 @@ func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string,
 }
 
 // UnreadCount returns the unread badge count for the profile.
-func (r *DeliveryRepository) UnreadCount(ctx context.Context, profileID string) (int, error) {
+func (r *DeliveryRepository) UnreadCount(ctx context.Context, userID int, profileID string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM notification_deliveries WHERE profile_id = $1 AND read_at IS NULL`,
-		profileID,
+		`SELECT count(*) FROM notification_deliveries WHERE user_id = $1 AND profile_id = $2 AND read_at IS NULL`,
+		userID, profileID,
 	).Scan(&count)
 	return count, err
 }
 
 // MarkRead marks one delivery read. Idempotent; reports whether the row
 // transitioned from unread to read.
-func (r *DeliveryRepository) MarkRead(ctx context.Context, profileID, id string) (bool, error) {
+func (r *DeliveryRepository) MarkRead(ctx context.Context, userID int, profileID, id string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE notification_deliveries
 		SET read_at = now()
-		WHERE profile_id = $1 AND id = $2 AND read_at IS NULL`,
-		profileID, id)
+		WHERE user_id = $1 AND profile_id = $2 AND id = $3 AND read_at IS NULL`,
+		userID, profileID, id)
 	if err != nil {
 		return false, err
 	}
@@ -442,22 +442,22 @@ func (r *DeliveryRepository) MarkRead(ctx context.Context, profileID, id string)
 
 // Exists reports whether a delivery belongs to the profile (used to make
 // mark-read idempotent without leaking other profiles' IDs).
-func (r *DeliveryRepository) Exists(ctx context.Context, profileID, id string) (bool, error) {
+func (r *DeliveryRepository) Exists(ctx context.Context, userID int, profileID, id string) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM notification_deliveries WHERE profile_id = $1 AND id = $2)`,
-		profileID, id,
+		`SELECT EXISTS (SELECT 1 FROM notification_deliveries WHERE user_id = $1 AND profile_id = $2 AND id = $3)`,
+		userID, profileID, id,
 	).Scan(&exists)
 	return exists, err
 }
 
 // MarkAllRead marks every unread delivery read for the profile.
-func (r *DeliveryRepository) MarkAllRead(ctx context.Context, profileID string) (int64, error) {
+func (r *DeliveryRepository) MarkAllRead(ctx context.Context, userID int, profileID string) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE notification_deliveries
 		SET read_at = now()
-		WHERE profile_id = $1 AND read_at IS NULL`,
-		profileID)
+		WHERE user_id = $1 AND profile_id = $2 AND read_at IS NULL`,
+		userID, profileID)
 	if err != nil {
 		return 0, err
 	}
@@ -466,9 +466,9 @@ func (r *DeliveryRepository) MarkAllRead(ctx context.Context, profileID string) 
 
 // DeleteAllForProfile removes every delivery for a deleted profile (profiles
 // may live outside Postgres, so no cascade).
-func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, profileID string) error {
+func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_deliveries WHERE profile_id = $1`, profileID)
+		`DELETE FROM notification_deliveries WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
 }
 

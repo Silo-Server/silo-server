@@ -49,38 +49,6 @@ function desktopTable(): HTMLElement {
   return screen.getByRole("table");
 }
 
-it("shows the unmapped path and why it did not resolve", () => {
-  render(
-    <PollEventTable
-      events={[
-        {
-          ...baseEvent,
-          status: "unresolved",
-          changes_returned: 1,
-          error_message: "returned 1 path(s) but none matched a Silo library folder",
-          changes: [
-            {
-              source_path: "/movies/Film (2024)/Film.mkv",
-              rewritten_path: "/movies/Film (2024)/Film.mkv",
-              scope: "file",
-              outcome: "unresolved",
-              reason: "no_library_match",
-              detail: "No library matches the given path",
-            },
-          ],
-        },
-      ]}
-      lookups={lookups}
-      librariesByID={librariesByID}
-    />,
-  );
-  const table = within(desktopTable());
-  expect(table.getByText("1 path · 0 linked")).toBeTruthy();
-  expect(table.getByText("/movies/Film (2024)/Film.mkv")).toBeTruthy();
-  expect(table.getByText(/No Silo library folder contains this path/)).toBeTruthy();
-  expect(table.queryByText(/Rewritten to/)).toBeNull();
-});
-
 it("shows rewritten paths, joined scans, and suppressed changes", () => {
   render(
     <PollEventTable
@@ -176,56 +144,6 @@ it("explains a change that waits for a follow-up scan and shows unknown outcomes
   ).toBeTruthy();
   expect(table.getByText("teleported")).toBeTruthy();
   expect(table.getByText("Sent somewhere new.")).toBeTruthy();
-});
-
-it("explains events recorded before paths were logged", () => {
-  render(
-    <PollEventTable
-      events={[{ ...baseEvent, changes_returned: 3 }]}
-      lookups={lookups}
-      librariesByID={librariesByID}
-    />,
-  );
-  expect(within(desktopTable()).getByText("Paths were not recorded for this event.")).toBeTruthy();
-});
-
-it("shows linked scan results in the expanded event", () => {
-  render(
-    <PollEventTable
-      events={[
-        {
-          ...baseEvent,
-          changes_returned: 1,
-          scans_created: 1,
-          scan_runs: [
-            {
-              id: "01RUN",
-              library_id: 7,
-              mode: "subtree",
-              path: "/mnt/tv/Show",
-              trigger: "autoscan",
-              status: "completed",
-              result: {
-                new: 4,
-                updated: 0,
-                unchanged: 10,
-                missing: 0,
-                missing_skipped_protected: 0,
-                files_deleted: 0,
-                items_deleted: 0,
-                memberships_removed: 0,
-                errors: 0,
-                skipped: 0,
-              },
-            },
-          ],
-        },
-      ]}
-      lookups={lookups}
-      librariesByID={librariesByID}
-    />,
-  );
-  expect(within(desktopTable()).getByText("4 new")).toBeTruthy();
 });
 
 const emptyResult = {

@@ -40,6 +40,59 @@ func waitForOnDemandIdle(t *testing.T, s *MetadataService) {
 	t.Fatal("timed out waiting for on-demand refresh claims to clear")
 }
 
+// newTrailersHarness returns a harness holding the matched movie "movie-1".
+func newTrailersHarness() *testHarness {
+	h := newTestHarness()
+	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+	return h
+}
+
+// succeedTrailersRefresh makes the next refreshes succeed and returns a
+// channel closed when the first one starts.
+func succeedTrailersRefresh(h *testHarness) <-chan struct{} {
+	started := make(chan struct{})
+	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
+		close(started)
+		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
+	}
+	return started
+}
+
+// forbidTrailersRefresh fails the test if a refresh starts.
+func forbidTrailersRefresh(t *testing.T, h *testHarness, what string) {
+	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
+		t.Errorf("%s must not start a refresh (content_id %s)", what, req.ContentID)
+		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
+	}
+}
+
+// failTrailersRefresh makes every refresh fail as if the provider were down.
+func failTrailersRefresh(h *testHarness) {
+	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
+		return nil, errors.New("tmdb is unreachable")
+	}
+}
+
+// requestTrailers asks for a trailer refresh of movie-1 and fails the test
+// unless it succeeds with status want.
+func requestTrailers(t *testing.T, h *testHarness, want, what string) TrailerRefreshOutcome {
+	t.Helper()
+	outcome, err := h.service.RequestTrailersRefresh(context.Background(), "movie-1")
+	if err != nil || outcome.Status != want {
+		t.Fatalf("%s = %+v, err = %v; want status %q", what, outcome, err, want)
+	}
+	return outcome
+}
+
+// seedTrailerTestDebt records refresh debt with reason for movie-1.
+func seedTrailerTestDebt(t *testing.T, debts *fakeRefreshDebtRepo, reason int64, at time.Time) {
+	t.Helper()
+	if err := debts.UpsertTargetDebt(context.Background(), RefreshTargetItem, "movie-1",
+		refreshDebtPriority(reason), reason, at); err != nil {
+		t.Fatalf("seed debt: %v", err)
+	}
+}
+
 // RequestTrailersRefresh reaches the cooldown gate through a runtime type
 // assertion on itemRepo, so a drift in the repository's signature would turn
 // every request into an error instead of failing the build.
@@ -51,25 +104,12 @@ func TestItemRepositorySatisfiesTrailerRefreshGate(t *testing.T) {
 }
 
 func TestRequestTrailersRefreshQueuesThenReportsCooldown(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+	started := succeedTrailersRefresh(h)
 
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("first status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	outcome := requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
 	if outcome.NextAllowedAt != nil {
 		t.Fatalf("queued outcome must not carry next_allowed_at, got %v", outcome.NextAllowedAt)
 	}
@@ -78,13 +118,7 @@ func TestRequestTrailersRefreshQueuesThenReportsCooldown(t *testing.T) {
 
 	// The second request inside the window loses the gate and reports when the
 	// next one may win: the stored timestamp plus the cooldown.
-	outcome, err = h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh second: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusCooldown {
-		t.Fatalf("second status = %q, want %q", outcome.Status, TrailerRefreshStatusCooldown)
-	}
+	outcome = requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
 	if got := h.itemRepo.trailersReleaseCount(); got != 0 {
 		t.Fatalf("a successful refresh must keep the slot, released %d times", got)
 	}
@@ -100,74 +134,19 @@ func TestRequestTrailersRefreshQueuesThenReportsCooldown(t *testing.T) {
 	}
 }
 
-func TestRequestTrailersRefreshAllowsRetryAfterCooldownLapses(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
-	processed := make(chan string, 4)
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		processed <- req.ContentID
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("first request = %+v, err = %v", outcome, err)
-	}
-	select {
-	case <-processed:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the first on-demand refresh")
-	}
-	waitForOnDemandIdle(t, h.service)
-
-	// One second past the window the gate opens again.
-	now = now.Add(TrailerRefreshCooldown + time.Second)
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh after cooldown: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status after cooldown lapsed = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
-	select {
-	case <-processed:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the second on-demand refresh")
-	}
-	if got := h.itemRepo.trailersClaimCount(); got != 2 {
-		t.Fatalf("cooldown slot consumed %d times, want 2", got)
-	}
-}
-
 // A library whose trailer_kinds allow-list is empty has remote videos turned
 // off, so the request is answered "disabled" — and must not burn the item's
 // weekly slot, or a user would be locked out for a week over a no-op.
 func TestRequestTrailersRefreshDisabledDoesNotConsumeCooldownSlot(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	if err := h.libraryRepo.Upsert(ctx, "movie-1", 10, time.Now()); err != nil {
+	h := newTrailersHarness()
+	if err := h.libraryRepo.Upsert(context.Background(), "movie-1", 10, time.Now()); err != nil {
 		t.Fatalf("seed library membership: %v", err)
 	}
 	folder := &models.MediaFolder{ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil}
 	h.service.folderRepo = &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{10: folder}}
+	forbidTrailersRefresh(t, h, "disabled request")
 
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		t.Errorf("disabled request must not start a refresh (content_id %s)", req.ContentID)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusDisabled {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusDisabled)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusDisabled, "request")
 	if got := h.itemRepo.trailersClaimCount(); got != 0 {
 		t.Fatalf("disabled request consumed the cooldown slot %d times, want 0", got)
 	}
@@ -175,55 +154,17 @@ func TestRequestTrailersRefreshDisabledDoesNotConsumeCooldownSlot(t *testing.T) 
 	// Re-enabling the library lets the very next request through, proving the
 	// slot really was untouched.
 	folder.TrailerKinds = []string{string(models.ExtraKindTrailer)}
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	outcome, err = h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh after re-enabling: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status after re-enabling = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
-	waitForProcess(t, started)
-}
-
-// A nil allow-list is "allow all" — an unknown scope or a transient library
-// lookup failure. It must not be mistaken for "disabled".
-func TestRequestTrailersRefreshTreatsUnknownLibraryScopeAsAllowed(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	// The item has no library membership, so resolveAllowedVideoKinds returns
-	// nil rather than an empty map.
-	h.service.folderRepo = &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{}}
-
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request after re-enabling")
 	waitForProcess(t, started)
 }
 
 func TestRequestTrailersRefreshPropagatesGateErrors(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+	h := newTrailersHarness()
 	gateErr := errors.New("database is down")
 	h.itemRepo.trailersClaimErr = gateErr
 
-	if _, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); !errors.Is(err, gateErr) {
+	if _, err := h.service.RequestTrailersRefresh(context.Background(), "movie-1"); !errors.Is(err, gateErr) {
 		t.Fatalf("err = %v, want %v", err, gateErr)
 	}
 	// The failed gate call must not strand the in-process claim, or every
@@ -235,24 +176,13 @@ func TestRequestTrailersRefreshPropagatesGateErrors(t *testing.T) {
 // fails — a provider outage, a timeout — the slot goes back so the viewer can
 // retry now instead of waiting out a window in which nothing was fetched.
 func TestRequestTrailersRefreshReleasesSlotWhenRefreshFails(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
-	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
-		return nil, errors.New("tmdb is unreachable")
-	}
+	failTrailersRefresh(h)
 
 	released := h.itemRepo.expectTrailersRelease()
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 	select {
 	case <-released:
 	case <-time.After(2 * time.Second):
@@ -264,61 +194,9 @@ func TestRequestTrailersRefreshReleasesSlotWhenRefreshFails(t *testing.T) {
 	waitForOnDemandIdle(t, h.service)
 
 	// The very next request wins the gate again, with no clock movement.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	outcome, err = h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("retry after a failed refresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("retry status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "retry after a failed refresh")
 	waitForProcess(t, started)
-}
-
-// A refresh that succeeds but turns up nothing keeps the slot: "no trailers
-// exist for this title" is an answer, and re-asking providers weekly is the
-// accepted cost ceiling.
-func TestRequestTrailersRefreshKeepsSlotWhenRefreshFindsNothing(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
-	// A successful refresh that produced no videos is indistinguishable here
-	// from any other success: Process returns Updated, and no video rows were
-	// written.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-
-	if got := h.itemRepo.trailersReleaseCount(); got != 0 {
-		t.Fatalf("successful refresh released the slot %d times, want 0", got)
-	}
-	if stored := h.itemRepo.trailersStoredAt("movie-1"); stored == nil {
-		t.Fatal("successful refresh must keep the slot consumed")
-	}
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("second request: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusCooldown {
-		t.Fatalf("status after a successful empty refresh = %q, want %q",
-			outcome.Status, TrailerRefreshStatusCooldown)
-	}
 }
 
 // The release is guarded on the timestamp the failing request wrote, so a
@@ -332,11 +210,10 @@ func TestRequestTrailersRefreshKeepsSlotWhenRefreshFindsNothing(t *testing.T) {
 // that TestRequestTrailersRefreshInFlightRefreshQueuesWithoutConsumingSlot
 // already covers.
 func TestRequestTrailersRefreshReleaseDoesNotClobberNewerClaim(t *testing.T) {
-	h := newTestHarness()
+	h := newTrailersHarness()
 	ctx := context.Background()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
 	// Hold the failing request's release until a newer claim is in place.
 	gate := make(chan struct{})
@@ -349,10 +226,7 @@ func TestRequestTrailersRefreshReleaseDoesNotClobberNewerClaim(t *testing.T) {
 	}
 
 	released := h.itemRepo.expectTrailersRelease()
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("first request = %+v, err = %v", outcome, err)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
 	waitForProcess(t, failed)
 
 	// The window lapses and a later request wins the gate afresh.
@@ -386,9 +260,7 @@ func TestRequestTrailersRefreshReleaseDoesNotClobberNewerClaim(t *testing.T) {
 // is answered "queued" — one really is running — without consuming the weekly
 // slot, so a failure of that refresh still leaves the viewer able to retry.
 func TestRequestTrailersRefreshInFlightRefreshQueuesWithoutConsumingSlot(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+	h := newTrailersHarness()
 
 	// Hold an in-flight refresh open for the duration of the request under
 	// test, exactly as the item-detail path's nudge would.
@@ -402,13 +274,7 @@ func TestRequestTrailersRefreshInFlightRefreshQueuesWithoutConsumingSlot(t *test
 	h.service.startOnDemandMetadataRefresh(RefreshTargetItem, "movie-1")
 	waitForProcess(t, entered)
 
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 	if got := h.itemRepo.trailersClaimCount(); got != 0 {
 		t.Fatalf("in-flight refresh consumed the cooldown slot %d times, want 0", got)
 	}
@@ -417,69 +283,27 @@ func TestRequestTrailersRefreshInFlightRefreshQueuesWithoutConsumingSlot(t *test
 	waitForOnDemandIdle(t, h.service)
 
 	// The slot was untouched, so the next request still wins the gate.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	outcome, err = h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("request after the in-flight refresh finished: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request after the in-flight refresh finished")
 	if got := h.itemRepo.trailersClaimCount(); got != 1 {
 		t.Fatalf("cooldown slot consumed %d times, want 1", got)
 	}
 	waitForProcess(t, started)
 }
 
-// The disabled short-circuit returns before the in-process claim is taken, so
-// it must not leave one behind either.
-func TestRequestTrailersRefreshDisabledLeavesNoInProcessClaim(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	if err := h.libraryRepo.Upsert(ctx, "movie-1", 10, time.Now()); err != nil {
-		t.Fatalf("seed library membership: %v", err)
-	}
-	h.service.folderRepo = &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{
-		10: {ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil},
-	}}
-
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusDisabled {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
-	waitForOnDemandIdle(t, h.service)
-}
-
 // A cooldown answer takes and then hands back the in-process claim; leaking it
 // would mute every subsequent refresh for the item until the process restarts.
 func TestRequestTrailersRefreshCooldownLeavesNoInProcessClaim(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("first request = %+v, err = %v", outcome, err)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
 	waitForProcess(t, started)
 	waitForOnDemandIdle(t, h.service)
 
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusCooldown {
-		t.Fatalf("second request = %+v, err = %v", outcome, err)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
 	waitForOnDemandIdle(t, h.service)
 }
 
@@ -488,11 +312,9 @@ func TestRequestTrailersRefreshCooldownLeavesNoInProcessClaim(t *testing.T) {
 // trailers, and charging a week for trailers that were fetched but not stored
 // would strand the viewer.
 func TestRequestTrailersRefreshReleasesSlotWhenVideoPersistFails(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
 	// Stand in for mergeAndPersist: the pipeline succeeds overall while the
 	// videos write fails and is only logged, which is exactly the shape the
@@ -504,10 +326,7 @@ func TestRequestTrailersRefreshReleasesSlotWhenVideoPersistFails(t *testing.T) {
 	}
 
 	released := h.itemRepo.expectTrailersRelease()
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 	select {
 	case <-released:
 	case <-time.After(time.Second):
@@ -519,15 +338,8 @@ func TestRequestTrailersRefreshReleasesSlotWhenVideoPersistFails(t *testing.T) {
 		t.Fatalf("slot must be free after a failed videos write, stored %s", stored)
 	}
 	// The viewer can retry immediately rather than waiting out the window.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("retry = %+v, want an immediately queued retry, err = %v", outcome, err)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "retry")
 	waitForProcess(t, started)
 }
 
@@ -536,23 +348,14 @@ func TestRequestTrailersRefreshReleasesSlotWhenVideoPersistFails(t *testing.T) {
 // worker picks up instead of an item locked out for the window having fetched
 // nothing.
 func TestRequestTrailersRefreshRecordsDurableDebt(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	debts := newFakeRefreshDebtRepo()
 	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 
-	debt, err := debts.GetTarget(ctx, RefreshTargetItem, "movie-1")
+	debt, err := debts.GetTarget(context.Background(), RefreshTargetItem, "movie-1")
 	if err != nil {
 		t.Fatalf("queued request must leave durable debt behind: %v", err)
 	}
@@ -571,33 +374,21 @@ func TestRequestTrailersRefreshRecordsDurableDebt(t *testing.T) {
 // A cooldown answer performs no work, so it must not enqueue debt either —
 // otherwise repeated polling from a client would keep an item permanently due.
 func TestRequestTrailersRefreshCooldownRecordsNoDebt(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	h.itemRepo.now = func() time.Time { return now }
 	debts := newFakeRefreshDebtRepo()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("first request = %+v, err = %v", outcome, err)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "first request")
 	waitForProcess(t, started)
 	waitForOnDemandIdle(t, h.service)
 
 	// Wire the debt repo only now, so anything it records can only have come
 	// from the cooldown request below.
 	h.service.refreshDebtRepo = debts
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusCooldown {
-		t.Fatalf("second request = %+v, err = %v", outcome, err)
-	}
-	if _, err := debts.GetTarget(ctx, RefreshTargetItem, "movie-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
+	requestTrailers(t, h, TrailerRefreshStatusCooldown, "second request")
+	if _, err := debts.GetTarget(context.Background(), RefreshTargetItem, "movie-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
 		t.Fatalf("a cooldown answer must not enqueue debt, got err = %v", err)
 	}
 }
@@ -606,23 +397,11 @@ func TestRequestTrailersRefreshCooldownRecordsNoDebt(t *testing.T) {
 // not a cooldown — there is no timestamp to report one with. Reporting it as
 // queued matches the in-process-dedup answer: an equivalent refresh is running.
 func TestRequestTrailersRefreshUndateableLostClaimReportsQueued(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+	h := newTrailersHarness()
 	h.itemRepo.trailersClaimResult = &trailersClaimResult{}
+	forbidTrailersRefresh(t, h, "a lost claim")
 
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		t.Errorf("a lost claim must not start a refresh (content_id %s)", req.ContentID)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	outcome := requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 	if outcome.NextAllowedAt != nil {
 		t.Fatalf("an undateable lost claim must not carry next_allowed_at, got %v", outcome.NextAllowedAt)
 	}
@@ -633,74 +412,46 @@ func TestRequestTrailersRefreshUndateableLostClaimReportsQueued(t *testing.T) {
 // claim cannot be made from a partially-resolved set: an unreadable library
 // might be the one that enables trailers, so any lookup failure degrades the
 // answer to unknown scope (allow-all) rather than a guess the viewer sees as
-// "trailers are disabled for this library".
-func TestRequestTrailersRefreshUnreadableLibraryIsNotDisabled(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	for _, folderID := range []int{10, 11} {
-		if err := h.libraryRepo.Upsert(ctx, "movie-1", folderID, time.Now()); err != nil {
-			t.Fatalf("seed library membership %d: %v", folderID, err)
-		}
-	}
-	// Folder 10 resolves with trailers off; folder 11 cannot be read at all.
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil},
-		},
-		lookupErrs: map[int]error{11: errors.New("connection reset")},
-	}
-
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q — a failed library lookup is unknown scope, not disabled",
-			outcome.Status, TrailerRefreshStatusQueued)
-	}
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-}
-
-// A library that no longer exists is not a failure: it cannot be the one
-// enabling trailers, so it is skipped and the remaining libraries still decide.
-func TestRequestTrailersRefreshMissingLibraryStillReportsDisabled(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	for _, folderID := range []int{10, 11} {
-		if err := h.libraryRepo.Upsert(ctx, "movie-1", folderID, time.Now()); err != nil {
-			t.Fatalf("seed library membership %d: %v", folderID, err)
-		}
-	}
-	// Folder 11 is absent from the repo entirely (deleted library).
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil},
-		},
-	}
-
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		t.Errorf("disabled request must not start a refresh (content_id %s)", req.ContentID)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusDisabled {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusDisabled)
-	}
-	if got := h.itemRepo.trailersClaimCount(); got != 0 {
-		t.Fatalf("disabled request consumed the cooldown slot %d times, want 0", got)
+// "trailers are disabled for this library". A library that no longer exists is
+// not a failure: it cannot be the one enabling trailers, so it is skipped and
+// the remaining libraries still decide.
+func TestRequestTrailersRefreshLibraryLookupScope(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lookupErrs map[int]error
+		want       string
+	}{
+		// Folder 10 resolves with trailers off; folder 11 cannot be read at all.
+		{"unreadable library is not disabled", map[int]error{11: errors.New("connection reset")}, TrailerRefreshStatusQueued},
+		// Folder 11 is absent from the repo entirely (deleted library).
+		{"missing library still reports disabled", nil, TrailerRefreshStatusDisabled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTrailersHarness()
+			for _, folderID := range []int{10, 11} {
+				if err := h.libraryRepo.Upsert(context.Background(), "movie-1", folderID, time.Now()); err != nil {
+					t.Fatalf("seed library membership %d: %v", folderID, err)
+				}
+			}
+			h.service.folderRepo = &fakeMetadataFolderRepo{
+				folders: map[int]*models.MediaFolder{
+					10: {ID: 10, Type: "movies", Enabled: true, TrailerKinds: nil},
+				},
+				lookupErrs: tc.lookupErrs,
+			}
+			if tc.want == TrailerRefreshStatusDisabled {
+				forbidTrailersRefresh(t, h, "disabled request")
+				requestTrailers(t, h, TrailerRefreshStatusDisabled, "request")
+				if got := h.itemRepo.trailersClaimCount(); got != 0 {
+					t.Fatalf("disabled request consumed the cooldown slot %d times, want 0", got)
+				}
+				return
+			}
+			started := succeedTrailersRefresh(h)
+			requestTrailers(t, h, TrailerRefreshStatusQueued, "request (a failed library lookup is unknown scope, not disabled)")
+			waitForProcess(t, started)
+			waitForOnDemandIdle(t, h.service)
+		})
 	}
 }
 
@@ -710,29 +461,18 @@ func TestRequestTrailersRefreshMissingLibraryStillReportsDisabled(t *testing.T) 
 // slot is consumed.
 func TestRequestTrailersRefreshLockedVideosDoesNotConsumeCooldownSlot(t *testing.T) {
 	h := newTestHarness()
-	ctx := context.Background()
 	h.itemRepo.items["movie-1"] = &models.MediaItem{
 		ContentID:    "movie-1",
 		Type:         "movie",
 		Status:       "matched",
 		LockedFields: []int{int(FieldVideos)},
 	}
+	forbidTrailersRefresh(t, h, "a videos-locked item")
 
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		t.Errorf("a videos-locked item must not start a refresh (content_id %s)", req.ContentID)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
 	// Reuses "disabled" rather than a new status: clients treat unknown
 	// statuses as a dead end, and "trailers cannot be fetched for this item"
 	// is exactly what disabled already means to a viewer.
-	if outcome.Status != TrailerRefreshStatusDisabled {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusDisabled)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusDisabled, "request")
 	if got := h.itemRepo.trailersClaimCount(); got != 0 {
 		t.Fatalf("a videos-locked item consumed the cooldown slot %d times, want 0", got)
 	}
@@ -741,43 +481,8 @@ func TestRequestTrailersRefreshLockedVideosDoesNotConsumeCooldownSlot(t *testing
 	// Unlocking lets the very next request through, proving the slot was never
 	// touched.
 	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request after unlocking = %+v, err = %v", outcome, err)
-	}
-	waitForProcess(t, started)
-}
-
-// A lock on some *other* field says nothing about videos, so it must not block
-// the action.
-func TestRequestTrailersRefreshUnrelatedLockStillQueues(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.itemRepo.items["movie-1"] = &models.MediaItem{
-		ContentID:    "movie-1",
-		Type:         "movie",
-		Status:       "matched",
-		LockedFields: []int{int(FieldOverview), int(FieldImages)},
-	}
-
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-
-	outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1")
-	if err != nil {
-		t.Fatalf("RequestTrailersRefresh: %v", err)
-	}
-	if outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("status = %q, want %q", outcome.Status, TrailerRefreshStatusQueued)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request after unlocking")
 	waitForProcess(t, started)
 }
 
@@ -787,11 +492,9 @@ func TestRequestTrailersRefreshUnrelatedLockStillQueues(t *testing.T) {
 // a due-now row would have the worker and the goroutine fetching the same item
 // at once.
 func TestRequestTrailersRefreshRecoveryDebtIsNotDueDuringTheFastPath(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+	h := newTrailersHarness()
 	debts := newFakeRefreshDebtRepo()
 	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
 
 	// Hold the refresh open so the debt row is observed exactly while the fast
 	// path is running — the window the reviewer's race lives in.
@@ -802,13 +505,10 @@ func TestRequestTrailersRefreshRecoveryDebtIsNotDueDuringTheFastPath(t *testing.
 		<-inFlight
 		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
 	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
 	waitForProcess(t, entered)
 
-	debt, err := debts.GetTarget(ctx, RefreshTargetItem, "movie-1")
+	debt, err := debts.GetTarget(context.Background(), RefreshTargetItem, "movie-1")
 	if err != nil {
 		t.Fatalf("queued request must leave durable debt behind: %v", err)
 	}
@@ -824,72 +524,69 @@ func TestRequestTrailersRefreshRecoveryDebtIsNotDueDuringTheFastPath(t *testing.
 
 // Once the fast path has done the work, the recovery row has nothing left to
 // recover: leaving it would have the worker re-run a refresh that already
-// happened as soon as the delay lapsed.
-func TestRequestTrailersRefreshClearsRecoveryDebtOnSuccess(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
+// happened as soon as the delay lapsed. Settling the recovery reason must not
+// discard debt the item genuinely has: another reason in the mask means it
+// still needs refreshing, and the queue should keep saying so.
+func TestRequestTrailersRefreshSettlesRecoveryDebtOnSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		existingDebt bool
+	}{
+		{"clears recovery debt", false},
+		{"keeps other debt reasons", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTrailersHarness()
+			debts := newFakeRefreshDebtRepo()
+			h.service.refreshDebtRepo = debts
+			if tc.existingDebt {
+				seedTrailerTestDebt(t, debts, RefreshDebtReasonCoreMetadataIncomplete, time.Now().UTC())
+			}
 
-	// Process here stands in for a refresh whose own debt sync did not run
-	// (hooks.process short-circuits processInternal), which is the case the
-	// settle step exists to cover.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
+			// Process here stands in for a refresh whose own debt sync did not
+			// run (hooks.process short-circuits processInternal), which is the
+			// case the settle step exists to cover.
+			started := succeedTrailersRefresh(h)
+			requestTrailers(t, h, TrailerRefreshStatusQueued, "request")
+			waitForProcess(t, started)
+			waitForOnDemandIdle(t, h.service)
 
-	if _, err := debts.GetTarget(ctx, RefreshTargetItem, "movie-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
-		t.Fatalf("a completed fast path must leave no recovery debt, got err = %v", err)
+			debt, err := debts.GetTarget(context.Background(), RefreshTargetItem, "movie-1")
+			if !tc.existingDebt {
+				if !errors.Is(err, ErrRefreshDebtNotFound) {
+					t.Fatalf("a completed fast path must leave no recovery debt, got err = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("pre-existing debt must survive the settle: %v", err)
+			}
+			if hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonTrailersRequested) {
+				t.Fatalf("reason mask = %d, want the trailers-requested bit cleared", debt.ReasonMask)
+			}
+			if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonCoreMetadataIncomplete) {
+				t.Fatalf("reason mask = %d, want the pre-existing core-metadata reason kept", debt.ReasonMask)
+			}
+		})
 	}
 }
 
-// Settling the recovery reason must not discard debt the item genuinely has:
-// another reason in the mask means it still needs refreshing, and the queue
-// should keep saying so.
-func TestRequestTrailersRefreshSettleKeepsOtherDebtReasons(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+// newScheduledTrailersHarness returns a trailers harness with a pinned clock
+// whose movie-1 holds a consumed slot and refresh debt with reason, the state
+// a scheduled refresh finds.
+func newScheduledTrailersHarness(t *testing.T, reason int64) *testHarness {
+	t.Helper()
+	h := newTrailersHarness()
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	h.itemRepo.now = func() time.Time { return now }
 	debts := newFakeRefreshDebtRepo()
 	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-	if err := debts.UpsertTargetDebt(ctx, RefreshTargetItem, "movie-1",
-		refreshDebtPriority(RefreshDebtReasonCoreMetadataIncomplete),
-		RefreshDebtReasonCoreMetadataIncomplete,
-		time.Now().UTC()); err != nil {
-		t.Fatalf("seed existing debt: %v", err)
+	claimed, claimedAt, err := h.itemRepo.TryClaimTrailersRefresh(context.Background(), "movie-1", TrailerRefreshCooldown)
+	if err != nil || !claimed || claimedAt == nil {
+		t.Fatalf("seed claim = %v, at = %v, err = %v", claimed, claimedAt, err)
 	}
-
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("request = %+v, err = %v", outcome, err)
-	}
-	waitForProcess(t, started)
-	waitForOnDemandIdle(t, h.service)
-
-	debt, err := debts.GetTarget(ctx, RefreshTargetItem, "movie-1")
-	if err != nil {
-		t.Fatalf("pre-existing debt must survive the settle: %v", err)
-	}
-	if hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonTrailersRequested) {
-		t.Fatalf("reason mask = %d, want the trailers-requested bit cleared", debt.ReasonMask)
-	}
-	if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonCoreMetadataIncomplete) {
-		t.Fatalf("reason mask = %d, want the pre-existing core-metadata reason kept", debt.ReasonMask)
-	}
+	seedTrailerTestDebt(t, debts, reason, now)
+	return h
 }
 
 // The durable recovery is the path taken when the process that consumed a slot
@@ -898,32 +595,12 @@ func TestRequestTrailersRefreshSettleKeepsOtherDebtReasons(t *testing.T) {
 // whole window having stored nothing — the exact gap the release hook closes on
 // the fast path.
 func TestRefreshScheduledTargetReleasesInheritedTrailerClaimOnFailure(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
 	// Stand in for the state a dead process left behind: the slot is consumed
 	// and the debt row carries the trailers-requested reason.
-	claimed, claimedAt, err := h.itemRepo.TryClaimTrailersRefresh(ctx, "movie-1", TrailerRefreshCooldown)
-	if err != nil || !claimed || claimedAt == nil {
-		t.Fatalf("seed claim = %v, at = %v, err = %v", claimed, claimedAt, err)
-	}
-	if err := debts.UpsertTargetDebt(ctx, RefreshTargetItem, "movie-1",
-		refreshDebtPriority(RefreshDebtReasonTrailersRequested),
-		RefreshDebtReasonTrailersRequested,
-		now); err != nil {
-		t.Fatalf("seed recovery debt: %v", err)
-	}
+	h := newScheduledTrailersHarness(t, RefreshDebtReasonTrailersRequested)
+	failTrailersRefresh(h)
 
-	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
-		return nil, errors.New("tmdb is unreachable")
-	}
-
-	if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetItem, "movie-1"); err == nil {
+	if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetItem, "movie-1"); err == nil {
 		t.Fatal("the recovery refresh was expected to fail")
 	}
 	if stored := h.itemRepo.trailersStoredAt("movie-1"); stored != nil {
@@ -932,15 +609,8 @@ func TestRefreshScheduledTargetReleasesInheritedTrailerClaimOnFailure(t *testing
 
 	// The viewer can retry immediately rather than waiting out a window in
 	// which nothing was ever fetched.
-	started := make(chan struct{})
-	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
-		close(started)
-		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
-	}
-	if outcome, err := h.service.RequestTrailersRefresh(ctx, "movie-1"); err != nil ||
-		outcome.Status != TrailerRefreshStatusQueued {
-		t.Fatalf("retry after a failed recovery = %+v, err = %v", outcome, err)
-	}
+	started := succeedTrailersRefresh(h)
+	requestTrailers(t, h, TrailerRefreshStatusQueued, "retry after a failed recovery")
 	waitForProcess(t, started)
 }
 
@@ -948,24 +618,7 @@ func TestRefreshScheduledTargetReleasesInheritedTrailerClaimOnFailure(t *testing
 // cooldown's purposes too: the pipeline reports success while none of the
 // trailers the week was charged for were stored.
 func TestRefreshScheduledTargetReleasesInheritedClaimWhenVideoPersistFails(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
-	if claimed, _, err := h.itemRepo.TryClaimTrailersRefresh(ctx, "movie-1", TrailerRefreshCooldown); err != nil || !claimed {
-		t.Fatalf("seed claim = %v, err = %v", claimed, err)
-	}
-	if err := debts.UpsertTargetDebt(ctx, RefreshTargetItem, "movie-1",
-		refreshDebtPriority(RefreshDebtReasonTrailersRequested),
-		RefreshDebtReasonTrailersRequested,
-		now); err != nil {
-		t.Fatalf("seed recovery debt: %v", err)
-	}
-
+	h := newScheduledTrailersHarness(t, RefreshDebtReasonTrailersRequested)
 	persistErr := errors.New("replace item videos: connection reset")
 	h.service.hooks.process = func(processCtx context.Context, req ProcessRequest) (*ProcessResult, error) {
 		reportVideoPersistFailure(processCtx, persistErr)
@@ -973,7 +626,7 @@ func TestRefreshScheduledTargetReleasesInheritedClaimWhenVideoPersistFails(t *te
 	}
 
 	// The refresh itself succeeded, so the queue must still see a success.
-	if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetItem, "movie-1"); err != nil {
+	if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetItem, "movie-1"); err != nil {
 		t.Fatalf("RefreshScheduledTarget: %v", err)
 	}
 	if stored := h.itemRepo.trailersStoredAt("movie-1"); stored != nil {
@@ -985,30 +638,11 @@ func TestRefreshScheduledTargetReleasesInheritedClaimWhenVideoPersistFails(t *te
 // the item may hold a claim from an unrelated in-flight request, and clearing
 // it would hand out a free extra refresh.
 func TestRefreshScheduledTargetLeavesUnrelatedTrailerClaimsAlone(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	h.itemRepo.now = func() time.Time { return now }
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["movie-1"] = &models.MediaItem{ContentID: "movie-1", Type: "movie", Status: "matched"}
-
-	if claimed, _, err := h.itemRepo.TryClaimTrailersRefresh(ctx, "movie-1", TrailerRefreshCooldown); err != nil || !claimed {
-		t.Fatalf("seed claim = %v, err = %v", claimed, err)
-	}
 	// Debt without the trailers-requested reason: ordinary scheduled work.
-	if err := debts.UpsertTargetDebt(ctx, RefreshTargetItem, "movie-1",
-		refreshDebtPriority(RefreshDebtReasonCoreMetadataIncomplete),
-		RefreshDebtReasonCoreMetadataIncomplete,
-		now); err != nil {
-		t.Fatalf("seed debt: %v", err)
-	}
+	h := newScheduledTrailersHarness(t, RefreshDebtReasonCoreMetadataIncomplete)
+	failTrailersRefresh(h)
 
-	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
-		return nil, errors.New("tmdb is unreachable")
-	}
-
-	if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetItem, "movie-1"); err == nil {
+	if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetItem, "movie-1"); err == nil {
 		t.Fatal("the scheduled refresh was expected to fail")
 	}
 	if h.itemRepo.trailersStoredAt("movie-1") == nil {

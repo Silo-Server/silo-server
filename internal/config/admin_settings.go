@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -45,6 +47,18 @@ const (
 // nothing about whether any optional step was configured.
 const SetupCompletedSettingKey = "setup.completed"
 
+// DashboardHiddenAttentionSettingKey lists the setup notices (by health item
+// id, such as "email") an admin hid from the Dashboard's Needs attention
+// panel, as a JSON array of strings. It is server-wide, so a server that
+// deliberately runs without mail stops asking every admin. Only the web
+// client reads it; empty hides nothing.
+const DashboardHiddenAttentionSettingKey = "ui.dashboard.hidden_attention"
+
+const (
+	maxDashboardHiddenAttentionIDs   = 32
+	maxDashboardHiddenAttentionIDLen = 64
+)
+
 // CatalogScopeVersionsToLibrarySettingKey makes a library-scoped catalog read
 // (library_id on the v2 item, versions, and episode operations) return only
 // the files stored in that library. Off, the default, keeps every accessible
@@ -71,6 +85,17 @@ const (
 // still being built; a planned stream that has to restart starts again from
 // the beginning.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
+
+// The connection speed test's schedule, delivered to clients with the probe
+// URL. Automatic tests run only when this is true; Test speed always works.
+// A reading lasts the max age, in days, before an automatic test is due again.
+const (
+	PlaybackBandwidthProbeAutomaticSettingKey  = "playback.bandwidth_probe_automatic"
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey = "playback.bandwidth_probe_max_age_days"
+	// DefaultBandwidthProbeMaxAgeDays matches the lifetime of a learned limit.
+	DefaultBandwidthProbeMaxAgeDays = 7
+	maxBandwidthProbeMaxAgeDays     = 30
+)
 
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
@@ -114,9 +139,10 @@ func splitRatingSourceList(raw string) (sources []string, malformed string) {
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
 const (
-	Allow4KTranscodeSettingKey               = "allow_4k_transcode"
-	PlaybackAllowHEVCEncodingSettingKey      = "playback.allow_hevc_encoding"
-	DownloadLocalTranscodeFallbackSettingKey = "download.local_transcode_fallback"
+	Allow4KTranscodeSettingKey                    = "allow_4k_transcode"
+	PlaybackAllowHEVCEncodingSettingKey           = "playback.allow_hevc_encoding"
+	PlaybackPreferLowerVersionTranscodeSettingKey = "playback.prefer_lower_version_transcode"
+	DownloadLocalTranscodeFallbackSettingKey      = "download.local_transcode_fallback"
 )
 
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
@@ -151,6 +177,16 @@ const MetadataImageWorkersSettingKey = "metadata.image_workers"
 // on provider limits a scan shares. On-demand lookups (a person page) aren't
 // counted.
 const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
+
+// MetadataFallbackLanguageSettingKey is the ISO 639-1 language metadata
+// refreshes fall back to when providers have no title or description in a
+// library's metadata language, before the original language.
+// MetadataFallbackOriginal turns the fallback off: the original language is
+// used, as before the setting existed.
+const (
+	MetadataFallbackLanguageSettingKey = "metadata.fallback_language"
+	MetadataFallbackOriginal           = "original"
+)
 
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
@@ -327,9 +363,13 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
+	// Unset until the admin saves the setup wizard's sharing choice; a
+	// migration stored true on servers set up before the wizard saved it.
+	"markers.share_by_default": "",
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
+	MetadataFallbackLanguageSettingKey:       "en",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
@@ -337,6 +377,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.hw_accel":                              "auto",
 	"playback.transcode_enabled":                     "true",
 	PlaybackAllowHEVCEncodingSettingKey:              "false",
+	PlaybackPreferLowerVersionTranscodeSettingKey:    "true",
 	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
 	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferTranscode),
 	PlaybackRoutingRemuxEgressSettingKey:             string(PlaybackEgressPreferProxy),
@@ -371,12 +412,10 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
 	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
 	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    "6h",
+	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
-	"recommendations.embedding_base_url":         "http://ollama:11434",
-	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
 	"recommendations.taste_profiles_cron":        "0 4 * * *",
 	"recommendations.cowatch_cron":               "30 4 * * *",
@@ -384,10 +423,10 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
 
-	"ai.base_url":                         "https://api.openai.com",
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
-	"ai.chat_model":                       "gpt-4o-mini",
+	AIServiceTierSettingKey:               "",
+	"ai.chat_model":                       "gpt-6-luna",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
 	"subtitle_ai.enabled":                 "false",
@@ -458,6 +497,8 @@ var adminSettingDefaults = map[string]string{
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
 
+	"autoscan.events_retention_days": "30",
+
 	// Off: server addresses non-admin users supply for history import and
 	// webhook sync must be on the public internet (historyimport).
 	"media_servers.allow_private_destinations": "false",
@@ -488,6 +529,9 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.binary_quantized":         "false",
 
 	PlaybackKeyframePlaylistSettingKey: "false",
+
+	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -513,8 +557,6 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_key_prefix", "s3.operational_key_prefix"},
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
-	{"ai.base_url", "subtitle_ai.base_url"}, //nolint:goconst // Explicit compatibility pair.
-	{"ai.api_key", "subtitle_ai.api_key"},   //nolint:goconst // Explicit compatibility pair.
 	{"ai.chat_model", "subtitle_ai.chat_model"},
 }
 
@@ -603,8 +645,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
-		PlaybackKeyframePlaylistSettingKey,
+	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
+		PlaybackKeyframePlaylistSettingKey, PlaybackBandwidthProbeAutomaticSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
@@ -678,6 +720,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalized, nil
 	case "playback.trickplay_interval_seconds":
 		return normalizeAdminInt(key, value, 5, 60)
+	case PlaybackBandwidthProbeMaxAgeDaysSettingKey:
+		// Rows are retained 30 days after their last update, so a longer
+		// lifetime would outlive the reading it describes.
+		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
 	case "playback.trickplay_workers":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
@@ -750,7 +796,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 25000)
 	case "catalog.search.meilisearch.rebuild_task_queue_depth":
 		return normalizeAdminInt(key, value, 1, 16)
-	case "taskmanager.history_retention_days":
+	case "taskmanager.history_retention_days", "autoscan.events_retention_days":
 		return normalizeAdminInt(key, value, 1, 3650)
 	case "taskmanager.history_keep_per_task":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
@@ -806,10 +852,18 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":
 		return normalizeAdminEnum(key, value, "off", "button", "auto")
+	case MetadataFallbackLanguageSettingKey:
+		value = strings.ToLower(value)
+		if value == "" || value == MetadataFallbackOriginal || (len(value) == 2 && lang.RegisteredTag(value) == value) {
+			return value, nil
+		}
+		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
-		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+		return normalizeAdminEnum(key, value, "api_key", aiAuthModeChatGPT)
 	case "ai.reasoning_effort":
 		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+	case AIServiceTierSettingKey:
+		return normalizeAdminEnum(key, value, "", "priority", "ultrafast")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":
@@ -832,8 +886,16 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
-	case "ai.base_url", "ai.asr_base_url", "recommendations.embedding_base_url",
-		"server.public_url", "jellyfin_compat.public_url",
+	case legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; connect the provider in AI Services", key)
+	case legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting, legacyOpenAIEmbeddingModel,
+		legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; choose the embedding provider on Recommendations", key)
+	case AITextProviderSettingKey, AISpeechProviderSettingKey, EmbeddingProviderSettingKey:
+		return value, nil
+
+	case "server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
@@ -856,6 +918,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
+	case DashboardHiddenAttentionSettingKey:
+		return normalizeDashboardHiddenAttention(value)
+
 	case "defaults.card_overlays", "opslog.bucket_policies", "ui.admin_theme_vars":
 		if value == "" {
 			return "", nil
@@ -867,7 +932,37 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return value, nil
 	}
 
+	if def, ok := adminDefaultDefinition(key); ok {
+		return normalizeAdminDefault(def, value)
+	}
+
 	return raw, nil
+}
+
+// adminDefaultDefinition returns the settings-contract definition whose
+// server-wide default the key holds. A contract that fails to load leaves the
+// key unrecognized; the server refuses to start in that state anyway.
+func adminDefaultDefinition(key string) (*settingscontract.Definition, bool) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, false
+	}
+	return contract.AdminDefaultFor(key)
+}
+
+// normalizeAdminDefault validates an administrator default against the value
+// schema of the setting it stands in for. Empty clears it, so viewers inherit
+// the contract default again.
+func normalizeAdminDefault(def *settingscontract.Definition, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	normalized, err := def.ValueSchema.NormalizeValue(json.RawMessage(value), settingscontract.ObjectSchemas())
+	if err != nil {
+		return "", fmt.Errorf("%s must be a valid %s value: %w",
+			settingscontract.AdminDefaultSettingKey(def.Key), def.Key, err)
+	}
+	return string(normalized), nil
 }
 
 // AdminSettingsCapabilities describes durable bootstrap configuration that is
@@ -913,6 +1008,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
 		return err
 	}
+	if err := ValidateAIProviderBindings(effective); err != nil {
+		return err
+	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {
 		endpoint := strings.TrimSpace(effective[prefix+"_endpoint"])
 		bucket := strings.TrimSpace(effective[prefix+"_bucket"])
@@ -950,12 +1048,8 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 			return fmt.Errorf("email.from_address is required when email is enabled")
 		}
 	}
-	for _, provider := range []string{"trakt", "simkl"} {
-		clientID := strings.TrimSpace(effective["watchsync."+provider+".client_id"])
-		clientSecret := strings.TrimSpace(effective["watchsync."+provider+".client_secret"])
-		if (clientID == "") != (clientSecret == "") {
-			return fmt.Errorf("watchsync.%s client ID and client secret must be configured together", provider)
-		}
+	if (strings.TrimSpace(effective["watchsync.simkl.client_id"]) == "") != (strings.TrimSpace(effective["watchsync.simkl.client_secret"]) == "") {
+		return errors.New("watchsync.simkl client ID and client secret must be configured together")
 	}
 	if err := ValidateRedisRateLimitTransport(effective, capabilities.RedisBootstrapAvailable); err != nil {
 		return err
@@ -1256,6 +1350,47 @@ func normalizeRatingSourceList(key, value string) (string, error) {
 		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
 	}
 	return strings.Join(sources, ","), nil
+}
+
+// normalizeDashboardHiddenAttention canonicalizes the hidden notice list:
+// trimmed, unique, non-empty ids in their original order. An empty list
+// stores as empty.
+func normalizeDashboardHiddenAttention(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	// Decode loosely and check each element: a []string target would take
+	// JSON null, at the top or as an element, without an error.
+	notStrings := fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	var ids []any
+	if err := json.Unmarshal([]byte(value), &ids); err != nil || ids == nil {
+		return "", notStrings
+	}
+	kept := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, element := range ids {
+		id, ok := element.(string)
+		if !ok {
+			return "", notStrings
+		}
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if len(id) > maxDashboardHiddenAttentionIDLen {
+			return "", fmt.Errorf("%s ids must be at most %d characters", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDLen)
+		}
+		seen[id] = true
+		kept = append(kept, id)
+	}
+	if len(kept) > maxDashboardHiddenAttentionIDs {
+		return "", fmt.Errorf("%s may list at most %d ids", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDs)
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	encoded, _ := json.Marshal(kept)
+	return string(encoded), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

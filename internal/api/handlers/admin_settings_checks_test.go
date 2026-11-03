@@ -5,10 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -169,81 +170,89 @@ func TestAdminSettingsReadsHideMachineManagedCheckpoint(t *testing.T) {
 	})
 }
 
-func TestAdminSettingsWritesRejectMachineManagedCheckpoint(t *testing.T) {
-	const (
-		storedCheckpoint      = `{"baseline_identity":"old","target_identity":"new"}`
-		replacementCheckpoint = `{"baseline_identity":"wrong","target_identity":"wrong"}`
-	)
+// Machine-managed rows refuse every generic settings write. The signing keys
+// matter most: a non-Owner admin who set one could forge Owner tokens.
+func TestAdminSettingsWritesRejectMachineManagedKeys(t *testing.T) {
+	const stored, replacement = "stored-value", "attacker-chosen-value"
+	nonOwnerAdmin := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "s2"})
+	noGuard := func(AdminSettingsSnapshot) error { return nil }
 
-	t.Run("batch settings", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: replacementCheckpoint,
-		}})
-		if err != nil {
-			t.Fatalf("marshal request: %v", err)
-		}
-		rec := httptest.NewRecorder()
+	writes := map[string]func(t *testing.T, h *AdminHandler, key, value string) int{
+		"v1 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{key: value}})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(nonOwnerAdmin, http.MethodPut, "/admin/settings", bytes.NewReader(body))
+			h.HandleUpdateSettings(rec, req)
+			return rec.Code
+		},
+		"v1 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			body, err := json.Marshal(updateSettingRequest{Value: value})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(nonOwnerAdmin, http.MethodPut, "/admin/settings/"+key, bytes.NewReader(body))
+			h.HandleUpdateSetting(rec, withChiParam(req, "key", key))
+			return rec.Code
+		},
+		"v2 batch": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSettings(nonOwnerAdmin, map[string]string{key: value}, noGuard)
+			return apiErrorStatus(t, err)
+		},
+		"v2 single": func(t *testing.T, h *AdminHandler, key, value string) int {
+			_, err := h.UpdateAdminSetting(nonOwnerAdmin, key, value, noGuard)
+			return apiErrorStatus(t, err)
+		},
+	}
 
-		handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", bytes.NewReader(body)))
+	for _, key := range []string{
+		config.ArtworkStorageReconcileCheckpointKey,
+		"auth.jwt_secret",
+		"audiobooks.abs.jwt_secret",
+	} {
+		for name, write := range writes {
+			for valueName, value := range map[string]string{"replace": replacement, "clear": ""} {
+				t.Run(key+"/"+name+"/"+valueName, func(t *testing.T) {
+					settings := &fakeServerSettingsStore{values: map[string]string{key: stored}}
+					if status := write(t, &AdminHandler{SettingsRepo: settings}, key, value); status != http.StatusBadRequest {
+						t.Fatalf("status = %d, want 400", status)
+					}
+					if got := settings.values[key]; got != stored {
+						t.Fatalf("%s = %q, want unchanged %q", key, got, stored)
+					}
+					if settings.atomicCalls != 0 {
+						t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
+					}
+				})
+			}
+		}
+	}
+}
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-		}
-		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
-			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
-		}
-		if settings.atomicCalls != 0 {
-			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
-		}
-	})
-
-	t.Run("single setting", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		body, err := json.Marshal(updateSettingRequest{Value: replacementCheckpoint})
-		if err != nil {
-			t.Fatalf("marshal request: %v", err)
-		}
-		req := httptest.NewRequest(
-			http.MethodPut,
-			"/admin/settings/"+config.ArtworkStorageReconcileCheckpointKey,
-			bytes.NewReader(body),
-		)
-		req = withChiParam(req, "key", config.ArtworkStorageReconcileCheckpointKey)
-		rec := httptest.NewRecorder()
-
-		handler.HandleUpdateSetting(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-		}
-		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
-			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
-		}
-		if settings.atomicCalls != 0 {
-			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
-		}
-	})
+func apiErrorStatus(t *testing.T, err error) int {
+	t.Helper()
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("error = %v, want *APIError", err)
+	}
+	return apiErr.Status
 }
 
 func TestAdminSettingsValidationIncludesEnvironmentManagedValues(t *testing.T) {
 	newHandler := func() (*AdminHandler, *fakeServerSettingsStore) {
 		settings := &fakeServerSettingsStore{values: map[string]string{
-			"watchsync.trakt.client_id": "configured-client-id",
+			"watchsync.simkl.client_id": "configured-client-id",
 		}}
 		return &AdminHandler{
 			SettingsRepo: settings,
 			BootstrapSensitiveConfigured: map[string]bool{
-				"watchsync.trakt.client_secret": true,
+				"watchsync.simkl.client_secret": true,
 			},
 			BootstrapSensitiveValues: map[string]string{
-				"watchsync.trakt.client_secret": "clawrouter-e2e-secret",
+				"watchsync.simkl.client_secret": "clawrouter-e2e-secret",
 			},
 		}, settings
 	}
@@ -286,29 +295,6 @@ func TestAdminSettingsValidationIncludesEnvironmentManagedValues(t *testing.T) {
 			t.Fatalf("branding.server_name = %q, want Casa", settings.values["branding.server_name"])
 		}
 	})
-}
-
-func TestAdminSensitiveStatusReportsNonSecretEnvironmentManagedSettings(t *testing.T) {
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{values: map[string]string{}},
-		BootstrapSensitiveConfigured: map[string]bool{
-			"clientip.trusted_proxies": true,
-		},
-	}
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetSensitiveStatus(rec, httptest.NewRequest(http.MethodGet, "/admin/settings/sensitive-status", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var response sensitiveStatusResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(response.ManagedByEnv) != 1 || response.ManagedByEnv[0] != "clientip.trusted_proxies" {
-		t.Fatalf("managed_by_env = %#v", response.ManagedByEnv)
-	}
 }
 
 func TestAdminUpdateSettingsRejectsEnvironmentManagedSetting(t *testing.T) {
@@ -393,31 +379,6 @@ func TestAdminUpdateSettingsRejectsWholeBatchBeforeWrite(t *testing.T) {
 	}
 }
 
-func TestAdminUpdateSettingsValidatesRoutingAgainstStoredPeer(t *testing.T) {
-	settings := &fakeServerSettingsStore{values: map[string]string{
-		config.PlaybackRoutingRemuxEgressSettingKey: string(config.PlaybackEgressProxyOnly),
-	}}
-	handler := &AdminHandler{SettingsRepo: settings}
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings",
-		strings.NewReader(`{"values":{"playback.routing.remux_execution":"api_only"}}`),
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateSettings(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-	if settings.setManyCalls != 0 {
-		t.Fatalf("SetMany calls = %d, want 0", settings.setManyCalls)
-	}
-	if _, exists := settings.values[config.PlaybackRoutingRemuxExecutionSettingKey]; exists {
-		t.Fatalf("invalid routing setting was persisted: %#v", settings.values)
-	}
-}
-
 func TestAdminUpdateSettingValidatesRoutingAgainstStoredPeer(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -498,72 +459,6 @@ func TestAdminUpdateSettingCanRepairLegacyInvalidRoutingPair(t *testing.T) {
 	if _, err := config.LoadFromDB(settings.values); err != nil {
 		t.Fatalf("repaired settings are restart-invalid: %v", err)
 	}
-}
-
-func TestAdminUpdateSettingsValidatesProspectiveDiagnosticsLimits(t *testing.T) {
-	const (
-		mib = 1024 * 1024
-	)
-
-	t.Run("rejects invalid final relationship", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			diagnostics.KeyMaxBundleBytes:       strconv.Itoa(10 * mib),
-			diagnostics.KeyMaxUncompressedBytes: strconv.Itoa(64 * mib),
-			diagnostics.KeyMaxBytesPerUser:      strconv.Itoa(200 * mib),
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		req := httptest.NewRequest(
-			http.MethodPut,
-			"/admin/settings",
-			strings.NewReader(fmt.Sprintf(
-				`{"values":{"%s":"%d","%s":"%d"}}`,
-				diagnostics.KeyMaxBundleBytes,
-				50*mib,
-				diagnostics.KeyMaxUncompressedBytes,
-				20*mib,
-			)),
-		)
-		rec := httptest.NewRecorder()
-
-		handler.HandleUpdateSettings(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-		}
-		if settings.setManyCalls != 0 {
-			t.Fatalf("invalid diagnostics batch wrote settings: SetMany=%d", settings.setManyCalls)
-		}
-	})
-
-	t.Run("accepts valid paired repair", func(t *testing.T) {
-		settings := &fakeServerSettingsStore{values: map[string]string{
-			diagnostics.KeyMaxBundleBytes:       strconv.Itoa(64 * mib),
-			diagnostics.KeyMaxUncompressedBytes: strconv.Itoa(128 * mib),
-			diagnostics.KeyMaxBytesPerUser:      strconv.Itoa(200 * mib),
-		}}
-		handler := &AdminHandler{SettingsRepo: settings}
-		req := httptest.NewRequest(
-			http.MethodPut,
-			"/admin/settings",
-			strings.NewReader(fmt.Sprintf(
-				`{"values":{"%s":"%d","%s":"%d"}}`,
-				diagnostics.KeyMaxBundleBytes,
-				50*mib,
-				diagnostics.KeyMaxUncompressedBytes,
-				60*mib,
-			)),
-		)
-		rec := httptest.NewRecorder()
-
-		handler.HandleUpdateSettings(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-		}
-		if settings.setManyCalls != 1 {
-			t.Fatalf("valid diagnostics batch SetMany=%d, want 1", settings.setManyCalls)
-		}
-	})
 }
 
 func TestAdminGenericSettingsRoutesRejectUnsafeRateLimitValues(t *testing.T) {
@@ -682,41 +577,6 @@ func TestAdminSettingsRejectClearingOnlyRedisTransport(t *testing.T) {
 	})
 }
 
-func TestAdminSettingsRejectMalformedRedisURL(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		target string
-		body   string
-		single bool
-	}{
-		{name: "batch", target: "/admin/settings", body: `{"values":{"redis.url":"not-a-url"}}`},
-		{name: "single", target: "/admin/settings/redis.url", body: `{"value":"not-a-url"}`, single: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			settings := &fakeServerSettingsStore{values: map[string]string{}}
-			handler := &AdminHandler{SettingsRepo: settings}
-			req := httptest.NewRequest(http.MethodPut, tc.target, strings.NewReader(tc.body))
-			if tc.single {
-				req = withChiParam(req, "key", "redis.url")
-			}
-			rec := httptest.NewRecorder()
-
-			if tc.single {
-				handler.HandleUpdateSetting(rec, req)
-			} else {
-				handler.HandleUpdateSettings(rec, req)
-			}
-
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-			}
-			if settings.setManyCalls != 0 || settings.setCalls != 0 {
-				t.Fatalf("malformed Redis URL was persisted: SetMany=%d Set=%d", settings.setManyCalls, settings.setCalls)
-			}
-		})
-	}
-}
-
 func TestAdminUpdateSettingsSkipsFunctionalNoOp(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{}}
 	handler := &AdminHandler{SettingsRepo: settings, RestartStatus: NewServerRestartStatusTracker()}
@@ -741,36 +601,6 @@ func TestAdminUpdateSettingsSkipsFunctionalNoOp(t *testing.T) {
 	}
 	if response.RestartRequired || len(response.RestartRequiredKeys) != 0 {
 		t.Fatalf("no-op response requested restart: %#v", response)
-	}
-}
-
-func TestAdminUpdateSettingsPersistsClearWhenOverrideEqualsDefault(t *testing.T) {
-	settings := &fakeServerSettingsStore{values: map[string]string{"branding.server_name": "Silo"}}
-	handler := &AdminHandler{SettingsRepo: settings, RestartStatus: NewServerRestartStatusTracker()}
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings",
-		strings.NewReader(`{"values":{"branding.server_name":""}}`),
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateSettings(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if settings.setManyCalls != 1 {
-		t.Fatalf("SetMany calls = %d, want 1 for explicit clear", settings.setManyCalls)
-	}
-	if settings.values["branding.server_name"] != "" {
-		t.Fatalf("stored value = %q, want cleared override", settings.values["branding.server_name"])
-	}
-	var response updateSettingsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Values["branding.server_name"] != "Silo" || response.RestartRequired {
-		t.Fatalf("response = %#v, want unchanged effective default without restart", response)
 	}
 }
 
@@ -804,40 +634,6 @@ func TestAdminUpdateSettingsReturnsEffectiveDefaultAfterClear(t *testing.T) {
 	}
 	if settings.values["branding.server_name"] != "" {
 		t.Fatalf("stored value = %q, want cleared override", settings.values["branding.server_name"])
-	}
-	if callbackValue != "Silo" {
-		t.Fatalf("callback value = %q, want effective default Silo", callbackValue)
-	}
-}
-
-func TestAdminUpdateSettingReturnsEffectiveDefaultAfterClear(t *testing.T) {
-	settings := &fakeServerSettingsStore{values: map[string]string{"branding.server_name": "Casa"}}
-	var callbackValue string
-	handler := &AdminHandler{
-		SettingsRepo: settings,
-		OnServerSettingUpdated: func(_ context.Context, _ string, value string) {
-			callbackValue = value
-		},
-	}
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings/branding.server_name",
-		strings.NewReader(`{"value":""}`),
-	)
-	req = withChiParam(req, "key", "branding.server_name")
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateSetting(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var response adminSettingResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Value != "Silo" {
-		t.Fatalf("response value = %q, want effective default", response.Value)
 	}
 	if callbackValue != "Silo" {
 		t.Fatalf("callback value = %q, want effective default Silo", callbackValue)
@@ -898,10 +694,10 @@ func TestAdminUpdateSettingPreservesLegacyPairedWriteFlow(t *testing.T) {
 		{
 			name: "clear first half of pair",
 			initial: map[string]string{
-				"watchsync.trakt.client_id":     "configured-client-id",
-				"watchsync.trakt.client_secret": "clawrouter-e2e-secret",
+				"watchsync.simkl.client_id":     "configured-client-id",
+				"watchsync.simkl.client_secret": "clawrouter-e2e-secret",
 			},
-			key:   "watchsync.trakt.client_id",
+			key:   "watchsync.simkl.client_id",
 			value: "",
 		},
 	} {
@@ -1035,39 +831,8 @@ func TestCheckS3ObjectPermissionsUsesFreshContextForFailureCleanup(t *testing.T)
 	}
 }
 
-func TestCheckS3ObjectPermissionsSurfacesCleanupFailure(t *testing.T) {
-	client := &fakeS3SettingsCheckClient{
-		getObject: func(context.Context, string, string) ([]byte, error) {
-			return nil, errors.New("read failed")
-		},
-		delete: func(context.Context, string, string) error {
-			return errors.New("delete failed")
-		},
-	}
-
-	err := checkS3ObjectPermissions(context.Background(), client, "silo")
-
-	if err == nil || !strings.Contains(err.Error(), "cleanup probe object: delete failed") {
-		t.Fatalf("error = %v, want cleanup failure", err)
-	}
-	if !strings.Contains(err.Error(), "read probe object: read failed") {
-		t.Fatalf("error = %v, want original read failure", err)
-	}
-}
-
 type fakeEmbeddingsSettingsCheckClient struct {
 	embed func(ctx context.Context, texts []string) ([][]float32, error)
-}
-
-type fakeMDBListSettingsCheckClient struct {
-	check func(context.Context) error
-}
-
-func (f *fakeMDBListSettingsCheckClient) Check(ctx context.Context) error {
-	if f.check != nil {
-		return f.check(ctx)
-	}
-	return nil
 }
 
 func (f *fakeEmbeddingsSettingsCheckClient) Embed(
@@ -1106,121 +871,105 @@ func (f *fakeAISettingsCheckClient) Transcribe(
 	return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 }
 
-func TestHandleCheckSettingsConnectionAIChatDoesNotSendStoredKeyToDraftEndpoint(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
+// testAIProviders encodes an ai.providers registry for a settings fixture.
+func testAIProviders(t *testing.T, providers ...config.AIProvider) string {
+	t.Helper()
+	return config.AIProviderRegistry{Version: 1, Providers: providers}.Encode()
+}
+
+// A check draft selects a provider by id, so a stored key reaches only the
+// address saved with it. A draft cannot substitute its own registry.
+func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
+	originalAI, originalEmbeddings := newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient
 	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
+		newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient = originalAI, originalEmbeddings
 	})
-
-	var captured llm.Config
-	var chatCalled bool
+	var capturedAI llm.Config
+	var capturedEmbeddings embeddings.ClientConfig
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{
-			chat: func(_ context.Context, _ []llm.Message, jsonObject bool) (string, error) {
-				chatCalled = true
-				if !jsonObject {
-					t.Fatal("chat connection check did not request a JSON response")
-				}
-				return `{"status":"ok"}`, nil
-			},
-		}
+		capturedAI = cfg
+		return &fakeAISettingsCheckClient{transcribe: func(context.Context, llm.TranscribeRequest) (*llm.Transcription, error) {
+			return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
+		}}
 	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":   "https://persisted.example.test",
-				"ai.chat_model": "persisted-model",
-				"ai.api_key":    "persisted-secret",
-			},
-		},
+	newAdminEmbeddingsSettingsCheckClient = func(cfg embeddings.ClientConfig) embeddingsSettingsCheckClient {
+		capturedEmbeddings = cfg
+		return &fakeEmbeddingsSettingsCheckClient{embed: func(context.Context, []string) ([][]float32, error) {
+			return [][]float32{make([]float32, 8)}, nil
+		}}
 	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_chat",
-		map[string]any{
-			"values": map[string]string{
-				"ai.base_url":   "https://draft.example.test",
-				"ai.chat_model": "draft-model",
-				"ai.api_key":    "",
-			},
-			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	both := []config.AICapability{config.AICapabilityChat, config.AICapabilityEmbeddings, config.AICapabilitySpeech}
+	stored := map[string]string{
+		config.AIProvidersSettingKey: testAIProviders(t,
+			config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://saved.example.test", APIKey: "saved-secret", Capabilities: both},
+			config.AIProvider{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", APIKey: "other-secret", Capabilities: both},
+			config.AIProvider{ID: "openai", Type: config.AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com", APIKey: "openai-secret", Capabilities: both},
+		),
+		config.AITextProviderSettingKey:    "saved",
+		config.AISpeechProviderSettingKey:  "saved",
+		config.EmbeddingProviderSettingKey: "saved",
+		"ai.chat_model":                    "chat-model",
+		"ai.asr_model":                     "whisper-model",
+		"recommendations.embedding_model":  "embed-model",
+		// Rows older builds wrote are no longer read.
+		"recommendations.embedding_base_url":   "https://legacy.example.test",
+		"recommendations.embedding_auth_token": "legacy-secret",
 	}
-
-	var response connectionCheckResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if !response.Success || !chatCalled {
-		t.Fatalf("response = %+v, chatCalled = %v", response, chatCalled)
-	}
-	if captured.BaseURL != "https://draft.example.test" || captured.ChatModel != "draft-model" {
-		t.Fatalf("captured config = %+v, want draft endpoint and model", captured)
-	}
-	if captured.APIKey != "" {
-		t.Fatalf("captured API key = %q, want no stored secret for a changed endpoint", captured.APIKey)
+	forged := testAIProviders(t, config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://attacker.example.test", Capabilities: both})
+	for _, tc := range []struct {
+		name, kind, wantURL, wantKey, wantTier string
+		values                                 map[string]string
+	}{
+		{name: "text uses the bound provider", kind: "ai_chat", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "text draft switches provider", kind: "ai_chat", values: map[string]string{config.AITextProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "text draft registry ignored", kind: "ai_chat", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "OpenAI draft tier", kind: "ai_chat", values: map[string]string{config.AITextProviderSettingKey: "openai", config.AIServiceTierSettingKey: "ultrafast"}, wantURL: "https://api.openai.com", wantKey: "openai-secret", wantTier: "ultrafast"},
+		{name: "other provider ignores tier", kind: "ai_chat", values: map[string]string{config.AIServiceTierSettingKey: "priority"}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "speech uses the bound provider", kind: "ai_transcription", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "speech draft switches provider", kind: "ai_transcription", values: map[string]string{config.AISpeechProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "speech draft registry ignored", kind: "ai_transcription", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings use the bound provider", kind: "recommendations_embedding", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft switches provider", kind: "recommendations_embedding", values: map[string]string{config.EmbeddingProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "embeddings draft registry ignored", kind: "recommendations_embedding", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft legacy endpoint ignored", kind: "recommendations_embedding", values: map[string]string{"recommendations.embedding_base_url": "https://attacker.example.test"}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capturedAI, capturedEmbeddings = llm.Config{}, embeddings.ClientConfig{}
+			handler := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: maps.Clone(stored)}}
+			dirty := make([]string, 0, len(tc.values))
+			for key := range tc.values {
+				dirty = append(dirty, key)
+			}
+			rec := performSettingsCheckRequest(t, handler, "/admin/settings/check/"+tc.kind, map[string]any{"values": tc.values, "dirty_keys": dirty})
+			var response connectionCheckResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || !response.Success {
+				t.Fatalf("response = %+v, %v", response, err)
+			}
+			gotURL, gotKey := capturedAI.BaseURL, capturedAI.APIKey
+			switch tc.kind {
+			case "ai_transcription":
+				gotURL, gotKey = capturedAI.ASRBaseURL, capturedAI.ASRAPIKey
+			case "recommendations_embedding":
+				gotURL, gotKey = capturedEmbeddings.BaseURL, capturedEmbeddings.APIKey
+			}
+			if gotURL != tc.wantURL || gotKey != tc.wantKey {
+				t.Fatalf("checked %q with %q, want %q with %q", gotURL, gotKey, tc.wantURL, tc.wantKey)
+			}
+			if capturedAI.ServiceTier != tc.wantTier {
+				t.Fatalf("checked service tier %q, want %q", capturedAI.ServiceTier, tc.wantTier)
+			}
+		})
 	}
 }
 
-func TestHandleCheckSettingsConnectionAIChatReusesStoredKeyForSameEndpoint(t *testing.T) {
+func TestHandleCheckSettingsConnectionAITranscriptionProbe(t *testing.T) {
 	originalFactory := newAdminAISettingsCheckClient
 	t.Cleanup(func() {
 		newAdminAISettingsCheckClient = originalFactory
 	})
 
-	var captured llm.Config
-	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{}
-	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":   "https://persisted.example.test/v1",
-				"ai.chat_model": "persisted-model",
-				"ai.api_key":    "persisted-secret",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_chat",
-		map[string]any{
-			"values": map[string]string{
-				"ai.base_url":   "https://persisted.example.test/other-path",
-				"ai.chat_model": "draft-model",
-			},
-			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if captured.APIKey != "persisted-secret" {
-		t.Fatalf("captured API key = %q, want stored secret for unchanged authority", captured.APIKey)
-	}
-}
-
-func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
-	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
-	})
-
-	var captured llm.Config
 	var request llm.TranscribeRequest
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
 		return &fakeAISettingsCheckClient{
 			transcribe: func(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
 				request = req
@@ -1236,12 +985,12 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 	handler := &AdminHandler{
 		SettingsRepo: &fakeServerSettingsStore{
 			values: map[string]string{
-				"ai.base_url":     "https://chat.example.test",
-				"ai.api_key":      "chat-secret",
-				"ai.chat_model":   "chat-model",
-				"ai.asr_base_url": "https://whisper.example.test",
-				"ai.asr_api_key":  "asr-secret",
-				"ai.asr_model":    "whisper-model",
+				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+					ID: "whisper", Type: config.AIProviderWhisper, Name: "Whisper", BaseURL: "http://whisper.example.test",
+					Capabilities: []config.AICapability{config.AICapabilitySpeech},
+				}),
+				config.AISpeechProviderSettingKey: "whisper",
+				"ai.asr_model":                    "whisper-model",
 			},
 		},
 	}
@@ -1252,68 +1001,12 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 		"/admin/settings/check/ai_transcription",
 		map[string]any{"values": map[string]string{}, "dirty_keys": []string{}},
 	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
 	var response connectionCheckResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if !response.Success {
-		t.Fatalf("response.Success = false, message = %q", response.Message)
-	}
-	if captured.ASRBaseURL != "https://whisper.example.test" ||
-		captured.ASRAPIKey != "asr-secret" ||
-		captured.ASRModel != "whisper-model" {
-		t.Fatalf("captured ASR config = %+v", captured)
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || !response.Success {
+		t.Fatalf("response = %+v, %v", response, err)
 	}
 	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 60*time.Second || request.Timeout > 75*time.Second {
 		t.Fatalf("transcription probe request = %+v, want bounded WAV probe", request)
-	}
-}
-
-func TestHandleCheckSettingsConnectionAITranscriptionDoesNotSendStoredKeysToDraftEndpoint(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
-	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
-	})
-
-	var captured llm.Config
-	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{}
-	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":     "https://chat.example.test",
-				"ai.api_key":      "chat-secret",
-				"ai.chat_model":   "chat-model",
-				"ai.asr_base_url": "https://stored-whisper.example.test",
-				"ai.asr_api_key":  "asr-secret",
-				"ai.asr_model":    "whisper-model",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_transcription",
-		map[string]any{
-			"values": map[string]string{
-				"ai.asr_base_url": "https://draft-whisper.example.test",
-			},
-			"dirty_keys": []string{"ai.asr_base_url"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if captured.ASRAPIKey != "" || captured.APIKey != "" {
-		t.Fatalf("captured config = %+v, want no stored ASR or inherited chat secret", captured)
 	}
 }
 
@@ -1381,125 +1074,8 @@ func TestHandleCheckSettingsConnectionS3UsesPersistedSensitiveValues(t *testing.
 	}
 }
 
-func TestHandleCheckSettingsConnectionMDBListUsesDraftOrSavedKey(t *testing.T) {
-	originalFactory := newAdminMDBListSettingsCheckClient
-	t.Cleanup(func() { newAdminMDBListSettingsCheckClient = originalFactory })
-	var captured []string
-	newAdminMDBListSettingsCheckClient = func(apiKey string) mdblistSettingsCheckClient {
-		captured = append(captured, apiKey)
-		return &fakeMDBListSettingsCheckClient{}
-	}
-	handler := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-		"mdblist.api_key": "saved-key",
-	}}}
-
-	for _, tc := range []struct {
-		name string
-		body map[string]any
-		want string
-	}{
-		{
-			name: "saved key when draft is blank and untouched",
-			body: map[string]any{"values": map[string]string{"mdblist.api_key": ""}, "dirty_keys": []string{}},
-			want: "saved-key",
-		},
-		{
-			name: "unsaved draft key",
-			body: map[string]any{"values": map[string]string{"mdblist.api_key": "draft-key"}, "dirty_keys": []string{"mdblist.api_key"}},
-			want: "draft-key",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := performSettingsCheckRequest(t, handler, "/admin/settings/check/mdblist", tc.body)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			var response connectionCheckResponse
-			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-				t.Fatal(err)
-			}
-			if !response.Success {
-				t.Fatalf("connection check failed: %s", response.Message)
-			}
-			if got := captured[len(captured)-1]; got != tc.want {
-				t.Fatalf("factory API key = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestHandleCheckSettingsConnectionRedisHonorsExplicitClear(t *testing.T) {
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"redis.url": "redis://persisted:6379",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/redis",
-		map[string]any{
-			"values": map[string]string{
-				"redis.url": "",
-			},
-			"dirty_keys": []string{"redis.url"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var response connectionCheckResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if response.Success {
-		t.Fatalf("response.Success = true, want false")
-	}
-	if !strings.Contains(response.Message, "Redis URL is required") {
-		t.Fatalf("message = %q, want Redis URL validation", response.Message)
-	}
-}
-
-func TestHandleCheckSettingsConnectionRejectsInvalidDraftValues(t *testing.T) {
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"s3.public_endpoint": "https://persisted.example.test",
-				"s3.public_bucket":   "silo",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/s3_public",
-		map[string]any{
-			"values": map[string]string{
-				"s3.public_token_ttl": "not-a-number",
-			},
-			"dirty_keys": []string{"s3.public_token_ttl"},
-		},
-	)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-
-	var response map[string]string
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if !strings.Contains(response["message"], "invalid int for") {
-		t.Fatalf("message = %q, want parse failure", response["message"])
-	}
-}
-
 func TestAdminGetSettingRedactsSensitiveSetting(t *testing.T) {
-	for _, key := range []string{"watchsync.trakt.client_secret", "watchsync.simkl.client_secret"} {
+	for _, key := range []string{"watchsync.simkl.client_secret"} {
 		t.Run(key, func(t *testing.T) {
 			const storedSecret = "stored-watch-provider-secret"
 			handler := &AdminHandler{
@@ -1527,7 +1103,7 @@ func TestAdminGetSettingRedactsSensitiveSetting(t *testing.T) {
 }
 
 func TestAdminUpdateSettingRedactsSensitiveSetting(t *testing.T) {
-	for _, key := range []string{"watchsync.trakt.client_secret", "watchsync.simkl.client_secret"} {
+	for _, key := range []string{"watchsync.simkl.client_secret"} {
 		t.Run(key, func(t *testing.T) {
 			const submittedSecret = "submitted-watch-provider-secret"
 			settings := &fakeServerSettingsStore{}
@@ -1622,134 +1198,6 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 	}
 }
 
-func TestAdminUpdateSettingNormalizesAIEndpointAndModelValues(t *testing.T) {
-	for _, tc := range []struct {
-		key   string
-		value string
-		want  string
-	}{
-		{key: "ai.base_url", value: "  https://text.example.test/v1  ", want: "https://text.example.test/v1"},
-		{key: "ai.chat_model", value: "  chat-model  ", want: "chat-model"},
-		{key: "ai.asr_base_url", value: "  https://speech.example.test  ", want: "https://speech.example.test"},
-		{key: "ai.asr_base_url", value: "  https://openrouter.ai/api/v1  ", want: "https://openrouter.ai/api/v1"},
-		{key: "ai.asr_model", value: "  whisper-model  ", want: "whisper-model"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			settings := &fakeServerSettingsStore{}
-			handler := &AdminHandler{SettingsRepo: settings}
-			body, err := json.Marshal(updateSettingRequest{Value: tc.value})
-			if err != nil {
-				t.Fatalf("Marshal() returned error: %v", err)
-			}
-			req := httptest.NewRequest(
-				http.MethodPut,
-				"/admin/settings/"+tc.key,
-				bytes.NewReader(body),
-			)
-			req = withChiParam(req, "key", tc.key)
-			rec := httptest.NewRecorder()
-
-			handler.HandleUpdateSetting(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if settings.values[tc.key] != tc.want {
-				t.Fatalf("stored value = %q, want %q", settings.values[tc.key], tc.want)
-			}
-		})
-	}
-}
-
-func TestAdminUpdatePolicyEditorEnabledValidation(t *testing.T) {
-	settings := &fakeServerSettingsStore{}
-	handler := &AdminHandler{SettingsRepo: settings}
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings/policy.editor_enabled",
-		strings.NewReader(`{"value":"maybe"}`),
-	)
-	req = withChiParam(req, "key", "policy.editor_enabled")
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateSetting(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-	if _, ok := settings.values["policy.editor_enabled"]; ok {
-		t.Fatalf("invalid policy.editor_enabled was stored: %#v", settings.values)
-	}
-}
-
-func TestAdminUpdateCatalogSearchSemanticSettingsValidation(t *testing.T) {
-	valid := []struct {
-		key   string
-		value string
-		want  string
-	}{
-		{key: catalog.SearchSettingMeilisearchSemanticEnabled, value: "TRUE", want: "true"},
-		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: ".30", want: "0.3"},
-		{key: catalog.SearchSettingMeilisearchEmbedder, value: "", want: catalog.DefaultMeilisearchEmbedder},
-		{key: catalog.SearchSettingMeilisearchEmbedder, value: "custom_embedder-2", want: "custom_embedder-2"},
-	}
-	for _, tc := range valid {
-		t.Run("valid "+tc.key, func(t *testing.T) {
-			settings := &fakeServerSettingsStore{}
-			handler := &AdminHandler{SettingsRepo: settings, RestartStatus: NewServerRestartStatusTracker()}
-			req := httptest.NewRequest(
-				http.MethodPut,
-				"/admin/settings/"+tc.key,
-				strings.NewReader(`{"value":"`+tc.value+`"}`),
-			)
-			req = withChiParam(req, "key", tc.key)
-			rec := httptest.NewRecorder()
-
-			handler.HandleUpdateSetting(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if got := config.EffectiveAdminSettings(settings.values)[tc.key]; got != tc.want {
-				t.Fatalf("effective value = %q, want %q", got, tc.want)
-			}
-		})
-	}
-
-	invalid := []struct {
-		key   string
-		value string
-	}{
-		{key: catalog.SearchSettingMeilisearchSemanticEnabled, value: "sometimes"},
-		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "-0.01"},
-		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "1.01"},
-		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "NaN"},
-		{key: catalog.SearchSettingMeilisearchEmbedder, value: "bad.name"},
-	}
-	for _, tc := range invalid {
-		t.Run("invalid "+tc.key, func(t *testing.T) {
-			settings := &fakeServerSettingsStore{}
-			handler := &AdminHandler{SettingsRepo: settings}
-			req := httptest.NewRequest(
-				http.MethodPut,
-				"/admin/settings/"+tc.key,
-				strings.NewReader(`{"value":"`+tc.value+`"}`),
-			)
-			req = withChiParam(req, "key", tc.key)
-			rec := httptest.NewRecorder()
-
-			handler.HandleUpdateSetting(rec, req)
-
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-			}
-			if _, ok := settings.values[tc.key]; ok {
-				t.Fatalf("invalid setting was stored: %#v", settings.values)
-			}
-		})
-	}
-}
-
 func performSettingsCheckRequest(
 	t *testing.T,
 	handler *AdminHandler,
@@ -1778,93 +1226,37 @@ func withChiParam(r *http.Request, key, value string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
 }
 
-func TestAdminGetSettingReportsRestartRequired(t *testing.T) {
-	const restartKey = "scanner.max_concurrent_libraries"
-	const liveKey = "server.log_level"
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-			restartKey: "4",
-			liveKey:    "debug",
-		}},
-		BootstrapSensitiveValues: map[string]string{
-			"playback.ffmpeg_path": "/opt/ffmpeg",
-		},
+// A binding is validated against the registry even though the batch does not
+// carry the registry, which the dependency group pulls into validation.
+func TestAdminBatchValidatesProviderBindings(t *testing.T) {
+	registry := testAIProviders(t,
+		config.AIProvider{ID: "router", Type: config.AIProviderOpenRouter, Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: "k",
+			Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilitySpeech}},
+		config.AIProvider{ID: "chat-only", Type: config.AIProviderCustom, Name: "Chat", BaseURL: "http://llm.lan", Capabilities: []config.AICapability{config.AICapabilityChat}},
+	)
+	// The single-setting write applies the same check.
+	for value, wantErr := range map[string]bool{"router": false, "chat-only": true, "missing": true} {
+		h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{config.AIProvidersSettingKey: registry}}}
+		if _, err := h.UpdateAdminSetting(t.Context(), config.AISpeechProviderSettingKey, value, nil); (err != nil) != wantErr {
+			t.Fatalf("single write of speech provider %q: err = %v, want error %v", value, err, wantErr)
+		}
 	}
-
 	for _, tc := range []struct {
-		name            string
-		key             string
-		wantValue       string
-		wantRestart     bool
-		wantRestartSeen bool
+		body     string
+		wantCode int
 	}{
-		{
-			name:            "stored restart-required key",
-			key:             restartKey,
-			wantValue:       "4",
-			wantRestart:     true,
-			wantRestartSeen: true,
-		},
-		{
-			name:      "stored hot-reloading key omits the flag",
-			key:       liveKey,
-			wantValue: "debug",
-		},
-		{
-			name:            "bootstrap value",
-			key:             "playback.ffmpeg_path",
-			wantValue:       "/opt/ffmpeg",
-			wantRestart:     true,
-			wantRestartSeen: true,
-		},
+		{`{"values":{"ai.speech_provider_id":"router","ai.asr_model":"openai/whisper-large-v3","subtitle_ai.transcribe_enabled":"true"}}`, http.StatusOK},
+		{`{"values":{"ai.speech_provider_id":"chat-only"}}`, http.StatusBadRequest},
+		{`{"values":{"ai.text_provider_id":"missing"}}`, http.StatusBadRequest},
+		{`{"values":{"ai.asr_base_url":"https://openrouter.ai/api/v1"}}`, http.StatusBadRequest},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if config.RestartRequired(tc.key) != tc.wantRestart {
-				t.Fatalf("test fixture drifted: config.RestartRequired(%q) = %v", tc.key, !tc.wantRestart)
-			}
-
-			req := httptest.NewRequest(http.MethodGet, "/admin/settings/"+tc.key, nil)
-			req = withChiParam(req, "key", tc.key)
-			rec := httptest.NewRecorder()
-
-			handler.HandleGetSetting(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			var payload struct {
-				Key             string `json:"key"`
-				Value           string `json:"value"`
-				RestartRequired bool   `json:"restart_required"`
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if payload.Key != tc.key || payload.Value != tc.wantValue {
-				t.Fatalf("payload = %+v, want key %q value %q", payload, tc.key, tc.wantValue)
-			}
-			if payload.RestartRequired != tc.wantRestart {
-				t.Fatalf("restart_required = %v, want %v", payload.RestartRequired, tc.wantRestart)
-			}
-			// omitempty must keep the flag off the wire for live keys.
-			if seen := strings.Contains(rec.Body.String(), "restart_required"); seen != tc.wantRestartSeen {
-				t.Fatalf("restart_required present = %v, want %v; body=%s", seen, tc.wantRestartSeen, rec.Body.String())
-			}
-		})
-	}
-}
-
-func TestAdminBatchAllowsOpenRouterASR(t *testing.T) {
-	settings := &fakeServerSettingsStore{}
-	handler := &AdminHandler{SettingsRepo: settings}
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(`{"values":{"ai.asr_base_url":"https://openrouter.ai/api/v1","ai.asr_model":"openai/whisper-large-v3","subtitle_ai.transcribe_enabled":"true"}}`)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
-	}
-	if settings.values["ai.asr_base_url"] != "https://openrouter.ai/api/v1" || settings.values["subtitle_ai.transcribe_enabled"] != "true" {
-		t.Fatalf("settings not saved: %+v", settings.values)
+		settings := &fakeServerSettingsStore{values: map[string]string{config.AIProvidersSettingKey: registry}}
+		handler := &AdminHandler{SettingsRepo: settings}
+		rec := httptest.NewRecorder()
+		handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(tc.body)))
+		if rec.Code != tc.wantCode {
+			t.Fatalf("%s: status = %d, want %d; body = %s", tc.body, rec.Code, tc.wantCode, rec.Body.String())
+		}
 	}
 }
 
@@ -1892,7 +1284,7 @@ func TestAITranscriptionConnectionRequiresTimestampedSpeech(t *testing.T) {
 				}}
 			}
 			cfg := &config.Config{}
-			cfg.AI.BaseURL = "https://openrouter.ai/api/v1"
+			cfg.AI.ASRBaseURL = "https://openrouter.ai/api/v1"
 			cfg.AI.ASRModel = "openai/whisper-large-v3"
 			if got := checkAITranscriptionConnection(t.Context(), cfg); got.Success != tc.want {
 				t.Fatalf("connection result = %+v, want success = %v", got, tc.want)

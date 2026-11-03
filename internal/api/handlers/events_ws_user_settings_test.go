@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,8 +95,8 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	}
 
 	// A change event addressed to this user must reach the connection.
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
@@ -102,5 +104,97 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	}
 	if string(event["event"]) != `"`+userSettingsChangedEvent+`"` {
 		t.Errorf("event = %s, want %q", event["event"], userSettingsChangedEvent)
+	}
+}
+
+// loopbackEventBus delivers each published event to every subscribed handler,
+// standing in for Redis between the nodes of a cluster.
+type loopbackEventBus struct {
+	mu       sync.Mutex
+	handlers []cache.EventHandler
+}
+
+func (b *loopbackEventBus) Publish(_ context.Context, _ string, event cache.Event) error {
+	b.mu.Lock()
+	handlers := slices.Clone(b.handlers)
+	b.mu.Unlock()
+	for _, handler := range handlers {
+		handler(event)
+	}
+	return nil
+}
+
+func (b *loopbackEventBus) Subscribe(_ context.Context, _ string, handler cache.EventHandler) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.handlers = append(b.handlers, handler)
+	return nil
+}
+
+func (b *loopbackEventBus) Close() error { return nil }
+
+// TestAdminDefaultChangeReachesEveryViewer covers the event that refreshes
+// viewers inheriting an administrator default: it is addressed to every
+// viewer, so an unbound plain user on another account must still receive it,
+// and a server setting that holds no administrator default publishes nothing.
+// The change is made on another node, so the every-viewer address has to
+// survive the event bus.
+func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
+	bus := &loopbackEventBus{}
+	hub := evt.NewHub("socket-node", bus)
+	if err := hub.Start(t.Context()); err != nil {
+		t.Fatalf("starting hub: %v", err)
+	}
+	adminNode := evt.NewHub("admin-node", bus)
+	handler := &EventsHandler{hub: hub}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 7, Role: "user"})
+		handler.HandleWebSocket(w, r.WithContext(ctx))
+	}))
+	defer server.Close()
+
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_settings", nil)
+	if err != nil {
+		t.Fatalf("dialing events websocket: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	defer func() { _ = conn.Close() }()
+
+	readUntil := func(wantType string) map[string]json.RawMessage {
+		t.Helper()
+		for {
+			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("setting read deadline: %v", err)
+			}
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("reading until %s frame: %v", wantType, err)
+			}
+			var frame map[string]json.RawMessage
+			if err := json.Unmarshal(data, &frame); err != nil {
+				t.Fatalf("frame is not JSON: %v (%s)", err, data)
+			}
+			if string(frame["type"]) == `"`+wantType+`"` {
+				return frame
+			}
+		}
+	}
+	readUntil("snapshot")
+
+	// Published first: if it produced an event, the read below would see it.
+	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.card_overlays")
+	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.ui.title_art")
+
+	event := readUntil("event")
+	var data userSettingsEventPayload
+	if err := json.Unmarshal(event["data"], &data); err != nil {
+		t.Fatalf("event data: %v (%s)", err, event["data"])
+	}
+	if data.Key != "ui.title_art" || data.Scope != "default" || data.ProfileID != "" {
+		t.Fatalf("event data = %+v, want ui.title_art at default for every profile", data)
 	}
 }

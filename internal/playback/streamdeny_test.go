@@ -250,3 +250,34 @@ func TestStreamDenySweepsExpiredCacheEntries(t *testing.T) {
 		t.Fatalf("cache size = %d, want expired entries swept on insert", size)
 	}
 }
+
+// TestStreamDenyLookupSkipsTheCache pins that a writer acting for another
+// replica's stop reads Redis itself: a "not denied" answer cached a moment
+// before the stop must not hide it, and a failed read is reported.
+func TestStreamDenyLookupSkipsTheCache(t *testing.T) {
+	deny, client, _, _ := newTestStreamDeny(t)
+	if deny.Denied(t.Context(), "session") {
+		t.Fatal("unmarked session reported denied")
+	}
+	// Another replica stops the session.
+	client.mu.Lock()
+	client.keys[StreamDenyKey("session")] = fakeStreamDenyKey{value: streamDenyValue}
+	client.mu.Unlock()
+	if deny.Denied(t.Context(), "session") {
+		t.Fatal("cached answer expected before the cache window ends")
+	}
+	if denied, err := deny.Lookup(t.Context(), "session"); err != nil || !denied {
+		t.Fatalf("Lookup = %v, %v; want the marker another replica wrote", denied, err)
+	}
+	if denied, err := deny.Lookup(t.Context(), "other"); err != nil || denied {
+		t.Fatalf("Lookup of an unmarked session = %v, %v", denied, err)
+	}
+	client.setErr(errors.New("redis down"))
+	if _, err := deny.Lookup(t.Context(), "other"); err == nil {
+		t.Fatal("a failed read was not reported")
+	}
+	var none *StreamDeny
+	if denied, err := none.Lookup(t.Context(), "session"); err != nil || denied {
+		t.Fatalf("nil store Lookup = %v, %v", denied, err)
+	}
+}

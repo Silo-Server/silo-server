@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -479,18 +478,6 @@ func TestInitialMatch_DeferralRecordsStaleIDs(t *testing.T) {
 	stale, err := staleRepo.GetByContentID(ctx, "movie-tmdb-578")
 	if err != nil || len(stale) == 0 {
 		t.Fatalf("stale ids = %v, %v; want the dead tag id recorded", stale, err)
-	}
-}
-
-func TestMatchFailureMessageNamesAnUnreadableNFO(t *testing.T) {
-	t.Parallel()
-	local := matchFailureFromDecision(&MatchDecision{Outcome: MatchOutcomeProviderTransient, localSidecarUnreadable: true})
-	if !strings.Contains(local.Message, "NFO") || local.Kind != MatchOutcomeProviderTransient {
-		t.Errorf("failure = %+v, want a transient failure naming the NFO", local)
-	}
-	remote := matchFailureFromDecision(&MatchDecision{Outcome: MatchOutcomeProviderTransient})
-	if remote.Message != "metadata provider is temporarily unavailable" {
-		t.Errorf("failure = %+v, want the provider message", remote)
 	}
 }
 

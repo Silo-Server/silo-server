@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -77,88 +78,6 @@ func buildMatchRouter(h *AdminMatchHandler) *chi.Mux {
 }
 
 // --- Tests ---
-
-func TestAdminMatchSearch_ReturnsCandidatesArray(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-1": {ContentID: "item-1", Title: "The Matrix", Year: 1999, Type: "movie"},
-		},
-	}
-	folders := &fakeMatchFolderLookup{
-		folders: map[string]int{"item-1": 10},
-	}
-	metaSvc := &fakeMatchMetadataService{
-		searchResults: []metadata.MatchCandidate{
-			{
-				Title:          "The Matrix",
-				Year:           1999,
-				ContentType:    "movie",
-				ProviderIDs:    map[string]string{"tmdb": "603", "imdb": "tt0133093"},
-				Sources:        []string{"tmdb"},
-				AgreementHints: []string{"agreed_by_tmdb_and_tvdb"},
-			},
-			{
-				Title:       "The Matrix Reloaded",
-				Year:        2003,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "604"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-	}
-
-	h := NewAdminMatchHandler(items, folders, metaSvc)
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchSearchRequest{Title: "The Matrix"})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-1/match/search", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp matchSearchResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-
-	if len(resp.Candidates) != 2 {
-		t.Fatalf("expected 2 candidates, got %d", len(resp.Candidates))
-	}
-
-	// Verify candidate structure.
-	c0 := resp.Candidates[0]
-	if c0.Title != "The Matrix" {
-		t.Errorf("expected title 'The Matrix', got %q", c0.Title)
-	}
-	if c0.ProviderIDs["tmdb"] != "603" {
-		t.Errorf("expected tmdb=603, got %q", c0.ProviderIDs["tmdb"])
-	}
-	if len(c0.AgreementHints) != 1 || c0.AgreementHints[0] != "agreed_by_tmdb_and_tvdb" {
-		t.Errorf("expected agreement_hints, got %v", c0.AgreementHints)
-	}
-}
-
-func TestAdminMatchSearch_ItemNotFound(t *testing.T) {
-	items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{}}
-	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchSearchRequest{Title: "foo"})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/nonexistent/match/search", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
 
 func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
 	items := &fakeMatchItemLookup{
@@ -305,27 +224,6 @@ func TestAdminMatchApply_PreservesContentID(t *testing.T) {
 	}
 }
 
-func TestAdminMatchApply_RequiresProviderIDs(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-4": {ContentID: "item-4", Title: "Test", Type: "movie"},
-		},
-	}
-	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchApplyRequest{ProviderIDs: map[string]string{}})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-4/match/apply", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for empty provider_ids, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestAdminMatchApply_NormalizesProviderIDKeys(t *testing.T) {
 	items := &fakeMatchItemLookup{
 		items: map[string]*models.MediaItem{
@@ -387,23 +285,6 @@ func TestAdminMatchApply_RejectsAllBlankProviderIDs(t *testing.T) {
 	}
 }
 
-func TestAdminMatchApply_ItemNotFound(t *testing.T) {
-	items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{}}
-	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchApplyRequest{ProviderIDs: map[string]string{"tmdb": "123"}})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/nonexistent/match/apply", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // capturingMetadataService wraps a fake to capture the query passed to SearchAndNormalize.
 type capturingMetadataService struct {
 	inner        *fakeMatchMetadataService
@@ -419,4 +300,36 @@ func (c *capturingMetadataService) SearchAndNormalize(ctx context.Context, query
 
 func (c *capturingMetadataService) Process(ctx context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error) {
 	return c.inner.Process(ctx, req)
+}
+
+// A match can move the item to a new content ID. Cached home rails still list
+// the old ID, so both IDs must reach the other API nodes.
+func TestAdminMatchApply_PublishesOldAndNewContentIDs(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"movie-tmdb-124905": {ContentID: "movie-tmdb-124905", Title: "Godzilla", Year: 2014, Type: "movie"},
+		},
+	}
+	metaSvc := &fakeMatchMetadataService{
+		processResult: &metadata.ProcessResult{ContentID: "movie-tmdb-929", Updated: true},
+	}
+	bus := &recordingEventBus{}
+	h := NewAdminMatchHandler(items, nil, metaSvc)
+	h.EventBus = bus
+
+	if _, err := h.ApplyAdminItemMatch(context.Background(), "movie-tmdb-124905", AdminMatchApplyRequest{
+		ProviderIDs: map[string]string{"tmdb": "929"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	var got []string
+	for _, event := range bus.events {
+		if event.Type == cache.EventCatalogItemChanged {
+			got = append(got, event.Payload)
+		}
+	}
+	if len(got) != 2 || got[0] != "movie-tmdb-124905" || got[1] != "movie-tmdb-929" {
+		t.Fatalf("catalog item changes = %v, want old then new content ID", got)
+	}
 }

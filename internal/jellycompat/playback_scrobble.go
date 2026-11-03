@@ -408,12 +408,12 @@ func compatScrobbleSource(
 		return nil
 	}
 	if upstreamSession != nil {
-		for _, source := range playSession.MediaSources {
-			if source.FileID == upstreamSession.MediaFileID {
-				copy := source
-				return &copy
-			}
+		if source := mediaSourceByFileID(playSession, upstreamSession.MediaFileID); source != nil {
+			return source
 		}
+	}
+	if source := playedMediaSource(playSession, ""); source != nil {
+		return source
 	}
 	return firstMediaSource(playSession)
 }

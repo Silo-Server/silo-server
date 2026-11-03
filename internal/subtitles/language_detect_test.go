@@ -5,66 +5,15 @@ import (
 	"testing"
 )
 
-func TestDetectSubtitleLanguageFromReleaseFilename(t *testing.T) {
-	cases := []struct {
-		filename string
-		want     string
-	}{
-		{
-			filename: "The.Super.Mario.Galaxy.Movie.2026.720p.WEBRip.x264.AAC-[YTS.BZ]-TR.srt",
-			want:     "tr",
-		},
-		{
-			filename: "Dune.Part.Two.2024.1080p.BluRay.x265.DTS-HD.MA.5.1-EN.srt",
-			want:     "en",
-		},
-		{
-			filename: "some.movie.chs.srt",
-			want:     "zh",
-		},
-		{
-			filename: "some.movie.pt-BR.srt",
-			want:     "pt-BR",
-		},
-		{
-			filename: "some.movie.pob.srt",
-			want:     "pt-BR",
-		},
-		{
-			filename: "some.movie.pt.srt",
-			want:     "pt",
-		},
-	}
-	for _, tc := range cases {
-		detected := DetectSubtitleLanguage(tc.filename, FormatSRT, nil)
-		if detected.Language != tc.want {
-			t.Fatalf("filename %q: language = %q, source = %q, want %q", tc.filename, detected.Language, detected.Source, tc.want)
-		}
-		if detected.Source != LanguageSourceFilename {
-			t.Fatalf("filename %q: source = %q, want filename", tc.filename, detected.Source)
-		}
-	}
-}
-
-func TestDetectSubtitleLanguageFromASSMetadata(t *testing.T) {
-	data := []byte(`[Script Info]
+func TestDetectSubtitleLanguage(t *testing.T) {
+	ass := []byte(`[Script Info]
 Title: Example
 Language: Spanish
 
 [Events]
 Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hola
 `)
-	detected := DetectSubtitleLanguage("subtitle.ass", FormatASS, data)
-	if detected.Language != "es" {
-		t.Fatalf("language = %q, want es", detected.Language)
-	}
-	if detected.Source != LanguageSourceMetadata {
-		t.Fatalf("source = %q, want metadata", detected.Source)
-	}
-}
-
-func TestDetectSubtitleLanguageFromContent(t *testing.T) {
-	data := []byte(`1
+	srt := []byte(`1
 00:00:01,000 --> 00:00:04,000
 Bonjour tout le monde, comment allez-vous aujourd'hui?
 
@@ -72,35 +21,51 @@ Bonjour tout le monde, comment allez-vous aujourd'hui?
 00:00:05,000 --> 00:00:08,000
 Je suis tres heureux de vous voir ici ce soir.
 `)
-	detected := DetectSubtitleLanguage("subtitle.srt", FormatSRT, data)
-	if detected.Language != "fr" {
-		t.Fatalf("language = %q, want fr", detected.Language)
+	cases := []struct {
+		filename string
+		format   SubtitleFormat
+		data     []byte
+		want     string
+		source   LanguageDetectionSource
+	}{
+		{"The.Super.Mario.Galaxy.Movie.2026.720p.WEBRip.x264.AAC-[YTS.BZ]-TR.srt", FormatSRT, nil, "tr", LanguageSourceFilename},
+		{"Dune.Part.Two.2024.1080p.BluRay.x265.DTS-HD.MA.5.1-EN.srt", FormatSRT, nil, "en", LanguageSourceFilename},
+		{"some.movie.chs.srt", FormatSRT, nil, "zh", LanguageSourceFilename},
+		{"some.movie.pt-BR.srt", FormatSRT, nil, "pt-BR", LanguageSourceFilename},
+		{"some.movie.pob.srt", FormatSRT, nil, "pt-BR", LanguageSourceFilename},
+		{"some.movie.pt.srt", FormatSRT, nil, "pt", LanguageSourceFilename},
+		{"subtitle.ass", FormatASS, ass, "es", LanguageSourceMetadata},
+		{"subtitle.srt", FormatSRT, srt, "fr", LanguageSourceContent},
 	}
-	if detected.Source != LanguageSourceContent {
-		t.Fatalf("source = %q, want content", detected.Source)
+	for _, tc := range cases {
+		detected := DetectSubtitleLanguage(tc.filename, tc.format, tc.data)
+		if detected.Language != tc.want || detected.Source != tc.source {
+			t.Fatalf("%q: language = %q, source = %q, want %q from %q", tc.filename, detected.Language, detected.Source, tc.want, tc.source)
+		}
 	}
 }
 
-func TestResolveUploadLanguageUsesManualFallback(t *testing.T) {
-	detected, err := ResolveUploadLanguage("subtitle.srt", FormatSRT, []byte("hello"), "de", false)
-	if err != nil {
-		t.Fatalf("ResolveUploadLanguage() error = %v", err)
-	}
-	if detected.Language != "de" {
-		t.Fatalf("language = %q, want de", detected.Language)
-	}
-	if detected.Source != LanguageSourceManual {
-		t.Fatalf("source = %q, want manual", detected.Source)
-	}
-}
-
-func TestResolveUploadLanguagePrefersFilename(t *testing.T) {
-	detected, err := ResolveUploadLanguage("movie.ja.srt", FormatSRT, []byte("hello"), "de", false)
-	if err != nil {
-		t.Fatalf("ResolveUploadLanguage() error = %v", err)
-	}
-	if detected.Language != "ja" {
-		t.Fatalf("language = %q, want ja", detected.Language)
+func TestResolveUploadLanguage(t *testing.T) {
+	french := "1\r\n00:00:01,000 --> 00:00:04,000\r\nBonjour tout le monde, comment allez-vous aujourd'hui?\r\n\r\n2\r\n00:00:05,000 --> 00:00:08,000\r\nJe suis tres heureux de vous voir ici ce soir.\r\n"
+	for _, tc := range []struct {
+		filename string
+		data     []byte
+		want     string
+		source   LanguageDetectionSource // empty: not checked
+	}{
+		{"subtitle.srt", []byte("hello"), "de", LanguageSourceManual},
+		// Filename detection wins over a non-override user language.
+		{"movie.ja.srt", []byte("hello"), "ja", ""},
+		// UTF-16 text is read as Upload stores it, so the preview matches.
+		{"subtitle.srt", utf16LEWithBOM(french), "fr", LanguageSourceContent},
+	} {
+		detected, err := ResolveUploadLanguage(tc.filename, FormatSRT, tc.data, "de", false)
+		if err != nil {
+			t.Fatalf("ResolveUploadLanguage(%q) error = %v", tc.filename, err)
+		}
+		if detected.Language != tc.want || (tc.source != "" && detected.Source != tc.source) {
+			t.Fatalf("%q: language = %q, source = %q, want %q", tc.filename, detected.Language, detected.Source, tc.want)
+		}
 	}
 }
 

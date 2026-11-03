@@ -23,8 +23,14 @@ type SubtitleCue struct {
 func ParseCues(data []byte) ([]SubtitleCue, error) {
 	text := string(data)
 	text = strings.TrimPrefix(text, "\ufeff")
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
+	if strings.HasPrefix(text, "WEBVTT") {
+		// WebVTT reads \r\r\n as two line breaks, so it can end a block.
+		text = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(text)
+	} else {
+		// In SRT, \r\r\n (a CRLF file converted twice) is one line break, as
+		// in the playback converter; the longest sequence goes first.
+		text = strings.NewReplacer("\r\r\n", "\n", "\r\n", "\n", "\r", "\n").Replace(text)
+	}
 
 	var cues []SubtitleCue
 	for _, block := range strings.Split(text, "\n\n") {

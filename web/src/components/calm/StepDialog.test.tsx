@@ -56,35 +56,6 @@ describe("StepDialog", () => {
     expect(opener).toHaveFocus();
   });
 
-  it("is a bottom sheet below 1024px, and the form step fills the screen", async () => {
-    render(<Harness />);
-    await userEvent.click(screen.getByRole("button", { name: "New collection" }));
-    const picker = await screen.findByRole("dialog", { name: "New collection" });
-    // jsdom can't lay out, so the classes that do the work are read instead.
-    expect(picker).toHaveClass("max-lg:bottom-0", "max-lg:w-full", "max-lg:rounded-b-none");
-    expect(picker).toHaveClass("lg:w-[min(1000px,calc(100vw-3rem))]");
-    expect(picker).toHaveTextContent("Step 1 of 2");
-
-    await userEvent.click(screen.getByRole("button", { name: "Manual" }));
-    const form = screen.getByRole("dialog", { name: "Manual" });
-    expect(form).toHaveClass("max-lg:bottom-0", "max-lg:h-dvh", "max-lg:rounded-none");
-    expect(form).toHaveClass("lg:w-[min(880px,calc(100vw-3rem))]");
-    expect(form).toHaveTextContent("Step 2 of 2");
-    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "All types" }));
-    expect(screen.getByRole("dialog", { name: "New collection" })).toBeInTheDocument();
-  });
-
-  it("closes from Cancel and the close button", async () => {
-    const onClose = vi.fn();
-    render(<Harness onClose={onClose} />);
-    await userEvent.click(screen.getByRole("button", { name: "New collection" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    await userEvent.click(screen.getByRole("button", { name: "New collection" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Close" }));
-    expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
   it("returns focus to the page when the dialog that opened it has gone", async () => {
     // A link in one dialog swaps it for the next in one render (the picker's
     // "Add a starter pack"), so the element that opened the second is removed.

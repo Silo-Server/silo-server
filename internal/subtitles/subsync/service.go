@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -133,7 +134,7 @@ type Service struct {
 // NewService builds a Service and starts its stale-job recovery.
 func NewService(d Deps) *Service {
 	s := &Service{
-		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, external: d.External, readFile: os.ReadFile,
+		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, external: d.External, readFile: fspath.ReadFile,
 		files: d.Files, artifacts: d.Artifacts,
 		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.FFmpegPath),
 		notifier: d.Notifier, node: d.Node, now: time.Now,
@@ -293,7 +294,7 @@ func (s *Service) SubtitlePlayed(ctx context.Context, target subtitles.SyncTarge
 		s.syncPlayed(ctx, target)
 		return
 	}
-	go s.syncPlayed(context.WithoutCancel(ctx), target)
+	go s.syncPlayed(queryattr.Detach(context.WithoutCancel(ctx)), target)
 }
 
 // firstPlay reports whether target was not considered within playedTTL, and
@@ -387,7 +388,7 @@ func (s *Service) start(ctx context.Context, job *Job, target subtitles.SyncTarg
 		s.updated(ctx, target, timing, queued)
 		return
 	}
-	go s.updated(context.WithoutCancel(ctx), target, timing, queued)
+	go s.updated(queryattr.Detach(context.WithoutCancel(ctx)), target, timing, queued)
 }
 
 func (s *Service) dispatch(job *Job) {
@@ -687,7 +688,7 @@ func (s *Service) align(ctx context.Context, r *run) (Outcome, error) {
 		return Outcome{}, err
 	}
 	r.report(ctx, PhaseAnalyzing, 0)
-	cues, err := subtitles.ParseCuesForFormat(subj.format, subj.data)
+	cues, err := subtitles.ParseCuesForFormat(subj.format, subtitles.DecodeText(subj.format, subj.language, subj.data))
 	if err != nil {
 		return Outcome{}, fmt.Errorf("read subtitle cues: %w", err)
 	}

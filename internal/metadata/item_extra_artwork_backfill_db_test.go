@@ -56,6 +56,9 @@ func TestItemOnlyArtworkBackfillAndRepairDB(t *testing.T) {
 			}
 			jobs[imageType] = source
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("list jobs: %v", err)
+		}
 		return jobs
 	}
 

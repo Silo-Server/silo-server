@@ -88,8 +88,7 @@ func (h *NotificationsHandler) HandleWebPushList(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Web push is not available")
 		return
 	}
-	profileID := apimw.GetProfileID(r.Context())
-	subs, err := service.List(r.Context(), profileID)
+	subs, err := service.List(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list push subscriptions")
 		return

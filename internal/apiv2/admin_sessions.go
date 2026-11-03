@@ -30,7 +30,7 @@ type AdminPlaybackSession struct {
 	EpisodeName              string  `json:"episode_name,omitempty"`
 	SeasonNumber             *int    `json:"season_number,omitempty"`
 	EpisodeNumber            *int    `json:"episode_number,omitempty"`
-	PosterURL                string  `json:"poster_url,omitempty"`
+	PosterURL                string  `json:"poster_url,omitempty" format:"uri-reference"`
 	PlayMethod               string  `json:"play_method"`
 	ReportingNode            string  `json:"reporting_node"`
 	NodeDisplayName          string  `json:"node_display_name,omitempty"`
@@ -49,6 +49,8 @@ type AdminPlaybackSession struct {
 	ClientLabel              string  `json:"client_label,omitempty"`
 	ClientLabelFull          string  `json:"client_label_full,omitempty"`
 	ClientUserAgent          string  `json:"client_user_agent,omitempty"`
+	DeviceID                 string  `json:"device_id,omitempty" doc:"Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared."`
+	DevicePlatform           string  `json:"device_platform,omitempty" doc:"Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play."`
 	AudioTrackIndex          int     `json:"audio_track_index"`
 	TranscodeAudio           bool    `json:"transcode_audio"`
 	StreamBitrateKbps        *int    `json:"stream_bitrate_kbps"`
@@ -68,7 +70,7 @@ type AdminPlaybackSession struct {
 	SourceVideoHeight        int     `json:"source_video_height,omitempty" doc:"Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown."`
 	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
 	SourceAudioChannels      *int    `json:"source_audio_channels"`
-	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
+	SourceAudioLanguage      string  `json:"source_audio_language,omitempty" doc:"Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown"`
 	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
 	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
 	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
@@ -85,6 +87,7 @@ type AdminPlaybackSession struct {
 	RoutingEgress            string  `json:"routing_egress,omitempty"`
 	RoutingEgressNodeID      *ID     `json:"routing_egress_node_id,omitempty"`
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
+	LifecycleSeq             *int64  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -147,6 +150,8 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		ClientLabel:              v.ClientLabel,
 		ClientLabelFull:          v.ClientLabelFull,
 		ClientUserAgent:          v.ClientUserAgent,
+		DeviceID:                 v.DeviceID,
+		DevicePlatform:           v.DevicePlatform,
 		AudioTrackIndex:          v.AudioTrackIndex,
 		TranscodeAudio:           v.TranscodeAudio,
 		StreamBitrateKbps:        v.StreamBitrateKbps,
@@ -183,6 +188,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		RoutingEgress:            v.RoutingEgress,
 		RoutingEgressNodeID:      adminSessionNodeID(v.RoutingEgressNodeID),
 		RoutingEgressNodeName:    v.RoutingEgressNodeName,
+		LifecycleSeq:             v.LifecycleSeq,
 	}
 }
 
@@ -221,6 +227,8 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	NodeRouting               bool     `json:"node_routing"`
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 	SourceVideoHeight         bool     `json:"source_video_height" doc:"Rows may carry source_video_height"`
+	DeviceIdentity            bool     `json:"device_identity" doc:"Rows may carry device_id and device_platform"`
+	LifecycleEvents           bool     `json:"lifecycle_events" doc:"The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq"`
 }
 
 const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
@@ -254,6 +262,8 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.StreamLocation = true
 		out.Body.OutputFormat = true
 		out.Body.SourceVideoHeight = true
+		out.Body.DeviceIdentity = true
+		out.Body.LifecycleEvents = out.Body.Available && reg.deps.PlaybackLifecycleEvents
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

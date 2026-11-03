@@ -2,21 +2,19 @@ package activitylog
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
-// TestConsumerRunPersistsBufferedEntriesOnStopDB stops the consumer with
-// entries still buffered, the way shutdown does, and checks that they reach
-// activity_log and the local live tail.
-func TestConsumerRunPersistsBufferedEntriesOnStopDB(t *testing.T) {
+func TestRecordLastActivityKeepsNewestDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -24,107 +22,63 @@ func TestConsumerRunPersistsBufferedEntriesOnStopDB(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	requestID := fmt.Sprintf("activitylog-consumer-%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM activity_log WHERE request_id = $1`, requestID)
-	})
-
-	hub := logstream.NewHub("node-a", nil)
-	tail, unsubscribe := hub.Subscribe(nil)
-	defer unsubscribe()
-
-	// Full batches plus a partial one, within the live tail's 64-entry buffer.
-	const n = 60
-	ch := make(chan LogEntry, n)
-	for i := range n {
-		ch <- LogEntry{
-			Timestamp: time.Now().UTC(), ClientIP: "192.0.2.1", RequestID: requestID, NodeID: "node-a",
-			Method: "GET", Path: fmt.Sprintf("/api/v2/probe/%d", i), PathPattern: "/api/v2/probe/{id}", StatusCode: 204,
-		}
-	}
-	stopped, cancel := context.WithCancel(ctx)
-	cancel()
-	consumer := NewConsumer(pool, hub)
-	consumer.batchSize = 25
-	consumer.Run(stopped, ch)
-
-	var rows int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM activity_log WHERE request_id = $1`, requestID).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
-	if rows != n {
-		t.Fatalf("persisted %d rows, want %d", rows, n)
-	}
-	if got := len(tail); got != n {
-		t.Fatalf("live tail received %d appends, want %d", got, n)
-	}
-	var row AuditEntry
-	if err := json.Unmarshal((<-tail).Entry, &row); err != nil || row.RequestID != requestID || row.ID == 0 {
-		t.Fatalf("live tail entry = %+v, err %v", row, err)
-	}
-}
-
-// TestConsumerKeepsEntriesBesideInvalidTextDB persists a batch in which
-// clients sent bytes Postgres text rejects, plus one row whose client address
-// is not an inet. The bytes are replaced and only the bad address is dropped;
-// before, any one of them failed the whole batch.
-func TestConsumerKeepsEntriesBesideInvalidTextDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	requestID := fmt.Sprintf("activitylog-invalid-text-%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM activity_log WHERE request_id = $1`, requestID)
-	})
-	hub := logstream.NewHub("node-a", nil)
-	tail, unsubscribe := hub.Subscribe(nil)
-	defer unsubscribe()
-
-	entry := func(path, userAgent, clientIP string) LogEntry {
-		return LogEntry{Timestamp: time.Now().UTC(), ClientIP: clientIP, RequestID: requestID, NodeID: "node-a",
-			Method: "GET", Path: path, PathPattern: "/api/v2/probe/*", StatusCode: 404, UserAgent: userAgent}
-	}
-	ch := make(chan LogEntry, 5)
-	ch <- entry("/api/v2/probe/ok", "probe", "192.0.2.1")
-	ch <- entry("/api/v2/probe/ua", "bad-\xff", "192.0.2.1")
-	ch <- entry("/api/v2/probe/\x00x", "probe", "192.0.2.1")
-	ch <- entry("/api/v2/probe/ip", "probe", "not-an-ip")
-	ch <- entry("/api/v2/probe/last", "probe", "192.0.2.1")
-	close(ch)
-	NewConsumer(pool, hub).Run(ctx, ch)
-
-	rows, err := pool.Query(ctx, `SELECT path, user_agent FROM activity_log WHERE request_id = $1 ORDER BY id`, requestID)
-	if err != nil {
+	defer pool.Close()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	var user int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,email,password_hash,role) VALUES($1,$2,'x','user') RETURNING id`,
+		"last-active-"+suffix, "last-active-"+suffix+"@example.test").Scan(&user); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for rows.Next() {
-		var path, userAgent string
-		if err := rows.Scan(&path, &userAgent); err != nil {
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, user) }()
+	deleted := -1
+	lastActive := func() time.Time {
+		t.Helper()
+		var ts time.Time
+		if err := pool.QueryRow(ctx, `SELECT last_active_at FROM user_last_activity WHERE user_id=$1`, user).Scan(&ts); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, path+" "+userAgent)
+		return ts
 	}
-	if err := rows.Err(); err != nil {
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	// The batch's newest entry wins; anonymous entries and accounts deleted
+	// since the request was logged are skipped without failing the batch.
+	if err := recordLastActivity(ctx, pool, []LogEntry{
+		{Timestamp: base.Add(time.Minute), UserID: &user},
+		{Timestamp: base.Add(time.Hour)},
+		{Timestamp: base, UserID: &user},
+		{Timestamp: base, UserID: &deleted},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/api/v2/probe/ok probe", "/api/v2/probe/ua bad-\uFFFD", "/api/v2/probe/\uFFFDx probe", "/api/v2/probe/last probe"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("persisted %q, want %q", got, want)
+	if got := lastActive(); !got.Equal(base.Add(time.Minute)) {
+		t.Fatalf("last_active_at = %v, want %v", got, base.Add(time.Minute))
 	}
-	if n := len(tail); n != len(want) {
-		t.Fatalf("live tail received %d appends, want %d", n, len(want))
+	if err := pool.QueryRow(ctx, `SELECT 1 FROM user_last_activity WHERE user_id=$1`, deleted).Scan(new(int)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("deleted account row: %v", err)
+	}
+
+	// A batch flushed late by another node never moves it back.
+	if err := recordLastActivity(ctx, pool, []LogEntry{{Timestamp: base, UserID: &user}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastActive(); !got.Equal(base.Add(time.Minute)) {
+		t.Fatalf("stale batch moved last_active_at to %v", got)
+	}
+
+	// An audited mutation stored its own row; the consumer records only the
+	// account's activity and does not store a second row.
+	consumer := NewConsumer(pool, logstream.NewHub("test", nil))
+	if err := consumer.insertBatch(ctx, []LogEntry{{Timestamp: base.Add(2 * time.Minute), UserID: &user, RequestID: "last-active-" + suffix, Method: "PUT", Persisted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastActive(); !got.Equal(base.Add(2 * time.Minute)) {
+		t.Fatalf("last_active_at = %v, want %v", got, base.Add(2*time.Minute))
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM activity_log WHERE request_id=$1`, "last-active-"+suffix).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("persisted entry stored %d rows: %v", stored, err)
 	}
 }

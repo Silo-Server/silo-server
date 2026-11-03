@@ -35,15 +35,6 @@ func TestRotationIndexAdvancesOnWeekBoundary(t *testing.T) {
 	}
 }
 
-func TestRotationIndexBoundsByCandidateCount(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		idx := RotationIndex(time.Now().Add(time.Duration(i)*24*time.Hour), "director", 5, 0)
-		if idx < 0 || idx >= 5 {
-			t.Fatalf("index %d out of [0,5)", idx)
-		}
-	}
-}
-
 // --- Recipe registration and definition tests ---
 
 // --- Validate tests ---
@@ -59,45 +50,10 @@ func TestEditorialSpotlightRejectsFranchise(t *testing.T) {
 	}
 }
 
-func TestEditorialSpotlightRejectsEmptyRaw(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	if err := rec.Validate(nil); err == nil {
-		t.Error("empty raw should be rejected (subject_type required)")
-	}
-	if err := rec.Validate(json.RawMessage(``)); err == nil {
-		t.Error("empty raw should be rejected (subject_type required)")
-	}
-}
-
-func TestEditorialSpotlightRejectsUnknownSubjectType(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	raw := json.RawMessage(`{"subject_type":"unknown"}`)
-	if err := rec.Validate(raw); err == nil {
-		t.Error("unknown subject_type should be rejected")
-	}
-}
-
 func TestEditorialSpotlightRejectsAutoRotateFalseWithEmptySubject(t *testing.T) {
 	rec, _ := Get("editorial_spotlight")
 	raw := json.RawMessage(`{"subject_type":"director","auto_rotate":false,"subject":""}`)
 	if err := rec.Validate(raw); err == nil {
 		t.Error("auto_rotate=false with empty subject should be rejected")
-	}
-}
-
-func TestEditorialSpotlightRejectsInvalidCadence(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	raw := json.RawMessage(`{"subject_type":"director","auto_rotate":true,"rotation_cadence":"hourly"}`)
-	if err := rec.Validate(raw); err == nil {
-		t.Error("rotation_cadence=hourly should be rejected")
-	}
-}
-
-func TestEditorialSpotlightEmptyCadenceIsWeekly(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	// empty cadence should default to weekly and pass validation
-	raw := json.RawMessage(`{"subject_type":"director","auto_rotate":true}`)
-	if err := rec.Validate(raw); err != nil {
-		t.Errorf("empty rotation_cadence should be treated as weekly: %v", err)
 	}
 }

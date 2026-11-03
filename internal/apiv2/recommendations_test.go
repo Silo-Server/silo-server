@@ -30,6 +30,7 @@ type fakeRecommendations struct {
 	lastExclude         map[string]struct{}
 	cardsHasMore        bool
 	swipePool           int
+	lastFilter          catalogpkg.AccessFilter
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -49,8 +50,8 @@ func (f *fakeRecommendations) BecauseWatchedCards(_ context.Context, _ int, _, i
 	return f.cards(limit)
 }
 
-func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
-	f.lastItemID, f.lastDays = "", days
+func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays, f.lastFilter = "", days, filter
 	return f.cards(limit)
 }
 

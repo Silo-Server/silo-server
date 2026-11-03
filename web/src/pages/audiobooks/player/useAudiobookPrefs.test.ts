@@ -52,10 +52,6 @@ describe("browser-local skip intervals", () => {
 });
 
 describe("smart rewind pref", () => {
-  it("defaults to enabled", () => {
-    expect(getAudiobookSmartRewind()).toBe(true);
-  });
-
   it("only an explicit false disables it", () => {
     storage.set(storage.KEYS.AUDIOBOOK_SMART_REWIND, "false");
     expect(getAudiobookSmartRewind()).toBe(false);

@@ -1,11 +1,11 @@
 package plugins
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,7 +16,26 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
+
+// binaryRelease returns a silo.metadb manifest checksummed for binary, its
+// JSON, and a binary plugin archive holding both.
+func binaryRelease(t *testing.T, version string, binary []byte) (*pluginv1.PluginManifest, []byte, []byte) {
+	t.Helper()
+	manifest := testPluginManifest(t, "silo.metadb", version)
+	manifest.Checksum = sha256Hex(binary)
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest, manifestBytes, archiveBytes
+}
 
 func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
 	// Use an ELF architecture different from the running test so the cache
@@ -27,16 +46,10 @@ func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
 	if runtime.GOARCH == "arm64" {
 		binaryData[18] = 0x3E // EM_X86_64
 	}
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-	checksum := sha256.Sum256(binaryData)
-	manifest.Checksum = hex.EncodeToString(checksum[:])
-	manifestBytes, err := protojson.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binaryData)
 	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-cached/plugin"}
 	cache := NewArchiveCacheAt(&legacyArchiveStore{}, t.TempDir())
-	path := cache.LocalInstallPath(installation)
+	path := requireLocalInstallPath(t, cache, installation)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -59,17 +72,7 @@ func TestArchiveCacheRepairsCorruptedBinaryOnCacheHit(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			binaryData := []byte("#!/bin/sh\nexit 0\n")
-			checksum := sha256.Sum256(binaryData)
-			manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-			manifest.Checksum = hex.EncodeToString(checksum[:])
-			manifestBytes, err := protojson.Marshal(manifest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
-			if err != nil {
-				t.Fatal(err)
-			}
+			manifest, manifestBytes, archiveBytes := binaryRelease(t, "0.0.19", binaryData)
 			store := &legacyArchiveStore{archive: &InstallationArchive{
 				InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes,
 			}}
@@ -84,7 +87,7 @@ func TestArchiveCacheRepairsCorruptedBinaryOnCacheHit(t *testing.T) {
 			if _, err := cache.Ensure(t.Context(), installation); err != nil {
 				t.Fatalf("populate cache: %v", err)
 			}
-			path := cache.LocalInstallPath(installation)
+			path := requireLocalInstallPath(t, cache, installation)
 			// Keep the file executable and the same size, but change its contents.
 			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 				t.Fatal(err)
@@ -103,114 +106,157 @@ func TestArchiveCacheRepairsCorruptedBinaryOnCacheHit(t *testing.T) {
 	}
 }
 
+// A legacy archive holding only the binary is rehydrated and repaired into a
+// plugin archive; a failure to persist the repair does not fail the launch.
 func TestArchiveCacheEnsureRecoversLegacyBinaryArchive(t *testing.T) {
-	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		saveErr error
+	}{
+		{name: "repair persisted"},
+		{name: "persist failure tolerated", saveErr: errors.New("db unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
 
-	binaryData := []byte("#!/bin/sh\nexit 0\n")
-	checksum := sha256.Sum256(binaryData)
+			binaryData := []byte("#!/bin/sh\nexit 0\n")
+			manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binaryData)
 
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-	manifest.Checksum = hex.EncodeToString(checksum[:])
-	manifestBytes, err := protojson.Marshal(manifest)
-	if err != nil {
-		t.Fatalf("protojson.Marshal() returned error: %v", err)
-	}
+			store := &legacyArchiveStore{
+				archive: &InstallationArchive{
+					InstallationID: 42,
+					ManifestJSON:   manifestBytes,
+					Checksum:       manifest.GetChecksum(),
+					Bytes:          binaryData,
+				},
+				saveErr: tc.saveErr,
+			}
 
-	store := &legacyArchiveStore{
-		archive: &InstallationArchive{
-			InstallationID: 42,
-			ManifestJSON:   manifestBytes,
-			Checksum:       manifest.GetChecksum(),
-			Bytes:          binaryData,
-		},
-	}
+			installDir := filepath.Join(t.TempDir(), "plugins", "silo.metadb", "0.0.19")
+			installation := &Installation{
+				ID:          42,
+				PluginID:    manifest.GetPluginId(),
+				Version:     manifest.GetVersion(),
+				InstallPath: filepath.Join(installDir, "plugin"),
+			}
 
-	installDir := filepath.Join(t.TempDir(), "plugins", "silo.metadb", "0.0.19")
-	installation := &Installation{
-		ID:          42,
-		PluginID:    manifest.GetPluginId(),
-		Version:     manifest.GetVersion(),
-		InstallPath: filepath.Join(installDir, "plugin"),
-	}
+			got, err := NewArchiveCache(store).Ensure(ctx, installation)
+			if err != nil {
+				t.Fatalf("Ensure() returned error: %v", err)
+			}
 
-	got, err := NewArchiveCache(store).Ensure(ctx, installation)
-	if err != nil {
-		t.Fatalf("Ensure() returned error: %v", err)
-	}
-	if got.GetPluginId() != manifest.GetPluginId() {
-		t.Fatalf("manifest plugin_id = %q, want %q", got.GetPluginId(), manifest.GetPluginId())
-	}
+			installedBinary, err := os.ReadFile(installation.InstallPath)
+			if err != nil {
+				t.Fatalf("read rehydrated plugin binary: %v", err)
+			}
+			if !bytes.Equal(installedBinary, binaryData) {
+				t.Fatal("rehydrated plugin binary does not match legacy binary bytes")
+			}
+			if tc.saveErr != nil {
+				return
+			}
 
-	if store.savedInstallationID != installation.ID {
-		t.Fatalf("repaired archive installation id = %d, want %d", store.savedInstallationID, installation.ID)
-	}
-	if !bytes.Equal(store.savedManifestJSON, manifestBytes) {
-		t.Fatal("repaired archive manifest does not match stored manifest")
-	}
-	if _, _, savedManifest, err := openPluginArchive(store.savedArchiveBytes); err != nil {
-		t.Fatalf("repaired archive is not a valid plugin archive: %v", err)
-	} else if savedManifest.GetChecksum() != manifest.GetChecksum() {
-		t.Fatalf("repaired archive checksum = %q, want %q", savedManifest.GetChecksum(), manifest.GetChecksum())
-	}
-
-	installedBinary, err := os.ReadFile(installation.InstallPath)
-	if err != nil {
-		t.Fatalf("read rehydrated plugin binary: %v", err)
-	}
-	if !bytes.Equal(installedBinary, binaryData) {
-		t.Fatal("rehydrated plugin binary does not match legacy binary bytes")
-	}
-	if _, err := os.Stat(InstalledManifestPath(installation.InstallPath)); err != nil {
-		t.Fatalf("expected rehydrated manifest file: %v", err)
+			if got.GetPluginId() != manifest.GetPluginId() {
+				t.Fatalf("manifest plugin_id = %q, want %q", got.GetPluginId(), manifest.GetPluginId())
+			}
+			if store.savedInstallationID != installation.ID {
+				t.Fatalf("repaired archive installation id = %d, want %d", store.savedInstallationID, installation.ID)
+			}
+			if !bytes.Equal(store.savedManifestJSON, manifestBytes) {
+				t.Fatal("repaired archive manifest does not match stored manifest")
+			}
+			if _, _, savedManifest, err := openPluginArchive(store.savedArchiveBytes); err != nil {
+				t.Fatalf("repaired archive is not a valid plugin archive: %v", err)
+			} else if savedManifest.GetChecksum() != manifest.GetChecksum() {
+				t.Fatalf("repaired archive checksum = %q, want %q", savedManifest.GetChecksum(), manifest.GetChecksum())
+			}
+			if _, err := os.Stat(InstalledManifestPath(installation.InstallPath)); err != nil {
+				t.Fatalf("expected rehydrated manifest file: %v", err)
+			}
+		})
 	}
 }
 
-func TestArchiveCacheEnsureRecoveryToleratesPersistFailure(t *testing.T) {
-	ctx := context.Background()
-
-	binaryData := []byte("#!/bin/sh\nexit 0\n")
-	checksum := sha256.Sum256(binaryData)
-
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-	manifest.Checksum = hex.EncodeToString(checksum[:])
-	manifestBytes, err := protojson.Marshal(manifest)
+// Only a failure of the stored archive's own contents is
+// ErrArchiveUnreadable. A store failure is not, so a caller that tolerates one
+// damaged plugin still fails on a database fault.
+func TestArchiveCacheEnsureMarksOnlyDamagedArchivesUnreadable(t *testing.T) {
+	// The manifest and binary check out, but an extra entry, which only
+	// extraction reads, fails its CRC.
+	binary := []byte("#!/bin/sh\nexit 0\n")
+	manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binary)
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	if err := writeArchiveEntry(writer, "manifest.json", manifestBytes); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeArchiveEntry(writer, "plugin", binary); err != nil {
+		t.Fatal(err)
+	}
+	extra, err := writer.CreateHeader(&zip.FileHeader{Name: "assets/extra.txt", Method: zip.Store})
 	if err != nil {
-		t.Fatalf("protojson.Marshal() returned error: %v", err)
+		t.Fatal(err)
+	}
+	if _, err := extra.Write([]byte("extra entry data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	corruptEntry := buffer.Bytes()
+	corruptEntry[bytes.Index(corruptEntry, []byte("extra entry data"))] ^= 0xff
+
+	// The binary entry is marked as a directory. The archive opens and its
+	// checksums match, but extraction writes a directory where the binary goes.
+	dirManifest, dirManifestBytes, _ := binaryRelease(t, "0.0.19", nil)
+	var dirBuffer bytes.Buffer
+	dirWriter := zip.NewWriter(&dirBuffer)
+	if err := writeArchiveEntry(dirWriter, "manifest.json", dirManifestBytes); err != nil {
+		t.Fatal(err)
+	}
+	dirHeader := &zip.FileHeader{Name: "plugin", Method: zip.Store}
+	dirHeader.SetMode(fs.ModeDir | 0o755)
+	if _, err := dirWriter.CreateHeader(dirHeader); err != nil {
+		t.Fatal(err)
+	}
+	if err := dirWriter.Close(); err != nil {
+		t.Fatal(err)
 	}
 
-	store := &legacyArchiveStore{
-		archive: &InstallationArchive{
-			InstallationID: 42,
-			ManifestJSON:   manifestBytes,
-			Checksum:       manifest.GetChecksum(),
-			Bytes:          binaryData,
-		},
-		saveErr: errors.New("db unavailable"),
-	}
+	for _, tc := range []struct {
+		name  string
+		store *legacyArchiveStore
+		want  bool
+	}{
+		{name: "archive is not a zip", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: []byte("{}"), Checksum: "0", Bytes: []byte("not a zip"),
+		}}},
+		{name: "entry fails its CRC", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: corruptEntry,
+		}}},
+		{name: "binary is a directory entry", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: dirManifestBytes, Checksum: dirManifest.GetChecksum(), Bytes: dirBuffer.Bytes(),
+		}}},
+		{name: "store fails", store: &legacyArchiveStore{getErr: errors.New("db unavailable")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installation := &Installation{ID: 42, PluginID: "silo.metadb", Version: "0.0.19",
+				InstallPath: filepath.Join(t.TempDir(), "plugin")}
 
-	installDir := filepath.Join(t.TempDir(), "plugins", "silo.metadb", "0.0.19")
-	installation := &Installation{
-		ID:          42,
-		PluginID:    manifest.GetPluginId(),
-		Version:     manifest.GetVersion(),
-		InstallPath: filepath.Join(installDir, "plugin"),
-	}
-
-	if _, err := NewArchiveCache(store).Ensure(ctx, installation); err != nil {
-		t.Fatalf("Ensure() returned error despite in-memory recovery: %v", err)
-	}
-
-	installedBinary, err := os.ReadFile(installation.InstallPath)
-	if err != nil {
-		t.Fatalf("read rehydrated plugin binary: %v", err)
-	}
-	if !bytes.Equal(installedBinary, binaryData) {
-		t.Fatal("rehydrated plugin binary does not match legacy binary bytes")
+			_, err := NewArchiveCache(tc.store).Ensure(t.Context(), installation)
+			if err == nil {
+				t.Fatal("Ensure() succeeded without a usable archive")
+			}
+			if got := errors.Is(err, ErrArchiveUnreadable); got != tc.want {
+				t.Fatalf("errors.Is(%v, ErrArchiveUnreadable) = %v, want %v", err, got, tc.want)
+			}
+		})
 	}
 }
 
 type legacyArchiveStore struct {
 	archive             *InstallationArchive
+	getErr              error
 	saveErr             error
 	savedInstallationID int
 	savedManifestJSON   []byte
@@ -219,7 +265,7 @@ type legacyArchiveStore struct {
 }
 
 func (s *legacyArchiveStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
-	return s.archive, nil
+	return s.archive, s.getErr
 }
 
 func (s *legacyArchiveStore) SaveArchive(
@@ -250,18 +296,7 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 
 	release := func(version, dir, script string) (*Installation, *legacyArchiveStore) {
 		t.Helper()
-		binaryData := []byte(script)
-		checksum := sha256.Sum256(binaryData)
-		manifest := testPluginManifest(t, "silo.metadb", version)
-		manifest.Checksum = hex.EncodeToString(checksum[:])
-		manifestBytes, err := protojson.Marshal(manifest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
-		if err != nil {
-			t.Fatal(err)
-		}
+		manifest, manifestBytes, archiveBytes := binaryRelease(t, version, []byte(script))
 		store := &legacyArchiveStore{archive: &InstallationArchive{
 			InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes,
 		}}
@@ -276,10 +311,10 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	first, firstStore := release("0.0.19", "install-aaaa", "#!/bin/sh\nexit 0\n")
 	cache := NewArchiveCacheAt(firstStore, root)
 	wantFirst := filepath.Join(root, "silo.metadb", "0.0.19", "install-aaaa", "plugin")
-	if got := cache.LocalInstallPath(first); got != wantFirst {
+	if got := requireLocalInstallPath(t, cache, first); got != wantFirst {
 		t.Fatalf("LocalInstallPath = %q, want %q", got, wantFirst)
 	}
-	if got := NewArchiveCache(firstStore).LocalInstallPath(first); got != first.InstallPath {
+	if got := requireLocalInstallPath(t, NewArchiveCache(firstStore), first); got != first.InstallPath {
 		t.Fatalf("LocalInstallPath without a root = %q, want the recorded path %q", got, first.InstallPath)
 	}
 
@@ -334,18 +369,7 @@ func (s *blockedArchiveStore) GetArchive(ctx context.Context, id int) (*Installa
 }
 
 func TestArchiveCacheSerializesRehydration(t *testing.T) {
-	binary := []byte("#!/bin/sh\nexit 0\n")
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-	sum := sha256.Sum256(binary)
-	manifest.Checksum = hex.EncodeToString(sum[:])
-	raw, err := protojson.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	archive, err := buildBinaryPluginArchive(raw, binary)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifest, raw, archive := binaryRelease(t, "0.0.19", []byte("#!/bin/sh\nexit 0\n"))
 	store := &blockedArchiveStore{legacyArchiveStore: &legacyArchiveStore{archive: &InstallationArchive{InstallationID: 42, ManifestJSON: raw, Checksum: manifest.Checksum, Bytes: archive}}, release: make(chan struct{})}
 	cache := NewArchiveCacheAt(store, t.TempDir())
 	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-release/plugin"}
@@ -368,7 +392,7 @@ func TestArchiveCacheSerializesRehydration(t *testing.T) {
 		t.Errorf("archive loads=%d, want 1", got)
 	}
 
-	if _, err := cache.validateInstalledFiles(cache.LocalInstallPath(installation), manifest); err != nil {
+	if _, err := cache.validateInstalledFiles(requireLocalInstallPath(t, cache, installation), manifest); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -380,17 +404,7 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 	ctx := t.Context()
 	binaryData := []byte("#!/bin/sh\nexit 0\n")
 	size := int64(len(binaryData))
-	sum := sha256.Sum256(binaryData)
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
-	manifest.Checksum = hex.EncodeToString(sum[:])
-	manifestBytes, err := protojson.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifest, manifestBytes, archiveBytes := binaryRelease(t, "0.0.19", binaryData)
 	archive := &InstallationArchive{InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes}
 	installation := &Installation{
 		ID: 42, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
@@ -400,7 +414,7 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 	store.archives = map[int]*InstallationArchive{42: archive}
 	cache := NewArchiveCache(store)
 	hashed := countHashedBytes(cache)
-	path := cache.LocalInstallPath(installation)
+	path := requireLocalInstallPath(t, cache, installation)
 
 	expectHashed := func(step string, want int64) {
 		t.Helper()
@@ -511,4 +525,13 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectHashed("Manifest of a new release", size)
+}
+
+func requireLocalInstallPath(t *testing.T, cache *ArchiveCache, installation *Installation) string {
+	t.Helper()
+	path, err := cache.LocalInstallPath(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

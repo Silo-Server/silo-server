@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -118,37 +117,9 @@ func TestParseEpisodeNFO_ExtendedFields(t *testing.T) {
 	}
 }
 
-func TestParseEpisodeNFO_LegacyRatingAndNoNumbers(t *testing.T) {
-	t.Parallel()
-
-	p, err := parseNFOData([]byte(`<episodedetails><title>Core</title><rating>7.5</rating></episodedetails>`))
-	if err != nil {
-		t.Fatalf("parseNFOData: %v", err)
-	}
-	if p.SeasonSet || p.EpisodeSet {
-		t.Errorf("SeasonSet/EpisodeSet = %v/%v, want false (numbers absent)", p.SeasonSet, p.EpisodeSet)
-	}
-	if p.RatingIMDB != 7.5 {
-		t.Errorf("legacy RatingIMDB = %v, want 7.5", p.RatingIMDB)
-	}
-}
-
-func TestParseEpisodeNFO_LegacyRatingIgnoredBesideRatingsBlock(t *testing.T) {
-	t.Parallel()
-
-	p, err := parseNFOData([]byte(`<episodedetails><title>Core</title>` +
-		`<ratings><rating name="tmdb" max="10" default="true"><value>8.1</value></rating></ratings>` +
-		`<rating>8.1</rating></episodedetails>`))
-	if err != nil {
-		t.Fatalf("parseNFOData: %v", err)
-	}
-	if p.RatingIMDB != 0 {
-		t.Errorf("RatingIMDB = %v, want 0 (bare rating repeats the tmdb default)", p.RatingIMDB)
-	}
-	if p.RatingTMDB != 8.1 {
-		t.Errorf("RatingTMDB = %v, want 8.1", p.RatingTMDB)
-	}
-}
+// ---------------------------------------------------------------------------
+// Parser tables: extended <episodedetails>
+// ---------------------------------------------------------------------------
 
 // Multi-<episodedetails> documents (multi-episode files) are out of scope in
 // v1: the first block wins and the parser flags the document so the provider
@@ -174,14 +145,23 @@ func TestParseEpisodeNFO_MultiEpisodeDocumentTakesFirst(t *testing.T) {
 // Provider: GetSeasons
 // ---------------------------------------------------------------------------
 
-func writeTestFile(t *testing.T, path, contents string) {
+// getSeasons and getEpisodes ask a fresh provider and fail the test on error.
+func getSeasons(t *testing.T, req metadata.SeasonsRequest) []metadata.SeasonResult {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", path, err)
+	seasons, err := NewProvider().GetSeasons(context.Background(), req)
+	if err != nil {
+		t.Fatalf("GetSeasons: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
+	return seasons
+}
+
+func getEpisodes(t *testing.T, req metadata.EpisodesRequest) []metadata.EpisodeResult {
+	t.Helper()
+	episodes, err := NewProvider().GetEpisodes(context.Background(), req)
+	if err != nil {
+		t.Fatalf("GetEpisodes: %v", err)
 	}
+	return episodes
 }
 
 func TestGetSeasons_SeasonNFOAndPoster(t *testing.T) {
@@ -190,17 +170,16 @@ func TestGetSeasons_SeasonNFOAndPoster(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	s2 := filepath.Join(root, "Season 02")
-	writeTestFile(t, filepath.Join(s1, "season.nfo"),
+	writeFile(t, filepath.Join(s1, "season.nfo"),
 		`<season><title>Course A: Classic</title><plot>Classic plan.</plot><seasonnumber>1</seasonnumber></season>`)
-	writeTestFile(t, filepath.Join(s1, "poster.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
-	writeTestFile(t, filepath.Join(s2, "season.nfo"), `<season><title>Course B</title></season>`)
-	writeTestFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
+	writeFile(t, filepath.Join(s1, "poster.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(s2, "season.nfo"), `<season><title>Course B</title></season>`)
+	writeFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
 	// Season 2 poster lives at the series root using the seasonNN-poster form.
-	writeTestFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
+	writeFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
 
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:     "series",
 		SeriesRootPaths: []string{root},
 		SeasonDirectoryPaths: map[int][]string{
@@ -208,9 +187,6 @@ func TestGetSeasons_SeasonNFOAndPoster(t *testing.T) {
 			2: {s2},
 		},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 2 {
 		t.Fatalf("len(seasons) = %d, want 2 (%#v)", len(seasons), seasons)
 	}
@@ -235,19 +211,15 @@ func TestGetSeasons_NumberConflictPrefersDirectoryNumber(t *testing.T) {
 
 	root := t.TempDir()
 	s2 := filepath.Join(root, "Season 02")
-	writeTestFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
-	writeTestFile(t, filepath.Join(s2, "season.nfo"),
+	writeFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
+	writeFile(t, filepath.Join(s2, "season.nfo"),
 		`<season><title>Course B</title><seasonnumber>7</seasonnumber></season>`)
 
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeriesRootPaths:      []string{root},
 		SeasonDirectoryPaths: map[int][]string{2: {s2}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 1 || seasons[0].SeasonNumber != 2 || seasons[0].Title != "Course B" {
 		t.Fatalf("seasons = %#v, want season 2 titled Course B", seasons)
 	}
@@ -258,42 +230,14 @@ func TestGetSeasons_NoSidecarsReturnsNothing(t *testing.T) {
 
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
-	if err := os.MkdirAll(s1, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(s1, "Show S01E01.mkv"), []byte("video"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	writeFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeriesRootPaths:      []string{root},
 		SeasonDirectoryPaths: map[int][]string{1: {s1}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 0 {
 		t.Fatalf("seasons = %#v, want none", seasons)
-	}
-}
-
-func TestGetSeasons_NonSeriesContentTypeReturnsNothing(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	s1 := filepath.Join(root, "Season 01")
-	writeTestFile(t, filepath.Join(s1, "season.nfo"), `<season><title>Nope</title></season>`)
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
-		ContentType:          "movie",
-		SeasonDirectoryPaths: map[int][]string{1: {s1}},
-	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
-	if len(seasons) != 0 {
-		t.Fatalf("seasons = %#v, want none for non-series content", seasons)
 	}
 }
 
@@ -304,14 +248,13 @@ func TestGetSeasons_PosterNamesIgnoreCase(t *testing.T) {
 	s1 := filepath.Join(root, "Season 01")
 	s2 := filepath.Join(root, "Season 02")
 	specials := filepath.Join(root, "Specials")
-	writeTestFile(t, filepath.Join(s1, "Folder.JPG"), "img")
-	writeTestFile(t, filepath.Join(s2, "episode.mkv"), "video")
-	writeTestFile(t, filepath.Join(root, "Season02-Poster.PNG"), "img")
-	writeTestFile(t, filepath.Join(specials, "episode.mkv"), "video")
-	writeTestFile(t, filepath.Join(root, "Season-Specials-Poster.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Folder.JPG"), "img")
+	writeFile(t, filepath.Join(s2, "episode.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Season02-Poster.PNG"), "img")
+	writeFile(t, filepath.Join(specials, "episode.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Season-Specials-Poster.jpg"), "img")
 
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:     "series",
 		SeriesRootPaths: []string{root},
 		SeasonDirectoryPaths: map[int][]string{
@@ -320,9 +263,6 @@ func TestGetSeasons_PosterNamesIgnoreCase(t *testing.T) {
 			2: {s2},
 		},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	want := map[int]string{
 		0: filepath.Join(root, "Season-Specials-Poster.jpg"),
 		1: filepath.Join(s1, "Folder.JPG"),
@@ -345,20 +285,16 @@ func TestGetSeasons_FlatLayoutKeepsSeriesPosterOffSeasons(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "Show S01E01.mkv"), "video")
-	writeTestFile(t, filepath.Join(root, "Show S02E01.mkv"), "video")
-	writeTestFile(t, filepath.Join(root, "poster.jpg"), "img")
-	writeTestFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
+	writeFile(t, filepath.Join(root, "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Show S02E01.mkv"), "video")
+	writeFile(t, filepath.Join(root, "poster.jpg"), "img")
+	writeFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
 
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeriesRootPaths:      []string{root},
 		SeasonDirectoryPaths: map[int][]string{1: {root}, 2: {root}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 1 || seasons[0].SeasonNumber != 2 {
 		t.Fatalf("seasons = %#v, want only season 2 from season02-poster.jpg", seasons)
 	}
@@ -374,16 +310,12 @@ func TestGetSeasons_SeasonFolderPosterWithoutSeriesRoot(t *testing.T) {
 
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
-	writeTestFile(t, filepath.Join(s1, "Cover.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Cover.jpg"), "img")
 
-	p := NewProvider()
-	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeasonDirectoryPaths: map[int][]string{1: {s1}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 1 || sidecarPath(t, seasons[0].PosterPath) != filepath.Join(s1, "Cover.jpg") {
 		t.Fatalf("seasons = %#v, want Season 01/Cover.jpg", seasons)
 	}
@@ -402,23 +334,19 @@ func TestGetEpisodes_ThumbnailNames(t *testing.T) {
 	e2 := filepath.Join(s1, "Show S01E02.mkv")
 	e3 := filepath.Join(s1, "Show S01E03.mkv")
 	for _, path := range []string{e1, e2, e3} {
-		writeTestFile(t, path, "video")
+		writeFile(t, path, "video")
 	}
 	// -thumb beats the bare basename image; either name matches ignoring case.
-	writeTestFile(t, filepath.Join(s1, "Show S01E01-thumb.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "Show S01E02.PNG"), "img")
-	writeTestFile(t, filepath.Join(s1, "show s01e03-THUMB.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E01-thumb.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E01.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E02.PNG"), "img")
+	writeFile(t, filepath.Join(s1, "show s01e03-THUMB.jpg"), "img")
 
-	p := NewProvider()
-	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		SeriesRootPaths:  []string{root},
 		EpisodeFilePaths: map[int][]string{1: {e1}, 2: {e2}, 3: {e3}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	want := map[int]string{
 		1: filepath.Join(s1, "Show S01E01-thumb.jpg"),
 		2: filepath.Join(s1, "Show S01E02.PNG"),
@@ -440,17 +368,16 @@ func TestGetEpisodes_EpisodeNFOAndThumb(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	e1 := filepath.Join(s1, "P90X S01E01 - Chest and Back.mkv")
-	writeTestFile(t, e1, "video")
-	writeTestFile(t, filepath.Join(s1, "P90X S01E01 - Chest and Back.nfo"),
+	writeFile(t, e1, "video")
+	writeFile(t, filepath.Join(s1, "P90X S01E01 - Chest and Back.nfo"),
 		`<episodedetails><title>Chest and Back</title><plot>Push and pull.</plot><aired>2004-01-01</aired><season>1</season><episode>1</episode><runtime>53</runtime></episodedetails>`)
-	writeTestFile(t, filepath.Join(s1, "P90X S01E01 - Chest and Back-thumb.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "P90X S01E01 - Chest and Back-thumb.jpg"), "img")
 	// Episode 2 has a media file but no NFO and no thumb: the provider must
 	// return nothing for it (synthesized fallback stays in charge).
 	e2 := filepath.Join(s1, "P90X S01E02 - Plyometrics.mkv")
-	writeTestFile(t, e2, "video")
+	writeFile(t, e2, "video")
 
-	p := NewProvider()
-	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:    1,
 		SeriesRootPaths: []string{root},
 		EpisodeFilePaths: map[int][]string{
@@ -458,9 +385,6 @@ func TestGetEpisodes_EpisodeNFOAndThumb(t *testing.T) {
 			2: {e2},
 		},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	if len(episodes) != 1 {
 		t.Fatalf("len(episodes) = %d, want 1 (%#v)", len(episodes), episodes)
 	}
@@ -490,18 +414,14 @@ func TestGetEpisodes_NumberConflictFilenameWins(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	e3 := filepath.Join(s1, "Show S01E03.mkv")
-	writeTestFile(t, e3, "video")
-	writeTestFile(t, filepath.Join(s1, "Show S01E03.nfo"),
+	writeFile(t, e3, "video")
+	writeFile(t, filepath.Join(s1, "Show S01E03.nfo"),
 		`<episodedetails><title>Third</title><season>4</season><episode>9</episode></episodedetails>`)
 
-	p := NewProvider()
-	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		EpisodeFilePaths: map[int][]string{3: {e3}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	if len(episodes) != 1 || episodes[0].SeasonNumber != 1 || episodes[0].EpisodeNumber != 3 {
 		t.Fatalf("episodes = %#v, want S1E3 from filename", episodes)
 	}
@@ -518,17 +438,13 @@ func TestGetEpisodes_RootTypeMismatchIgnored(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	e1 := filepath.Join(s1, "Show S01E01.mkv")
-	writeTestFile(t, e1, "video")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.nfo"), `<movie><title>Not an episode</title></movie>`)
+	writeFile(t, e1, "video")
+	writeFile(t, filepath.Join(s1, "Show S01E01.nfo"), `<movie><title>Not an episode</title></movie>`)
 
-	p := NewProvider()
-	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		EpisodeFilePaths: map[int][]string{1: {e1}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	if len(episodes) != 0 {
 		t.Fatalf("episodes = %#v, want none for mismatched root type", episodes)
 	}
@@ -544,7 +460,7 @@ func TestGetSeasons_ShowNFONamesAndPostersSeasons(t *testing.T) {
 	s1 := filepath.Join(root, "Season 01")
 	s2 := filepath.Join(root, "Season 02")
 	s3 := filepath.Join(root, "Season 03")
-	writeTestFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow>
+	writeFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow>
   <title>Show</title>
   <namedseason number="1">Named One</namedseason>
   <namedseason number="2">Named Two</namedseason>
@@ -552,23 +468,20 @@ func TestGetSeasons_ShowNFONamesAndPostersSeasons(t *testing.T) {
   <thumb aspect="poster" type="season" season="2">art/season02.jpg</thumb>
   <thumb aspect="banner" type="season" season="3">art/banner03.jpg</thumb>
 </tvshow>`)
-	writeTestFile(t, filepath.Join(root, "art", "season02.jpg"), "img")
-	writeTestFile(t, filepath.Join(root, "art", "banner03.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "season.nfo"),
+	writeFile(t, filepath.Join(root, "art", "season02.jpg"), "img")
+	writeFile(t, filepath.Join(root, "art", "banner03.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "season.nfo"),
 		`<season><title>Season NFO Title</title><premiered>2001-01-01</premiered></season>`)
-	writeTestFile(t, filepath.Join(s1, "poster.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "poster.jpg"), "img")
 	for i, dir := range []string{s1, s2, s3} {
-		writeTestFile(t, filepath.Join(dir, fmt.Sprintf("Show S%02dE01.mkv", i+1)), "video")
+		writeFile(t, filepath.Join(dir, fmt.Sprintf("Show S%02dE01.mkv", i+1)), "video")
 	}
 
-	seasons, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeriesRootPaths:      []string{root},
 		SeasonDirectoryPaths: map[int][]string{1: {s1}, 2: {s2}, 3: {s3}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	want := []metadata.SeasonResult{
 		{SeasonNumber: 1, Title: "Season NFO Title", AirDate: "2001-01-01", PosterPath: filepath.Join(s1, "poster.jpg")},
 		{SeasonNumber: 2, Title: "Named Two", PosterPath: filepath.Join(root, "art", "season02.jpg")},
@@ -587,17 +500,14 @@ func TestGetSeasons_ShowNFOSeasonPosterURL(t *testing.T) {
 
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
-	writeTestFile(t, filepath.Join(root, "tvshow.nfo"),
+	writeFile(t, filepath.Join(root, "tvshow.nfo"),
 		`<tvshow><title>Show</title><thumb aspect="poster" season="1">https://img.example.org/s1.jpg</thumb></tvshow>`)
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
-	seasons, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
+	writeFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
+	seasons := getSeasons(t, metadata.SeasonsRequest{
 		ContentType:          "series",
 		SeriesRootPaths:      []string{root},
 		SeasonDirectoryPaths: map[int][]string{1: {s1}},
 	})
-	if err != nil {
-		t.Fatalf("GetSeasons: %v", err)
-	}
 	if len(seasons) != 1 || seasons[0].PosterPath != "nfo+https://img.example.org/s1.jpg" || seasons[0].Title != "" {
 		t.Fatalf("seasons = %#v, want season 1 with the NFO poster URL", seasons)
 	}
@@ -613,31 +523,28 @@ func TestGetEpisodes_ProviderIDsAndNFOThumb(t *testing.T) {
 	e1 := filepath.Join(s1, "Show S01E01.mkv")
 	e2 := filepath.Join(s1, "Show S01E02.mkv")
 	e3 := filepath.Join(s1, "Show S01E03.mkv")
-	writeTestFile(t, e1, "video")
-	writeTestFile(t, e2, "video")
-	writeTestFile(t, e3, "video")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.nfo"), `<episodedetails>
+	writeFile(t, e1, "video")
+	writeFile(t, e2, "video")
+	writeFile(t, e3, "video")
+	writeFile(t, filepath.Join(s1, "Show S01E01.nfo"), `<episodedetails>
   <title>One</title><premiered>2020-02-02</premiered>
   <uniqueid type="tvdb" default="true">7654321</uniqueid>
   <uniqueid type="tmdb">998877</uniqueid>
   <uniqueid type="imdb">tt1234567</uniqueid>
   <thumb>stills/one.jpg</thumb>
 </episodedetails>`)
-	writeTestFile(t, filepath.Join(s1, "stills", "one.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "Show S01E02.nfo"),
+	writeFile(t, filepath.Join(s1, "stills", "one.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E02.nfo"),
 		`<episodedetails><title>Two</title><thumb>https://img.example.org/two.jpg</thumb></episodedetails>`)
-	writeTestFile(t, filepath.Join(s1, "Show S01E02-thumb.jpg"), "img")
-	writeTestFile(t, filepath.Join(s1, "Show S01E03.nfo"),
+	writeFile(t, filepath.Join(s1, "Show S01E02-thumb.jpg"), "img")
+	writeFile(t, filepath.Join(s1, "Show S01E03.nfo"),
 		`<episodedetails><title>Three</title><thumb>https://img.example.org/three.jpg</thumb></episodedetails>`)
 
-	episodes, err := NewProvider().GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		SeriesRootPaths:  []string{root},
 		EpisodeFilePaths: map[int][]string{1: {e1}, 2: {e2}, 3: {e3}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	if len(episodes) != 3 {
 		t.Fatalf("episodes = %#v, want 3", episodes)
 	}
@@ -706,18 +613,15 @@ func TestGetEpisodes_SharedNFODropsProviderIDs(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	video := filepath.Join(s1, "Show S01E01-E02.mkv")
-	writeTestFile(t, video, "video")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01-E02.nfo"),
+	writeFile(t, video, "video")
+	writeFile(t, filepath.Join(s1, "Show S01E01-E02.nfo"),
 		`<episodedetails><title>Double</title><uniqueid type="tvdb">4001</uniqueid></episodedetails>`)
 
-	episodes, err := NewProvider().GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	episodes := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		SeriesRootPaths:  []string{root},
 		EpisodeFilePaths: map[int][]string{1: {video}, 2: {video}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes: %v", err)
-	}
 	if len(episodes) != 2 {
 		t.Fatalf("episodes = %#v, want 2", episodes)
 	}
@@ -729,14 +633,11 @@ func TestGetEpisodes_SharedNFODropsProviderIDs(t *testing.T) {
 
 	// A targeted refresh asks about one of the episodes; the file still
 	// serves both.
-	targeted, err := NewProvider().GetEpisodes(context.Background(), metadata.EpisodesRequest{
+	targeted := getEpisodes(t, metadata.EpisodesRequest{
 		SeasonNumber:     1,
 		SeriesRootPaths:  []string{root},
 		EpisodeFilePaths: map[int][]string{2: {video}},
 	})
-	if err != nil {
-		t.Fatalf("GetEpisodes(targeted): %v", err)
-	}
 	if len(targeted) != 1 || targeted[0].Title != "Double" || targeted[0].ProviderIDs != nil {
 		t.Fatalf("targeted episodes = %#v, want episode 2 with no ids", targeted)
 	}
@@ -751,13 +652,11 @@ func TestGetSeasons_UnreadableShowNFOReportsUnavailable(t *testing.T) {
 
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
-	writeTestFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
-	writeTestFile(t, filepath.Join(s1, "season.nfo"), `<season><title>Kept</title></season>`)
+	writeFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(s1, "season.nfo"), `<season><title>Kept</title></season>`)
 	showNFO := filepath.Join(root, "tvshow.nfo")
-	writeTestFile(t, showNFO, `<tvshow><title>Show</title><namedseason number="1">Named</namedseason></tvshow>`)
-	if err := os.Chmod(showNFO, 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
+	writeFile(t, showNFO, `<tvshow><title>Show</title><namedseason number="1">Named</namedseason></tvshow>`)
+	setMode(t, showNFO, 0)
 
 	seasons, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
 		ContentType:          "series",
@@ -785,8 +684,8 @@ func TestGetSeasons_StaleShowNFOOnLostShareIsNotRead(t *testing.T) {
 	lost := t.TempDir()
 	s1 := filepath.Join(live, "Season 01")
 	e1 := filepath.Join(s1, "Show S01E01.mkv")
-	writeTestFile(t, e1, "video")
-	writeTestFile(t, filepath.Join(lost, "tvshow.nfo"),
+	writeFile(t, e1, "video")
+	writeFile(t, filepath.Join(lost, "tvshow.nfo"),
 		`<tvshow><title>Show</title><namedseason number="1">Stale Name</namedseason></tvshow>`)
 	gone := filepath.Join(lost, "Season 02", "Show S02E01.mkv") // cataloged, but the share is empty
 

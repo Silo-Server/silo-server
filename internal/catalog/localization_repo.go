@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -29,7 +30,10 @@ func NewMediaItemLocalizationRepository(pool *pgxpool.Pool) *MediaItemLocalizati
 // taken wholesale (provider data is authoritative for them); overview and
 // tagline respect provenance — a manual value is never overwritten, and an
 // empty incoming value never blanks an existing one (so a provider with no
-// translated overview does not erase an AI or manual translation).
+// translated overview does not erase an AI or manual translation). The one
+// exception is a provider value identical to the base item's: that is a copy
+// of the base text, not a translation, so an empty incoming value clears it
+// and the field falls back to the same base text, open to AI translation.
 func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *models.MediaItemLocalization) error {
 	if loc == nil || loc.ContentID == "" || loc.Language == "" {
 		return fmt.Errorf("invalid media item localization")
@@ -49,6 +53,9 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 			title = EXCLUDED.title,
 			sort_title = EXCLUDED.sort_title,
 			overview = CASE
+				WHEN media_item_localizations.overview_source = 'provider' AND EXCLUDED.overview = ''
+					AND media_item_localizations.overview = (SELECT mi.overview FROM media_items mi WHERE mi.content_id = EXCLUDED.content_id)
+					THEN ''
 				WHEN media_item_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
 					THEN media_item_localizations.overview
 				ELSE EXCLUDED.overview END,
@@ -57,6 +64,9 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 					THEN media_item_localizations.overview_source
 				ELSE 'provider' END,
 			tagline = CASE
+				WHEN media_item_localizations.tagline_source = 'provider' AND EXCLUDED.tagline = ''
+					AND media_item_localizations.tagline = (SELECT mi.tagline FROM media_items mi WHERE mi.content_id = EXCLUDED.content_id)
+					THEN ''
 				WHEN media_item_localizations.tagline_source = 'manual' OR EXCLUDED.tagline = ''
 					THEN media_item_localizations.tagline
 				ELSE EXCLUDED.tagline END,
@@ -586,7 +596,7 @@ func scanMediaItemLocalization(row pgx.Row) (*models.MediaItemLocalization, erro
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning media item localization: %w", err)
@@ -608,7 +618,7 @@ func scanSeasonLocalization(row pgx.Row) (*models.SeasonLocalization, error) {
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning season localization: %w", err)
@@ -627,7 +637,7 @@ func scanEpisodeLocalization(row pgx.Row) (*models.EpisodeLocalization, error) {
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning episode localization: %w", err)

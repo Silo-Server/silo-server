@@ -71,3 +71,10 @@ func TestNextIDRefusesIDMintedAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("mintID after lease expiry = (%q, %v), want empty ID and ErrLeaseExpired", id, err)
 	}
 }
+
+// restoreActive puts back the generator NextID used before the test.
+func restoreActive(t *testing.T) {
+	t.Helper()
+	prev := active.Load()
+	t.Cleanup(func() { active.Store(prev) })
+}

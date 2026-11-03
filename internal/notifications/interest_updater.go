@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -63,9 +64,29 @@ type InterestUpdater struct {
 	homeChanged map[profileKey]time.Time
 }
 
+// profileKey names one profile on one account. A profile id alone is not
+// unique: every account from before profiles has a profile named "default".
 type profileKey struct {
 	userID    int
 	profileID string
+}
+
+// String renders the key as account/profile for logs and errors.
+func (k profileKey) String() string { return strconv.Itoa(k.userID) + "/" + k.profileID }
+
+// LogValue logs the key as account/profile in every slog handler; the JSON
+// handler would otherwise encode the unexported fields as {}.
+func (k profileKey) LogValue() slog.Value { return slog.StringValue(k.String()) }
+
+// profileKeyArrays splits keys into the parallel account and profile arrays a
+// query matches with (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])).
+func profileKeyArrays(keys []profileKey) ([]int, []string) {
+	userIDs := make([]int, len(keys))
+	profileIDs := make([]string, len(keys))
+	for i, key := range keys {
+		userIDs[i], profileIDs[i] = key.userID, key.profileID
+	}
+	return userIDs, profileIDs
 }
 
 // NewInterestUpdater creates an InterestUpdater.
@@ -369,9 +390,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	started := make([]string, 0, 16)
 	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
-	// to the later episode.
+	// to the later episode. A special anchor moves to the most recent regular
+	// one; see below.
 	anchorKey, hasAnchor := 0, false
 	var anchorAt time.Time
+	regularAnchorKey, hasRegularAnchor := 0, false
+	var regularAnchorAt time.Time
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -402,11 +426,23 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 				if key, ok := episodeKeys[episodeID]; ok {
 					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
 					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
-					if !hasAnchor || at.After(anchorAt) || (at.Equal(anchorAt) && key > anchorKey) {
+					if !hasAnchor || completedLater(at, key, anchorAt, anchorKey) {
 						anchorKey, anchorAt, hasAnchor = key, at, true
+					}
+					if key >= firstRegularEpisodeKey && (!hasRegularAnchor || completedLater(at, key, regularAnchorAt, regularAnchorKey)) {
+						regularAnchorKey, regularAnchorAt, hasRegularAnchor = key, at, true
 					}
 				}
 			}
+		}
+	}
+	// Specials carry no airing position, so Home doesn't let one anchor a
+	// series that has regular seasons: it resumes after the most recent
+	// regular episode, or at the first one (catalog's nextUpAnchorsCTE).
+	if hasAnchor && anchorKey < firstRegularEpisodeKey && hasRegularEpisodes(episodeKeys) {
+		anchorKey = firstRegularEpisodeKey - 1
+		if hasRegularAnchor {
+			anchorKey = regularAnchorKey
 		}
 	}
 
@@ -494,7 +530,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 
 	if !flags.HasAnyInterest() && lastCompleted == nil {
 		// Nothing can ever notify: drop all rows for the pair.
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	libraryIDs, err := u.visibleSeriesLibraries(ctx, userID, profileID, seriesID)
@@ -502,7 +538,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return err
 	}
 	if len(libraryIDs) == 0 {
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	rows := make([]SeriesInterest, 0, len(libraryIDs))
@@ -514,7 +550,13 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	if err := u.interests.UpsertRows(ctx, rows); err != nil {
 		return err
 	}
-	return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, libraryIDs)
+	return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, libraryIDs)
+}
+
+// completedLater reports whether a completion at (at, key) anchors Next Up
+// over the current one: it is newer, or as new and a later episode.
+func completedLater(at time.Time, key int, currentAt time.Time, currentKey int) bool {
+	return at.After(currentAt) || (at.Equal(currentAt) && key > currentKey)
 }
 
 // loadSeriesStructure returns the series' episode keys (content_id ->

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 )
 
@@ -143,7 +144,8 @@ func checkCreatedAPIKey(t *testing.T, raw []byte, transport, scenario, owner str
 	var row struct {
 		ID         int64      `json:"id"`
 		UserID     int64      `json:"user_id"`
-		Key        string     `json:"api_key"`
+		KeyHash    string     `json:"key_hash"`
+		KeyPrefix  string     `json:"key_prefix"`
 		Label      string     `json:"label"`
 		Scopes     []string   `json:"scopes"`
 		RateTier   string     `json:"rate_tier"`
@@ -157,7 +159,10 @@ func checkCreatedAPIKey(t *testing.T, raw []byte, transport, scenario, owner str
 	if scenario == "keys_create.scoped" {
 		scopes, label = []string{"admin:users"}, "scoped"
 	}
-	if strconv.FormatInt(row.ID, 10) != id || strconv.FormatInt(row.UserID, 10) != owner || row.Key != receipt.Key || row.Key == "" || row.Label != label || row.RateTier != "standard" || !slices.Equal(row.Scopes, scopes) || row.LastUsedAt != nil {
+	if len(receipt.Key) != 67 || row.KeyHash != auth.HashLinkToken(receipt.Key) || row.KeyPrefix != receipt.Key[:11] || bytes.Contains(after[id], []byte(receipt.Key)) {
+		t.Error("created row retained a bearer or does not match its verifier and prefix")
+	}
+	if strconv.FormatInt(row.ID, 10) != id || strconv.FormatInt(row.UserID, 10) != owner || row.Label != label || row.RateTier != "standard" || !slices.Equal(row.Scopes, scopes) || row.LastUsedAt != nil {
 		t.Error("created row does not match exact receipt/account/normalized configuration")
 	}
 	created := row.CreatedAt

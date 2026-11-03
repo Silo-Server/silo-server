@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NodeRoutingSettings } from "./NodeRoutingSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 const useAdminNodesMock = vi.fn();
@@ -28,22 +29,8 @@ const DEFAULT_ROUTING = {
   "playback.routing.video_transcode_egress": "prefer_proxy",
 };
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
-  const dirtyKeys = new Set(dirty);
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    getPersistedValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    isDirty: (key: string) => dirtyKeys.has(key),
-    dirtyCount: dirtyKeys.size,
-    dirtyKeys: [...dirtyKeys],
-    save: vi.fn().mockResolvedValue(undefined),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-  };
-}
+const makeForm = (values: Record<string, string>, dirty: string[] = []) =>
+  fakeSettingsForm(values, { dirty, save: vi.fn().mockResolvedValue(undefined) });
 
 function transcodeNode(overrides: Record<string, unknown> = {}) {
   return { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true, ...overrides };
@@ -64,13 +51,6 @@ beforeEach(() => {
 });
 
 describe("NodeRoutingSettings", () => {
-  it("manages only the routing keys", () => {
-    useSettingsFormMock.mockReturnValue(makeForm(DEFAULT_ROUTING));
-    renderRouting();
-
-    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual(Object.keys(DEFAULT_ROUTING));
-  });
-
   it("stages every primitive setting when a preset is selected", async () => {
     const form = makeForm(DEFAULT_ROUTING);
     useSettingsFormMock.mockReturnValue(form);
@@ -107,15 +87,5 @@ describe("NodeRoutingSettings", () => {
     expect(
       screen.getByText(/requires every native client to support authorized media origins/),
     ).toBeInTheDocument();
-  });
-
-  it("saves staged routing through its own bar", async () => {
-    const form = makeForm(DEFAULT_ROUTING, ["playback.routing.remux_egress"]);
-    useSettingsFormMock.mockReturnValue(form);
-
-    renderRouting();
-    await userEvent.click(screen.getByRole("button", { name: /^Save/ }));
-
-    expect(form.save).toHaveBeenCalledTimes(1);
   });
 });

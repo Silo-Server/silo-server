@@ -15,19 +15,15 @@ import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
-import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
-
-const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function formatDate(value?: string | null) {
   if (!value) {
     return null;
   }
-  const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
-  return formatPreferredDate(date, "medium") || null;
+  return formatPreferredDate(value, "medium") || null;
 }
 
 function formatRuntime(minutes?: number | null) {
@@ -207,9 +203,6 @@ export default function ItemCard({
       : itemHref;
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
-  const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -227,6 +220,7 @@ export default function ItemCard({
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             scrim="background"
+            lazy
           >
             {item.status === "pending" && (
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
@@ -316,26 +310,22 @@ export default function ItemCard({
           itemTitle={displayTitle}
         />
       </div>
-      {showCaption ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
-            {displayTitle}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+          {displayTitle}
+        </ViewTransitionLink>
+        {episodeLabels?.episodeTitle ? (
+          <ViewTransitionLink
+            to={itemHref}
+            className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
+          >
+            {episodeLabels.episodeTitle}
           </ViewTransitionLink>
-          {showMetadata && episodeLabels?.episodeTitle ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
-            >
-              {episodeLabels.episodeTitle}
-            </ViewTransitionLink>
-          ) : null}
-          {showMetadata ? (
-            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
-              <SortMeta item={item} sortField={sortField} />
-            </ViewTransitionLink>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+        <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
+          <SortMeta item={item} sortField={sortField} />
+        </ViewTransitionLink>
+      </div>
     </div>
   );
 }

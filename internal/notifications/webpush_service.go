@@ -177,17 +177,17 @@ func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, e
 	})
 }
 
-// List returns the profile's subscriptions.
-func (s *WebPushService) List(ctx context.Context, profileID string) ([]WebPushSubscription, error) {
-	return s.repo.ListByProfile(ctx, profileID)
+// List returns the account profile's subscriptions.
+func (s *WebPushService) List(ctx context.Context, userID int, profileID string) ([]WebPushSubscription, error) {
+	return s.repo.ListByProfile(ctx, userID, profileID)
 }
 
-// Unsubscribe removes a subscription by id (profile-scoped, settings UI) or
-// by endpoint (user-scoped: the browser owns the endpoint and Subscribe may
-// have reassigned it to a sibling profile). Idempotent.
+// Unsubscribe removes a subscription by id (scoped to the account profile,
+// settings UI) or by endpoint (user-scoped: the browser owns the endpoint and
+// Subscribe may have reassigned it to a sibling profile). Idempotent.
 func (s *WebPushService) Unsubscribe(ctx context.Context, userID int, profileID, id, endpoint string) error {
 	if id != "" {
-		return s.repo.Delete(ctx, profileID, id)
+		return s.repo.Delete(ctx, userID, profileID, id)
 	}
 	if endpoint != "" {
 		return s.repo.DeleteByEndpoint(ctx, userID, endpoint)
@@ -195,6 +195,6 @@ func (s *WebPushService) Unsubscribe(ctx context.Context, userID int, profileID,
 	return fmt.Errorf("%w: an id or endpoint is required", ErrWebPushInvalid)
 }
 
-func (s *WebPushService) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
-	return s.repo.ListPage(ctx, profile, limit, after)
+func (s *WebPushService) ListPage(ctx context.Context, userID int, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
+	return s.repo.ListPage(ctx, userID, profile, limit, after)
 }

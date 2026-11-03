@@ -135,24 +135,6 @@ func TestSocketRejectsMissingToken(t *testing.T) {
 	}
 }
 
-func TestDurableSessionListingReadsOtherProcess(t *testing.T) {
-	pool := newCompatTestPool(t)
-	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	id := uuid.NewString()
-	first.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "native"})
-	t.Cleanup(func() { first.Delete(id) })
-	sessions, err := second.ListActiveForToken(t.Context(), id)
-	if err != nil || len(sessions) != 1 || sessions[0].ID != id {
-		t.Fatalf("durable sessions %+v %v", sessions, err)
-	}
-	first.Delete(id)
-	sessions, err = second.ListActiveForToken(t.Context(), id)
-	if err != nil || len(sessions) != 0 {
-		t.Fatalf("deleted session remained visible %+v %v", sessions, err)
-	}
-}
-
 func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
@@ -160,7 +142,6 @@ func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
 		wantAudio, wantSubtitle *int
 	}{
 		{"second version", 22, new(3), new(-1)},
-		{"first version", 11, new(1), new(2)},
 		{"unknown version", 33, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

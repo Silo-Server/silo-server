@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Captions, Check, ChevronDown, Loader2 } from "lucide-react";
+import { Captions, Check, ChevronDown, Loader2, Search } from "lucide-react";
 
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -32,11 +32,12 @@ interface SubtitlesPopoverProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   activeAudioTrackIndex?: number | null;
   onSelectSubtitle?: (selection: PrePlaySubtitleSelection) => void;
   onSelectSubtitleOff?: () => void;
   onResetSelection?: () => void;
+  /** Opens the subtitle provider search for this version. */
+  onSearchSubtitles?: () => void;
 }
 
 function SubtitleFlagBadges({
@@ -198,11 +199,11 @@ export default function SubtitlesPopover({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles = true,
-  profileLanguage,
   activeAudioTrackIndex = null,
   onSelectSubtitle,
   onSelectSubtitleOff,
   onResetSelection,
+  onSearchSubtitles,
 }: SubtitlesPopoverProps) {
   const [open, setOpen] = useState(false);
   // Downloaded subtitles normally load lazily on open, but when the saved
@@ -229,14 +230,12 @@ export default function SubtitlesPopover({
         subtitleMode,
         showForcedSubtitles,
         audioLanguage: activeAudioLanguage,
-        profileLanguage,
       }),
     [
       activeAudioLanguage,
       candidates.all,
       preferredSubtitleLanguage,
       preferredSubtitleTrackSignature,
-      profileLanguage,
       showForcedSubtitles,
       subtitleMode,
     ],
@@ -330,6 +329,21 @@ export default function SubtitlesPopover({
         )}
         {candidates.all.length === 0 && !downloadedQuery.isLoading && (
           <div className="text-muted-foreground px-3 py-2 text-sm">No subtitles available.</div>
+        )}
+        {onSearchSubtitles && (
+          <div className="border-border bg-popover sticky -bottom-1.5 -mx-1.5 border-t px-1.5 pt-1.5 pb-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onSearchSubtitles();
+              }}
+              className="hover:bg-accent/30 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
+            >
+              <Search className="text-muted-foreground size-4" />
+              Search for Subtitles…
+            </button>
+          </div>
         )}
       </div>
     </DetailPopover>

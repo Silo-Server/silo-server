@@ -38,7 +38,6 @@ import {
   type HomeRowsPageOption,
   type PageRef,
 } from "@/lib/homeRows/types";
-import { isTraktConfig } from "@/lib/sectionTypes";
 
 type AdminSectionList = Awaited<ReturnType<typeof fetchAdminSections>>;
 type QuickField = "shown" | "hero";
@@ -53,8 +52,8 @@ const BATCH_PARALLEL = 4;
 export interface BatchFailure {
   id: string;
   title: string;
-  /** changed: it no longer matches the page; legacy: a Trakt row can't be turned back on. */
-  reason: "changed" | "legacy" | "failed";
+  /** changed: it no longer matches the page. */
+  reason: "changed" | "failed";
   message?: string;
 }
 
@@ -73,7 +72,6 @@ function toHomeRow(section: PageSectionConfig): HomeRow {
     hero: section.featured,
     shown: section.enabled,
     own: false,
-    legacyTrakt: isTraktConfig(section.config),
   };
 }
 
@@ -296,7 +294,6 @@ export function useAdminHomeRows(): AdminHomeRows {
         const writeOne = async (id: string): Promise<BatchFailure["reason"] | null> => {
           const section = onScreen.get(id);
           if (!section) return "changed";
-          if (shown && !section.enabled && isTraktConfig(section.config)) return "legacy";
           // Read even a row that already looks right: another admin may have
           // flipped it since this page loaded.
           const snapshot = await fetchAdminSectionSnapshot(id);

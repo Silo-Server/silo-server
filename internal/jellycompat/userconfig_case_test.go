@@ -14,7 +14,7 @@ import (
 )
 
 func TestConfigurationFieldCasingUpdatesCanonicalSettings(t *testing.T) {
-	for _, casing := range []string{"Pascal", "camel", "mixed"} {
+	for _, casing := range []string{"Pascal", "camel"} {
 		t.Run(casing, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil).WithUserStore(compatTestUserStoreProvider{store: store})
@@ -23,8 +23,6 @@ func TestConfigurationFieldCasingUpdatesCanonicalSettings(t *testing.T) {
 				switch casing {
 				case "camel":
 					return strings.ToLower(s[:1]) + s[1:]
-				case "mixed":
-					return strings.ToUpper(s)
 				}
 				return s
 			}

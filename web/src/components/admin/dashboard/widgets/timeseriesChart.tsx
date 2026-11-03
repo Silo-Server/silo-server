@@ -2,7 +2,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import type { AdminTimeseries } from "@/api/types";
 import { ChartEmptyState, ChartSkeleton, LineChart } from "../charts";
-import type { LineChartOverlay, LineChartPoint } from "../charts";
+import type { LineChartOverlay, LineChartPoint, LineChartStack } from "../charts";
 import { SectionError } from "../feedback";
 
 export interface TimeseriesChartBodyProps {
@@ -20,6 +20,8 @@ export interface TimeseriesChartBodyProps {
   minTickStep?: number;
   /** Secondary series drawn over the primary one; see LineChart. */
   overlays?: readonly LineChartOverlay[];
+  /** Bands drawn stacked instead of the primary line; see LineChart. */
+  stacks?: readonly LineChartStack[];
   height?: number;
   /**
    * Fill the card's content area instead of a fixed `height`. Widget rows are
@@ -48,6 +50,7 @@ export function TimeseriesChartBody({
   edgeLabels,
   minTickStep,
   overlays,
+  stacks,
   height = 160,
   fill = false,
 }: TimeseriesChartBodyProps) {
@@ -84,6 +87,7 @@ export function TimeseriesChartBody({
       edgeLabels={edgeLabels}
       minTickStep={minTickStep}
       overlays={overlays}
+      stacks={stacks}
     />
   );
 }

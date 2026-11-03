@@ -4,18 +4,43 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"weak"
 
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 const postgresOperationOther = "other"
 
 type postgresTraceKey struct{ operation string }
-type postgresTracer struct{ role string }
+type postgresTracer struct {
+	role      string
+	attribute bool
+}
+
+type postgresTraceNode struct {
+	context.Context //nolint:containedctx // The trace node carries its parent context and owns operation state.
+	slot            string
+	finish          func(error)
+	// done makes completion run once: pgx v5.9.2 ends a batch twice after an
+	// early error (conn.go deferred end, then batch.go Close).
+	done atomic.Bool
+	op   queryattr.Op
+}
+
+func (n *postgresTraceNode) Value(key any) any {
+	if traceKey, ok := key.(postgresTraceKey); ok && traceKey.operation == n.slot {
+		return n
+	}
+	return n.Context.Value(key)
+}
 
 // The first token is deliberately allowlisted. Comments and CTEs are reported
 // as other/with; no SQL text, statement name, arguments or table names escape.
@@ -32,42 +57,65 @@ func queryOperation(sql string) string {
 	}
 }
 
-func (t postgresTracer) start(ctx context.Context, slot, operation string) context.Context {
+func (t postgresTracer) start(ctx context.Context, slot, operation string, op queryattr.Op) context.Context {
 	ctx, finish := telemetry.StartDependency(ctx, "postgres", t.role, operation)
-	return context.WithValue(ctx, postgresTraceKey{slot}, finish)
+	node := &postgresTraceNode{Context: ctx, slot: slot, finish: finish, op: op}
+	if span := trace.SpanFromContext(node); span.IsRecording() && op.Site() != "" {
+		span.SetAttributes(attribute.String("silo.db.site", op.Site()), attribute.String("silo.db.shape", op.Shape()))
+	}
+	return node
 }
 func endPostgres(ctx context.Context, slot string, err error) {
-	if finish, ok := ctx.Value(postgresTraceKey{slot}).(func(error)); ok {
-		finish(err)
+	node, ok := ctx.Value(postgresTraceKey{slot}).(*postgresTraceNode)
+	if !ok || !node.done.CompareAndSwap(false, true) {
+		return
 	}
+	node.finish(err)
+	node.op.End(ctx, err)
 }
 func (t postgresTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
-	return t.start(ctx, "query", queryOperation(d.SQL))
+	var op queryattr.Op
+	if t.attribute {
+		op = queryattr.Begin(ctx, queryattr.KindQuery, d.SQL, d.Args, 1)
+	}
+	return t.start(ctx, "query", queryOperation(d.SQL), op)
 }
 func (t postgresTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryEndData) {
 	endPostgres(ctx, "query", d.Err)
 }
-func (t postgresTracer) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
-	return t.start(ctx, "batch", "batch")
+func (t postgresTracer) TraceBatchStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceBatchStartData) context.Context {
+	var op queryattr.Op
+	if t.attribute {
+		op = queryattr.Begin(ctx, queryattr.KindBatch, "", nil, d.Batch.Len())
+	}
+	return t.start(ctx, "batch", "batch", op)
 }
 func (t postgresTracer) TraceBatchQuery(context.Context, *pgx.Conn, pgx.TraceBatchQueryData) {}
 func (t postgresTracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceBatchEndData) {
 	endPostgres(ctx, "batch", d.Err)
 }
 func (t postgresTracer) TraceCopyFromStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceCopyFromStartData) context.Context {
-	return t.start(ctx, "copy", "copy")
+	var op queryattr.Op
+	if t.attribute {
+		op = queryattr.Begin(ctx, queryattr.KindCopy, "", nil, 1)
+	}
+	return t.start(ctx, "copy", "copy", op)
 }
 func (t postgresTracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceCopyFromEndData) {
 	endPostgres(ctx, "copy", d.Err)
 }
 func (t postgresTracer) TraceConnectStart(ctx context.Context, _ pgx.TraceConnectStartData) context.Context {
-	return t.start(ctx, "connect", "connect")
+	return t.start(ctx, "connect", "connect", queryattr.Op{})
 }
 func (t postgresTracer) TraceConnectEnd(ctx context.Context, d pgx.TraceConnectEndData) {
 	endPostgres(ctx, "connect", d.Err)
 }
 func (t postgresTracer) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
-	return t.start(ctx, "acquire", "acquire")
+	var op queryattr.Op
+	if t.attribute {
+		op = queryattr.Begin(ctx, queryattr.KindAcquire, "", nil, 0)
+	}
+	return t.start(ctx, "acquire", "acquire", op)
 }
 func (t postgresTracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, d pgxpool.TraceAcquireEndData) {
 	endPostgres(ctx, "acquire", d.Err)

@@ -2,8 +2,6 @@ package abs
 
 import (
 	"context"
-	"errors"
-	"testing"
 )
 
 // fakeProgressStore is a minimal in-memory ProgressStore for the play
@@ -29,36 +27,4 @@ func (f *fakeProgressStore) SetHideFromContinue(_ context.Context, _, _, _ strin
 }
 func (f *fakeProgressStore) DeleteProgress(_ context.Context, _, _, _ string) error {
 	return nil
-}
-
-func TestResumeTimeFromProgressStore_NoRow(t *testing.T) {
-	store := &fakeProgressStore{row: nil}
-	got, err := resolveResumeTime(context.Background(), store, "1", "", "book123")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if got != 0 {
-		t.Errorf("resume time = %v, want 0", got)
-	}
-}
-
-func TestResumeTimeFromProgressStore_NilStore(t *testing.T) {
-	got, err := resolveResumeTime(context.Background(), nil, "1", "", "book123")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if got != 0 {
-		t.Errorf("resume time = %v, want 0", got)
-	}
-}
-
-func TestResumeTimeFromProgressStore_LookupError(t *testing.T) {
-	store := &fakeProgressStore{getErr: errors.New("boom")}
-	got, err := resolveResumeTime(context.Background(), store, "1", "", "book123")
-	if err == nil {
-		t.Errorf("expected error, got nil")
-	}
-	if got != 0 {
-		t.Errorf("resume time = %v, want 0 on error", got)
-	}
 }

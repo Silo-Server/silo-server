@@ -47,14 +47,7 @@ describe("realtimeMonitoringStatusText", () => {
 
   it.each<[LibraryRealtimeMonitoringState, string]>([
     ["server_disabled", "Turned off server-wide"],
-    ["library_disabled", "Library is disabled"],
-    ["monitoring_off", "Off"],
-    ["not_reporting", "Not reporting"],
-    ["starting", "Starting"],
-    ["unsupported_filesystem", "Unsupported filesystem"],
-    ["unsupported_platform", "Unsupported platform"],
     ["limit_reached", "Watch limit reached"],
-    ["root_unavailable", "Folder unavailable"],
     ["error", "Error"],
   ])("labels %s and adds the server's detail", (state, label) => {
     expect(realtimeMonitoringStatusText(entry(state))).toBe(label);

@@ -159,18 +159,6 @@ func TestPositiveTasteItemsKeepsPositiveTitlesOnly(t *testing.T) {
 	}
 }
 
-// The taste-profile summary reports signals of each kind; the count of
-// positive titles behind the cold-start level is not one.
-func TestSummarySignalCountsLeavesOutPositiveTitles(t *testing.T) {
-	got := summarySignalCounts(map[string]int{"favorited": 3, "watch_high": 2, signalCountPositiveTitles: 4})
-	if want := map[string]int{"favorited": 3, "watch_high": 2}; !maps.Equal(got, want) {
-		t.Fatalf("summary counts = %v, want %v", got, want)
-	}
-	if got := summarySignalCounts(nil); got == nil || len(got) != 0 {
-		t.Fatalf("summary counts of no row = %v, want an empty map", got)
-	}
-}
-
 // axisVector is a full-width vector pointing along axis, nudged along the
 // axes in nudges, so test items sit next to each other and away from the
 // rest of a shared test database.

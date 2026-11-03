@@ -3,24 +3,25 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { LimitField } from "@/components/settings/LimitField";
+import { LimitField, type LimitFieldProps } from "@/components/settings/LimitField";
 
 function Harness({
   initial,
   onChange,
-  unlimitedValue,
+  label = "Per-user bandwidth",
+  unit = "Mbps",
+  ...field
 }: {
   initial: string;
   onChange?: (value: string) => void;
-  unlimitedValue?: string;
-}) {
+} & Partial<Pick<LimitFieldProps, "label" | "unit" | "unlimitedValue" | "scale">>) {
   const [value, setValue] = useState(initial);
   return (
     <LimitField
-      label="Per-user bandwidth"
+      label={label}
+      unit={unit}
+      {...field}
       value={value}
-      unlimitedValue={unlimitedValue}
-      unit="Mbps"
       onChange={(next) => {
         setValue(next);
         onChange?.(next);
@@ -70,62 +71,37 @@ describe("LimitField", () => {
     expect(onChange).toHaveBeenLastCalledWith("-1");
     expect(screen.getByRole("checkbox", { name: "Unlimited" })).toBeChecked();
   });
-
-  it("passes typed limits straight through", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<Harness initial="" onChange={onChange} />);
-
-    await user.type(screen.getByLabelText("Per-user bandwidth"), "25");
-    expect(onChange).toHaveBeenLastCalledWith("25");
-  });
 });
 
-function ScaledHarness({ initial, onChange }: { initial: string; onChange?: (v: string) => void }) {
-  const [value, setValue] = useState(initial);
-  return (
-    <LimitField
-      label="Prepared file storage budget"
-      value={value}
-      unit="GB"
-      scale={1_000_000_000}
-      onChange={(next) => {
-        setValue(next);
-        onChange?.(next);
-      }}
-    />
-  );
-}
+const scaled = { label: "Prepared file storage budget", unit: "GB", scale: 1_000_000_000 };
 
 describe("LimitField scaled units", () => {
   it("shows a stored byte value in the display unit", () => {
-    render(<ScaledHarness initial="53687091200" />);
+    render(<Harness {...scaled} initial="53687091200" />);
 
     expect(screen.getByLabelText("Prepared file storage budget")).toHaveValue(53.687);
   });
 
-  it("stores what was typed in the underlying unit", async () => {
+  it.each([
+    ["stores what was typed in the underlying unit", "50", "50000000000"],
+    [
+      "keeps a fractional entry typeable instead of rewriting it mid-keystroke",
+      "1.5",
+      "1500000000",
+    ],
+  ])("%s", async (_, typed, stored) => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ScaledHarness initial="" onChange={onChange} />);
+    render(<Harness {...scaled} initial="" onChange={onChange} />);
 
-    await user.type(screen.getByLabelText("Prepared file storage budget"), "50");
-    expect(onChange).toHaveBeenLastCalledWith("50000000000");
-  });
-
-  it("keeps a fractional entry typeable instead of rewriting it mid-keystroke", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<ScaledHarness initial="" onChange={onChange} />);
-
-    await user.type(screen.getByLabelText("Prepared file storage budget"), "1.5");
-    expect(onChange).toHaveBeenLastCalledWith("1500000000");
+    await user.type(screen.getByLabelText("Prepared file storage budget"), typed);
+    expect(onChange).toHaveBeenLastCalledWith(stored);
   });
 
   it("writes the unscaled sentinel for unlimited", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ScaledHarness initial="50000000000" onChange={onChange} />);
+    render(<Harness {...scaled} initial="50000000000" onChange={onChange} />);
 
     await user.click(screen.getByRole("checkbox", { name: "Unlimited" }));
     expect(onChange).toHaveBeenLastCalledWith("0");

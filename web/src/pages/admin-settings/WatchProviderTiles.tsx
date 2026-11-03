@@ -28,7 +28,7 @@ interface PluginWatchProvider {
 
 /**
  * One entry per watch-sync capability across the installed plugins. Every
- * watch provider, Trakt, Simkl, and MDBList included, is a plugin, so this is
+ * watch provider, Simkl and MDBList included, is a plugin, so this is
  * what the server can actually sync with.
  */
 function pluginWatchProviders(installations: PluginInstallation[]): PluginWatchProvider[] {
@@ -114,9 +114,9 @@ export function WatchProviderTiles() {
         <p className="text-sm">No watch provider plugins are installed.</p>
       )}
       <p className="text-muted-foreground mt-3 text-xs">
-        Trakt, Simkl, MDBList, and other watch providers install from the {catalogLink}. A
-        provider&apos;s app credentials live on its plugin page, and viewers link their own accounts
-        from profile settings.
+        Simkl, MDBList, and other watch providers install from the {catalogLink}. A provider&apos;s
+        app credentials live on its plugin page, and viewers link their own accounts from profile
+        settings.
       </p>
     </>
   );

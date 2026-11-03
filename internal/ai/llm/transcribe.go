@@ -122,9 +122,8 @@ func hostMatchesAny(baseURL string, hosts []string) bool {
 	return false
 }
 
-// Transcribe performs one audio transcription against the ASR endpoint
-// (falling back to the chat endpoint's base URL/key when no ASR override is
-// configured), using the OpenAI-compatible /v1/audio/transcriptions API with
+// Transcribe performs one audio transcription against the ASR endpoint, using
+// the OpenAI-compatible /v1/audio/transcriptions API with
 // response_format=verbose_json for segment timestamps.
 func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transcription, error) {
 	cfg := c.Config()
@@ -142,7 +141,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := endpointURL(cfg.asrBaseURL(), "audio/transcriptions")
+	url := endpointURL(cfg.ASRBaseURL, "audio/transcriptions")
 
 	var result *Transcription
 	doErr := c.doWithRetry(ctx, c.asrHTTP, "transcription API",
@@ -169,7 +168,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			if req.Language != "" {
 				fields = append(fields, [2]string{"language", req.Language})
 			}
-			if !hostMatchesAny(cfg.asrBaseURL(), strictHostedASRHosts) {
+			if !hostMatchesAny(cfg.ASRBaseURL, strictHostedASRHosts) {
 				fields = append(fields, [2]string{"vad_filter", "true"})
 			}
 			for _, f := range fields {
@@ -186,7 +185,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 				return nil, fmt.Errorf("create request: %w", err)
 			}
 			httpReq.Header.Set("Content-Type", w.FormDataContentType())
-			if key := cfg.asrAPIKey(); key != "" {
+			if key := cfg.ASRAPIKey; key != "" {
 				httpReq.Header.Set("Authorization", "Bearer "+key)
 			}
 			return httpReq, nil
@@ -194,14 +193,14 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 		func(respBody []byte) error {
 			var parsed transcriptionResponse
 			if err := json.Unmarshal(respBody, &parsed); err != nil {
-				return fmt.Errorf("decode transcription response: %w", err)
+				return fmt.Errorf("decode transcription response: %w: %w", ErrUnusableResponse, err)
 			}
 			if parsed.Error != nil && parsed.Error.Message != "" {
-				return fmt.Errorf("transcription API error: %s", parsed.Error.Message)
+				return &HTTPError{StatusCode: http.StatusBadGateway, message: "transcription API error: " + parsed.Error.Message}
 			}
 			if parsed.Segments == nil {
 				return &permanentError{err: fmt.Errorf(
-					"transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required", cfg.ASRModel)}
+					"transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required: %w", cfg.ASRModel, ErrUnusableResponse)}
 			}
 			out := &Transcription{Language: parsed.Language}
 			for _, s := range *parsed.Segments {
@@ -211,14 +210,14 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 					continue
 				}
 				if s.Start == nil || s.End == nil || *s.Start < 0 || *s.End <= *s.Start {
-					return &permanentError{err: fmt.Errorf("transcription endpoint returned missing or invalid segment timestamps (model %q)", cfg.ASRModel)}
+					return &permanentError{err: fmt.Errorf("transcription endpoint returned missing or invalid segment timestamps (model %q): %w", cfg.ASRModel, ErrUnusableResponse)}
 				}
 				out.Segments = append(out.Segments, TranscriptionSegment{
 					Start: *s.Start, End: *s.End, Text: s.Text, Words: wordsFromJSON(s.Words),
 				})
 			}
 			if len(out.Segments) == 0 && strings.TrimSpace(parsed.Text) != "" {
-				return &permanentError{err: fmt.Errorf("transcription endpoint returned text without timed segments (model %q)", cfg.ASRModel)}
+				return &permanentError{err: fmt.Errorf("transcription endpoint returned text without timed segments (model %q): %w", cfg.ASRModel, ErrUnusableResponse)}
 			}
 			attachTopLevelWords(out.Segments, wordsFromJSON(parsed.Words))
 			result = out
@@ -273,7 +272,7 @@ func decorateTranscribeError(err error) error {
 	if !likelyUnsupported {
 		return err
 	}
-	return fmt.Errorf("%w — the configured endpoint likely does not support audio transcription; "+
-		"set a Whisper-compatible Transcription base URL (and model) under Admin Settings → AI Services "+
-		"(e.g. a self-hosted faster-whisper/speaches server, api.groq.com/openai with whisper-large-v3-turbo, or api.openai.com with whisper-1)", err)
+	return fmt.Errorf("%w — the selected provider likely does not support audio transcription; "+
+		"choose a Whisper-compatible speech-to-text provider and model under Admin Settings → AI Services "+
+		"(e.g. a self-hosted faster-whisper/speaches server, Groq with whisper-large-v3-turbo, or OpenAI with whisper-1)", err)
 }

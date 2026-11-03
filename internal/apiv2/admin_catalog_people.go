@@ -14,8 +14,8 @@ type AdminPeopleService interface {
 type AdminPersonUpdate struct {
 	Name       *string `json:"name,omitempty" nullable:"true"`
 	Bio        *string `json:"bio,omitempty" nullable:"true"`
-	BirthDate  *string `json:"birth_date,omitempty" nullable:"true" doc:"YYYY-MM-DD; empty clears; null or omission preserves."`
-	DeathDate  *string `json:"death_date,omitempty" nullable:"true" doc:"YYYY-MM-DD; empty clears; null or omission preserves."`
+	BirthDate  *string `json:"birth_date,omitempty" nullable:"true" pattern:"^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$" doc:"Calendar date, YYYY-MM-DD; empty clears; null or omission preserves."`
+	DeathDate  *string `json:"death_date,omitempty" nullable:"true" pattern:"^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$" doc:"Calendar date, YYYY-MM-DD; empty clears; null or omission preserves."`
 	Birthplace *string `json:"birthplace,omitempty" nullable:"true"`
 	Homepage   *string `json:"homepage,omitempty" nullable:"true"`
 	TmdbID     *string `json:"tmdb_id,omitempty" nullable:"true"`

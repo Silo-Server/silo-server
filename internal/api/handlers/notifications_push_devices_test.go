@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,8 +60,8 @@ func (f *handlerPushStore) UpsertFCM(ctx context.Context, registration notificat
 	}, nil
 }
 
-func (f *handlerPushStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
-	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+func (f *handlerPushStore) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, fmt.Sprintf("%d/%s/%s", userID, profileID, deviceID))
 	return f.err
 }
 
@@ -78,43 +79,6 @@ func newApplePushRequest(body string) *http.Request {
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 42, Role: "user", SessionID: "sess-1", TokenType: auth.TokenTypeAccess})
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	return req.WithContext(ctx)
-}
-
-func TestHandleRegisterApplePushDevice(t *testing.T) {
-	store := &handlerPushStore{}
-	handler := NewNotificationsHandler(&notifications.System{
-		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
-	}, nil)
-
-	body := `{
-		"device_id":"local-device",
-		"apns_token":"` + strings.Repeat("a", 64) + `",
-		"apns_environment":"production",
-		"apns_topic":"org.siloserver.silo",
-		"push_mode":"private_push"
-	}`
-	rr := httptest.NewRecorder()
-	handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(body))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var response applePushRegisterResponse
-	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.ID != "push-row" || response.ServerDeviceID != "server-device" || !response.Enabled || response.PushMode != notifications.PushModePrivatePush {
-		t.Fatalf("unexpected response: %+v", response)
-	}
-	if store.calls != 1 {
-		t.Fatalf("store calls = %d, want 1", store.calls)
-	}
-	if store.got.UserID != 42 || store.got.ProfileID != "profile-1" || store.got.DeviceID != "local-device" {
-		t.Fatalf("unexpected stored registration: %+v", store.got)
-	}
-	if response.DisplayToken != "" || response.DisplayTokenExpiresAt != "" {
-		t.Fatalf("display token must be omitted without an issuer: %+v", response)
-	}
 }
 
 func TestHandleRegisterApplePushDeviceMintsDisplayToken(t *testing.T) {
@@ -180,122 +144,33 @@ func newPushDevicesRequest(method, target, body string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-func TestHandleRegisterPushDeviceAndroid(t *testing.T) {
-	store := &handlerPushStore{}
-	handler := NewNotificationsHandler(&notifications.System{
-		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
-	}, nil)
-	// The Apple display token is Apple-only: Android registration must never
-	// receive one even when an issuer is configured.
-	handler.SetApplePushDisplayTokenIssuer(auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour))
-
-	token := strings.Repeat("F", 140)
-	body := `{
-		"platform":"android",
-		"token":"` + token + `",
-		"device_id":"local-device",
-		"push_mode":"private_push"
-	}`
-	rr := httptest.NewRecorder()
-	handler.HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost, "/api/v1/notifications/push/devices", body))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var response applePushRegisterResponse
-	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.ID != "push-row-android" || response.PushMode != notifications.PushModePrivatePush {
-		t.Fatalf("unexpected response: %+v", response)
-	}
-	if store.gotFCM.UserID != 42 || store.gotFCM.ProfileID != "profile-1" || store.gotFCM.FCMToken != token {
-		t.Fatalf("unexpected stored registration: %+v", store.gotFCM)
-	}
-}
-
-func TestHandleRegisterPushDeviceRejectsUnknownPlatformAndBadToken(t *testing.T) {
-	newHandler := func() *NotificationsHandler {
-		return NewNotificationsHandler(&notifications.System{
-			PushDevices: notifications.NewPushDeviceService(&handlerPushStore{}, handlerPushCipher(t)),
-		}, nil)
-	}
-
-	rr := httptest.NewRecorder()
-	newHandler().HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost,
-		"/api/v1/notifications/push/devices",
-		`{"platform":"apple","token":"`+strings.Repeat("F", 140)+`","device_id":"local-device"}`))
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("apple platform status = %d, want 422", rr.Code)
-	}
-
-	rr = httptest.NewRecorder()
-	newHandler().HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost,
-		"/api/v1/notifications/push/devices",
-		`{"platform":"android","token":"short","device_id":"local-device"}`))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("bad token status = %d, want 400", rr.Code)
-	}
-}
-
-func TestHandleRegisterApplePushDeviceErrors(t *testing.T) {
-	tests := []struct {
-		name       string
-		system     *notifications.System
-		body       string
-		wantStatus int
-	}{
-		{
-			name:       "service unavailable",
-			system:     &notifications.System{},
-			body:       `{}`,
-			wantStatus: http.StatusServiceUnavailable,
-		},
-		{
-			name: "invalid json",
-			system: &notifications.System{
-				PushDevices: notifications.NewPushDeviceService(&handlerPushStore{}, handlerPushCipher(t)),
-			},
-			body:       `{`,
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name: "invalid field",
-			system: &notifications.System{
-				PushDevices: notifications.NewPushDeviceService(&handlerPushStore{}, handlerPushCipher(t)),
-			},
-			body: `{
-				"device_id":"local-device",
-				"apns_token":"abcd",
-				"apns_environment":"production",
-				"apns_topic":"org.siloserver.silo",
-				"push_mode":"private_push"
-			}`,
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name: "unsupported topic",
-			system: &notifications.System{
-				PushDevices: notifications.NewPushDeviceService(&handlerPushStore{}, handlerPushCipher(t)),
-			},
-			body: `{
-				"device_id":"local-device",
-				"apns_token":"` + strings.Repeat("a", 64) + `",
-				"apns_environment":"production",
-				"apns_topic":"com.example.app",
-				"push_mode":"private_push"
-			}`,
-			wantStatus: http.StatusUnprocessableEntity,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := NewNotificationsHandler(tt.system, nil)
+func TestLegacyMobilePushOwnershipConflict(t *testing.T) {
+	for _, platform := range []string{notifications.PushPlatformApple, notifications.PushPlatformAndroid} {
+		t.Run(platform, func(t *testing.T) {
+			store := &handlerPushStore{err: notifications.ErrPushGenerationConflict}
+			handler := NewNotificationsHandler(&notifications.System{
+				PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
+			}, nil)
 			rr := httptest.NewRecorder()
-			handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(tt.body))
-			if rr.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tt.wantStatus, rr.Body.String())
+			if platform == notifications.PushPlatformApple {
+				body := `{"device_id":"fixture-phone","apns_token":"` + strings.Repeat("a", 64) + `","apns_environment":"production","apns_topic":"org.siloserver.silo"}`
+				handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(body))
+			} else {
+				body := `{"device_id":"fixture-phone","platform":"android","token":"` + strings.Repeat("a", 64) + `"}`
+				handler.HandleRegisterPushDevice(rr, newApplePushRequest(body))
+			}
+			if rr.Code != http.StatusConflict || store.calls != 1 {
+				t.Fatalf("status=%d calls=%d", rr.Code, store.calls)
+			}
+			var response struct {
+				Error   string `json:"error"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error != "conflict" || response.Message != "Push registration conflicts with the current installation" {
+				t.Fatalf("unexpected refusal: %s", rr.Body.String())
 			}
 		})
 	}

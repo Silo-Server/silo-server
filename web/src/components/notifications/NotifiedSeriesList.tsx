@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
-import { BellOff, Search } from "lucide-react";
+import { Bell, BellOff, Search } from "lucide-react";
 import type { NotificationPreferences } from "@/api/types";
 import type { NotifiedSeries, NotifiedSeriesOptions } from "@/api/v2/notifications";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -21,6 +21,7 @@ import {
   formatEpisodeCode,
   useNotificationPreferences,
   useNotificationSeries,
+  useSetNotificationSeriesMuted,
 } from "@/hooks/queries/notifications";
 import { useDebounce } from "@/hooks/useDebounce";
 import { NotificationPoster } from "./NotificationPoster";
@@ -44,8 +45,10 @@ function triggerText(series: NotifiedSeries): string {
   return `Any episode after ${code}`;
 }
 
-/** Why a listed series does not notify: the switches that silence it. */
+/** Why a listed series does not notify: the mute, or the switches that
+ * silence it. */
 function silencedText(series: NotifiedSeries, prefs: NotificationPreferences | undefined) {
+  if (series.muted) return "Muted";
   if (prefs && !prefs.enabled) return "Notifications are off";
   const off = prefs
     ? NOTIFICATION_REASONS.filter(
@@ -57,19 +60,28 @@ function silencedText(series: NotifiedSeries, prefs: NotificationPreferences | u
   return `${names} notifications are off`;
 }
 
+/** Mutes or unmutes a row's series; absent when the server cannot. */
+type MuteAction = {
+  pending: string | undefined;
+  set: (series: NotifiedSeries, muted: boolean) => void;
+};
+
 function NotifiedSeriesRow({
   series,
   prefs,
+  mute,
 }: {
   series: NotifiedSeries;
   prefs: NotificationPreferences | undefined;
+  mute: MuteAction | undefined;
 }) {
   const { item } = series;
+  const muteLabel = series.muted ? "Unmute" : "Mute";
   return (
-    <li>
+    <li className="hover:bg-muted/60 flex items-center gap-1 rounded-xl pr-2 transition-colors">
       <ViewTransitionLink
         to={buildItemHref({ contentId: item.content_id })}
-        className="hover:bg-muted/60 flex items-start gap-3 rounded-xl px-3 py-3 transition-colors"
+        className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-3"
       >
         <div className={`shrink-0 ${series.notifies ? "" : "opacity-50"}`}>
           <NotificationPoster url={item.poster_url} thumbhash={item.poster_thumbhash} />
@@ -85,7 +97,7 @@ function NotifiedSeriesRow({
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1">
             {NOTIFICATION_REASONS.filter((reason) => series.reasons[reason.key]).map((reason) => {
-              const off = !series.active_reasons[reason.key];
+              const off = series.muted || !series.active_reasons[reason.key];
               return (
                 <span
                   key={reason.key}
@@ -102,6 +114,24 @@ function NotifiedSeriesRow({
           </div>
         </div>
       </ViewTransitionLink>
+      {mute && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground shrink-0"
+          disabled={mute.pending === item.content_id}
+          aria-label={`${muteLabel} ${item.title}`}
+          title={
+            series.muted
+              ? "Notify me about new episodes again"
+              : "Stop notifying me about new episodes"
+          }
+          onClick={() => mute.set(series, !series.muted)}
+        >
+          {series.muted ? <Bell /> : <BellOff />}
+          <span className="hidden sm:inline">{muteLabel}</span>
+        </Button>
+      )}
     </li>
   );
 }
@@ -173,14 +203,13 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
   const setQ = series.setQ;
   useEffect(() => {
     if (debounced !== series.q) setQ(debounced);
-    // Only a settled edit writes the URL; series.q follows from it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a settled edit writes the URL; series.q follows from it
   }, [debounced]);
   useEffect(() => {
     // The URL changed from elsewhere (the Series button resets it); our own
     // writes match the settled text and leave typing in progress alone.
     if (series.q !== debounced) setText(series.q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on URL changes only, not on each keystroke
   }, [series.q]);
   return (
     <div className="mb-3 flex flex-col gap-2 px-3 sm:flex-row sm:items-center">
@@ -236,11 +265,27 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
 
 /**
  * The Series view of the notifications page: every series whose new episodes
- * notify this profile, then the ones its preferences silence. Both lists load
- * as the viewer scrolls; the silenced list starts once the first is complete.
+ * notify this profile, then the ones that won't, because its preferences
+ * silence them or it muted them. Both lists load as the viewer scrolls; the
+ * second starts once the first is complete. With canMute, each row can mute
+ * or unmute its series.
  */
-export function NotifiedSeriesList({ onOpenPreferences }: { onOpenPreferences: () => void }) {
+export function NotifiedSeriesList({
+  onOpenPreferences,
+  canMute = false,
+}: {
+  onOpenPreferences: () => void;
+  canMute?: boolean;
+}) {
   const series = useSeriesOptions();
+  const setMuted = useSetNotificationSeriesMuted();
+  const mute: MuteAction | undefined = canMute
+    ? {
+        pending: setMuted.isPending ? setMuted.variables?.seriesId : undefined,
+        set: (entry, muted) =>
+          setMuted.mutate({ seriesId: entry.item.content_id, title: entry.item.title, muted }),
+      }
+    : undefined;
   const active = useNotificationSeries("active", series.options);
   const inactive = useNotificationSeries("inactive", series.options);
   const { data: prefs } = useNotificationPreferences();
@@ -304,7 +349,12 @@ export function NotifiedSeriesList({ onOpenPreferences }: { onOpenPreferences: (
       >
         <ul className="list-none space-y-1">
           {notifying.map((entry) => (
-            <NotifiedSeriesRow key={entry.item.content_id} series={entry} prefs={prefs} />
+            <NotifiedSeriesRow
+              key={entry.item.content_id}
+              series={entry}
+              prefs={prefs}
+              mute={mute}
+            />
           ))}
         </ul>
         {!active.hasNextPage && silenced.length > 0 && (
@@ -317,7 +367,12 @@ export function NotifiedSeriesList({ onOpenPreferences }: { onOpenPreferences: (
             </h2>
             <ul className="list-none space-y-1">
               {silenced.map((entry) => (
-                <NotifiedSeriesRow key={entry.item.content_id} series={entry} prefs={prefs} />
+                <NotifiedSeriesRow
+                  key={entry.item.content_id}
+                  series={entry}
+                  prefs={prefs}
+                  mute={mute}
+                />
               ))}
             </ul>
           </section>
@@ -344,7 +399,7 @@ export function NotifiedSeriesList({ onOpenPreferences }: { onOpenPreferences: (
         >
           Preferences
         </button>
-        .
+        {canMute ? ", or mute one series." : "."}
       </p>
       <SeriesToolbar series={series} />
       {body}

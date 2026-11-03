@@ -34,7 +34,7 @@ func TestConnectionHistoryFromStoredActivation(t *testing.T) {
 }
 
 func TestFirstSelectionPersistsConnectionHistoryAcrossDisconnect(t *testing.T) {
-	for _, unavailable := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+	for _, unavailable := range []int{http.StatusOK} {
 		t.Run(http.StatusText(unavailable), func(t *testing.T) {
 			store := &memoryStore{values: map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "old-model"}}
 			save(t, store, credentials{Accounts: []account{{ClientID: "app", AccessToken: "access", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour)}}})

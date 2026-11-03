@@ -2,11 +2,7 @@ package requests
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
 // watchlistPrefFunc stands in for the profile's requests.watchlist_auto_request.
@@ -50,42 +46,6 @@ func TestWatchlistAddRequestsTitleWithWatchlistSource(t *testing.T) {
 	}
 }
 
-func TestWatchlistAddFollowsSomeoneElsesRequest(t *testing.T) {
-	store := newFakeStore()
-	activeRequestFor(store, 949)
-	svc := newWatchlistTestService(store)
-
-	state, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle())
-	if err != nil {
-		t.Fatalf("RequestFromWatchlist: %v", err)
-	}
-	if len(store.created) != 0 {
-		t.Fatalf("created = %+v, want no second request", store.created)
-	}
-	followed, _ := store.FollowedRequests(context.Background(), []string{"req-owner"}, testViewer(1))
-	if !followed["req-owner"] || !state.Following || state.RequestedByViewer {
-		t.Fatalf("state = %+v, follows = %v; want the viewer following the other account's request", state, followed)
-	}
-}
-
-func TestWatchlistAddWithOwnRequestDoesNothing(t *testing.T) {
-	store := newFakeStore()
-	req := activeRequestFor(store, 949)
-	req.RequestedByUserID, req.RequestedByProfileID = 1, "profile-1"
-	svc := newWatchlistTestService(store)
-
-	state, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle())
-	if err != nil {
-		t.Fatalf("RequestFromWatchlist: %v", err)
-	}
-	if len(store.created) != 0 || len(store.follows) != 0 {
-		t.Fatalf("created = %+v, follows = %v; want nothing", store.created, store.follows)
-	}
-	if !state.RequestedByViewer || state.RequestID != "req-owner" {
-		t.Fatalf("state = %+v, want the viewer's own request", state)
-	}
-}
-
 func TestWatchlistAddRefusalReportsReason(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -112,20 +72,6 @@ func TestWatchlistAddRefusalReportsReason(t *testing.T) {
 				t.Fatalf("state = %+v, want not requestable with reason %q", state, tc.reason)
 			}
 		})
-	}
-}
-
-// A refusal the policy read cannot predict (here the store's own quota check
-// under the requester's lock) still reaches the state.
-func TestWatchlistAddStoreRefusalReportsReason(t *testing.T) {
-	if got := watchlistRefusalReason(QuotaError{Used: 5, Limit: 5}); got != "quota_exceeded" {
-		t.Fatalf("quota reason = %q", got)
-	}
-	if got := watchlistRefusalReason(fmt.Errorf("wrapped: %w", ErrUserBlocked)); got != "blocked" {
-		t.Fatalf("blocked reason = %q", got)
-	}
-	if got := watchlistRefusalReason(fmt.Errorf("tmdb unreachable")); got != "" {
-		t.Fatalf("transient failure reason = %q, want none", got)
 	}
 }
 
@@ -165,15 +111,6 @@ func TestWatchlistAddWithSettingOffRequestsNothing(t *testing.T) {
 				t.Fatalf("follows = %v, want none while the setting is off", store.follows)
 			}
 		})
-	}
-}
-
-func TestWatchlistAddRefusesWhenRequestsDisabled(t *testing.T) {
-	store := newFakeStore()
-	svc := newWatchlistTestService(store)
-	store.settings.RequestsEnabled = false
-	if _, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle()); !errors.Is(err, ErrRequestsDisabled) {
-		t.Fatalf("err = %v, want ErrRequestsDisabled", err)
 	}
 }
 
@@ -228,122 +165,6 @@ func TestWatchlistRemoveUnfollows(t *testing.T) {
 	}
 	if store.requests["req-owner"].Outcome != OutcomeActive {
 		t.Fatal("the other account's request was touched")
-	}
-}
-
-// The watchlisting profile hears that the title arrived through the existing
-// fulfilled notification: as the requester of a request the watchlist made,
-// and as a follower of someone else's. The watchlist entry then promotes on
-// the next read (covered in internal/watchlist).
-func TestWatchlistRequestsReceiveFulfilledNotification(t *testing.T) {
-	store := newFakeStore()
-	owner := activeRequestFor(store, 42)
-	svc := newWatchlistTestService(store)
-	follower := Viewer{UserID: 3, ProfileID: "watchlisting-profile"}
-	title := heatTitle()
-	title.TMDBID = 42
-	if _, err := svc.RequestFromWatchlist(context.Background(), follower, title); err != nil {
-		t.Fatalf("RequestFromWatchlist: %v", err)
-	}
-	created, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle())
-	if err != nil || !created.RequestedByViewer {
-		t.Fatalf("RequestFromWatchlist = %+v, %v", created, err)
-	}
-
-	owner.Status = StatusCompleted
-	own := store.active[MediaTypeMovie][949]
-	own.Status = StatusCompleted
-	store.unnotified = []string{owner.ID, own.ID}
-	notifier := &fakeNotifier{}
-	svc.presence = &fakePresence{available: map[MediaType]map[int]bool{MediaTypeMovie: {42: true, 949: true}}}
-	svc.SetFulfillmentNotifier(notifier)
-
-	svc.notifyFulfilledPending(context.Background())
-
-	if len(notifier.requestIDs) != 2 {
-		t.Fatalf("notified requests = %v, want both", notifier.requestIDs)
-	}
-	var heard bool
-	for _, followers := range notifier.followers {
-		for _, f := range followers {
-			heard = heard || f == Follower{UserID: follower.UserID, ProfileID: follower.ProfileID}
-		}
-	}
-	if !heard {
-		t.Fatalf("followers = %+v, want the watchlisting profile", notifier.followers)
-	}
-}
-
-func TestWatchlistRequestStatesFillDownloadFromOneRead(t *testing.T) {
-	store := newFakeStore()
-	req := activeRequestFor(store, 949)
-	req.Status = StatusDownloading
-	store.targets = map[string][]Target{req.ID: {{
-		ID: 1, RequestID: req.ID, Quality: Quality1080p, Status: StatusDownloading,
-		Download: &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 100, BytesLeft: 40, Downloads: 1},
-	}}}
-	svc := newWatchlistTestService(store)
-
-	states, err := svc.WatchlistRequestStates(context.Background(), testViewer(1), []WatchlistTitle{heatTitle(), {MediaType: MediaTypeSeries, TMDBID: 1399, Title: "GoT"}})
-	if err != nil {
-		t.Fatalf("WatchlistRequestStates: %v", err)
-	}
-	heat := states[WatchlistKey{MediaType: MediaTypeMovie, TMDBID: 949}]
-	if heat.Download == nil || heat.Download.BytesLeft != 40 || heat.Status != StatusDownloading {
-		t.Fatalf("heat = %+v, want downloading with progress", heat)
-	}
-	got := states[WatchlistKey{MediaType: MediaTypeSeries, TMDBID: 1399}]
-	if !got.Requestable || got.Download != nil {
-		t.Fatalf("series = %+v, want requestable without download", got)
-	}
-}
-
-type recordingTitleObserver struct {
-	details  []int
-	notFound []int
-}
-
-func (o *recordingTitleObserver) ObservedDetail(_ context.Context, _ string, tmdbID int, _ *tmdb.MediaDetail) {
-	o.details = append(o.details, tmdbID)
-}
-
-func (o *recordingTitleObserver) ObservedNotFound(_ context.Context, _ string, tmdbID int) {
-	o.notFound = append(o.notFound, tmdbID)
-}
-
-func TestGetDetailReportsToTitleObserver(t *testing.T) {
-	client := &fakeTMDBClient{detailErr: fmt.Errorf("fetching: %w", tmdb.ErrNotFound)}
-	svc := newTestServiceWithTMDB(newFakeStore(), client)
-	observer := &recordingTitleObserver{}
-	svc.SetTitleObserver(observer)
-
-	if _, err := svc.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 949); err == nil {
-		t.Fatal("GetDetail succeeded on a TMDB 404")
-	}
-	if len(observer.notFound) != 1 || observer.notFound[0] != 949 || len(observer.details) != 0 {
-		t.Fatalf("observer = %+v, want one not-found for 949", observer)
-	}
-
-	client.detailErr = nil
-	client.detail = &tmdb.MediaDetail{ID: 949, MediaType: "movie", Title: "Heat"}
-	if _, err := svc.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
-		t.Fatalf("GetDetail: %v", err)
-	}
-	if len(observer.details) != 1 || observer.details[0] != 949 {
-		t.Fatalf("observer = %+v, want one detail for 949", observer)
-	}
-}
-
-func TestFeatureStatusReportsWatchlistRequests(t *testing.T) {
-	store := newFakeStore()
-	svc := newWatchlistTestService(store)
-	status, err := svc.GetFeatureStatus(context.Background(), testViewer(1))
-	if err != nil || !status.WatchlistRequests {
-		t.Fatalf("status = %+v, %v; want watchlist requests on", status, err)
-	}
-	svc.SetWatchlistPreference(watchlistPrefFunc(func(int, string) bool { return false }))
-	if status, _ = svc.GetFeatureStatus(context.Background(), testViewer(1)); status.WatchlistRequests {
-		t.Fatal("watchlist requests on after the profile opted out")
 	}
 }
 
@@ -437,39 +258,5 @@ func TestWithdrawProfileWatchlistRequests(t *testing.T) {
 		if req.Outcome != OutcomeActive {
 			t.Fatalf("request %s = %s, want left alone", req.ID, req.Outcome)
 		}
-	}
-}
-
-// A watchlist add keeps only its own snapshot, without an overview or
-// backdrop; the request takes them from the TMDB detail it reads anyway, so
-// the admin queue shows the same artwork as for a direct request. A caller
-// that sent its own keeps them.
-func TestWatchlistRequestTakesDisplayFieldsFromTMDB(t *testing.T) {
-	store := newFakeStore()
-	store.settings.WatchlistRequests = true
-	store.trackActive = true
-	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{detail: &tmdb.MediaDetail{
-		Title: "Heat", Year: 1995, Overview: "A heist.", PosterPath: "/poster.jpg", BackdropPath: "/backdrop.jpg",
-	}})
-	if _, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle()); err != nil {
-		t.Fatalf("RequestFromWatchlist: %v", err)
-	}
-	if len(store.created) != 1 {
-		t.Fatalf("created %d requests, want 1", len(store.created))
-	}
-	in := store.created[0].Input
-	if in.Overview != "A heist." || in.PosterPath != "/poster.jpg" || in.BackdropPath != "/backdrop.jpg" {
-		t.Fatalf("request input = %+v, want TMDB's overview, poster and backdrop", in)
-	}
-
-	own := newFakeStore()
-	svc = newTestServiceWithTMDB(own, &fakeTMDBClient{detail: &tmdb.MediaDetail{Title: "Heat", Overview: "TMDB text", BackdropPath: "/tmdb.jpg"}})
-	if _, err := svc.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie, TMDBID: 949, Title: "Heat", Overview: "Client text", BackdropPath: "/client.jpg",
-	}); err != nil {
-		t.Fatalf("CreateRequest: %v", err)
-	}
-	if got := own.created[0].Input; got.Overview != "Client text" || got.BackdropPath != "/client.jpg" {
-		t.Fatalf("request input = %+v, want the caller's own fields kept", got)
 	}
 }

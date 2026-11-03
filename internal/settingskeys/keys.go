@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 18
+const Revision = 24
 
 // Setting keys, one constant per definition.
 const (
@@ -49,6 +49,12 @@ const (
 	PlaybackAutoSkipIntro = "playback.auto_skip_intro"
 	// Auto-skip recaps
 	PlaybackAutoSkipRecap = "playback.auto_skip_recap"
+	// Lower quality when buffering
+	PlaybackBufferingQualityMode = "playback.buffering_quality_mode"
+	// Cellular maximum bitrate
+	PlaybackCellularMaxBitrateKbps = "playback.cellular_max_bitrate_kbps"
+	// Cellular quality
+	PlaybackCellularPreferredQuality = "playback.cellular_preferred_quality"
 	// Skip intros
 	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
@@ -59,6 +65,10 @@ const (
 	PlaybackPreferredQuality = "playback.preferred_quality"
 	// Show forced subtitles
 	PlaybackShowForcedSubtitles = "playback.show_forced_subtitles"
+	// Show marker confidence
+	PlaybackShowMarkerConfidence = "playback.show_marker_confidence"
+	// Show marker source
+	PlaybackShowMarkerSource = "playback.show_marker_source"
 	// Subtitle appearance
 	PlaybackSubtitleAppearance = "playback.subtitle_appearance"
 	// Preferred subtitle language
@@ -171,11 +181,16 @@ var Remote = []string{
 	PlaybackAutoSkipCredits,
 	PlaybackAutoSkipIntro,
 	PlaybackAutoSkipRecap,
+	PlaybackBufferingQualityMode,
+	PlaybackCellularMaxBitrateKbps,
+	PlaybackCellularPreferredQuality,
 	PlaybackIntroSkipMode,
 	PlaybackMaxBitrateKbps,
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
 	PlaybackShowForcedSubtitles,
+	PlaybackShowMarkerConfidence,
+	PlaybackShowMarkerSource,
 	PlaybackSubtitleAppearance,
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,

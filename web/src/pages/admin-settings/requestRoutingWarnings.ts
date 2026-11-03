@@ -56,6 +56,7 @@ type IncludeField = (typeof LIST_CONDITION_FIELDS)[keyof typeof LIST_CONDITION_F
 const SINGLE_VALUED: ReadonlySet<IncludeField> = new Set([
   "original_languages",
   "requester_user_ids",
+  "series_statuses",
 ]);
 
 const KNOWN_KEYS = new Set<string>([

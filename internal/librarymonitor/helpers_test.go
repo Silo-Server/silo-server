@@ -302,7 +302,7 @@ func (r *fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*sca
 	return r.record(changeFile, req.Path)
 }
 
-func (r *fakeResolver) ResolveVanishedPath(_ context.Context, path, _ string) (*scantrigger.Target, error) {
+func (r *fakeResolver) ResolveVanishedFile(_ context.Context, path, _ string) (*scantrigger.Target, error) {
 	return r.record(changeVanishedFile, path)
 }
 

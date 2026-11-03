@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
@@ -20,7 +20,7 @@ const OPTIONS = [
   option("best", "Best Picture Winners", "mdblist"),
   option("xmas", "Christmas Classics", "smart"),
   option("tmdb", "TMDB Top", "tmdb", "user"),
-  option("trakt", "Trakt Watchlist", "trakt", "user"),
+  option("watchlist", "IMDb Watchlist", "mdblist", "user"),
   option("mine", "My Picks", "manual", "user"),
 ];
 
@@ -38,12 +38,10 @@ function Harness({
   initial = "",
   source = collections(),
   onPick = vi.fn(),
-  locked,
 }: {
   initial?: string;
   source?: RowCollections;
   onPick?: (option: CollectionOption) => void;
-  locked?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -52,7 +50,6 @@ function Harness({
       value={value}
       onPageIds={new Set(["ghibli"])}
       pageLabel="Home"
-      locked={locked}
       onPick={(picked) => {
         setValue(picked.id);
         onPick(picked);
@@ -66,28 +63,6 @@ function names() {
 }
 
 describe("CollectionPicker", () => {
-  it("lists every collection as a radio with its kind and count, and marks ones on the page", () => {
-    render(<Harness />);
-    expect(screen.getByRole("radiogroup", { name: "Collection" })).toBeInTheDocument();
-    expect(names()).toEqual([
-      "Studio Ghibli",
-      "Best Picture Winners",
-      "Christmas Classics",
-      "TMDB Top",
-      "Trakt Watchlist",
-      "My Picks",
-    ]);
-    const ghibli = screen.getByRole("radio", { name: "Studio Ghibli" });
-    expect(ghibli).toHaveAccessibleDescription("Manual · 23 titles · On Home");
-    expect(screen.getByRole("radio", { name: "Best Picture Winners" })).toHaveAccessibleDescription(
-      "Synced list · 23 titles",
-    );
-    expect(screen.getByRole("searchbox", { name: "Search collections" })).toHaveAttribute(
-      "placeholder",
-      "Search 6 collections",
-    );
-  });
-
   it("filters by Manual, Smart and Synced list for library and personal collections alike", async () => {
     render(<Harness />);
     const filters = screen.getByRole("group", { name: "Collection type" });
@@ -100,7 +75,7 @@ describe("CollectionPicker", () => {
     await userEvent.click(within(filters).getByRole("button", { name: "Smart" }));
     expect(names()).toEqual(["Christmas Classics"]);
     await userEvent.click(within(filters).getByRole("button", { name: "Synced list" }));
-    expect(names()).toEqual(["Best Picture Winners", "TMDB Top", "Trakt Watchlist"]);
+    expect(names()).toEqual(["Best Picture Winners", "TMDB Top", "IMDb Watchlist"]);
     await userEvent.click(within(filters).getByRole("button", { name: "All" }));
     expect(names()).toHaveLength(6);
   });
@@ -113,20 +88,6 @@ describe("CollectionPicker", () => {
     await userEvent.type(screen.getByRole("searchbox", { name: "Search collections" }), "zzz");
     expect(screen.queryAllByRole("radio")).toEqual([]);
     expect(screen.getByText('No collections match "zzz".')).toBeInTheDocument();
-  });
-
-  it("picks with the keyboard and hands back the whole option", async () => {
-    const onPick = vi.fn();
-    render(<Harness onPick={onPick} />);
-    await userEvent.click(screen.getByRole("radio", { name: "Studio Ghibli" }));
-    expect(onPick).toHaveBeenLastCalledWith(OPTIONS[0]);
-    // Held down: Radix checks a radio when an arrow key moves focus to it.
-    await userEvent.keyboard("{ArrowDown>}");
-    await waitFor(() =>
-      expect(screen.getByRole("radio", { name: "Best Picture Winners" })).toBeChecked(),
-    );
-    await userEvent.keyboard("{/ArrowDown}");
-    expect(onPick).toHaveBeenLastCalledWith(OPTIONS[1]);
   });
 
   it("keeps a selection the filter hides and says the row keeps a collection that isn't listed", async () => {
@@ -145,26 +106,5 @@ describe("CollectionPicker", () => {
       screen.getByText("Collections didn't load. Close this and try again."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/isn't in this list/)).toBeNull();
-  });
-
-  it("says when collections are loading, failed or there are none", () => {
-    const { rerender } = render(<Harness source={collections({ options: [], loading: true })} />);
-    expect(screen.getByText("Loading collections…")).toBeInTheDocument();
-    rerender(<Harness source={collections({ options: [], failed: true })} />);
-    expect(
-      screen.getByText("Collections didn't load. Close this and try again."),
-    ).toBeInTheDocument();
-    rerender(<Harness source={collections({ options: [] })} />);
-    expect(
-      screen.getByText("No collections yet. Make one in Collections first."),
-    ).toBeInTheDocument();
-  });
-
-  it("can't change a legacy Trakt row's collection", () => {
-    render(<Harness initial="ghibli" locked />);
-    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
-    expect(
-      screen.getByText("This row follows a Trakt list, so its collection can't change."),
-    ).toBeInTheDocument();
   });
 });

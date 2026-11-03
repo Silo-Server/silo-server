@@ -27,6 +27,8 @@ import type {
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
 import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
+import { invalidateAdminDefaultQueries } from "../settingValues";
+import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
 import { toast } from "sonner";
 
 /**
@@ -43,6 +45,22 @@ export const OVERLAY_CONFIG_SERVER_KEYS = [
 
 function affectsOverlayConfig(key: string) {
   return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
+}
+
+function invalidateAdminDefaults(
+  queryClient: ReturnType<typeof useQueryClient>,
+  serverSettingKeys: string[],
+) {
+  return serverSettingKeys.flatMap((serverSettingKey) => {
+    const key = adminDefaultSettingFor(serverSettingKey);
+    return key ? [invalidateAdminDefaultQueries(queryClient, key)] : [];
+  });
+}
+
+// Connect Apps connect-info reads the compat settings and, for
+// password_login_available, the server-wide local password switch.
+function affectsConnectInfo(key: string) {
+  return key.startsWith("jellyfin_compat.") || key === "auth.local_password_login";
 }
 
 /* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
@@ -66,7 +84,7 @@ function useRetainedSettingsBaseline(
     },
   };
 }
-/* eslint-enable react-hooks/refs */
+/* eslint-enable react-hooks/refs -- ends the baseline-capture exception */
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
@@ -242,10 +260,12 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
-          // The user-facing Connect Apps card reads the same settings and
-          // caches them for minutes, so it has to drop its copy too.
-          queryClient.invalidateQueries({ queryKey: compatKeys.all }),
         );
+      }
+      if (keys.some(affectsConnectInfo)) {
+        // The user-facing Connect Apps card reads the same settings and
+        // caches them for minutes, so it has to drop its copy too.
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
       }
       if (keys.includes("server.public_url")) {
         // Invitation and reset links are built on the public URL, so the
@@ -272,6 +292,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, keys));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(profileContext)) retained.reset();
     },
@@ -363,6 +384,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         );
       }
+      if (affectsConnectInfo(variables.key)) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
+      }
       if (variables.key.startsWith("catalog.search.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
@@ -379,6 +403,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, [variables.key]));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(variables.profileContext)) retained.reset();
     },

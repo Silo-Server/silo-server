@@ -4,6 +4,12 @@ import type { GalleryPreset, RecipeCatalogResponse, RecipeDefinition } from "@/l
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 import { rowKindLabel } from "./catalog";
 import { collectionIdOf, withPickedCollection, withQueryDefinition } from "./payloads";
+import {
+  customHolidayProblem,
+  customHolidaysOf,
+  holidayDatesProblem,
+  themeDatesOf,
+} from "./seasonal";
 import { stableJson } from "./stableJson";
 import type { HomeRow, Surface } from "./types";
 import { applyVariant, variantFamily, variantOf } from "./variants";
@@ -147,9 +153,18 @@ export function savedTitle(
 export function canSaveDraft(draft: RowDraft, surface: Surface = "profile"): boolean {
   const { config } = draft;
   switch (draft.sectionType) {
-    case "seasonal_themed":
-      // An empty holiday list with no legacy theme.
-      return !(Array.isArray(config.enabled_themes) && config.enabled_themes.length === 0);
+    case "seasonal_themed": {
+      // Every custom holiday and every holiday's own dates complete, and at
+      // least one holiday of either kind unless a legacy single theme remains.
+      const custom = customHolidaysOf(config);
+      if (custom.some((holiday) => customHolidayProblem(holiday) !== null)) return false;
+      const dates = Object.values(themeDatesOf(config));
+      if (dates.some((window) => holidayDatesProblem(window) !== null)) return false;
+      return (
+        custom.length > 0 ||
+        !(Array.isArray(config.enabled_themes) && config.enabled_themes.length === 0)
+      );
+    }
     case "collection":
       return collectionIdOf(config, surface) !== "";
     case "admin_curated_list":

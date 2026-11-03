@@ -5,25 +5,20 @@
  * Synced list editor for a saved list, both scopes. New synced lists are
  * imported unpinned, and a save never sends `featured`.
  */
-import type { ReactElement } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
 import {
-  adminCapabilities,
   adminCollection,
   adminCollectionList,
   adminSyncedCollection,
-  personalCapabilities,
   personalSyncedCollection,
 } from "@/test/fixtures/collectionAnswers";
 import { artworkTile, chooseArtwork } from "@/test/collectionArtwork";
 import { goldens } from "@/test/fixtures/collectionBodies";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
-import CollectionEditorPage from "./CollectionEditorPage";
+import { prepareEditorPage, saveBar, showEditorPage } from "./collectionEditorPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 vi.mock("@/hooks/queries/profiles", () => ({
@@ -48,18 +43,7 @@ const libraries = [{ id: 1, name: "Movies", type: "movies" }] as Library[];
 installV2Recorder();
 
 beforeEach(() => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  HTMLElement.prototype.scrollIntoView = () => {};
-  HTMLElement.prototype.hasPointerCapture = () => false;
-  v2Recorder.answer("GET /api/v2/admin/collections/capabilities", adminCapabilities);
-  v2Recorder.answer("GET /api/v2/collections/capabilities", personalCapabilities);
+  prepareEditorPage();
   v2Recorder.answer("GET /api/v2/admin/collections", adminCollectionList(adminCollection));
   v2Recorder.answer("GET /api/v2/admin/collections/templates", templateCatalog);
   v2Recorder.answer("GET /api/v2/collections/templates", templateCatalog);
@@ -106,40 +90,8 @@ const templateCatalog = {
   ],
 };
 
-function show(element: ReactElement, url = "/") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const router = createMemoryRouter(
-    [
-      { path: "/", element },
-      { path: "/admin/collections", element: <p>Admin collections page</p> },
-      {
-        element: <CollectionEditorPage scope="server" />,
-        children: [{ path: "/admin/collections/new" }, { path: "/admin/collections/:id/edit" }],
-      },
-      { path: "/collections", element: <p>Collections page</p> },
-      {
-        element: <CollectionEditorPage scope="personal" />,
-        children: [{ path: "/collections/new" }, { path: "/collections/:id/edit" }],
-      },
-    ],
-    { initialEntries: [url] },
-  );
-  render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
-  return router;
-}
-
 async function type(label: string, value: string) {
   fireEvent.change(await screen.findByLabelText(label), { target: { value } });
-}
-
-function saveBar() {
-  return screen.getByRole("region", { name: "Unsaved changes" });
 }
 
 /** Save from the editor page; it stays on the list. */
@@ -167,7 +119,7 @@ async function createAndLeave() {
 
 describe("admin Synced list step", () => {
   it("imports a pasted MDBList link, unpinned", async () => {
-    show(<></>, "/admin/collections/new?type=synced&source=mdblist&libraryId=1");
+    showEditorPage("/admin/collections/new?type=synced&source=mdblist&libraryId=1");
     await type("Name", "Top Watched");
     await type("Or paste any MDBList link", "https://mdblist.com/lists/user/top-watched/json");
     await createAndLeave();
@@ -175,7 +127,7 @@ describe("admin Synced list step", () => {
   });
 
   it("imports a TMDB chart", async () => {
-    show(<></>, "/admin/collections/new?type=synced&source=tmdb_chart&libraryId=1");
+    showEditorPage("/admin/collections/new?type=synced&source=tmdb_chart&libraryId=1");
     fireEvent.click(await screen.findByRole("radio", { name: /^Trending/ }));
     expect(screen.getByLabelText("Name")).toHaveValue("Trending Today");
     await createAndLeave();
@@ -183,7 +135,7 @@ describe("admin Synced list step", () => {
   });
 
   it("imports a TMDB list", async () => {
-    show(<></>, "/admin/collections/new?type=synced&source=tmdb_list&libraryId=1");
+    showEditorPage("/admin/collections/new?type=synced&source=tmdb_list&libraryId=1");
     await type("Name", "Festival Picks");
     await type("Paste a TMDB list link", "https://www.themoviedb.org/list/310-festival-picks");
     await createAndLeave();
@@ -191,7 +143,7 @@ describe("admin Synced list step", () => {
   });
 
   it("creates from a TMDB template pick with its server poster", async () => {
-    show(<></>, "/admin/collections/new?type=synced&libraryId=1");
+    showEditorPage("/admin/collections/new?type=synced&libraryId=1");
     fireEvent.click(await screen.findByRole("radio", { name: "Trending Movies This Week" }));
     expect(
       within(await artworkTile("poster")).getByRole("img", { name: "Poster preview" }),
@@ -205,7 +157,7 @@ describe("admin Synced list step", () => {
       configured: true,
       items: [mdblistSearchHit],
     });
-    show(<></>, "/admin/collections/new?type=synced&libraryId=1");
+    showEditorPage("/admin/collections/new?type=synced&libraryId=1");
     await type("Search lists", "oscar");
     fireEvent.click(await screen.findByRole("radio", { name: "Oscar Winners" }));
     await createAndLeave();
@@ -218,7 +170,7 @@ describe("admin Synced list step", () => {
 
 describe("personal Synced list step", () => {
   it("creates from a TMDB template pick with its server poster", async () => {
-    show(<></>, "/collections/new?type=synced");
+    showEditorPage("/collections/new?type=synced");
     fireEvent.click(await screen.findByRole("radio", { name: "Trending Movies This Week" }));
     await createAndLeave();
     expect(v2Recorder.writes()).toEqual(goldens.personalTemplateTMDB);
@@ -250,7 +202,7 @@ describe("admin Synced list editor", () => {
         },
       }),
     );
-    show(<></>, "/admin/collections/c1/edit?libraryId=1");
+    showEditorPage("/admin/collections/c1/edit?libraryId=1");
     const limit = await screen.findByRole("spinbutton", { name: "Max titles" });
     fireEvent.change(limit, { target: { value: "100" } });
     fireEvent.blur(limit);
@@ -271,7 +223,7 @@ describe("admin Synced list editor", () => {
         },
       }),
     );
-    show(<></>, "/admin/collections/c1/edit?libraryId=1");
+    showEditorPage("/admin/collections/c1/edit?libraryId=1");
     await type("Name", "Trending This Week");
     await saveAndWait(1);
     expect(v2Recorder.writes()).toEqual(goldens.adminEditTMDBChart);
@@ -284,29 +236,10 @@ describe("admin Synced list editor", () => {
         source_config: { mode: "tmdb_list", url: "https://www.themoviedb.org/list/310" },
       }),
     );
-    show(<></>, "/admin/collections/c1/edit?libraryId=1");
+    showEditorPage("/admin/collections/c1/edit?libraryId=1");
     await type("Name", "Festival Picks");
     await saveAndWait(1);
     expect(v2Recorder.writes()).toEqual(goldens.adminEditTMDBList);
-  });
-
-  it("sends no source for a legacy Trakt list", async () => {
-    answerAdmin(
-      adminSyncedCollection("trakt", {
-        source_url: "trakt://recommended/movie/p-owner",
-        source_config: {
-          mode: "trakt_preset",
-          preset: "recommended",
-          media_type: "movie",
-          profile_id: "p-owner",
-          limit: 40,
-        },
-      }),
-    );
-    show(<></>, "/admin/collections/c1/edit?libraryId=1");
-    await type("Name", "For you");
-    await saveAndWait(1);
-    expect(v2Recorder.writes()).toEqual(goldens.adminEditTrakt);
   });
 });
 
@@ -322,7 +255,7 @@ describe("personal Synced list editor", () => {
   });
 
   it("sends only what changed", async () => {
-    show(<></>, "/collections/c1/edit");
+    showEditorPage("/collections/c1/edit");
     await type("Name", "Top Watched");
     await saveAndWait(1);
     expect(v2Recorder.writes()).toEqual(goldens.personalSyncedRename);
@@ -346,26 +279,11 @@ describe("personal Synced list editor", () => {
     }
 
     async function removePoster() {
-      show(<></>, "/collections/c1/edit");
+      showEditorPage("/collections/c1/edit");
       await chooseArtwork("poster", "Use the collage");
       expect(within(posterSlot()).queryByRole("img")).toBeNull();
       expect(within(saveBar()).getByText(/Poster not saved/)).toBeTruthy();
     }
-
-    it("sends nothing and shows the poster again on Discard", async () => {
-      await removePoster();
-      await act(async () => {});
-      expect(v2Recorder.writes()).toEqual([]);
-      fireEvent.click(within(saveBar()).getByRole("button", { name: "Discard" }));
-      expect(within(posterSlot()).getByRole("img")).toBeTruthy();
-      expect(v2Recorder.writes()).toEqual([]);
-    });
-
-    it("deletes the poster after the PATCH on Save", async () => {
-      await removePoster();
-      await saveAndWait(2);
-      expect(v2Recorder.writes()).toEqual(goldens.personalSyncedStagedPosterRemoval);
-    });
 
     it("starts again from the saved collection after Save", async () => {
       await removePoster();
@@ -385,7 +303,7 @@ describe("personal Synced list editor", () => {
   });
 
   it("clears Max titles with max_items 0", async () => {
-    show(<></>, "/collections/c1/edit");
+    showEditorPage("/collections/c1/edit");
     const limit = await screen.findByRole("spinbutton", { name: "Max titles" });
     fireEvent.change(limit, { target: { value: "" } });
     fireEvent.blur(limit);

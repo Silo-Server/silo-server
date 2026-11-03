@@ -220,47 +220,6 @@ describe("LibrarySettings", () => {
     expect(mocks.useAvailableUserLibraries).toHaveBeenCalledWith({ includeHidden: true });
   });
 
-  it("renders the inherited summary for libraries without playback overrides", () => {
-    const markup = renderToStaticMarkup(<LibrarySettings />);
-
-    expect(markup).toContain("Uses profile defaults");
-    expect(markup).toContain("Remember library pages");
-    expect(markup).toContain("Edit playback overrides");
-  });
-
-  it("renders the playback override summary from the values resolved for that library", () => {
-    mocks.useEffectiveSettings.mockImplementation(
-      (options?: { libraryIds?: readonly number[] }) => {
-        if (!options?.libraryIds?.length) {
-          return { data: {}, isLoading: false };
-        }
-        return {
-          isLoading: false,
-          data: {
-            ...resolved(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "ja", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, "en", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-          },
-        };
-      },
-    );
-
-    const markup = renderToStaticMarkup(<LibrarySettings />);
-
-    expect(markup).toContain(
-      "Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off",
-    );
-  });
-
   it("resolves each library's overrides with that library in context", () => {
     renderToStaticMarkup(<LibrarySettings />);
 

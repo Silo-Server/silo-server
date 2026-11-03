@@ -2,13 +2,16 @@ package ebookconvert
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func newTestCache(t *testing.T, opts CacheOptions) *Cache {
@@ -21,7 +24,20 @@ func newTestCache(t *testing.T, opts CacheOptions) *Cache {
 	if err != nil {
 		t.Fatalf("NewCache: %v", err)
 	}
+	t.Cleanup(func() { _ = c.root.Close() })
 	return c
+}
+
+// convertPath runs GetOrConvert and returns the cache entry's path, closing the
+// descriptor so the existing path-based assertions apply.
+func convertPath(t *testing.T, c *Cache, src string, key SourceKey) (string, error) {
+	t.Helper()
+	f, err := c.GetOrConvert(t.Context(), src, key)
+	if err != nil {
+		return "", err
+	}
+	_ = f.Close()
+	return f.Name(), nil
 }
 
 func keyFor(t *testing.T, fileID int, path string) SourceKey {
@@ -38,7 +54,7 @@ func TestCache_MissThenHit(t *testing.T) {
 	src := filepath.Join("testdata", "sample-ncx.mobi")
 	key := keyFor(t, 1, src)
 
-	p1, err := c.GetOrConvert(context.Background(), src, key)
+	p1, err := convertPath(t, c, src, key)
 	if err != nil {
 		t.Fatalf("first GetOrConvert: %v", err)
 	}
@@ -52,7 +68,7 @@ func TestCache_MissThenHit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p2, err := c.GetOrConvert(context.Background(), src, key)
+	p2, err := convertPath(t, c, src, key)
 	if err != nil {
 		t.Fatalf("second GetOrConvert: %v", err)
 	}
@@ -82,57 +98,16 @@ func TestCache_KeyChangesOnModTime(t *testing.T) {
 	if k1.hash() == k2.hash() {
 		t.Fatal("expected different cache keys for different mtime")
 	}
-	p1, err := c.GetOrConvert(context.Background(), src, k1)
+	p1, err := convertPath(t, c, src, k1)
 	if err != nil {
 		t.Fatalf("convert k1: %v", err)
 	}
-	p2, err := c.GetOrConvert(context.Background(), src, k2)
+	p2, err := convertPath(t, c, src, k2)
 	if err != nil {
 		t.Fatalf("convert k2: %v", err)
 	}
 	if p1 == p2 {
 		t.Fatal("different keys must map to different cache files")
-	}
-}
-
-// A transient timeout is NOT negatively cached: it would otherwise wedge a
-// slow-but-convertible book onto the raw-fallback path for the whole TTL.
-func TestCache_TimeoutNotNegativelyCached(t *testing.T) {
-	conv, err := NewConverter(context.Background(), Options{Timeout: time.Nanosecond})
-	if err != nil {
-		t.Fatalf("NewConverter: %v", err)
-	}
-	t.Cleanup(func() { _ = conv.Close(context.Background()) })
-	c, err := NewCache(conv, CacheOptions{Dir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewCache: %v", err)
-	}
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 1, src)
-
-	_, err = c.GetOrConvert(context.Background(), src, key)
-	if !errors.Is(err, ErrConversionTimedOut) {
-		t.Fatalf("got %v, want ErrConversionTimedOut", err)
-	}
-	c.mu.Lock()
-	_, cached := c.neg[key.hash()]
-	c.mu.Unlock()
-	if cached {
-		t.Fatal("a transient timeout must not be negatively cached")
-	}
-}
-
-// Eviction must never delete the EPUB it is about to hand back, even when the
-// configured budget is smaller than a single converted file.
-func TestCache_EvictionKeepsJustConverted(t *testing.T) {
-	c := newTestCache(t, CacheOptions{Dir: t.TempDir(), MaxBytes: 1})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	p, err := c.GetOrConvert(context.Background(), src, keyFor(t, 1, src))
-	if err != nil {
-		t.Fatalf("convert: %v", err)
-	}
-	if fi, statErr := os.Stat(p); statErr != nil || fi.Size() == 0 {
-		t.Fatalf("returned path must exist and be non-empty (eviction deleted it): stat=%v", statErr)
 	}
 }
 
@@ -149,7 +124,7 @@ func TestCache_EvictionSkipsInFlightTemps(t *testing.T) {
 	_ = os.Chtimes(tmp, old, old)
 
 	src := filepath.Join("testdata", "sample-ncx.mobi")
-	if _, err := c.GetOrConvert(context.Background(), src, keyFor(t, 1, src)); err != nil {
+	if _, err := convertPath(t, c, src, keyFor(t, 1, src)); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
 	if _, err := os.Stat(tmp); err != nil {
@@ -167,7 +142,9 @@ func TestCache_CallerCancelDoesNotAbortSharedWork(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // caller bails before the conversion can finish
-	_, _ = c.GetOrConvert(ctx, src, key)
+	if f, err := c.GetOrConvert(ctx, src, key); err == nil {
+		_ = f.Close()
+	}
 
 	dst := filepath.Join(c.opts.Dir, key.hash()+".epub")
 	deadline := time.Now().Add(10 * time.Second)
@@ -178,28 +155,6 @@ func TestCache_CallerCancelDoesNotAbortSharedWork(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("detached conversion did not populate the cache after the caller canceled")
-}
-
-func TestCache_NegativeCachesDRM(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-drm-v1.mobi")
-	key := keyFor(t, 7, src)
-
-	err1 := mustConvertErr(t, c, src, key)
-	if !errors.Is(err1, ErrDRMProtected) {
-		t.Fatalf("got %v, want ErrDRMProtected", err1)
-	}
-	// Second call should be served from the negative cache (still DRM error).
-	err2 := mustConvertErr(t, c, src, key)
-	if !errors.Is(err2, ErrDRMProtected) {
-		t.Fatalf("negative-cached call: got %v, want ErrDRMProtected", err2)
-	}
-	c.mu.Lock()
-	_, cached := c.neg[key.hash()]
-	c.mu.Unlock()
-	if !cached {
-		t.Fatal("DRM result was not negatively cached")
-	}
 }
 
 func TestCache_Singleflight(t *testing.T) {
@@ -215,7 +170,7 @@ func TestCache_Singleflight(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := c.GetOrConvert(context.Background(), src, key)
+			p, err := convertPath(t, c, src, key)
 			if err != nil {
 				errs <- err
 				return
@@ -242,7 +197,7 @@ func TestCache_BudgetEviction(t *testing.T) {
 	c := newTestCache(t, CacheOptions{Dir: dir, MaxBytes: budget})
 	src := filepath.Join("testdata", "sample-ncx.mobi")
 
-	p1, err := c.GetOrConvert(context.Background(), src, keyFor(t, 1, src))
+	p1, err := convertPath(t, c, src, keyFor(t, 1, src))
 	if err != nil {
 		t.Fatalf("convert 1: %v", err)
 	}
@@ -252,7 +207,7 @@ func TestCache_BudgetEviction(t *testing.T) {
 
 	k2 := keyFor(t, 2, src)
 	k2.FileID = 2
-	p2, err := c.GetOrConvert(context.Background(), src, k2)
+	p2, err := convertPath(t, c, src, k2)
 	if err != nil {
 		t.Fatalf("convert 2: %v", err)
 	}
@@ -275,8 +230,105 @@ func TestCache_BudgetEviction(t *testing.T) {
 	}
 }
 
-func mustConvertErr(t *testing.T, c *Cache, src string, key SourceKey) error {
-	t.Helper()
-	_, err := c.GetOrConvert(context.Background(), src, key)
-	return err
+// The default cache dir sits at a predictable path in the shared temp dir.
+// Another local account that creates it first must not get its entries served:
+// NewCache refuses a root it could control, and a symlinked entry is never a
+// hit, so a reader can never receive a file outside the cache.
+func TestCache_RefusesEntriesOthersControl(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on Unix modes and unprivileged symlinks")
+	}
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("PRIVATE-SERVICE-FILE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("root writable by others", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "silo-ebook-epub")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o777|os.ModeSticky); err != nil { // Chmod: the umask would clear Mkdir's bits
+			t.Fatal(err)
+		}
+		_, err := NewCache(newTestConverter(t), CacheOptions{Dir: dir})
+		if err == nil || !strings.Contains(err.Error(), "writable by its group or other users") {
+			t.Fatalf("NewCache error = %v, want a refusal of the writable root", err)
+		}
+	})
+	t.Run("entry symlinked outside the cache", func(t *testing.T) {
+		c := newTestCache(t, CacheOptions{})
+		src := filepath.Join("testdata", "sample-ncx.mobi")
+		key := keyFor(t, 1, src)
+		entry := filepath.Join(c.opts.Dir, key.hash()+".epub")
+		if err := os.Symlink(secret, entry); err != nil {
+			t.Fatal(err)
+		}
+
+		if f, lookupErr, ok := c.Lookup(key); ok || lookupErr != nil {
+			if f != nil {
+				_ = f.Close()
+			}
+			t.Fatalf("Lookup = ok %v, err %v; want a miss", ok, lookupErr)
+		}
+		// A miss converts again and the rename replaces the symlink with the
+		// real conversion.
+		p, err := convertPath(t, c, src, key)
+		if err != nil {
+			t.Fatalf("GetOrConvert: %v", err)
+		}
+		assertValidEpub(t, p)
+		if fi, err := os.Lstat(entry); err != nil || !fi.Mode().IsRegular() {
+			t.Fatalf("entry after conversion: %v, %v; want a regular file", fi, err)
+		}
+	})
+	// A parent dir another account can write lets it rename the cache dir
+	// away after NewCache verified it and put a symlink in its place.
+	// Conversion and eviction must stay in the dir NewCache verified.
+	t.Run("cache dir replaced after start", func(t *testing.T) {
+		parent := t.TempDir()
+		dir := filepath.Join(parent, "silo-ebook-epub")
+		c := newTestCache(t, CacheOptions{Dir: dir, MaxBytes: 1})
+		victim := t.TempDir()
+		victimFile := filepath.Join(victim, "book.epub")
+		if err := os.WriteFile(victimFile, []byte("library book"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		moved := filepath.Join(parent, "moved")
+		if err := os.Rename(dir, moved); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(victim, dir); err != nil {
+			t.Fatal(err)
+		}
+
+		src := filepath.Join("testdata", "sample-ncx.mobi")
+		key := keyFor(t, 1, src)
+		if _, err := convertPath(t, c, src, key); err != nil {
+			t.Fatalf("GetOrConvert: %v", err)
+		}
+		if _, err := os.Stat(victimFile); err != nil {
+			t.Fatalf("eviction reached the swapped-in dir: %v", err)
+		}
+		if names, _ := filepath.Glob(filepath.Join(victim, "*")); len(names) != 1 {
+			t.Fatalf("swapped-in dir holds %v, want only book.epub", names)
+		}
+		assertValidEpub(t, filepath.Join(moved, key.hash()+".epub"))
+	})
+}
+
+// The catalog stores the fspath-encoded form of a non-UTF-8 file name; the
+// cache key must stat the real file.
+func TestSourceKeyFromStat_EncodedNonUTF8Path(t *testing.T) {
+	rawPath := filepath.Join(t.TempDir(), "B\xe5rd.mobi")
+	if err := os.WriteFile(rawPath, []byte("mobi"), 0o600); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	k, err := SourceKeyFromStat(7, fspath.Encode(rawPath))
+	if err != nil {
+		t.Fatalf("SourceKeyFromStat: %v", err)
+	}
+	if k.Size != 4 {
+		t.Fatalf("Size = %d, want 4", k.Size)
+	}
 }

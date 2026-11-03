@@ -111,6 +111,21 @@ export async function listNotificationSeries(
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
   };
 }
+/** Mutes (or unmutes) new-episode notifications for one series. */
+export async function setNotificationSeriesMuted(
+  seriesId: string,
+  muted: boolean,
+  profileContext = captureNotificationAuthority(),
+) {
+  requireNotificationAuthority(profileContext);
+  await v2(
+    muted
+      ? "PUT /api/v2/notifications/series/{series_id}/mute"
+      : "DELETE /api/v2/notifications/series/{series_id}/mute",
+    { path: { series_id: seriesId }, profileContext, retryAuthentication: false },
+  );
+  requireNotificationAuthority(profileContext);
+}
 export async function unreadNotificationCount(profileContext = captureNotificationAuthority()) {
   requireNotificationAuthority(profileContext);
   const body = await v2("GET /api/v2/notifications/unread-count", { profileContext });

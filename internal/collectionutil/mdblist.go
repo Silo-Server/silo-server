@@ -140,6 +140,16 @@ const (
 // MDBListMaxEntries applies. rawURL may be the list page or its /json form and
 // is validated with CanonicalMDBListURL before any request is made.
 func FetchMDBListJSON[T any](ctx context.Context, client *http.Client, rawURL string, maxEntries int) ([]T, error) {
+	return FetchMDBListJSONQuery[T](ctx, client, rawURL, maxEntries, nil)
+}
+
+// MDBListIMDbPopularOrder asks the /json feed for the list in IMDb popularity
+// (MovieMeter) order, most popular first.
+var MDBListIMDbPopularOrder = url.Values{"sort": {"imdbpopular"}, "sortorder": {"asc"}}
+
+// FetchMDBListJSONQuery is FetchMDBListJSON with extra query parameters sent
+// on every page request, such as MDBListIMDbPopularOrder.
+func FetchMDBListJSONQuery[T any](ctx context.Context, client *http.Client, rawURL string, maxEntries int, extra url.Values) ([]T, error) {
 	listURL, err := CanonicalMDBListURL(rawURL)
 	if err != nil {
 		return nil, err
@@ -156,6 +166,9 @@ func FetchMDBListJSON[T any](ctx context.Context, client *http.Client, rawURL st
 	for len(entries) < maxEntries {
 		pageSize := min(mdblistJSONPageSize, maxEntries-len(entries))
 		query := parsed.Query()
+		for key, values := range extra {
+			query[key] = values
+		}
 		query.Set("limit", strconv.Itoa(pageSize))
 		query.Set("offset", strconv.Itoa(len(entries)))
 		parsed.RawQuery = query.Encode()

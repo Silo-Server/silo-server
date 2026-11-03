@@ -12,12 +12,14 @@ type RouteEventBody = components["schemas"]["PlaybackRouteEventBody"];
  * Reports a route event for a v2 attempt. Diagnostics never control
  * playback: the event carries a fresh id, is sent once, and any failure is
  * swallowed. A lost 202 is not retried by this helper; a caller that does
- * retry must reuse the same event_id.
+ * retry must reuse the same event_id. `keepalive` lets the request outlive
+ * a page that is closing.
  */
 export async function reportRouteEventV2(
   config: PlayerConfig,
   installationId: string,
   event: RouteEventV3,
+  { keepalive = false }: { keepalive?: boolean } = {},
 ): Promise<void> {
   const payload: RouteEventBody = {
     ...event,
@@ -29,7 +31,7 @@ export async function reportRouteEventV2(
       method: "POST",
       headers: { Accept: "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
+      ...(keepalive ? { keepalive: true } : { signal: AbortSignal.timeout(5000) }),
     });
   } catch {
     // Dropped, never retried.
@@ -41,8 +43,9 @@ export function reportSessionRouteEventV2(
   config: PlayerConfig,
   sessionId: string,
   event: RouteEventV3,
+  options?: { keepalive?: boolean },
 ): Promise<void> {
   const installationId = sessionInstallation(sessionId);
   if (!installationId) return Promise.resolve();
-  return reportRouteEventV2(config, installationId, event);
+  return reportRouteEventV2(config, installationId, event, options);
 }

@@ -108,7 +108,6 @@ const FIXTURE_ANSWERS: Record<string, unknown> = {
   "POST /api/v2/admin/collections/import/mdblist": adminImport,
   "POST /api/v2/admin/collections/import/tmdb": adminImport,
   "POST /api/v2/admin/collections/import/tmdb-list": adminImport,
-  "POST /api/v2/admin/collections/import/trakt": adminImport,
   "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job": adminTemplateJobAccepted,
   "GET /api/v2/admin/collection-jobs/{job_id}": getAdminTemplateJobCompleted,
   "GET /api/v2/collections": listCollectionsOk,

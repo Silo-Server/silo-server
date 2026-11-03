@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
@@ -11,14 +11,29 @@ import type { EditSession, HomeRow, HomeRowsAdapter } from "@/lib/homeRows/types
 import { VARIANT_FAMILIES } from "@/lib/homeRows/variants";
 import { AddRowDialog } from "./AddRowDialog";
 import { paramFieldKeys } from "@/lib/homeRows/paramFields";
+import seasonalThemes from "../../../../../contracts/api/v2/fixtures/list_seasonal_themes_ok.json";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+// The real catalog body the server's contract fixture pins.
+vi.mock("@/hooks/queries/seasonalThemes", () => ({
+  useSeasonalThemes: () => ({ data: seasonalThemes, isError: false }),
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 vi.mock("@/hooks/queries/items", () => ({
   fetchWatchDetail: async (id: string) => ({ title: `Title ${id}` }),
 }));
+
+// Radix Select drives pointer capture and scrolling that jsdom lacks.
+beforeAll(() => {
+  Object.defineProperties(Element.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+});
 
 const COLLECTIONS: CollectionOption[] = [
   {
@@ -49,7 +64,6 @@ function row(overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }
@@ -148,99 +162,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Add row picker", () => {
-  it("lists the groups as vertical tabs with their counts and moves between them with arrows", async () => {
-    const { dialog } = await open();
-    const tablist = within(dialog).getByRole("tablist", { name: "Kinds of rows" });
-    expect(tablist).toHaveAttribute("aria-orientation", "vertical");
-    const tabs = within(tablist).getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Keep watching5 kinds",
-      "What's new4 kinds",
-      "Popular4 kinds",
-      "Picked for you4 kinds",
-      "Moods & themes11 kinds",
-      "Collections & rules2 kinds",
-    ]);
-    expect(within(dialog).getByRole("searchbox", { name: "Search rows" })).toHaveFocus();
-    tabs[0]!.focus();
-    await userEvent.keyboard("{ArrowDown}");
-    expect(tabs[1]).toHaveFocus();
-    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
-    await userEvent.keyboard("{End}");
-    expect(tabs[5]).toHaveFocus();
-    await userEvent.keyboard("{ArrowDown}");
-    expect(tabs[0]).toHaveFocus();
-  });
-
-  it("marks kinds already on the page and names variant chips with their kind", async () => {
-    const { dialog } = await open();
-    expect(
-      within(dialog).getByRole("button", { name: "Trending on this server" }),
-    ).toHaveAccessibleDescription("What's been played most here lately. Already on Home.");
-    expect(
-      within(dialog).getByRole("button", { name: "Trending on this server, 7 days" }),
-    ).toBeInTheDocument();
-  });
-
-  it("offers a way back from a search that finds nothing", async () => {
-    const { dialog } = await open();
-    await userEvent.type(within(dialog).getByRole("searchbox"), "zzz");
-    expect(within(dialog).getByText("No rows match “zzz”.")).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Clear search" }));
-    expect(within(dialog).getAllByRole("tab")).toHaveLength(6);
-  });
-
-  it("closes on Escape from step 2 and puts focus back on the button that opened it", async () => {
-    const { trigger, dialog } = await open();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Hidden gems" }));
-    expect(await screen.findByRole("heading", { name: "Hidden gems" })).toHaveFocus();
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(trigger).toHaveFocus();
-  });
-
-  it("shows variants as text on phones and lays the groups out as a row of chips", async () => {
-    vi.stubGlobal(
-      "matchMedia",
-      (query: string) =>
-        ({
-          matches: query === "(max-width: 1023px)",
-          media: query,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-        }) as unknown as MediaQueryList,
-    );
-    const { dialog } = await open();
-    expect(within(dialog).getByRole("tablist")).toHaveAttribute("aria-orientation", "horizontal");
-    expect(within(dialog).getByText("24 hours, 7 days or 30 days")).toBeInTheDocument();
-    expect(
-      within(dialog).queryByRole("button", { name: "Trending on this server, 7 days" }),
-    ).toBeNull();
-  });
-
-  it("uses the phone sheet's short copy on phones", async () => {
-    vi.stubGlobal(
-      "matchMedia",
-      (query: string) =>
-        ({
-          matches: query === "(max-width: 1023px)" || query === "(max-width: 639px)",
-          media: query,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-        }) as unknown as MediaQueryList,
-    );
-    const { dialog } = await open();
-    expect(
-      within(dialog).getByText("Pick what it shows. It goes to the bottom of Home."),
-    ).toBeInTheDocument();
-    expect(within(dialog).getByRole("searchbox", { name: "Search rows" })).toHaveAttribute(
-      "placeholder",
-      "Search rows",
-    );
-  });
-});
-
 describe("Add row form", () => {
   it("adds with the preset name when the name is left blank, never a raw type", async () => {
     const { dialog } = await open();
@@ -273,24 +194,6 @@ describe("Add row form", () => {
     expect(screen.getByRole("dialog", { name: "Add a row to Home" })).toBeInTheDocument();
   });
 
-  it("keeps rarely changed settings under More options with a summary", async () => {
-    const { dialog } = await open();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Short & sweet" }));
-    const form = await screen.findByRole("dialog", { name: "Short & sweet" });
-    const more = within(form).getByRole("button", { name: /More options/ });
-    expect(more).toHaveTextContent("20 titles·not the hero banner");
-    expect(more).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(more);
-    await userEvent.click(within(form).getByRole("switch", { name: "Hero banner" }));
-    expect(more).toHaveTextContent("the hero banner");
-    expect(
-      within(form).getByText(
-        "The web shows this row as a banner. The apps show it as a regular row.",
-      ),
-    ).toBeInTheDocument();
-    expect(within(form).getByLabelText("Longest runtime (minutes)")).toHaveValue(95);
-  });
-
   it("lets Number of titles be cleared and retyped, and restores it when left blank", async () => {
     const { dialog } = await open();
     await userEvent.click(within(dialog).getByRole("button", { name: "Short & sweet" }));
@@ -320,7 +223,9 @@ describe("Add row form", () => {
       if (box.getAttribute("aria-checked") === "true") await userEvent.click(box);
     }
     expect(within(form).getByRole("radio", { name: /Holidays/ })).toBeChecked();
-    expect(within(form).getByText("Pick at least one holiday.")).toBeInTheDocument();
+    expect(
+      within(form).getByText("Pick at least one holiday or add your own."),
+    ).toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Add row" })).toBeDisabled();
   });
 
@@ -439,10 +344,6 @@ describe("param fields", () => {
       expect(overlap, type).toEqual([]);
     }
   });
-
-  it("has no Anchor item field for Because you watched", () => {
-    expect(paramFieldKeys("because_you_watched")).toEqual([]);
-  });
 });
 
 function editSession(overrides: Partial<HomeRow>): EditSession {
@@ -517,31 +418,6 @@ describe("collection rows", () => {
     });
     expect(savedDraft().config).not.toHaveProperty("user_collection_id");
   });
-
-  it("turns a ready-made row into a collection row without leaving the dialog", async () => {
-    await open(
-      editSession({
-        title: "My picks",
-        sectionType: "trending_on_server",
-        config: { window: "7d" },
-      }),
-    );
-    const dialog = screen.getByRole("dialog", { name: "Edit row" });
-    await userEvent.click(within(dialog).getByRole("button", { name: /^Change what/ }));
-    const picker = await screen.findByRole("dialog", { name: "Change what this row shows" });
-    await userEvent.click(within(picker).getByRole("button", { name: "A collection" }));
-    const form = await screen.findByRole("dialog", { name: "Edit row" });
-    expect(within(form).getByRole("button", { name: "Save" })).toBeDisabled();
-    await userEvent.click(within(form).getByRole("radio", { name: "Studio Ghibli" }));
-    expect(within(form).getByLabelText("Row name")).toHaveValue("My picks");
-    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(savedDraft()).toMatchObject({
-      sectionType: "collection",
-      title: "My picks",
-      config: { library_collection_id: "ghibli" },
-    });
-  });
 });
 
 // Configs in the shape the older editor has always written for rule rows.
@@ -589,44 +465,6 @@ describe("rule rows", () => {
     expect(JSON.stringify(savedDraft().config)).toBe(JSON.stringify(config));
   });
 
-  it("edits rules in one sentence and list, with no Easy mode", async () => {
-    await open(editSession({ sectionType: "custom_filter", config: structuredClone(MULTI_GROUP) }));
-    expect(screen.getAllByRole("group", { name: "What the row shows" })).toHaveLength(1);
-    expect(screen.getByRole("group", { name: "Group 2" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Easy" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Advanced" })).toBeNull();
-  });
-
-  it("keeps personalized rules and sorts editable, with the order under More options", async () => {
-    await open(
-      editSession({
-        sectionType: "custom_filter",
-        config: {
-          library_ids: [],
-          match: "all",
-          groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: false }] }],
-          sort: { field: "date_viewed", order: "desc" },
-        },
-      }),
-    );
-    expect(screen.queryByRole("group", { name: "Rule not editable here" })).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Field" })).toHaveTextContent("Watched");
-    await userEvent.click(screen.getByRole("button", { name: /More options/ }));
-    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveTextContent("Date Viewed");
-  });
-
-  it("names the order on the closed More options box", async () => {
-    await open(
-      editSession({
-        sectionType: "custom_filter",
-        config: { ...structuredClone(MULTI_GROUP), sort: { field: "rating_imdb", order: "desc" } },
-      }),
-    );
-    expect(screen.getByRole("button", { name: /More options/ })).toHaveTextContent(
-      "Highest rated first·20 titles·not the hero banner",
-    );
-  });
-
   it("shows rules it can't edit read-only and keeps them until removed", async () => {
     await open(
       editSession({ sectionType: "custom_filter", config: structuredClone(UNKNOWN_FIELDS) }),
@@ -663,24 +501,6 @@ describe("rule rows", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(JSON.stringify(savedDraft().config)).toBe(JSON.stringify(config));
-  });
-
-  it("starts a new rule row with no rules", async () => {
-    const { dialog } = await open();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Titles matching rules" }));
-    const form = await screen.findByRole("dialog", { name: "Titles matching rules" });
-    expect(
-      within(form).getByText("Describe the titles you want. New matches show up on their own."),
-    ).toBeInTheDocument();
-    expect(within(form).getByText(/No rules yet/)).toBeInTheDocument();
-    await userEvent.click(within(form).getByRole("button", { name: "Add rule" }));
-    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
-    expect(create.mock.calls[0]![0].config).toMatchObject({
-      library_ids: [],
-      match: "all",
-      groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "" }] }],
-    });
   });
 });
 

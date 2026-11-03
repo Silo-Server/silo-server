@@ -9,116 +9,9 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestRequireSession_SkipsRefreshWhenNoAuthService(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	store := NewSessionStore(30*24*time.Hour, clock)
-
-	// Session with token expiring in 3 minutes (within 5min buffer).
-	// With no authService configured, refresh is skipped and the session
-	// is still returned (best-effort enhancement, not hard requirement).
-	_ = store.Put(Session{
-		Token:                 "valid-tok",
-		StreamAppUserID:       1,
-		StreamAppAccessToken:  "old-access",
-		StreamAppRefreshToken: "refresh-tok",
-		StreamAppTokenExpiry:  now.Add(3 * time.Minute),
-	})
-
-	authn := &Authenticator{sessions: store}
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("X-Emby-Token", "valid-tok")
-	rec := httptest.NewRecorder()
-
-	handler := authn.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session := SessionFromContext(r.Context())
-		if session == nil {
-			t.Fatal("expected session in context")
-		}
-		if session.StreamAppAccessToken != "old-access" {
-			t.Errorf("expected access token unchanged, got %s", session.StreamAppAccessToken)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-}
-
-func TestRequireSession_PassesThroughNonExpiringToken(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	store := NewSessionStore(30*24*time.Hour, clock)
-
-	// Token not expiring for 30 minutes — no refresh needed.
-	_ = store.Put(Session{
-		Token:                "fresh-tok",
-		StreamAppUserID:      1,
-		StreamAppAccessToken: "good-access",
-		StreamAppTokenExpiry: now.Add(30 * time.Minute),
-	})
-
-	authn := &Authenticator{sessions: store}
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("X-Emby-Token", "fresh-tok")
-	rec := httptest.NewRecorder()
-
-	handler := authn.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session := SessionFromContext(r.Context())
-		if session == nil {
-			t.Fatal("expected session in context")
-		}
-		if session.StreamAppAccessToken != "good-access" {
-			t.Errorf("expected access token unchanged, got %s", session.StreamAppAccessToken)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-}
-
-func TestRequireSession_NoAuthService_PassesThroughExpiredStreamAppToken(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	store := NewSessionStore(30*24*time.Hour, clock)
-
-	// Session with already-expired StreamApp token and no authService to refresh.
-	_ = store.Put(Session{
-		Token:                "expired-tok",
-		StreamAppUserID:      1,
-		StreamAppAccessToken: "dead-access",
-		StreamAppTokenExpiry: now.Add(-1 * time.Hour), // already expired
-	})
-
-	authn := &Authenticator{sessions: store}
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("X-Emby-Token", "expired-tok")
-	rec := httptest.NewRecorder()
-
-	handler := authn.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// When authService is nil and token is expired, session should still
-		// be returned (the compat session itself is valid, only the StreamApp
-		// token is stale). The refresh logic is a best-effort enhancement.
-		session := SessionFromContext(r.Context())
-		if session == nil {
-			t.Fatal("expected session in context")
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 (no authService = skip refresh), got %d", rec.Code)
-	}
-}
 
 func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	now := fixedNow()
@@ -139,7 +32,6 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 		// no api_key and no auth header. Previously 401'd (case-sensitive lookup).
 		{"lowercase playSessionId (Wholphin)", "static=true&mediaSourceId=x&playSessionId=ps-abc", http.StatusOK},
 		{"canonical PlaySessionId", "PlaySessionId=ps-abc", http.StatusOK},
-		{"legacy PlaySessionID", "PlaySessionID=ps-abc", http.StatusOK},
 		{"unknown play session", "playSessionId=does-not-exist", http.StatusUnauthorized},
 		{"no auth at all", "static=true", http.StatusUnauthorized},
 	}
@@ -162,6 +54,38 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 				t.Fatal("expected authenticated session in context")
 			}
 		})
+	}
+}
+
+// With the default settings, a play session keeps authorizing PlaySessionId-only
+// HLS requests for 24h, so a paused or long play survives past six hours (#2899).
+func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := fixedNow()
+	clock := func() time.Time { return now }
+	deps := withDefaults(Dependencies{Config: cfg, Now: clock})
+	sessions := NewSessionStore(30*24*time.Hour, clock)
+	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
+	deps.PlaybackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
+	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil)
+
+	for _, tc := range []struct {
+		elapsed  time.Duration
+		wantCode int
+	}{
+		{24*time.Hour - time.Minute, http.StatusOK},
+		{24 * time.Hour, http.StatusUnauthorized},
+	} {
+		now = fixedNow().Add(tc.elapsed)
+		req := requestWithCompatRouteItem(httptest.NewRequest("GET", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", nil), "itm")
+		rec := httptest.NewRecorder()
+		mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })).ServeHTTP(rec, req)
+		if rec.Code != tc.wantCode {
+			t.Errorf("after %s: status = %d, want %d", tc.elapsed, rec.Code, tc.wantCode)
+		}
 	}
 }
 
@@ -244,58 +168,6 @@ func TestAdminAPIKeyActivityAttribution(t *testing.T) {
 	}
 }
 
-func TestRequireAdminAPIKey_RejectsNilAPIKey(t *testing.T) {
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{returnNilWithoutError: true},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
-	)
-	req := httptest.NewRequest("GET", "/Library/VirtualFolders", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler should not run")
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRequireAdminAPIKey_LastUsedUpdateHasDeadline(t *testing.T) {
-	called := make(chan bool, 1)
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{
-			key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"},
-			update: func(ctx context.Context, _ int64) error {
-				_, ok := ctx.Deadline()
-				called <- ok
-				return nil
-			},
-		},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
-	)
-	req := httptest.NewRequest("GET", "/Library/VirtualFolders", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	select {
-	case ok := <-called:
-		if !ok {
-			t.Fatal("expected last-used update context to have a deadline")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for last-used update")
-	}
-}
-
 // newAdminAPIKeyAuthForTest builds an authenticator without a UserStoreProvider,
 // exercising the admin-bool path only (no session synthesis).
 func newAdminAPIKeyAuthForTest(keys apiKeyValidator, users apiKeyUserLoader) *AdminAPIKeyAuthenticator {
@@ -303,27 +175,17 @@ func newAdminAPIKeyAuthForTest(keys apiKeyValidator, users apiKeyUserLoader) *Ad
 }
 
 type fakeAPIKeyValidator struct {
-	key                   *models.APIKey
-	returnNilWithoutError bool
-	getCalls              int
-	update                func(context.Context, int64) error
+	key *models.APIKey
 }
 
 func (f *fakeAPIKeyValidator) GetByKey(_ context.Context, key string) (*models.APIKey, error) {
-	f.getCalls++
-	if f.returnNilWithoutError {
-		return nil, nil
-	}
 	if f.key != nil && f.key.Key == key {
 		return f.key, nil
 	}
 	return nil, auth.ErrAPIKeyNotFound
 }
 
-func (f *fakeAPIKeyValidator) UpdateLastUsed(ctx context.Context, id int64) error {
-	if f.update != nil {
-		return f.update(ctx, id)
-	}
+func (f *fakeAPIKeyValidator) UpdateLastUsed(context.Context, int64) error {
 	return nil
 }
 

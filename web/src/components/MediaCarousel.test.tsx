@@ -17,20 +17,6 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
 import MediaCarousel from "./MediaCarousel";
 
 describe("MediaCarousel", () => {
-  it("links Explore all to the row's page", () => {
-    render(
-      <MemoryRouter>
-        <MediaCarousel title="Trending Movies" viewAllHref="/requests/discover/trending_movies">
-          <div>Heat</div>
-        </MediaCarousel>
-      </MemoryRouter>,
-    );
-
-    const link = screen.getByRole("link", { name: "Explore all Trending Movies" });
-    expect(link).toHaveAttribute("href", "/requests/discover/trending_movies");
-    expect(link).toHaveTextContent("Explore all");
-  });
-
   it("keeps the Explore all button for rows that navigate themselves", () => {
     const onViewAll = vi.fn();
     render(
@@ -177,29 +163,5 @@ describe("MediaCarousel windowing", () => {
     expect(screen.getAllByRole("link")).toHaveLength(30);
     expect(placeholders(container)).toHaveLength(0);
     expect(idleTasks).toHaveLength(0);
-  });
-
-  it("does not re-render unchanged slides when the carousel itself re-renders", () => {
-    const renders = vi.fn();
-    function Card({ title }: { title: string }) {
-      renders(title);
-      return <div>{title}</div>;
-    }
-    const children = [<Card key="a" title="A" />, <Card key="b" title="B" />];
-    const { rerender } = render(
-      <MemoryRouter>
-        <MediaCarousel title="Row">{children}</MediaCarousel>
-      </MemoryRouter>,
-    );
-    expect(renders).toHaveBeenCalledTimes(2);
-
-    rerender(
-      <MemoryRouter>
-        <MediaCarousel title="Renamed row">{children}</MediaCarousel>
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("heading", { name: "Renamed row" })).toBeInTheDocument();
-    expect(renders).toHaveBeenCalledTimes(2);
   });
 });

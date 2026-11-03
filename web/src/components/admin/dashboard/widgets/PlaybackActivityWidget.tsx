@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { formatTime } from "@/lib/datetime";
 import { useAdminPlaybackActivity } from "@/hooks/queries/admin/dashboardInsights";
 import { ChartEmptyState, ChartSkeleton, StackedColumnChart } from "../charts";
 import { SectionError } from "../feedback";
 import { formatDayLabel, rangeHours, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import {
   buildPlaybackActivityColumns,
@@ -43,17 +44,12 @@ export function PlaybackActivityWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle("Playback activity", range)}
-        </CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-muted-foreground text-[11px] tabular-nums">
-            {total.toLocaleString()} {total === 1 ? "session" : "sessions"}
-          </span>
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+      <WidgetHeader title={rangeTitle("Playback activity", range)}>
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          {total.toLocaleString()} {total === 1 ? "session" : "sessions"}
+        </span>
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         {query.isLoading ? (
           <ChartSkeleton fill />

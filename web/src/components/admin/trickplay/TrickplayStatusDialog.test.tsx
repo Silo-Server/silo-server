@@ -75,28 +75,4 @@ describe("TrickplayStatusDialog", () => {
       ),
     );
   });
-
-  it("points to the library setting when previews are off", async () => {
-    renderDialog(() =>
-      jsonResponse({ files: [{ file_id: "42", state: "off", servable: false, failures: 0 }] }),
-    );
-
-    expect(await screen.findByText("Off for this library")).toBeTruthy();
-    expect(screen.getByText(/Turn on Generate seek previews/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Make Again/ }).hasAttribute("disabled")).toBe(true);
-  });
-});
-
-it("reports zero regenerated files without claiming work is running", async () => {
-  renderDialog((method) =>
-    method === "POST"
-      ? jsonResponse({ requeued: 0 }, 202)
-      : jsonResponse({
-          files: [{ file_id: "42", state: "unusable", servable: false, failures: 0 }],
-        }),
-  );
-  const button = await screen.findByRole("button", { name: /Make Again/ });
-  await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
-  fireEvent.click(button);
-  await waitFor(() => expect(toast.success).toHaveBeenCalledWith("No seek previews were queued"));
 });

@@ -30,7 +30,7 @@ func NewRefreshTrendingDiscoverTask(refresher TrendingDiscoverRefresher) *Refres
 func (t *RefreshTrendingDiscoverTask) Key() string  { return "refresh_trending_discover" }
 func (t *RefreshTrendingDiscoverTask) Name() string { return "Refresh Trending Discover" }
 func (t *RefreshTrendingDiscoverTask) Description() string {
-	return "Refreshes the persisted external trending lists (TMDB/Trakt) for Trending Discover home sections and the calendar's Trending view"
+	return "Refreshes the persisted external trending lists (TMDB) for Trending Discover home sections and the calendar's Trending view"
 }
 
 func (t *RefreshTrendingDiscoverTask) Category() taskmanager.TaskCategory {

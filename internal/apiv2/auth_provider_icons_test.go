@@ -46,6 +46,7 @@ func TestAuthProviderIconProjection(t *testing.T) {
 		{name: "missing seam", icon: icon, missing: true},
 		{name: "external", icon: "https://provider.example.test/api/v2/plugin-content/plugins/3/assets/icon.svg", want: "https://provider.example.test/api/v2/plugin-content/plugins/3/assets/icon.svg"},
 		{name: "relative external", icon: "//provider.example.test/icon.svg", want: "//provider.example.test/icon.svg"},
+		{name: "malformed external", icon: "https://bad host.example.test/icon.svg"},
 		{name: "other installation", icon: "/api/v2/plugin-content/plugins/4/assets/icon.svg"},
 		{name: "traversal", icon: "/api/v2/plugin-content/plugins/3/assets/%2e%2e/private.svg"},
 		{name: "nonasset", icon: "/api/v2/plugin-content/plugins/3/admin"},

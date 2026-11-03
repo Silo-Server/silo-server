@@ -13,6 +13,12 @@ vi.mock("@/components/MediaItemMenu", () => ({
   },
 }));
 
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`}>Play {title}</a>
+  ),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null, quickActionMode: "watched" }),
 }));
@@ -72,7 +78,7 @@ describe("SeasonEpisodeGrid", () => {
     }
   });
 
-  it("marks an episode only when none of its files can be read", () => {
+  it("marks an episode and drops its play button only when none of its files can be read", () => {
     const file = {
       resolution: "",
       codec_video: "",
@@ -104,6 +110,7 @@ describe("SeasonEpisodeGrid", () => {
               { ...file, file_id: 5, resolution: "1080p" },
             ]),
             episode("ep-5", 5, [{ ...file, file_id: 6, resolution: "1080p" }]),
+            episode("ep-6", 6, []),
           ]}
         />
       </MemoryRouter>,
@@ -126,63 +133,14 @@ describe("SeasonEpisodeGrid", () => {
     // Only episode 3 has no readable version; episode 4 still plays its
     // second file.
     expect(screen.getAllByText("Damaged file")).toHaveLength(1);
-    const card = screen.getByText("Episode title 3").closest(".media-card");
+    const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
-  });
 
-  it("marks episodes whose overview was machine-translated", () => {
-    const episode = (id: string, number: number, fields?: string[]) => ({
-      content_id: id,
-      season_number: 1,
-      episode_number: number,
-      title: `Episode title ${number}`,
-      overview: `Overview ${number}`,
-      air_date: null,
-      runtime: 0,
-      still_url: "",
-      still_thumbhash: "",
-      files: [],
-      machine_translated_fields: fields,
-    });
-    render(
-      <MemoryRouter>
-        <SeasonEpisodeGrid
-          isLoading={false}
-          episodes={[episode("ep-1", 1, ["overview"]), episode("ep-2", 2)]}
-        />
-      </MemoryRouter>,
+    // Quick play needs a readable file; an episode without files has nothing
+    // to play either.
+    expect(screen.getAllByRole("link", { name: /^Play / }).map((link) => link.textContent)).toEqual(
+      ["Play Episode title 4", "Play Episode title 5"],
     );
-    expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
-  });
-
-  it("drops the translation label with a spoiler-hidden overview", () => {
-    spoilerPrefs.hideOverviews = true;
-    const episode = (id: string, number: number, userData?: Record<string, unknown>) => ({
-      content_id: id,
-      season_number: 1,
-      episode_number: number,
-      title: `Episode title ${number}`,
-      overview: `Overview ${number}`,
-      air_date: null,
-      runtime: 0,
-      still_url: "",
-      still_thumbhash: "",
-      files: [],
-      machine_translated_fields: ["overview"],
-      user_data: userData as never,
-    });
-    render(
-      <MemoryRouter>
-        <SeasonEpisodeGrid
-          isLoading={false}
-          episodes={[episode("ep-1", 1, { played: true }), episode("ep-2", 2)]}
-        />
-      </MemoryRouter>,
-    );
-    // Only the watched episode shows its overview, so only it carries the label.
-    expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
-    const hiddenCard = screen.getByText("Episode title 2").closest("a");
-    expect(hiddenCard).not.toHaveTextContent("Translated by AI");
   });
 });

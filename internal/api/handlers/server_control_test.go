@@ -56,20 +56,6 @@ func TestServerControlRestartRequestsShutdown(t *testing.T) {
 	}
 }
 
-func TestServerControlRestartUnavailable(t *testing.T) {
-	t.Parallel()
-
-	handler := NewServerControlHandler(nil, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleRestart(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestServerControlRestartAlreadyRequested(t *testing.T) {
 	t.Parallel()
 

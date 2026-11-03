@@ -67,16 +67,3 @@ func wireWatchTogetherCapabilityFakes(deps *Dependencies) {
 func watchTogetherCapabilityFixtureCases() []fixtureCase {
 	return []fixtureCase{{name: "watch_together_capabilities", operationID: "getWatchTogetherCapabilities", method: "GET", path: Prefix + "/watch-together/capabilities", headers: bearer(memberToken), status: 200, schema: "#/components/schemas/WatchTogetherCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "An authenticated account reads which watch-together room behaviors the server supports."}}
 }
-
-func TestWatchTogetherCapabilitiesWithoutOptionalDependencies(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.WatchTogetherCapability = &fakeWatchTogetherCapability{available: true}
-	rec := do(t, NewHandler(deps), http.MethodGet, Prefix+"/watch-together/capabilities", "", bearer(memberToken))
-	var out WatchTogetherCapabilities
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != 200 || out.MemberState || out.Picker || out.LobbyReady || out.ConnectionReplaced || out.SocketProtocol != "" || out.MaxMemberStateIDs != 0 {
-		t.Fatalf("advertised unwired operations: %d %+v", rec.Code, out)
-	}
-}

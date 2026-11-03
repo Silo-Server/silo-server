@@ -318,7 +318,7 @@ func (h *OAuthHandler) ServeStart(w http.ResponseWriter, r *http.Request, req OA
 	ctx := r.Context()
 	onPublicOrigin := h.OnPublicOrigin(r)
 	if req.Native {
-		req.startOrigin = requestOrigin(r)
+		req.startOrigin = clientip.RequestOrigin(r)
 	}
 	// An unknown start origin is refused before checkStart: a start failure
 	// redirects to the app with that origin as iss, which only a known
@@ -415,7 +415,7 @@ func (h *OAuthHandler) resumeNativeStart(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if !h.OnPublicOrigin(r) {
-		slog.InfoContext(ctx, "oauth parked native start presented on another origin than the public URL", "component", "auth", "installation_id", req.InstallID, "origin", requestOrigin(r), "public_url", h.currentHostBaseURL())
+		slog.InfoContext(ctx, "oauth parked native start presented on another origin than the public URL", "component", "auth", "installation_id", req.InstallID, "origin", clientip.RequestOrigin(r), "public_url", h.currentHostBaseURL())
 		http.Error(w, nativeStartUnknownMessage, http.StatusBadRequest)
 		return
 	}
@@ -747,24 +747,6 @@ func (h *OAuthHandler) appRedirect(ctx context.Context, issuer string, q url.Val
 // hold, so the residual relay needs a hostile server on a local address.
 const oauthIssuerParameter = "iss"
 
-// requestOrigin is the origin r arrived on, serialized like an iss and
-// derived like OnPublicOrigin: the host a trusted proxy names in
-// X-Forwarded-Host or the Host header, and the scheme of the connection or
-// the one a trusted proxy names. On the public origin it is the public
-// origin.
-func requestOrigin(r *http.Request) string {
-	scheme := clientip.RequestScheme(r)
-	if scheme == "" {
-		// Ambiguous proxy metadata: name the transport's scheme. A wrong
-		// guess makes the app refuse the redirect, never accept a relay.
-		scheme = schemeHTTP
-		if r.TLS != nil {
-			scheme = schemeHTTPS
-		}
-	}
-	return serializeOrigin(scheme, clientip.RequestHost(r))
-}
-
 // cgnatRange is the shared address space of RFC 6598, which carrier NAT and
 // overlay networks such as Tailscale use.
 var cgnatRange = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
@@ -790,7 +772,7 @@ func (h *OAuthHandler) knownStartOrigin(origin string) bool {
 	if h.deps.KnownOrigins != nil {
 		for _, raw := range h.deps.KnownOrigins() {
 			known, err := url.Parse(raw)
-			if err == nil && known.Host != "" && serializeOrigin(known.Scheme, known.Host) == origin {
+			if err == nil && known.Host != "" && clientip.SerializeOrigin(known.Scheme, known.Host) == origin {
 				return true
 			}
 		}
@@ -811,25 +793,6 @@ func (h *OAuthHandler) knownStartOrigin(origin string) bool {
 		}
 	}
 	return false
-}
-
-// serializeOrigin is scheme://host[:port] with the scheme and host in lower
-// case, the default port of the scheme left out, and no path or trailing
-// slash.
-func serializeOrigin(scheme, host string) string {
-	scheme = strings.ToLower(strings.TrimSpace(scheme))
-	hostURL := url.URL{Host: strings.TrimSpace(host)}
-	name, port := strings.ToLower(hostURL.Hostname()), hostURL.Port()
-	if (scheme == schemeHTTPS && port == "443") || (scheme == schemeHTTP && port == "80") {
-		port = ""
-	}
-	if strings.Contains(name, ":") {
-		name = "[" + name + "]"
-	}
-	if port != "" {
-		name += ":" + port
-	}
-	return scheme + "://" + name
 }
 
 // addServerID adds this server's identity to an app redirect.

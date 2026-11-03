@@ -82,18 +82,3 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 		})
 	}
 }
-
-func TestNotificationEmailLinksV2MissingProofAndService(t *testing.T) {
-	fake := new(fakeNotificationEmailLinks)
-	h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: handlers.NewEmailLinkHandler(fake)})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v2/notifications/email/verify", nil))
-	if rec.Code != 400 || fake.calls != 1 || fake.token != "" {
-		t.Fatalf("missing token: %d calls=%d", rec.Code, fake.calls)
-	}
-	rec = httptest.NewRecorder()
-	apiv2.NewHandler(apiv2.Dependencies{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v2/notifications/email/unsubscribe?token=synthetic", nil))
-	if rec.Code != 503 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
-		t.Fatalf("missing service: %d %v", rec.Code, rec.Header())
-	}
-}

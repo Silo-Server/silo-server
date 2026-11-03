@@ -8,10 +8,7 @@
 // and validation live in the packages above.
 package apiv2
 
-import (
-	"embed"
-	_ "embed"
-)
+import "embed"
 
 // FS holds route-inventory.json, migration.json, migration.schema.json,
 // offline-routes.txt, the breaking-change approvals with their schema, and

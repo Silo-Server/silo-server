@@ -291,7 +291,6 @@ export function SubtitleSearchModal({
           upload={handleUpload}
           detectLanguage={handleDetectLanguage}
           onSuccess={handleUploadSuccess}
-          onError={setError}
           variant="player"
           defaultLanguage={selectedLang}
         />

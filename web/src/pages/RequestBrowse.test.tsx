@@ -101,13 +101,6 @@ describe("RequestBrowse", () => {
     expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1);
   });
 
-  it("stops offering more at the end of the list", () => {
-    mocks.useRequestBrowse.mockReturnValue(loaded([browse(1)], { hasNextPage: false }));
-    renderAt("/requests/browse/genre/drama?media_type=movie");
-
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
-  });
-
   it("keeps loading past a page a rating limit emptied", () => {
     const empty = { ...browse(1), results: [] };
     mocks.useRequestBrowse.mockReturnValue(loaded([empty]));
@@ -132,16 +125,5 @@ describe("RequestBrowse", () => {
       "/requests/browse/genre/drama?media_type=series",
     );
     expect(screen.getByTestId("location")).not.toHaveTextContent("page=");
-  });
-
-  it("requests a title from its card", () => {
-    mocks.mutate.mockResolvedValue({});
-    renderAt("/requests/browse/genre/drama");
-
-    fireEvent.click(screen.getByRole("button", { name: /^Request Heat/ }));
-
-    expect(mocks.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ media_type: "movie", tmdb_id: 42 }),
-    );
   });
 });

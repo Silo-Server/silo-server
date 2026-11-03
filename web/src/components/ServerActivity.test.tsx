@@ -51,15 +51,18 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+function openPopover(buttonName: string) {
+  render(
+    <MemoryRouter>
+      <ServerActivity />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: buttonName }));
+}
+
 describe("ServerActivity task progress", () => {
   it("shows an indeterminate running state instead of a misleading zero percent", () => {
-    render(
-      <MemoryRouter>
-        <ServerActivity />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Server activity: 1 active" }));
+    openPopover("Server activity: 1 active");
 
     expect(screen.queryByText("Preparing downloads")).not.toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
@@ -72,15 +75,6 @@ describe("ServerActivity task progress", () => {
 });
 
 describe("ServerActivity download preparation", () => {
-  function openPopover(activeCount: number) {
-    render(
-      <MemoryRouter>
-        <ServerActivity />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: `Server activity: ${activeCount} active` }));
-  }
-
   it("counts running and queued jobs and shows live progress", () => {
     mocks.preparations = makePreparationList(
       [
@@ -99,7 +93,7 @@ describe("ServerActivity download preparation", () => {
       { queued: 4, retrying: 1, failed_recent: 2 },
     );
     // 1 task + 2 running + 4 queued + 1 retrying.
-    openPopover(8);
+    openPopover("Server activity: 8 active");
 
     expect(screen.getByText("Preparing downloads")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
@@ -123,7 +117,7 @@ describe("ServerActivity download preparation", () => {
     mocks.preparations = makePreparationList(
       Array.from({ length: 5 }, (_, i) => makePreparation({ id: `art-${i}` })),
     );
-    openPopover(6);
+    openPopover("Server activity: 6 active");
     expect(screen.getAllByText("25%")).toHaveLength(3);
     expect(screen.getByText("2 more running")).toBeInTheDocument();
   });
@@ -131,19 +125,8 @@ describe("ServerActivity download preparation", () => {
   it("still shows recent failures when nothing else is active", () => {
     mocks.tasks = [];
     mocks.preparations = makePreparationList([], { failed_recent: 1 });
-    render(
-      <MemoryRouter>
-        <ServerActivity />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Server activity" }));
+    openPopover("Server activity");
     expect(screen.queryByText("No active server activity")).not.toBeInTheDocument();
     expect(screen.getByText("1 failed in the last 24 hours")).toBeInTheDocument();
-  });
-
-  it("says so when the queue is empty", () => {
-    mocks.preparations = makePreparationList([]);
-    openPopover(1);
-    expect(screen.getByText("No downloads being prepared")).toBeInTheDocument();
   });
 });

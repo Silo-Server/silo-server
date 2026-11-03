@@ -103,7 +103,7 @@ type AdminRequestIntegrationBody struct {
 	SupportedMediaTypes []string       `json:"supported_media_types"`
 	PluginConfig        map[string]any `json:"plugin_config"`
 	Enabled             bool           `json:"enabled"`
-	BaseURL             string         `json:"base_url"`
+	BaseURL             string         `json:"base_url" doc:"Service base URL; a host[:port] without a scheme gets http://; not validated as a URI"`
 	APIKey              string         `json:"api_key_ref,omitempty" writeOnly:"true" doc:"New credential; omitted or blank preserves the saved credential on update"`
 }
 type AdminRequestIntegration struct {
@@ -114,7 +114,7 @@ type AdminRequestIntegration struct {
 	SupportedMediaTypes []string        `json:"supported_media_types"`
 	PluginConfig        map[string]any  `json:"plugin_config"`
 	Enabled             bool            `json:"enabled"`
-	BaseURL             string          `json:"base_url"`
+	BaseURL             string          `json:"base_url" doc:"Service base URL as stored; not validated as a URI"`
 	HasAPIKey           bool            `json:"has_api_key"`
 	LastCheckAt         NullableInstant `json:"last_check_at"`
 	LastCheckStatus     string          `json:"last_check_status"`
@@ -151,7 +151,7 @@ type AdminRequestOptionsInput struct {
 		Name           string         `json:"name,omitempty"`
 		CapabilityID   string         `json:"capability_id,omitempty"`
 		InstallationID *ID            `json:"installation_id,omitempty" pattern:"^[1-9][0-9]*$"`
-		BaseURL        *string        `json:"base_url,omitempty"`
+		BaseURL        *string        `json:"base_url,omitempty" doc:"Service base URL; a host[:port] without a scheme gets http://, and empty clears it; not validated as a URI"`
 		APIKey         string         `json:"api_key_ref,omitempty" writeOnly:"true"`
 		PluginConfig   map[string]any `json:"plugin_config,omitempty"`
 	}
@@ -178,6 +178,9 @@ type AdminRequestCapabilitiesOutputBody struct {
 	Available            bool `json:"available"`
 	GuardedConfiguration bool `json:"guarded_configuration"`
 	Routing              bool `json:"routing" doc:"Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing"`
+	RoutingSeriesStatus  bool `json:"routing_series_status" doc:"Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none"`
+	DiscoverLayout       bool `json:"discover_layout" doc:"Whether the Requests Discover page's layout can be edited under /admin/request-discover"`
+	DiscoverListOrder    bool `json:"discover_list_order" doc:"Whether an mdblist Discover row takes list.order. Send it only when true"`
 }
 
 func adminRequestViewer(ctx context.Context) mediarequests.Viewer {
@@ -222,6 +225,9 @@ func registerAdminRequests(reg *Registry) {
 		out.Body.Available = reg.deps.AdminRequests != nil
 		_, out.Body.GuardedConfiguration = reg.deps.AdminRequests.(guardedAdminRequests)
 		_, out.Body.Routing = reg.deps.AdminRequests.(adminRequestRoutes)
+		out.Body.RoutingSeriesStatus = out.Body.Routing
+		_, out.Body.DiscoverLayout = reg.deps.AdminRequests.(adminRequestDiscover)
+		out.Body.DiscoverListOrder = out.Body.DiscoverLayout
 		return out, nil
 	})
 	Register(reg, op(http.MethodGet, "/admin/requests", opListAdminRequests, false), func(ctx context.Context, in *AdminMediaRequestListInput) (*MediaRequestCollectionOutput, error) {

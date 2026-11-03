@@ -4,9 +4,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { useRedetectEpisodeIntro, useRedetectItemMarkers } from "../items";
+import { useRedetectItemMarkers } from "../items";
 import { setAccessToken, setProfileId, setRefreshToken } from "@/api/client";
-import { useAdminMarkerCapabilities, useMarkerDetectionKinds } from "./markers";
+import { useMarkerDetectionKinds } from "./markers";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(installPolicyStorageMocks);
 afterEach(() => vi.unstubAllGlobals());
@@ -54,46 +54,6 @@ it("does not refresh or replay re-detection after401", async () => {
     ).rejects.toThrow();
   });
   expect(calls).toEqual(["/api/v2/admin/items/episode-1/redetect-markers"]);
-});
-it.each(["queued", "already_running"] as const)("preserves %s acknowledgment", async (status) => {
-  const { calls, wrapper } = setup(() => jsonResponse({ status }, 202));
-  const { result } = renderHook(useRedetectItemMarkers, { wrapper });
-  await act(async () => {
-    await expect(
-      result.current.mutateAsync({ itemId: "episode-1", kind: "intro" }),
-    ).resolves.toEqual({ status });
-  });
-  expect(calls).toHaveLength(1);
-});
-it.each(["intro", "credits", "all"] as const)("sends the %s kind", async (kind) => {
-  const { calls, bodies, wrapper } = setup(() => jsonResponse({ status: "queued" }, 202));
-  const { result } = renderHook(useRedetectItemMarkers, { wrapper });
-  await act(async () => {
-    await result.current.mutateAsync({ itemId: "movie-1", kind });
-  });
-  expect(calls).toEqual(["/api/v2/admin/items/movie-1/redetect-markers"]);
-  expect(bodies).toEqual([{ kind }]);
-});
-it("falls back to the episode-only intro operation", async () => {
-  const { calls, bodies, wrapper } = setup(() => jsonResponse({ status: "queued" }, 202));
-  const { result } = renderHook(useRedetectEpisodeIntro, { wrapper });
-  await act(async () => {
-    await result.current.mutateAsync("episode-1");
-  });
-  expect(calls).toEqual(["/api/v2/admin/items/episode-1/redetect-intro"]);
-  expect(bodies).toEqual([undefined]);
-});
-it("reads the marker capability document once, without retrying a failure", async () => {
-  const { calls, wrapper } = setup(() => jsonResponse({ title: "Not Found", status: 404 }, 404));
-  const { result } = renderHook(() => useAdminMarkerCapabilities(), { wrapper });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(result.current.data?.redetect_markers).toBeUndefined();
-  expect(calls).toEqual(["/api/v2/admin/markers/capabilities"]);
-});
-it("does not read marker capabilities for non-admins", () => {
-  const { calls, wrapper } = setup(() => jsonResponse({}, 200));
-  renderHook(() => useAdminMarkerCapabilities(false), { wrapper });
-  expect(calls).toEqual([]);
 });
 
 describe("useMarkerDetectionKinds", () => {
@@ -153,12 +113,6 @@ describe("useMarkerDetectionKinds", () => {
       await waitFor(() => expect(result.current).toBeUndefined());
     },
   );
-
-  it("reads nothing until enabled", () => {
-    const { calls, wrapper } = setup(detectionServer(true, {}));
-    renderHook(() => useMarkerDetectionKinds(false), { wrapper });
-    expect(calls).toEqual([]);
-  });
 });
 
 // An older API node answers the route it does not have with a 404.

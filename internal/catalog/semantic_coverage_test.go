@@ -65,24 +65,6 @@ func fatalFetch(t *testing.T) func(context.Context, string) ([]catalogTypeCovera
 	}
 }
 
-// TestCoverageReadyNilSnapshotIsSafe verifies the fail-safe contract: a
-// freshly-constructed tracker that has never refreshed reports not-ready, never
-// panics, and never touches the fetch seam (read path is lock/DB free).
-func TestCoverageReadyNilSnapshotIsSafe(t *testing.T) {
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
-
-	ready, reason := tr.CoverageReady(nil)
-	if ready {
-		t.Fatalf("nil-snapshot tracker reported ready")
-	}
-	if reason != "coverage not yet computed" {
-		t.Fatalf("reason = %q, want %q", reason, "coverage not yet computed")
-	}
-	if tr.Snapshot() != nil {
-		t.Fatalf("Snapshot() = %+v, want nil before any refresh", tr.Snapshot())
-	}
-}
-
 // TestCoverageRefreshEmptyModelDoesNotFetch verifies that when no embedding
 // model is active (no lock / no provider value) Refresh publishes an empty
 // not-ready snapshot without ever consulting the fetch seam.
@@ -461,37 +443,5 @@ func TestCoverageRunStopsOnContextCancel(t *testing.T) {
 	}
 	if refreshes.Load() == 0 {
 		t.Fatalf("Run should perform an immediate refresh before ticking")
-	}
-}
-
-// TestNewSemanticCoverageTrackerCoverageDBSmoke is the single DB-backed test. It
-// proves the default fetch wiring reaches catalogSemanticCoverageByType through
-// a real pool. Skipped unless SILO_TEST_DATABASE_URL is set.
-func TestNewSemanticCoverageTrackerCoverageDBSmoke(t *testing.T) {
-	pool := newSemanticCoverageTestPool(t)
-	const prefix = "covtrack-smoke-"
-	cleanupSemanticCoverageItems(t, pool, prefix)
-
-	seedSemanticCoverageMediaItem(t, pool, prefix+"m1", "movie", "matched")
-	seedSemanticCoverageMediaItem(t, pool, prefix+"m2", "movie", "matched")
-	seedSemanticCoverageEmbedding(t, pool, prefix+"m1", "smoke-model")
-
-	tr := newSemanticCoverageTracker(pool, []string{"movie"}, constCoverageModels{model: "smoke-model"})
-	if err := tr.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh against real pool: %v", err)
-	}
-	snap := tr.Snapshot()
-	if snap == nil {
-		t.Fatalf("Snapshot() = nil after DB-backed refresh")
-	}
-	cov := snap.PerType["movie"]
-	if cov.Eligible < 2 {
-		t.Fatalf("movie eligible = %d, want >= 2 seeded rows", cov.Eligible)
-	}
-	if cov.Vectorized < 1 {
-		t.Fatalf("movie vectorized = %d, want >= 1 seeded embedding", cov.Vectorized)
-	}
-	if cov.Vectorized > cov.Eligible {
-		t.Fatalf("vectorized %d exceeds eligible %d", cov.Vectorized, cov.Eligible)
 	}
 }

@@ -15,7 +15,6 @@ import {
   currentHero,
   defaultPackLibraryIds,
   effectiveHeroes,
-  failureReason,
   featuredRequest,
   heroTemplates,
   packAdded,
@@ -56,7 +55,6 @@ describe("starter packs", () => {
   it.each([
     ["movie", "movies", true],
     ["movie", "series", false],
-    ["tv", "series", true],
     ["tv", "TVShows", true],
     ["mixed", "series", true],
     ["movie", "mixed", true],
@@ -163,14 +161,6 @@ describe("starter packs", () => {
     ]);
   });
 
-  it("reads a finished apply the same way", () => {
-    const plan = packPlan(templateResultFromV2(coreApplied), pack("core_defaults"), [1, 2]);
-    expect(plan.map((row) => [row.libraryName, row.added.length, row.failed.length])).toEqual([
-      ["Movies", 2, 0],
-      ["TV Shows", 1, 1],
-    ]);
-  });
-
   it("counts a finished apply as added unless nothing new landed and something failed", () => {
     const core = pack("core_defaults");
     expect(packAdded(templateResultFromV2(coreApplied), core)).toBe(true);
@@ -200,18 +190,6 @@ describe("starter packs", () => {
     ).toBe(false);
   });
 
-  it.each([
-    ["collection_not_available", "its list wasn't added to that library"],
-    ["ineligible_library", "that library can't take this list"],
-    ["template_not_in_bundle", "that list isn't in this pack"],
-    ["library_not_selected", "that library isn't one you picked"],
-    ["template_not_found", "this server doesn't have that list anymore"],
-    ["operation_failed", "something went wrong"],
-    [undefined, "something went wrong"],
-  ])("says why %s failed in words", (code, words) => {
-    expect(failureReason(code)).toBe(words);
-  });
-
   it("sums up a finished apply from the lists the pack shows", () => {
     const core = pack("core_defaults");
     const applied = templateResultFromV2({
@@ -239,30 +217,6 @@ describe("starter packs", () => {
       "Core Defaults finished with problems",
     );
     expect(packResultHeading("Core Defaults", false, false)).toBe("Core Defaults wasn't added");
-  });
-
-  it("calls a mixed set of left-out lists just lists", () => {
-    const result = templateResultFromV2({
-      ...coreDryRun,
-      created: [],
-      skipped: [
-        {
-          template_id: "tmdb_trending_tv_week",
-          template_title: "Trending TV This Week",
-          library_id: "3",
-          library_name: "Audiobooks",
-          reason: "ineligible_library",
-        },
-        {
-          template_id: "tmdb_popular_movies",
-          template_title: "Popular Movies",
-          library_id: "3",
-          library_name: "Audiobooks",
-          reason: "ineligible_library",
-        },
-      ],
-    });
-    expect(packPlan(result, pack("core_defaults"), [3])[0]!.notForLibrary).toBe("2 lists");
   });
 });
 

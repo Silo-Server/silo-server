@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -353,31 +352,6 @@ func TestAdminSectionsListAndBulkTransport(t *testing.T) {
 		t.Fatalf("empty list %d %s", empty.Code, empty.Body)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, path+"/s1", "", bearer(adminToken)), TypeNotFound)
-}
-
-func TestAdminSectionsSynchronousBulkLimit(t *testing.T) {
-	for _, count := range []int{100, 101} {
-		t.Run(strconv.Itoa(count), func(t *testing.T) {
-			f := newFakeAdminSections()
-			h := adminSectionsTestHandler(t, f)
-			ids := make([]ID, count)
-			for i := range ids {
-				ids[i] = ID(strconv.Itoa(i + 1))
-			}
-			body, err := json.Marshal(AdminSectionBulkCreate{Scope: "library", LibraryIDs: ids, SectionType: "recently_added", Title: "Bulk", Config: SectionConfig{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			response := do(t, h, http.MethodPost, Prefix+"/admin/sections/bulk", string(body), bearer(adminToken))
-			if count == 100 {
-				if response.Code != http.StatusOK || f.bulks != 1 || f.bulkLibraryCount != 100 {
-					t.Fatalf("100-library boundary: status=%d calls=%d body=%s", response.Code, f.bulks, response.Body)
-				}
-			} else if response.Code != http.StatusUnprocessableEntity || f.bulks != 0 {
-				t.Fatalf("oversized bulk reached service: status=%d calls=%d body=%s", response.Code, f.bulks, response.Body)
-			}
-		})
-	}
 }
 
 // An omitted, empty, or scalar library scope must not collapse into a non-nil

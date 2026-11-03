@@ -88,11 +88,13 @@ func (c *ABSConfigProvider) RefreshTTL(_ context.Context) (time.Duration, error)
 
 // StandaloneLoginEnabled reports whether body-creds login is permitted.
 // We default to true; an operator can set "audiobooks.abs.login_disabled"
-// to "true" in server_settings to gate it off.
+// to "true" in server_settings to gate it off. A failed settings read is
+// returned rather than treated as enabled, so the operator's gate cannot be
+// bypassed by a database error.
 func (c *ABSConfigProvider) StandaloneLoginEnabled(ctx context.Context) (bool, error) {
 	disabled, err := c.Settings.Get(ctx, "audiobooks.abs.login_disabled")
 	if err != nil {
-		return true, nil // fail open
+		return false, fmt.Errorf("abs_config: read login_disabled: %w", err)
 	}
 	return disabled != "true", nil
 }

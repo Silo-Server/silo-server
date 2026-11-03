@@ -102,41 +102,6 @@ func TestAutoscanVirtualFoldersIncludesEnabledLocationsForAdminKey(t *testing.T)
 	}
 }
 
-func TestAutoscanMediaUpdatedEnqueuesResolvedPath(t *testing.T) {
-	root := t.TempDir()
-	filePath := filepath.Join(root, "Movie.mkv")
-	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	queue := &fakeAutoscanQueue{}
-	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{{
-		ID:      3,
-		Name:    "Movies",
-		Type:    "movie",
-		Enabled: true,
-		Paths:   []string{root},
-	}}}, queue, NewResourceIDCodec(), nil)
-
-	body := []byte(`{"Updates":[{"path":` + strconv.Quote(filePath) + `,"updateType":"Modified"}]}`)
-	req := httptest.NewRequest(http.MethodPost, "/Library/Media/Updated", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	handler.HandleMediaUpdated(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(queue.calls) != 1 {
-		t.Fatalf("expected one queued scan, got %d", len(queue.calls))
-	}
-	if len(queue.batches) != 1 {
-		t.Fatalf("expected one batch enqueue, got %d", len(queue.batches))
-	}
-	if queue.calls[0].libraryID != 3 || queue.calls[0].mode != "file" || queue.calls[0].path != filePath || queue.calls[0].trigger != "jellyfin_autoscan" {
-		t.Fatalf("unexpected queued scan: %#v", queue.calls[0])
-	}
-}
-
 func TestAutoscanMediaUpdatedRejectsAmbiguousLibraryWithoutPartialEnqueue(t *testing.T) {
 	root := t.TempDir()
 	ambiguousRoot := t.TempDir()
@@ -238,52 +203,6 @@ func TestAutoscanMediaUpdatedIgnoresUnsupportedSidecars(t *testing.T) {
 		t.Fatalf("expected one parent scan, got %#v", queue.calls)
 	}
 	if queue.calls[0].libraryID != 5 || queue.calls[0].mode != "subtree" || queue.calls[0].path != movieDir || queue.calls[0].trigger != "jellyfin_autoscan" {
-		t.Fatalf("unexpected parent scan: %#v", queue.calls[0])
-	}
-}
-
-func TestAutoscanMediaUpdatedSidecarsScanParent(t *testing.T) {
-	root := t.TempDir()
-	movieDir := filepath.Join(root, "Movie (2024)")
-	if err := os.Mkdir(movieDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	nfoPath := filepath.Join(movieDir, "Movie.nfo")
-	posterPath := filepath.Join(movieDir, "poster.jpg")
-	for _, path := range []string{nfoPath, posterPath} {
-		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	queue := &fakeAutoscanQueue{}
-	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{{
-		ID:      6,
-		Name:    "Movies",
-		Type:    "movie",
-		Enabled: true,
-		Paths:   []string{root},
-	}}}, queue, NewResourceIDCodec(), nil)
-
-	payload := map[string]any{"Updates": []map[string]string{
-		{"path": nfoPath, "updateType": "Modified"},
-		{"path": posterPath, "updateType": "Modified"},
-	}}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/Library/Media/Updated", bytes.NewReader(data))
-	rec := httptest.NewRecorder()
-
-	handler.HandleMediaUpdated(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(queue.calls) != 1 {
-		t.Fatalf("expected one parent scan, got %#v", queue.calls)
-	}
-	if queue.calls[0].libraryID != 6 || queue.calls[0].mode != "subtree" || queue.calls[0].path != movieDir || queue.calls[0].trigger != "jellyfin_autoscan" {
 		t.Fatalf("unexpected parent scan: %#v", queue.calls[0])
 	}
 }

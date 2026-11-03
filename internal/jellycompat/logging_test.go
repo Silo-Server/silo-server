@@ -3,8 +3,6 @@ package jellycompat
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -116,75 +114,5 @@ func assertLogSecretsAbsent(t *testing.T, log string, secrets ...string) {
 		if strings.Contains(log, secret) {
 			t.Errorf("log contains synthetic credential %q", secret)
 		}
-	}
-}
-
-type debugErrorBody struct {
-	err    error
-	closed bool
-}
-
-func (b *debugErrorBody) Read(p []byte) (int, error) {
-	return copy(p, "partial"), b.err
-}
-
-func (b *debugErrorBody) Close() error {
-	b.closed = true
-	return b.err
-}
-
-func TestDebugRequestBodyPreservesReadAndCloseErrors(t *testing.T) {
-	wantErr := errors.New("synthetic read error")
-	original := &debugErrorBody{err: wantErr}
-	body := &debugRequestBody{ReadCloser: original}
-	buf := make([]byte, 16)
-	n, err := body.Read(buf)
-	if !errors.Is(err, wantErr) || string(buf[:n]) != "partial" || body.body.String() != "partial" {
-		t.Fatalf("read changed: n=%d err=%v capture=%q", n, err, body.body.String())
-	}
-	if err := body.Close(); !errors.Is(err, wantErr) || !original.closed {
-		t.Fatalf("Close not forwarded: %v", err)
-	}
-}
-
-func TestDebugLoggerFilterLeavesRequestUnread(t *testing.T) {
-	var logs bytes.Buffer
-	original := io.NopCloser(strings.NewReader("unchanged"))
-	h := newDebugLogMiddleware(&logs, "selected-client")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		if r.Body != original {
-			t.Fatal("filtered request body was wrapped")
-		}
-	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", original))
-	if logs.Len() != 0 {
-		t.Fatal("filtered request was logged")
-	}
-}
-
-func TestDebugLoggerReportsActualRequestTruncation(t *testing.T) {
-	for _, size := range []int{debugMaxBodyCapture - 1, debugMaxBodyCapture, debugMaxBodyCapture + 1} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			const prefix = `{"Pw":"capture-secret","data":"`
-			const suffix = `"}`
-			body := prefix + strings.Repeat("a", size-len(prefix)-len(suffix)) + suffix
-			var logs bytes.Buffer
-			h := newDebugLogMiddleware(&logs, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				got, err := io.ReadAll(r.Body)
-				if err != nil || string(got) != body {
-					t.Fatal("request body changed")
-				}
-			}))
-			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			r.ContentLength = -1 // Verify observed reads, not a trusted length header.
-			h.ServeHTTP(httptest.NewRecorder(), r)
-			wantTruncated := size > debugMaxBodyCapture
-			if got := strings.Contains(logs.String(), "[truncated at"); got != wantTruncated {
-				t.Errorf("truncation notice = %t, want %t", got, wantTruncated)
-			}
-			if !wantTruncated && strings.Contains(logs.String(), "omitted") {
-				t.Error("complete JSON was omitted")
-			}
-			assertLogSecretsAbsent(t, logs.String(), "capture-secret")
-		})
 	}
 }

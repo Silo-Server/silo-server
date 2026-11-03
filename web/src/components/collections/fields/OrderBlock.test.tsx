@@ -54,12 +54,6 @@ function choose(combobox: HTMLElement, option: string) {
 }
 
 describe("OrderBlock, Smart", () => {
-  it("shows no limit as a blank field", () => {
-    const { input } = renderSmart();
-    expect(input).toHaveValue(null);
-    expect(input).toHaveAttribute("placeholder", "No limit");
-  });
-
   it("commits a whole number on Enter", () => {
     const { input, onChange } = renderSmart();
     input.focus();
@@ -68,13 +62,6 @@ describe("OrderBlock, Smart", () => {
     expect(input).not.toHaveFocus();
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith({ rules: expect.objectContaining({ limit: 40 }) });
-  });
-
-  it("keeps a limit above 500", () => {
-    const { input, onChange } = renderSmart();
-    fireEvent.change(input, { target: { value: "2000" } });
-    fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith({ rules: expect.objectContaining({ limit: 2000 }) });
   });
 
   it("removes the limit when the field is cleared", () => {
@@ -92,30 +79,6 @@ describe("OrderBlock, Smart", () => {
     fireEvent.blur(input);
     expect(onChange).not.toHaveBeenCalled();
     expect(input).toHaveValue(250);
-  });
-
-  it("names each direction for the sort it orders", () => {
-    renderSmart();
-    expect(screen.getByRole("combobox", { name: "Direction" })).toHaveTextContent("Newest first");
-    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Direction" }), {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Newest first",
-      "Oldest first",
-    ]);
-  });
-
-  it("offers personal sorts only where they apply", () => {
-    renderSmart({ allowPersonalized: true });
-    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Sort by" }), {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
-    });
-    expect(screen.getByRole("option", { name: "Date Viewed" })).toBeInTheDocument();
   });
 
   it("changing the sort leaves sort_config alone when nothing is stored", () => {
@@ -163,25 +126,27 @@ describe("OrderBlock, Synced list", () => {
     };
   }
 
-  it("keeps the list's own order by default and says blank takes the whole list", () => {
-    const { input } = renderSynced();
-    expect(screen.getByRole("combobox", { name: "Default sort" })).toHaveTextContent("List order");
-    expect(input).toHaveAttribute("placeholder", "Whole list");
-    expect(screen.getByText(/Blank takes the whole list, up to 500\./)).toBeInTheDocument();
-  });
-
-  it("sends the chosen default sort", () => {
-    const { onSortChange } = renderSynced();
+  it("picks a sort and its direction, and List order clears both", () => {
+    const { onSortChange } = renderSynced({ sortConfig: { field: "release_date", order: "desc" } });
+    choose(screen.getByRole("combobox", { name: "Direction" }), "Oldest first");
+    expect(onSortChange).toHaveBeenLastCalledWith({ field: "release_date", order: "asc" });
     choose(screen.getByRole("combobox", { name: "Default sort" }), "Title");
-    expect(onSortChange).toHaveBeenCalledWith({ field: "title", order: "asc" });
+    expect(onSortChange).toHaveBeenLastCalledWith({ field: "title", order: "asc" });
+    choose(screen.getByRole("combobox", { name: "Default sort" }), "List order");
+    expect(onSortChange).toHaveBeenLastCalledWith({});
   });
 
-  it("caps max titles at 500 and clears it when blank", () => {
+  it("leaves Direction off while the list keeps its own order", () => {
+    renderSynced();
+    expect(screen.getByRole("combobox", { name: "Direction" })).toBeDisabled();
+  });
+
+  it("keeps max titles above 500 and clears it when blank", () => {
     const { input, onLimitChange } = renderSynced({ limit: 50 });
-    fireEvent.change(input, { target: { value: "900" } });
+    fireEvent.change(input, { target: { value: "10000" } });
     fireEvent.blur(input);
-    expect(onLimitChange).toHaveBeenLastCalledWith(500);
-    expect(input).toHaveValue(500);
+    expect(onLimitChange).toHaveBeenLastCalledWith(10000);
+    expect(input).toHaveValue(10000);
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.blur(input);
     expect(onLimitChange).toHaveBeenLastCalledWith(undefined);

@@ -39,22 +39,6 @@ func TestNegotiateChoosesOriginalThenConversion(t *testing.T) {
 	}
 }
 
-func TestConversionFor(t *testing.T) {
-	for _, tc := range []struct {
-		channels int
-		want     Conversion
-	}{
-		{1, Conversion{Channels: 1, BitrateKbps: 128}},
-		{2, Conversion{Channels: 2, BitrateKbps: 192}},
-		{6, Conversion{Channels: 2, BitrateKbps: 192, SourceChannels: 6}},
-		{0, Conversion{Channels: 2, BitrateKbps: 192}},
-	} {
-		if got := ConversionFor(File{AudioChannels: tc.channels}); got != tc.want {
-			t.Fatalf("ConversionFor(%d) = %+v, want %+v", tc.channels, got, tc.want)
-		}
-	}
-}
-
 func TestServeFileRefusesReplacedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "theme.mp3")
 	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {

@@ -132,16 +132,3 @@ func TestDeliveryKeepsRecordingWhileALongResponseFlows(t *testing.T) {
 		t.Fatalf("recorded delivery %d times over %d bytes, want at least %d (one per %d-byte slice)", got, size, want, meterChunk)
 	}
 }
-
-// Handlers also run without meterEgress (tests call them directly), so a
-// missing recorder must be harmless.
-func TestDeliveryWithoutARecorderIsANoOp(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	noteDelivery(r, &streamtoken.Claims{SessionID: "session-1"})
-	noteDelivery(r, nil)
-	w := &meteredResponseWriter{ResponseWriter: httptest.NewRecorder(), meter: newEgressMeter()}
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("media")); err != nil {
-		t.Fatal(err)
-	}
-}

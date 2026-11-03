@@ -73,6 +73,27 @@ func TestCanceledClientServerErrorIsAbandoned(t *testing.T) {
 	}
 }
 
+// A success is written and recorded with its status whether or not the
+// client's context ended: the operation completed, and a half-closed client
+// receives it.
+func TestCanceledClientSuccessIsRecorded(t *testing.T) {
+	logs := captureLogs(t)
+	h := observe(bufferResponse(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":"yes"}`)
+	})))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, Prefix+"/libraries", nil).WithContext(ctx))
+	if w.Code != http.StatusCreated || w.Body.String() != `{"ok":"yes"}` {
+		t.Fatalf("sent %d %q, want 201 {\"ok\":\"yes\"}", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(logs.Bytes(), []byte(`"status":201,"status_class":"2xx"`)) {
+		t.Fatalf("request not recorded as 201: %q", logs.String())
+	}
+}
+
 // net/http cancels the request context when an HTTP/1.1 client half-closes
 // its side, though that client is still reading. Its server error has to
 // arrive: a handler that writes nothing gets net/http's empty 200 instead.
@@ -111,5 +132,42 @@ func TestHalfClosedClientGetsServerError(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusInternalServerError || len(body) == 0 {
 		t.Fatalf("half-closed client got %s with body %q, want the 500 problem", resp.Status, body)
+	}
+}
+
+// A half-closed client is still reading, so a success has to reach it with its
+// own status and body. Writing nothing lets net/http answer an empty 200.
+func TestHalfClosedClientGetsSuccess(t *testing.T) {
+	srv := httptest.NewServer(observe(bufferResponse(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done() // the half-close has reached the server
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":"yes"}`)
+	}))))
+	t.Cleanup(srv.Close)
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := io.WriteString(conn, "POST "+Prefix+"/libraries HTTP/1.1\r\nHost: silo\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated || string(body) != `{"ok":"yes"}` {
+		t.Fatalf("half-closed client got %s with body %q, want 201 Created with {\"ok\":\"yes\"}", resp.Status, body)
 	}
 }

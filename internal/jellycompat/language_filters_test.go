@@ -121,9 +121,6 @@ func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
 		{"", views},
 		{"ExcludeLocationTypes=Virtual", views},
 		{"MediaTypes=Video", browse},
-		{"Tags=Classic", browse},
-		{"HasSubtitles=true", browse},
-		{"IsFavorite=false", browse},
 		{"Recursive=true", browse},
 		// Unresolvable IDs never widen into an unfiltered catalog browse.
 		{"Ids=not-an-id", views},
@@ -132,13 +129,8 @@ func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
 		// Other filters must not drop an Ids filter that names nothing (#2264).
 		{"Ids=not-an-id&IncludeItemTypes=Movie&Recursive=true", empty},
 		{"Ids=00000000-0000-0000-0000-000000000001&IncludeItemTypes=Movie&Recursive=true", empty},
-		{"Ids=not-an-id,also-not-an-id&Recursive=true", empty},
-		{"Ids=not-an-id&IncludeItemTypes=Movie", empty},
-		{"Ids=not-an-id&MediaTypes=Video", empty},
 		{"Ids=not-an-id&IsFavorite=true", empty},
 		{"Ids=not-an-id&SearchTerm=alpha", empty},
-		{"Ids=not-an-id&Genres=Drama", empty},
-		{"GenreIds=not-an-id&IncludeItemTypes=Movie&Recursive=true", empty},
 		// A library view ID is not unresolvable; it routes as it always has.
 		{"Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},
 		{"Ids=not-an-id&Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},

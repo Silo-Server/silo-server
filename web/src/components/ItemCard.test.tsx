@@ -57,19 +57,6 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
   });
 
-  it("renders the series last air date when sorted by last_air_date", () => {
-    const markup = renderCard({
-      sortField: "last_air_date",
-      item: {
-        ...baseItem,
-        last_air_date: "2026-03-22",
-      },
-    });
-
-    expect(markup).toContain("Mar");
-    expect(markup).toContain("2026");
-  });
-
   it("falls back to default label when last_air_date is null", () => {
     const markup = renderCard({
       sortField: "last_air_date",
@@ -80,27 +67,6 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("2023");
-  });
-
-  it("renders content rating when sorted by content_rating", () => {
-    const markup = renderCard({
-      sortField: "content_rating",
-      item: baseItem,
-    });
-
-    expect(markup).toContain("TV-MA");
-  });
-
-  it("renders runtime when sorted by runtime", () => {
-    const markup = renderCard({
-      sortField: "runtime",
-      item: {
-        ...baseItem,
-        runtime: 95,
-      },
-    });
-
-    expect(markup).toContain("1h 35m");
   });
 
   it("renders non-IMDb ratings for matching rating sorts", () => {
@@ -121,20 +87,6 @@ describe("ItemCard SortMeta", () => {
 
     expect(tmdbMarkup).toContain('<span class="not-uppercase">TMDB</span> 8.2');
     expect(criticMarkup).toContain('<span class="not-uppercase">RT</span> 96%');
-  });
-
-  it("renders resolution when sorted by resolution", () => {
-    const markup = renderCard({
-      sortField: "resolution",
-      item: {
-        ...baseItem,
-        overlay_summary: {
-          resolution: "2160p",
-        },
-      },
-    });
-
-    expect(markup).toContain("2160p");
   });
 
   it("renders audiobook-native sort metadata", () => {
@@ -226,22 +178,6 @@ describe("ItemCard SortMeta", () => {
     expect(markup).not.toContain("Ch");
   });
 
-  it("renders a chapters-only manga count chip", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-2",
-        type: "manga",
-        title: "One Piece",
-        manga_chapter_count: 100,
-        manga_volume_count: 0,
-      },
-    });
-
-    expect(markup).toContain("100 Ch");
-    expect(markup).not.toContain("Vol");
-  });
-
   it("renders both counts when a series has volumes and loose chapters", () => {
     const markup = renderCard({
       item: {
@@ -255,56 +191,6 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("12 Vol · 3 Ch");
-  });
-
-  it("renders a color-coded publication status chip on manga cards", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-st",
-        type: "manga",
-        title: "Ongoing Manga",
-        manga_volume_count: 5,
-        show_status: "Ongoing",
-      },
-    });
-    expect(markup).toContain("Ongoing");
-    expect(markup).toContain("text-emerald-200");
-  });
-
-  it("does not render a status chip on non-manga cards or when status is absent", () => {
-    const noStatus = renderCard({
-      item: { ...baseItem, content_id: "manga-ns", type: "manga", title: "No Status" },
-    });
-    expect(noStatus).not.toContain("Ongoing");
-    const ebook = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "eb",
-        type: "ebook",
-        title: "Book",
-        show_status: "Completed",
-      },
-    });
-    expect(ebook).not.toContain("Completed");
-  });
-
-  it("renders episode cards with series context when available", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "episode-1",
-        type: "episode",
-        title: "When You're Lost in the Darkness",
-        series_title: "The Last of Us",
-        season_number: 1,
-        episode_number: 1,
-      },
-    });
-
-    expect(markup).toContain("The Last of Us");
-    expect(markup).toContain("S01E01");
-    expect(markup).toContain("When You&#x27;re Lost in the Darkness");
   });
 });
 

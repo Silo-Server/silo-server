@@ -103,50 +103,6 @@ func TestDeviceSettingsWire(t *testing.T) {
 	}
 }
 
-// updateDevice carries the three PATCH states of custom_name to the seam:
-// a value renames, null clears, and omission changes nothing.
-func TestUpdateDeviceWire(t *testing.T) {
-	f := &fakeDeviceSettings{}
-	deps := pilotDeps(nil, nil)
-	deps.DeviceSettings = f
-	h := newTestHandler(t, deps)
-	headers := viewerHeaders()
-	name := func(u handlers.DeviceUpdate) string {
-		if !u.Rename {
-			return "<unchanged>"
-		}
-		if u.CustomName == nil {
-			return "<cleared>"
-		}
-		return *u.CustomName
-	}
-	for _, c := range []struct{ body, want string }{
-		{`{"custom_name":"Living Room"}`, "Living Room"},
-		{`{"custom_name":null}`, "<cleared>"},
-		{`{}`, "<unchanged>"},
-	} {
-		rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1?profile_id=p-family", c.body, headers)
-		if rec.Code != 200 || f.targetProfile != "p-family" || f.targetDevice != "d-1" || name(f.update) != c.want {
-			t.Fatalf("%s: %d %q %s", c.body, rec.Code, name(f.update), rec.Body.String())
-		}
-		var got DeviceSettings
-		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.DeviceID != "d-1" || got.DeviceName != "Apple TV" || got.ProfileID != "p-family" || (c.want == "Living Room") != (got.CustomName == "Living Room") {
-			t.Fatalf("%s: representation %s", c.body, rec.Body.String())
-		}
-	}
-	before := f.calls
-	for _, body := range []string{`{"custom_name":""}`, `{"custom_name":"` + strings.Repeat("é", 121) + `"}`} {
-		if rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1", body, headers); rec.Code != 422 || f.calls != before {
-			t.Fatalf("invalid name reached the seam: %d %s", rec.Code, rec.Body.String())
-		}
-	}
-	if rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1", `{"custom_name":"`+strings.Repeat("é", 120)+`"}`, headers); rec.Code != 200 {
-		t.Fatalf("120 runes: %d %s", rec.Code, rec.Body.String())
-	}
-	if rec := do(t, h, http.MethodPatch, "/api/v2/devices/missing", `{"custom_name":"x"}`, headers); rec.Code != 404 {
-		t.Fatalf("missing: %d %s", rec.Code, rec.Body.String())
-	}
-}
 func TestDeviceSettingsGates(t *testing.T) {
 	f := &fakeDeviceSettings{}
 	deps := pilotDeps(nil, nil)

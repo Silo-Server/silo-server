@@ -12,7 +12,11 @@ func TestSidecarSubtitleTags(t *testing.T) {
 		{"/m/Movie (2020).mkv", "/m/Movie (2020).sdh.en.SRT", SubtitleTags{Language: "en", HearingImpaired: true}, true},
 		{"/m/Movie.Name.2020.mkv", "/m/Movie.Name.2020.hr.ai.srt", SubtitleTags{Language: "hr"}, true},
 		{"/m/Movie.part2.mkv", "/m/Movie.part2.fr.forced.ass", SubtitleTags{Language: "fr", Forced: true}, true},
+		{"/m/Movie.mkv", "/m/movie.EN.srt", SubtitleTags{Language: "en"}, true},
+		// Folding changes the byte length: "ß" is two bytes, "ẞ" three.
+		{"/m/Straße.mkv", "/m/STRAẞE.de.srt", SubtitleTags{Language: "de"}, true},
 		{"/m/Movie.mkv", "/m/MovieExtra.srt", SubtitleTags{}, false},
+		{"/m/Movie.mkv", "/m/movieextra.srt", SubtitleTags{}, false},
 		{"/m/Movie.mkv", "/m/Other.en.srt", SubtitleTags{}, false},
 	}
 	for _, tc := range tests {

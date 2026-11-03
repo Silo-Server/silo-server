@@ -3,10 +3,11 @@ package scanner
 import (
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // scopeLibraryRoot returns the most specific configured library root that
@@ -25,7 +26,9 @@ func scopeLibraryRoot(path string, libraryRoots []string) string {
 // scanRootIgnoreRules loads the rules above a scoped folder walk, stopping at
 // its configured library root. Rules outside that root cannot affect a library.
 // A failed ancestor read makes the scope incomplete, so callers must protect it
-// from missing-file reconciliation.
+// from missing-file reconciliation. The scope is also ignored when it, or a
+// directory between it and the root, has a name the walk skips
+// (SkippedDirName), so a scoped scan never reads what a full scan passes over.
 func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, bool, error) {
 	path = filepath.Clean(path)
 	root := scopeLibraryRoot(path, libraryRoots)
@@ -42,10 +45,13 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 	var rules []ignoreRules
 	for i := len(parents) - 1; i >= 0; i-- {
 		dir := parents[i]
+		if dir != root && SkippedDirName(filepath.Base(dir)) {
+			return rules, true, nil
+		}
 		if ignoreRulesMatch(rules, dir, true) {
 			return rules, true, nil
 		}
-		entries, err := os.ReadDir(dir)
+		entries, err := fspath.ReadDir(dir)
 		if err != nil {
 			return nil, false, fmt.Errorf("read ignore ancestor %s: %w", dir, err)
 		}
@@ -57,8 +63,11 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 	}
 	// A scope is a directory unless the filesystem says otherwise.
 	isDir := true
-	if info, err := os.Stat(path); err == nil {
+	if info, err := fspath.Stat(path); err == nil {
 		isDir = info.IsDir()
+	}
+	if isDir && SkippedDirName(filepath.Base(path)) {
+		return rules, true, nil
 	}
 	return rules, ignoreRulesMatch(rules, path, isDir), nil
 }
@@ -69,7 +78,7 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 func libraryRootSkipped(root string) bool {
 	entries := make([]fs.DirEntry, 0, 2)
 	for _, name := range []string{ignoreFileName, ignoreMarkerNoMedia} {
-		if info, err := os.Lstat(filepath.Join(root, name)); err == nil {
+		if info, err := fspath.Lstat(filepath.Join(root, name)); err == nil {
 			entries = append(entries, fs.FileInfoToDirEntry(info))
 		}
 	}
@@ -137,8 +146,8 @@ func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath str
 	}
 	rules = inherited
 	if hasIgnore {
-		if content, err := os.ReadFile(filepath.Join(dirPhysicalPath, ignoreFileName)); err == nil {
-			patterns := parseGitIgnorePatterns(string(content))
+		if content, err := fspath.ReadFile(filepath.Join(dirPhysicalPath, ignoreFileName)); err == nil {
+			patterns := parseGitIgnorePatterns(ignoreFileText(content))
 			if len(patterns) == 0 {
 				return inherited, true
 			}
@@ -146,8 +155,8 @@ func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath str
 		}
 	}
 	if hasSiloIgnore {
-		if content, err := os.ReadFile(filepath.Join(dirPhysicalPath, siloIgnoreFileName)); err == nil {
-			if patterns := parseIgnorePatterns(string(content)); len(patterns) > 0 {
+		if content, err := fspath.ReadFile(filepath.Join(dirPhysicalPath, siloIgnoreFileName)); err == nil {
+			if patterns := parseIgnorePatterns(ignoreFileText(content)); len(patterns) > 0 {
 				rules = append(rules, ignoreRules{basePath: dirLogicalPath, patterns: patterns})
 			}
 		}
@@ -163,6 +172,11 @@ func DirSkipped(dir string, entries []fs.DirEntry) bool {
 	_, skip := dirIgnoreRules(nil, dir, dir, entries)
 	return skip
 }
+
+// ignoreFileText returns ignore-file content in fspath encoding, the form the
+// names it is matched against take, so a pattern holding the raw bytes of a
+// non-UTF-8 name still matches that name.
+func ignoreFileText(content []byte) string { return fspath.Encode(string(content)) }
 
 // parseIgnorePatterns converts .siloignore file content into match patterns.
 // Blank lines and `#` comments are dropped, the rest is kept verbatim.

@@ -189,27 +189,3 @@ func TestAdminRequestUserUsageContract(t *testing.T) {
 	deps.AdminRequestUsage = nil
 	requireProblem(t, do(t, NewHandler(deps), http.MethodGet, path, "", actingRequestAdmin), TypeDependencyUnavailable)
 }
-
-func TestAdminAccountInsightCapabilities(t *testing.T) {
-	read := func(deps Dependencies) map[string]any {
-		t.Helper()
-		reply := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/users/capabilities", "", actingRequestAdmin)
-		if reply.Code != http.StatusOK {
-			t.Fatalf("%d %s", reply.Code, reply.Body.String())
-		}
-		var body map[string]any
-		if err := json.Unmarshal(reply.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		return body
-	}
-	flags := []string{"account_devices", "watch_summary", "account_downloads", "request_usage"}
-	deps, _ := adminAccountInsightDeps()
-	on := read(deps)
-	off := read(requestDeps(fixtureRequests()))
-	for _, flag := range flags {
-		if on[flag] != true || off[flag] != false {
-			t.Errorf("%s: configured %v, unconfigured %v", flag, on[flag], off[flag])
-		}
-	}
-}

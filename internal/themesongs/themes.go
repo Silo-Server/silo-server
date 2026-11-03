@@ -13,10 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 var (
@@ -204,12 +206,14 @@ func Open(file File) (*os.File, error) {
 	if err != nil || !filepath.IsLocal(rel) {
 		return nil, ErrUnavailable
 	}
-	root, err := os.OpenRoot(file.OwnerPath)
+	// Both paths are fspath-encoded; the encoding never produces a separator,
+	// so rel decodes to the real relative name.
+	root, err := os.OpenRoot(fspath.Decode(file.OwnerPath))
 	if err != nil {
 		return nil, ErrUnavailable
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.Open(rel)
+	f, err := root.Open(fspath.Decode(rel))
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -243,7 +247,7 @@ func ServeFile(w http.ResponseWriter, r *http.Request, id, path string, size int
 		http.Error(w, "theme audio unavailable", http.StatusNotFound)
 		return
 	}
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		http.Error(w, "theme audio unavailable", http.StatusNotFound)
 		return
@@ -263,7 +267,7 @@ func Unchanged(path string, size int64, modified time.Time) bool {
 	if !filepath.IsAbs(path) || Container(path) == "" {
 		return false
 	}
-	info, err := os.Stat(path)
+	info, err := fspath.Stat(path)
 	return err == nil && matches(info, size, modified)
 }
 

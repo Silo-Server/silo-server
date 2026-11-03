@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,8 +106,7 @@ func (f accessGroupIntSliceField) Ptr() *[]int {
 	if !f.Set {
 		return nil
 	}
-	value := append([]int(nil), f.Value...)
-	return &value
+	return new(slices.Clone(f.Value))
 }
 
 type accessGroupStringSliceField struct {
@@ -121,14 +121,6 @@ func (f *accessGroupStringSliceField) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	return json.Unmarshal(data, &f.Value)
-}
-
-func (f accessGroupStringSliceField) Ptr() *[]string {
-	if !f.Set {
-		return nil
-	}
-	value := append([]string(nil), f.Value...)
-	return &value
 }
 
 func (h *AccessGroupHandler) HandleList(w http.ResponseWriter, r *http.Request) {
@@ -412,7 +404,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		ID:                       group.ID,
 		Name:                     group.Name,
 		Description:              group.Description,
-		LibraryIDs:               append([]int(nil), group.LibraryIDs...),
+		LibraryIDs:               slices.Clone(group.LibraryIDs),
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(group.MaxPlaybackQuality),
 		DownloadAllowed:          group.DownloadAllowed,
 		DownloadTranscodeAllowed: group.DownloadTranscodeAllowed,
@@ -420,7 +412,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		AudioTranscodeAllowed:    group.AudioTranscodeAllowed,
 		MaxStreams:               group.MaxStreams,
 		MaxTranscodes:            group.MaxTranscodes,
-		AllowedPermissions:       append([]string(nil), group.AllowedPermissions...),
+		AllowedPermissions:       slices.Clone(group.AllowedPermissions),
 		RequestsAllowed:          group.RequestsAllowed,
 		IsDefault:                group.IsDefault,
 		MemberCount:              group.MemberCount,

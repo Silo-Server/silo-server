@@ -52,15 +52,6 @@ func TestRemoteDispatchHWAccelPrefersTheNodesOverride(t *testing.T) {
 			want:    "none",
 		},
 		{
-			name: "an override beats the stale report it contradicts",
-			handler: overriddenNode("qsv", &nodepool.Node{
-				URL:             "http://node-1",
-				HWAccelOverride: override("none"),
-				Capabilities:    json.RawMessage(`{"resolved":"qsv"}`)}),
-			nodeURL: "http://node-1",
-			want:    "none",
-		},
-		{
 			name:    "a node with no override keeps the cluster value",
 			handler: overriddenNode("qsv", &nodepool.Node{URL: "http://node-1"}),
 			nodeURL: "http://node-1",

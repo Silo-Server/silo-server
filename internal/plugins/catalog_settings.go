@@ -153,32 +153,30 @@ func readIncludeApprovedCommunityQuery(ctx context.Context, querier catalogSetti
 	var value string
 	err := querier.QueryRow(ctx, query, IncludeApprovedCommunityPluginsSetting).Scan(&value)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
 		return false, fmt.Errorf("read approved community plugin setting: %w", err)
 	}
-	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
-	if err != nil {
-		return false, nil
+	if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+		return parsed, nil
 	}
-	return parsed, nil
+	return false, nil // a malformed stored value reads as the default (off)
 }
 
 func readIntegerSetting(ctx context.Context, querier catalogSettingsQuerier, key string) (int, error) {
 	var value string
 	err := querier.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, fmt.Errorf("read plugin setting %q: %w", key, err)
 	}
-	parsed, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || parsed < 0 {
-		return 0, nil
+	if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed >= 0 {
+		return parsed, nil
 	}
-	return parsed, nil
+	return 0, nil // a malformed or negative stored value reads as the default (0)
 }
 
 func reconcileManagedRepositories(ctx context.Context, executor catalogSettingsExecutor, includeCommunity bool) (int, error) {

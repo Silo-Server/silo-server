@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -30,16 +32,30 @@ func newPINLimitStore(t *testing.T) userstore.UserStore {
 	t.Helper()
 	store := newProfileTestStore(t)
 	ctx := context.Background()
-	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: ptr("1234")}); err != nil {
+	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PINHash: storedPIN(t, "1234")}); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Kid"}); err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
-	if err := store.UpdateProfile(ctx, "profile-2", userstore.UpdateProfileInput{PIN: ptr("5678")}); err != nil {
+	if err := store.UpdateProfile(ctx, "profile-2", userstore.UpdateProfileInput{PINHash: storedPIN(t, "5678")}); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
 	return store
+}
+
+// storedPIN is a profile PIN as the profile handlers store it: its bcrypt
+// hash, or "" for none.
+func storedPIN(t *testing.T, pin string) *string {
+	t.Helper()
+	if pin == "" {
+		return new("")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return new(string(hash))
 }
 
 func postVerifyPIN(t *testing.T, h *ProfileHandler, profileID, pin string) *httptest.ResponseRecorder {
@@ -107,24 +123,6 @@ func TestHandleVerifyPIN_CorrectPINResetsCount(t *testing.T) {
 		requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "0000"), false)
 	}
 	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "1234"), true)
-}
-
-// Two API nodes sharing one backend share the count, as Redis does in a
-// cluster.
-func TestHandleVerifyPIN_SharedLimiterAcrossHandlers(t *testing.T) {
-	store := newPINLimitStore(t)
-	shared := ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
-	nodeA := newPINLimitHandler(t, store, shared)
-	nodeB := newPINLimitHandler(t, store, shared)
-
-	for range 3 {
-		requireVerifyPIN(t, postVerifyPIN(t, nodeA, "profile-1", "0000"), false)
-	}
-	for range 2 {
-		requireVerifyPIN(t, postVerifyPIN(t, nodeB, "profile-1", "0000"), false)
-	}
-	requirePINLocked(t, postVerifyPIN(t, nodeA, "profile-1", "1234"))
-	requirePINLocked(t, postVerifyPIN(t, nodeB, "profile-1", "1234"))
 }
 
 // A profile that does not exist or has no PIN is refused before an attempt

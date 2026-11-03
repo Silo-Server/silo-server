@@ -18,7 +18,7 @@ func NewSyncUserCollectionsTask(scheduler CollectionSyncRunner) *SyncUserCollect
 func (t *SyncUserCollectionsTask) Key() string  { return "sync_user_collections" }
 func (t *SyncUserCollectionsTask) Name() string { return "Sync User Collections" }
 func (t *SyncUserCollectionsTask) Description() string {
-	return "Refreshes profile-owned imported collections (TMDB, Trakt, MDBList) on their schedule"
+	return "Refreshes profile-owned imported collections (TMDB, MDBList) on their schedule"
 }
 func (t *SyncUserCollectionsTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary

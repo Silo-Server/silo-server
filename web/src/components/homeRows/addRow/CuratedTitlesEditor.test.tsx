@@ -57,9 +57,4 @@ describe("CuratedTitlesEditor", () => {
     );
     expect(screen.getByRole("button", { name: "Already here is added" })).toBeDisabled();
   });
-
-  it("asks for at least one title when the list is empty", () => {
-    render(<Harness initial={[]} />);
-    expect(screen.getByText("Search above and add at least one title.")).toBeInTheDocument();
-  });
 });

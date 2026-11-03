@@ -1,3 +1,0 @@
-CREATE TABLE alpha (
-    id BIGSERIAL PRIMARY KEY
-);

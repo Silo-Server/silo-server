@@ -18,24 +18,13 @@ func (chapterThumbnailTestPresigner) DirectURL(_ context.Context, key string, _ 
 
 func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	matchA, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	matchB, _ := sessions.StartSession(2, "profile-b", 100, PlayDirect, false)
-	other, _ := sessions.StartSession(3, "profile-c", 101, PlayDirect, false)
-
-	_ = sessions.SetRealtimeConnection(matchA.ID, true)
-	_ = sessions.SetRealtimeConnection(matchB.ID, true)
-	_ = sessions.SetRealtimeConnection(other.ID, true)
-
 	hub := NewRealtimeHub()
-	connA := &dispatchTestConn{}
-	connB := &dispatchTestConn{}
-	connOther := &dispatchTestConn{}
-	regA := hub.Register(matchA.ID, connA)
-	regB := hub.Register(matchB.ID, connB)
-	regOther := hub.Register(other.ID, connOther)
-	defer hub.Unregister(regA)
-	defer hub.Unregister(regB)
-	defer hub.Unregister(regOther)
+	matchA := startPlaybackTestSession(t, sessions, 1, "profile-a", 100, PlayDirect)
+	matchB := startPlaybackTestSession(t, sessions, 2, "profile-b", 100, PlayDirect)
+	other := startPlaybackTestSession(t, sessions, 3, "profile-c", 101, PlayDirect)
+	connA := connectRealtimeTestConn(t, sessions, hub, matchA.ID)
+	connB := connectRealtimeTestConn(t, sessions, hub, matchB.ID)
+	connOther := connectRealtimeTestConn(t, sessions, hub, other.ID)
 
 	notifier := NewChapterThumbnailNotifier(sessions, hub, chapterThumbnailTestPresigner{}.DirectURL, 0)
 	notifier.ChapterThumbnailReady(
@@ -78,15 +67,10 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 
 func TestMarkerThumbnailNotifierRequiresNegotiation(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	opted, _ := sessions.StartSession(1, "profile", 100, PlayDirect, false)
-	legacy, _ := sessions.StartSession(2, "profile", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(opted.ID, true)
-	_ = sessions.SetRealtimeConnection(legacy.ID, true)
 	hub := NewRealtimeHub()
-	a, b := &dispatchTestConn{}, &dispatchTestConn{}
-	regA, regB := hub.Register(opted.ID, a), hub.Register(legacy.ID, b)
-	defer hub.Unregister(regA)
-	defer hub.Unregister(regB)
+	opted := startPlaybackTestSession(t, sessions, 1, "profile", 100, PlayDirect)
+	legacy := startPlaybackTestSession(t, sessions, 2, "profile", 100, PlayDirect)
+	a, b := connectRealtimeTestConn(t, sessions, hub, opted.ID), connectRealtimeTestConn(t, sessions, hub, legacy.ID)
 	store := NewMemoryPlanStoreV3()
 	if err := store.SaveAttempt(t.Context(), AttemptRecordV3{PlaybackAttemptID: opted.ID, ExpiresAt: time.Now().Add(time.Hour), SessionID: opted.ID, NormalizedRequest: StartRequestV3{ClientFeatures: []string{FeatureMarkerThumbnailsV3}}}); err != nil {
 		t.Fatal(err)
@@ -115,15 +99,10 @@ func TestMarkerThumbnailNotifierRequiresNegotiation(t *testing.T) {
 func TestMarkerThumbnailNotifierDeliversAcrossReplicasOnce(t *testing.T) {
 	bus := &markerUpdateTestBus{}
 	sessions := NewSessionManager(0, 0)
-	opted, _ := sessions.StartSession(1, "profile", 100, PlayDirect, false)
-	legacy, _ := sessions.StartSession(2, "profile", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(opted.ID, true)
-	_ = sessions.SetRealtimeConnection(legacy.ID, true)
 	hub := NewRealtimeHub()
-	a, b := &dispatchTestConn{}, &dispatchTestConn{}
-	regA, regB := hub.Register(opted.ID, a), hub.Register(legacy.ID, b)
-	defer hub.Unregister(regA)
-	defer hub.Unregister(regB)
+	opted := startPlaybackTestSession(t, sessions, 1, "profile", 100, PlayDirect)
+	legacy := startPlaybackTestSession(t, sessions, 2, "profile", 100, PlayDirect)
+	a, b := connectRealtimeTestConn(t, sessions, hub, opted.ID), connectRealtimeTestConn(t, sessions, hub, legacy.ID)
 	store := NewMemoryPlanStoreV3()
 	if err := store.SaveAttempt(t.Context(), AttemptRecordV3{PlaybackAttemptID: opted.ID, SessionID: opted.ID, ExpiresAt: time.Now().Add(time.Hour), NormalizedRequest: StartRequestV3{ClientFeatures: []string{FeatureMarkerThumbnailsV3}}}); err != nil {
 		t.Fatal(err)

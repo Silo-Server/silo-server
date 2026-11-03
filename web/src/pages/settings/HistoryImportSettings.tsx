@@ -325,7 +325,7 @@ export default function HistoryImportSettings() {
       const run = await createRunMutation.mutateAsync({
         profile_id: effectiveProfileId,
         source: "jellyfin",
-        jellyfin_base_url: jellyfinServerURL,
+        jellyfin_base_url: jellyfinServerURL.trim(),
         jellyfin_username: jellyfinUsername,
         jellyfin_password: jellyfinPassword,
       });

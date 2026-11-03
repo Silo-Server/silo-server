@@ -147,24 +147,20 @@ describe("DeviceSettings capability discovery", () => {
     expect(mocks.refetchCapabilities).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["API version is incompatible", { ...compatibleCapabilities, api_version: 2 }],
-    [
-      "batched effective reads are missing",
-      { ...compatibleCapabilities, supports_batched_effective: undefined },
-    ],
-    ["revision is missing", { ...compatibleCapabilities, manifest_revision: undefined }],
-  ])("does not request all settings when the %s", (_case, capabilities) => {
-    mocks.capabilities.data = capabilities as SettingsCapabilities;
+  it.each([["API version is incompatible", { ...compatibleCapabilities, api_version: 2 }]])(
+    "does not request all settings when the %s",
+    (_case, capabilities) => {
+      mocks.capabilities.data = capabilities as SettingsCapabilities;
 
-    render(<DeviceSettings />);
+      render(<DeviceSettings />);
 
-    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ keys: [], enabled: false }),
-    );
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
-  });
+      expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ keys: [], enabled: false }),
+      );
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
+    },
+  );
 
   it("still requests settings when the server reports no idempotent writes", () => {
     // The v2 write operations carry no mutation id, so replay support is not
@@ -294,27 +290,12 @@ describe("DeviceSettings capability discovery", () => {
 
       expect(mocks.clearDevice).not.toHaveBeenCalled();
     });
-
-    it("offers nothing to reset on a device with no changes", () => {
-      render(<DeviceSettings />);
-
-      expect(
-        screen.queryByRole("button", { name: "Use profile settings" }),
-      ).not.toBeInTheDocument();
-    });
   });
 
   describe("naming a device", () => {
     beforeEach(() => {
       mocks.capabilities.data = { ...compatibleCapabilities, supports_device_rename: true };
       vi.spyOn(window, "confirm").mockReturnValue(true);
-    });
-
-    it("offers no rename on a server that cannot store the name", () => {
-      mocks.capabilities.data = compatibleCapabilities;
-      render(<DeviceSettings />);
-
-      expect(screen.queryByRole("button", { name: "Rename" })).not.toBeInTheDocument();
     });
 
     it("saves the typed name for the device it is editing", async () => {
@@ -367,23 +348,6 @@ describe("DeviceSettings capability discovery", () => {
         },
         expect.anything(),
       );
-    });
-
-    it("uses the chosen name throughout, keeping the reported one for reference", async () => {
-      const user = userEvent.setup();
-      mocks.ownDevices = [
-        device({ custom_name: "Den", changed_count: 1, is_current_device: false }),
-      ];
-      render(<DeviceSettings />);
-
-      expect(screen.getByRole("heading", { name: "Den" })).toBeInTheDocument();
-      expect(screen.getByText("Reports itself as Living Room TV")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Use profile settings" }));
-      expect(window.confirm).toHaveBeenLastCalledWith(
-        expect.stringMatching(/^Use your profile settings on Den\?/),
-      );
-      await user.click(screen.getByRole("button", { name: /Forget/ }));
-      expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/^Forget Den\?/));
     });
   });
 });

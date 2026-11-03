@@ -1,5 +1,5 @@
 import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
-import { preferredDateLocale } from "@/lib/datetime";
+import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
 import {
   formatRequestDisplayState,
   formatRequestReason,
@@ -41,14 +41,6 @@ export const WATCHLIST_TITLE_RANK = {
   attention: 4,
 } as const;
 export type WatchlistTitleRank = (typeof WATCHLIST_TITLE_RANK)[keyof typeof WATCHLIST_TITLE_RANK];
-
-/** A YYYY-MM-DD calendar date as local midnight, or null when unparseable. */
-function calendarDate(value: string | undefined): Date | null {
-  const match = value ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
-  if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return Number.isNaN(date.getTime()) ? null : date;
-}
 
 function startOfDay(now: Date): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -95,7 +87,7 @@ export function watchlistTitleStatus(
   }
 
   const state = requestDisplayState(request.status, undefined, request.state);
-  const release = calendarDate(title.release_date);
+  const release = parseCalendarDate(title.release_date);
   const upcoming = release !== null && release.getTime() > startOfDay(now).getTime();
   const out = upcoming && release ? `Out ${formatReleaseDay(release, now)}` : null;
 
@@ -176,7 +168,7 @@ export function watchlistTitleStatus(
 }
 
 function releaseTime(title: WatchlistTitle): number {
-  return calendarDate(title.release_date)?.getTime() ?? Number.POSITIVE_INFINITY;
+  return parseCalendarDate(title.release_date)?.getTime() ?? Number.POSITIVE_INFINITY;
 }
 
 function addedTime(title: WatchlistTitle): number {

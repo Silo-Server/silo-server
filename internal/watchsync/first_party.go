@@ -9,7 +9,6 @@ import (
 
 // The provider keys of Silo's former built-in providers.
 const (
-	traktProviderKey   = "trakt"
 	simklProviderKey   = "simkl"
 	mdblistProviderKey = "mdblist"
 )
@@ -26,7 +25,6 @@ type firstPartyPlugin struct {
 // export records, and imported watch history are all stored under these keys,
 // so registering the plugins under them carries every existing link over.
 var firstPartyProviderKeys = map[firstPartyPlugin]string{
-	{PluginID: "silo.watchprovider." + traktProviderKey, CapabilityID: traktProviderKey}:     traktProviderKey,
 	{PluginID: "silo.watchprovider." + simklProviderKey, CapabilityID: simklProviderKey}:     simklProviderKey,
 	{PluginID: "silo.watchprovider." + mdblistProviderKey, CapabilityID: mdblistProviderKey}: mdblistProviderKey,
 }
@@ -45,6 +43,18 @@ func PluginProviderKey(installationID int, pluginID, capabilityID string, siloMa
 	return fmt.Sprintf("%s:%d:%s", providerSourcePlugin, installationID, capabilityID)
 }
 
+// retiredPluginIDs lists first-party watch-sync plugins for providers Silo no
+// longer supports. Their installations are never registered, so a copy left
+// installed on a server cannot sync, scrobble, or claim a provider key.
+var retiredPluginIDs = map[string]bool{
+	"silo.watchprovider.trakt": true,
+}
+
+// RetiredPlugin reports whether pluginID is a retired watch-sync plugin.
+func RetiredPlugin(pluginID string) bool {
+	return retiredPluginIDs[pluginID]
+}
+
 // FirstPartyPluginID returns the first-party plugin that serves providerKey,
 // for keys that a former built-in provider used.
 func FirstPartyPluginID(providerKey string) (string, bool) {
@@ -56,8 +66,8 @@ func FirstPartyPluginID(providerKey string) (string, bool) {
 	return "", false
 }
 
-// The plugin global config entry, and its fields, where the first-party Trakt
-// and Simkl plugins read their provider app credentials.
+// The plugin global config entry, and its fields, where first-party plugins
+// read their provider app credentials.
 const (
 	firstPartyAppConfigKey = "app"
 	appClientIDField       = "client_id"
@@ -176,25 +186,4 @@ func MarkFirstPartyMigrated(ctx context.Context, store FirstPartyMigrationStore,
 		return err
 	}
 	return store.SetServerSetting(ctx, key, "plugin")
-}
-
-// AppClientID returns the provider app client ID that the plugin serving
-// providerKey is configured with, read from its "app" global config. Other
-// Silo features that call the same provider with a profile's token (Trakt
-// collections) must send the client ID the token was issued to. It is empty
-// when no plugin serves the key or the plugin has none configured.
-func (s *Service) AppClientID(ctx context.Context, providerKey string) (string, error) {
-	provider, ok := s.registry.Get(providerKey)
-	if !ok {
-		return "", nil
-	}
-	plugin, ok := provider.(*PluginProvider)
-	if !ok {
-		return "", nil
-	}
-	config, err := plugin.providerConfig(ctx)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(config.GetValues()[firstPartyAppConfigKey+"."+appClientIDField]), nil
 }

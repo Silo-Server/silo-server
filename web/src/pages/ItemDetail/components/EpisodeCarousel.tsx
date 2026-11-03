@@ -15,6 +15,7 @@ import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import EpisodeCardCaption from "./EpisodeCardCaption";
 
 interface EpisodeCarouselProps {
   episodes: EpisodeListItem[];
@@ -32,7 +33,7 @@ export default function EpisodeCarousel({
   );
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
-  const { hideImages } = useEpisodeSpoilerPrefs();
+  const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -70,6 +71,7 @@ export default function EpisodeCarousel({
                 episodeLinkState={episodeLinkState}
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
+                hideOverviewIfUnwatched={hideOverviews}
                 onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
               />
             ))}
@@ -97,6 +99,7 @@ function EpisodeCarouselCard({
   episodeLinkState,
   quickActionMode,
   hideImageIfUnwatched,
+  hideOverviewIfUnwatched,
   onPrefetch,
 }: {
   ep: EpisodeListItem;
@@ -104,6 +107,7 @@ function EpisodeCarouselCard({
   episodeLinkState?: EpisodeNavigationState;
   quickActionMode: CardQuickActionMode;
   hideImageIfUnwatched: boolean;
+  hideOverviewIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -206,17 +210,12 @@ function EpisodeCarouselCard({
           aria-current={isCurrent ? "page" : undefined}
           className="block"
         >
-          <div className="text-muted-foreground/70 mt-2 flex items-center gap-2 text-xs">
-            <span>Episode {ep.episode_number}</span>
-            {ep.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
-          </div>
-          <p
-            className="truncate text-sm font-semibold"
-            style={isCurrent ? { color: "var(--primary)" } : undefined}
-          >
-            {episodeTitle}
-          </p>
-          {ep.runtime > 0 && <p className="text-muted-foreground/70 text-xs">{ep.runtime}m</p>}
+          <EpisodeCardCaption
+            episode={ep}
+            hideOverview={hideOverviewIfUnwatched && isEpisodeUnwatched(ep.user_data)}
+            isCurrent={isCurrent}
+            badges={ep.user_data?.played && <WatchedCheckIndicator />}
+          />
         </ViewTransitionLink>
       </div>
     </li>

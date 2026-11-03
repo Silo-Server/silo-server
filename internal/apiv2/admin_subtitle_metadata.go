@@ -20,7 +20,7 @@ type AdminSubtitleMetadata struct {
 	ID              ID      `json:"id"`
 	MediaFileID     ID      `json:"media_file_id"`
 	Provider        string  `json:"provider"`
-	Language        string  `json:"language"`
+	Language        string  `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)"`
 	Format          string  `json:"format"`
 	ReleaseName     string  `json:"release_name"`
 	Score           float64 `json:"score"`
@@ -39,7 +39,7 @@ type AdminSubtitleMetadataInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 }
 type AdminSubtitleMetadataPatch struct {
-	Language        *string `json:"language,omitempty" nullable:"false" minLength:"1" maxLength:"128"`
+	Language        *string `json:"language,omitempty" nullable:"false" minLength:"1" maxLength:"128" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code, any case; stored in canonical form"`
 	ReleaseName     *string `json:"release_name,omitempty" nullable:"false" maxLength:"4096"`
 	HearingImpaired *bool   `json:"hearing_impaired,omitempty" nullable:"false"`
 }

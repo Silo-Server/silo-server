@@ -51,6 +51,8 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "playback.subtitle_appearance": "subtitles",
   "playback.preferred_quality": "picture",
   "playback.max_bitrate_kbps": "picture",
+  "playback.cellular_preferred_quality": "picture",
+  "playback.cellular_max_bitrate_kbps": "picture",
   "playback.auto_skip_intro": "episodes",
   "playback.intro_skip_mode": "episodes",
   "playback.auto_skip_credits": "episodes",

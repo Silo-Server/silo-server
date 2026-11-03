@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -74,6 +75,10 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 
 func requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, db := queryattr.StartRequest(r.Context())
+		if db != nil {
+			r = r.WithContext(ctx)
+		}
 		start := time.Now()
 		ww := &statusResponseWriter{ResponseWriter: w}
 
@@ -84,7 +89,8 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			routePattern = routeCtx.RoutePattern()
 		}
 
-		slog.InfoContext(r.Context(), "jellycompat request", "component", "jellycompat",
+		attrs := []any{
+			"component", "jellycompat",
 			"request_id", middleware.GetReqID(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -97,7 +103,9 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"user_agent", r.UserAgent(),
 			"content_length", r.ContentLength,
 			"auth_kind", authKind(r),
-		)
+		}
+		attrs = append(attrs, db.LogAttrs()...)
+		slog.InfoContext(r.Context(), "jellycompat request", attrs...)
 	})
 }
 

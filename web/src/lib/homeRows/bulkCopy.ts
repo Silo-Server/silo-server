@@ -1,5 +1,4 @@
 import { sectionLibraryFilterIds } from "@/lib/sectionLibraryFilter";
-import { isTraktConfig } from "@/lib/sectionTypes";
 import type { RowDraft } from "./rowDraft";
 import type { LibraryPage, PageRef } from "./types";
 
@@ -34,7 +33,7 @@ function namesLibrary(config: Record<string, unknown>): boolean {
 /**
  * Whether a row can be copied to other library pages as it is. The bulk
  * create sends one config to every page, so only ready-made kinds whose
- * settings name no library qualify. Legacy Trakt rows can't be created again.
+ * settings name no library qualify.
  * Hero rows are handled by the caller: a new hero row stays on its own page,
  * and copies of an existing one are never heroes.
  */
@@ -42,11 +41,7 @@ export function canCopyToLibraries(row: {
   sectionType: string;
   config: Record<string, unknown>;
 }): boolean {
-  return (
-    !PAGE_BOUND_TYPES.has(row.sectionType) &&
-    !namesLibrary(row.config) &&
-    !isTraktConfig(row.config)
-  );
+  return !PAGE_BOUND_TYPES.has(row.sectionType) && !namesLibrary(row.config);
 }
 
 /** Spellings of a library type, by the kind they name (as in internal/librarykind). */

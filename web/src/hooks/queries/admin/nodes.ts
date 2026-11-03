@@ -175,11 +175,29 @@ function useNodeWrite() {
         );
       return result;
     },
-    onSuccess: (_result, intent) => {
+    onSuccess: (result, intent) => {
       if (!mounted.current || !intent.authority || !isNodeWriteAuthorityActive(intent.authority))
         return;
       toast.success(intent.action === "delete" ? "Node deleted" : "Node configuration saved");
       intent.onSuccess?.();
+      // A new node has never been checked, so it lists as unhealthy and takes
+      // no work until the next health sweep, up to 30 seconds later. Check it
+      // now; the check stores its result for every server.
+      if (intent.action === "create" && result) {
+        const authority = intent.authority;
+        void v2("POST /api/v2/admin/nodes/{id}/check", {
+          path: { id: String(result.id) },
+          profileContext: authority,
+          retryAuthentication: false,
+        })
+          .catch(() => {
+            // The sweep checks the node anyway.
+          })
+          .finally(() => {
+            if (isNodeWriteAuthorityActive(authority))
+              client.invalidateQueries({ queryKey: adminKeys.nodes() });
+          });
+      }
     },
     onError: (_error, intent) => {
       if (mounted.current && intent.authority && isNodeWriteAuthorityActive(intent.authority))

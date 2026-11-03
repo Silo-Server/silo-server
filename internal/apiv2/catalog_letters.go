@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
 // Section catalog-letters: the letter index behind an alphabetical jump bar.
@@ -67,6 +68,8 @@ func registerCatalogLetters(reg *Registry) {
 	op.DefaultStatus = http.StatusOK
 	operation := viewerOperation(op)
 	operation.RetrySafety = RetrySafetyNaturalIdempotent
+	// A user store that cannot run the query is 501 capability_unsupported.
+	operation.Errors = append(operation.Errors, http.StatusNotImplemented)
 	Register(reg, operation, reg.queryCatalogLetters)
 }
 
@@ -75,7 +78,7 @@ func (reg *Registry) queryCatalogLetters(ctx context.Context, in *CatalogLetters
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}

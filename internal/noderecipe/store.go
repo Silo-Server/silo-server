@@ -455,11 +455,60 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 	if s == nil || s.rdb == nil || sessionID == "" {
 		return nil
 	}
+	return s.rdb.Del(ctx, s.recordKeys(sessionID)...).Err()
+}
+
+// deleteUnlessMovedAttempts bounds how often DeleteUnlessMoved rereads a
+// record that changed under it.
+const deleteUnlessMovedAttempts = 3
+
+// DeleteUnlessMoved is Delete for a node tearing down its own transport. It
+// leaves the record in place, and reports kept, when the stored card names
+// another node (playback.RecipeExecutor.NamesAnotherNode): the API stores the
+// card of the node a transport moved to under the same id, so a stop the old
+// node runs late must not delete it. The read and the delete form one
+// transaction: a card written between them makes the delete reread it rather
+// than remove it.
+func (s *Store) DeleteUnlessMoved(ctx context.Context, sessionID string, executor playback.RecipeExecutor) (kept bool, err error) {
+	if s == nil || s.rdb == nil || sessionID == "" {
+		return false, nil
+	}
+	keys := s.recordKeys(sessionID)
+	for range deleteUnlessMovedAttempts {
+		kept = false
+		err = s.rdb.Watch(ctx, func(tx *redis.Tx) error {
+			data, err := tx.Get(ctx, keys[0]).Bytes()
+			switch {
+			case errors.Is(err, redis.Nil):
+				// Nothing stored; still clear any sidecars left behind.
+			case err != nil:
+				return err
+			default:
+				if card, ok := unmarshalCard(data); ok && executor.NamesAnotherNode(card) {
+					kept = true
+					return nil
+				}
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Del(ctx, keys...)
+				return nil
+			})
+			return err
+		}, keys[0])
+		if !errors.Is(err, redis.TxFailedErr) {
+			return kept, err
+		}
+	}
+	return false, err
+}
+
+// recordKeys lists the keys that make up the record stored under sessionID.
+func (s *Store) recordKeys(sessionID string) []string {
 	keys := []string{s.key(sessionID)}
 	if s.prefix == KeyPrefix {
 		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID))
 	}
-	return s.rdb.Del(ctx, keys...).Err()
+	return keys
 }
 
 // RevokeNode invalidates every recipe previously issued for nodeURL. The

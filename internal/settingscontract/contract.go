@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Scope identifies the storage identity a value is attached to.
@@ -150,7 +151,14 @@ type Definition struct {
 	Control          string          `json:"recommended_control,omitempty"`
 	SuggestedOptions string          `json:"suggested_options,omitempty"`
 	UnsetLabel       string          `json:"unset_label,omitempty"`
-	Deprecated       bool            `json:"deprecated,omitempty"`
+	// AdminDefault lets the server administrator replace DefaultValue for the
+	// whole server. The replacement lives in server settings under
+	// AdminDefaultSettingKey and is still reported with source "default": it is
+	// what a viewer inherits, not something the viewer chose. Only resolvers
+	// built with settingsresolve's WithAdminDefaults read it, so every server
+	// path that resolves such a key must build its resolver that way.
+	AdminDefault bool `json:"admin_default,omitempty"`
+	Deprecated   bool `json:"deprecated,omitempty"`
 	// Notes is maintainer commentary. It is stripped from the public manifest.
 	Notes string `json:"notes,omitempty"`
 }
@@ -397,6 +405,30 @@ func (d *Definition) AllowsScope(scope Scope) bool {
 // IsRemote reports whether the server stores this setting's values.
 func (d *Definition) IsRemote() bool {
 	return d.Persistence == PersistenceRemote
+}
+
+// adminDefaultPrefix namespaces administrator defaults among server settings.
+const adminDefaultPrefix = "defaults."
+
+// AdminDefaultSettingKey is the server-settings key that holds the
+// administrator's default for a setting, as JSON text. An empty or absent
+// value means no administrator default, so default_value applies.
+func AdminDefaultSettingKey(key string) string {
+	return adminDefaultPrefix + key
+}
+
+// AdminDefaultFor returns the definition whose administrator default the
+// server-settings key holds, or false when the key holds none.
+func (m *Manifest) AdminDefaultFor(serverSettingKey string) (*Definition, bool) {
+	key, ok := strings.CutPrefix(serverSettingKey, adminDefaultPrefix)
+	if !ok {
+		return nil, false
+	}
+	def, ok := m.Lookup(key)
+	if !ok || !def.AdminDefault {
+		return nil, false
+	}
+	return def, true
 }
 
 // VisibleAtRevision reports whether a client pinned to revision may surface this

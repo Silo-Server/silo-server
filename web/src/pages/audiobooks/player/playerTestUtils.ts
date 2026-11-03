@@ -1,5 +1,4 @@
 import { vi } from "vitest";
-import type { PlayerChapter } from "@/player/types";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
 import { SEEK_CHOICES } from "@/lib/seekIntervals";
 import {
@@ -51,14 +50,4 @@ export function makePrefs(over: Partial<AudiobookPrefs> = {}): AudiobookPrefs {
     setSmartRewind: vi.fn(),
     ...over,
   };
-}
-
-export function makeChapters(starts: number[], total: number): PlayerChapter[] {
-  return starts.map((start, index) => ({
-    index,
-    title: `Chapter ${index + 1}`,
-    start_seconds: start,
-    end_seconds: starts[index + 1] ?? total,
-    source: "embedded",
-  }));
 }

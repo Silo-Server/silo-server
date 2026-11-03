@@ -88,7 +88,7 @@ func (a *Analyzer) sweep() error {
 	return errors.New(strings.Join(s.findings, "; "))
 }
 
-func (s *sweeper) report(node ast.Node, format string, args ...any) {
+func (s *sweeper) reportf(node ast.Node, format string, args ...any) {
 	s.findings = append(s.findings, s.a.errorf(node, format, args...).Error())
 }
 
@@ -100,11 +100,11 @@ func (s *sweeper) file(file *ast.File) {
 	for _, spec := range file.Imports {
 		path := strings.Trim(spec.Path.Value, `"`)
 		if defaultMuxImports[path] && !s.allowedProfilingImport(rel, spec, path) {
-			s.report(spec, "%s imports %s, which registers on http.DefaultServeMux at init; "+
+			s.reportf(spec, "%s imports %s, which registers on http.DefaultServeMux at init; "+
 				"nothing may serve that mux, so the import is refused", rel, path)
 		}
 		if path == "unsafe" && audited {
-			s.report(spec, "%s imports unsafe in an audited package; unsafe can reach the router behind a "+
+			s.reportf(spec, "%s imports unsafe in an audited package; unsafe can reach the router behind a "+
 				"sealed handler, so audited packages may not import it", rel)
 		}
 	}
@@ -165,7 +165,7 @@ func (s *sweeper) visit(decl ast.Node, where string, allowed bool) {
 				break
 			}
 			if t := s.info().TypeOf(typed.Type); s.a.set.producesRouter(t) {
-				s.report(typed, "a variable is declared with %s %s; its zero value is a working router "+
+				s.reportf(typed, "a variable is declared with %s %s; its zero value is a working router "+
 					"that no listener enumerates", typeLabel(t), where)
 			}
 		case *ast.TypeAssertExpr:
@@ -191,12 +191,12 @@ func (s *sweeper) visit(decl ast.Node, where string, allowed bool) {
 func (s *sweeper) recovery(at ast.Node, typeExpr ast.Expr, verb string) {
 	t := s.info().TypeOf(typeExpr)
 	if _, isParam := types.Unalias(t).(*types.TypeParam); isParam {
-		s.report(at, "%s a type parameter; instantiated with a router type it would recover a router "+
+		s.reportf(at, "%s a type parameter; instantiated with a router type it would recover a router "+
 			"no listener enumerates", verb)
 		return
 	}
 	if kind := s.a.set.routerKind(t); kind != ctorNone {
-		s.report(at, "%s %s, which is %s by its method set; a router recovered from a value is a "+
+		s.reportf(at, "%s %s, which is %s by its method set; a router recovered from a value is a "+
 			"registration surface the inventory cannot see", verb, typeLabel(t), kind)
 	}
 }
@@ -229,7 +229,7 @@ func (s *sweeper) ident(ident *ast.Ident) {
 	if inst, ok := s.info().Instances[ident]; ok && inst.TypeArgs != nil {
 		for i := 0; i < inst.TypeArgs.Len(); i++ {
 			if kind := s.a.set.routerKind(inst.TypeArgs.At(i)); kind != ctorNone {
-				s.report(ident, "%s is instantiated with %s, which is %s by its method set; a generic "+
+				s.reportf(ident, "%s is instantiated with %s, which is %s by its method set; a generic "+
 					"can assert a value to its type argument and recover a router", ident.Name,
 					typeLabel(inst.TypeArgs.At(i)), kind)
 			}
@@ -238,17 +238,17 @@ func (s *sweeper) ident(ident *ast.Ident) {
 	switch obj := s.info().Uses[ident].(type) {
 	case *types.Func:
 		if isRouterCtor(obj) != ctorNone && !s.a.set.callees[ident] {
-			s.report(ident, "%s.%s is used as a function value rather than called; a router built through it "+
+			s.reportf(ident, "%s.%s is used as a function value rather than called; a router built through it "+
 				"would not be recognized as a construction", obj.Pkg().Name(), obj.Name())
 		}
 		if obj.Pkg() != nil && obj.Pkg().Path() == "reflect" {
 			if why := reflectRecovery[recvName(obj)][obj.Name()]; why != "" {
-				s.report(ident, "%s on a router the inventory cannot see", why)
+				s.reportf(ident, "%s on a router the inventory cannot see", why)
 			}
 		}
 	case *types.Var:
 		if obj.Pkg() != nil && obj.Pkg().Path() == httpImportPath && obj.Name() == "DefaultServeMux" {
-			s.report(ident, "refers to http.DefaultServeMux, which no listener enumerates")
+			s.reportf(ident, "refers to http.DefaultServeMux, which no listener enumerates")
 		}
 	}
 }
@@ -261,9 +261,9 @@ func (s *sweeper) call(call *ast.CallExpr) {
 	}
 	switch {
 	case defaultMuxRegistrars[fn.Name()]:
-		s.report(call, "http.%s registers on http.DefaultServeMux, which no listener enumerates", fn.Name())
+		s.reportf(call, "http.%s registers on http.DefaultServeMux, which no listener enumerates", fn.Name())
 	case handlerConsumingCalls[fn.Name()] && len(call.Args) > 0 && isNilValue(call.Args[len(call.Args)-1], s.info()):
-		s.report(call, "serves a nil handler, which is http.DefaultServeMux; no listener enumerates it")
+		s.reportf(call, "serves a nil handler, which is http.DefaultServeMux; no listener enumerates it")
 	}
 }
 
@@ -277,18 +277,18 @@ func (s *sweeper) composite(lit *ast.CompositeLit) {
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
-			s.report(lit, "http.Server is built with a positional literal; the route inventory requires "+
+			s.reportf(lit, "http.Server is built with a positional literal; the route inventory requires "+
 				"a keyed literal with a non-nil Handler")
 			return
 		}
 		if key, _ := kv.Key.(*ast.Ident); key != nil && key.Name == methodHandler {
 			if isNilValue(kv.Value, s.info()) {
-				s.report(kv, "http.Server is built with Handler: nil, which serves http.DefaultServeMux")
+				s.reportf(kv, "http.Server is built with Handler: nil, which serves http.DefaultServeMux")
 			}
 			return
 		}
 	}
-	s.report(lit, "http.Server is built without a Handler, so it serves http.DefaultServeMux; "+
+	s.reportf(lit, "http.Server is built without a Handler, so it serves http.DefaultServeMux; "+
 		"no listener enumerates that mux")
 }
 
@@ -302,11 +302,11 @@ func (s *sweeper) production(expr ast.Expr, where string) {
 		return
 	}
 	if strings.HasPrefix(where, "at ") {
-		s.report(expr, "%s constructed %s, which belongs to no listener entry point; "+
+		s.reportf(expr, "%s constructed %s, which belongs to no listener entry point; "+
 			"build it inside a declared listener entry function", s.a.set.exprText(expr), where)
 		return
 	}
-	s.report(expr, "%s constructed %s outside the inventoried listeners; "+
+	s.reportf(expr, "%s constructed %s outside the inventoried listeners; "+
 		"add it as a listener or record it as an explicit exclusion for that function", s.a.set.exprText(expr), where)
 }
 
