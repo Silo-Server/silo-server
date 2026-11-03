@@ -126,3 +126,51 @@ func TestListConfiguredGlobalConfigKeysTreatsBlankStringsAsUnset(t *testing.T) {
 		t.Fatalf("keys = %v, want none for a blank entry", keys)
 	}
 }
+
+// One unreadable entry must not hide any other plugin's configured state. The settings
+// list reads every eligible installation in one call, so a row the cipher cannot open
+// has to stay that installation's problem: reporting the whole batch as unconfigured
+// would take a working plugin's dependent setting off offer.
+func TestListConfiguredGlobalConfigKeysIsolatesAnUnreadableEntry(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := context.Background()
+	store := NewRuntimeConfigStore(pool, instanceStateTestCipher(t))
+
+	healthy := seedResidentQueryInstallation(t, pool, true)
+	if err := store.PutGlobalConfig(ctx, healthy, "account", map[string]any{
+		"api_key": "key-value",
+	}); err != nil {
+		t.Fatalf("seed global config: %v", err)
+	}
+
+	// A value the server cannot open: the encrypted-entry shaper with nothing
+	// encrypted inside it, which is what a truncated write leaves behind.
+	damaged := seedResidentQueryInstallation(t, pool, true)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO plugin_runtime_configs (plugin_installation_id, config_key, config_value)
+		VALUES ($1, 'account', $2::jsonb)
+	`, damaged, `{"__silo_encrypted_runtime_config_v1":"not-an-envelope"}`); err != nil {
+		t.Fatalf("seed unreadable global config: %v", err)
+	}
+
+	byInstallation, err := store.ListConfiguredGlobalConfigKeysForInstallations(ctx, []int{healthy, damaged})
+	if err != nil {
+		t.Fatalf("one unreadable entry failed the batch: %v", err)
+	}
+	if len(byInstallation[healthy]) != 1 || byInstallation[healthy][0] != "account" {
+		t.Fatalf("readable installation keys = %v, want [account]", byInstallation[healthy])
+	}
+	if len(byInstallation[damaged]) != 0 {
+		t.Fatalf("unreadable installation keys = %v, want none", byInstallation[damaged])
+	}
+
+	// The unreadable entry does not spoil a later read either: the installation is
+	// unconfigured on its own account, not poisoned for every caller.
+	alone, err := store.ListConfiguredGlobalConfigKeysForInstallations(ctx, []int{healthy})
+	if err != nil {
+		t.Fatalf("ListConfiguredGlobalConfigKeysForInstallations: %v", err)
+	}
+	if len(alone[healthy]) != 1 {
+		t.Fatalf("keys after a damaged batch = %v, want [account]", alone[healthy])
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -235,6 +236,12 @@ func (s *RuntimeConfigStore) ListConfiguredGlobalConfigKeysForInstallations(ctx 
 	}
 	defer rows.Close()
 
+	// A row that will not decode is dropped for its own installation rather than
+	// failing the batch: one damaged entry must not take every other plugin's
+	// configured state with it. The installation whose entry is unreadable reports
+	// nothing, which is the answer that keeps a screen from offering a feature that
+	// cannot work, and the warning names the entry an operator has to look at.
+	damaged := make(map[int]bool)
 	for rows.Next() {
 		var installationID int
 		var key string
@@ -244,7 +251,10 @@ func (s *RuntimeConfigStore) ListConfiguredGlobalConfigKeysForInstallations(ctx 
 		}
 		value, err := decodeRuntimeConfigValue(s.cipher, installationID, key, valueJSON)
 		if err != nil {
-			return nil, fmt.Errorf("decoding plugin runtime config %d/%s: %w", installationID, key, err)
+			slog.WarnContext(ctx, "skipping unreadable plugin runtime config entry", "component", "plugins",
+				"installation_id", installationID, "config_key", key, "error", err)
+			damaged[installationID] = true
+			continue
 		}
 		if key == "" || !runtimeConfigCarriesValue(value) {
 			continue
@@ -253,6 +263,9 @@ func (s *RuntimeConfigStore) ListConfiguredGlobalConfigKeysForInstallations(ctx 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating plugin runtime config keys: %w", err)
+	}
+	for installationID := range damaged {
+		delete(keys, installationID)
 	}
 	return keys, nil
 }
