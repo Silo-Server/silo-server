@@ -95,6 +95,9 @@ type ReconcileArtworkCacheTask struct {
 	settings ArtworkReconcileSettingsStore
 	branding BrandingAssetReconciler
 	identity string
+	// location is where the runner's store reads and writes
+	// (blobstore.Location); empty means identity.
+	location string
 	pool     *pgxpool.Pool
 }
 
@@ -104,6 +107,15 @@ func NewReconcileArtworkCacheTask(runner ArtworkReconcileRunner, settings Artwor
 		pool = pools[0]
 	}
 	return &ReconcileArtworkCacheTask{runner: runner, settings: settings, branding: branding, identity: identity, pool: pool}
+}
+
+// WithLocation records where the runner's store reads and writes
+// (blobstore.Location). A local store can keep an identity recorded under a
+// linked path, and that path can lead elsewhere once the link is retargeted;
+// the configured location is compared with where the store opened instead.
+func (t *ReconcileArtworkCacheTask) WithLocation(location string) *ReconcileArtworkCacheTask {
+	t.location = location
+	return t
 }
 
 func (t *ReconcileArtworkCacheTask) Key() string  { return "reconcile_artwork_cache" }
@@ -287,6 +299,9 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 			stats.SampleMissing, stats.Sampled, stats.Requeued, stats.Cleared,
 		)
 	}
+	if stats.Unrecovered > 0 {
+		message += fmt.Sprintf(", kept %d missing a size with no provider source (refresh or re-upload them)", stats.Unrecovered)
+	}
 	if stats.Errors > 0 {
 		// SweepErrors is zero here (checked above), so these are probe or
 		// branding errors — reported, but they don't reduce sweep coverage.
@@ -335,7 +350,11 @@ func (t *ReconcileArtworkCacheTask) checkConfiguredStore(current map[string]stri
 	if err != nil {
 		return fmt.Errorf("reading configured artwork location: %w", err)
 	}
-	if known && identity != t.identity {
+	location := t.location
+	if location == "" {
+		location = t.identity
+	}
+	if known && identity != location && !blobstore.SameLocalRoot(identity, location) {
 		return ErrArtworkReconcileStaleStore
 	}
 	return nil

@@ -439,6 +439,119 @@ describe("AdminUsers user dialog policy hints", () => {
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(mocks.create.mock.calls[0]![0].body.max_streams).toBe(2);
   });
+
+  // Overrides Max remote stream bitrate to a custom 7 Mbps (not a preset) in a
+  // fresh Create User dialog and fills the account fields, so only the bitrate
+  // can stop the save. 7000 kbps is the last valid value a later edit could leave.
+  const remoteMbps = "Max remote stream bitrate in Mbps";
+  const remoteOverride = (dialog: HTMLElement) =>
+    within(
+      within(dialog).getByText("Max remote stream bitrate").closest("div.space-y-1") as HTMLElement,
+    ).getByRole("switch");
+  async function openCreateWithCustomRemoteBitrate(user: ReturnType<typeof userEvent.setup>) {
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    await user.click(remoteOverride(dialog));
+    await user.click(within(dialog).getByRole("combobox", { name: "Max remote stream bitrate" }));
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    await user.type(within(dialog).getByLabelText(remoteMbps), "7");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    return dialog;
+  }
+
+  it("refuses to save a cleared custom bitrate from another tab and shows the Limits tab", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithCustomRemoteBitrate(user);
+    await user.clear(within(dialog).getByLabelText(remoteMbps));
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    const reported: EventTarget[] = [];
+    dialog
+      .querySelector("form")!
+      .addEventListener("invalid", (event) => reported.push(event.target!), true);
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // The box reopens empty, not on the last valid 7, and the browser points at it.
+    const field = within(dialog).getByLabelText(remoteMbps);
+    expect(field).toHaveValue("");
+    expect(reported).toContain(field);
+  });
+
+  it("keeps invalid custom bitrate text across a tab switch and still refuses to save it", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithCustomRemoteBitrate(user);
+    await user.clear(within(dialog).getByLabelText(remoteMbps));
+    await user.type(within(dialog).getByLabelText(remoteMbps), "abc");
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    const reported: EventTarget[] = [];
+    dialog
+      .querySelector("form")!
+      .addEventListener("invalid", (event) => reported.push(event.target!), true);
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    const field = within(dialog).getByLabelText(remoteMbps);
+    expect(field).toHaveValue("abc");
+    expect(reported).toContain(field);
+  });
+
+  it("saves the retyped custom bitrate after a cleared one", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithCustomRemoteBitrate(user);
+    await user.clear(within(dialog).getByLabelText(remoteMbps));
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    await user.type(within(dialog).getByLabelText(remoteMbps), "1.5");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body.max_remote_stream_bitrate_kbps).toBe(1500);
+  });
+
+  it("drops a cleared custom bitrate when Override is turned off", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithCustomRemoteBitrate(user);
+    await user.clear(within(dialog).getByLabelText(remoteMbps));
+    await user.click(remoteOverride(dialog));
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty(
+      "max_remote_stream_bitrate_kbps",
+    );
+  });
+
+  it("refuses to save an overridden bitrate with no limit picked from another tab", async () => {
+    // The group list hasn't loaded, so turning Override on has no value to seed.
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    await user.click(remoteOverride(dialog));
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dialog).queryByLabelText(remoteMbps)).not.toBeInTheDocument();
+  });
 });
 
 describe("AdminUsers access group column and filter", () => {

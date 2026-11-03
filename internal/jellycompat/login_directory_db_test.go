@@ -104,7 +104,7 @@ func TestLoginPINConventionStaysLocalDB(t *testing.T) {
 
 	// Selecting the directory permits only the original password attempt,
 	// even when the caller supplied the account's old local password as fallback.
-	_, _, usedFallback, err := svc.CompatLoginWithLocalFallback(ctx, linked.Username, "directory-secret#4321", "correct horse battery", "test", "")
+	_, _, usedFallback, err := svc.CompatLoginWithLocalFallback(ctx, linked.Username, "directory-secret#4321", "correct horse battery", "test", "", "")
 	if !errors.Is(err, auth.ErrInvalidCredentials) || usedFallback {
 		t.Fatalf("directory fallback: used = %v, error = %v", usedFallback, err)
 	}

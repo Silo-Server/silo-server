@@ -84,7 +84,7 @@ type SectionOverrideWrite struct {
 	SectionType     *string       `json:"section_type,omitempty" nullable:"false" maxLength:"64" doc:"Legacy recipe name; user_section_type is preferred for a profile-built section" example:"recently_added"`
 	Title           *string       `json:"title,omitempty" nullable:"false" maxLength:"200" doc:"Title override; empty keeps the admin title" example:"New this week"`
 	Featured        *bool         `json:"featured,omitempty" nullable:"true" doc:"Featured override; null or omitted keeps the admin value" example:"false"`
-	ItemLimit       *int          `json:"item_limit,omitempty" nullable:"true" minimum:"1" doc:"Item-limit override; null or omitted keeps the admin value" example:"20"`
+	ItemLimit       *int          `json:"item_limit,omitempty" nullable:"true" minimum:"1" maximum:"500" doc:"Item-limit override; null or omitted keeps the admin value" example:"20"`
 	Config          SectionConfig `json:"config,omitzero" doc:"Legacy config override; {} saves an explicitly empty one, omitted saves none. Validated by the recipe on a profile-built section"`
 	IsUserAdded     *bool         `json:"is_user_added,omitempty" nullable:"false" doc:"A profile-built section; an empty section_id implies it" example:"false"`
 	UserSectionType *string       `json:"user_section_type,omitempty" nullable:"false" maxLength:"64" doc:"Recipe of a profile-built section; must be registered on this server" example:"hidden_gems"`

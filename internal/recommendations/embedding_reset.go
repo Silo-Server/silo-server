@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -212,9 +213,12 @@ func (w *Worker) EmbeddingLockConflict(ctx context.Context) (string, error) {
 // conflict for every configuration. The text never quotes a base URL, which
 // can carry credentials.
 func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, sourceDimensions int) string {
-	err := lock.ValidateConfig(baseURL, model)
+	if strings.TrimSpace(baseURL) == "" && lock.BaseURL != "" {
+		return fmt.Sprintf("No embedding provider is chosen. Choose a provider that serves %q, or reset embeddings to use another model.", lock.Model)
+	}
+	err := lock.ValidateConfig(model)
 	if err == nil && sourceDimensions > 0 {
-		err = lock.Validate(baseURL, model, sourceDimensions)
+		err = lock.Validate(model, sourceDimensions)
 	}
 	// Stored vectors of another width conflict whatever the model returns,
 	// so this needs no probe of the provider.
@@ -223,9 +227,7 @@ func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, so
 	}
 	if err != nil {
 		switch {
-		case lock.BaseURL != "" && lock.BaseURL != baseURL:
-			return "Embeddings were created with a different provider base URL. Reset embeddings before switching providers."
-		case lock.Model != "" && lock.Model != model:
+		case lock.Model != "" && !SameEmbeddingModel(lock.Model, model):
 			return fmt.Sprintf("Embeddings were created with model %q, not %q. Reset embeddings before switching models.", lock.Model, model)
 		case lock.SourceDimensions != 0 && lock.SourceDimensions != sourceDimensions:
 			return fmt.Sprintf("Embeddings were created with %d-dimension vectors, but the model now returns %d. Reset embeddings before switching models.", lock.SourceDimensions, sourceDimensions)

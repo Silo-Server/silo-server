@@ -9,7 +9,7 @@ import type { PageRef } from "@/lib/homeRows/types";
 
 /** How many titles the step 2 and Edit row strip shows. */
 export const PREVIEW_ITEM_LIMIT = 7;
-const PREVIEW_DEBOUNCE_MS = 400;
+export const PREVIEW_DEBOUNCE_MS = 400;
 
 export type PreviewState =
   | { status: "off" }

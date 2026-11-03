@@ -9,6 +9,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // loginLimitBurst caps the number of body-creds /login attempts a single
@@ -96,7 +97,8 @@ func (l *LoginLimiter) janitor() {
 
 // clientIP returns the rate-limit key for a request. The standalone listener
 // is public, so spoofable forwarding headers are deliberately ignored: the key
-// is always the transport peer.
+// is always the transport peer, an IPv6 peer by its /64 as on the native
+// listener (ratelimit.SourceKey).
 //
 // r.RemoteAddr is not that peer once clientip.Middleware has run — it has been
 // replaced with the header-derived viewer address, which an attacker fronted by
@@ -110,7 +112,7 @@ func clientIP(r *http.Request) string {
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return addr
+		return ratelimit.SourceKey(addr)
 	}
-	return host
+	return ratelimit.SourceKey(host)
 }

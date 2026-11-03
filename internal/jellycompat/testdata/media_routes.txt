@@ -19,6 +19,7 @@ GET /Episode/{id}/Timestamps	non-media
 GET /Genres	non-media
 GET /Genres/{name}	non-media
 GET /Items	non-media
+GET /Items/Counts	non-media
 GET /Items/Filters	non-media
 GET /Items/Filters2	non-media
 GET /Items/Latest	non-media
@@ -28,8 +29,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media
@@ -39,6 +43,7 @@ GET /Items/{id}/SpecialFeatures	non-media
 GET /Items/{id}/ThemeMedia	non-media
 GET /Items/{id}/ThemeSongs	non-media
 GET /Items/{id}/ThemeVideos	non-media
+GET /Library/MediaFolders	non-media
 GET /Library/VirtualFolders	non-media
 GET /Localization/Cultures	non-media
 GET /MediaSegments/{id}	non-media
@@ -67,6 +72,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -116,6 +122,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
@@ -159,6 +166,7 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
+QUERY /web/*	non-media
 TRACE /web/*	non-media
 # fixture 2
 GET /	non-media
@@ -181,6 +189,7 @@ GET /Episode/{id}/Timestamps	non-media
 GET /Genres	non-media
 GET /Genres/{name}	non-media
 GET /Items	non-media
+GET /Items/Counts	non-media
 GET /Items/Filters	non-media
 GET /Items/Filters2	non-media
 GET /Items/Latest	non-media
@@ -190,8 +199,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media
@@ -201,6 +213,7 @@ GET /Items/{id}/SpecialFeatures	non-media
 GET /Items/{id}/ThemeMedia	non-media
 GET /Items/{id}/ThemeSongs	non-media
 GET /Items/{id}/ThemeVideos	non-media
+GET /Library/MediaFolders	non-media
 GET /Library/VirtualFolders	non-media
 GET /Localization/Cultures	non-media
 GET /MediaSegments/{id}	non-media
@@ -229,6 +242,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -278,6 +292,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
@@ -321,4 +336,5 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
+QUERY /web/*	non-media
 TRACE /web/*	non-media

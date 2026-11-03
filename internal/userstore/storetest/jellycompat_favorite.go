@@ -52,7 +52,7 @@ func RunAtomicJellycompatFavorite(t *testing.T, store userstore.UserStore, rejec
 	check(true, true, 123, 1)
 	edit.IsFavorite = new(false)
 	edit.Completed = false
-	edit.ClearHistory = true
+	edit.ClearWatched = true
 	edit.History = nil
 	edit.PositionSeconds = 77
 	reject(true)
@@ -64,5 +64,5 @@ func RunAtomicJellycompatFavorite(t *testing.T, store userstore.UserStore, rejec
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(false, false, 77, 0)
+	check(false, false, 77, 1)
 }

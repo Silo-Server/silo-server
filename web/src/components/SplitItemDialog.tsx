@@ -20,7 +20,9 @@ import type {
   MatchCandidate,
   SplitHistoryMode,
 } from "@/api/types";
+import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
+import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
 interface SplittableItem {
@@ -28,6 +30,7 @@ interface SplittableItem {
   title: string;
   year?: number;
   type: string;
+  /** The library the page is scoped to, if any. */
   library_id?: number;
 }
 
@@ -65,6 +68,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
   const [detachUnmatched, setDetachUnmatched] = useState(false);
   const [historyMode, setHistoryMode] = useState<SplitHistoryMode>("evidence");
   const [preview, setPreview] = useState<ItemSplitResponse | null>(null);
+  const [pickedLibraryId, setPickedLibraryId] = useState<number>();
 
   const searchMutation = useSearchItemMatchCandidates(item.content_id);
   const splitMutation = useSplitItem();
@@ -83,6 +87,29 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
     }
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [files]);
+
+  // The split itself needs no library, but the identity search does when the
+  // item is in several: the files being moved say which one, then the page's
+  // library scope, then the admin's pick. A single-library item searches
+  // without one, as the server resolves it.
+  const itemLibraryIds = useMemo(() => libraryIdsOfFiles(files), [files]);
+  const selectedLibraryIds = useMemo(
+    () => libraryIdsOfFiles(files.filter((file) => selectedIds.has(file.id))),
+    [files, selectedIds],
+  );
+  const multiLibrary = itemLibraryIds.length > 1;
+  const inferredLibraryId = !multiLibrary
+    ? undefined
+    : selectedLibraryIds.length === 1
+      ? selectedLibraryIds[0]
+      : item.library_id;
+  const currentPick =
+    pickedLibraryId !== undefined && itemLibraryIds.includes(pickedLibraryId)
+      ? pickedLibraryId
+      : undefined;
+  const needsLibraryPick = multiLibrary && inferredLibraryId === undefined;
+  const searchLibraryId = needsLibraryPick ? currentPick : inferredLibraryId;
+  const searchBlocked = filesLoading || (needsLibraryPick && currentPick === undefined);
 
   const toggleFile = useCallback((id: string) => {
     setSelectedIds((current) => {
@@ -121,10 +148,10 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
       imdb_id: imdbId || undefined,
       tmdb_id: tmdbId || undefined,
       tvdb_id: tvdbId || undefined,
-      library_id: item.library_id,
+      library_id: searchLibraryId,
     };
     searchMutation.mutate(request);
-  }, [title, year, imdbId, tmdbId, tvdbId, item.library_id, searchMutation]);
+  }, [title, year, imdbId, tmdbId, tvdbId, searchLibraryId, searchMutation]);
 
   const targetChosen = detachUnmatched || selectedCandidate !== null;
   const selectionValid = selectedIds.size > 0 && selectedIds.size < files.length;
@@ -299,9 +326,16 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                 aria-label="TVDB ID"
               />
             </div>
+            {needsLibraryPick && (
+              <ItemLibraryPicker
+                libraryIds={itemLibraryIds}
+                value={currentPick}
+                onChange={setPickedLibraryId}
+              />
+            )}
             <Button
               onClick={handleSearch}
-              disabled={searchMutation.isPending}
+              disabled={searchMutation.isPending || searchBlocked}
               variant="secondary"
               className="w-full gap-2"
             >

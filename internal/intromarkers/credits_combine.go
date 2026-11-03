@@ -102,7 +102,7 @@ func combineCredits(candidate Candidate, evidence creditsEvidence, limits credit
 	runs := buildRuns(keyframes)
 	segment, ok := combineAudio(evidence.Audio, keyframes, &runs, duration)
 	if !ok {
-		segment, ok = placeVideoCredits(runs, keyframes, evidence.Silences, limits.windowStart(duration), duration, limits)
+		segment, ok = placeVideoCredits(runs, keyframes, evidence.Silences, limits.WindowStart(duration), duration, limits)
 	}
 	if !ok {
 		return Segment{}, false

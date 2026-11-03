@@ -124,3 +124,96 @@ func TestFolderMembershipReconciliationRetriesDeadlockDB(t *testing.T) {
 		t.Fatalf("item reconciliation attempts = %d, want 2 (one deadlock, one retry)", got)
 	}
 }
+
+// TestStaleMembershipRemovalLocksSeriesFirstDB covers the lock order between
+// stale membership removal and curated rebind or split, which lock the series
+// row and then delete its memberships without retrying a deadlock. Removal
+// must wait on the series before it deletes any membership, so the curation
+// transaction's delete never waits on it.
+func TestStaleMembershipRemovalLocksSeriesFirstDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	seriesID := fmt.Sprintf("mlo-series-%d", suffix)
+	episodeID := fmt.Sprintf("mlo-episode-%d", suffix)
+	var folderID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ('tv', 'Lock Order Test', true) RETURNING id`,
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	for _, seed := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'series', 'Lock Order Series', 'matched', '{}'::text[])`, []any{seriesID}},
+		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Episode')`, []any{episodeID, seriesID}},
+		{`INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW())`, []any{episodeID, folderID}},
+	} {
+		if _, err := pool.Exec(ctx, seed.query, seed.args...); err != nil {
+			t.Fatalf("seed %q: %v", seed.query, err)
+		}
+	}
+
+	// The curation transaction locks the series first.
+	curation, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin curation: %v", err)
+	}
+	defer func() { _ = curation.Rollback(ctx) }()
+	var curationPID int
+	if err := curation.QueryRow(ctx,
+		`SELECT pg_backend_pid() FROM media_items WHERE content_id = $1 FOR UPDATE`, seriesID,
+	).Scan(&curationPID); err != nil {
+		t.Fatalf("lock series: %v", err)
+	}
+
+	removed := make(chan error, 1)
+	go func() {
+		_, err := NewEpisodeLibraryRepository(pool).RemoveStaleFolderMemberships(ctx, folderID)
+		removed <- err
+	}()
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for blocked := false; !blocked; {
+		if err := pool.QueryRow(waitCtx, `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid)))
+		`, curationPID).Scan(&blocked); err != nil {
+			t.Fatalf("waiting for membership removal to block on the series: %v", err)
+		}
+		select {
+		case err := <-removed:
+			t.Fatalf("membership removal finished while the series was locked: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// Removing memberships first would make this delete wait on it, then
+	// deadlock once removal waits on the series.
+	if _, err := curation.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+		t.Fatalf("set lock timeout: %v", err)
+	}
+	if _, err := curation.Exec(ctx, `DELETE FROM episode_libraries WHERE episode_id = $1`, episodeID); err != nil {
+		t.Fatalf("curation delete waited on membership removal: %v", err)
+	}
+	if err := curation.Commit(ctx); err != nil {
+		t.Fatalf("commit curation: %v", err)
+	}
+	if err := <-removed; err != nil {
+		t.Fatalf("RemoveStaleFolderMemberships: %v", err)
+	}
+}

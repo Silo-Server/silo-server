@@ -58,35 +58,79 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		}
 	}
 
+	return r.findOrCreateByName(ctx, p)
+}
+
+// personNameLockSQL serializes the name lookup and insert for one
+// case-folded name across every connection, so concurrent scan workers and
+// replicas sharing the database that all miss the lookup cannot each insert a
+// namesake row. The key matches the LOWER(name) lookup below.
+const personNameLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended('people-name:' || LOWER($1), 0))`
+
+// findOrCreateByName resolves p through the provider-safe name fallback and
+// inserts it when no stored person qualifies. Callers have already missed on
+// tmdb_id and imdb_id.
+func (r *PersonRepository) findOrCreateByName(ctx context.Context, p models.Person) (int64, error) {
+	// The lookup must take a fresh snapshot after waiting for the name lock.
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return 0, fmt.Errorf("begin person find-or-create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	if p.Name != "" {
-		rows, err := r.pool.Query(ctx, `
-			SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
-			FROM people
-			WHERE LOWER(name) = LOWER($1)
-			ORDER BY id`, p.Name)
+		if _, err := tx.Exec(ctx, personNameLockSQL, p.Name); err != nil {
+			return 0, fmt.Errorf("lock person name: %w", err)
+		}
+		existingID, found, err := findPersonByName(ctx, tx, p)
 		if err != nil {
-			return 0, fmt.Errorf("lookup by name: %w", err)
+			return 0, err
 		}
-		for rows.Next() {
-			candidate := models.Person{}
-			if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
-				rows.Close()
-				return 0, fmt.Errorf("scan name lookup: %w", err)
+		if found {
+			if err := tx.Commit(ctx); err != nil {
+				return 0, fmt.Errorf("commit person name lookup: %w", err)
 			}
-			if !canResolvePersonByName(p, candidate) {
-				continue
-			}
-			rows.Close()
-			return r.enrichExisting(ctx, candidate.ID, p)
+			return r.enrichExisting(ctx, existingID, p)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("iterate name lookup: %w", err)
-		}
-		rows.Close()
 	}
 
-	// Not found — create new person
+	id, err := insertPerson(ctx, tx, p)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit person insert: %w", err)
+	}
+	return id, nil
+}
+
+// findPersonByName returns the first stored person p may resolve to by name.
+func findPersonByName(ctx context.Context, tx pgx.Tx, p models.Person) (int64, bool, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
+		FROM people
+		WHERE LOWER(name) = LOWER($1)
+		ORDER BY id`, p.Name)
+	if err != nil {
+		return 0, false, fmt.Errorf("lookup by name: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		candidate := models.Person{}
+		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
+			return 0, false, fmt.Errorf("scan name lookup: %w", err)
+		}
+		if canResolvePersonByName(p, candidate) {
+			return candidate.ID, true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("iterate name lookup: %w", err)
+	}
+	return 0, false, nil
+}
+
+func insertPerson(ctx context.Context, tx pgx.Tx, p models.Person) (int64, error) {
 	idStr, err := idgen.NextID()
 	if err != nil {
 		return 0, fmt.Errorf("generate person id: %w", err)
@@ -96,7 +140,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		return 0, fmt.Errorf("parse generated id: %w", err)
 	}
 
-	_, err = r.pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO people (id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
@@ -649,21 +693,30 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		args = append(args, query)
 		argIdx++
 	}
-	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx))
+	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx))
 	where := strings.Join(conditions, " AND ")
-	order := "name ASC, id ASC"
+	const columns = `id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
+		photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+		metadata_refresh_attempted_at`
+	sql := `SELECT ` + columns + ` FROM people WHERE ` + where + ` ORDER BY name ASC, id ASC LIMIT $1`
 	if scoped && query != "" {
 		// Words match however they are spaced, so a name equal to the query
-		// as typed or with its whitespace collapsed counts as exact.
-		order = fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d))) DESC, ", argIdx, argIdx+1) + order
+		// as typed or with its whitespace collapsed counts as exact. Exact
+		// names and the rest are separate branches, each in name order, so
+		// the second can read idx_people_name in order and stop at the limit:
+		// one ORDER BY that ranks exact names first must sort every match,
+		// thousands of rows for a one-letter query.
+		exact := fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d)))", argIdx, argIdx+1)
 		args = append(args, query, strings.Join(strings.Fields(query), " "))
+		sql = `SELECT ` + columns + ` FROM (
+			(SELECT ` + columns + `, true AS exact FROM people WHERE ` + where + ` AND ` + exact + ` ORDER BY name, id LIMIT $1)
+			UNION ALL
+			(SELECT ` + columns + `, false FROM people WHERE ` + where + ` AND NOT ` + exact + ` ORDER BY name, id LIMIT $1)
+		) ranked ORDER BY exact DESC, name ASC, id ASC LIMIT $1`
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
-			metadata_refresh_attempted_at
-		FROM people WHERE `+where+` ORDER BY `+order+` LIMIT $1`, args...,
-	)
+	// How many names a query matches ranges from a handful to most of the
+	// table, so each search is planned for its own words (searchPlanArgs).
+	rows, err := r.pool.Query(ctx, sql, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
 	}
@@ -737,7 +790,11 @@ func personCreditVisibleSQL(personIDExpr string, types []string, scope personCre
 	}
 	// Episode access follows the parent series, while scope and excluded
 	// media types describe the credited item itself.
-	appendLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	if scope.Listed {
+		appendListedLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	} else {
+		appendLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	}
 	applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, args, argIdx)
 	applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, args, argIdx)
 	if scope.LibraryID > 0 {
@@ -769,9 +826,14 @@ func personCreditVisibleSQL(personIDExpr string, types []string, scope personCre
 // guest star belongs to the series' libraries. ContentID also matches the
 // credited item itself: a series scope covers its episodes' guest stars, and
 // an episode scope covers that episode's own credits.
+//
+// Listed counts only credits on items in a library, as people listings do; a
+// read by ID leaves it unset, so a person credited on a title the scanner's
+// file removal grace holds still opens, like the title itself.
 type personCreditScope struct {
 	LibraryID int
 	ContentID string
+	Listed    bool
 }
 
 // maxPersonConflictResolutions bounds how many external-id collisions a single
@@ -1726,13 +1788,15 @@ func (r *PersonRepository) ListByKind(ctx context.Context, contentID string, kin
 }
 
 // CountItemsByType returns the number of media items a person appears in,
-// grouped by item type (e.g. "movie", "series", "episode").
+// grouped by item type (e.g. "movie", "series", "episode"). It counts items in
+// a library, judged for an episode by its parent series.
 func (r *PersonRepository) CountItemsByType(ctx context.Context, personID int64) (map[string]int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT mi.type, COUNT(DISTINCT mi.content_id)
 		FROM item_people ip
 		JOIN media_items mi ON mi.content_id = ip.content_id
 		WHERE ip.person_id = $1
+		  AND `+InSomeLibraryWhere(`CASE WHEN mi.type = 'episode' THEN `+episodeParentSeriesIDExpr("mi.content_id")+` ELSE mi.content_id END`)+`
 		GROUP BY mi.type`, personID,
 	)
 	if err != nil {
@@ -1806,7 +1870,7 @@ type PersonSearchOptions struct {
 func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts PersonSearchOptions) ([]models.Person, int, error) {
 	args := []any{}
 	argIdx := 1
-	scope := personCreditScope{LibraryID: opts.LibraryID, ContentID: opts.ContentID}
+	scope := personCreditScope{LibraryID: opts.LibraryID, ContentID: opts.ContentID, Listed: true}
 	visible := personCreditVisibleSQL("p.id", videoCreditTypes, scope, opts.Filter, &args, &argIdx)
 	personConditions := []string{}
 	addName := func(clause, value string) {

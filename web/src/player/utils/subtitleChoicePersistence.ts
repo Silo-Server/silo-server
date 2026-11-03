@@ -66,9 +66,9 @@ export function sendSubtitleChoiceRequest(
  * holds only the *resolved* value and has no control that edits it, so for a
  * viewer who never expressed a preference it is the contract default; writing
  * that back would pin the default at the top of the ladder and permanently
- * shadow the profile-scope toggle on the Language & Subtitles settings screen. It still
- * rides along on the legacy composite row, which is keyed to a concrete track
- * selection and is not part of the canonical resolution ladder.
+ * shadow the profile-scope toggle on the Language & Subtitles settings screen. The legacy
+ * composite row leaves it out too: the server copies that member into the
+ * canonical profile_series row, so sending it would pin it all the same.
  *
  * Returns an empty list when the index names neither a current track nor the
  * supplied just-created inventory entry (e.g. the in-progress AI live track's
@@ -80,7 +80,6 @@ export function buildSubtitleChoiceRequests({
   index,
   tracks,
   inventoryTrack,
-  showForcedSubtitles,
 }: {
   seriesId: string;
   /** The chosen track's backend index, or null for "subtitles off". */
@@ -88,8 +87,6 @@ export function buildSubtitleChoiceRequests({
   tracks: readonly PlayerSubtitleInfo[];
   /** A just-created inventory entry that has not reached `tracks` yet. */
   inventoryTrack?: SubtitleInventoryItemV3;
-  /** The resolved forced-subtitle behavior, preserved in the legacy row. */
-  showForcedSubtitles?: boolean;
 }): SubtitleChoiceRequest[] {
   if (!seriesId) return [];
 
@@ -145,7 +142,10 @@ export function buildSubtitleChoiceRequests({
       subtitle_mode: mode,
       // The contract spells "no signature" as an absent member, not null.
       track_signature: trackSignature ?? undefined,
-      show_forced_subtitles: showForcedSubtitles,
+      // show_forced_subtitles is left out on purpose: the server keeps what
+      // the series already had. Sending the resolved value would pin the
+      // profile's "Show forced subtitles" choice on this series, so a later
+      // change to that toggle would never reach it.
     },
   });
 

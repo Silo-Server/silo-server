@@ -89,6 +89,10 @@ Apple and Google stores, and a server that plays arbitrary remote stream URLs pu
 client suite at risk. This is settled product direction, not a design problem to solve; do not
 write code for it, and say so plainly if asked.
 
+**Deleting, moving, renaming, or otherwise managing media files will not be accepted** either.
+Silo is a media server, not a media manager: it reads libraries (the shipped Compose file mounts
+them read-only) and leaves file management to other tools.
+
 ## Gotchas
 
 The first two are irreversible — data loss, not inconvenience. Treat them as absolute.
@@ -163,7 +167,7 @@ what goes in it.
 
 `make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`, `make migrate-status`
 / `make migrate-up` — read the `Makefile` for the rest. Local services:
-`docker compose up -d postgres redis`.
+`docker compose -f dev/compose.yml up -d postgres redis`.
 
 While iterating, run the focused tests for the packages you touched (`go test ./internal/<pkg>/...`)
 rather than the whole suite; the full gate below is for pre-PR. In tests, wait on observable

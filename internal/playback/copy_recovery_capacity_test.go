@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -380,7 +381,7 @@ func TestRestartSegmentLocked_CopyRecoveryUnresolvedKeepsEncoder(t *testing.T) {
 	if err != nil || ok || target != (SegmentRecoveryTarget{}) {
 		t.Fatalf("unresolved recovery = %+v, %t, %v", target, ok, err)
 	}
-	if !session.IsRunning() || session.Opts() != before || encodinglimit.Snapshot().ActiveJobs != 1 {
+	if !session.IsRunning() || !reflect.DeepEqual(session.Opts(), before) || encodinglimit.Snapshot().ActiveJobs != 1 {
 		t.Fatal("unresolved recovery stopped or changed the encoder")
 	}
 	select {
@@ -421,7 +422,7 @@ func TestRestartSegmentLocked_CopyRecoveryProbeFailureRestoresProgress(t *testin
 					if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
 						t.Fatalf("failed or unmapped probe outcome = %+v", result)
 					}
-					if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || session.Opts() != before {
+					if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || !reflect.DeepEqual(session.Opts(), before) {
 						t.Fatal("failed or unmapped probe left no encoder with the previous recipe")
 					}
 					restored = awaitCopyRecoveryProcess(t, events)
@@ -627,7 +628,7 @@ func TestRestartSegmentLocked_CopyRecoveryProbeFailureCanRetry(t *testing.T) {
 			if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
 				t.Fatalf("failed or unmapped probe outcome = %+v", result)
 			}
-			if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || session.Opts() != before {
+			if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || !reflect.DeepEqual(session.Opts(), before) {
 				t.Fatal("failed or unmapped probe did not restore the previous recipe")
 			}
 			restored := awaitCopyRecoveryProcess(t, events)

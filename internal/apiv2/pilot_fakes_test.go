@@ -32,6 +32,8 @@ type fakeAccounts struct {
 	wizardErr       error
 	users           map[int]handlers.UserView
 	err             error
+	// signOuts records each accepted ChangePassword's signOutOtherSessions.
+	signOuts *[]bool
 }
 
 func (f fakeAccounts) NeedsSetup(context.Context) (bool, error) { return f.needsSetup, f.err }
@@ -77,6 +79,7 @@ func (f fakeAccounts) AccountPasswordCapability(_ context.Context, claims *auth.
 	return handlers.AccountPasswordCapabilityView{
 		Configured: true, ChangePassword: passwordChangeAllowed(claims, profileID) && f.users[claims.UserID].Username != "off",
 		RequiresCurrentPassword: true, MinimumPasswordLength: auth.MinimumPasswordLength, MaximumPasswordBytes: auth.MaximumPasswordBytes,
+		SignOutOtherSessions: true,
 	}, nil
 }
 
@@ -92,7 +95,7 @@ func (f fakeAccounts) AuthorizePasswordChange(_ context.Context, claims *auth.Cl
 
 // ChangePassword answers the way the real seam does: "pw" is every account's
 // current password (as in Login), the limits are the auth package's.
-func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string) error {
+func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string, signOutOtherSessions bool) error {
 	switch {
 	case f.err != nil:
 		return f.err
@@ -104,6 +107,9 @@ func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current,
 		return &handlers.APIError{Status: 400, Code: "password_too_long", Message: "Password must be at most 72 bytes", Field: "new_password"}
 	case next == "oauth-only":
 		return &handlers.APIError{Status: 409, Code: "password_login_disabled", Message: "This account does not use local password sign-in"}
+	}
+	if f.signOuts != nil {
+		*f.signOuts = append(*f.signOuts, signOutOtherSessions)
 	}
 	return nil
 }
@@ -237,7 +243,7 @@ func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCrea
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -252,7 +258,7 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -263,12 +269,12 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 // canManageHouseholdAs it runs the command's verifier for a PIN-locked
 // primary profile and answers an unverified one with the 403
 // profile_management the real service returns.
-func (f *fakeProfiles) manage(activeProfileID string, verify func(string) error) error {
+func (f *fakeProfiles) manage(activeProfileID string, verify func(*userstore.Profile) error) error {
 	if f.err != nil {
 		return f.err
 	}
 	if f.lockedPrimary != "" && activeProfileID == f.lockedPrimary {
-		if err := verify(f.lockedPrimary); err != nil {
+		if err := verify(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -455,8 +461,8 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps := parityDeps(false)
 	deps.Accounts = fakeAccounts{
 		users: map[int]handlers.UserView{
-			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true},
-			2: {ID: 2, Username: "ada", Email: "ada@example.test", Role: "admin", Permissions: []string{"marker_edit", "metadata_curation"}},
+			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true},
+			2: {ID: 2, Username: "ada", Email: "ada@example.test", Role: "admin", PolicyPermissions: []string{"marker_edit", "metadata_curation"}},
 		},
 	}
 	if progress == nil {
@@ -688,7 +694,7 @@ func (f *fakeSettingValuesSeam) identity(req handlers.SettingIdentityRequest) (h
 			if req.ProfileID != "p-other" {
 				return handlers.SettingValueView{}, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 			}
-			if err := req.VerifyProfile(v.ProfileID); err != nil {
+			if err := req.VerifyProfile(&userstore.Profile{ID: v.ProfileID}); err != nil {
 				return handlers.SettingValueView{}, settingAPIError(403, "forbidden", "", "Profile verification required")
 			}
 			v.ProfileID = req.ProfileID
@@ -848,7 +854,7 @@ func (f *fakeSettingValuesSeam) effective(q handlers.EffectiveSettingsQuery, key
 		if q.ProfileID != "p-other" {
 			return nil, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 		}
-		if err := q.VerifyProfile(profileID); err != nil {
+		if err := q.VerifyProfile(&userstore.Profile{ID: profileID}); err != nil {
 			return nil, settingAPIError(403, "forbidden", "", "Profile verification required")
 		}
 		profileID = q.ProfileID
@@ -1072,7 +1078,7 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode string) (*han
 	}
 	if r.Status == auth.DeviceLoginStatusApproved {
 		view.Tokens = &handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, DownloadAllowed: true}}
+			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true}}
 		if r.Temporary {
 			view.Temporary = true
 			view.ProfileID = r.profileID
@@ -1214,7 +1220,7 @@ func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) 
 	switch {
 	case in.Username == "laura" && in.Password == "pw":
 		return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 	case in.Username == "off":
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "user_disabled", Message: "User account is disabled"}
 	case in.Username == "newcomer":
@@ -1274,7 +1280,7 @@ func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.Networ
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
@@ -1358,7 +1364,7 @@ func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.Reg
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 401, Code: "setup_complete", Message: "Initial setup has already been completed"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 1, Username: in.Username, Email: in.Email, Role: "admin", Permissions: []string{"marker_edit", "metadata_curation"}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 1, Username: in.Username, Email: in.Email, Role: "admin", PolicyPermissions: []string{}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) SignupEnabled(context.Context) (bool, error) { return f.signupOn, f.err }
@@ -1381,10 +1387,10 @@ func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationI
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "duplicate", Message: "Username or email already taken"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", Permissions: []string{}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true}}, nil
 }
 
-func (f *fakeSessionService) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+func (f *fakeSessionService) PluginLaunchToken(_ context.Context, claims *auth.Claims, profileID string) (string, error) {
 	if claims == nil || claims.SessionID == "" {
 		return "", &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Invalid or missing authentication token"}
 	}

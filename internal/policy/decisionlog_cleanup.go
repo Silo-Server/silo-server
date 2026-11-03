@@ -2,12 +2,15 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/partman"
 )
 
 const decisionLogCleanupBatchSize = 10000
@@ -27,7 +30,8 @@ type DecisionLogPartitionManager interface {
 // CleanupDecisionLogsOnce runs one policy decision log retention pass. It
 // returns the number of deleted rows plus the first error encountered, so
 // callers (the task manager) can report a degraded pass instead of silently
-// letting policy_decisions grow unbounded.
+// letting policy_decisions grow unbounded. A partition drop that found the
+// table busy is not returned: the row deletes still prune that pass.
 func CleanupDecisionLogsOnce(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -45,6 +49,7 @@ func CleanupDecisionLogsOnce(
 	}
 
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+	totalDeleted := int64(0)
 	if pm != nil {
 		if err := pm.EnsureFuturePartitions(ctx); err != nil {
 			slog.WarnContext(ctx, "policy decision log ensure future partitions error", "component", "policy", "error", err)
@@ -52,11 +57,12 @@ func CleanupDecisionLogsOnce(
 		}
 
 		partitionCleanupFailed := false
-		totalDeleted := int64(0)
 		if dropped, err := pm.DropExpiredPartitions(ctx, cutoff); err != nil {
 			slog.WarnContext(ctx, "policy decision log partition cleanup error", "component", "policy", "error", err)
 			partitionCleanupFailed = true
-			if firstErr == nil {
+			// A busy table is not a failed pass: the row deletes below still
+			// prune it, and the next run retries the drop.
+			if firstErr == nil && !errors.Is(err, partman.ErrPartitionBusy) {
 				firstErr = err
 			}
 		} else if len(dropped) > 0 {
@@ -87,7 +93,7 @@ func CleanupDecisionLogsOnce(
 	if total > 0 {
 		slog.InfoContext(ctx, "policy decision log cleanup completed", "component", "policy", "deleted", total, "retention_days", days)
 	}
-	return total, firstErr
+	return totalDeleted + total, firstErr
 }
 
 func deleteExpiredDecisionRowsBefore(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time) (int64, error) {

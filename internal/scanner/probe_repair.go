@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
@@ -83,6 +84,57 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	return false
 }
 
+// chapterSourceEmbedded marks a chapter read from the file's container.
+const chapterSourceEmbedded = "embedded"
+
+// carryUnprobedChapters keeps chapters a reprobe cannot reproduce. The
+// audiobook scanner synthesizes one chapter per part of a multipart book from
+// the file name; those are not in the container, so playback's repair probe
+// finds none and would otherwise erase the book's chapter list on first play.
+// Chapters read from the container ("embedded") follow the reprobe.
+func carryUnprobedChapters(previous []models.MediaChapter, next *models.MediaFile) {
+	if len(next.Chapters) > 0 || len(previous) == 0 {
+		return
+	}
+	for _, chapter := range previous {
+		if chapter.Source == chapterSourceEmbedded {
+			return
+		}
+	}
+	next.Chapters = previous
+}
+
+// carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status
+// across playback's probe repair, which skips the frame read, when the
+// reprobed stream is the one that was checked. The fields a repair fills in
+// (a missing color range, legacy Dolby Vision provenance) don't count as a
+// difference. Any other difference leaves the track unchecked for the HDR10+
+// backfill.
+func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
+	if len(previous) == 0 || len(next) == 0 || previous[0].HDR10PlusUnchecked || !next[0].HDR10PlusUnchecked {
+		return
+	}
+	checked := previous[0]
+	if strings.TrimSpace(checked.ColorRange) == "" {
+		checked.ColorRange = next[0].ColorRange
+	}
+	if videoTracksHaveLegacyDVProvenance([]models.VideoTrack{checked}) {
+		checked.DVConfigPresent = next[0].DVConfigPresent
+		checked.DVBLCompatIDPresent = next[0].DVBLCompatIDPresent
+		checked.DVBLPresent = next[0].DVBLPresent
+		checked.DVELPresent = next[0].DVELPresent
+		checked.DVRPUPresent = next[0].DVRPUPresent
+	}
+	if tonemap.StreamSignatureForTrack(checked) != tonemap.StreamSignatureForTrack(next[0]) {
+		return
+	}
+	next[0].HDR10PlusUnchecked = false
+	next[0].HDR10Plus = previous[0].HDR10Plus
+	if previous[0].HDR10Plus {
+		next[0].VideoRangeType = mediaprobe.RangeTypeWithHDR10Plus(next[0])
+	}
+}
+
 // videoTracksHaveLegacyDVProvenance reports whether a Dolby Vision track was
 // written by a probe generation that predates the DV provenance columns. Those
 // rows decode to explicit false, which is indistinguishable from a genuine
@@ -140,7 +192,7 @@ type PlaybackProbeEnsurer struct {
 	ffmpegPath  string
 	livePaths   atomic.Pointer[probeBinaries]
 	timeout     time.Duration
-	// probeFile is the ffprobe entry point; nil means the package's ProbeFile.
+	// probeFile is the ffprobe entry point; nil means probeFileStreamsOnly.
 	// Tests substitute it to drive the coalescing behavior deterministically.
 	probeFile func(context.Context, string, string) (*ProbeData, error)
 	// probeRepair collapses concurrent repairs of the same source revision so a
@@ -431,7 +483,7 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		}
 		probeFile := e.probeFile
 		if probeFile == nil {
-			probeFile = ProbeFile
+			probeFile = probeFileStreamsOnly
 		}
 		probe, err := probeFile(probeCtx, ffprobePath, current.FilePath)
 		if err != nil && IsProbeRejection(probeCtx, current.FilePath, err) {
@@ -442,6 +494,8 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		}
 		updated := *current
 		applyProbeData(&updated, probe, "local")
+		carryCheckedHDR10Plus(current.VideoTracks, updated.VideoTracks)
+		carryUnprobedChapters(current.Chapters, &updated)
 		return e.fileRepo.Upsert(probeCtx, updated)
 	})
 	select {

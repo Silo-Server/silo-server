@@ -14,10 +14,14 @@ import (
 // the bootstrap loader dependency-free, so the two constants must stay in sync.
 const minSecretKeyLen = 32
 
+// The server modes that run as a node of a main server.
 const (
-	bootstrapModeIntegrated = "integrated"
-	bootstrapModeTranscode  = "transcode"
+	modeProxy     = "proxy"
+	modeTranscode = "transcode"
 )
+
+// defaultMode is the server mode when MODE is unset.
+const defaultMode = "integrated"
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
@@ -25,6 +29,7 @@ type BootstrapConfig struct {
 	RedisURL          string // optional override; empty means use DB setting
 	Listen            string
 	JFListen          string
+	ABSListen         string
 	Mode              string
 	TranscodeMaxJobs  int  // operator-owned worker ceiling; 0 means unlimited
 	EnrollmentEnabled bool // core operator permits sending bootstrap secrets to workers
@@ -68,10 +73,10 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	secretKey := os.Getenv("SECRET_KEY")
 	mode := os.Getenv("MODE")
 	if mode == "" {
-		mode = bootstrapModeIntegrated
+		mode = defaultMode
 	}
 	token, bindingFile := os.Getenv("SILO_NODE_ENROLLMENT_TOKEN"), os.Getenv("SILO_NODE_BINDING_FILE")
-	canEnroll := allowEnrollment && mode == bootstrapModeTranscode && (token != "" || bindingFile != "")
+	canEnroll := allowEnrollment && mode == modeTranscode && (token != "" || bindingFile != "")
 	if token != "" && (len(token) < 32 || len(token) > 512) {
 		return nil, errors.New("SILO_NODE_ENROLLMENT_TOKEN must contain 32 to 512 characters")
 	}
@@ -92,6 +97,20 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	jfPort := os.Getenv("JF_PORT")
 	if jfPort == "" {
 		jfPort = "8096"
+	}
+
+	absPort := os.Getenv("ABS_PORT")
+	if absPort == "" {
+		absPort = "13378"
+	}
+
+	// NODE_URL is a node's whole identity: it keys session bookkeeping and
+	// selects the stream_nodes row whose acceleration overrides the node adopts.
+	// A URL guessed from the listen port would give two nodes on the same port
+	// one identity. An enrolled transcode worker takes it from its saved
+	// binding instead, which main checks once the binding is loaded.
+	if (mode == modeProxy || mode == modeTranscode) && os.Getenv("NODE_URL") == "" && !canEnroll {
+		return nil, fmt.Errorf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -117,6 +136,7 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 		RedisURL:          redisURL,
 		Listen:            ":" + port,
 		JFListen:          ":" + jfPort,
+		ABSListen:         ":" + absPort,
 		Mode:              mode,
 		TranscodeMaxJobs:  maxJobs,
 		EnrollmentEnabled: enrollmentEnabled,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http/httptest"
 	"net/url"
 	"slices"
@@ -76,6 +77,47 @@ func (r configuredSeriesRepo) ListAvailableIDsBySeriesPage(_ context.Context, id
 	return slicePage(r.pages[id], offset, limit), nil
 }
 
+// countingSeriesRepo counts the series whose episodes are read.
+type countingSeriesRepo struct {
+	episodeListSource
+	reads *int
+}
+
+func (r countingSeriesRepo) ListAvailableIDsBySeriesPage(_ context.Context, id string, limit, offset int) ([]string, error) {
+	*r.reads++
+	return slicePage([]string{id + "-episode"}, offset, limit), nil
+}
+
+// ListBySeriesIDs serves the series rollups BrowseItems adds to the page.
+func (countingSeriesRepo) ListBySeriesIDs(context.Context, []string) (map[string][]*models.Episode, error) {
+	return map[string][]*models.Episode{}, nil
+}
+
+// A page without a total, such as Latest, checks series only until the page
+// is filled: each series costs episode reads.
+func TestConfiguredBrowseStateStopsCheckingSeriesOncePageIsFull(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	browse := &stubBrowseSource{}
+	for i := range 100 {
+		id := fmt.Sprintf("series-%03d", i)
+		browse.items = append(browse.items, &models.MediaItem{ContentID: id, Type: "series", Title: id})
+	}
+	reads := 0
+	svc := &directContentService{browseRepo: browse, episodeRepo: countingSeriesRepo{reads: &reads}, storeProvider: compatTestUserStoreProvider{store: store}}
+	params := url.Values{"type": {"series"}, "is_played": {"false"}, "compose_state": {"true"}, "include_total": {"false"}, "offset": {"0"}, "limit": {"5"}}
+	result, err := svc.BrowseItems(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 5 || !result.HasMore {
+		t.Fatalf("page: %+v", result)
+	}
+	// Five for the page and one to know there are more.
+	if reads != 6 {
+		t.Fatalf("series checked = %d, want 6", reads)
+	}
+}
+
 func TestConfiguredSeriesPlayedUsesEpisodes(t *testing.T) {
 	store := newJellycompatUserStore(t)
 	now := time.Now().UTC()
@@ -86,11 +128,11 @@ func TestConfiguredSeriesPlayedUsesEpisodes(t *testing.T) {
 	}
 	svc := &directContentService{episodeRepo: configuredSeriesRepo{pages: map[string][]string{"incomplete": {"unplayed-episode"}, "done": {"done-episode"}}}}
 	items := []upstreamListItem{{ContentID: "incomplete", Type: "series"}, {ContentID: "done", Type: "series"}, {ContentID: "empty", Type: "series"}}
-	matches, err := svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(true)})
+	matches, err := svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(true)}, len(items))
 	if err != nil || !slices.Equal(matches, []bool{false, true, false}) {
 		t.Fatalf("series rollup: %v %v", matches, err)
 	}
-	matches, err = svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(false)})
+	matches, err = svc.matchConfiguredUserState(t.Context(), store, "p1", items, catalog.BrowseFilters{IsPlayed: new(false)}, len(items))
 	if err != nil || !slices.Equal(matches, []bool{true, false, true}) {
 		t.Fatalf("unplayed series: %v %v", matches, err)
 	}
@@ -123,7 +165,7 @@ func TestConfiguredBrowseStatePropagatesErrors(t *testing.T) {
 	for _, failure := range []string{"favorite", "progress", "history"} {
 		t.Run(failure, func(t *testing.T) {
 			store := failedBrowseStateStore{UserStore: newJellycompatUserStore(t), failure: failure}
-			_, err := (&directContentService{}).matchConfiguredUserState(t.Context(), store, "p1", []upstreamListItem{{ContentID: "movie", Type: "movie"}}, catalog.BrowseFilters{IsFavorite: true, IsPlayed: new(true)})
+			_, err := (&directContentService{}).matchConfiguredUserState(t.Context(), store, "p1", []upstreamListItem{{ContentID: "movie", Type: "movie"}}, catalog.BrowseFilters{IsFavorite: true, IsPlayed: new(true)}, 1)
 			if err == nil {
 				t.Fatal("state error hidden")
 			}
@@ -289,6 +331,31 @@ func TestConfiguredBrowseWithoutTotalStopsAfterLookahead(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestConfiguredBrowseHugeLimitWithoutTotal pins that a Limit near math.MaxInt
+// still returns the page from Offset. Offset+Limit used to wrap negative and
+// end the scan at the first match, before the page.
+func TestConfiguredBrowseHugeLimitWithoutTotal(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	var items []upstreamListItem
+	for _, id := range []string{"movie-1", "movie-2", "movie-3"} {
+		items = append(items, upstreamListItem{ContentID: id, Type: "movie"})
+		if _, err := store.AddFavorite(t.Context(), "p1", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &directContentService{storeProvider: compatTestUserStoreProvider{store: store}}
+	filters := catalog.BrowseFilters{IsFavorite: true, Offset: 1, Limit: math.MaxInt}
+	result, err := svc.browseConfiguredUserState(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, filters, false, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+		return items, false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Items[0].ContentID != "movie-2" || result.Items[1].ContentID != "movie-3" || result.HasMore {
+		t.Fatalf("page: %+v", result)
 	}
 }
 

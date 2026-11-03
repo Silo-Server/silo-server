@@ -17,7 +17,7 @@ type AdminJellyfinCompatWebService interface {
 }
 type AdminJellyfinWebInstallBody struct {
 	Version   string `json:"version,omitempty" maxLength:"64" doc:"Jellyfin Web release to pin; empty resolves the release compatible with the emulated server version"`
-	SourceURL string `json:"source_url,omitempty" maxLength:"2048" doc:"Official jellyfin-web source; empty uses the stored source URL"`
+	SourceURL string `json:"source_url,omitempty" format:"uri-reference" maxLength:"2048" doc:"Official jellyfin-web source; empty uses the stored source URL"`
 }
 type AdminJellyfinWebInstallInput struct {
 	// Body is required but may be empty ({}): an empty version pins the stored

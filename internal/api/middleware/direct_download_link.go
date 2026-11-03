@@ -43,7 +43,7 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 			writeForbidden(w, "The download link does not authorize this file")
 			return
 		}
-		authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+		authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 		if err != nil {
 			writeCredentialCheckUnavailable(w, r, err)
 			return

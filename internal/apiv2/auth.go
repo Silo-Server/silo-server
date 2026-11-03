@@ -81,7 +81,7 @@ func registerAuth(reg *Registry) {
 	// anyone; on v2 that is a 409 conflict with the session's state, and a
 	// refused return is 403.
 	end.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.endImpersonation)
+	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.endImpersonation)
 	login := humaOp(http.MethodPost, Prefix+"/auth/login", "login", "auth",
 		"Authenticate with a username and password and open a login session.")
 	// Wrong credentials are 401 invalid_token; a disabled account, turned-off
@@ -90,8 +90,9 @@ func registerAuth(reg *Registry) {
 	// the account's person (not_permitted) is 403, and so is a directory sign-in
 	// with no account while account creation is off (account_required); an
 	// account a directory sign-in cannot create or link is 409 (email_in_use,
-	// identity_linked_elsewhere).
-	login.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict}
+	// identity_linked_elsewhere). A name that has used its sign-in attempt
+	// budget, or a client over the login rate limit, is 429 rate_limited.
+	login.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusTooManyRequests}
 	Register(reg, Operation{
 		Operation:   login,
 		RetrySafety: RetrySafetyNonRetryable,

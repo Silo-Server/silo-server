@@ -165,3 +165,26 @@ func TestGlobalRateBoundsUnsafeRequestsPerSecond(t *testing.T) {
 		t.Fatalf("burst = %d, want a positive bounded value", rate.Burst)
 	}
 }
+
+func TestSourceKey(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"203.0.113.7", "203.0.113.7"},
+		{"2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"},
+		{"2001:db8:1:2::1", "2001:db8:1:2::/64"},
+		{"2001:db8:1:3::1", "2001:db8:1:3::/64"},
+		// IPv4 written as IPv6, local-network and NAT64 addresses count on
+		// their own, as IPv4 addresses do.
+		{"::ffff:203.0.113.7", "::ffff:203.0.113.7"},
+		{"64:ff9b::cb00:7107", "64:ff9b::cb00:7107"},
+		{"64:ff9b:1:abcd::cb00:7107", "64:ff9b:1:abcd::cb00:7107"},
+		{"fd12:3456:789a:1::5", "fd12:3456:789a:1::5"},
+		{"fe80::1", "fe80::1"},
+		{"::1", "::1"},
+		{"", ""},
+		{"not-an-address", "not-an-address"},
+	} {
+		if got := SourceKey(tc.in); got != tc.want {
+			t.Errorf("SourceKey(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

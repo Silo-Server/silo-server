@@ -54,10 +54,12 @@ then position). That order reaches viewers in two places:
   in their stored order. Arrange draws them in a band at the start of the shelf. A move never places
   a card above the band, and the order a move saves is the order Arrange shows. A shelf that sorts
   itself (by name, recently updated or most titles) ignores `featured` (`applyCollectionSort`).
-- **The Server collections list** on every profile's Collections page is capped per library
-  (`ListServerCollections`, `capServerCollections`), so pinned collections are the ones that lead
-  it, whatever their shelf's order. This is why Pin stays available on a shelf that sorts itself,
-  and why its help line names that list.
+- **The Server collections list** on every profile's Collections page opens with each
+  library's first 20 in this order (`ListServerCollections`, `capServerCollections`) and adds the
+  rest of each library's Collections tab list after them, straight away for a picked library and
+  one library at a time at the end of the grid in the default view (All, or the only library).
+  Pinned collections lead each library's collections there, whatever their shelf's order. This is
+  why Pin stays available on a shelf that sorts itself, and why its help line names that list.
 
 `featured` is a column on the collection, so a Pin set from one library's Arrange applies in every
 library the collection is in, while its shelf and position stay per library. Pin's help line says so

@@ -21,6 +21,11 @@ import (
 const (
 	WebhookBodyCaptureLimit = 16 * 1024
 	webhookBodyExcerptLimit = 2048
+	// maxIndentedWebhookJSONDepth caps the nesting depth that gets pretty-printed.
+	// Indentation grows with depth squared, so a 16 KB body of nested arrays
+	// would otherwise expand to over 100 MB. Real webhook payloads nest well
+	// under this; deeper ones are encoded compactly instead.
+	maxIndentedWebhookJSONDepth = 32
 )
 
 var sensitiveWebhookKeyFragments = []string{
@@ -101,7 +106,13 @@ func sanitizeJSONString(body []byte) string {
 		return redactRawWebhookText(string(body))
 	}
 	sanitized := sanitizeWebhookValue("", payload)
-	encoded, err := json.MarshalIndent(sanitized, "", "  ")
+	var encoded []byte
+	var err error
+	if nestsDeeperThan(sanitized, maxIndentedWebhookJSONDepth) {
+		encoded, err = json.Marshal(sanitized)
+	} else {
+		encoded, err = json.MarshalIndent(sanitized, "", "  ")
+	}
 	if err != nil {
 		return redactRawWebhookText(string(body))
 	}
@@ -220,6 +231,29 @@ func sanitizeWebhookValue(key string, value any) any {
 	}
 }
 
+// nestsDeeperThan reports whether value has more than depth levels of nested
+// objects or arrays. It stops descending once the limit is passed.
+func nestsDeeperThan(value any, depth int) bool {
+	if depth < 0 {
+		return true
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, nested := range typed {
+			if nestsDeeperThan(nested, depth-1) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if nestsDeeperThan(nested, depth-1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func redactRawWebhookText(raw string) string {
 	normalized := strings.ToValidUTF8(raw, "")
 	for _, pattern := range rawSensitiveValuePatterns {
@@ -243,11 +277,14 @@ func truncateWebhookExcerpt(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	runes := []rune(raw)
-	if len(runes) <= webhookBodyExcerptLimit {
-		return raw
+	runes := 0
+	for offset := range raw {
+		if runes == webhookBodyExcerptLimit {
+			return raw[:offset] + "..."
+		}
+		runes++
 	}
-	return string(runes[:webhookBodyExcerptLimit]) + "..."
+	return raw
 }
 
 func isSensitiveWebhookKey(key string) bool {

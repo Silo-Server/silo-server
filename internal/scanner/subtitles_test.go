@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
 func TestExternalSubtitleDirCacheMatchesSidecars(t *testing.T) {
@@ -18,7 +20,7 @@ func TestExternalSubtitleDirCacheMatchesSidecars(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "Movie.de.srt"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cache := newExternalSubtitleDirCache()
+	cache := newExternalSubtitleDirCache("movies")
 	for _, test := range []struct {
 		media  string
 		titles []string
@@ -38,7 +40,7 @@ func TestExternalSubtitleDirCacheMatchesSidecars(t *testing.T) {
 		if !reflect.DeepEqual(titles, test.titles) {
 			t.Fatalf("%s titles = %v, want %v", test.media, titles, test.titles)
 		}
-		want, err := DetectExternalSubtitles(filepath.Join(dir, test.media))
+		want, err := newExternalSubtitleDirCache("movies").Detect(filepath.Join(dir, test.media))
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("cached = %#v, uncached = %#v, error = %v", got, want, err)
 		}
@@ -53,7 +55,7 @@ func TestExternalSubtitleDirCacheConcurrent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Movie.en.srt"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	cache := newExternalSubtitleDirCache()
+	cache := newExternalSubtitleDirCache("movies")
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Go(func() {
@@ -79,8 +81,7 @@ func TestParseSuffixCanonicalizesCompatibleLanguageTags(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var got ExternalSubtitleInfo
-			parseSuffix(tc.suffix, &got)
+			got := naming.ParseSubtitleSuffix(tc.suffix)
 			if got.Language != tc.want {
 				t.Fatalf("language = %q, want %q", got.Language, tc.want)
 			}
@@ -135,10 +136,9 @@ func TestParseSuffixReadsLanguageAndFlagsInAnyPosition(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.suffix, func(t *testing.T) {
-			var got ExternalSubtitleInfo
-			parseSuffix(tc.suffix, &got)
+			got := naming.ParseSubtitleSuffix(tc.suffix)
 			if got.Language != tc.language || got.Forced != tc.forced || got.HearingImpaired != tc.hearing {
-				t.Fatalf("parseSuffix(%q) = language %q, forced %v, hearing impaired %v; want %q, %v, %v",
+				t.Fatalf("ParseSubtitleSuffix(%q) = language %q, forced %v, hearing impaired %v; want %q, %v, %v",
 					tc.suffix, got.Language, got.Forced, got.HearingImpaired, tc.language, tc.forced, tc.hearing)
 			}
 		})
@@ -155,5 +155,125 @@ func TestExternalSubtitleModelsCarryHearingImpaired(t *testing.T) {
 	}
 	if empty := externalSubtitleModels(nil); empty == nil || len(empty) != 0 {
 		t.Fatalf("externalSubtitleModels(nil) = %#v, want an empty non-nil slice", empty)
+	}
+}
+
+func TestExternalSubtitleDirCacheReadsSubtitleFolders(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"Movie (2020)/Movie.mkv",
+		"Movie (2020)/Movie-trailer.mkv",
+		"Movie (2020)/Movie-sample.mkv",
+		"Movie (2020)/movie.en.srt",
+		"Movie (2020)/Movie.idx",
+		"Movie (2020)/Movie.sub",
+		"Movie (2020)/Movie.sup",
+		"Movie (2020)/Subs/English.srt",
+		"Movie (2020)/Subs/2_French.sdh.srt",
+		"Movie (2020)/Subs/Other Movie.en.srt",
+		"Movie (2020)/Subs/2012.srt",
+		"Movie (2020)/Subtitles/Movie.de.srt",
+		"Versions (2021)/Versions - 1080p.mkv",
+		"Versions (2021)/Versions - 2160p.mkv",
+		"Versions (2021)/Subs/English.srt",
+		"Versions (2021)/Subs/Versions - 2160p.fr.srt",
+		"Case/Movie.mkv",
+		"Case/movie.mkv",
+		"Case/movie.en.srt",
+		"Case/MOVIE.de.srt",
+		"Season 01/Show - S01E01.mkv",
+		"Season 01/Show - S01E02.mkv",
+		"Season 01/subs/English.srt",
+		"Season 01/subs/Show - S01E01/2_English.srt",
+		"Season 01/subs/Show - S01E01/3_Spanish.srt",
+		"Season 01/subs/Show - S01E02.en.srt",
+		"Season 01/Featurettes/Show - S01E01.en.srt",
+		"Single Season/Show - S02E01.mkv",
+		"Single Season/Subs/English.srt",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		folderType string
+		media      string
+		want       []string // path relative to root, then language
+	}{
+		// A movie's own sidecar matches whatever its case, and the Subs/
+		// files that name only a language apply to the folder's one feature.
+		// A VobSub .sub (paired with .idx) and a .sup are bitmaps playback
+		// can neither serve nor burn in.
+		{"movies", "Movie (2020)/Movie.mkv", []string{
+			"Movie (2020)/movie.en.srt", "en",
+			"Movie (2020)/Subs/2_French.sdh.srt", "fr",
+			"Movie (2020)/Subs/English.srt", "en",
+			"Movie (2020)/Subtitles/Movie.de.srt", "de",
+		}},
+		{"movies", "Movie (2020)/Movie-trailer.mkv", nil},
+		// Shared timing across versions isn't known, so only a named file
+		// applies.
+		{"movies", "Versions (2021)/Versions - 1080p.mkv", nil},
+		{"movies", "Versions (2021)/Versions - 2160p.mkv", []string{
+			"Versions (2021)/Subs/Versions - 2160p.fr.srt", "fr",
+		}},
+		// Videos whose names differ only in case each keep the sidecars
+		// named exactly for them; one named for neither belongs to neither.
+		{"movies", "Case/Movie.mkv", nil},
+		{"movies", "Case/movie.mkv", []string{"Case/movie.en.srt", "en"}},
+		// Outside a movie library, only files named for the episode, or in a
+		// folder named for it, apply.
+		{"tvshows", "Season 01/Show - S01E01.mkv", []string{
+			"Season 01/subs/Show - S01E01/2_English.srt", "en",
+			"Season 01/subs/Show - S01E01/3_Spanish.srt", "es",
+		}},
+		{"tvshows", "Season 01/Show - S01E02.mkv", []string{
+			"Season 01/subs/Show - S01E02.en.srt", "en",
+		}},
+		{"tvshows", "Single Season/Show - S02E01.mkv", nil},
+	} {
+		got, err := newExternalSubtitleDirCache(test.folderType).Detect(filepath.Join(root, test.media))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pairs []string
+		for _, subtitle := range got {
+			rel, err := filepath.Rel(root, subtitle.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pairs = append(pairs, filepath.ToSlash(rel), subtitle.Language)
+		}
+		if !reflect.DeepEqual(pairs, test.want) {
+			t.Fatalf("%s sidecars = %q, want %q", test.media, pairs, test.want)
+		}
+	}
+}
+
+func TestExternalSubtitleDirCacheKeepsSidecarsWhenASubtitleFolderFails(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Movie.mkv", "Movie.en.srt", "Subs/English.srt"} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(dir, "Subs"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "Subs"), 0700) })
+	if _, err := os.ReadDir(filepath.Join(dir, "Subs")); err == nil {
+		t.Skip("an unreadable directory is still readable here (running as root)")
+	}
+	got, err := newExternalSubtitleDirCache("movies").Detect(filepath.Join(dir, "Movie.mkv"))
+	if err == nil || len(got) != 1 || got[0].Title != "Movie.en.srt" {
+		t.Fatalf("Detect = %#v, %v; want the sidecar beside the video and an error", got, err)
 	}
 }

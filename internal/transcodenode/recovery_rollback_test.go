@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func TestRestartSegmentLocked_CopyProbeFailureKeepsRestoredWorker(t *testing.T) 
 			if ok || timestamp == "" && err == nil || timestamp != "" && err != nil {
 				t.Fatalf("probe result changed: ok=%t err=%v", ok, err)
 			}
-			if !session.IsRunning() || server.sessions[before.SessionID] != session || server.activeJobs.Load() != 1 || session.Opts() != before {
+			if !session.IsRunning() || server.sessions[before.SessionID] != session || server.activeJobs.Load() != 1 || !reflect.DeepEqual(session.Opts(), before) {
 				t.Fatal("worker evicted or changed a restored producer")
 			}
 			tracker := server.tracker.(*recordingSessionTracker)

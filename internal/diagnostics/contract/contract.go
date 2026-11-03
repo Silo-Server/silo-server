@@ -51,7 +51,7 @@ var (
 	manifestArchiveRequiredFields     = []string{"entries", "bytes", "uncompressed_bytes", "sha256"}
 
 	reportTypes       = []string{"crash", "anr", "native_crash", "hang", "abnormal_exit", "manual"}
-	platforms         = []string{"android", "android-tv", "ios", "tvos"}
+	platforms         = []string{"android", "android-tv", "ios", "tvos", "roku"}
 	crashSources      = []string{"ueh", "exit_info", "metrickit", "exit_sentinel"}
 	crashProvenances  = []string{"pre_failure", "post_restart", "metric_reporting_period"}
 	consentModes      = []string{"prompt", "always", "manual"}

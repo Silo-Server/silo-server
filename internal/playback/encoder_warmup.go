@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -133,7 +132,7 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 }
 
 func runHardwareEncoderWarmup(ctx context.Context, ffmpegPath string, args ...string) ([]byte, error) {
-	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...)) //nolint:gosec // The FFmpeg binary is operator-configured; arguments are constructed internally without a shell.
+	return encodinglimit.CombinedOutput(procgroup.CommandContext(ctx, ffmpegPath, args...))
 }
 
 func hardwareEncoderWarmupDevices(backend, configured string) []string {

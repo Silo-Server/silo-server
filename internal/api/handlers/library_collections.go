@@ -63,6 +63,14 @@ type LibraryCollectionHandler struct {
 	// PersonalCollages serves the collages of the personal collections opted
 	// into a library tab; nil when artwork storage is not configured.
 	PersonalCollages *catalog.PersonalCollectionCollages
+	// ArtworkSigner signs the artwork URLs local storage serves; collages
+	// read those posters from ArtworkStore. Nil when storage serves its own
+	// URLs.
+	ArtworkSigner *artworkurl.Signer
+	// PersonalMemberCounts counts the members a viewer sees in the
+	// hand-picked and imported personal collections opted into a library
+	// tab and remembers the counts between reads; nil counts on every read.
+	PersonalMemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -191,7 +199,7 @@ func (h *LibraryCollectionHandler) CollectionCollagePath(collectionID, key strin
 }
 
 func (h *LibraryCollectionHandler) collageComposer() collectionCollageComposer {
-	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, httpClient: h.httpClient}
+	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, signer: h.ArtworkSigner, httpClient: h.httpClient}
 }
 
 type libraryCollectionResponse struct {
@@ -987,14 +995,7 @@ func (h *LibraryCollectionHandler) cleanupDeletedCollection(ctx context.Context,
 	if h.SortPreferenceCleaner != nil {
 		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
-	store := h.ArtworkStore
-	if store == nil {
-		return
-	}
-	prefix := fmt.Sprintf("collection-images/%s/", collectionID)
-	if _, err := store.DeletePrefix(ctx, prefix); err != nil {
-		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "error", err)
-	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID)
 }
 
 type adminReorderCollectionsRequest struct {
@@ -2715,11 +2716,8 @@ func (h *LibraryCollectionHandler) presignGPURLCtx(ctx context.Context, path str
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
 	}
 	if h.ArtworkResolver == nil {
 		return ""
@@ -2748,6 +2746,21 @@ func (h *LibraryCollectionHandler) withViewerPosters(ctx context.Context, collec
 		out = append(out, &viewed)
 	}
 	return out
+}
+
+// viewerCollectionCounts returns what each collection shows the viewer
+// described by access (catalog ViewerCollectionCounts), or nil
+// when access narrows nothing and the stored counts are the viewer's. A
+// collection whose count could not be read is absent and logged.
+func (h *LibraryCollectionHandler) viewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) map[string]catalog.ViewerCollectionCount {
+	if h.repo == nil {
+		return nil
+	}
+	counts, err := h.repo.ViewerCollectionCounts(ctx, collections, access)
+	if err != nil {
+		slog.WarnContext(ctx, "counting server collections for the viewer failed", "component", "collections", "error", err)
+	}
+	return counts
 }
 
 // withViewerPoster is withViewerPosters for one collection and the viewer in
@@ -3144,10 +3157,6 @@ func (h *LibraryCollectionHandler) processCollectionImage(
 	return uploadCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, fileData)
 }
 
-func (h *LibraryCollectionHandler) deleteCollectionImages(ctx context.Context, collectionID, imageType string) error {
-	return removeCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType)
-}
-
 // adminCollectionImagePath returns the stored path of one admin collection
 // image.
 func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context, collectionID, imageType string) (string, error) {
@@ -3162,7 +3171,7 @@ func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context,
 }
 
 // cleanUpReplacedCollectionImage removes the revision that a committed
-// replacement of an admin collection image superseded.
+// replacement or clear of an admin collection image superseded.
 func (h *LibraryCollectionHandler) cleanUpReplacedCollectionImage(ctx context.Context, collectionID, imageType, oldPath string) {
 	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
 		return h.adminCollectionImagePath(ctx, collectionID, imageType)

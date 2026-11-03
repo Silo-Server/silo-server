@@ -65,6 +65,8 @@ func TestLoadDatabaseURLNeedsNoSecretKey(t *testing.T) {
 
 func TestStartupBootstrapAllowsOptInUnboundTranscodeOnly(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
+	// An unbound worker learns its URL from the binding the core sends.
+	t.Setenv("NODE_URL", "")
 	t.Setenv("SECRET_KEY", "")
 	t.Setenv("SILO_NODE_ENROLLMENT_TOKEN", strings.Repeat("t", 48))
 	t.Setenv("SILO_NODE_BINDING_FILE", "/private/node-binding.json")
@@ -92,6 +94,7 @@ func TestStartupBootstrapAllowsOptInUnboundTranscodeOnly(t *testing.T) {
 		})
 	}
 }
+
 func TestStartupBootstrapRefusesUnprotectedOrPartialEnrollment(t *testing.T) {
 	t.Setenv("MODE", "transcode")
 	t.Setenv("DATABASE_URL", "")
@@ -105,5 +108,42 @@ func TestStartupBootstrapRefusesUnprotectedOrPartialEnrollment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://old-customer.invalid/silo")
 	if _, err := LoadStartupBootstrap("", true); err == nil {
 		t.Fatal("partial customer bootstrap accepted")
+	}
+}
+
+func TestLoadBootstrapNodeModesNeedNodeURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example.invalid/silo")
+	t.Setenv("SECRET_KEY", "0123456789abcdef0123456789abcdef")
+	for _, tc := range []struct {
+		mode, nodeURL string
+		ok            bool
+	}{
+		{"proxy", "", false},
+		{"transcode", "", false},
+		{"transcode", "http://node-1:8080", true},
+		{"integrated", "", true},
+		{"api", "", true},
+	} {
+		t.Setenv("MODE", tc.mode)
+		t.Setenv("NODE_URL", tc.nodeURL)
+		if _, err := LoadBootstrap(""); (err == nil) != tc.ok {
+			t.Errorf("MODE=%s NODE_URL=%q: LoadBootstrap error = %v", tc.mode, tc.nodeURL, err)
+		}
+	}
+}
+
+func TestAudiobookshelfCompatWithBootstrapListen(t *testing.T) {
+	cases := []struct {
+		name, listen, bootstrap, want string
+	}{
+		{"ABS_PORT moves an enabled listener", ":13378", ":13379", ":13379"},
+		{"a disabled listener stays disabled", "", ":13379", ""},
+		{"no bootstrap address keeps the listener", ":13378", "", ":13378"},
+	}
+	for _, tc := range cases {
+		got := AudiobookshelfCompatConfig{Listen: tc.listen}.WithBootstrapListen(tc.bootstrap)
+		if got.Listen != tc.want {
+			t.Errorf("%s: Listen = %q, want %q", tc.name, got.Listen, tc.want)
+		}
 	}
 }

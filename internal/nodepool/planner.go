@@ -604,6 +604,23 @@ func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
 	return false
 }
 
+// TranscodeNodeWith reports whether a healthy transcode node satisfies
+// eligible, at its job cap or not: a node that may take the work once it has
+// room.
+func (p *Planner) TranscodeNodeWith(eligible func(*Node) bool) bool {
+	if p == nil || p.transcodes == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, node := range p.transcodes.Nodes() {
+		if node.TakesNewWork() && (eligible == nil || eligible(node)) {
+			return true
+		}
+	}
+	return false
+}
+
 // groupHealth reports, for every group label present in either pool, whether
 // all of its enabled members are healthy. Pools only hold enabled nodes, so
 // disabled nodes never count against a group.

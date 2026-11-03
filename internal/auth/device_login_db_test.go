@@ -220,7 +220,7 @@ func TestDeviceLoginCancelDB(t *testing.T) {
 	if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID); !errors.Is(err, ErrDeviceLoginCanceled) {
 		t.Fatalf("approve error = %v", err)
 	}
-	if err := svc.Deny(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}); !errors.Is(err, ErrDeviceLoginCanceled) {
+	if err := svc.Deny(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, userID); !errors.Is(err, ErrDeviceLoginCanceled) {
 		t.Fatalf("deny error = %v", err)
 	}
 	poll, err := svc.Poll(ctx, start.DeviceCode)
@@ -264,6 +264,80 @@ func TestDeviceLoginCancelDB(t *testing.T) {
 
 	if _, err := svc.Cancel(ctx, "no-such-device-code"); !errors.Is(err, ErrDeviceLoginNotFound) {
 		t.Fatalf("cancel unknown error = %v", err)
+	}
+}
+
+// TestDeviceLoginDenyApprovedByAnotherAccountDB: once one account approves,
+// another account can no more deny the request than approve it, so the
+// device still collects the approval. The approving account can still
+// withdraw its own approval.
+func TestDeviceLoginDenyApprovedByAnotherAccountDB(t *testing.T) {
+	svc, pool, userID, name := deviceLoginTestService(t)
+	ctx := t.Context()
+	var otherID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'x', 'user', true)
+		RETURNING id`,
+		name("other"), name("other")+"@example.invalid",
+	).Scan(&otherID); err != nil {
+		t.Fatalf("insert other user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, otherID)
+	})
+
+	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("deny-other")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := DeviceLoginLookupInput{UserCode: start.UserCode}
+	if err := svc.Approve(ctx, lookup, userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Approve(ctx, lookup, otherID); !errors.Is(err, ErrDeviceLoginConflict) {
+		t.Fatalf("approve by another account error = %v", err)
+	}
+	if err := svc.Deny(ctx, lookup, otherID); !errors.Is(err, ErrDeviceLoginConflict) {
+		t.Fatalf("deny by another account error = %v", err)
+	}
+	if poll, err := svc.Poll(ctx, start.DeviceCode); err != nil || poll.TokenPair == nil {
+		t.Fatalf("poll after another account's deny = %+v, %v", poll, err)
+	}
+
+	withdrawn, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("deny-own")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup = DeviceLoginLookupInput{UserCode: withdrawn.UserCode}
+	if err := svc.Approve(ctx, lookup, userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Deny(ctx, lookup, userID); err != nil {
+		t.Fatalf("deny own approval error = %v", err)
+	}
+	if poll, err := svc.Poll(ctx, withdrawn.DeviceCode); err != nil || poll.Status != DeviceLoginStatusDenied || poll.TokenPair != nil {
+		t.Fatalf("poll after withdrawing = %+v, %v", poll, err)
+	}
+
+	// Deleting the approver sets approved_by_user_id NULL and leaves the
+	// request approved but uncollectable; any account can still deny it.
+	orphaned, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("deny-orphaned")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup = DeviceLoginLookupInput{UserCode: orphaned.UserCode}
+	if err := svc.Approve(ctx, lookup, otherID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, otherID); err != nil {
+		t.Fatalf("delete approving user: %v", err)
+	}
+	if err := svc.Deny(ctx, lookup, userID); err != nil {
+		t.Fatalf("deny orphaned approval error = %v", err)
+	}
+	if poll, err := svc.Poll(ctx, orphaned.DeviceCode); err != nil || poll.Status != DeviceLoginStatusDenied {
+		t.Fatalf("poll after denying orphaned approval = %+v, %v", poll, err)
 	}
 }
 

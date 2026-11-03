@@ -45,7 +45,7 @@ func applyCustomerBinding(bc *config.BootstrapConfig, b nodeenrollment.Binding) 
 	return nil
 }
 func completeNodeBootstrap(ctx context.Context, bc *config.BootstrapConfig) error {
-	if bc.Mode != transcodeMode || (bc.DatabaseURL != "" && bc.EnrollmentToken == "" && bc.BindingFile == "") {
+	if bc.Mode != serverModeTranscode || (bc.DatabaseURL != "" && bc.EnrollmentToken == "" && bc.BindingFile == "") {
 		return nil
 	}
 	path := bc.BindingFile

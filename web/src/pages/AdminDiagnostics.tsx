@@ -232,6 +232,7 @@ export default function AdminDiagnostics() {
               <SelectItem value="android-tv">Android TV</SelectItem>
               <SelectItem value="ios">iOS</SelectItem>
               <SelectItem value="tvos">tvOS</SelectItem>
+              <SelectItem value="roku">Roku</SelectItem>
             </SelectContent>
           </Select>
         </FilterField>
@@ -738,6 +739,8 @@ function formatPlatform(value: string) {
       return "iOS";
     case "tvos":
       return "tvOS";
+    case "roku":
+      return "Roku";
     default:
       return "Android";
   }

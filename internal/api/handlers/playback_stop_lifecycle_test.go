@@ -31,7 +31,7 @@ func TestStopPlaybackSessionFinalizesUnderLifecycleLock(t *testing.T) {
 	handler.tm.RegisterTranscodeSession(session.ID, encoder)
 	done := make(chan error, 1)
 	go func() {
-		_, err := handler.stopPlaybackSessionWithResult(context.Background(), session, false)
+		_, err := handler.stopPlaybackSessionWithResult(context.Background(), session, "")
 		done <- err
 	}()
 	select {

@@ -744,8 +744,9 @@ const PIN_EVERY_LIBRARY = " This applies in every library it's in.";
 /**
  * What Pin does, given what the shelf sorts by (null for Your order) and
  * whether the collection is in more than one library. Pinned collections also
- * lead the capped Server collections list on every profile's Collections
- * page, which is all Pin does on a shelf that sorts itself.
+ * lead their library's collections in the Server collections list on every
+ * profile's Collections page, which is all Pin does on a shelf that sorts
+ * itself.
  */
 export function pinHelp(shelfSortedBy: string | null, inSeveralLibraries = false): string {
   const help =

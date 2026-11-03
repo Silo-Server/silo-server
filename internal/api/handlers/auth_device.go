@@ -299,7 +299,7 @@ func (h *AuthHandler) PollDeviceLogin(ctx context.Context, deviceCode string) (*
 			AccessToken:  result.TokenPair.AccessToken,
 			RefreshToken: result.TokenPair.RefreshToken,
 			ExpiresIn:    result.TokenPair.ExpiresIn,
-			User:         buildUserResponse(result.User, effectiveDownloadAllowed(ctx, result.User, h.accessGroups), nil, nil),
+			User:         buildUserResponse(result.User, effectiveAccountPolicy(ctx, result.User, h.accessGroups), nil, nil),
 		}
 		if result.Temporary {
 			view.ProfileID = result.ProfileID
@@ -409,7 +409,7 @@ func (h *AuthHandler) DenyDeviceLogin(ctx context.Context, input auth.DeviceLogi
 	if err := deviceDecisionSessionError(ctx); err != nil {
 		return DeviceLoginDecision{}, err
 	}
-	if err := h.device.Deny(ctx, input); err != nil {
+	if err := h.device.Deny(ctx, input, userID); err != nil {
 		return DeviceLoginDecision{}, deviceDecisionError(err)
 	}
 	return DeviceLoginDecision{Status: auth.DeviceLoginStatusDenied}, nil

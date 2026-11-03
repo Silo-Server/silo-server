@@ -12,7 +12,7 @@
     "progress": 0,
     "progress_message": "Transcribing",
     "result_subtitle_id": null,
-    "error_message": "Subtitle processing failed.",
+    "error_message": "Subtitle processing stopped because of an unexpected server error. Try again later.",
     "created_at": "2026-01-02T03:04:05.678Z",
     "updated_at": "2026-01-02T03:04:05.678Z"
   }

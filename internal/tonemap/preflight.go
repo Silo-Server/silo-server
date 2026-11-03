@@ -537,7 +537,7 @@ func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 	}
 	filter := VAAPIFilter(request.Kind)
 	if request.SoftwareVideoDecode {
-		filter = "format=nv12,hwupload," + filter
+		filter = SoftwareUploadFilter(request.Kind) + filter
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }
@@ -549,10 +549,7 @@ func intelOpenCLPreflightUpload(request SourcePreflightRequest) string {
 	if !request.SoftwareVideoDecode {
 		return ""
 	}
-	if IsSDRSource(request.Kind) {
-		return "format=nv12,hwupload,"
-	}
-	return "format=p010le,hwupload,"
+	return SoftwareUploadFilter(request.Kind)
 }
 
 // sourcePreflightEncoder returns the encoder paired with the selected mode.

@@ -95,6 +95,7 @@ interface ProblemLike {
   type?: string;
   title?: string;
   detail?: string;
+  errors?: { detail?: string }[];
 }
 
 /**
@@ -177,7 +178,13 @@ export async function playerV2<K extends PlayerV2Key>(
     let code: string | undefined;
     try {
       const problem = JSON.parse(text) as ProblemLike;
-      const detail = problem.detail?.trim() || problem.title?.trim();
+      // A validation problem's own detail only points at its field errors,
+      // which say what to fix.
+      const fieldDetails = (problem.errors ?? [])
+        .map((error) => error.detail?.trim())
+        .filter(Boolean)
+        .join(" ");
+      const detail = fieldDetails || problem.detail?.trim() || problem.title?.trim();
       if (detail) message = detail;
       if (typeof problem.type === "string") {
         const segment = problem.type.split("?")[0]?.split("/").pop() ?? "";

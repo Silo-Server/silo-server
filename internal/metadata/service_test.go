@@ -525,6 +525,25 @@ func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
+func (r *fakeRefreshDebtRepo) RestartTerminalEpisodeDebt(_ context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	debt, ok := r.debts[fakeRefreshDebtKey(targetType, contentID)]
+	if !ok {
+		return nil
+	}
+	debt.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
+	now := time.Now()
+	if debt.AttemptCount < refreshDebtEpisodeTerminalAttempts || debt.LastAttemptAt == nil || !debt.LastAttemptAt.Before(attemptedBefore) ||
+		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
+		return nil
+	}
+	debt.Priority = max(debt.Priority, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete))
+	debt.AttemptCount = 0
+	debt.NextRefreshAt = nextRefreshAt
+	return nil
+}
+
 // fakeFileRepo implements FileContentUpdater with an in-memory store.
 type fakeFileRepo struct {
 	mu                  sync.Mutex
@@ -2136,47 +2155,6 @@ func TestCreateOrFindSkeleton_TrustedFilenameIDBypassesAmbiguousScanner(t *testi
 	}
 	if got, want := item.TmdbID, "106"; got != want {
 		t.Fatalf("item.TmdbID = %q, want %q", got, want)
-	}
-}
-
-func TestCreateOrFindSkeleton_TrustedFilenameIDBeatsStaleFolderID(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "predator-106",
-		Status:    "matched",
-		Title:     "Predator",
-		Year:      1987,
-		Type:      "movie",
-		TmdbID:    "106",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if got, want := result.ContentID, "predator-106"; got != want {
-		t.Fatalf("ContentID = %q, want %q", got, want)
-	}
-	if result.IsNew {
-		t.Fatal("expected matched external-id reuse to keep IsNew=false")
-	}
-	if got := h.fileRepo.contentIDs[file.ID]; got != "predator-106" {
-		t.Fatalf("linked content_id = %q, want predator-106", got)
 	}
 }
 

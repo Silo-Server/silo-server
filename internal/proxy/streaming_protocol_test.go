@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +68,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 	}
 }
 
-func TestStreamingProtocolLocalRemuxHeadStartsWork(t *testing.T) {
+func TestStreamingProtocolLocalRemuxHeadDoesNotStartWork(t *testing.T) {
 	const secret = "synthetic-remux-head"
 	proxy := newSocketProxyServer(t, secret, clientip.NewResolver(nil))
 	binary := filepath.Join(t.TempDir(), "remux.sh")
@@ -82,7 +83,7 @@ func TestStreamingProtocolLocalRemuxHeadStartsWork(t *testing.T) {
 	if response.status != 200 || response.body != "" {
 		t.Fatal(response.status, response.body)
 	}
-	if _, err := os.Stat(binary + ".started"); err != nil {
-		t.Fatal("existing local HEAD execution behavior changed", err)
+	if _, err := os.Stat(binary + ".started"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("local HEAD started remux work", err)
 	}
 }

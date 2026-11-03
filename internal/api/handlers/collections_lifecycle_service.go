@@ -265,6 +265,7 @@ func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete collection")
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
 
 	return nil
 }
@@ -432,9 +433,7 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		return err
 	}
 
-	if err := removeCollectionImageVariants(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID, imageType); err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete images")
-	}
+	oldPath := collection.PosterURL
 	empty := ""
 	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
 		ID:               collectionID,
@@ -447,6 +446,13 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear poster")
 	}
+	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
+		current, err := store.GetCollection(ctx, collectionID)
+		if err != nil {
+			return "", err
+		}
+		return current.PosterURL, nil
+	})
 	// The collection shows its collage again.
 	collection.PosterURL = ""
 	h.refreshCollage(ctx, store, userID, collection)

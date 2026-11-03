@@ -123,6 +123,9 @@ type fakeSignalStore struct {
 	favorites []userstore.Favorite
 	watchlist []userstore.WatchlistEntry
 	marks     []userstore.NotInterestedEntry
+
+	// progressPages counts ListProgressPage calls by status.
+	progressPages map[string]int
 }
 
 // ListNotInterestedPage returns the profile's marks in one page, as stored.
@@ -234,6 +237,10 @@ func (s *fakeSignalStore) ListProgress(_ context.Context, profileID, status stri
 }
 
 func (s *fakeSignalStore) ListProgressPage(ctx context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	if s.progressPages == nil {
+		s.progressPages = map[string]int{}
+	}
+	s.progressPages[status]++
 	rows, err := s.ListProgress(ctx, profileID, status, len(s.progress), 0)
 	if err != nil {
 		return nil, err
@@ -329,7 +336,7 @@ func TestSignalReaderWatchedSetCanonicalizesStoreProgress(t *testing.T) {
 	repo := &fakeSignalRepo{canonical: map[string]string{
 		"episode-1": "series-1",
 	}}
-	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true)
 
 	watched, err := reader.WatchedItemIDSet(context.Background(), 7, "p1")
 	if err != nil {
@@ -355,7 +362,7 @@ func TestSignalReaderWatchedSetIncludesEbookReaderProgress(t *testing.T) {
 			{MediaItemID: "ebook-low", PositionSeconds: 0.2, DurationSeconds: 1, UpdatedAt: time.Date(2026, 6, 1, 11, 0, 0, 0, time.UTC)},
 		},
 	}
-	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true)
 
 	watched, err := reader.WatchedItemIDSet(context.Background(), 7, "p1")
 	if err != nil {
@@ -561,7 +568,7 @@ func TestSignalReaderRecommendationExclusionSet(t *testing.T) {
 		"episode-favorite": "series-favorite",
 	}}
 
-	excluded, err := NewSignalReader(repo, fakeSignalProvider{store: store}).RecommendationExclusionSet(t.Context(), 7, "p1")
+	excluded, err := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true).RecommendationExclusionSet(t.Context(), 7, "p1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,10 +624,36 @@ func TestWatchedSetMemoReadsEachProfileOnce(t *testing.T) {
 	if repo.watchedReads != 1 {
 		t.Fatalf("reads under the memo = %d, want 1", repo.watchedReads)
 	}
+	// A memo installed under one already there is the same memo.
+	read(WithWatchedSetMemo(ctx), rowsReader, "p1")
+	if repo.watchedReads != 1 {
+		t.Fatalf("reads under a nested memo = %d, want 1", repo.watchedReads)
+	}
 	read(ctx, blendReader, "p2")
 	read(t.Context(), rowsReader, "p1")
 	if repo.watchedReads != 3 {
 		t.Fatalf("reads = %d, want one more for another profile and one without the memo", repo.watchedReads)
+	}
+}
+
+// On the Postgres user store the watched set is one repo query and the
+// store's progress is never paged; a store outside Postgres is walked.
+func TestWatchedSetReadsTheRepoUnlessTheStoreIsOutsidePostgres(t *testing.T) {
+	for _, outside := range []bool{false, true} {
+		store := &fakeSignalStore{progress: []userstore.WatchProgress{{ProfileID: "p1", MediaItemID: "watched", Completed: true}}}
+		repo := &fakeSignalRepo{fallbackWatched: map[string]struct{}{"watched": {}}}
+		set, err := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(outside).WatchedItemIDSet(t.Context(), 7, "p1")
+		if err != nil || !maps.Equal(set, map[string]struct{}{"watched": {}}) {
+			t.Fatalf("outside postgres %v: watched set = %v, %v", outside, set, err)
+		}
+		wantRepoReads, wantWalks := 1, 0
+		if outside {
+			wantRepoReads, wantWalks = 0, 1
+		}
+		if repo.watchedReads != wantRepoReads || store.progressPages["all"] != wantWalks {
+			t.Fatalf("outside postgres %v: repo queries = %d, progress pages walked = %d; want %d and %d",
+				outside, repo.watchedReads, store.progressPages["all"], wantRepoReads, wantWalks)
+		}
 	}
 }
 

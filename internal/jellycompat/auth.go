@@ -155,7 +155,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 					"token_prefix", safeTokenPrefix(token),
 					"error", logredact.SanitizeText(err.Error()),
 				)
-				a.sessions.Delete(token)
+				_ = a.sessions.Delete(token)
 				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 				return
 			}
@@ -240,6 +240,7 @@ func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request,
 func serveWithSessionContext(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
 	attributeActivity(r, session)
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
+	ctx = withRequestScope(ctx, session)
 	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
 	next.ServeHTTP(w, r.WithContext(ctx))
 }

@@ -3,11 +3,13 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/time/rate"
 )
 
 type fakeClock struct {
@@ -127,10 +129,18 @@ func TestNilAttemptLimiterAllows(t *testing.T) {
 }
 
 func TestRetryAfterSecondsRoundsUp(t *testing.T) {
-	for _, tc := range []struct {
+	type testCase struct {
 		in   time.Duration
 		want int
-	}{{0, 1}, {time.Millisecond, 1}, {time.Second, 1}, {1500 * time.Millisecond, 2}, {5 * time.Minute, 300}} {
+	}
+	cases := []testCase{{0, 1}, {time.Millisecond, 1}, {time.Second, 1}, {1500 * time.Millisecond, 2}, {5 * time.Minute, 300}}
+	// A saturated wait only fits in a 64-bit int; a constant conversion would
+	// stop this package compiling on 32-bit targets.
+	if strconv.IntSize == 64 {
+		d := rate.InfDuration
+		cases = append(cases, testCase{d, int(d/time.Second) + 1})
+	}
+	for _, tc := range cases {
 		if got := RetryAfterSeconds(tc.in); got != tc.want {
 			t.Errorf("RetryAfterSeconds(%v) = %d, want %d", tc.in, got, tc.want)
 		}

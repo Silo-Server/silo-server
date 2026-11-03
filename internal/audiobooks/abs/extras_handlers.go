@@ -130,11 +130,20 @@ func (h *Handler) handleDeleteItemProgress(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	contentID := chi.URLParam(r, "libraryItemId")
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil || item == nil {
+		http.Error(w, "progress not found", http.StatusNotFound)
+		return
+	}
 	if h.deps.ProgressStore == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	contentID := chi.URLParam(r, "libraryItemId")
 	if err := h.deps.ProgressStore.DeleteProgress(r.Context(), a.UserID, a.ProfileID, contentID); err != nil {
 		slog.WarnContext(r.Context(), "abs delete progress failed", "component", "audiobooks", "err", err, "content", contentID)
 		http.Error(w, "delete progress failed", http.StatusInternalServerError)

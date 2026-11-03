@@ -71,3 +71,52 @@ func TestOrderedAndroidPushTransport(t *testing.T) {
 		}
 	}
 }
+
+type fakeAndroidPushRetirement struct {
+	calls int
+	cmd   notifications.AndroidPushRetirement
+	err   error
+}
+
+func (*fakeAndroidPushRetirement) AndroidPushRetirementAvailable() bool { return true }
+func (f *fakeAndroidPushRetirement) RetireAndroidPush(_ context.Context, cmd notifications.AndroidPushRetirement) (notifications.AndroidPushReceipt, error) {
+	f.calls++
+	f.cmd = cmd
+	return notifications.AndroidPushReceipt{Generation: cmd.Generation, Removed: true}, f.err
+}
+
+// The app calls retirement after it has cleared its login, so the route must
+// answer on the installation key alone.
+func TestAndroidPushRetirementTransportNeedsNoSession(t *testing.T) {
+	f := new(fakeAndroidPushRetirement)
+	deps := pilotDeps(nil, nil)
+	deps.AndroidPushRetirement = f
+	h := NewHandler(deps)
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	headers := map[string]string{"X-Push-Installation-Key": key, "X-Push-Generation": "9007199254740993"}
+	path := Prefix + "/notifications/push/devices/install/retire"
+	r := do(t, h, http.MethodPost, path, "", headers)
+	if r.Code != 200 || strings.TrimSpace(r.Body.String()) != `{"generation":"9007199254740993","removed":true}` || f.cmd != (notifications.AndroidPushRetirement{DeviceID: "install", InstallationKey: key, Generation: 9007199254740993}) {
+		t.Fatalf("%d %s %+v", r.Code, r.Body.String(), f.cmd)
+	}
+	for _, bad := range []string{"0", "01", "9223372036854775808"} {
+		before := f.calls
+		r = do(t, h, http.MethodPost, path, "", with(headers, "X-Push-Generation", bad))
+		if r.Code != 422 || f.calls != before {
+			t.Fatalf("generation=%q status=%d", bad, r.Code)
+		}
+	}
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{{notifications.ErrPushGenerationConflict, 409}, {notifications.ErrPushInstallationProof, 403}, {notifications.ErrPushDeviceInvalid, 422}, {notifications.ErrPushDeviceUnavailable, 503}} {
+		f.err = tc.err
+		if r = do(t, h, http.MethodPost, path, "", headers); r.Code != tc.status {
+			t.Fatalf("error=%v status=%d", tc.err, r.Code)
+		}
+	}
+	deps.AndroidPushRetirement = nil
+	if r = do(t, NewHandler(deps), http.MethodPost, path, "", headers); r.Code != 503 {
+		t.Fatal("absent retirement", r.Code)
+	}
+}

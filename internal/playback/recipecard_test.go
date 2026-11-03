@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -54,6 +55,8 @@ func recipeCardFixtureOpts(revision tonemap.SourceRevision) TranscodeOpts {
 		ThrottleSeconds:        180,
 		CopyVideoMPEGTS:        true,
 		KeyframePlaylist:       true,
+		// Playlist form, not media bytes, but a reconstruct must keep it.
+		HLSVariableSubstitution: true,
 	}
 }
 
@@ -135,6 +138,9 @@ func checkRoundTripRecipeOpts(t *testing.T, got, opts TranscodeOpts, revision to
 	}
 	if !got.CopyVideoMPEGTS || !got.KeyframePlaylist {
 		t.Errorf("copy-video MPEG-TS or keyframe playlist lost in round trip: %+v", got)
+	}
+	if !got.HLSVariableSubstitution {
+		t.Error("HLSVariableSubstitution lost in round trip")
 	}
 }
 
@@ -248,6 +254,8 @@ func TestRecipeCardClientMetadataStoredNotInClaims(t *testing.T) {
 	card.ClientBuild = "20260814"
 	card.ClientChannel = "beta"
 	card.ClientUserAgent = "Findroid/0.15"
+	card.DeviceID = "device-1"
+	card.DevicePlatform = "Android"
 
 	encoded, err := json.Marshal(card)
 	if err != nil {
@@ -257,19 +265,22 @@ func TestRecipeCardClientMetadataStoredNotInClaims(t *testing.T) {
 	if err := json.Unmarshal(encoded, &back); err != nil {
 		t.Fatalf("unmarshal card: %v", err)
 	}
-	if back.ClientName != "Findroid" || back.ClientVersion != "0.15" || back.ClientBuild != "20260814" || back.ClientChannel != "beta" || back.ClientUserAgent != "Findroid/0.15" {
+	if back.ClientName != "Findroid" || back.ClientVersion != "0.15" || back.ClientBuild != "20260814" || back.ClientChannel != "beta" || back.ClientUserAgent != "Findroid/0.15" ||
+		back.DeviceID != "device-1" || back.DevicePlatform != "Android" {
 		t.Fatalf("client metadata lost in stored-card round trip: %+v", back)
 	}
 
 	claims := card.ToClaims()
 	fromClaims := RecipeCardFromClaims(&claims)
-	if fromClaims.ClientName != "" || fromClaims.ClientVersion != "" || fromClaims.ClientBuild != "" || fromClaims.ClientChannel != "" || fromClaims.ClientUserAgent != "" {
+	if fromClaims.ClientName != "" || fromClaims.ClientVersion != "" || fromClaims.ClientBuild != "" || fromClaims.ClientChannel != "" || fromClaims.ClientUserAgent != "" ||
+		fromClaims.DeviceID != "" || fromClaims.DevicePlatform != "" {
 		t.Fatalf("client metadata must not travel via token claims: %+v", fromClaims)
 	}
 }
 
 // TestReconstructSessionRestoresClientMetadata verifies a rebuilt session keeps its client identity,
-// so the admin client label and Jellyfin pill survive a server restart.
+// so the admin client label and Jellyfin pill survive a server restart, and takes the viewer's
+// address from the media request that rebuilt it.
 func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	tm := NewTranscodeManager()
 	tm.Sessions = NewSessionManager(0, 0)
@@ -280,12 +291,18 @@ func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	card.ClientBuild = "  20260814\x00  "
 	card.ClientChannel = "  beta\t  "
 	card.ClientUserAgent = "  Findroid/0.15 (Android)  "
+	card.DeviceID = "  device-1  "
+	card.DevicePlatform = "  Android  "
 
-	session := tm.ReconstructSession(t.Context(), "sess-jf", 42, card)
+	session := tm.ReconstructSession(clientip.SetContext(t.Context(), "203.0.113.20"), "sess-jf", 42, card)
 	if session == nil {
 		t.Fatal("reconstruct returned nil")
 	}
-	if session.ClientName != "Findroid" || session.ClientVersion != "0.15" || session.ClientBuild != "20260814" || session.ClientChannel != "beta" || session.ClientUserAgent != "Findroid/0.15 (Android)" {
+	if session.ClientIP != "203.0.113.20" {
+		t.Fatalf("ClientIP = %q, want the rebuilding request's 203.0.113.20", session.ClientIP)
+	}
+	if session.ClientName != "Findroid" || session.ClientVersion != "0.15" || session.ClientBuild != "20260814" || session.ClientChannel != "beta" || session.ClientUserAgent != "Findroid/0.15 (Android)" ||
+		session.DeviceID != "device-1" || session.DevicePlatform != "Android" {
 		t.Fatalf("client metadata not restored: %+v", session)
 	}
 	if !session.TranscodeAudio {
@@ -348,6 +365,9 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.ThrottleSeconds != card.ThrottleSeconds ||
 		!got.CopyVideoMPEGTS || !got.KeyframePlaylist {
 		t.Fatalf("encode parameters lost in round trip (non-v2 source channels must be stripped):\n have %+v\n want %+v", got, card)
+	}
+	if !claims.HLSVariableSubstitution || !got.HLSVariableSubstitution {
+		t.Fatal("HLSVariableSubstitution lost in the stream token")
 	}
 }
 

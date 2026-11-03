@@ -22,6 +22,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -1568,7 +1569,7 @@ func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...)) //nolint:gosec // The FFmpeg binary is operator-configured; probe arguments are constructed internally without a shell.
+	return encodinglimit.CombinedOutput(procgroup.CommandContext(ctx, ffmpegPath, args...))
 }
 
 func ffmpegOutputHasToken(output []byte, token string) bool {

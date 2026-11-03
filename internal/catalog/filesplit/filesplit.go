@@ -6,6 +6,7 @@ package filesplit
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,13 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 	fileIDs := distinctFileIDs(opts.Files)
 	if len(fileIDs) != len(opts.Files) {
 		return nil, fmt.Errorf("filesplit: file ids must be positive and unique")
+	}
+	// Episode state follows a moved multi-episode file for every episode it
+	// serves, not only the one it links to. Read those before the move unlinks
+	// the files.
+	spannedPairs, err := spannedEpisodePairs(ctx, tx, opts, fileIDs)
+	if err != nil {
+		return nil, err
 	}
 	// The self-join reads each row as it was before the update, so the source
 	// episodes the moved files leave behind come from the database rather than
@@ -160,6 +168,11 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 	}
 
 	derivedEpisodePairs := DeriveEpisodePairs(opts.ItemType, opts.Files, opts.ToContentID)
+	for _, pair := range spannedPairs {
+		if !slices.ContainsFunc(derivedEpisodePairs, func(derived reattribute.IDPair) bool { return derived.From == pair.From }) {
+			derivedEpisodePairs = append(derivedEpisodePairs, pair)
+		}
+	}
 	episodePairs, err := keepFullyMovedEpisodePairs(ctx, tx, derivedEpisodePairs)
 	if err != nil {
 		return nil, err
@@ -207,22 +220,19 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 		`, fileIDs); err != nil {
 			return nil, fmt.Errorf("filesplit: adding target episode library membership: %w", err)
 		}
+		if _, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.id = ANY($1::bigint[])", fileIDs); err != nil {
+			return nil, fmt.Errorf("filesplit: %w", err)
+		}
 		if len(sourceEpisodeIDs) > 0 {
 			if _, err := tx.Exec(ctx, `
-				DELETE FROM episode_libraries source_membership
-				WHERE source_membership.episode_id = ANY($1::text[])
-				  AND NOT EXISTS (
-					SELECT 1
-					FROM media_files remaining
-					WHERE remaining.episode_id = source_membership.episode_id
-					  AND remaining.media_folder_id = source_membership.media_folder_id
-					  AND remaining.missing_since IS NULL
-				  )
+				DELETE FROM episode_libraries el
+				WHERE el.episode_id IN `+catalog.SpanReachSQL("$1::text[]")+`
+				  AND `+catalog.NoServingEpisodeFileSQL+`
 			`, sourceEpisodeIDs); err != nil {
 				return nil, fmt.Errorf("filesplit: removing stale source episode library membership: %w", err)
 			}
 		}
-		if err := catalog.RecomputeSeriesLatestEpisodeAdded(
+		if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(
 			ctx,
 			tx,
 			[]string{opts.FromContentID, opts.ToContentID},
@@ -259,10 +269,39 @@ func DeriveEpisodePairs(itemType string, files []File, targetContentID string) [
 	return pairs
 }
 
+// spannedEpisodePairs maps the later episodes the moved multi-episode files
+// serve onto deterministic episode ids under the target series.
+func spannedEpisodePairs(ctx context.Context, tx pgx.Tx, opts Options, fileIDs []int) ([]reattribute.IDPair, error) {
+	if opts.ItemType != itemTypeSeries || !contentid.IsProviderAnchored(opts.ToContentID) {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, catalog.SpannedEpisodesSQL("mf.id = ANY($1::bigint[]) AND mf.content_id = $2"), fileIDs, opts.FromContentID)
+	if err != nil {
+		return nil, fmt.Errorf("filesplit: listing spanned source episodes: %w", err)
+	}
+	defer rows.Close()
+	var pairs []reattribute.IDPair
+	for rows.Next() {
+		var from string
+		var season, episode int
+		if err := rows.Scan(&from, &season, &episode); err != nil {
+			return nil, fmt.Errorf("filesplit: scanning spanned source episode: %w", err)
+		}
+		if to, ok := contentid.ForEpisode(opts.ToContentID, season, episode); ok && to != from {
+			pairs = append(pairs, reattribute.IDPair{From: from, To: to})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("filesplit: iterating spanned source episodes: %w", err)
+	}
+	return pairs, nil
+}
+
 // keepFullyMovedEpisodePairs excludes a source episode when another active
-// file still points at it after the selected files were detached. Episode
-// progress has no file dimension, so moving a shared episode's state would
-// steal progress from the source show.
+// file still serves it after the selected files were detached: one linked to
+// it, or a multi-episode file spanning it. Episode progress has no file
+// dimension, so moving a shared episode's state would steal progress from the
+// source show.
 func keepFullyMovedEpisodePairs(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -281,12 +320,8 @@ func keepFullyMovedEpisodePairs(
 	rows, err := tx.Query(ctx, `
 		SELECT pair.from_id, pair.to_id
 		FROM UNNEST($1::text[], $2::text[]) AS pair(from_id, to_id)
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM media_files remaining
-			WHERE remaining.episode_id = pair.from_id
-			  AND remaining.missing_since IS NULL
-		)
+		CROSS JOIN LATERAL (SELECT pair.from_id AS content_id) e
+		WHERE NOT `+catalog.EpisodeHasServingFileSQL+`
 	`, fromIDs, toIDs)
 	if err != nil {
 		return nil, fmt.Errorf("filesplit: filtering shared episode state: %w", err)

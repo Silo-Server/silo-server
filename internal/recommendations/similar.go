@@ -238,6 +238,6 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 }
 
 func (e *Engine) ensureEmbeddingLockConfig(ctx context.Context) error {
-	_, err := checkEmbeddingLockConfig(ctx, e.repo, e.cfg.EmbeddingBaseURL, e.cfg.EmbeddingModel)
+	_, err := checkEmbeddingLockConfig(ctx, e.repo, e.cfg.EmbeddingModel)
 	return err
 }

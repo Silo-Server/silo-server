@@ -73,7 +73,7 @@ type ThemeAudioFormat struct {
 }
 
 type ThemePlayback struct {
-	URL         string    `json:"url" doc:"Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin"`
+	URL         string    `json:"url" format:"uri-reference" doc:"Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	Delivery    string    `json:"delivery" enum:"original,converted" doc:"converted is progressive AAC in audio-only MP4 with no length and no byte ranges; fetch a new grant to replay it"`
 	ContentType string    `json:"content_type" doc:"Media type of the audio at url" example:"audio/mpeg"`

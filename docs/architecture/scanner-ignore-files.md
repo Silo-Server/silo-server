@@ -25,7 +25,7 @@ the same in both servers:
   comments, or malformed patterns), is a marker like `.nomedia`: the directory
   and everything under it are skipped.
 - Otherwise each line is a gitignore pattern, and only matching entries are
-  skipped. A `.ignore` that lists `.downloads` skips that folder and nothing
+  skipped. A `.ignore` that lists `downloads` skips that folder and nothing
   else.
 
 Patterns follow gitignore syntax:
@@ -68,6 +68,18 @@ principles as Plex's `.plexignore`:
 - Globbing uses Go's `filepath.Match`: `*` matches within one path segment and
   does not cross `/`. A pattern therefore only matches files directly inside
   the directory unless it contains an explicit `/` path, e.g. `Season 2/*.mkv`.
+
+## Hidden and housekeeping directories
+
+Without any ignore file, every walker skips a directory below a configured
+library root whose name starts with `.`, as Jellyfin does, and the NAS and OS
+housekeeping folders `@eaDir`, `@Recycle`, `#recycle`, and `$RECYCLE.BIN`
+(case-insensitive). The rule is `scanner.SkippedDirName`, which the real-time
+monitor shares. A skipped directory is never read, so one the scan cannot open
+is not a walk failure. Hidden files are not skipped by this rule.
+
+A configured library root is walked whatever its name. A subtree scan whose
+scope is a skipped directory, or lies below one, reads nothing.
 
 ## Scan behavior
 

@@ -284,10 +284,31 @@ func TestDiscoveryQueries_DisabledLibrariesUseNotExists(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assertNoLibraryJoin(t, tc.query)
-			assertDenyOnlyRequiresLibraryMembership(t, tc.query)
+			assertRequiresLibraryMembership(t, tc.query)
 			if !strings.Contains(tc.query, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out") {
 				t.Fatalf("expected disabled library NOT EXISTS predicate, got:\n%s", tc.query)
 			}
+		})
+	}
+}
+
+// With no library scope and no disabled library, a discovery row still keeps
+// out media_items rows that belong to no library, such as a title whose last
+// file was removed.
+func TestDiscoveryQueries_UnscopedRequireLibraryMembership(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"rating_threshold", mustQuery(buildRatingThresholdQuery(RatingFilter{Min: 7}))},
+		{"unplayed_high_rated", mustQuery(buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7, UserID: 1, ProfileID: "p"}))},
+		{"forgotten_favorites", mustQuery(buildForgottenFavoritesQuery(ForgottenFavoritesFilter{UserID: 1, ProfileID: "p", LookbackDays: 365}))},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertNoLibraryJoin(t, tc.query)
+			assertRequiresLibraryMembership(t, tc.query)
 		})
 	}
 }
@@ -313,11 +334,11 @@ func assertNoLibraryJoin(t *testing.T, query string) {
 	}
 }
 
-func assertDenyOnlyRequiresLibraryMembership(t *testing.T, query string) {
+func assertRequiresLibraryMembership(t *testing.T, query string) {
 	t.Helper()
 	membershipPredicate := "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id)"
 	if !strings.Contains(query, membershipPredicate) {
-		t.Fatalf("deny-only library filters must require positive library membership, got:\n%s", query)
+		t.Fatalf("unscoped and deny-only library filters must require positive library membership, got:\n%s", query)
 	}
 	if strings.Contains(query, "mil_scope_in.media_folder_id") {
 		t.Fatalf("positive membership predicate should not bind a specific library, got:\n%s", query)

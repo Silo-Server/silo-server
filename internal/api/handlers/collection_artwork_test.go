@@ -146,9 +146,9 @@ func TestUploadCollectionImageVariants_ContentAddressedKeysBustCache(t *testing.
 	if pathA != pathARepeat {
 		t.Fatalf("identical bytes produced different keys %q and %q", pathA, pathARepeat)
 	}
-	// The revision uses the shared artworkkey shape inside .../poster/, so the
-	// whole prefix is still cleanable by removeCollectionImageVariants and the
-	// signed artwork route treats the key as immutable.
+	// The revision uses the shared artworkkey shape inside .../poster/, so
+	// deleting an admin collection still clears it by prefix and the signed
+	// artwork route treats the key as immutable.
 	if !strings.HasPrefix(pathA, "collection-images/collection-1/poster/original.") ||
 		artworkkey.Revision(pathA) == "" {
 		t.Fatalf("unexpected key shape %q", pathA)
@@ -260,6 +260,46 @@ func TestRemoveReplacedCollectionImageVersion_RemovesLegacyFixedKeys(t *testing.
 		"collection-images/c1/poster/w500.webp",
 		"collection-images/c1/poster/w300.webp",
 	)
+}
+
+// partialDeleteStore deletes the first okKeys keys of a batch and then fails,
+// as the filesystem store does when one key cannot be removed.
+type partialDeleteStore struct {
+	stubListDeleteStore
+	okKeys int
+}
+
+func (s *partialDeleteStore) Delete(_ context.Context, keys []string) (int, error) {
+	n := min(s.okKeys, len(keys))
+	s.deleted = append(s.deleted, keys[:n]...)
+	if n < len(keys) {
+		return n, errors.New("permission denied")
+	}
+	return n, nil
+}
+
+// Clearing an image removes only the revision the clear displaced. A
+// revision that a concurrent upload stored, committed or not, survives the
+// cleanup, so the upload never ends up referencing deleted artwork.
+func TestCleanUpReplacedCollectionImage_ClearKeepsConcurrentUpload(t *testing.T) {
+	store := &stubListDeleteStore{keys: []string{
+		"collection-images/c1/poster/original.0000000000000001.webp",
+		"collection-images/c1/poster/w300.0000000000000001.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+		"collection-images/c1/poster/w300.0000000000000002.webp",
+		"collection-images/c1/backdrop/original.0000000000000001.webp",
+	}}
+	for _, current := range []string{"", "collection-images/c1/poster/original.0000000000000002.webp"} {
+		store.deleted = nil
+		cleanUpReplacedCollectionImage(t.Context(), store, adminCollectionImagePrefix, "c1", "poster",
+			"collection-images/c1/poster/original.0000000000000001.webp",
+			func(context.Context) (string, error) { return current, nil },
+		)
+		assertCollectionImageDeletes(t, store.deleted,
+			"collection-images/c1/poster/original.0000000000000001.webp",
+			"collection-images/c1/poster/w300.0000000000000001.webp",
+		)
+	}
 }
 
 func assertCollectionImageDeletes(t *testing.T, got []string, want ...string) {

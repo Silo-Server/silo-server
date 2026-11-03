@@ -4,8 +4,10 @@ import (
 	"mime/multipart"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSanitizeWebhookBodyExcerptJSONRedactsSensitiveFields(t *testing.T) {
@@ -21,6 +23,31 @@ func TestSanitizeWebhookBodyExcerptJSONRedactsSensitiveFields(t *testing.T) {
 	}
 	if !strings.Contains(got, `"safe": "ok"`) {
 		t.Fatalf("expected safe field to remain visible: %q", got)
+	}
+}
+
+// A captured body of deeply nested arrays still yields a redacted, truncated
+// excerpt without expanding in memory. Not parallel, because it measures
+// allocations.
+func TestSanitizeWebhookBodyExcerptDeeplyNestedJSON(t *testing.T) {
+	const depth = 8000
+	body := []byte(`[{"token":"abc"},` + strings.Repeat("[", depth) + strings.Repeat("]", depth) + `]`)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	got := SanitizeWebhookBodyExcerpt("application/json", body)
+	runtime.ReadMemStats(&after)
+
+	if strings.Contains(got, "abc") {
+		t.Fatalf("expected token to be redacted: %q", got)
+	}
+	if runes, want := utf8.RuneCountInString(got), webhookBodyExcerptLimit+len("..."); runes != want {
+		t.Fatalf("excerpt has %d runes, want %d", runes, want)
+	}
+	// Pretty-printing this body used to allocate over 1 GiB.
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 32<<20 {
+		t.Fatalf("excerpt allocated %d MiB for a %d KiB body", allocated>>20, len(body)>>10)
 	}
 }
 

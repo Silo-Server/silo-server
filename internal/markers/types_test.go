@@ -123,15 +123,27 @@ func TestPopulationRegistryReturnsLastProviderErrorAsMiss(t *testing.T) {
 	}
 }
 
-// With fetch priorities configured, the lowest priority that answers wins,
-// a failing preferred provider falls back with its error reported, and equal
-// priorities break the tie by marker quality.
+// Confidence picks the winner across providers; equal confidence falls back to
+// the lower fetch_priority, then submission count, and a failing provider
+// falls back to the next with its error reported.
 func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 	intro := func(id string, end time.Duration, confidence float64, submissions int) *fakeProvider {
 		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
 			{Kind: MarkerKindIntro, Start: 0, End: end, Confidence: confidence, SubmissionCount: submissions},
 		}}}
 	}
+	credits := func(id string, start, end time.Duration) *fakeProvider {
+		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
+			{Kind: MarkerKindCredits, Start: start, End: end, Confidence: 0.9},
+		}}}
+	}
+	absent := func(id string, confidence float64) *fakeProvider {
+		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
+			{Kind: MarkerKindIntro, Absent: true, Confidence: confidence},
+		}}}
+	}
+	both := absent("both", 0.9)
+	both.result.Markers = append(both.result.Markers, Marker{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.5})
 	for _, tc := range []struct {
 		name       string
 		providers  []*fakeProvider
@@ -141,9 +153,39 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 		wantEnd    time.Duration // zero: not checked
 	}{
 		{
-			name:       "lower fetch_priority wins",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 500), intro("b", 25*time.Second, 0.6, 1)},
+			name:       "an absent answer competes like a marker",
+			providers:  []*fakeProvider{absent("a", 0.9), intro("b", 25*time.Second, 0.6, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a",
+		},
+		{
+			name:       "a marker beats a weaker absent answer",
+			providers:  []*fakeProvider{intro("a", 25*time.Second, 0.9, 1), absent("b", 0.6)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a provider's range outweighs its own absent answer",
+			providers:  []*fakeProvider{both},
+			priorities: map[string]int{"both": 10},
+			winner:     "both", wantEnd: 30 * time.Second,
+		},
+		{
+			name:       "higher confidence beats a better priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.6, 500)},
 			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "a", wantEnd: 30 * time.Second,
+		},
+		{
+			name:       "equal confidence falls back to lower fetch_priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.8, 500), intro("b", 25*time.Second, 0.8, 1)},
+			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "b", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a marker without confidence loses to a rated one",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0, 500), intro("b", 25*time.Second, 0.1, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
 			winner:     "b", wantEnd: 25 * time.Second,
 		},
 		{
@@ -153,8 +195,15 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 			wantErr:    true, winner: "lower",
 		},
 		{
-			name:       "same priority tie-breaks by submission count",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.7, 1), intro("b", 25*time.Second, 0.9, 2)},
+			// The helper's file runs 2000 seconds; its credits window opens at 1500.
+			name:       "misplaced credits do not outrank another provider's credits",
+			providers:  []*fakeProvider{credits("early", 94*time.Second, 112*time.Second), credits("late", 1900*time.Second, 2000*time.Second)},
+			priorities: map[string]int{"early": 10, "late": 20},
+			winner:     "late", wantEnd: 2000 * time.Second,
+		},
+		{
+			name:       "same confidence and priority tie-breaks by submission count",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.9, 2)},
 			priorities: map[string]int{"a": 10, "b": 10},
 			winner:     "b",
 		},
@@ -179,6 +228,55 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 				t.Fatalf("winner = %+v, want provider %s", got, tc.winner)
 			}
 		})
+	}
+}
+
+// A marker below its provider's minimum confidence leaves its kind to the next
+// provider. A provider left with nothing for a kind withdraws its stored marker
+// of that kind, even when its answer comes from the cache, and a local marker
+// stays.
+func TestPopulationRegistrySkipsMarkersBelowMinimumConfidence(t *testing.T) {
+	registry := NewRegistry(nil)
+	preferred := &fakeProvider{id: "preferred", result: Result{Markers: []Marker{
+		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.2},
+		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1900 * time.Second, Confidence: 0.9},
+	}}}
+	fallback := &fakeProvider{id: "fallback", result: Result{Markers: []Marker{
+		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.6},
+	}}}
+	_ = registry.Register(preferred)
+	_ = registry.Register(fallback)
+	registry.config = &ProviderConfigStore{cache: map[string]ProviderConfig{
+		"preferred": {Provider: "preferred", FetchEnabled: true, FetchPriority: 10, FetchMinConfidence: 0.5},
+		"fallback":  {Provider: "fallback", FetchEnabled: true, FetchPriority: 20, FetchMinConfidence: 0.5},
+	}}
+
+	merged, _, err := populateRegistryForTest(context.Background(), registry)
+	if err != nil {
+		t.Fatalf("population returned error: %v", err)
+	}
+	winners := map[MarkerKind]string{}
+	for _, m := range merged.Markers {
+		winners[m.Kind] = m.ProviderID
+	}
+	if len(merged.Markers) != 2 || winners[MarkerKindIntro] != "fallback" || winners[MarkerKindCredits] != "preferred" {
+		t.Fatalf("merged = %+v, want the fallback intro and the preferred credits", merged.Markers)
+	}
+
+	cached := mergeProviderResults([]providerResult{{
+		entry:  fetchEntry{provider: preferred, minConfidence: 0.95},
+		result: preferred.result,
+	}})
+	file := &models.MediaFile{ID: 1, Duration: 2000,
+		IntroStart: new(0.0), IntroEnd: new(30.0), IntroMarkersSource: new(models.MarkerSourceOnline), IntroMarkersProvider: new("preferred"),
+		CreditsStart: new(1810.0), CreditsEnd: new(1900.0), CreditsMarkersSource: new(models.MarkerSourceScanner),
+		CreditsMarkersAlgorithm: new("credits-chapter:v1"), CreditsMarkersConfidence: new(0.95)}
+	next := ApplyResult(file, cached)
+	if next.IntroStart != nil {
+		t.Fatalf("intro = %v, want the provider's stored intro withdrawn", *next.IntroStart)
+	}
+	if next.CreditsStart == nil || *next.CreditsStart != 1810 {
+		t.Fatalf("credits = %v, want the local credits kept", next.CreditsStart)
 	}
 }
 
@@ -231,6 +329,20 @@ func TestDetectionToggleEnabled(t *testing.T) {
 	} {
 		if got := DetectionToggleEnabled(raw); got != want {
 			t.Errorf("DetectionToggleEnabled(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestShareByDefaultEnabled(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"":        false,
+		"true":    true,
+		" TRUE ":  true,
+		"false":   false,
+		" False ": false,
+	} {
+		if got := ShareByDefaultEnabled(raw); got != want {
+			t.Errorf("ShareByDefaultEnabled(%q) = %v, want %v", raw, got, want)
 		}
 	}
 }

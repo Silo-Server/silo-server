@@ -107,9 +107,10 @@ func TestGetServerConnections(t *testing.T) {
 	}
 
 	// No public or local URL: the endpoint and the local url are absent,
-	// never manufactured. An unparsable one is treated the same. The pin
-	// stays: LAN discovery still supplies local addresses.
-	for _, raw := range []string{"", "not a url", "ftp://silo.example.test"} {
+	// never manufactured. An unparsable one is treated the same, and so is
+	// a scoped IPv6 origin, which no other device can use. The pin stays:
+	// LAN discovery still supplies local addresses.
+	for _, raw := range []string{"", "not a url", "ftp://silo.example.test", "http://[fe80::1%25eth0]:8080"} {
 		publicURL, localURL = raw, raw
 		doc = decodeConnections(t, do(t, h, http.MethodGet, path, "", bearer(memberToken)))
 		if len(doc.Endpoints) != 2 || doc.Endpoints[0].Kind != EndpointKindProvider {

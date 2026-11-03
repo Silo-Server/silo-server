@@ -56,7 +56,7 @@ describe("durable admin import runs", () => {
     vi.mocked(v2).mockRejectedValue(new Error("connection closed"));
     const { result } = renderHook(() => useCreateAdminRunForMapping(), { wrapper: wrapper() });
     await act(async () => {
-      await expect(result.current.mutateAsync(2)).rejects.toThrow("connection closed");
+      await expect(result.current.mutateAsync({ id: 2 })).rejects.toThrow("connection closed");
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);

@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 const (
@@ -457,6 +458,9 @@ type ItemRefreshExecutor struct {
 	artworkCacher ItemRefreshArtworkCacher
 	eventBus      cache.EventBus
 	realtimeHub   *notifications.Hub
+	// evictRails drops this node's cached home rails that list the given
+	// content IDs; tests replace it.
+	evictRails func(contentIDs ...string)
 }
 
 func NewItemRefreshExecutor(
@@ -489,6 +493,7 @@ func NewItemRefreshExecutor(
 		scanRuns:        scanRuns,
 		refresher:       refresher,
 		eventBus:        eventBus,
+		evictRails:      sections.EvictResolvedListItems,
 		realtimeHub:     realtimeHub,
 	}
 }
@@ -606,6 +611,21 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	// pre-refresh titles/posters and serve them for the whole cache TTL.
 	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
+	// scan_complete only rotates Recently Added. Every other cached home rail
+	// that lists the item would keep its pre-refresh values, for example the
+	// manual edits a Reset to Provider just replaced. Evict this node's rails
+	// directly as well: without Redis the bus is a no-op, and a failed publish
+	// must not leave the node that ran the refresh serving stale rails.
+	changed := []string{refreshContentID}
+	if req.RequestedContentID != "" && req.RequestedContentID != refreshContentID {
+		changed = append(changed, req.RequestedContentID)
+	}
+	if e.evictRails != nil {
+		e.evictRails(changed...)
+	}
+	for _, contentID := range changed {
+		e.publish(cache.EventCatalogItemChanged, contentID)
+	}
 	if e.realtimeHub != nil {
 		if scanResult != nil && (scanResult.New > 0 || scanResult.Updated > 0 || scanResult.Missing > 0 || matched > 0) {
 			_ = e.realtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{

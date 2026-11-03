@@ -31,10 +31,16 @@ func registerAdminRateLimitWrite(reg *Registry) {
 			return nil, p
 		}
 		var maps struct {
-			Tiers map[string]json.RawMessage `json:"tiers"`
-			Auth  map[string]json.RawMessage `json:"auth_endpoints"`
+			Tiers   map[string]json.RawMessage `json:"tiers"`
+			Auth    map[string]json.RawMessage `json:"auth_endpoints"`
+			Session json.RawMessage            `json:"session_quota"`
 		}
 		_ = json.Unmarshal(in.RawBody, &maps)
+		if len(maps.Session) > 0 {
+			if p := rejectNonNullableNulls(maps.Session, nil); p != nil {
+				return nil, p
+			}
+		}
 		for _, group := range []map[string]json.RawMessage{maps.Tiers, maps.Auth} {
 			for _, raw := range group {
 				if string(raw) == "null" {

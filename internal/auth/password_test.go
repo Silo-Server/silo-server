@@ -71,7 +71,7 @@ func TestValidatePasswordChange(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := validatePasswordChange(tt.user, tt.currentPassword, tt.newPassword)
+			err := validatePasswordChange(t.Context(), tt.user, tt.currentPassword, tt.newPassword)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("validatePasswordChange() error = %v, want %v", err, tt.wantErr)
 			}

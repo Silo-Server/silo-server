@@ -15,7 +15,7 @@ type AdminPluginRepositoriesService interface {
 }
 type AdminPluginRepository struct {
 	ID            string   `json:"id"`
-	URL           string   `json:"url"`
+	URL           string   `json:"url" doc:"Repository index URL as entered; not validated as a URI"`
 	DisplayName   string   `json:"display_name"`
 	Enabled       bool     `json:"enabled"`
 	SourceKind    string   `json:"source_kind"`

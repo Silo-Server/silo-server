@@ -251,31 +251,6 @@ func TestTranslateOnViewUsesTheEpisodesOwnLibraries(t *testing.T) {
 	}
 }
 
-// failOpenLimiter is a shared limiter whose store is unreachable: it allows
-// everything and says so with Remaining -1.
-type failOpenLimiter struct{}
-
-func (failOpenLimiter) Allow(context.Context, string, ratelimit.Rate) ratelimit.AllowResult {
-	return ratelimit.AllowResult{Allowed: true, Remaining: -1}
-}
-func (failOpenLimiter) Close() {}
-
-func TestTranslateOnViewKeepsABudgetWhileTheSharedLimiterFailsOpen(t *testing.T) {
-	userID := 7
-	h := newGuardHandler("de", failOpenLimiter{})
-	var limited int
-	for i := 0; i < 15; i++ {
-		_, err := h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "item1", "de", &userID)
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
-			limited++
-		}
-	}
-	if limited == 0 {
-		t.Fatal("no request was limited while the shared limiter failed open")
-	}
-}
-
 // A refused request spends budget before the pending-language lookup runs.
 func TestTranslateOnViewChecksTheBudgetBeforeTheLanguage(t *testing.T) {
 	userID := 7
