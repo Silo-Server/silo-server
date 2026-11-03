@@ -50,6 +50,8 @@ the `left-edge` or `right-edge`. A corner draws at most three badges and a rail 
 dropped rather than overlapping. The two bottom corners share the bottom edge row by row, counted
 from the bottom: a badge shares its width only with the badge at the same height in the other
 corner, so a long badge in one corner never shortens a badge in the other that has room beside it.
+A pair too wide for the card wraps, the right badge onto a line of its own, so only a badge wider
+than the card on its own is cut short.
 
 The top-right corner belongs to the watch-status indicator, and no badge is drawn there. The
 schema still accepts `top-right` because documents stored before settings revision 25 use it: a

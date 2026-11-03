@@ -394,7 +394,8 @@ function BadgeStack({
 // badge shares its width only with the badge beside it. Side-by-side columns
 // would each be as wide as their widest badge, and a long badge in one corner
 // would cut the other corner's badges short even where the pair at each
-// height fits.
+// height fits. A pair too wide for the card wraps, the right badge onto a line
+// of its own, so only a badge wider than the card on its own is cut short.
 function BottomRows({
   left,
   right,
@@ -411,16 +412,18 @@ function BottomRows({
   const levels = Math.max(left.length, right.length);
   // Index 0 is the top row, so the shorter corner lines up with the bottom.
   const at = (badges: ResolvedBadge[], level: number) => badges[badges.length - levels + level];
+  const stackGap = overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap);
   return (
-    <div
-      className={`flex flex-col ${preset.gapClass}`}
-      style={{ gap: overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap) }}
-    >
+    <div className={`flex flex-col ${preset.gapClass}`} style={{ gap: stackGap }}>
       {Array.from({ length: levels }, (_, level) => {
         const start = at(left, level);
         const end = at(right, level);
         return (
-          <div key={level} className="flex min-w-0 items-end" style={{ gap }}>
+          <div
+            key={level}
+            className="flex min-w-0 flex-wrap items-end"
+            style={{ columnGap: gap, rowGap: stackGap }}
+          >
             {start ? <Badge badge={start} preset={preset} scalingMode={scalingMode} /> : null}
             {end ? (
               <span className="ml-auto flex min-w-0 justify-end">
