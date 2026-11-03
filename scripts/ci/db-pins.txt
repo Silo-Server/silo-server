@@ -111,8 +111,8 @@
 ./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query, and the PostgreSQL path picks what the general path
-# picks.
+# watch-progress query, a page of cards reads the profile's resumable progress
+# once, and the PostgreSQL path picks what the general path picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
 ./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
