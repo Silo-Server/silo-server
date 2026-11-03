@@ -172,6 +172,15 @@ func TestMarkPlayedClearsRewatchPosition(t *testing.T) {
 			if rec.Code != 200 {
 				t.Fatalf("set rewatch state: %d %s", rec.Code, rec.Body.String())
 			}
+			plays := func() int {
+				t.Helper()
+				history, err := store.ListHistory(t.Context(), session.ProfileID, 10, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return len(history)
+			}
+			before := plays()
 
 			rec = httptest.NewRecorder()
 			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+query, "", "itemId", id, session))
@@ -183,6 +192,16 @@ func TestMarkPlayedClearsRewatchPosition(t *testing.T) {
 			progress, err := store.GetProgress(t.Context(), session.ProfileID, "episode-1")
 			if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
 				t.Fatalf("stored progress = %+v, %v; want watched with no position", progress, err)
+			}
+			if got := plays(); got != before+1 {
+				t.Fatalf("plays after rewatch mark = %d, want %d", got, before+1)
+			}
+
+			// A repeat with no new position in between records nothing.
+			rec = httptest.NewRecorder()
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+query, "", "itemId", id, session))
+			if got := plays(); rec.Code != 200 || got != before+1 {
+				t.Fatalf("repeated mark: status %d, plays %d, want %d", rec.Code, got, before+1)
 			}
 		})
 	}
