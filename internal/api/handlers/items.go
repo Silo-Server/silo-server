@@ -259,12 +259,8 @@ func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Contex
 			h.maybeRequestStaleSeasonMetadataRefresh(ctx, detail.ContentID, episodes)
 		}
 	case "series":
-		if h.itemRepo == nil {
-			return
-		}
-		item, err := h.itemRepo.GetByID(ctx, detail.ContentID)
-		if err == nil && item != nil && item.EpisodeMetadataIncomplete {
-			h.requestStaleMetadataRefresh(ctx, "item", item.ContentID)
+		if detail.EpisodeMetadataIncomplete {
+			h.requestStaleMetadataRefresh(ctx, "item", detail.ContentID)
 		}
 	}
 }

@@ -70,8 +70,10 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
-# Seek previews: one availability lookup per item or episode page.
+# Seek previews: one availability lookup per item or episode page, and none
+# for a detail that leaves previews out.
 ./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestItemDetailSkipsPlaybackPreviewsOnlyWhenAsked
 ./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
