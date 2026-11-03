@@ -47,6 +47,7 @@ var (
 	defaultDRIDir              = "/dev/dri"
 	defaultNVIDIAControlDevice = "/dev/nvidiactl"
 	defaultNVIDIADeviceGlob    = "/dev/nvidia[0-9]*"
+	defaultDXGDevice           = "/dev/dxg"
 	sysClassDRMDir             = "/sys/class/drm"
 	procBootIDPath             = "/proc/sys/kernel/random/boot_id"
 	currentGOOS                = runtime.GOOS
@@ -1591,8 +1592,8 @@ func isNVIDIADevice(renderDevPath string) bool {
 }
 
 func hasNVIDIADevice() bool {
-	if file, err := os.Open(defaultNVIDIAControlDevice); err == nil {
-		file.Close()
+	// WSL exposes GPUs through dxg; the FFmpeg probe still verifies NVENC.
+	if deviceOpenable(defaultNVIDIAControlDevice) || deviceOpenable(defaultDXGDevice) {
 		return true
 	}
 	matches, err := filepath.Glob(defaultNVIDIADeviceGlob)
@@ -1600,8 +1601,7 @@ func hasNVIDIADevice() bool {
 		return false
 	}
 	for _, dev := range matches {
-		if file, err := os.Open(dev); err == nil {
-			file.Close()
+		if deviceOpenable(dev) {
 			return true
 		}
 	}
