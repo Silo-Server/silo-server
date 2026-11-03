@@ -740,6 +740,13 @@ func (p *interestTrackingProvider) SupportsAtomicSectionProfileReset(pool *pgxpo
 	return ok && provider.SupportsAtomicSectionProfileReset(pool)
 }
 
+// The decorator hooks writes only, so reading the shared tables directly
+// misses nothing it does.
+func (p *interestTrackingProvider) StoresAccountsIn(pool *pgxpool.Pool) bool {
+	provider, ok := p.inner.(interface{ StoresAccountsIn(*pgxpool.Pool) bool })
+	return ok && provider.StoresAccountsIn(pool)
+}
+
 func (s *interestTrackingStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {
 	pager, ok := s.UserStore.(userstore.AdminSettingValuePager)
 	if !ok {

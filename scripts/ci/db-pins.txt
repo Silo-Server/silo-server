@@ -140,6 +140,10 @@
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
 
+# Viewer access: the account, its access group, the profile and its viewer
+# preferences cost one batch, and answer what reading each on its own does.
+./internal/policy TestViewerResolverBatchedReadsMatchEachDB
+
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100
 # and 1000, with one DELETE per sync.
