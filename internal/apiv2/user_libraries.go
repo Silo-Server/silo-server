@@ -23,8 +23,9 @@ type UserLibrary struct {
 	Type      string `json:"type"`
 	SortOrder int    `json:"sort_order"`
 	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
-	// BoxSetsEnabled tells a client the library's movies can have a box set.
-	BoxSetsEnabled bool `json:"box_sets_enabled" doc:"The library gathers movies of one TMDB collection into a box set, which movie pages and search show; browsing lists each movie" example:"false"`
+	// BoxSetsEnabled tells a client the library's movies can have a box set
+	// (for search, only with box_sets_in_search).
+	BoxSetsEnabled bool `json:"box_sets_enabled" doc:"The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie" example:"false"`
 }
 
 type UserLibraryListOutput struct{ Body Collection[UserLibrary] }

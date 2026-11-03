@@ -26305,7 +26305,7 @@ export interface components {
        */
       box_set_min_movies: number;
       /**
-       * @description Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and in search; library browse still lists each movie. Movie and mixed libraries only
+       * @description Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and, when box_sets_in_search is true, in search; library browse still lists each movie. Movie and mixed libraries only
        * @example false
        */
       box_sets_enabled: boolean;
@@ -33543,7 +33543,7 @@ export interface components {
     };
     UserLibrary: {
       /**
-       * @description The library gathers movies of one TMDB collection into a box set, which movie pages and search show; browsing lists each movie
+       * @description The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie
        * @example false
        */
       box_sets_enabled: boolean;
