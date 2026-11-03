@@ -33,7 +33,13 @@ func TestSocketOriginTrustedProxy(t *testing.T) {
 		{"override ambiguous", "https://example.test", "example.test", "https://public.test", "127.0.0.1:80", []string{"https", "http"}, false},
 		{"override ambiguous keeps public", "https://public.test", "internal.test", "https://public.test", "127.0.0.1:80", []string{"https", "http"}, true},
 		{"ambiguous", "https://example.test", "example.test", "", "127.0.0.1:80", []string{"https", "http"}, false},
-		{"null", "null", "example.test", "", "127.0.0.1:80", nil, false},
+		{"opaque packaged app", "null", "example.test", "", "127.0.0.1:80", nil, true},
+		{"file packaged app", "file://", "example.test", "https://public.test", "127.0.0.1:80", nil, true},
+		{"app scheme", "app://com.example.tv", "example.test", "https://public.test", "127.0.0.1:80", nil, true},
+		{"no scheme", "example.test", "example.test", "", "127.0.0.1:80", nil, false},
+		{"bare host and port", "example.test:443", "example.test", "", "127.0.0.1:80", nil, false},
+		{"empty scheme authority", "//example.test", "example.test", "", "127.0.0.1:80", nil, false},
+		{"foreign page on localhost", "http://localhost:8085", "example.test", "", "127.0.0.1:80", nil, false},
 		{"path", "http://example.test/path", "example.test", "", "127.0.0.1:80", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
