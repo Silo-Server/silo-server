@@ -409,7 +409,8 @@ function CatalogResults({
   }
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
+    // A collection uses the whole width, like the library view and the Collections wall.
+    <div className={cn(!isCollectionSource && "page-shell", "space-y-6 py-4 sm:py-6")}>
       {searchParams.get("notice") === "read-only" ? (
         <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
       ) : null}

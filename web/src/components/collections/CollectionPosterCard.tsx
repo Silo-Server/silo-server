@@ -27,7 +27,7 @@ export function CollectionPosterCard({
   kind: "regular" | "user_collections";
   /** The library a server collection opens in; unused for user collections. */
   libraryId?: number;
-  /** Set on another profile's shared collection: shown as "by Name". */
+  /** Set on another profile's shared collection: shown as "by Name" under the title. */
   ownerName?: string;
   /** The line under the name. When set, the caption always shows and the poster drops its count. */
   meta?: ReactNode;
@@ -48,7 +48,7 @@ export function CollectionPosterCard({
   const showCaption = meta !== undefined || cardPresentation.caption !== "artwork";
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
-  if (meta === undefined && ownerName) {
+  if (ownerName) {
     subline = <div className="text-muted-foreground truncate text-xs">by {ownerName}</div>;
   } else if (
     meta === undefined &&
