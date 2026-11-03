@@ -17,6 +17,7 @@ import {
 } from "@/hooks/queries/items";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
@@ -602,7 +603,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
                 className="text-muted-foreground hover:text-foreground h-6 w-6 shrink-0"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(folderData.rootPath);
+                    await copyTextToClipboard(folderData.rootPath);
                     toast.success("Copied root path");
                   } catch {
                     toast.error("Failed to copy path");
@@ -633,7 +634,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
                 className="text-muted-foreground hover:text-foreground h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(fullPath);
+                    await copyTextToClipboard(fullPath);
                     toast.success("Copied folder path");
                   } catch {
                     toast.error("Failed to copy path");

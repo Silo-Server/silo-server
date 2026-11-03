@@ -44,7 +44,9 @@ import {
 } from "./adminCatalogMaintenancePathRewrites";
 import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
+import { toast } from "sonner";
 
 export default function AdminCatalogMaintenance() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -653,7 +655,11 @@ export default function AdminCatalogMaintenance() {
                         variant="outline"
                         size="sm"
                         onClick={async () => {
-                          await navigator.clipboard.writeText(job.public_url ?? "");
+                          try {
+                            await copyTextToClipboard(job.public_url ?? "");
+                          } catch {
+                            toast.error("Failed to copy to clipboard");
+                          }
                         }}
                       >
                         Copy URL
