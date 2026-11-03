@@ -34,7 +34,8 @@ import {
   type RecFieldDef,
 } from "@/pages/admin-settings/recommendationsSettings";
 import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
-import { EmbeddingProviderField, ModelField } from "@/pages/admin-settings/AIProviders";
+import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
+import { ModelField } from "@/pages/admin-settings/AIModelField";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 
@@ -722,9 +723,9 @@ export default function AdminRecommendations() {
                         value={embeddingModel}
                         placeholder="text-embedding-3-large, qwen3-embedding:0.6b"
                         onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
-                        onCommit={() => {
-                          if (embeddingModel !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
-                            void handleCommit(EMBEDDING_MODEL_KEY, embeddingModel);
+                        onCommit={(next) => {
+                          if (next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
+                            void handleCommit(EMBEDDING_MODEL_KEY, next);
                           }
                         }}
                       />

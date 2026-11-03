@@ -29,17 +29,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
-// ignoredDirNames is the set of directory names skipped during scanning.
+// ignoredDirNames holds the NAS and OS housekeeping directory names skipped
+// during scanning, lower case. Hidden directories are skipped by their dot
+// prefix (SkippedDirName), so none are listed here.
 var ignoredDirNames = map[string]bool{
-	".recyclebin":  true,
 	"@recycle":     true,
 	"@eadir":       true,
-	".trash":       true,
 	"#recycle":     true,
 	"$recycle.bin": true,
-	".deleted":     true,
-	".inbound":     true,
-	".downloads":   true,
 }
 
 // ignoredMovieSupplementalDirNames holds movie-library directory names whose
@@ -362,7 +359,8 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
-// files that live beneath that subtree.
+// files that live beneath that subtree. A podcast library scans the whole show
+// folder that holds the subtree (see scanPodcastSubtree).
 func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	cleanSubtree := filepath.Clean(subtreePath)
 	// A subtree scan under a skipped library root would walk nothing and
@@ -390,6 +388,9 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 			return nil, err
 		}
 		return &ScanResult{}, nil
+	}
+	if librarykind.IsPodcast(folder.Type) {
+		return s.scanPodcastSubtree(watchCtx, folder, cleanSubtree)
 	}
 	if librarykind.IsManga(folder.Type) {
 		if err := s.scanMangaPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
@@ -495,8 +496,12 @@ func canonicalWalkPath(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func isIgnoredDirectoryPath(path string) bool {
-	return ignoredDirNames[strings.ToLower(filepath.Base(path))]
+// SkippedDirName reports whether scans skip a directory with this name below
+// a library root, together with everything under it: a hidden (dot-prefixed)
+// directory, as in Jellyfin, or a NAS or OS housekeeping folder. A configured
+// library root is walked whatever its name.
+func SkippedDirName(name string) bool {
+	return strings.HasPrefix(name, ".") || ignoredDirNames[strings.ToLower(name)]
 }
 
 // recordWalkFailure counts an entry the walk could not read or resolve.
@@ -613,9 +618,6 @@ func walkLogicalTree(
 	}
 	visitedPhysicalDirs[canonicalDir] = struct{}{}
 
-	if isIgnoredDirectoryPath(logicalPath) {
-		return nil
-	}
 	if mode == walkModeMovie && shouldSkipMovieSupplementalDir(logicalPath) {
 		return nil
 	}
@@ -665,7 +667,7 @@ func walkLogicalTree(
 			}
 			if targetInfo.IsDir() {
 				// Directory-only patterns apply once the link resolves to a directory.
-				if ignoreRulesMatch(childRules, logicalChild, true) {
+				if SkippedDirName(entry.Name()) || ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
 				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
@@ -681,6 +683,9 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
+			if SkippedDirName(entry.Name()) {
+				continue
+			}
 			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 				return err
 			}
@@ -768,16 +773,16 @@ func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string,
 // a directory. A missing parent (a missing library root, or storage that
 // dropped further up), a dangling symlink at or above the scope, and permission
 // or I/O errors stay walk failures. An unreachable or suspect-empty library
-// root keeps its own protection.
+// root keeps its own protection. scope and libraryRoots are encoded paths.
 func scopeRootVanished(scope string, libraryRoots []string) bool {
 	root := scopeLibraryRoot(scope, libraryRoots)
 	if root == "" || root == scope {
 		return false
 	}
-	if _, err := os.Lstat(scope); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := fspath.Lstat(scope); !errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
-	parent, err := os.Stat(filepath.Dir(scope))
+	parent, err := fspath.Stat(filepath.Dir(scope))
 	return err == nil && parent.IsDir()
 }
 
@@ -2601,9 +2606,22 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int,
 // membership reconciliation and trash removal, even if already marked missing.
 // Counts are returned for the caller's flavor-specific logging.
 func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.MediaFolder, confirmedCleanup bool, unreadablePaths ...string) (trashed, removedMemberships, deletedItems int, err error) {
-	configuredPaths, err := s.configuredFolderPaths(ctx, folder)
+	protectedRoots, err := s.sweepProtectedRoots(ctx, folder, confirmedCleanup, unreadablePaths)
 	if err != nil {
 		return 0, 0, 0, err
+	}
+	return s.sweepMissingWithProtectedRoots(ctx, folder, protectedRoots)
+}
+
+// sweepProtectedRoots returns the paths sweepMissingAndReconcile exempts from
+// destructive cleanup: unreadablePaths, every unreachable configured root, and,
+// unless confirmedCleanup, every suspect-empty one. A caller that also needs
+// them before marking files missing computes them once and passes them to
+// sweepMissingWithProtectedRoots.
+func (s *Scanner) sweepProtectedRoots(ctx context.Context, folder *models.MediaFolder, confirmedCleanup bool, unreadablePaths []string) ([]string, error) {
+	configuredPaths, err := s.configuredFolderPaths(ctx, folder)
+	if err != nil {
+		return nil, err
 	}
 	configuredRoots := cleanScanRoots(configuredPaths)
 	protectedRoots := probeUnreachableRoots(ctx, folder.ID, configuredRoots)
@@ -2611,10 +2629,16 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 	if !confirmedCleanup {
 		suspectRoots, serr := s.suspectEmptyRoots(ctx, folder.ID, configuredRoots, protectedRoots)
 		if serr != nil {
-			return 0, 0, 0, serr
+			return nil, serr
 		}
 		protectedRoots = append(protectedRoots, suspectRoots...)
 	}
+	return protectedRoots, nil
+}
+
+// sweepMissingWithProtectedRoots is sweepMissingAndReconcile with the
+// protected roots already computed by sweepProtectedRoots.
+func (s *Scanner) sweepMissingWithProtectedRoots(ctx context.Context, folder *models.MediaFolder, protectedRoots []string) (trashed, removedMemberships, deletedItems int, err error) {
 	var orphanedImageDirs []string
 	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, true, protectedRoots)
 	if err != nil {
@@ -4218,6 +4242,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Forced:           st.Forced,
 			Default:          st.Default,
 			HearingImpaired:  st.HearingImpaired,
+			IndexOnly:        st.IndexOnly,
 		}
 	}
 	mf.SubtitleTracks = subtitleTracks

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -45,6 +46,27 @@ func (r markItemRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, fil
 		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
 	}
 	return out, nil
+}
+
+// failingItemRepo is a markItemRepo whose access check or item lookup fails
+// with the given error instead of answering.
+type failingItemRepo struct {
+	markItemRepo
+	accessErr, getErr error
+}
+
+func (r failingItemRepo) EnsureAccessible(ctx context.Context, id string, filter catalog.AccessFilter) error {
+	if r.accessErr != nil {
+		return r.accessErr
+	}
+	return r.markItemRepo.EnsureAccessible(ctx, id, filter)
+}
+
+func (r failingItemRepo) GetByID(ctx context.Context, id string) (*models.MediaItem, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	return r.markItemRepo.GetByID(ctx, id)
 }
 
 // Marking takes movies and series only, and tells recommendations once per
@@ -100,5 +122,42 @@ func TestMarkNotInterested(t *testing.T) {
 	}
 	if notifier.calls != 3 {
 		t.Fatalf("notifications = %d after unmark, want 3", notifier.calls)
+	}
+}
+
+// A catalog query that fails is a server error, not a missing item: a client
+// told that an item it can see is gone drops it. The not-found answer stays a
+// 404 (TestMarkNotInterested), as does an ID Postgres cannot take as text,
+// which names no item and is never queried.
+func TestPersonalListLookupFailureIsServerError(t *testing.T) {
+	failure := fmt.Errorf("checking item access: %w", context.DeadlineExceeded)
+	items := markItemRepo{items: map[string]*models.MediaItem{"movie:heat": {ContentID: "movie:heat", Type: "movie"}}}
+	viewer := PersonalListViewer{UserID: 1, ProfileID: "p1"}
+	ctx := context.Background()
+	getFavorite := func(id string) func(*PersonalDataHandler) error {
+		return func(h *PersonalDataHandler) error {
+			_, _, err := h.GetFavorite(ctx, viewer, id)
+			return err
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		repo failingItemRepo
+		call func(*PersonalDataHandler) error
+		want int
+	}{
+		{"access check", failingItemRepo{markItemRepo: items, accessErr: failure}, getFavorite("movie:heat"), http.StatusInternalServerError},
+		{"item lookup", failingItemRepo{markItemRepo: items, getErr: failure}, func(h *PersonalDataHandler) error {
+			return h.MarkNotInterested(ctx, viewer, "movie:heat")
+		}, http.StatusInternalServerError},
+		{"malformed id", failingItemRepo{markItemRepo: items, accessErr: failure}, getFavorite("movie:\x00heat"), http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewPersonalDataHandler(testUserStoreProvider{store: newHouseholdTestStore(t)}, tc.repo)
+			var apiErr *APIError
+			if err := tc.call(h); !errors.As(err, &apiErr) || apiErr.Status != tc.want {
+				t.Fatalf("err = %v, want status %d", err, tc.want)
+			}
+		})
 	}
 }

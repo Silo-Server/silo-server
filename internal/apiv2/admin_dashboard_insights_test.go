@@ -45,7 +45,8 @@ func (s *dashboardInsightsStub) ReadAdminDownloadsStats(_ context.Context, limit
 }
 func TestAdminDashboardInsights(t *testing.T) {
 	at := time.Date(2026, 9, 1, 1, 2, 3, 123456789, time.FixedZone("test", 3600))
-	s := &dashboardInsightsStub{series: &handlers.AdminTimeseries{ResolutionSeconds: 60, From: at, To: at.Add(time.Hour), EgressBytes: 412_500_000_000, DownloadEgressBytes: 37_800_000_000, Points: []handlers.AdminTimeseriesPoint{{T: at, EgressKbps: 50, DownloadEgressKbps: 20}}}}
+	s := &dashboardInsightsStub{series: &handlers.AdminTimeseries{ResolutionSeconds: 60, From: at, To: at.Add(time.Hour), EgressBytes: 412_500_000_000, DownloadEgressBytes: 37_800_000_000, Points: []handlers.AdminTimeseriesPoint{{T: at, EgressKbps: 50, DownloadEgressKbps: 20, EgressBySource: map[string]int64{"api": 20, "node:7": 30}}},
+		EgressSources: []handlers.AdminTimeseriesEgressSource{{Key: "api", Kind: "api", Name: "API server", EgressBytes: 150}, {Key: "node:7", Kind: "node", NodeID: 7, Name: "proxy-ams", EgressBytes: 225}}}}
 	deps := requestDeps(fixtureRequests())
 	deps.AdminDashboardInsights = s
 	h := NewHandler(deps)
@@ -56,7 +57,7 @@ func TestAdminDashboardInsights(t *testing.T) {
 	for _, tc := range []struct {
 		path      string
 		fragments []string
-	}{{"timeseries?hours=1&refresh=true", []string{`"from":"2026-09-01T00:02:03.123Z"`, `"oldest_sample_at":null`, `"download_egress_kbps":20`, `"egress_bytes":412500000000`, `"download_egress_bytes":37800000000`}}, {"playback-activity?hours=1&refresh=true", []string{`"hours":1`, `"buckets":[]`, `"profiles_active_24h":0`}}, {"top-activity?days=1&limit=2&refresh=true", []string{`"titles":[]`, `"user_id":"7"`, `"profile_id":"household-profile"`}}, {"downloads?limit=2&refresh=true", []string{`"active_downloads":3`, `"user_id":"7"`}}} {
+	}{{"timeseries?hours=1&refresh=true", []string{`"from":"2026-09-01T00:02:03.123Z"`, `"oldest_sample_at":null`, `"download_egress_kbps":20`, `"egress_bytes":412500000000`, `"download_egress_bytes":37800000000`, `"egress_by_source":{"api":20,"node:7":30}`, `"egress_sources":[{"key":"api","kind":"api","name":"API server","egress_bytes":150},{"key":"node:7","kind":"node","node_id":"7","name":"proxy-ams","egress_bytes":225}]`}}, {"playback-activity?hours=1&refresh=true", []string{`"hours":1`, `"buckets":[]`, `"profiles_active_24h":0`}}, {"top-activity?days=1&limit=2&refresh=true", []string{`"titles":[]`, `"user_id":"7"`, `"profile_id":"household-profile"`}}, {"downloads?limit=2&refresh=true", []string{`"active_downloads":3`, `"user_id":"7"`}}} {
 		r := do(t, h, "GET", path+tc.path, "", actingRequestAdmin)
 		if r.Code != 200 || !s.refresh {
 			t.Fatal(tc.path, r.Code, r.Body.String(), s)

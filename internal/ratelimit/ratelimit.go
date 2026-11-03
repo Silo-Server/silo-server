@@ -64,6 +64,25 @@ type Config struct {
 	IPBurst        int
 	// Auth endpoint per-IP limits
 	AuthEndpoints map[string]AuthEndpointConfig
+	// Session is the hourly quota each sign-in session gets.
+	Session SessionQuotaConfig
+}
+
+// Session quota modes. Off counts nothing; log counts and logs sessions over
+// the quota but serves them; enforce refuses them with 429.
+const (
+	SessionQuotaOff     = "off"
+	SessionQuotaLog     = "log"
+	SessionQuotaEnforce = "enforce"
+)
+
+// SessionQuotaConfig is a token bucket per sign-in session: it holds Burst
+// requests and refills at RequestsPerHour. The per-second and per-minute
+// budgets stop bursts; this one stops a client that stays under them all day.
+type SessionQuotaConfig struct {
+	Mode            string
+	RequestsPerHour float64
+	Burst           int
 }
 
 // DefaultConfig returns the default rate limit configuration.
@@ -106,5 +125,10 @@ func DefaultConfig() Config {
 			// key is the guard; this is anti-probe hygiene.
 			"android_push_retire": {RequestsPerMinute: 20, Burst: 10},
 		},
+		// Sized from production traffic: the busiest first-party sessions
+		// stayed under 20,000 in an hour and rarely above 10,000, while a
+		// polling integration ran at 30,000 an hour around the clock. Log
+		// until an admin chooses to enforce.
+		Session: SessionQuotaConfig{Mode: SessionQuotaLog, RequestsPerHour: 10000, Burst: 30000},
 	}
 }

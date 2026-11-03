@@ -131,6 +131,8 @@ type SubtitleTrackInfo struct {
 	Forced           bool
 	Default          bool
 	HearingImpaired  bool
+	// IndexOnly is models.SubtitleTrack.IndexOnly.
+	IndexOnly bool
 }
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.

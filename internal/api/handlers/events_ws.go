@@ -24,6 +24,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type historyImportActiveLister interface {
@@ -393,7 +395,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	go func() {
 		defer close(readDone)
 		for {
-			_, data, readErr := conn.ReadMessage()
+			_, data, readErr := wsconn.ReadMessage(conn, maxEventsFrameBytes)
 			if readErr != nil {
 				return
 			}

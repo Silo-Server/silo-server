@@ -207,7 +207,7 @@ func uploadCollectionImageVariants(
 	// Revision the key by content so replacement artwork lands on a new key,
 	// and therefore a new public URL, rather than overwriting a fixed key that
 	// stays cached by the CDN and browsers (issue #1258). Revisions stay in the
-	// imageType directory, so removeCollectionImageVariants still clears every
+	// imageType directory, so deleting an admin collection still clears every
 	// one of them by that prefix.
 	basePath := collectionImageDir(prefix, collectionID, imageType)
 	return putCollectionImageVariants(ctx, store, basePath, collectionImageRevision(fileData), widths, fileData)
@@ -287,13 +287,13 @@ func collectionCollageDir(prefix, collectionID string) string {
 }
 
 // removeReplacedCollectionImageVersion deletes the variants of the revision
-// that a replacement superseded, identified from the previously stored path. It
-// runs after the new revision is committed, and currentPath is the path the row
-// holds on a fresh read at cleanup time.
+// that a replacement or clear superseded, identified from the previously
+// stored path. It runs after the change is committed, and currentPath is the
+// path the row holds on a fresh read at cleanup time.
 //
-// Only the superseded revision is removed, never "everything but the new
-// revision", so a concurrent replacement that committed its own revision is
-// never deleted. The revision is skipped when the row still points at it
+// Only the superseded revision is removed, never "everything but the current
+// revision", so a concurrent upload that committed its own revision is never
+// deleted. The revision is skipped when the row still points at it
 // (currentPath), which guards against a concurrent restore of the same content:
 // re-uploading the old bytes reuses the old keys, so deleting them would strip
 // the artwork the row now references. A legacy fixed key (no revision) selects
@@ -334,13 +334,14 @@ func removeReplacedCollectionImageVersion(
 	return nil
 }
 
-// cleanUpReplacedCollectionImage runs after a replacement image is committed.
-// It reads the path the row now holds and removes the revision oldPath named.
-// Callers upload the replacement under its own revision and commit it before
-// calling this, so a failed upload or update leaves the stored artwork intact.
-// Failures here only log: the committed artwork is intact and the worst case
-// is an orphaned revision. The replacement is already committed, so cleanup
-// outlives a canceled request, bounded by collectionImageCleanupTimeout.
+// cleanUpReplacedCollectionImage runs after a replacement image or a clear is
+// committed. It reads the path the row now holds and removes the revision
+// oldPath named. Callers commit the new reference (a new revision, or empty)
+// before calling this, so a failed upload, update, or delete never leaves the
+// row pointing at missing or partly deleted artwork (issue #2419). Failures
+// here only log: the worst case is an orphaned revision. The change is already
+// committed, so cleanup outlives a canceled request, bounded by
+// collectionImageCleanupTimeout.
 func cleanUpReplacedCollectionImage(
 	ctx context.Context,
 	store blobstore.Store,
@@ -379,31 +380,6 @@ func removeDeletedCollectionArtwork(ctx context.Context, store blobstore.Store, 
 func isCollectionImageKeyIn(dir, key string) bool {
 	name, ok := strings.CutPrefix(key, dir)
 	return ok && name != "" && !strings.Contains(name, "/")
-}
-
-// removeCollectionImageVariants deletes every stored variant for the given
-// collection / imageType under the supplied S3 prefix.
-func removeCollectionImageVariants(
-	ctx context.Context,
-	store blobstore.Store,
-	prefix, collectionID, imageType string,
-) error {
-	if store == nil {
-		return nil
-	}
-	p := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
-	items, _, err := store.List(ctx, p, "", 0)
-	if err != nil {
-		return fmt.Errorf("listing objects: %w", err)
-	}
-	keys := make([]string, 0, len(items))
-	for _, item := range items {
-		keys = append(keys, item.Key)
-	}
-	if _, err := store.Delete(ctx, keys); err != nil {
-		return fmt.Errorf("deleting collection variants: %w", err)
-	}
-	return nil
 }
 
 // collectionCollageComposer composes collection collages from title posters

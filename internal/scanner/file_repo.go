@@ -890,6 +890,23 @@ func (r *FileRepository) UpsertBatchTx(ctx context.Context, tx pgx.Tx, files []m
 	return nil
 }
 
+// LockByPathsTx locks the media_files rows at paths, in id order, within the
+// caller's transaction. A paths entry with no row locks nothing.
+func (r *FileRepository) LockByPathsTx(ctx context.Context, tx pgx.Tx, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM media_files
+		WHERE file_path = ANY($1)
+		ORDER BY id
+		FOR NO KEY UPDATE
+	`, paths); err != nil {
+		return fmt.Errorf("locking media files: %w", err)
+	}
+	return nil
+}
+
 // fileUpsertCapture lets UpsertBatchTx reuse the canonical upsert SQL and
 // argument normalization without duplicating its large column list.
 type fileUpsertCapture struct {
@@ -4122,6 +4139,16 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 // the same recognized root path within a media folder. If preferredType is
 // set, matches of that type sort first.
 func (r *FileRepository) FindContentIDByRootPath(ctx context.Context, folderID int, rootPath, preferredType string) (string, error) {
+	return findContentIDByRootPath(ctx, r.pool, folderID, rootPath, preferredType)
+}
+
+// FindContentIDByRootPathTx is FindContentIDByRootPath within the caller's
+// transaction.
+func (r *FileRepository) FindContentIDByRootPathTx(ctx context.Context, tx pgx.Tx, folderID int, rootPath, preferredType string) (string, error) {
+	return findContentIDByRootPath(ctx, tx, folderID, rootPath, preferredType)
+}
+
+func findContentIDByRootPath(ctx context.Context, queryer fileQueryer, folderID int, rootPath, preferredType string) (string, error) {
 	query := `SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
@@ -4144,7 +4171,7 @@ func (r *FileRepository) FindContentIDByRootPath(ctx context.Context, folderID i
 		LIMIT 1`
 
 	var contentID string
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&contentID)
+	err := queryer.QueryRow(ctx, query, args...).Scan(&contentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil

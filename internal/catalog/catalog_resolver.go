@@ -103,10 +103,12 @@ type facetFetcher interface {
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
 // the existing package-level helpers using the supplied pool. values caches
-// column facet value lists for typeahead; nil disables caching.
+// column facet value lists for typeahead and technical the resolution and
+// track language lists; a nil cache disables caching.
 type pgxFacetFetcher struct {
-	pool   *pgxpool.Pool
-	values *facetValueCache
+	pool      *pgxpool.Pool
+	values    *facetValueCache
+	technical *technicalFacetCache
 }
 
 func (f *pgxFacetFetcher) DistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -118,15 +120,15 @@ func (f *pgxFacetFetcher) DistinctScalarColumn(ctx context.Context, column strin
 }
 
 func (f *pgxFacetFetcher) Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listResolutionsWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listResolutionsWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listDistinctJSONBLanguageWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope)
+	return listDistinctJSONBLanguageWithSource(ctx, f.pool, f.technical, column, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listSubtitleLanguagesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listSubtitleLanguagesWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -1243,6 +1245,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	if r == nil || r.browseRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires a browse repository")
 	}
+	req = withCacheableHistorySnapshot(req)
 	var (
 		filters    BrowseFilters
 		earlyEmpty bool
@@ -1316,6 +1319,17 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
+// withCacheableHistorySnapshot pins a history request without a snapshot to
+// the next whole minute. The snapshot is part of the cached facet lists' keys
+// (facet values, technical facets), so a per-request "now" would never hit;
+// the next whole minute still covers every event watched so far.
+func withCacheableHistorySnapshot(req CatalogRequest) CatalogRequest {
+	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
+	}
+	return req
+}
+
 // CatalogFacetSearchResult is the typed return for SearchFacet.
 type CatalogFacetSearchResult struct {
 	// Matches are the values that start with q, case-insensitively, A-Z;
@@ -1363,12 +1377,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	if q == "" && !isColumn {
 		return result, nil
 	}
-	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
-		// The snapshot is part of the facet value cache key, so a
-		// per-request "now" would never hit. The next whole minute still
-		// covers every event watched so far.
-		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
-	}
+	req = withCacheableHistorySnapshot(req)
 	scope, err := r.facetSearchScope(ctx, req, access)
 	if err != nil {
 		return nil, err

@@ -894,8 +894,11 @@ existing `500`. API keys keep their profile-less admin access. A PIN-locked prim
 needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
 admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
 acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
-admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
-This is the same critical bridge fix.
+admin-role `marker_edit` grant follows the same acting-admin rule as the metadata-curation
+bypass (#1911). This is the same critical bridge fix. The account payload's `permissions` list
+differs by version: v2 `Account.permissions` lists only an admin's explicitly assigned
+permissions, while the frozen v1 account body keeps listing every assignable permission for an
+enabled admin. No gate reads either list.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
@@ -1282,7 +1285,7 @@ tombstone. The retained contract is:
   finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
-container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
+container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
 root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
@@ -1627,6 +1630,21 @@ work from the capped size; `total_count` keeps its meaning. Without the paramete
 its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
 only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
 `include_items_max` is.
+`getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
+one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
+`getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
+row's own `item_limit`. Neither read runs the cross-row duplicate filter. A row either read
+answers with `item_limit` carries `has_more: true` when it holds more cards than it answered, so
+that reading it again without `item_limit` answers more; the field is absent when false and on
+every other read that answers a `Section`. This includes an admin curated list, which an uncapped
+read can answer past its own `item_limit`. The server fetches and filters a capped row at the
+row's own `item_limit`, exactly as the uncapped read does, and builds only its first cards, so
+`has_more` is true exactly when the uncapped read answers more cards. Fetching at the cap would
+miss cards that a fetcher drops after applying its limit, such as an unsorted collection's
+members the access filter removes. A client sends `item_limit` to these two reads only when
+`getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
+parameter on them does not send. A row that draws a random subset on each read may answer
+different cards when read again.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
@@ -1671,12 +1689,12 @@ overwrite newer progress; every item needs a stable event time before automatic 
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
 resume position while keeping its watched state and history, answers `204` (also when there is
-nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
-kind `markWatched` does not handle, and is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for an
+audiobook or a kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
 `clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
-v2 `markWatched` on a watched movie or episode with a resume position records another play and
+v2 `markWatched` on a watched movie, episode or audiobook with a resume position records another play and
 clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
 no-op. Semantics are in
 [the progress API](../progress-api.md#clearing-a-resume-position).

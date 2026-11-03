@@ -4,6 +4,7 @@ import type {
   ItemDetail,
   SeasonDetailResponse,
   SeasonsResponse,
+  SectionItem,
 } from "@/api/types";
 import {
   adminKeys,
@@ -148,12 +149,18 @@ export function removeItemFromHomeSectionCaches(
       ) {
         return current;
       }
-      const nextItems = current.section.items.filter((item) => item.content_id !== itemId);
+      const kept = (item: SectionItem) => item.content_id !== itemId;
+      const nextItems = current.section.items.filter(kept);
       if (nextItems.length === current.section.items.length) {
         return current;
       }
       return {
         ...current,
+        // A completed row's shown cards lose the removed ones, so none of its
+        // later cards moves up into them (see dropCrossSectionDuplicates).
+        ...(current.shown !== undefined && {
+          shown: current.section.items.slice(0, current.shown).filter(kept).length,
+        }),
         section: {
           ...current.section,
           total_count: Math.max(

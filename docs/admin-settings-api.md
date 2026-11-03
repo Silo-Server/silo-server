@@ -11,7 +11,8 @@ no-store responses:
   whose changes need a server restart.
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names and
   `managed_by_env` names. Values are never returned. Both fields are arrays,
-  including when empty.
+  including when empty. `configured` leaves out machine-managed keys, such as
+  the JWT signing keys the server generates itself.
 
 `managed_by_env` lists the keys the server's environment sets on every start:
 `redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
@@ -136,12 +137,27 @@ uses the model's default. Explicit values come from the model's capability
 response. The server validates known model families against their supported
 levels; an unknown custom model is validated by the provider connection check.
 Text requests read the persisted authentication mode, text provider, model,
-effort, and active registration together at request start.
+effort, service tier, and active registration together at request start.
+
+`ai.service_tier` applies only to a text provider whose registry type is `openai`
+while `ai.auth_mode` is `api_key`. Its default, an empty string, omits OpenAI's
+`service_tier` parameter and inherits the OpenAI project's setting. `priority`
+requests Fast/Priority processing through Chat Completions; `ultrafast` uses
+API-key-authenticated Responses with storage disabled. Only completed text
+output is accepted; incomplete responses and refusals never replace source text.
+OpenAI decides whether the account and model support the requested tier. Silo
+does not silently fall back after a provider rejection. Switching to another
+provider or a ChatGPT plan keeps the setting but omits it from requests. Speech
+and embedding requests do not use this setting.
 
 The following operations require an acting administrator:
 
 - `GET /api/v2/admin/ai/capabilities?model=...` discovers supported reasoning
-  levels and whether the ChatGPT connection service is available.
+  levels and whether the ChatGPT connection service is available. The optional
+  `openai_service_tiers` list advertises `default`, `priority`, and `ultrafast`
+  as configuration choices for OpenAI API-key text providers; it does not
+  guarantee availability for an individual model or account. Clients must not
+  offer the tier control when this capability is absent.
 - `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
   connection status, and the latest login outcome without credentials.
   `attempt_id` identifies the attempt that produced that outcome.

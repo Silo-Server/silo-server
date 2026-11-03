@@ -424,6 +424,10 @@ export const adminKeys = {
   topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
   downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
   downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
+  apiClientsRoot: () => ["admin", "dashboard", "api-clients"] as const,
+  apiClients: (hours: number) => ["admin", "dashboard", "api-clients", hours] as const,
+  apiClientEndpoints: (sessionId: string, hours: number) =>
+    ["admin", "dashboard", "api-clients", "endpoints", sessionId, hours] as const,
   restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,

@@ -74,6 +74,20 @@ type LibraryHandler struct {
 	// Trickplay, when set, queues or removes seek previews right after a
 	// library's trickplay setting changes on this node.
 	Trickplay libraryTrickplayReconciler
+	// BoxSets, when set, looks up the TMDB collections of a library's
+	// movies right after box sets are turned on for it.
+	BoxSets libraryBoxSetSyncer
+}
+
+// libraryBoxSetSyncer starts the box set sync task.
+type libraryBoxSetSyncer interface {
+	SyncBoxSetsSoon()
+}
+
+func (h *LibraryHandler) syncBoxSets() {
+	if h.BoxSets != nil {
+		h.BoxSets.SyncBoxSetsSoon()
+	}
 }
 
 // libraryTrickplayReconciler is the slice of *trickplay.Service the library
@@ -223,6 +237,10 @@ type createLibraryRequest struct {
 	RealtimeMonitoring *bool `json:"-"`
 	// TrickplayEnabled is set only by the v2 createLibrary operation.
 	TrickplayEnabled bool `json:"-"`
+	// The box set settings are set only by the v2 createLibrary operation.
+	BoxSetsEnabled  bool  `json:"-"`
+	BoxSetMinMovies int   `json:"-"`
+	BoxSetsInSearch *bool `json:"-"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -243,6 +261,10 @@ type updateLibraryRequest struct {
 	RealtimeMonitoring *bool `json:"-"`
 	// TrickplayEnabled is set only by the v2 updateLibrary operation.
 	TrickplayEnabled *bool `json:"-"`
+	// The box set settings are set only by the v2 updateLibrary operation.
+	BoxSetsEnabled  *bool `json:"-"`
+	BoxSetMinMovies *int  `json:"-"`
+	BoxSetsInSearch *bool `json:"-"`
 }
 
 // affectsTrickplay reports whether the update can change which of the
@@ -306,6 +328,10 @@ type libraryResponse struct {
 	// view only.
 	TrickplayEnabled   bool `json:"-"`
 	TrickplaySupported bool `json:"-"`
+	// The box set settings are read by the v2 library view only.
+	BoxSetsEnabled  bool `json:"-"`
+	BoxSetMinMovies int  `json:"-"`
+	BoxSetsInSearch bool `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -447,6 +473,9 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ScanWarningAt:              f.ScanWarningAt,
 		RealtimeMonitoring:         f.RealtimeMonitoring,
 		TrickplayEnabled:           f.TrickplayEnabled,
+		BoxSetsEnabled:             f.BoxSetsEnabled,
+		BoxSetMinMovies:            f.BoxSetMinMovies,
+		BoxSetsInSearch:            f.BoxSetsInSearch,
 	}
 }
 

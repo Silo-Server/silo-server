@@ -133,7 +133,10 @@ and runs each file at idle CPU and I/O priority:
   server found no video stream (`no_stream`). A GPU that cannot decode the codec fails
   its attempt as `unsupported`, logged at debug rather than as the
   accelerator's first failure. Attempt timeouts grow with the samples: two minutes plus half a
-  second a sample on hardware, two seconds a sample in software.
+  second a sample on hardware, two seconds a sample in software. A
+  reference-picture read gets the chunk's playing time on top (see
+  [media sampling](media-sampling.md#sheets)), and a request to a node
+  waits that long too.
 - A file selected for local extraction that this server cannot read
   (an offline mount) is given back for an hour without counting a failure;
   `invalid_data` and `no_stream` mark it unusable; any other failure counts and backs off.
@@ -257,12 +260,28 @@ Players read previews through the native API:
   a file among the versions the watch detail lists for the caller, so it
   applies the same access rules. Every sheet is signed or the manifest is
   withheld: clients cut thumbnails by index and cannot skip a sheet.
-  Local storage and S3 with a separate public or token-authenticated delivery
-  endpoint use signed `/api/v2/artwork/...` URLs. The server reads sheets from
-  the storage API, so delivery lag cannot hide newly published sheets.
-  Standard S3 delivery retains direct presigned URLs. Issued URLs protect the
-  revision through their latest expiry; clients read the manifest again after
-  `expires_at`.
+  Standard S3 delivery uses direct presigned URLs, and local storage uses
+  signed `/api/v2/artwork/...` URLs. S3 with a separate public or
+  token-authenticated read endpoint uses the endpoint's URLs only for a
+  revision whose `delivery_scope` matches the current endpoint
+  configuration, and the signed server route for any other. The server route
+  reads the storage API, so endpoint lag cannot hide newly published sheets.
+  Issued URLs protect the revision through their latest expiry; clients read
+  the manifest again after `expires_at`.
+- With such an endpoint, a generation fetches its last uploaded sheet through
+  it before publishing and records the scope when it answers; an endpoint
+  shows a generation's writes in about the order they were made, so one
+  ranged GET per revision stands for every sheet. A
+  revision that misses, one published before the endpoint was configured, or
+  one recorded under another scope is checked again by each server's
+  background pass (`internal/trickplay/delivery.go`), every 15 minutes: it
+  claims revisions not checked in that time, a batch at a time, and stops at
+  a probe error or a batch that confirms nothing, so a broken endpoint is not
+  probed for the whole backlog. Scope is compared when the manifest is read,
+  so during a rolling restart a server reads a revision another configuration
+  confirmed as unconfirmed and signs the server route; servers on the two
+  configurations may record their own scope over each other's until every
+  server runs the new one.
 - Playback capabilities advertise `trickplay_v1`.
 
 Thumbnail i shows `[i*interval_ms, (i+1)*interval_ms)`; it sits on sheet

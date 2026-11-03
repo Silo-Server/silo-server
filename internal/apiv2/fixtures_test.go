@@ -1772,7 +1772,8 @@ func fixtureCases() []fixtureCase {
 
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
 // section reads, which getHomeCapabilities advertises as
-// section_item_limit_max.
+// section_item_limit_max, and of the Home row reads, which it advertises as
+// row_item_limit_max, and a capped Home row read's has_more.
 func sectionItemLimitFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -1785,6 +1786,18 @@ func sectionItemLimitFixtureCases() []fixtureCase {
 			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
 			method:   http.MethodGet, path: "/api/v2/library/1/sections?item_limit=101", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_section_items_item_limit_out_of_range", operationID: opGetHomeSectionItems,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_layout_item_limit_out_of_range", operationID: opGetHomeLayout,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_section_items_capped_ok", operationID: opGetHomeSectionItems,
+			scenario: "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=1", headers: viewer,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Section"},
 	}
 }
 
@@ -1910,12 +1923,12 @@ func resumePositionFixtureCases() []fixtureCase {
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
 // first sections, the include_items bound, and the capability document that
-// advertises it and the item_limit bound of the aggregate section reads.
+// advertises it and the item_limit bound of the section reads.
 func homeLayoutItemsFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
 		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
-			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max, and listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max.",
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max, listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max, and getHomeSectionItems and getHomeLayout accept item_limit up to row_item_limit_max.",
 			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
 		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,

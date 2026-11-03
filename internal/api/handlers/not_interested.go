@@ -42,7 +42,7 @@ func (h *PersonalDataHandler) GetNotInterested(ctx context.Context, viewer Perso
 		return userstore.NotInterestedEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return userstore.NotInterestedEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return userstore.NotInterestedEntry{}, false, itemLookupError(ctx, itemID, err)
 	}
 	mark, err := store.GetNotInterested(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -64,11 +64,14 @@ func (h *PersonalDataHandler) MarkNotInterested(ctx context.Context, viewer Pers
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+		return itemLookupError(ctx, itemID, err)
 	}
 	if h.itemRepo != nil {
 		item, err := h.itemRepo.GetByID(ctx, itemID)
-		if err != nil || item == nil {
+		if err != nil {
+			return itemLookupError(ctx, itemID, err)
+		}
+		if item == nil {
 			return apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		if item.Type != itemTypeMovie && item.Type != itemTypeSeries {

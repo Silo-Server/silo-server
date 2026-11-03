@@ -314,18 +314,32 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 // one, since a phone off the TV's network can't open a LAN address;
 // otherwise the origin the device used.
 func (reg *Registry) deviceLoginBaseURL(r *http.Request) string {
-	if reg.deps.ServerConnections.PublicURL != nil {
-		publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
-		if origin, ok := netaccess.NormalizeOrigin(publicURL); ok {
-			if u, err := url.Parse(publicURL); err == nil {
-				return origin + strings.TrimRight(u.EscapedPath(), "/")
-			}
-		}
+	if base := reg.publicBaseURL(); base != "" {
+		return base
 	}
 	if r == nil {
 		return ""
 	}
 	return handlers.RequestBaseURL(r)
+}
+
+// publicBaseURL is the configured public URL as a base for absolute links:
+// its origin and any path it is served under, without a trailing slash. It
+// is "" when none is configured or it is not a usable URL.
+func (reg *Registry) publicBaseURL() string {
+	if reg.deps.ServerConnections.PublicURL == nil {
+		return ""
+	}
+	publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
+	origin, ok := netaccess.NormalizeOrigin(publicURL)
+	if !ok {
+		return ""
+	}
+	u, err := url.Parse(publicURL)
+	if err != nil {
+		return ""
+	}
+	return origin + strings.TrimRight(u.EscapedPath(), "/")
 }
 
 func (reg *Registry) startDeviceLogin(ctx context.Context, in *StartDeviceLoginInput) (*DeviceLoginStartOutput, error) {

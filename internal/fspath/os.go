@@ -6,6 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // The functions below are the os, path/filepath, and os/exec calls Silo makes
@@ -23,8 +26,57 @@ func OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 // Stat is os.Stat for an encoded path. The returned FileInfo reports the
 // encoded base name.
 func Stat(name string) (os.FileInfo, error) {
-	info, err := os.Stat(Decode(name))
+	info, err := osStat(Decode(name))
 	return encodedInfo(info), err
+}
+
+// osStat is os.Stat; tests swap it to simulate a stat that never returns.
+var osStat = os.Stat
+
+// statCall is one in-flight stat that StatContext callers for a path share.
+type statCall struct {
+	done chan struct{}
+	info os.FileInfo
+	err  error
+}
+
+var (
+	statCallsMu sync.Mutex
+	statCalls   = map[string]*statCall{}
+)
+
+// StatContext is Stat that returns ctx.Err() once ctx ends, even while the
+// stat system call is still blocked, as it can be on a stalled network or
+// FUSE mount. The call keeps running until the kernel returns; concurrent
+// callers for the same path share it, so a wedged path holds one goroutine
+// however many requests give up on it.
+func StatContext(ctx context.Context, name string) (os.FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	statCallsMu.Lock()
+	call, ok := statCalls[name]
+	if !ok {
+		call = &statCall{done: make(chan struct{})}
+		statCalls[name] = call
+		go func() {
+			call.info, call.err = Stat(name)
+			statCallsMu.Lock()
+			delete(statCalls, name)
+			statCallsMu.Unlock()
+			close(call.done)
+		}()
+	}
+	statCallsMu.Unlock()
+	select {
+	case <-call.done:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return call.info, call.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Lstat is os.Lstat for an encoded path. The returned FileInfo reports the
@@ -69,12 +121,13 @@ func Readlink(name string) (string, error) {
 	return Encode(target), nil
 }
 
-// CommandContext is exec.CommandContext with every argument decoded, so an
-// encoded media path reaches ffmpeg or ffprobe as the real file name, also
+// CommandContext is procgroup.CommandContext with every argument decoded, so
+// an encoded media path reaches ffmpeg or ffprobe as the real file name, also
 // when it is embedded in a larger argument such as a filter graph. Arguments
-// without reserved code points pass through unchanged.
+// without reserved code points pass through unchanged. As with procgroup, the
+// end of ctx kills every process the command started.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, DecodeAll(args)...) //nolint:gosec // same contract as exec.CommandContext; callers pass configured tool binaries and separate arguments, no shell
+	return procgroup.CommandContext(ctx, name, DecodeAll(args)...)
 }
 
 // DecodeAll decodes each string in args. It returns args itself when no

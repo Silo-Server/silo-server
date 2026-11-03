@@ -2,9 +2,11 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +83,18 @@ func TestChatGPTAdministrationRequiresActingAdmin(t *testing.T) {
 	res = do(t, h, "GET", Prefix+"/admin/ai/chatgpt", "", actingRequestAdmin)
 	if res.Code != 503 || strings.Contains(res.Body.String(), "provider-token") {
 		t.Fatal(res.Code, res.Body.String())
+	}
+}
+
+func TestAICapabilitiesAdvertiseOpenAIServiceTiers(t *testing.T) {
+	h := NewHandler(requestDeps(fixtureRequests()))
+	res := do(t, h, "GET", Prefix+"/admin/ai/capabilities", "", actingRequestAdmin)
+	var body AdminAICapabilities
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != 200 || !slices.Equal(body.OpenAIServiceTiers, []string{"default", "priority", "ultrafast"}) {
+		t.Fatalf("capabilities: %d %s", res.Code, res.Body.String())
 	}
 }
 

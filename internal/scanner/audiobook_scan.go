@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,6 +88,10 @@ type audiobookDiskFile struct {
 //
 // Comparison uses sameFileModifiedAt for mtime to absorb sub-second precision
 // differences between filesystem reads.
+//
+// Every part of a multi-file book carries the chapter the scanner synthesized
+// for it. Earlier builds let playback's probe repair erase those, so a part
+// without chapters is reprocessed to restore them.
 func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDiskFile) bool {
 	if len(existing) != len(onDisk) {
 		return false
@@ -94,6 +99,9 @@ func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDi
 	byPath := make(map[string]*models.MediaFile, len(existing))
 	for _, mf := range existing {
 		if mf == nil || mf.HasLegacyAttachedPictureVideo() {
+			return false
+		}
+		if len(existing) > 1 && len(mf.Chapters) == 0 {
 			return false
 		}
 		byPath[mf.FilePath] = mf
@@ -297,6 +305,9 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 			}
 		}
 		if isDir {
+			if SkippedDirName(entry.Name()) {
+				continue
+			}
 			directories = append(directories, child)
 		} else if SupportsAudioFile(entry.Name()) {
 			scan.seenPaths[child] = true
@@ -334,6 +345,11 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 		}
 		info, statErr := fspath.Stat(cleanRoot)
 		switch {
+		case statErr != nil && scopeRootVanished(cleanRoot, libraryRoots):
+			// A deleted book folder is an empty scope, as for movies and
+			// series: its files are reconciled instead of protected.
+			scans = append(scans, scan)
+			continue
 		case statErr != nil:
 			scan.rootErr = fmt.Errorf("stat root: %w", statErr)
 		case !info.IsDir():
@@ -658,6 +674,17 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	if blockAll {
 		return nil
 	}
+	sweepProtected, err := s.sweepProtectedRoots(ctx, folder, confirmedCleanup, protectedPaths)
+	if err != nil {
+		return err
+	}
+	if !fullScan {
+		// The empty-cleanup decision only probes the scanned scope, and a
+		// deleted book folder is unreachable by design. Protect configured
+		// roots that are unreachable or suspect-empty (a lost mount leaving
+		// its mountpoint) before marking, as the movie/series pipeline does.
+		protectedPaths = sweepProtected
+	}
 
 	now := time.Now().UTC()
 	missing := 0
@@ -681,7 +708,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 		}
 	}
 
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup, protectedPaths...)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingWithProtectedRoots(ctx, folder, sweepProtected)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "audiobook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
@@ -1125,6 +1152,17 @@ func audiobookLookupPaths(files []parsedAudiobookFile) []string {
 	return paths
 }
 
+// Lockable metadata fields the audiobook scan writes from tags. These mirror
+// metadata.MetadataField, which this package cannot import (metadata imports
+// scanner). The values are stored in media_items.locked_fields, so they cannot
+// change without a data migration.
+const (
+	lockedFieldName         = 0
+	lockedFieldGenres       = 2
+	lockedFieldStudios      = 3
+	lockedFieldReleaseDates = 13
+)
+
 // applyBookToMediaItem copies parsed-audiobook tag fields onto the
 // MediaItem. Used for both fresh inserts and re-scans of existing rows
 // so manual edits to fields not driven by the file (e.g., poster_path
@@ -1136,26 +1174,31 @@ func audiobookLookupPaths(files []parsedAudiobookFile) []string {
 // in OriginalTitle when it differs so the original is never lost.
 func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 	item.Type = "audiobook"
-	raw := strings.TrimSpace(book.Title)
-	cleaned := stripNarratorSuffix(raw)
-	if cleaned == "" {
-		cleaned = raw
+	if !slices.Contains(item.LockedFields, lockedFieldName) {
+		raw := strings.TrimSpace(book.Title)
+		cleaned := stripNarratorSuffix(raw)
+		if cleaned == "" {
+			cleaned = raw
+		}
+		item.Title = cleaned
+		if cleaned != raw && item.OriginalTitle == "" {
+			item.OriginalTitle = raw
+		}
 	}
-	item.Title = cleaned
-	if cleaned != raw && item.OriginalTitle == "" {
-		item.OriginalTitle = raw
+	releaseDatesLocked := slices.Contains(item.LockedFields, lockedFieldReleaseDates)
+	if !releaseDatesLocked {
+		item.Year = book.Year
 	}
-	item.Year = book.Year
 	if book.Overview != "" && item.Overview == "" {
 		item.Overview = book.Overview
 	}
-	if book.Publisher != "" {
+	if book.Publisher != "" && !slices.Contains(item.LockedFields, lockedFieldStudios) {
 		item.Studios = mergeUniqueStrings(item.Studios, []string{book.Publisher})
 	}
-	if len(book.Genres) > 0 {
+	if len(book.Genres) > 0 && !slices.Contains(item.LockedFields, lockedFieldGenres) {
 		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
 	}
-	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && (item.ReleaseDate == nil || *item.ReleaseDate == "") {
+	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && !releaseDatesLocked && (item.ReleaseDate == nil || *item.ReleaseDate == "") {
 		item.ReleaseDate = &rd
 	}
 	if book.Language != "" && item.OriginalLanguage == "" {

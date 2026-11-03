@@ -22,6 +22,7 @@ type CatalogHandler struct {
 	resolver    *catalog.CatalogResolver
 	itemsH      *ItemsHandler
 	workSummary catalog.WorkSummaryProvider
+	boxSets     *catalog.BoxSetRepository
 }
 
 func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) *CatalogHandler {
@@ -644,6 +645,10 @@ func buildPostCatalogLibraryScope(
 		args = append(args, disabledLibraryIDs)
 		nextArgIdx++
 	}
+
+	// Removed audiobooks remain in the catalog during the rename grace period.
+	// Keep them out of this legacy listing until a library links them again.
+	conditions = append(conditions, "(mi.type <> 'audiobook' OR "+catalog.InSomeLibraryWhere("mi.content_id")+")")
 
 	return conditions, args, nextArgIdx, false
 }

@@ -220,6 +220,7 @@ export default function ItemCard({
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             scrim="background"
+            lazy
           >
             {item.status === "pending" && (
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
