@@ -61094,7 +61094,7 @@ export interface operations {
         user_id?: number;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -109447,7 +109447,7 @@ export interface operations {
         channels?: string;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -125201,7 +125201,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -145351,7 +145351,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
