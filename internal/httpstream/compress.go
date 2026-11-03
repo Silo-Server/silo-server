@@ -130,7 +130,7 @@ const minEncodedLength = 256
 // HTTP/1.0 client. A longer body, or one whose handler flushes, streams.
 const maxHeldLength = 8 << 20
 
-// maxPooledHeld is the largest held-body buffer returned to heldBodies, so a
+// maxPooledHeld is the largest held-body buffer kept for reuse, so a
 // rare large response does not pin its buffer for the small ones after it.
 const maxPooledHeld = 64 << 10
 
@@ -316,20 +316,20 @@ func (w *compressWriter) Write(p []byte) (int, error) {
 	if !w.decided {
 		w.WriteHeader(http.StatusOK)
 	}
-	if w.enc == nil {
-		return w.ResponseWriter.Write(p)
-	}
-	if w.holding() {
-		// A body longer than its declared length streams, so the hold stays
-		// bounded by maxHeldLength.
-		if int64(len(p)) > w.remaining {
-			if err := w.stream(); err != nil {
-				return 0, err
+	if w.enc != nil {
+		if w.holding() {
+			// A body longer than its declared length streams, so the hold
+			// stays bounded by maxHeldLength.
+			if int64(len(p)) > w.remaining {
+				if err := w.stream(); err != nil {
+					return 0, err
+				}
 			}
+			w.remaining -= int64(len(p))
 		}
-		w.remaining -= int64(len(p))
+		return w.enc.Write(p)
 	}
-	return w.enc.Write(p)
+	return w.ResponseWriter.Write(p)
 }
 
 // Flush pushes what the encoder holds to the client, which ends a hold. Like
@@ -383,9 +383,13 @@ func (w *compressWriter) close() {
 		_, _ = w.ResponseWriter.Write(b.buf.Bytes())
 	}
 	w.held, w.header = nil, nil
-	if b.buf.Cap() <= maxPooledHeld {
+	// The pooled encoder still points at b until its next Reset, so a large
+	// buffer is dropped rather than left reachable through it.
+	if b.buf.Cap() > maxPooledHeld {
+		b.buf = bytes.Buffer{}
+	} else {
 		b.buf.Reset()
-		b.out = nil
-		heldBodies.Put(b)
 	}
+	b.out = nil
+	heldBodies.Put(b)
 }
