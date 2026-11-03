@@ -356,10 +356,7 @@ function CatalogResults({
     [loadedHistoryItems, selectedIds],
   );
   const selectedHistoryTargets = useMemo(
-    () =>
-      selectedHistoryItems.flatMap((item) =>
-        item.type === "box_set" ? [] : [buildHistoryRemovalTarget(item.content_id, item.type)],
-      ),
+    () => selectedHistoryItems.map((item) => buildHistoryRemovalTarget(item.content_id, item.type)),
     [selectedHistoryItems],
   );
   // A collection the viewer cannot reach answers 404, the same for a deleted

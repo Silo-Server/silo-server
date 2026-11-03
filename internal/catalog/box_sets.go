@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,20 +14,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 )
 
-// Movie box sets group the movies TMDB lists in one collection (a franchise
-// such as Harry Potter) into one browse card. A library opts in with
+// Movie box sets gather the movies TMDB lists in one collection (a franchise
+// such as Harry Potter) for search, a box set page, and a movie page's row;
+// library browse lists the movies on their own. A library opts in with
 // box_sets_enabled; a collection forms a box set there once the viewer can
 // see at least box_set_min_movies of its movies in that library. Membership
-// comes from TMDB and is stored by the box set sync task, so browsing never
+// comes from TMDB and is stored by the box set sync task, so reads never
 // calls TMDB.
 const (
 	DefaultBoxSetMinMovies = 2
 	MinBoxSetMinMovies     = 2
 	MaxBoxSetMinMovies     = 10
-
-	// BoxSetContentIDPrefix starts the synthetic content ID of a box set
-	// card: box_set:<tmdb collection id>.
-	BoxSetContentIDPrefix = "box_set:"
 )
 
 // LibraryTypeSupportsBoxSets reports whether a library of this type holds
@@ -66,11 +62,6 @@ var boxSetSuffixWords = map[string]bool{"box": true, "set": true, boxSetNameSuff
 
 // boxSetNameSuffix ends a TMDB collection's name ("Harry Potter Collection").
 const boxSetNameSuffix = "collection"
-
-// BoxSetContentID is the synthetic content ID of a box set card.
-func BoxSetContentID(collectionID int64) string {
-	return BoxSetContentIDPrefix + strconv.FormatInt(collectionID, 10)
-}
 
 // TMDBMovieCollection is a TMDB collection as the box set sync stored it.
 // Each image's SourcePath is the provider URL and Path is the cached copy's

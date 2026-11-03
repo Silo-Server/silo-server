@@ -49,71 +49,6 @@ func (h *CatalogHandler) SetBoxSetRepository(repo *catalog.BoxSetRepository) {
 	h.boxSets = repo
 }
 
-// prepareBoxSetBrowse turns a group=box_set browse of one library with box
-// sets on into a grouped browse of its box sets. It returns the box sets
-// the page may show, keyed by member content ID; nil means the browse is
-// not grouped into box sets (no single library, box sets off, a search, or
-// no box set the viewer can see).
-func (h *CatalogHandler) prepareBoxSetBrowse(ctx context.Context, req *catalog.CatalogRequest, access catalog.AccessFilter) (map[string]catalog.BoxSetGroup, error) {
-	if !req.GroupBoxSets || h.boxSets == nil || req.Source != catalog.CatalogSourceQuery || req.SearchQuery != "" {
-		return nil, nil
-	}
-	libraryIDs := playableTargetLibraryIDs(*req)
-	if len(libraryIDs) != 1 {
-		return nil, nil
-	}
-	minMovies, ok, err := h.boxSets.LibraryBoxSetMinMovies(ctx, libraryIDs[0])
-	if err != nil || !ok {
-		return nil, err
-	}
-	groups, err := h.resolver.BoxSetGroups(ctx, libraryIDs[0], minMovies, access, nil)
-	if err != nil || len(groups) == 0 {
-		return nil, err
-	}
-	byMember := make(map[string]catalog.BoxSetGroup)
-	collections := make([]int64, 0, len(groups))
-	for _, g := range groups {
-		collections = append(collections, g.CollectionID)
-		for _, contentID := range g.MemberContentIDs {
-			byMember[contentID] = g
-		}
-	}
-	req.BoxSetCollections = collections
-	req.GroupByWork = true
-	return byMember, nil
-}
-
-// applyBoxSets replaces each card that stands for a box set with the box
-// set. The grouped query keeps one movie per box set, so any member on the
-// page is that box set's representative. It fails rather than leave a
-// representative as a plain movie card: its siblings are already folded out
-// of the page and the totals.
-func (h *CatalogHandler) applyBoxSets(ctx context.Context, v ItemViewer, libraryID int, items []itemListResponse, byMember map[string]catalog.BoxSetGroup) error {
-	var groups []catalog.BoxSetGroup
-	for _, item := range items {
-		if g, ok := byMember[item.ContentID]; ok {
-			groups = append(groups, g)
-		}
-	}
-	if len(groups) == 0 {
-		return nil
-	}
-	views, err := h.boxSetViews(ctx, v, libraryID, groups, false)
-	if err != nil {
-		return boxSetError(ctx, err)
-	}
-	for i := range items {
-		g, ok := byMember[items[i].ContentID]
-		if !ok {
-			continue
-		}
-		if view, ok := views[g.CollectionID]; ok {
-			items[i] = boxSetCatalogItem(items[i], view)
-		}
-	}
-	return nil
-}
-
 // boxSetViews builds the views of groups, which belong to one library,
 // keyed by collection ID. A group whose collection is not stored is left
 // out. hero sizes the artwork for a detail page's hero rather than a card.
@@ -204,39 +139,6 @@ func (h *CatalogHandler) boxSetArtworkURLs(ctx context.Context, access catalog.A
 		}
 	}
 	return urls
-}
-
-// boxSetCatalogItem is the card of a box set in place of its representative
-// movie. It keeps the movie's sort metrics, which placed it in the list, and
-// falls back to the movie's artwork when the collection has none.
-func boxSetCatalogItem(representative itemListResponse, view BoxSetView) itemListResponse {
-	item := itemListResponse{
-		ContentID:         catalog.BoxSetContentID(view.CollectionID),
-		Type:              "box_set",
-		Title:             view.Title,
-		Year:              view.FirstYear,
-		Genres:            []string{},
-		Keywords:          []string{},
-		Status:            representative.Status,
-		Overview:          view.Overview,
-		PosterURL:         view.PosterURL,
-		PosterThumbhash:   view.PosterThumbhash,
-		BackdropURL:       view.BackdropURL,
-		BackdropThumbhash: view.BackdropThumbhash,
-		AddedAt:           representative.AddedAt,
-		SortMetrics:       representative.SortMetrics,
-		UserState:         &itemUserStateResponse{Played: view.MemberCount > 0 && view.PlayedCount == view.MemberCount},
-		BoxSet:            new(view),
-	}
-	if item.PosterURL == "" {
-		item.PosterURL = representative.PosterURL
-		item.PosterThumbhash = representative.PosterThumbhash
-	}
-	if item.BackdropURL == "" {
-		item.BackdropURL = representative.BackdropURL
-		item.BackdropThumbhash = representative.BackdropThumbhash
-	}
-	return item
 }
 
 // BoxSet returns one box set of a library with its movies the viewer can see
