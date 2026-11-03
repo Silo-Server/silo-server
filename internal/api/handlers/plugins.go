@@ -317,7 +317,12 @@ type PluginUserSettingsView struct {
 	// administrator has set. A screen gates a per-account setting on one of them
 	// when the feature behind it needs a credential the account does not hold.
 	// Values are never included: some are secrets.
-	ConfiguredGlobalKeys []string `json:"configured_global_keys"`
+	//
+	// v1 feature development is frozen, so this new field reaches clients on the
+	// v2 installation instead, which maps it from the Go field rather than from
+	// its JSON. A tag here would grow a response whose shape is carried unchanged
+	// through the bridge, so a marshaling test pins the v1 wire without it.
+	ConfiguredGlobalKeys []string `json:"-"`
 }
 
 type pluginUserSettingsListResponse struct {
