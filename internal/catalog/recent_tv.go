@@ -585,6 +585,10 @@ func (r *RecentTVRepository) ListNewest(ctx context.Context, q RecentTVQuery) ([
 	return targets, hasMore, err
 }
 
+// recentTVPreallocMax caps the targets slice preallocated from a request's
+// limit; a longer result grows as its rows arrive.
+const recentTVPreallocMax = 256
+
 const (
 	recentTVNewestWindowGrowth = 4
 	recentTVNewestMaxWindow    = 8192
@@ -627,7 +631,11 @@ func (r *RecentTVRepository) listNewestBounded(ctx context.Context, q RecentTVQu
 			return nil, false, nil
 		}
 		sqlText, args := buildRecentTVNewestQuery(q, cutoff)
-		page := recentTVTargetRows{targets: make([]RecentTVTarget, 0, q.Limit+1)}
+		capacity := q.Limit + 1
+		if capacity > recentTVPreallocMax {
+			capacity = recentTVPreallocMax
+		}
+		page := recentTVTargetRows{targets: make([]RecentTVTarget, 0, capacity)}
 		if err := queryWithoutJIT(ctx, r.pool, sqlText, args, page.scan); err != nil {
 			return nil, false, fmt.Errorf("listing recently-added TV events: %w", err)
 		}
@@ -782,6 +790,9 @@ func queryRecentTVTargets(ctx context.Context, pool *pgxpool.Pool, sqlText strin
 	}
 	defer rows.Close()
 
+	if capacity < 0 || capacity > recentTVPreallocMax {
+		capacity = recentTVPreallocMax
+	}
 	page := recentTVTargetRows{withTotal: withTotal, targets: make([]RecentTVTarget, 0, capacity)}
 	for rows.Next() {
 		if err := page.scan(rows); err != nil {
