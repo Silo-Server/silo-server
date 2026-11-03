@@ -9,7 +9,9 @@ printf legacy > "$lib_dir/libmfxhw64.so.1.35"
 ln -s libmfxhw64.so.1.35 "$lib_dir/libmfxhw64.so.1"
 printf modern > "$lib_dir/libmfx-gen.so.1.2.17"
 printf dispatcher > "$lib_dir/libvpl.so.2"
-printf driver > "$lib_dir/iHD_drv_video.so"
+# jellyfin-ffmpeg installs the iHD driver under lib/dri/, not lib/.
+mkdir "$lib_dir/dri"
+printf driver > "$lib_dir/dri/iHD_drv_video.so"
 sh "$root/scripts/configure-intel-qsv-runtime.sh" auto amd64 "$lib_dir"
 test -f "$lib_dir/libmfxhw64.so.1.35"
 if sh "$root/scripts/configure-intel-qsv-runtime.sh" '' amd64 "$lib_dir"; then
@@ -25,7 +27,7 @@ test ! -e "$lib_dir/libmfxhw64.so.1.35"
 test ! -L "$lib_dir/libmfxhw64.so.1"
 test "$(cat "$lib_dir/libmfx-gen.so.1.2.17")" = modern
 test "$(cat "$lib_dir/libvpl.so.2")" = dispatcher
-test "$(cat "$lib_dir/iHD_drv_video.so")" = driver
+test "$(cat "$lib_dir/dri/iHD_drv_video.so")" = driver
 # A change in upstream packaging cannot silently produce an image with no VPL.
 rm "$lib_dir/libmfx-gen.so.1.2.17"
 if sh "$root/scripts/configure-intel-qsv-runtime.sh" vpl amd64 "$lib_dir"; then exit 1; fi
