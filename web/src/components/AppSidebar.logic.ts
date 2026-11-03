@@ -27,20 +27,6 @@ export function isSidebarRailCollapsed(collapsed: boolean, sidebarExpanded: bool
 }
 
 /**
- * How far a library row slides left once the surface is clipped to the rail, so
- * its icon lines up with the rest of the icon column.
- *
- * The slot reserved ahead of the icon is a chevron button when the library has
- * pins — 12px padding + a 14px glyph + 4px = 30px — and a 12px border-box
- * spacer otherwise (`w-3` includes its own `pl-3` under Tailwind's preflight).
- * Every other nav row starts its icon 12px into the row, so only the chevron
- * case is out of line; the spacer already matches and must not be shifted.
- */
-export function libraryRowShift(hasPins: boolean) {
-  return hasPins ? "-18px" : "0px";
-}
-
-/**
  * Inline style for the sidebar surface.
  *
  * While hover-expanded on a detail page the sidebar floats over the page as an
