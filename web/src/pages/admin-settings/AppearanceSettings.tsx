@@ -28,6 +28,7 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import {
   buildDefaultPrefs,
   CATEGORY_META,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/overlays";
 import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { parseCardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
@@ -99,6 +101,13 @@ export default function AppearanceSettings() {
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
   const { images, imageUploadsAvailable, supportsStyles } = useOverlayPrefs();
+  // Poster size is each profile's own choice with no server default, so the
+  // preview draws at the administrator's. Admin pages sit outside the
+  // provider that resolves it for the app, so it is read here.
+  const presentationQuery = useEffectiveSettings({ keys: [SETTING_KEYS.UI_CARD_PRESENTATION] });
+  const { poster_size: posterSize } = parseCardPresentation(
+    presentationQuery.data?.[SETTING_KEYS.UI_CARD_PRESENTATION]?.value,
+  );
 
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
@@ -329,7 +338,11 @@ export default function AppearanceSettings() {
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
               </div>
               <div className="mt-3 flex justify-center pb-1">
-                <OverlayPreviewCard prefs={overlayPrefs} size="sm" variant={previewVariant} />
+                <OverlayPreviewCard
+                  prefs={overlayPrefs}
+                  posterSize={posterSize}
+                  variant={previewVariant}
+                />
               </div>
             </div>
           </div>

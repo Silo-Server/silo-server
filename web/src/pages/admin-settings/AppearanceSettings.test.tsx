@@ -54,6 +54,10 @@ vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 
+vi.mock("@/hooks/queries/settingValues", () => ({
+  useEffectiveSettings: () => ({ data: undefined }),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ images: [], imageUploadsAvailable: true, supportsStyles: true }),
 }));
