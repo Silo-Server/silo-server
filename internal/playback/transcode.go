@@ -270,15 +270,19 @@ type TranscodeSession struct {
 	copyTimeline         observedCopyTimeline
 	segmentGeneration    uint64
 	segmentIncarnation   string
-	throttler            *TranscodeThrottler
-	stderrLinesLogged    int
-	stderrBytesLogged    int
-	stderrDroppedLines   int
-	stderrCapLogged      bool
-	restartCount         int
-	stderrLineIndex      int
-	stderrWriter         *ffmpegStderrWriter
-	restartHook          func(context.Context)
+	// dv81Converted maps each media segment a DV7ToDV81BitstreamFilter
+	// session has rewritten to the segmentGeneration it was rewritten in, so
+	// a repeat request does not re-read it. Guarded by mu.
+	dv81Converted      map[string]uint64
+	throttler          *TranscodeThrottler
+	stderrLinesLogged  int
+	stderrBytesLogged  int
+	stderrDroppedLines int
+	stderrCapLogged    bool
+	restartCount       int
+	stderrLineIndex    int
+	stderrWriter       *ffmpegStderrWriter
+	restartHook        func(context.Context)
 	// generationStartedAt is when the currently-owning ffmpeg process was
 	// spawned. Output in the shared directory older than this timestamp was
 	// written by a previous generation (or a previous session sharing the
@@ -3121,11 +3125,9 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		return nil, ErrSegmentNotFound
 	}
 	if s.opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter {
-		// Under s.mu, so no request is handed a segment mid-rewrite. The
-		// rewrite is idempotent, which also covers a new FFmpeg generation
-		// rewriting init.mp4 or a segment.
-		if err := convertDV81Segment(root, name); err != nil {
-			slog.Warn("playback: dolby vision 8.1 segment conversion failed", "session", s.opts.SessionID, "segment", name, "error", err)
+		if err := s.convertDV81Locked(root, name); err != nil {
+			_ = segment.Close()
+			return nil, err
 		}
 	}
 	if s.segmentIncarnation == "" {
@@ -3139,31 +3141,49 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 	}, nil
 }
 
-// convertDV81Segment rewrites a served file of a DV7ToDV81BitstreamFilter
-// session in place: init.mp4's DOVI record, or a media segment's RPUs.
-func convertDV81Segment(root *os.Root, name string) error {
-	if name != hlsInitSegmentName && !strings.HasSuffix(name, ".m4s") {
+// convertDV81Locked rewrites a served file of a DV7ToDV81BitstreamFilter
+// session in place before it is handed out: init.mp4's DOVI record, or a media
+// segment's RPUs. It runs under s.mu, so no request sees a file mid-rewrite.
+// It fails closed: a segment it cannot convert is not served under the plan's
+// Dolby Vision 8.1 claim, so the client replans onto the next recipe. An
+// init.mp4 that does not parse yet reads as not ready, like an empty one.
+func (s *TranscodeSession) convertDV81Locked(root *os.Root, name string) error {
+	if name != hlsInitSegmentName && (!strings.HasSuffix(name, ".m4s") || s.dv81Converted[name] == s.segmentGeneration+1) {
 		return nil
 	}
 	initFile, err := root.OpenFile(hlsInitSegmentName, os.O_RDWR, 0)
 	if err != nil {
-		return err
+		return ErrSegmentNotFound
 	}
 	track, err := dovirpu.ConvertInitFile(initFile)
 	_ = initFile.Close()
-	if err != nil || name == hlsInitSegmentName {
-		return err
+	if err != nil {
+		slog.Warn("playback: dolby vision 8.1 init segment not convertible yet", "session", s.opts.SessionID, "error", err)
+		return ErrSegmentNotFound
+	}
+	if name == hlsInitSegmentName {
+		return nil
 	}
 	f, err := root.OpenFile(name, os.O_RDWR, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open segment for dolby vision 8.1 conversion: %w", err)
 	}
-	defer func() { _ = f.Close() }()
 	stats, err := dovirpu.ConvertSegmentFile(f, track)
-	if err == nil && stats.Dropped > 0 {
-		err = fmt.Errorf("%d of %d RPUs could not be converted; those frames play their HDR10 base layer", stats.Dropped, stats.Dropped+stats.Converted)
+	_ = f.Close()
+	if err != nil {
+		slog.Error("playback: dolby vision 8.1 segment conversion failed", "session", s.opts.SessionID, "segment", name, "error", err)
+		return fmt.Errorf("convert segment to dolby vision 8.1: %w", err)
 	}
-	return err
+	if stats.Dropped > 0 {
+		slog.Warn("playback: dolby vision 8.1 RPUs left as HDR10", "session", s.opts.SessionID, "segment", name,
+			"dropped", stats.Dropped, "converted", stats.Converted)
+	}
+	if s.dv81Converted == nil {
+		s.dv81Converted = make(map[string]uint64)
+	}
+	// Stored as generation+1 so the zero value means "never converted".
+	s.dv81Converted[name] = s.segmentGeneration + 1
+	return nil
 }
 
 // servableSegmentName reports whether name is a plain file name the segment

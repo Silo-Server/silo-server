@@ -393,7 +393,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// instead — the client is then told the actual cause, a source whose Dolby
 	// Vision metadata cannot be removed, rather than a generic HDR message that
 	// sends the user looking for a missing encoder.
-	if dvStripUnsupportedBySource && !originalRangeOK && !clientDV81Eligible && !clientHDR10Eligible {
+	if dvStripUnsupportedBySource && !originalRangeOK && !serverDV81Eligible && !clientDV81Eligible && !clientHDR10Eligible {
 		_, _, _, _, toneMapEligible := toneMapRecipeV3(input, source)
 		if !toneMapEligible || !videoTranscodeExecutableV3(input, source) {
 			return terminalPlannerResultV3(TerminalDVConversionUnsupportedV3,
@@ -670,13 +670,13 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		if serverDV81Eligible {
 			dvModes = append(dvModes, dvRemuxDV81V3)
 		}
-		if dvStripEligible && (source.DVProfile == 7 || !rangeOK) {
-			dvModes = append(dvModes, dvRemuxStripV3)
-		} else {
+		// A Profile 7 copy is never preserved as-is: it would carry the
+		// enhancement layer and Profile 7 RPUs to a client that cannot take them.
+		if source.DVProfile != 7 && (rangeOK || !dvStripEligible) {
 			dvModes = append(dvModes, dvRemuxPreserveV3)
-			if dvStripEligible {
-				dvModes = append(dvModes, dvRemuxStripV3)
-			}
+		}
+		if dvStripEligible {
+			dvModes = append(dvModes, dvRemuxStripV3)
 		}
 		hlsAudioConversionUnavailable := ""
 		for _, dvMode := range dvModes {

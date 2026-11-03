@@ -244,14 +244,23 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 // A single-track Profile 7 source goes to an output that takes Profile 8.1 as
 // the server's HLS 8.1 conversion (fMP4 only) before the HDR10 strip. A
 // dual-track source keeps its RPUs on the enhancement-layer track, which a
-// remux does not copy, so it goes straight to the strip.
+// remux does not copy, so it goes straight to the strip. Without the strip, a
+// failed 8.1 plan falls through to a transcode, not to a raw Profile 7 copy.
 func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
 		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 	})
-	for _, singleTrack := range []bool{true, false} {
+	stripless := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+	})
+	for _, tc := range []struct {
+		singleTrack bool
+		registry    *TransformationRegistryV3
+	}{{true, registry}, {false, registry}, {true, stripless}} {
+		singleTrack := tc.singleTrack
 		file, req := dv81NativeAndHDR10FixtureV3()
 		track := &file.VideoTracks[0]
 		track.DVProfile, track.DVBLCompatID, track.VideoRangeType = 7, 6, "DOVIWithEL"
@@ -264,7 +273,7 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 		plans, _ := replanChainV3(t, PlannerInputV3{
 			Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 			Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-			Registry: registry,
+			Registry: tc.registry,
 		})
 		dv81, firstStrip := 0, -1
 		for i, plan := range plans {
@@ -281,8 +290,17 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 			if firstStrip < 0 && planStripsDVToHDR10V3(plan) {
 				firstStrip = i
 			}
+			// Without the strip, the 8.1 plan must fall through to a
+			// transcode, never to a copy of the raw Profile 7 stream.
+			if plan.Delivery != DeliveryOriginalHTTPV3 && plan.Delivery != DeliveryTranscodeHLSV3 && len(plan.Transformations) == 0 {
+				t.Fatalf("plan %d copies Profile 7 unconverted: %s", i, plan.Delivery)
+			}
 		}
-		if want := map[bool]int{true: 1, false: 0}[singleTrack]; dv81 != want || firstStrip != dv81 {
+		wantStrip := dv81
+		if tc.registry == stripless {
+			wantStrip = -1
+		}
+		if want := map[bool]int{true: 1, false: 0}[singleTrack]; dv81 != want || firstStrip != wantStrip {
 			t.Fatalf("single track %v: %d 8.1 plans, first strip at %d", singleTrack, dv81, firstStrip)
 		}
 	}

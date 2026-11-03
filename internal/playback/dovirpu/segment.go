@@ -203,6 +203,7 @@ func videoSamples(b []byte, moof box, trackID uint32) ([][2]int, error) {
 		if err != nil {
 			return nil, err
 		}
+		next := base // a run without a data offset continues where the last one ended
 		runs, err := boxes(b, traf.body, traf.end)
 		if err != nil {
 			return nil, err
@@ -211,9 +212,12 @@ func videoSamples(b []byte, moof box, trackID uint32) ([][2]int, error) {
 			if trun.typ != "trun" {
 				continue
 			}
-			s, err := trunSamples(b, trun, base, defaultSize)
+			s, err := trunSamples(b, trun, base, next, defaultSize)
 			if err != nil {
 				return nil, err
+			}
+			if len(s) > 0 {
+				next = s[len(s)-1][1]
 			}
 			out = append(out, s...)
 		}
@@ -254,14 +258,18 @@ func tfhdDefaults(b []byte, tfhd box, moofStart int) (base int, defaultSize uint
 	return base, defaultSize, err
 }
 
-func trunSamples(b []byte, trun box, base int, defaultSize uint32) ([][2]int, error) {
+func trunSamples(b []byte, trun box, base, next int, defaultSize uint32) ([][2]int, error) {
 	if trun.end-trun.body < 8 {
 		return nil, errors.New("dovirpu: short trun")
 	}
 	flags := binary.BigEndian.Uint32(b[trun.body:]) & 0xFFFFFF
 	count := int(binary.BigEndian.Uint32(b[trun.body+4:]))
 	at := trun.body + 8
-	off := base
+	off := next
+	if flags&0x200 == 0 && defaultSize == 0 {
+		// shortcut: sizes from trex are not read; FFmpeg writes them in tfhd or trun.
+		return nil, errors.New("dovirpu: fragment has no sample sizes")
+	}
 	if flags&0x1 != 0 { // data-offset-present
 		if at+4 > trun.end {
 			return nil, errors.New("dovirpu: short trun")
