@@ -423,6 +423,36 @@ describe("Server collections", () => {
     );
   });
 
+  it("focuses the first card Load more added even when the profile's own cards arrive meanwhile", async () => {
+    let answerPersonal = () => {};
+    v2Recorder.answer(
+      "GET /api/v2/collections",
+      () =>
+        new Promise((resolve) => {
+          answerPersonal = () => resolve({ items: [rainyDays, letterboxd] });
+        }),
+    );
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    answerMoviesAndKids(3);
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", async () => {
+      await released;
+      return libraryTab("1", [oscarWinners, heistNight, spaceOperas]);
+    });
+    show();
+    const all = await screen.findByRole("region", { name: "All collections" });
+    (await within(all).findByRole("button", { name: "Load more" })).focus();
+    await userEvent.keyboard("{Enter}");
+    await act(async () => answerPersonal());
+    await within(all).findByRole("link", { name: "Rainy days" });
+    await act(async () => release());
+    await vi.waitFor(() =>
+      expect(within(all).getByRole("link", { name: "Heist night" })).toHaveFocus(),
+    );
+  });
+
   it("loads one library's rest each time the end of the grid is reached under All", async () => {
     const kiki = { ...oscarWinners, id: "lc-kiki", title: "Kiki's Delivery Service" };
     v2Recorder.answer("GET /api/v2/collections/server", {
