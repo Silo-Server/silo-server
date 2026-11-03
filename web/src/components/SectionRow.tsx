@@ -75,7 +75,7 @@ export default memo(function SectionRow({
         : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: section.title }),
     [libraryId, section.id, section.title],
   );
-  const { prefs: overlayPrefs, watchStatus, quickActionMode } = useOverlayPrefs();
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
@@ -144,7 +144,6 @@ export default memo(function SectionRow({
                 item={item}
                 libraryId={libraryId}
                 overlayPrefs={overlayPrefs}
-                watchStatus={watchStatus}
                 quickActionMode={quickActionMode}
                 priority={index < priorityCount}
               />

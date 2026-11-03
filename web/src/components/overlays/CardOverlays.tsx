@@ -9,7 +9,6 @@ import {
   orderedOverlaysForPosition,
   overlayImageUrl,
   readableTextOn,
-  watchStatusOf,
 } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import type {
@@ -512,9 +511,8 @@ export default function CardOverlays({
   const edgeInset = overlayLength(EDGE_INSET, scalingMode, POSTER_VARS.edgeInset);
   const edgeGap = overlayLength(EDGE_GAP, scalingMode, POSTER_VARS.edgeGap);
   // Poster cards keep the top-right corner clear for the watch-status
-  // indicator unless the viewer turned it off; wide cards never draw it.
-  const reserveStatus = !wide && watchStatusOf(prefs) !== "off";
-  const topRight = reserveStatus
+  // indicator; wide cards never draw it.
+  const topRight = !wide
     ? `calc(${edgeInset} + ${overlayLength(STATUS_RESERVE, scalingMode, POSTER_VARS.statusReserve)})`
     : edgeInset;
   // A filled badge on a rail sits flush against the edge as a tab; a

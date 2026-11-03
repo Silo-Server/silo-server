@@ -155,7 +155,7 @@ export default function Recommendations() {
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
-  const { prefs: overlayPrefs, watchStatus, quickActionMode } = useOverlayPrefs();
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
@@ -200,7 +200,6 @@ export default function Recommendations() {
                 <SectionItemCard
                   item={item}
                   overlayPrefs={overlayPrefs}
-                  watchStatus={watchStatus}
                   quickActionMode={quickActionMode}
                 />
               </div>

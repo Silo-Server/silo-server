@@ -11,11 +11,7 @@ import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import CardWatchStatus from "@/components/overlays/CardWatchStatus";
-import {
-  overlayDataFromBrowseItem,
-  type CardOverlayPrefs,
-  type WatchStatusMode,
-} from "@/lib/overlays";
+import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
@@ -183,7 +179,6 @@ export default function ItemCard({
   libraryId,
   sortField,
   overlayPrefs,
-  watchStatus = "off",
   quickActionMode = "none",
   narrowPosterActions = false,
   selectionMode = false,
@@ -194,8 +189,6 @@ export default function ItemCard({
   libraryId?: number;
   sortField?: string;
   overlayPrefs?: CardOverlayPrefs | null;
-  /** What the top-right corner shows; see CardWatchStatus. */
-  watchStatus?: WatchStatusMode;
   quickActionMode?: CardQuickActionMode;
   narrowPosterActions?: boolean;
   selectionMode?: boolean;
@@ -251,7 +244,7 @@ export default function ItemCard({
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
             )}
             {item.status === "matched" && item.type !== "manga" && (
-              <CardWatchStatus userState={item.user_state} mode={watchStatus} />
+              <CardWatchStatus userState={item.user_state} />
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and

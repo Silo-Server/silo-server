@@ -29,8 +29,6 @@ import {
   isOverlaySuppressed,
   OVERLAY_REGISTRY,
   POSITION_OPTIONS,
-  WATCH_STATUS_OPTIONS,
-  watchStatusOf,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayImage,
@@ -350,21 +348,6 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
           onChange={pickShortcuts}
         />
       </SettingsGroup>
-
-      {supportsStyles ? (
-        <SettingsGroup
-          title="Watch status"
-          description="The poster's top-right corner: a check once you watch something, and how many episodes a show you started has left."
-        >
-          <ChoiceButtons
-            label="Watch status"
-            hideLabel
-            value={watchStatusOf(displayPrefs)}
-            options={WATCH_STATUS_OPTIONS}
-            onChange={(watchStatus) => setPrefs({ ...displayPrefs, watchStatus })}
-          />
-        </SettingsGroup>
-      ) : null}
 
       <SettingsGroup
         title="Badges"

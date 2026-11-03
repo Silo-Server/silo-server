@@ -1,9 +1,4 @@
-import {
-  OVERLAY_CATEGORIES,
-  type OverlayCategory,
-  type OverlayPosition,
-  type WatchStatusMode,
-} from "./types";
+import { OVERLAY_CATEGORIES, type OverlayCategory, type OverlayPosition } from "./types";
 
 // Shared UI metadata so user-facing and admin settings stay in sync. These
 // labels are presentational only; the canonical enums live in types.ts.
@@ -14,12 +9,6 @@ export const POSITION_OPTIONS: { value: OverlayPosition; label: string }[] = [
   { value: "right-edge", label: "Right Edge" },
   { value: "bottom-left", label: "Bottom Left" },
   { value: "bottom-right", label: "Bottom Right" },
-];
-
-export const WATCH_STATUS_OPTIONS: readonly { value: WatchStatusMode; label: string }[] = [
-  { value: "remaining", label: "Watched and episodes left" },
-  { value: "watched", label: "Watched only" },
-  { value: "off", label: "Off" },
 ];
 
 interface CategoryMeta {

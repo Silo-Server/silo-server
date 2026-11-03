@@ -1,11 +1,9 @@
 import type {
-  CardOverlayPrefs,
   OverlayFontWeight,
   OverlayPreset,
   OverlayShadow,
   OverlayShape,
   OverlayStyle,
-  WatchStatusMode,
 } from "./types";
 
 // 200 apart, since closer weights look alike at badge sizes. 800 is also the
@@ -111,10 +109,6 @@ export function applyOverlayStyle(
     };
   }
   return next;
-}
-
-export function watchStatusOf(prefs: CardOverlayPrefs | null | undefined): WatchStatusMode {
-  return prefs?.watchStatus ?? "remaining";
 }
 
 // Where the server serves an uploaded overlay image. The ref is

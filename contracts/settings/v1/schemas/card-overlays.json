@@ -12,11 +12,6 @@
       "type": "string",
       "enum": ["minimal", "classic", "vibrant", "pill", "square", "plate", "band"]
     },
-    "watchStatus": {
-      "description": "What the top-right status corner shows: a check on watched titles plus the episodes left on a started series (remaining), only the check (watched), or nothing (off). Absent means remaining.",
-      "type": "string",
-      "enum": ["remaining", "watched", "off"]
-    },
     "style": {
       "description": "Overrides on top of the preset. Each absent field keeps the preset's own value.",
       "$ref": "#/$defs/style"

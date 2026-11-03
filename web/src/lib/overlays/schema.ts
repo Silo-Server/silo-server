@@ -1,6 +1,6 @@
 import { PRESET_IDS } from "./presets";
 import { OVERLAY_MAP, OVERLAY_REGISTRY } from "./registry";
-import { OVERLAY_POSITIONS, WATCH_STATUS_MODES } from "./types";
+import { OVERLAY_POSITIONS } from "./types";
 import type {
   CardOverlayPrefs,
   OverlayData,
@@ -11,12 +11,10 @@ import type {
   OverlayShape,
   OverlayStyle,
   PresetId,
-  WatchStatusMode,
 } from "./types";
 
 // Settings manifest revision whose card-overlays schema first accepts the
-// edge positions, the plate and band presets, watchStatus, style, and image
-// references. Below it the server rejects a document that uses any of them.
+// edge positions, the plate and band presets, style, and image references. Below it the server rejects a document that uses any of them.
 export const OVERLAY_STYLE_MANIFEST_REVISION = 25;
 
 export function buildDefaultPrefs(): CardOverlayPrefs {
@@ -122,10 +120,6 @@ export function parseOverlayStyle(v: unknown): OverlayStyle | undefined {
   return Object.keys(style).length > 0 ? style : undefined;
 }
 
-function parseWatchStatus(v: unknown): WatchStatusMode | undefined {
-  return WATCH_STATUS_MODES.includes(v as WatchStatusMode) ? (v as WatchStatusMode) : undefined;
-}
-
 // Heuristic: v1 docs are flat Record<OverlayId, {enabled,position}>. v2 docs
 // have a "version" field or at minimum a "preset" string and "items" object.
 function looksLikeV2(parsed: unknown): boolean {
@@ -191,8 +185,6 @@ function parseV2(parsed: Record<string, unknown>): CardOverlayPrefs {
     order: Array.isArray(parsed.order) ? (parsed.order as unknown[]).filter(isKnownOverlayId) : [],
     items: buildItems(sourceItems),
   };
-  const watchStatus = parseWatchStatus(parsed.watchStatus);
-  if (watchStatus) prefs.watchStatus = watchStatus;
   const style = parseOverlayStyle(parsed.style);
   if (style) prefs.style = style;
   return prefs;
@@ -279,7 +271,7 @@ export function withoutUnlistedImages(
 }
 
 // Whether the server accepts the revision-25 fields: edge positions, the
-// plate and band presets, watchStatus, style and image references.
+// plate and band presets, style and image references.
 export function supportsOverlayStyles(support: OverlayServerSupport): boolean {
   return (
     support.manifestRevision !== undefined &&
@@ -313,7 +305,7 @@ export function overlayPrefsForServer(
   ) as CardOverlayPrefs["items"];
   const order = prefs.order.filter((id) => isOverlaySupportedBy(id, support));
   if (styles) return { ...prefs, order, items };
-  const { watchStatus: _watchStatus, style: _style, ...rest } = prefs;
+  const { style: _style, ...rest } = prefs;
   const preset = prefs.preset === "plate" || prefs.preset === "band" ? "classic" : prefs.preset;
   return { ...rest, preset, order, items };
 }

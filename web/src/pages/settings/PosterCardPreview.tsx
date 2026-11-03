@@ -17,7 +17,6 @@ import {
   requestDownloadBarPercent,
   type CardOverlayPrefs,
   type OverlayPreviewVariant,
-  type WatchStatusMode,
 } from "@/lib/overlays";
 import type { CardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
@@ -59,7 +58,6 @@ interface PosterCardPreviewViewProps {
   presentation: CardPresentation;
   /** Null while badges are off. */
   overlayPrefs: CardOverlayPrefs | null;
-  watchStatus?: WatchStatusMode;
   quickActionMode: CardQuickActionMode;
   /** Samples this server can show; the request sample needs request support. */
   variants: readonly OverlayPreviewVariant[];
@@ -70,7 +68,6 @@ interface PosterCardPreviewViewProps {
 export function PosterCardPreviewView({
   presentation,
   overlayPrefs,
-  watchStatus = "off",
   quickActionMode,
   variants,
   revealShortcuts = false,
@@ -117,10 +114,7 @@ export function PosterCardPreviewView({
                     hasProgressBar={downloadPercent !== null}
                   />
                 ) : null}
-                <CardWatchStatus
-                  userState={OVERLAY_PREVIEW_WATCH_STATES[variant]}
-                  mode={watchStatus}
-                />
+                <CardWatchStatus userState={OVERLAY_PREVIEW_WATCH_STATES[variant]} />
                 {hasShortcuts ? (
                   <div
                     aria-hidden="true"
@@ -170,7 +164,6 @@ export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolea
   const {
     editablePrefs,
     overlaysEnabled,
-    watchStatus,
     quickActionPreference,
     quickActionsEnabled,
     isOverlaySupported,
@@ -184,7 +177,6 @@ export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolea
     <PosterCardPreviewView
       presentation={cardPresentation}
       overlayPrefs={overlaysEnabled ? editablePrefs : null}
-      watchStatus={watchStatus}
       quickActionMode={quickActionsEnabled ? quickActionPreference : "none"}
       variants={variants}
       revealShortcuts={revealShortcuts}

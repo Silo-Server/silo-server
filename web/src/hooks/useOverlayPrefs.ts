@@ -22,7 +22,6 @@ import {
   serializeOverlayPrefs,
   storedOverlayIds,
   supportsOverlayStyles,
-  watchStatusOf,
   withoutUnlistedImages,
   type CardOverlayPrefs,
   type OverlayId,
@@ -234,9 +233,6 @@ export function useOverlayPrefs() {
 
   return {
     prefs: overlaysEnabled && !isLoading ? renderPrefs : null,
-    // The status corner shows whether or not badges are on; while settings
-    // load it stays empty rather than flashing a mode that may change.
-    watchStatus: isLoading ? ("off" as const) : watchStatusOf(prefs),
     // The full document, badges on or off, for settings screens.
     editablePrefs: prefs,
     images,

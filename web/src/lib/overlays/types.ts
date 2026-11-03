@@ -12,11 +12,6 @@ export const OVERLAY_POSITIONS = [
 ] as const;
 export type OverlayPosition = (typeof OVERLAY_POSITIONS)[number];
 
-// What the top-right status corner shows: a check on a watched title plus the
-// episodes left on a started series, only the check, or nothing.
-export const WATCH_STATUS_MODES = ["remaining", "watched", "off"] as const;
-export type WatchStatusMode = (typeof WATCH_STATUS_MODES)[number];
-
 // Logical groupings used by the settings UI to organize controls.
 export const OVERLAY_CATEGORIES = ["tech", "ratings", "metadata", "ribbons"] as const;
 export type OverlayCategory = (typeof OVERLAY_CATEGORIES)[number];
@@ -130,8 +125,6 @@ export interface OverlayStyle {
 export interface CardOverlayPrefs {
   version: 2;
   preset: PresetId;
-  // Absent means "remaining", the default.
-  watchStatus?: WatchStatusMode;
   style?: OverlayStyle;
   order: OverlayId[]; // empty = use registry order
   items: Record<OverlayId, OverlayItemConfig>;

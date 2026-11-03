@@ -106,23 +106,6 @@ describe("CardOverlaySettings", () => {
     expect(mocks.setQuickActionMode).not.toHaveBeenCalled();
   });
 
-  it("saves the watch-status choice into the badge document, badges on or off", () => {
-    mocks.overlaysEnabled = false;
-    render(<CardOverlaySettings />);
-    const status = screen.getByRole("radiogroup", { name: "Watch status" });
-
-    expect(
-      within(status).getByRole("radio", { name: "Watched and episodes left" }),
-    ).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(within(status).getByRole("radio", { name: "Watched only" }));
-
-    expect(mocks.setPrefs).toHaveBeenCalledTimes(1);
-    const saved = mocks.setPrefs.mock.calls[0]?.[0];
-    expect(saved.watchStatus).toBe("watched");
-    // The rest of the document is the profile's own, not a reset.
-    expect(saved.items.resolution.enabled).toBe(true);
-  });
-
   it("resets shortcuts on their own once they differ from the server's", () => {
     const { rerender } = render(<CardOverlaySettings />);
     expect(screen.queryByRole("button", { name: "Reset shortcuts" })).toBeNull();

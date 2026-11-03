@@ -2,7 +2,6 @@ import { Check } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { MediaItemUserState } from "@/api/types";
-import type { WatchStatusMode } from "@/lib/overlays";
 
 import {
   EDGE_INSET,
@@ -13,7 +12,6 @@ import {
 
 interface CardWatchStatusProps {
   userState: MediaItemUserState | undefined;
-  mode: WatchStatusMode;
 }
 
 // The episodes a started, unfinished series or season has left, or null.
@@ -29,10 +27,9 @@ function remainingEpisodes(userState: MediaItemUserState | undefined): number | 
 // a started series has left. No badge is ever placed in this corner (see
 // CardOverlays), and it shows whether or not badges are on. The layer is
 // sized from the card width the same way the badges are.
-export default function CardWatchStatus({ userState, mode }: CardWatchStatusProps) {
-  if (mode === "off") return null;
+export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
   const played = userState?.played === true;
-  const left = mode === "remaining" ? remainingEpisodes(userState) : null;
+  const left = remainingEpisodes(userState);
   if (!played && left === null) return null;
 
   // Poster cards have no legacy CSS-variable pass for this corner; a browser

@@ -39,7 +39,6 @@ renderer follows, and the uploaded images badges can use.
   behind the text: without a `textColor` the text is black or white, whichever reads better on
   it, and the preset's text shadow is dropped. An accent the preset writes as text keeps that role
   only at a contrast ratio of at least 3 against the fill; below that it tints the fill instead.
-- `watchStatus` decides what the top-right corner shows (see below). Absent means `remaining`.
 - `items` holds one entry per badge: `enabled`, `position`, optional `accentColor` and `showIcon`,
   and optional uploaded-image references (see below). `order` ranks badges that share a position;
   an empty list means registry order.
@@ -55,18 +54,12 @@ schema still accepts `top-right` because documents stored before settings revisi
 client draws such a badge on the `right-edge` rail and writes `right-edge` when it saves. The top
 badge row stops short of the corner so a long badge never runs under the indicator.
 
-The indicator shows:
-
-| `watchStatus` | Watched title | Started series or season | Anything else |
-|---|---|---|---|
-| `remaining` | check | episodes left | nothing |
-| `watched` | check | nothing | nothing |
-| `off` | nothing | nothing | nothing |
-
-"Started" means the profile has watched at least one episode and has not finished; the counts come
-from `user_state.watched_count` and `user_state.unplayed_count`, which the v2 catalog sends only
-for a series or season the profile has not finished. An untouched show shows nothing, so a
-library of new shows is not covered in numbers.
+The indicator shows a check on a watched title and the number of episodes left on a started series
+or season, and nothing on anything else. It is not a setting: every poster card draws it, whether
+or not badges are on, and wide cards never do. "Started" means the profile has watched at least one
+episode and has not finished; the counts come from `user_state.watched_count` and
+`user_state.unplayed_count`, which the v2 catalog sends only for a series or season the profile has
+not finished. An untouched show shows nothing, so a library of new shows is not covered in numbers.
 
 ## Uploaded images
 
@@ -107,7 +100,7 @@ no value images: their values are continuous or carry a single meaning.
 
 ## Compatibility
 
-Settings revision 25 added the edge positions, the `plate` and `band` presets, `watchStatus`,
-`style`, and the image references. A server below revision 25 rejects a document that uses any of
+Settings revision 25 added the edge positions, the `plate` and `band` presets, `style`, and the
+image references. A server below revision 25 rejects a document that uses any of
 them, so a client writes them only when the server advertises revision 25 or later; the web client
 otherwise maps the edge rails back to the corner on the same side and drops the rest.

@@ -1334,7 +1334,7 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 
 	valid := map[string]string{
 		"catalog.metadata_language_overrides": `{"ja":"en","no":"x-silo-original"}`,
-		"ui.card_overlays": `{"version":2,"preset":"plate","watchStatus":"watched",` +
+		"ui.card_overlays": `{"version":2,"preset":"plate",` +
 			`"style":{"size":1.4,"shape":"rounded","background":"#000000b3","textColor":"#ffffff",` +
 			`"borderColor":"#ffffff26","borderWidth":1,"fontWeight":"extrabold","uppercase":false,"shadow":true},` +
 			`"order":["hdr","year"],` +

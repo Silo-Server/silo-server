@@ -35,21 +35,18 @@ import {
   OVERLAY_REGISTRY,
   isOverlayOffered,
   POSITION_OPTIONS,
-  WATCH_STATUS_OPTIONS,
   parseOverlayPrefs,
   serializeOverlayPrefs,
-  watchStatusOf,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayPosition,
-  type WatchStatusMode,
 } from "@/lib/overlays";
 import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
-import { SETTINGS_CONTROL_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { SettingField, SettingFieldRow } from "./SettingField";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const FAVICON_ACCEPT =
@@ -305,31 +302,6 @@ export default function AppearanceSettings() {
             onChange={(v) => form.setValue(OVERLAYS_ENABLED_KEY, v)}
             restartRequired={restartKeys.has(OVERLAYS_ENABLED_KEY)}
           />
-
-          {supportsStyles ? (
-            <SettingFieldRow
-              label="Watch status"
-              description="What a poster's top-right corner shows, for people who have not chosen. It shows whether or not badges are on."
-            >
-              <Select
-                value={watchStatusOf(overlayPrefs)}
-                onValueChange={(v) =>
-                  setOverlayPrefs({ ...overlayPrefs, watchStatus: v as WatchStatusMode })
-                }
-              >
-                <SelectTrigger className={SETTINGS_CONTROL_WIDTH} aria-label="Watch status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WATCH_STATUS_OPTIONS.map((choice) => (
-                    <SelectItem key={choice.value} value={choice.value}>
-                      {choice.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
-          ) : null}
 
           {/* Row and preview are one list child so the hairline falls after
               the pair, not between them. The preview gets a full-width framed

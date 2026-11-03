@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { MediaItemUserState } from "@/api/types";
-import type { WatchStatusMode } from "@/lib/overlays";
 import CardWatchStatus from "./CardWatchStatus";
 
 const base = { is_favorite: false, in_watchlist: false };
@@ -17,17 +16,14 @@ const untouched: MediaItemUserState = {
 const movie: MediaItemUserState = { ...base, played: false };
 
 describe("CardWatchStatus", () => {
-  it.each<[string, MediaItemUserState | undefined, WatchStatusMode, string | null]>([
-    ["a watched title", watched, "remaining", "Watched"],
-    ["a started series", started, "remaining", "3 episodes left"],
-    ["an untouched series", untouched, "remaining", null],
-    ["an unwatched movie", movie, "remaining", null],
-    ["no user state", undefined, "remaining", null],
-    ["a started series in watched-only mode", started, "watched", null],
-    ["a watched title in watched-only mode", watched, "watched", "Watched"],
-    ["a watched title with the corner off", watched, "off", null],
-  ])("shows the right thing for %s", (_name, userState, mode, expected) => {
-    const { container } = render(<CardWatchStatus userState={userState} mode={mode} />);
+  it.each<[string, MediaItemUserState | undefined, string | null]>([
+    ["a watched title", watched, "Watched"],
+    ["a started series", started, "3 episodes left"],
+    ["an untouched series", untouched, null],
+    ["an unwatched movie", movie, null],
+    ["no user state", undefined, null],
+  ])("shows the right thing for %s", (_name, userState, expected) => {
+    const { container } = render(<CardWatchStatus userState={userState} />);
     if (expected === null) {
       expect(container).toBeEmptyDOMElement();
     } else {

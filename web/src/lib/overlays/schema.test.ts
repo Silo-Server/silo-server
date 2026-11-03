@@ -20,11 +20,12 @@ describe("parseOverlayPrefs", () => {
     expect(prefs.items.rating_imdb.position).toBe("right-edge");
   });
 
-  it("keeps the style, watch status and images it accepts and drops the rest", () => {
+  it("keeps the style and images it accepts and drops the rest", () => {
     const prefs = parseOverlayPrefs({
       version: 2,
       preset: "plate",
-      watchStatus: "sometimes",
+      // Written by an earlier build of this revision; the corner is no longer a choice.
+      watchStatus: "watched",
       style: {
         size: 1.5,
         shape: "blob",
@@ -43,7 +44,7 @@ describe("parseOverlayPrefs", () => {
       },
     });
     expect(prefs.preset).toBe("plate");
-    expect(prefs.watchStatus).toBeUndefined();
+    expect(prefs).not.toHaveProperty("watchStatus");
     expect(prefs.style).toEqual({ size: 1.5, background: "#000000b3" });
     expect(prefs.items.resolution).toMatchObject({
       position: "left-edge",
@@ -69,7 +70,6 @@ describe("overlayPrefsForServer", () => {
   const prefs = parseOverlayPrefs({
     version: 2,
     preset: "band",
-    watchStatus: "off",
     style: { size: 1.2 },
     order: [],
     items: {
@@ -82,7 +82,6 @@ describe("overlayPrefsForServer", () => {
     const storable = overlayPrefsForServer(prefs, { manifestRevision: 24, storedIds: new Set() });
     expect(storable.preset).toBe("classic");
     expect(storable).not.toHaveProperty("style");
-    expect(storable).not.toHaveProperty("watchStatus");
     expect(storable.items.rating_imdb).toEqual({ enabled: true, position: "top-left" });
     expect(storable.items.show_status.position).toBe("top-right");
   });
