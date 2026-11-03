@@ -645,6 +645,13 @@
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
 
+# What a screen gates a plugin's per-account setting on: only global config
+# entries that still carry a value count, a cleared entry does not, and one read
+# covering several installations keeps their answers apart.
+./internal/plugins TestListConfiguredGlobalConfigKeysCountsOnlyFilledInEntries
+./internal/plugins TestListConfiguredGlobalConfigKeysTreatsAnEmptyObjectAsUnset
+./internal/plugins TestListConfiguredGlobalConfigKeysTreatsBlankStringsAsUnset
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
