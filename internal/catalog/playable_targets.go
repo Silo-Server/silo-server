@@ -464,23 +464,5 @@ func progressUpdatedAfter(candidate, current string) bool {
 // real cost, which crosses jit_above_cost for a page of cards; compiling then
 // takes about twice as long as running the query.
 func (r *PlayableTargetResolver) queryPlayableTargets(ctx context.Context, query string, args []any, scan func(pgx.Rows) error) error {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
-		return fmt.Errorf("disabling JIT: %w", err)
-	}
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		if err := scan(rows); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	return queryWithoutJIT(ctx, r.pool, query, args, scan)
 }

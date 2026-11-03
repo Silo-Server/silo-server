@@ -57,6 +57,9 @@
 # A finished regular episode does not push a half-watched special off Continue Watching.
 ./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
 
+# A failed play-target read returns its error and the pool reuses its connection.
+./internal/catalog TestPlayableTargetQueryFailureKeepsConnection
+
 # Series air-date sort keys advance when a known episode airs. The latest
 # available episode air date counts only episodes with a file in a library:
 # files the bulk episode link attaches count, also when an air-date correction

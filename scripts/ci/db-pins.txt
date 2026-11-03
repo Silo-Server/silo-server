@@ -119,6 +119,10 @@
 ./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
 ./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
 
+# Home Recently Added TV: the newest cards take one round trip for the cutoff
+# and one for the window, with the JIT guard in the same batches.
+./internal/catalog TestRecentTVListNewestRoundTrips
+
 # Continue Watching: only an in-progress episode sets how far back the
 # superseded walk reads the profile's completed rows.
 ./internal/catalog TestSupersededCutoffIgnoresInProgressMoviesPostgres
