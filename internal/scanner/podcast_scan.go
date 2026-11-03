@@ -71,7 +71,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 			continue
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || SkippedDirName(entry.Name()) {
 				continue
 			}
 			subPath := filepath.Join(root, entry.Name())
