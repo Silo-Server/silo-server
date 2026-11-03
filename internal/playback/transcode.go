@@ -3112,7 +3112,7 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 	if err != nil || !dv81 {
 		return lease, err
 	}
-	if err := s.convertDV81(name, lease.Generation, sessionID); err != nil {
+	if err := s.convertDV81(name, lease, sessionID); err != nil {
 		_ = lease.Close()
 		return nil, err
 	}
@@ -3142,7 +3142,14 @@ func (s *TranscodeSession) openSegment(name string) (lease *SegmentLease, dv81 b
 	// Files opened through a Root hold their own descriptor and stay valid
 	// after the Root closes.
 	defer func() { _ = root.Close() }()
-	segment, err := root.Open(name)
+	// A DV7ToDV81BitstreamFilter session rewrites the leased file itself, so
+	// a restart that replaces the name meanwhile cannot split what is
+	// converted from what is served.
+	flag := os.O_RDONLY
+	if s.opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter {
+		flag = os.O_RDWR
+	}
+	segment, err := root.OpenFile(name, flag, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, false, "", ErrSegmentNotFound
@@ -3176,10 +3183,10 @@ func (s *TranscodeSession) openSegment(name string) (lease *SegmentLease, dv81 b
 // convert is not served under the plan's Dolby Vision 8.1 claim, so the client
 // replans onto the next recipe. An init.mp4 that does not parse yet reads as
 // not ready, like an empty one; one that parses but cannot carry 8.1 fails.
-func (s *TranscodeSession) convertDV81(name string, generation uint64, sessionID string) error {
+func (s *TranscodeSession) convertDV81(name string, lease *SegmentLease, sessionID string) error {
 	s.dv81Mu.Lock()
 	defer s.dv81Mu.Unlock()
-	if name != hlsInitSegmentName && (!strings.HasSuffix(name, ".m4s") || s.dv81Converted[name] == generation+1) {
+	if name != hlsInitSegmentName && (!strings.HasSuffix(name, ".m4s") || s.dv81Converted[name] == lease.Generation+1) {
 		return nil
 	}
 	root, err := os.OpenRoot(s.outputDir)
@@ -3187,12 +3194,17 @@ func (s *TranscodeSession) convertDV81(name string, generation uint64, sessionID
 		return ErrSegmentNotFound
 	}
 	defer func() { _ = root.Close() }()
-	initFile, err := root.OpenFile(hlsInitSegmentName, os.O_RDWR, 0)
-	if err != nil {
-		return ErrSegmentNotFound
+	// The leased file when it is init.mp4. For a media segment the current
+	// init.mp4 only supplies the track id and NAL length size, which a
+	// restart of the same recipe does not change.
+	initFile := lease.File
+	if name != hlsInitSegmentName {
+		if initFile, err = root.OpenFile(hlsInitSegmentName, os.O_RDWR, 0); err != nil {
+			return ErrSegmentNotFound
+		}
+		defer func() { _ = initFile.Close() }()
 	}
 	track, err := dovirpu.ConvertInitFile(initFile)
-	_ = initFile.Close()
 	if errors.Is(err, dovirpu.ErrUnsupportedInit) {
 		slog.Error("playback: dolby vision 8.1 init segment cannot be converted", "session", sessionID, "error", err)
 		return fmt.Errorf("convert init segment to dolby vision 8.1: %w", err)
@@ -3204,15 +3216,7 @@ func (s *TranscodeSession) convertDV81(name string, generation uint64, sessionID
 	if name == hlsInitSegmentName {
 		return nil
 	}
-	f, err := root.OpenFile(name, os.O_RDWR, 0)
-	if os.IsNotExist(err) {
-		return ErrSegmentNotFound // pruned or replaced by a restart meanwhile
-	}
-	if err != nil {
-		return fmt.Errorf("open segment for dolby vision 8.1 conversion: %w", err)
-	}
-	stats, err := dovirpu.ConvertSegmentFile(f, track)
-	_ = f.Close()
+	stats, err := dovirpu.ConvertSegmentFile(lease.File, track)
 	if err != nil {
 		slog.Error("playback: dolby vision 8.1 segment conversion failed", "session", sessionID, "segment", name, "error", err)
 		return fmt.Errorf("convert segment to dolby vision 8.1: %w", err)
@@ -3225,7 +3229,7 @@ func (s *TranscodeSession) convertDV81(name string, generation uint64, sessionID
 		s.dv81Converted = make(map[string]uint64)
 	}
 	// Stored as generation+1 so the zero value means "never converted".
-	s.dv81Converted[name] = generation + 1
+	s.dv81Converted[name] = lease.Generation + 1
 	return nil
 }
 
