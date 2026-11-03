@@ -154,6 +154,40 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 	}
 }
 
+// A watched item with a resume position is a rewatch in progress. A played
+// mark on it must clear the position, as Jellyfin does, or the client reads it
+// back as in progress (#3257).
+func TestMarkPlayedClearsRewatchPosition(t *testing.T) {
+	for _, query := range []string{"", "datePlayed=2025-02-03T04:05:06Z"} {
+		t.Run("query="+query, func(t *testing.T) {
+			store := newJellycompatUserStore(t)
+			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
+			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+			codec := NewResourceIDCodec()
+			id := codec.EncodeStringID(EncodedIDItem, "episode-1")
+			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "episode-1", Type: "episode", Runtime: 100}}, service, codec, &config.Config{})
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+			rec := httptest.NewRecorder()
+			h.HandleUpdateUserData(rec, viewerRequest("POST", "/", `{"Played":true,"PlaybackPositionTicks":70000000,"LastPlayedDate":"2025-01-01T00:00:00Z"}`, "itemId", id, session))
+			if rec.Code != 200 {
+				t.Fatalf("set rewatch state: %d %s", rec.Code, rec.Body.String())
+			}
+
+			rec = httptest.NewRecorder()
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+query, "", "itemId", id, session))
+			var dto itemUserDataDTO
+			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
+			if rec.Code != 200 || !dto.Played || dto.PlaybackPositionTicks != 0 {
+				t.Fatalf("mark played kept the rewatch position: %d %+v", rec.Code, dto)
+			}
+			progress, err := store.GetProgress(t.Context(), session.ProfileID, "episode-1")
+			if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
+				t.Fatalf("stored progress = %+v, %v; want watched with no position", progress, err)
+			}
+		})
+	}
+}
+
 type failingViewerStore struct{ userstore.UserStore }
 
 func (failingViewerStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
@@ -410,7 +444,7 @@ func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
 	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
 	date := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	ids := []string{"episode-1", "episode-2"}
-	if err := service.MarkPlayedBatchAt(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, ids, date); err != nil {
+	if err := service.MarkPlayedBatchAt(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, ids, date, false); err != nil {
 		t.Fatal(err)
 	}
 	dates, err := jellycompatProgressDates(t.Context(), store, "profile-1", ids)

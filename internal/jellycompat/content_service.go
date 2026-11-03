@@ -66,7 +66,10 @@ type UserDataService interface {
 	ListProgressByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]*upstreamProgress, error)
 	GetProgress(ctx context.Context, session *Session, contentID string) (*upstreamProgress, error)
 	MarkPlayed(ctx context.Context, session *Session, contentID string) error
-	MarkPlayedBatch(ctx context.Context, session *Session, contentIDs []string) error
+	// MarkPlayedBatch marks contentIDs played. recordRewatch is for a movie or
+	// episode mark: one already watched with a resume position records
+	// another play and loses the position.
+	MarkPlayedBatch(ctx context.Context, session *Session, contentIDs []string, recordRewatch bool) error
 	MarkUnplayed(ctx context.Context, session *Session, contentID string) error
 	MarkUnplayedBatch(ctx context.Context, session *Session, contentIDs []string) error
 }
