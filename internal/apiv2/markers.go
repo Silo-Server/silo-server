@@ -42,7 +42,7 @@ type MarkerOccurrence struct {
 	Kind                    string   `json:"kind" enum:"intro,credits,recap,preview"`
 	StartSeconds            float64  `json:"start_seconds" minimum:"0"`
 	EndSeconds              float64  `json:"end_seconds" minimum:"0"`
-	ThumbnailURL            string   `json:"thumbnail_url,omitempty"`
+	ThumbnailURL            string   `json:"thumbnail_url,omitempty" format:"uri-reference"`
 	ThumbnailThumbhash      string   `json:"thumbnail_thumbhash,omitempty"`
 	ThumbnailCaptureSeconds *float64 `json:"thumbnail_capture_seconds,omitempty" minimum:"0" doc:"Captured source timestamp; marker previews sample the marker start"`
 }

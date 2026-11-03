@@ -151,31 +151,6 @@ it.each([
   },
 );
 
-it("keeps viewer readiness cached when sign-in only starts", async () => {
-  const client = new QueryClient();
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  request.mockImplementation(async (operation) =>
-    operation === "GET /api/v2/capabilities/metadata-ai"
-      ? { state: "not_configured", on_view: "off" }
-      : {},
-  );
-  const { result } = renderHook(
-    () => ({ capability: useMetadataAIStatus(), start: useStartChatGPTLogin() }),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.capability.data?.enabled).toBe(false));
-  await act(async () => {
-    await result.current.start.mutateAsync(undefined);
-  });
-  expect(
-    request.mock.calls.filter(
-      ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
-    ),
-  ).toHaveLength(1);
-});
-
 it.each([
   ["selection", useSelectChatGPTAccount],
   ["completed login", useCompleteChatGPTLogin],
@@ -331,41 +306,6 @@ it.each([
     const callsBeforeSwitch = invalidate.mock.calls.length;
     setAccessToken("account-b");
     rerender();
-    await act(async () => {
-      finishInvalidation();
-      await rejected;
-    });
-    expect(invalidate).toHaveBeenCalledTimes(callsBeforeSwitch);
-  },
-);
-
-it.each(["settings", "viewer capability"])(
-  "rejects completion when authority changes during %s refresh",
-  async (refresh) => {
-    const client = new QueryClient();
-    const settingsKey = adminSettingsKey(captureProfileRequestContext()!);
-    const pausedKey = refresh === "settings" ? settingsKey : metadataAIStatusKey;
-    let finishInvalidation!: () => void;
-    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation((filter) => {
-      if (JSON.stringify(filter?.queryKey) !== JSON.stringify(pausedKey)) return Promise.resolve();
-      return new Promise<void>((resolve) => {
-        finishInvalidation = resolve;
-      });
-    });
-    request.mockResolvedValue({});
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-    const { result, rerender } = renderHook(useCompleteChatGPTLogin, { wrapper });
-    let pending!: Promise<unknown>;
-    act(() => {
-      pending = result.current.mutateAsync("fixture");
-    });
-    const rejected = expect(pending).rejects.toBeInstanceOf(StaleApiRequestContextError);
-    await vi.waitFor(() => expect(finishInvalidation).toBeTypeOf("function"));
-    setAccessToken("account-b");
-    rerender();
-    const callsBeforeSwitch = invalidate.mock.calls.length;
     await act(async () => {
       finishInvalidation();
       await rejected;

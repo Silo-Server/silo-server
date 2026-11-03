@@ -32,6 +32,11 @@ export function preconnectToStreamOrigin(streamUrl: string): void {
  * cannot set an Authorization header, by appending the access token as a query
  * parameter.
  *
+ * Only API-relative paths get the token. An absolute URL names a proxy node
+ * origin, which authorizes the request from the signed stream token already in
+ * the URL and never reads the login token, so sending it would only hand the
+ * viewer's credential to the node.
+ *
  * Under protocol v3 the plan's `stream.url` is already fully anchored by the
  * server — the seek position, the stream token, and every other routing
  * decision are baked in. This helper must not add playback semantics of its
@@ -42,9 +47,13 @@ export function buildPlayerStreamUrl(
   streamPath: string,
   token: string | null,
 ): string {
+  // Absolute distributed URLs and their signed routing stay untouched, and
+  // never carry the login token.
+  if (streamPath.startsWith("http://") || streamPath.startsWith("https://")) {
+    return streamPath;
+  }
   // Realtime subtitle events carry domain-relative paths; v2 plans may also
-  // replay older local paths. Project only API-local delivery routes, keeping
-  // absolute distributed URLs and their signed routing untouched.
+  // replay older local paths. Project only API-local delivery routes.
   streamPath = streamPath.replace(
     /^(?:\/api\/v1)?\/(stream\/|playback\/transcode\/)/,
     "/api/v2/$1",
@@ -54,10 +63,7 @@ export function buildPlayerStreamUrl(
   const apiRoot = /^\/api\/v[12]\//.test(streamPath)
     ? apiBaseUrl.replace(/\/api\/v[12]\/?$/, "")
     : apiBaseUrl;
-  const base =
-    streamPath.startsWith("http://") || streamPath.startsWith("https://")
-      ? streamPath
-      : `${apiRoot}${streamPath}`;
+  const base = `${apiRoot}${streamPath}`;
   if (!token) {
     return base;
   }

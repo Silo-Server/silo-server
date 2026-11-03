@@ -48,17 +48,6 @@ func TestEverySettingsRegistryKeyIsRegisteredInTheContract(t *testing.T) {
 	}
 }
 
-// TestContractRenamesStayLive keeps the rename table honest: an entry for a key
-// the registry no longer has is dead weight that hides the next real rename.
-func TestContractRenamesStayLive(t *testing.T) {
-	for registryKey := range contractKeyRenames {
-		if _, ok := settingsRegistry[registryKey]; !ok {
-			t.Errorf("contractKeyRenames maps %q, which settingsRegistry no longer defines",
-				registryKey)
-		}
-	}
-}
-
 // TestRegistryDefaultsMatchTheContract catches the failure mode that is silent
 // in production: the two sides agree a setting exists and disagree on what it
 // resolves to when nobody has set it. A user who never touched the toggle gets

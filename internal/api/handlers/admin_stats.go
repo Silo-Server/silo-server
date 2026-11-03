@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -161,25 +162,34 @@ func (p *AdminStatsProvider) Close() {
 	p.cache.Close()
 }
 
+// queryAdminStats counts what the libraries show: titles in a library and
+// present files. Titles and files held by the scanner's file removal grace
+// are left out (see docs/architecture/missing-files.md).
 func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchProviderLister) (AdminStats, error) {
 	if pool == nil {
 		return AdminStats{}, fmt.Errorf("database not configured")
 	}
 
-	var (
-		totalUsers      int64
-		totalItems      int64
-		totalFiles      int64
-		totalMovies     int64
-		totalMovieFiles int64
-		totalShows      int64
-		totalShowFiles  int64
-		advisoryTitles  int64
-		activeStreams   int64
-		totalStorage    int64
-	)
+	stats, err := queryAdminCountStats(ctx, pool)
+	if err != nil {
+		return AdminStats{}, err
+	}
 
-	row := pool.QueryRow(ctx, `
+	activity, err := queryWatchProviderActivity(ctx, pool)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to query watch provider admin stats", "component", "api", "error", err)
+		activity = nil
+	}
+	stats.WatchProviders = mergeWatchProviderStats(listWatchProviders(providers), activity)
+	return stats, nil
+}
+
+// queryAdminCountStats reads every count queryAdminStats reports in one
+// statement. Tests pass a transaction that holds one snapshot while other
+// tests write the shared database.
+func queryAdminCountStats(ctx context.Context, q rowQuerier) (AdminStats, error) {
+	var s AdminStats
+	err := q.QueryRow(ctx, `
 		WITH user_stats AS (
 			SELECT COUNT(*)::bigint AS total_users
 			FROM users
@@ -191,6 +201,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 				COUNT(*) FILTER (WHERE type = 'series')::bigint AS total_shows,
 				COUNT(*) FILTER (WHERE type IN ('movie', 'series') AND advisory_age IS NOT NULL)::bigint AS advisory_titles
 			FROM media_items
+			WHERE `+catalog.InSomeLibraryWhere("media_items.content_id")+`
 		),
 		file_stats AS (
 			SELECT
@@ -222,6 +233,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 				JOIN media_folders ON media_folders.id = media_files.media_folder_id
 				LEFT JOIN media_items ON media_items.content_id = media_files.content_id
 				LEFT JOIN episodes ON episodes.content_id = media_files.episode_id
+				WHERE media_files.missing_since IS NULL
 			) classified_files
 		),
 		session_stats AS (
@@ -243,41 +255,12 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 		CROSS JOIN item_stats
 		CROSS JOIN file_stats
 		CROSS JOIN session_stats
-	`)
-	if err := row.Scan(
-		&totalUsers,
-		&totalItems,
-		&totalFiles,
-		&totalMovies,
-		&totalMovieFiles,
-		&totalShows,
-		&totalShowFiles,
-		&advisoryTitles,
-		&activeStreams,
-		&totalStorage,
-	); err != nil {
+	`).Scan(&s.TotalUsers, &s.TotalItems, &s.TotalFiles, &s.TotalMovies, &s.TotalMovieFiles,
+		&s.TotalShows, &s.TotalShowFiles, &s.AdvisoryTitles, &s.ActiveStreams, &s.TotalStorageBytes)
+	if err != nil {
 		return AdminStats{}, fmt.Errorf("querying admin stats: %w", err)
 	}
-
-	activity, err := queryWatchProviderActivity(ctx, pool)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to query watch provider admin stats", "component", "api", "error", err)
-		activity = nil
-	}
-
-	return AdminStats{
-		TotalUsers:        int(totalUsers),
-		TotalItems:        int(totalItems),
-		TotalFiles:        int(totalFiles),
-		TotalMovies:       int(totalMovies),
-		TotalMovieFiles:   int(totalMovieFiles),
-		TotalShows:        int(totalShows),
-		TotalShowFiles:    int(totalShowFiles),
-		AdvisoryTitles:    int(advisoryTitles),
-		ActiveStreams:     int(activeStreams),
-		TotalStorageBytes: totalStorage,
-		WatchProviders:    mergeWatchProviderStats(listWatchProviders(providers), activity),
-	}, nil
+	return s, nil
 }
 
 // listWatchProviders tolerates both a nil interface and a typed-nil registry.

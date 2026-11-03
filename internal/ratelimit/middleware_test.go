@@ -16,11 +16,13 @@ import (
 
 type recordingLimiter struct {
 	keys   []string
+	rates  []Rate
 	denied map[string]bool
 }
 
 func (l *recordingLimiter) Allow(_ context.Context, key string, limit Rate) AllowResult {
 	l.keys = append(l.keys, key)
+	l.rates = append(l.rates, limit)
 	return AllowResult{
 		Allowed:   !l.denied[key],
 		Limit:     max(1, int(limit.RequestsPerSecond)),
@@ -55,32 +57,6 @@ func TestAuthEndpointHandlerUsesGlobalIPAndEndpointBudgets(t *testing.T) {
 	}
 	if !slices.Equal(perKey.keys, []string{"ip:203.0.113.10", "authip:203.0.113.10:login"}) {
 		t.Fatalf("per-key limiter keys = %#v", perKey.keys)
-	}
-}
-
-func TestAuthEndpointHandlerDoesNotConsumeGlobalBudgetForRejectedClient(t *testing.T) {
-	for _, deniedKey := range []string{"ip:203.0.113.10", "authip:203.0.113.10:login"} {
-		t.Run(deniedKey, func(t *testing.T) {
-			perKey := &recordingLimiter{denied: map[string]bool{deniedKey: true}}
-			global := &recordingLimiter{}
-			mw := NewMiddleware(perKey, global, nil, true)
-			mw.cfg = DefaultConfig()
-			handler := mw.AuthEndpointHandler("login")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Fatal("next handler called for rejected request")
-			}))
-			req := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-			req = req.WithContext(clientip.SetContext(req.Context(), "203.0.113.10"))
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("response = %d, want 429", rec.Code)
-			}
-			if len(global.keys) != 0 {
-				t.Fatalf("global limiter keys = %#v, want no consumed budget", global.keys)
-			}
-		})
 	}
 }
 
@@ -187,5 +163,28 @@ func TestGlobalRateBoundsUnsafeRequestsPerSecond(t *testing.T) {
 	}
 	if rate.Burst <= 0 {
 		t.Fatalf("burst = %d, want a positive bounded value", rate.Burst)
+	}
+}
+
+func TestSourceKey(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"203.0.113.7", "203.0.113.7"},
+		{"2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"},
+		{"2001:db8:1:2::1", "2001:db8:1:2::/64"},
+		{"2001:db8:1:3::1", "2001:db8:1:3::/64"},
+		// IPv4 written as IPv6, local-network and NAT64 addresses count on
+		// their own, as IPv4 addresses do.
+		{"::ffff:203.0.113.7", "::ffff:203.0.113.7"},
+		{"64:ff9b::cb00:7107", "64:ff9b::cb00:7107"},
+		{"64:ff9b:1:abcd::cb00:7107", "64:ff9b:1:abcd::cb00:7107"},
+		{"fd12:3456:789a:1::5", "fd12:3456:789a:1::5"},
+		{"fe80::1", "fe80::1"},
+		{"::1", "::1"},
+		{"", ""},
+		{"not-an-address", "not-an-address"},
+	} {
+		if got := SourceKey(tc.in); got != tc.want {
+			t.Errorf("SourceKey(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

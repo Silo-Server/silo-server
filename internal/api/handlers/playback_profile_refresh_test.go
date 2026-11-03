@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -22,31 +20,6 @@ func (c *countingSignalsNotifier) NotifySignalsChanged(context.Context, int, str
 type playbackRefreshDriver struct {
 	ping func(t *testing.T, position float64)
 	stop func(t *testing.T)
-}
-
-func newV1PlaybackRefreshDriver(t *testing.T, h *PlaybackHandler, manager *playback.SessionManager, file *models.MediaFile) playbackRefreshDriver {
-	session, err := manager.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := map[string]string{"session_id": session.ID}
-	return playbackRefreshDriver{
-		ping: func(t *testing.T, position float64) {
-			rr := httptest.NewRecorder()
-			body := fmt.Appendf(nil, `{"position":%g,"is_paused":false}`, position)
-			h.HandleUpdateProgress(rr, playbackTestRequest(http.MethodPost, "/", body, params))
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("v1 progress at %v: status = %d, body = %s", position, rr.Code, rr.Body.String())
-			}
-		},
-		stop: func(t *testing.T) {
-			rr := httptest.NewRecorder()
-			h.HandleStopPlayback(rr, playbackTestRequest(http.MethodDelete, "/", nil, params))
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("v1 stop: status = %d, body = %s", rr.Code, rr.Body.String())
-			}
-		},
-	}
 }
 
 func newV2PlaybackRefreshDriver(t *testing.T, h *PlaybackHandler, manager *playback.SessionManager, file *models.MediaFile) playbackRefreshDriver {
@@ -83,14 +56,13 @@ func newV2PlaybackRefreshDriver(t *testing.T, h *PlaybackHandler, manager *playb
 // taste-profile refresh to changes that move the profile: a heartbeat that
 // only advances the position neither marks the profile stale nor queues a
 // rebuild; the heartbeat that crosses the watched threshold and the stop each
-// do once. Both native surfaces share the progress writer.
+// do once.
 func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing.T) {
 	const positionOnlyPings = 2
 	// 90% of 3600s is the default watched threshold (3240s).
 	file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
 
 	for name, newDriver := range map[string]func(*testing.T, *PlaybackHandler, *playback.SessionManager, *models.MediaFile) playbackRefreshDriver{
-		"v1": newV1PlaybackRefreshDriver,
 		"v2": newV2PlaybackRefreshDriver,
 	} {
 		t.Run(name, func(t *testing.T) {

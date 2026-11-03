@@ -123,10 +123,12 @@ export default function LibraryRecommended({
     });
 
     nextIds.forEach((sectionId) => {
+      const featured = layout.some((section) => section.id === sectionId && section.featured);
       void queryClient
         .fetchQuery<HomeSectionItemsResponse>({
           queryKey: sectionKeys.libraryItems(libraryId, sectionId),
-          queryFn: ({ signal }) => fetchLibrarySectionItems(libraryId, sectionId, { signal }),
+          queryFn: ({ signal }) =>
+            fetchLibrarySectionItems(libraryId, sectionId, { signal, featured }),
           staleTime: SECTION_STALE_TIME,
         })
         .then((response) => {

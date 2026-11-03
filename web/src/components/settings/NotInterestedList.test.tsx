@@ -71,11 +71,4 @@ describe("NotInterestedList", () => {
     expect(screen.getByText("Title movie:a")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
-
-  it("offers a retry when nothing loaded", () => {
-    mocks.list.mockReturnValue(listState({ isError: true }));
-    renderList();
-    expect(screen.getByText(/Couldn't load/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-  });
 });

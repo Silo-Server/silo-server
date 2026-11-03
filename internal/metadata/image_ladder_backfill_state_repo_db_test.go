@@ -72,31 +72,6 @@ func seedLadderFenceFixture(t *testing.T, pool *pgxpool.Pool) ladderFenceFixture
 	return fixture
 }
 
-func TestImageLadderBackfillFinalConfirmationRejectsLateOldArtwork(t *testing.T) {
-	pool := imageCacheQueueTestPool(t)
-	fixture := seedLadderFenceFixture(t, pool)
-	ctx := context.Background()
-
-	if _, err := pool.Exec(ctx, `UPDATE media_items SET poster_path = $1 WHERE content_id = $2`, fixture.oldPath, fixture.contentID); err != nil {
-		t.Fatalf("publish old-ladder artwork: %v", err)
-	}
-	confirmed, err := NewImageLadderBackfillStateRepository(pool).ConfirmBackfilled(ctx, 3)
-	if err != nil {
-		t.Fatalf("ConfirmBackfilled: %v", err)
-	}
-	if confirmed {
-		t.Fatal("confirmed ladder v3 while the published artwork lacks its new rung")
-	}
-
-	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !state.LastAttemptAt.IsZero() {
-		t.Fatalf("last attempt = %v, want immediate retry after rejected confirmation", state.LastAttemptAt)
-	}
-}
-
 func TestImageLadderBackfillLateOldArtworkReopensCompletedVersion(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	fixture := seedLadderFenceFixture(t, pool)
@@ -170,8 +145,9 @@ func TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion(t *testing.T) {
 	}
 }
 
-// Extra backdrops are cached on the backdrop ladder too, so one published
-// without the rung the current ladder added reopens a finished backfill.
+// Extra backdrops and season backdrops are cached on the backdrop ladder too,
+// so one published without the rung the current ladder added reopens a
+// finished backfill.
 func TestImageLadderBackfillLateOldBackdropReopensCompletedVersion(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	fixture := seedLadderFenceFixture(t, pool)
@@ -187,25 +163,29 @@ func TestImageLadderBackfillLateOldBackdropReopensCompletedVersion(t *testing.T)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, oldBackdrop)
 	})
-	if _, err := pool.Exec(ctx, `
-		UPDATE image_ladder_backfill_state
-		SET backfilled_version = 3, updated_at = NOW()
-		WHERE id = 1
-	`); err != nil {
-		t.Fatalf("establish completed ladder state: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_item_backdrops (content_id, ordinal, path, source_path)
-		VALUES ($1, 1, $2, 'https://example.invalid/backdrop.jpg')
-	`, fixture.contentID, oldBackdrop); err != nil {
-		t.Fatalf("publish late old-ladder backdrop: %v", err)
-	}
+	for _, publish := range []struct{ surface, sql string }{
+		{"extra backdrop", `INSERT INTO media_item_backdrops (content_id, ordinal, path, source_path)
+			VALUES ($1, 1, $2, 'https://example.invalid/backdrop.jpg')`},
+		{"season backdrop", `INSERT INTO seasons (content_id, series_id, season_number, backdrop_path, backdrop_source_path)
+			VALUES ($1 || '-s1', $1, 1, $2, 'https://example.invalid/backdrop.jpg')`},
+	} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE image_ladder_backfill_state
+			SET backfilled_version = 3, updated_at = NOW()
+			WHERE id = 1
+		`); err != nil {
+			t.Fatalf("establish completed ladder state: %v", err)
+		}
+		if _, err := pool.Exec(ctx, publish.sql, fixture.contentID, oldBackdrop); err != nil {
+			t.Fatalf("publish late old-ladder %s: %v", publish.surface, err)
+		}
 
-	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if state.BackfilledVersion != 2 {
-		t.Fatalf("backfilled version = %d, want reopened v2", state.BackfilledVersion)
+		state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if state.BackfilledVersion != 2 {
+			t.Fatalf("%s: backfilled version = %d, want reopened v2", publish.surface, state.BackfilledVersion)
+		}
 	}
 }

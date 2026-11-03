@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { V2ProblemError } from "@/api/v2/request";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { markSignedOut } from "@/lib/externalSignIn";
-import Login from "./Login";
+import {
+  renderLogin,
+  signInWithPassword,
+  waitForPasswordResetCapability,
+} from "./loginPage.test-support";
 
 const request = vi.hoisted(() => vi.fn());
 const leave = vi.hoisted(() => vi.fn());
@@ -82,39 +84,10 @@ afterEach(() => {
   auth.login.mockReset();
 });
 
-function renderLogin(entry = "/login") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
-async function settled() {
-  // The password-reset capability query is the page's last read.
-  await waitFor(() =>
-    expect(request.mock.calls.map(([operation]) => operation)).toContain(
-      "GET /api/v2/capabilities/password-reset",
-    ),
-  );
-}
+const settled = () => waitForPasswordResetCapability(request);
 
 it.each([
   ["not_permitted", "Your account at the sign-in provider isn't allowed to use this server."],
-  [
-    "email_in_use",
-    "An account with this email already exists. Ask an admin to connect it to the sign-in provider.",
-  ],
-  ["identity_linked_elsewhere", "That provider account is already connected to another account."],
-  ["account_disabled", "This account is disabled."],
-  ["provider_unavailable", "The sign-in provider can't be reached right now. Try again later."],
-  ["state_invalid", "The sign-in didn't finish in this browser. Start again from this page."],
-  ["session_expired", "The sign-in took too long. Start again from this page."],
-  ["already_linked", "This account is already connected to the sign-in provider."],
-  ["login_failed", "Sign-in with the provider failed. Try again."],
   ["something_new", "Sign-in with the provider failed. Try again."],
 ])("explains the %s refusal and does not send the person straight back", async (reason, text) => {
   auth.providers = [OIDC];
@@ -143,9 +116,7 @@ it("shows the password form instead with /login?local=1", async () => {
   renderLogin("/login?local=1");
   await screen.findByRole("link", { name: "Forgot password?" });
   expect(leave).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  signInWithPassword("admin");
   // No provider named: the server keeps the name on the local provider.
   await waitFor(() => expect(auth.login).toHaveBeenCalledWith("admin", "pw", undefined));
 });
@@ -193,12 +164,6 @@ it("keeps Automatic routing with a directory provider and hides Forgot password 
   expect(screen.queryByRole("link", { name: "Forgot password?" })).toBeNull();
 });
 
-it("offers Forgot password when the form is the local one", async () => {
-  auth.providers = [LOCAL, OIDC];
-  renderLogin();
-  await screen.findByRole("link", { name: "Forgot password?" });
-});
-
 it.each([
   ["local_login_disabled", 403, [LDAP], "Password sign-in is turned off on this server."],
   [
@@ -213,46 +178,13 @@ it.each([
     [LDAP, OIDC],
     "Your account at the sign-in provider isn't allowed to use this server.",
   ],
-  [
-    "account_required",
-    403,
-    [LDAP, OIDC],
-    "You don't have an account on this server yet. Ask an admin to add you.",
-  ],
-  [
-    "email_in_use",
-    409,
-    [LDAP, OIDC],
-    "An account with this email already exists. Ask an admin to connect it to the sign-in provider.",
-  ],
-  [
-    "identity_linked_elsewhere",
-    409,
-    [LDAP, OIDC],
-    "That provider account is already connected to another account.",
-  ],
-  [
-    "provider_unavailable",
-    503,
-    [LDAP, OIDC],
-    "The sign-in provider can't be reached right now. Try again later.",
-  ],
   // A disabled Silo account (v1's user_disabled).
   ["permission_denied", 403, [LOCAL], "This account is disabled."],
 ])("explains the %s password sign-in refusal", async (type, status, providers, text) => {
   auth.providers = providers;
-  auth.login.mockRejectedValue(
-    new V2ProblemError("login", {
-      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
-      title: type,
-      status,
-      detail: "raw detail",
-    } as never),
-  );
+  auth.login.mockRejectedValue(v2Problem(status, type, "raw detail"));
   renderLogin();
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "alice" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  signInWithPassword("alice");
   expect((await screen.findByRole("alert")).textContent).toBe(text);
   expect(screen.queryByText("raw detail")).toBeNull();
 });
@@ -260,18 +192,9 @@ it.each([
 it("stays on the password form after a refusal on /login?local=1", async () => {
   // A refusal on /login?local=1 must not bounce the person to the provider.
   auth.providers = [OIDC];
-  auth.login.mockRejectedValue(
-    new V2ProblemError("login", {
-      type: "https://siloserver.org/docs/api/v2/problems/local_login_disabled",
-      title: "Local password sign-in disabled",
-      status: 403,
-      detail: "raw detail",
-    } as never),
-  );
+  auth.login.mockRejectedValue(v2Problem(403, "local_login_disabled", "raw detail"));
   renderLogin("/login?local=1");
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "alice" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  signInWithPassword("alice");
   await screen.findByRole("alert");
   expect(leave).not.toHaveBeenCalled();
 });

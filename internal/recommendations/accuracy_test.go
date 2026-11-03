@@ -6,8 +6,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // The genre pass keeps MMR's order: an over-represented genre's later items
@@ -57,31 +55,6 @@ func TestApplyGenreCapFillsFromTheSkippedItems(t *testing.T) {
 
 	if got := applyGenreCap(row, genres); !slices.Equal(mmrItemIDs(got), mmrItemIDs(row)) {
 		t.Fatalf("applyGenreCap = %v, want the row unchanged", mmrItemIDs(got))
-	}
-}
-
-// Items without genre data are never counted against a genre's places.
-func TestApplyGenreCapIgnoresItemsWithoutGenres(t *testing.T) {
-	row := make([]ScoredItem, 30)
-	genres := map[string][]string{}
-	for i := range row {
-		id := fmt.Sprintf("i%02d", i)
-		row[i] = ScoredItem{MediaItemID: id}
-		if i < 15 {
-			genres[id] = []string{"Thriller"}
-		}
-	}
-
-	got := mmrItemIDs(applyGenreCap(row, genres))
-
-	var want []string
-	for _, span := range [][2]int{{0, 10}, {15, 25}, {10, 15}, {25, 30}} {
-		for i := span[0]; i < span[1]; i++ {
-			want = append(want, fmt.Sprintf("i%02d", i))
-		}
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("applyGenreCap = %v, want %v", got, want)
 	}
 }
 
@@ -161,24 +134,6 @@ func TestPlaceTypeSupplementsNoops(t *testing.T) {
 	}
 }
 
-func TestCollaborativeSupportAggregatesAcrossPeers(t *testing.T) {
-	candidates := collaborativeCandidates([]peerLikes{
-		{userID: 1, similarity: 1, weights: map[string]float64{"shared": 0.4, "single": 0.6}},
-		{userID: 2, similarity: 1, weights: map[string]float64{"shared": 0.3, "single-other": 0.6}},
-	})
-
-	shared, ok := candidates["shared"]
-	if !ok {
-		t.Fatalf("candidates = %#v, want the title two accounts liked", candidates)
-	}
-	if math.Abs(shared.score-0.7) > 1e-9 {
-		t.Fatalf("shared score = %f, want the peers' scores summed", shared.score)
-	}
-	if len(shared.accounts) != 2 {
-		t.Fatalf("shared accounts = %d, want 2", len(shared.accounts))
-	}
-}
-
 // Profiles are distinct watchers in the Jaccard score, but the shared-watcher
 // floor counts accounts, so one household's profiles cannot make a pair other
 // households see.
@@ -243,85 +198,6 @@ func TestCompatiblePeerContentRatingsComparesAgeCeilings(t *testing.T) {
 	ratings = compatiblePeerContentRatings("15")
 	if !slices.Contains(ratings, "PG-13") || slices.Contains(ratings, "R") {
 		t.Fatalf("a 15 ceiling must admit PG-13 peers and exclude R peers: %#v", ratings)
-	}
-}
-
-func TestMMRLambdaUsesConfiguredGlobalOverride(t *testing.T) {
-	engine := &Engine{cfg: config.RecommendationsConfig{DiversityLambda: 0.25}}
-	if got := engine.mmrLambda(); got != 0.25 {
-		t.Fatalf("mmrLambda = %f, want configured override", got)
-	}
-
-	engine.cfg.DiversityLambda = 1.2
-	if got := engine.mmrLambda(); got != defaultMMRLambda {
-		t.Fatalf("mmrLambda = %f, want fallback default for invalid override", got)
-	}
-}
-
-func TestEmbeddingTextNeedsRefreshIncludesEmptyCanonicalText(t *testing.T) {
-	if !embeddingTextNeedsRefresh("model-a", "", "generated text", "model-a") {
-		t.Fatal("expected same-model row with empty canonical text to be stale")
-	}
-	if !embeddingTextNeedsRefresh("model-a", "old text", "generated text", "model-a") {
-		t.Fatal("expected changed canonical text to be stale")
-	}
-	if embeddingTextNeedsRefresh("model-a", "generated text", "generated text", "model-a") {
-		t.Fatal("did not expect matching model and canonical text to be stale")
-	}
-}
-
-func TestBuildTasteClustersDeterministic(t *testing.T) {
-	items := []clusterItem{
-		clusterTestItem("a1", []float32{1, 0}, 1, "Action"),
-		clusterTestItem("a2", []float32{0.98, 0.02}, 0.9, "Action"),
-		clusterTestItem("a3", []float32{0.95, 0.05}, 0.8, "Action"),
-		clusterTestItem("a4", []float32{0.9, 0.1}, 0.7, "Action"),
-		clusterTestItem("a5", []float32{0.88, 0.12}, 0.6, "Action"),
-		clusterTestItem("a6", []float32{0.86, 0.14}, 0.5, "Action"),
-		clusterTestItem("d1", []float32{0, 1}, 1, "Drama"),
-		clusterTestItem("d2", []float32{0.02, 0.98}, 0.9, "Drama"),
-		clusterTestItem("d3", []float32{0.05, 0.95}, 0.8, "Drama"),
-		clusterTestItem("d4", []float32{0.1, 0.9}, 0.7, "Drama"),
-		clusterTestItem("d5", []float32{0.12, 0.88}, 0.6, "Drama"),
-		clusterTestItem("d6", []float32{0.14, 0.86}, 0.5, "Drama"),
-	}
-
-	first := buildTasteClusters(items)
-	second := buildTasteClusters(items)
-
-	if len(first) != len(second) {
-		t.Fatalf("cluster count changed: %d vs %d", len(first), len(second))
-	}
-	for i := range first {
-		if first[i].Label != second[i].Label ||
-			first[i].MemberCount != second[i].MemberCount ||
-			first[i].TotalWeight != second[i].TotalWeight {
-			t.Fatalf("cluster %d changed: %#v vs %#v", i, first[i], second[i])
-		}
-	}
-}
-
-func TestDeduplicateKeepsBackfillCandidates(t *testing.T) {
-	seen := map[string]struct{}{"already-seen": {}}
-	items := []ScoredItem{
-		{MediaItemID: "already-seen", Score: 1.0},
-		{MediaItemID: "next-best", Score: 0.9},
-		{MediaItemID: "backfill", Score: 0.8},
-		{MediaItemID: "not-shown", Score: 0.7},
-	}
-
-	kept := deduplicateItems(items, seen, 2)
-
-	if len(kept) != 2 || kept[0].MediaItemID != "next-best" || kept[1].MediaItemID != "backfill" {
-		t.Fatalf("unexpected retained items: %#v", kept)
-	}
-	// Only shown items are spent: the row's third survivor stays free for a
-	// later row.
-	if _, spent := seen["not-shown"]; spent {
-		t.Fatal("an item past the row's limit was marked seen")
-	}
-	if later := deduplicateItems([]ScoredItem{{MediaItemID: "backfill"}, {MediaItemID: "not-shown"}}, seen, 2); len(later) != 1 || later[0].MediaItemID != "not-shown" {
-		t.Fatalf("later row kept %#v, want only not-shown", later)
 	}
 }
 

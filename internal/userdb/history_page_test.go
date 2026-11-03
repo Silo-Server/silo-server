@@ -2,7 +2,6 @@ package userdb
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -13,14 +12,7 @@ import (
 // after the key, so a tie on watched_at is broken by id and a row hidden or
 // inserted between pages neither repeats nor skips a neighbor.
 func TestListHistoryPageKeysetOrdering(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	store := NewSQLiteUserStore(db)
 	ctx := context.Background()
 

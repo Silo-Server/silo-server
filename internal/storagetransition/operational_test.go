@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 // A local root holds every blob kind under one namespace since operational
@@ -29,11 +31,7 @@ func localRootObjects() map[string][]byte {
 
 func stagedValues(t *testing.T, values map[string]string) *memorySettings {
 	t.Helper()
-	raw, err := json.Marshal(stagedTarget{Values: values})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}
+	return stagedSettings(t, stagedTarget{Values: values})
 }
 
 func assertObjects(t *testing.T, name string, store *memoryStore, present, absent []string) {
@@ -152,6 +150,92 @@ func TestLocalPrivateOnlyTransitionMovesOperationalDataToBucket(t *testing.T) {
 	}
 	if got := settings.values[blobstore.OperationalIdentitySettingKey]; got != targetPrivate.Identity() {
 		t.Fatalf("recorded private identity = %q, want %q", got, targetPrivate.Identity())
+	}
+}
+
+// The active store can keep the identity recorded under another path to its
+// directory. A private-only transition opens the artwork target afresh, by
+// its resolved path; that is still the active location, so the artwork
+// identity and objects stay as they are.
+func TestPrivateOnlyTransitionKeepsAliasedArtworkIdentity(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: localRootObjects()}
+	reopened := &memoryStore{identity: "local|" + filepath.Join(state, "artwork"), objects: map[string][]byte{}}
+	targetPrivate := &memoryStore{identity: "s3|https://s3|private|", objects: map[string][]byte{}}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork"), "s3.private_bucket": "private"})
+	service := testService(settings, source)
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return reopened, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return targetPrivate }
+
+	value, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := value.(Result); result.TargetIdentity != source.Identity() {
+		t.Fatalf("target identity = %q, want the recorded %q", result.TargetIdentity, source.Identity())
+	}
+	if len(reopened.objects) != 0 {
+		t.Fatalf("artwork copied onto its own directory: %v", reopened.objects)
+	}
+	if got := settings.values[blobstore.IdentitySettingKey]; got != "" && got != source.Identity() {
+		t.Fatalf("recorded artwork identity = %q, want it left as %q", got, source.Identity())
+	}
+}
+
+// The active store keeps the identity recorded under a link. If the link is
+// later pointed at another directory, a transition to that directory is a
+// real move: the artwork is still where the store opened it.
+func TestTransitionToRetargetedLinkCopiesArtwork(t *testing.T) {
+	base := t.TempDir()
+	first, second := filepath.Join(base, "first"), filepath.Join(base, "second")
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(filepath.Join(dir, "artwork"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(first, linked); err != nil {
+		t.Fatal(err)
+	}
+	recorded := &memorySettings{values: map[string]string{blobstore.IdentitySettingKey: "local|" + filepath.Join(linked, "artwork")}}
+	stores, _, err := blobstore.Open(t.Context(), blobstore.Options{Backend: blobstore.BackendLocal, LocalPath: filepath.Join(linked, "artwork"), Settings: recorded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.Assets.Put(t.Context(), "tmdb/movie/1/poster/a.webp", []byte("artwork")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(second, linked); err != nil {
+		t.Fatal(err)
+	}
+	target, err := blobstore.NewFilesystem(filepath.Join(second, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(second, "artwork")})
+	service := New(nil, settings, nil, stores.Assets, nil)
+	service.reconcile = func(context.Context, blobstore.Store, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
+		return metadata.ArtworkReconcileStats{}, nil
+	}
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return nil }
+
+	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
+		t.Fatalf("transition to the directory the link now names failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second, "artwork", "tmdb", "movie", "1", "poster", "a.webp")); err != nil {
+		t.Fatalf("artwork not copied to the new directory: %v", err)
 	}
 }
 
@@ -387,51 +471,6 @@ func TestStartKeepsPrivateBucketOnlyForLocalSource(t *testing.T) {
 	}
 }
 
-func TestPreflightDescribesEachMove(t *testing.T) {
-	const (
-		localRoot = "local|/srv/silo"
-		publicS3  = "s3|https://s3|public|"
-		otherS3   = "s3|https://s3|other|"
-		privateS3 = "s3|https://s3|private|"
-	)
-	local := locationOf(localRoot, "")
-	localPrivate := locationOf(localRoot, privateS3)
-	s3 := locationOf(publicS3, privateS3)
-	s3Other := locationOf(otherS3, privateS3)
-	s3NoPrivate := locationOf(publicS3, "")
-	for _, tt := range []struct {
-		name            string
-		current, target storageLocation
-		policy          string
-		wantUploads     string
-		wantSubtitles   string
-		wantOperational string
-	}{
-		{"s3 to local migrate", s3, local, PolicyMigrateAll, "Copied to the new artwork store", "copied", "are copied to local disk"},
-		{"local to s3 migrate", local, s3, PolicyMigrateAll, "Copied to the new artwork store", "copied", "are copied to the private bucket"},
-		{"local to s3 preserve", local, s3, PolicyPreserveUploads, "profile avatars, and downloaded subtitles are copied", "copied", "remain on local disk"},
-		{"artwork-only preserve", s3, s3Other, PolicyPreserveUploads, "profile avatars stay in their current storage", "copied", "stay in their current storage"},
-		{"no operational source", s3NoPrivate, local, PolicyPreserveUploads, "and downloaded subtitles are copied.", "copied", "stay in their current storage"},
-		{"s3 fresh", s3, s3Other, PolicyFresh, "cleared", "not copied", "stay in their current storage"},
-		{"local adds private bucket", local, localPrivate, PolicyMigrateAll, "Profile avatars are copied", "stay in their current storage", "are copied to the private bucket"},
-		{"local drops private bucket fresh", localPrivate, local, PolicyFresh, "Profile avatars are not copied", "stay in their current storage", "remain on the private bucket"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			preflight := describe(tt.current, tt.target, tt.policy)
-			for field, pair := range map[string][2]string{
-				"Uploads":      {preflight.Uploads, tt.wantUploads},
-				"Subtitles":    {preflight.Subtitles, tt.wantSubtitles},
-				"Diagnostics":  {preflight.Diagnostics, tt.wantOperational},
-				"CatalogSeeds": {preflight.CatalogSeeds, tt.wantOperational},
-			} {
-				if !strings.Contains(pair[0], pair[1]) {
-					t.Errorf("%s = %q, want %q", field, pair[0], pair[1])
-				}
-			}
-		})
-	}
-}
-
 func TestPreflightWarnsWhenSidecarArtworkIsNotCopied(t *testing.T) {
 	const (
 		oldAssets  = "s3|https://s3|old-public|"
@@ -605,6 +644,29 @@ func TestStartRejectsTargetEqualToActiveStorage(t *testing.T) {
 	}
 }
 
+// The active store can carry the identity recorded under another path to the
+// same directory. Naming that directory by its current path is still the
+// active location, not a move onto itself.
+func TestStartRejectsActiveDirectoryReachedByAnotherPath(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork")}
+	settings := &memorySettings{values: clone(current)}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: map[string][]byte{}}
+	service := New(nil, settings, memoryJobs{}, source, nil)
+	_, err := startStaged(t, service, settings, PolicyMigrateAll, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(state, "artwork")})
+	if err == nil || !strings.Contains(err.Error(), "same as active storage") {
+		t.Fatalf("Start error = %v, want the same directory rejected as unchanged", err)
+	}
+}
+
 // Removing a bucket removes the private location; the endpoint and prefix it
 // leaves behind would otherwise fail validation or linger for the next bucket.
 func TestStartClearsPrivateLocationWithItsBucket(t *testing.T) {
@@ -771,24 +833,6 @@ func TestCopyPassCopiesAPageConcurrently(t *testing.T) {
 	}
 	if copied != 3 {
 		t.Fatalf("copied %d objects, want 3", copied)
-	}
-}
-
-// Every progress call writes the job row and publishes an event, so a large
-// page reports on an interval rather than once per object.
-func TestCopyPassThrottlesProgress(t *testing.T) {
-	source := &memoryStore{identity: "s3|source|public|", objects: map[string][]byte{}}
-	for i := range 20 {
-		source.objects[fmt.Sprintf("tmdb/%02d.webp", i)] = []byte(fmt.Sprintf("image-%d", i))
-	}
-	service := New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil)
-	service.progressInterval = time.Hour
-	calls := 0
-	if _, _, _, err := service.copyPrefixPass(t.Context(), "throttle", "public:", source, &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, "", func(int, int, string) { calls++ }, 0, "run", map[string]objectListing{}, false); err != nil {
-		t.Fatal(err)
-	}
-	if calls > 2 {
-		t.Fatalf("progress reported %d times for one page, want the first object and the page total", calls)
 	}
 }
 

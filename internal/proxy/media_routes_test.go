@@ -86,14 +86,7 @@ func TestProxyTokenRoutesEnforceCommittedProxyEgress(t *testing.T) {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 	base := streamtoken.Claims{
 		SessionID: "route-bound", MediaPath: mediaPath, PlayMethod: string(playback.PlayDirect),
 		UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
@@ -225,6 +218,16 @@ func TestProxyPlaybackEndpointStatusV3BindsRecipeFamily(t *testing.T) {
 		{name: "copy-fmp4 transcode", claims: func() streamtoken.Claims {
 			claims := transcodeVideo
 			claims.PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
+			return claims
+		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
+		{name: "subtitle-renditions transcode", claims: func() streamtoken.Claims {
+			claims := transcodeVideo
+			claims.PlayMethod = streamtoken.PlayMethodSubtitleRenditionsTranscode
+			return claims
+		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
+		{name: "subtitle-renditions copy", claims: func() streamtoken.Claims {
+			claims := transcodeRemux
+			claims.PlayMethod = streamtoken.PlayMethodSubtitleRenditionsCopyFMP4
 			return claims
 		}(), endpoint: proxyPlaybackEndpointTranscodeV3},
 		{name: "transcode on identity", claims: transcodeVideo, endpoint: proxyPlaybackEndpointIdentityV3, want: http.StatusServiceUnavailable},

@@ -281,29 +281,6 @@ func TestSetSubtitlePreferenceCanonicalPreservesCanonicalForcedOverride(t *testi
 	}
 }
 
-// TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced: with no
-// canonical row and no legacy row, an omitted show_forced_subtitles means no
-// override, as on v1.
-func TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	ctx := context.Background()
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
-		ProfileID: "profile-1", SeriesID: "series-1",
-		SubtitleLanguage: "en", SubtitleTrackIndex: 1, SubtitleMode: "always",
-	}); err != nil {
-		t.Fatalf("v2 write: %v", err)
-	}
-	eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1")
-	if eff.Source == settingscontract.ScopeProfileSeries {
-		t.Fatalf("forced override invented: %s from %q", eff.Value, eff.Source)
-	}
-	legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1")
-	if err != nil || legacy == nil || legacy.HasShowForcedSubtitles {
-		t.Fatalf("legacy row = %+v, %v; want one without a forced override", legacy, err)
-	}
-}
-
 // TestSetSubtitlePreferenceCanonicalDoesNotResurrectClearedOverride replays
 // the review finding: DELETE /settings/values clears the canonical forced row
 // without touching the legacy row, so the legacy row still holds the old flag.

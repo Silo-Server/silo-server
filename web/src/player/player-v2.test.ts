@@ -157,6 +157,43 @@ describe("playerV2", () => {
       message: "The profile is locked.",
     });
   });
+
+  it("surfaces a validation problem's field details instead of its generic detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+              title: "Validation failed",
+              status: 422,
+              detail: "The request did not pass validation; see errors.",
+              errors: [
+                {
+                  location: "body",
+                  code: "invalid",
+                  detail:
+                    "credits marker: credits must start at or after 32:30, in the end-credits window",
+                },
+              ],
+            }),
+            { status: 422, headers: { "Content-Type": "application/problem+json" } },
+          ),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/markers/files/{file_id}", {
+      path: { file_id: "2" },
+      body: { credits: { start_seconds: 94, end_seconds: 112 } },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toMatchObject({
+      status: 422,
+      code: "validation_failed",
+      message: "credits marker: credits must start at or after 32:30, in the end-credits window",
+    });
+  });
 });
 
 it("sends subtitle multipart bytes once without a JSON content type", async () => {

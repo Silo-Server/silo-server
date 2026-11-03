@@ -12,6 +12,7 @@ import {
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
+import { readMeasuredBandwidthKbps } from "./bandwidth-probe";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -237,89 +238,60 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
-  it("prefers a fresh probe measurement over the downlink hint", () => {
-    vi.stubGlobal("navigator", { connection: { downlink: 10 } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
-    );
-    try {
-      expect(detectBandwidthEstimateKbpsV3()).toBe(180_000);
-    } finally {
-      localStorage.removeItem("silo-bandwidth-estimate");
-    }
+  const week = 7 * 24 * 60 * 60 * 1000;
+  /** A reading this device measured on the named connection type. */
+  const keptReading = (kbps: number, network = "unknown") => ({
+    readings: [{ kbps, measuredAt: Date.now(), maxAgeMs: week, network }],
+    writtenAt: Date.now(),
   });
 
-  it("ignores a cached measurement while Data Saver is on", () => {
-    vi.stubGlobal("navigator", { connection: { downlink: 10, saveData: true } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
-    );
+  // `kept` is what the page has read back, so a row that sends nothing shows
+  // the reading was there to send.
+  it.each<[string, Record<string, unknown>, unknown, number | undefined, number | undefined]>([
+    [
+      "prefers the kept speed reading over the downlink hint",
+      { downlink: 10 },
+      keptReading(180_000),
+      180_000,
+      180_000,
+    ],
+    [
+      "ignores a cached measurement while Data Saver is on",
+      { downlink: 10, saveData: true },
+      keptReading(180_000),
+      180_000,
+      undefined,
+    ],
+    [
+      "ignores a cached measurement on cellular without falling back to the downlink",
+      { downlink: 4.5, type: "cellular" },
+      keptReading(180_000, "cellular"),
+      180_000,
+      undefined,
+    ],
+    [
+      "does not send a server's reading kept from before this page read the server",
+      { downlink: 10 },
+      {
+        readings: [{ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: week }],
+        writtenAt: Date.now(),
+      },
+      undefined,
+      undefined,
+    ],
+    [
+      "sends no estimate from a stall limit an older build cached",
+      { downlink: 8 },
+      { kbps: 4_200, measuredAt: Date.now(), observed: true },
+      undefined,
+      undefined,
+    ],
+  ])("%s", (_name, connection, stored, kept, sent) => {
+    vi.stubGlobal("navigator", { connection });
+    localStorage.setItem("silo-bandwidth-estimate", JSON.stringify(stored));
     try {
-      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
-    } finally {
-      localStorage.removeItem("silo-bandwidth-estimate");
-    }
-  });
-
-  it("ignores a cached measurement on cellular without falling back to the downlink", () => {
-    vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
-    );
-    try {
-      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
-    } finally {
-      localStorage.removeItem("silo-bandwidth-estimate");
-    }
-  });
-
-  it("uses a limit playback observed even on a metered link", () => {
-    vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({
-        kbps: 4_200,
-        measuredAt: Date.now(),
-        observed: true,
-        link: "unknown:save-data",
-      }),
-    );
-    try {
-      expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
-    } finally {
-      localStorage.removeItem("silo-bandwidth-estimate");
-    }
-  });
-
-  it("does not carry a limit observed on Wi-Fi onto a metered link", () => {
-    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 56_000, measuredAt: Date.now(), observed: true }),
-    );
-    try {
-      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
-    } finally {
-      localStorage.removeItem("silo-bandwidth-estimate");
-    }
-  });
-
-  it("does not carry a limit observed on cellular onto Data Saver Wi-Fi", () => {
-    vi.stubGlobal("navigator", { connection: { type: "wifi", saveData: true, downlink: 3 } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({
-        kbps: 20_000,
-        measuredAt: Date.now(),
-        observed: true,
-        link: "cellular:full",
-      }),
-    );
-    try {
-      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+      expect(readMeasuredBandwidthKbps()).toBe(kept);
+      expect(detectBandwidthEstimateKbpsV3()).toBe(sent);
     } finally {
       localStorage.removeItem("silo-bandwidth-estimate");
     }

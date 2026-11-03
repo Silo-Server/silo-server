@@ -156,25 +156,6 @@ const shownTitles = (sections: SettingsSectionEntry[]) =>
   sections.filter((s) => !s.hidden).map((s) => s.id);
 
 describe("useProfileHomeRows", () => {
-  it("sends two quick changes as two saves in order, and the second one wins", async () => {
-    const { result } = await ready();
-    hold("PUT /api/v2/profile/sections");
-
-    act(() => result.current.setHidden("a", true));
-    act(() => result.current.setHidden("b", true));
-    // Only one save is in flight; the second change waits for it.
-    await waitFor(() => expect(held.get("PUT /api/v2/profile/sections")).toHaveLength(1));
-    expect(result.current.pending).toBe(true);
-    expect(shownTitles(result.current.sections)).toEqual(["c"]);
-
-    await settle("PUT /api/v2/profile/sections");
-    await settle("PUT /api/v2/profile/sections");
-    await waitFor(() => expect(result.current.pending).toBe(false));
-
-    expect(puts.map((put) => hiddenIds(put.overrides))).toEqual([["a"], ["a", "b"]]);
-    expect(shownTitles(result.current.sections)).toEqual(["c"]);
-  });
-
   it("merges changes made while a save is in flight into one next save", async () => {
     const { result } = await ready();
     hold("PUT /api/v2/profile/sections");

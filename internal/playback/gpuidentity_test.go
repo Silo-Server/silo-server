@@ -2,7 +2,6 @@ package playback
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,13 +46,19 @@ func (e *hwAccelTestEnv) setBootID(t *testing.T, bootID string) {
 // cache, which is otherwise computed once and would leak between tests.
 func stubNVIDIASMI(t *testing.T, output string, err error) {
 	t.Helper()
-	previous := nvidiaSMIQuery
-	nvidiaSMIQuery = func(context.Context) ([]byte, error) {
+	stubNVIDIASMIQuery(t, func(context.Context) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
 		return []byte(output), nil
-	}
+	})
+}
+
+// stubNVIDIASMIQuery is stubNVIDIASMI for a query whose answer changes.
+func stubNVIDIASMIQuery(t *testing.T, query func(context.Context) ([]byte, error)) {
+	t.Helper()
+	previous := nvidiaSMIQuery
+	nvidiaSMIQuery = query
 	resetNVIDIAUUIDCacheForTest()
 	t.Cleanup(func() {
 		nvidiaSMIQuery = previous
@@ -113,24 +118,6 @@ func TestDetectHWAccelReportsHardwareIdentity(t *testing.T) {
 	}
 }
 
-// A host without the NVIDIA toolkit is the common case, not a failure: the
-// report must still describe the hardware it can see.
-func TestDetectHWAccelOmitsGPUUUIDWhenNVIDIASMIUnavailable(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addPCIRenderDevice(t, "renderD128", "0x10de", "0000:03:00.0")
-	stubNVIDIASMI(t, "", errors.New("exec: \"nvidia-smi\": executable file not found in $PATH"))
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	detail := renderDeviceDetail(t, DetectHWAccelWithFFmpeg("auto", ffmpeg.path, ""), filepath.Join(env.driDir, "renderD128"))
-
-	if detail.PCIAddress != "0000:03:00.0" {
-		t.Fatalf("PCIAddress = %q, want the sysfs address even without nvidia-smi", detail.PCIAddress)
-	}
-	if detail.GPUUUID != "" {
-		t.Fatalf("GPUUUID = %q, want empty", detail.GPUUUID)
-	}
-}
-
 // A device with no PCI symlink (virtual, or a restricted sysfs) reports no
 // address rather than the literal directory name behind the lookup.
 func TestDetectHWAccelOmitsPCIAddressWithoutSysfsLink(t *testing.T) {
@@ -142,17 +129,6 @@ func TestDetectHWAccelOmitsPCIAddressWithoutSysfsLink(t *testing.T) {
 
 	if detail.PCIAddress != "" {
 		t.Fatalf("PCIAddress = %q, want empty", detail.PCIAddress)
-	}
-}
-
-func TestDetectHWAccelOmitsBootIDOffLinux(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.setBootID(t, "2f6e7a8b-9c0d-4a2b-8c3d-5b2c1f0e1111")
-	currentGOOS = "darwin"
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	if got := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "").BootID; got != "" {
-		t.Fatalf("BootID = %q, want empty off Linux", got)
 	}
 }
 

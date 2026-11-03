@@ -67,9 +67,12 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name             *string
-	Avatar           *string
-	PIN              *string
+	Name   *string
+	Avatar *string
+	// PINHash replaces the profile's PIN: a bcrypt hash the caller made
+	// (passwordhash.Generate) before opening any transaction, or "" to remove
+	// the PIN.
+	PINHash          *string
 	IsChild          *bool
 	MaxContentRating *string
 	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
@@ -451,6 +454,10 @@ type SeriesPlaybackPreference struct {
 	Resolution string `json:"resolution"`
 	HDR        bool   `json:"hdr"`
 	CodecVideo string `json:"codec_video"`
+	// FileID and EditionKey name the exact version for a row keyed by a
+	// movie's own content ID; series rows leave them empty.
+	FileID     int    `json:"file_id,omitempty"`
+	EditionKey string `json:"edition_key,omitempty"`
 	UpdatedAt  string `json:"updated_at"`
 }
 

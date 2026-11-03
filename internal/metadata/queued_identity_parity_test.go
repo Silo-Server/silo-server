@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -156,6 +157,79 @@ func TestQueuedMovieIdentityPreservesCurrentProviderAnchor(t *testing.T) {
 	skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false)
 	if err != nil || skeleton == nil || skeleton.TmdbID != "335984" {
 		t.Fatalf("explicit provider anchor was blocked: skeleton=%+v error=%v", skeleton, err)
+	}
+}
+
+// A folder and a file name can carry different IDs from one provider. The
+// queued identity must read them in the order the scanner stored the group's
+// IDs, or the comparison reports a change that no rescan can clear.
+func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *testing.T) {
+	const libraryRoot = "/movies"
+	for _, tt := range []struct{ name, path, wantTmdb, wantImdb string }{
+		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
+		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999", ""},
+		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
+	} {
+		// A new file goes through skeleton creation; a file already linked to
+		// a provisional item goes through the reused-item check.
+		for _, linked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/linked=%t", tt.name, linked), func(t *testing.T) {
+				_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
+				assignment := assignments[tt.path]
+				scanned := naming.InferGroupIdentity(tt.path, "movies", assignment)
+
+				h := newTestHarness()
+				file := &models.MediaFile{
+					ID: 1, MediaFolderID: 10, FilePath: tt.path,
+					GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+					ObservedRootPath: scanned.ObservedRootPath, CanonicalRootPath: assignment.RootPath,
+					BaseType: scanned.BaseType, BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear,
+				}
+				h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+					MediaFolderID: 10, GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+					BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear, InferredType: scanned.BaseType, State: "resolved", OverrideSource: "none",
+					TmdbID: scanned.TmdbID, ImdbID: scanned.ImdbID, TvdbID: scanned.TvdbID,
+				})
+				if linked {
+					file.ContentID = "pending-item"
+					if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{
+						ContentID: file.ContentID, Status: "pending", Title: scanned.BaseTitle, Year: scanned.BaseYear, Type: "movie",
+						Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+					}); err != nil {
+						t.Fatalf("seed provisional item: %v", err)
+					}
+				}
+				worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+				skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
+				if err != nil || skeleton == nil || reused != linked || skeleton.TmdbID != tt.wantTmdb || skeleton.ImdbID != tt.wantImdb {
+					t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v reused=%t error=%v", scanned, skeleton, reused, err)
+				}
+			})
+		}
+	}
+}
+
+// A rerun refreshes a matched item's own title, even when a path tag names
+// another one.
+func TestQueuedMovieRerunKeepsMatchedItemProviderIDs(t *testing.T) {
+	const libraryRoot = "/movies"
+	path := libraryRoot + "/Predator (1987) {tmdb-999}/Predator (1987) {tmdb-106}.mkv"
+	h := newTestHarness()
+	if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{
+		ContentID: "movie-tmdb-106", Status: "matched", Title: "Predator", Year: 1987, Type: "movie", TmdbID: "106",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed matched item: %v", err)
+	}
+	file := &models.MediaFile{
+		ID: 1, MediaFolderID: 10, FilePath: path, ContentID: "movie-tmdb-106",
+		ObservedRootPath: filepath.Dir(path), CanonicalRootPath: filepath.Dir(path),
+		BaseType: "movie", BaseTitle: "Predator", BaseYear: 1987,
+	}
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+	skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, true, libraryRoot)
+	if err != nil || skeleton == nil || skeleton.ContentID != "movie-tmdb-106" || skeleton.TmdbID != "106" {
+		t.Fatalf("rerun of a matched item left its identity: skeleton=%+v error=%v", skeleton, err)
 	}
 }
 
@@ -549,25 +623,31 @@ func TestQueuedOverrideFailsWithoutContentFileLister(t *testing.T) {
 
 // A heuristic folder ID is a guess, so on first link the override's forced ID
 // for the same provider wins, as it does when the worker reuses a linked item.
+// That holds when the file name also carries an IMDb tag, which otherwise
+// loses to the folder's bare ID.
 func TestCreateOrFindSkeletonForcedIDBeatsHeuristicFolderID(t *testing.T) {
-	h := newTestHarness()
-	file := &models.MediaFile{
-		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name tt0000111/Old Name.mkv",
-		GroupKeyVersion: 1, ContentGroupKey: "new-group", BaseType: "movie", BaseTitle: "Old Name",
-	}
 	if hints := naming.ParseFolderIDs("Old Name tt0000111"); hints == nil || hints.ImdbID != "tt0000111" {
 		t.Fatalf("fixture folder name does not carry a heuristic IMDb ID: %+v", hints)
 	}
-	h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
-		ForcedType: "movie", ForcedImdbID: "tt0000222",
-	}}
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-	skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
-	if err != nil || reused || skeleton == nil {
-		t.Fatalf("first link failed: skeleton=%+v reused=%t err=%v", skeleton, reused, err)
-	}
-	if skeleton.ImdbID != "tt0000222" {
-		t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
+	for _, name := range []string{"Old Name.mkv", "Old Name {imdb-tt0000222}.mkv"} {
+		t.Run(name, func(t *testing.T) {
+			h := newTestHarness()
+			file := &models.MediaFile{
+				ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name tt0000111/" + name,
+				GroupKeyVersion: 1, ContentGroupKey: "new-group", BaseType: "movie", BaseTitle: "Old Name",
+			}
+			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
+				ForcedType: "movie", ForcedImdbID: "tt0000222",
+			}}
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+			skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
+			if err != nil || reused || skeleton == nil {
+				t.Fatalf("first link failed: skeleton=%+v reused=%t err=%v", skeleton, reused, err)
+			}
+			if skeleton.ImdbID != "tt0000222" {
+				t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
+			}
+		})
 	}
 }
 

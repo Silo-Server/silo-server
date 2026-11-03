@@ -40,3 +40,17 @@ func TestProxyAdminRoutesRequireASignature(t *testing.T) {
 		t.Fatalf("legacy bearer during the upgrade window: status %d, want 200", code)
 	}
 }
+
+// Both capability routes run ffmpeg, so they must stay inside the signed admin
+// group; the test above only reaches the middleware through /status.
+func TestProxyCapabilityRoutesRequireBearer(t *testing.T) {
+	server := newCapabilityProxyServer(t, "capability-secret")
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/hw-capabilities"},
+		{http.MethodPost, "/admin/reprobe-capabilities"},
+	} {
+		if recorder := serveProxy(t, server, route.method, route.path, ""); recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401 without a bearer token", route.method, route.path, recorder.Code)
+		}
+	}
+}

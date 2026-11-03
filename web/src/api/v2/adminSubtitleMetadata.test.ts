@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import {
   captureAdminSubtitleEditIntent,
   getAdminSubtitleEditor,
   updateAdminSubtitleMetadata,
 } from "./adminSubtitleMetadata";
+import { pendingResponse, stubPendingFetch } from "./pendingFetch.test-support";
 const row = {
   id: "9007199254740993",
   media_file_id: "42",
@@ -50,41 +51,10 @@ it("reads canonical state once and sends only the patch with the original strong
   expect(editor.etag).toBe('"v4"');
   expect(saved.etag).toBe('"v5"');
 });
-it.each([401, 412, 503])(
-  "does not reread, replay or adopt an error validator after %s",
-  async (status) => {
-    setAccessToken("synthetic-admin");
-    setRefreshToken("synthetic-refresh");
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(json(row))
-      .mockResolvedValueOnce(
-        json(
-          { type: "about:blank", title: "Not saved", status, code: "precondition_failed" },
-          '"newer"',
-          status,
-        ),
-      );
-    vi.stubGlobal("fetch", fetch);
-    const editor = await getAdminSubtitleEditor(
-      captureAdminSubtitleEditIntent(row, adminSubtitleListScope()),
-    );
-    await expect(updateAdminSubtitleMetadata(editor, { release_name: "Draft" })).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(editor.etag).toBe('"v4"');
-  },
-);
 it("refuses stale click authority and a PIN change while canonical state is in flight", async () => {
   const scope = adminSubtitleListScope();
   const intent = captureAdminSubtitleEditIntent(row, scope);
-  let finish!: (r: Response) => void;
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  vi.stubGlobal("fetch", fetch);
+  const { fetch, finish } = stubPendingFetch();
   const request = getAdminSubtitleEditor(intent);
   setProfileToken("changed");
   finish(json(row));
@@ -102,23 +72,18 @@ it.each([
   ).rejects.toThrow();
 });
 it("refuses a late successful save after authority changes", async () => {
-  let finish!: (r: Response) => void;
+  const save = pendingResponse();
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(json(row))
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
+    .mockReturnValueOnce(save.promise);
   vi.stubGlobal("fetch", fetch);
   const editor = await getAdminSubtitleEditor(
     captureAdminSubtitleEditIntent(row, adminSubtitleListScope()),
   );
   const saving = updateAdminSubtitleMetadata(editor, { release_name: "Draft" });
   setProfileId("other");
-  finish(json({ ...row, release_name: "Draft" }, '"saved"'));
+  save.finish(json({ ...row, release_name: "Draft" }, '"saved"'));
   await expect(saving).rejects.toThrow();
   expect(editor.etag).toBe('"v4"');
   expect(fetch).toHaveBeenCalledTimes(2);

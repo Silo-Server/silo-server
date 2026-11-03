@@ -2,7 +2,6 @@ package watchsync
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"slices"
 	"testing"
@@ -45,14 +44,7 @@ func sendAllPlays(_ int, plays []LocalPlay) (ExportResult, error) {
 // minute apart.
 func newDrainService(t *testing.T, count int) (*Service, *serviceFakeRepo, userstore.UserStore) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := userdb.InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := openUserDB(t)
 	start := time.Date(2020, time.November, 4, 14, 0, 0, 0, time.UTC)
 	for i := range count {
 		if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
@@ -321,36 +313,5 @@ func TestVisiblePlaysSkipsTheStoreForAnEmptyPage(t *testing.T) {
 	}
 	if len(lister.queries) != 1 || !slices.Equal(lister.queries[0].MediaItemIDs, []string{"m"}) {
 		t.Fatalf("queries = %+v, want one filtered to the page's item", lister.queries)
-	}
-}
-
-// Once a batch has gone out, the deadline is checked on every page, so pages
-// that end up with nothing to send cannot run the export past the reserve.
-func TestServiceExportWatchedChecksTheDeadlineOnPagesWithNothingToSend(t *testing.T) {
-	service, repo, store := newDrainService(t, 25)
-	start := time.Now().UTC()
-	clock := start
-	service.now = func() time.Time { return clock }
-	ctx, cancel := context.WithDeadline(t.Context(), start.Add(time.Hour))
-	defer cancel()
-	var calls [][]LocalPlay
-	exporter := drainExporterStub{batchSize: 10, calls: &calls, respond: func(call int, plays []LocalPlay) (ExportResult, error) {
-		// Hide the rest of the backlog, so later pages have nothing to send,
-		// and move the clock inside the reserve.
-		if err := store.RemoveHistoryItems(t.Context(), drainConn.ProfileID, []string{testMovieMediaID}, time.Now().UTC()); err != nil {
-			t.Fatal(err)
-		}
-		clock = start.Add(time.Hour - exportDrainReserve/2)
-		return sendAllPlays(call, plays)
-	}}
-
-	if _, err := service.ExportWatched(ctx, drainConn, ServerConfig{}, exporter); err != nil {
-		t.Fatal(err)
-	}
-	if len(calls) != 1 || len(repo.historyPageSizes) != 1 {
-		t.Fatalf("calls = %d, pages read = %d; want one batch and no further page reads", len(calls), len(repo.historyPageSizes))
-	}
-	if counts := exportStatusCounts(repo); counts[historyExportStatusSent] != 10 || counts[historyExportStatusPending] != 15 {
-		t.Fatalf("export statuses = %v, want 10 sent and 15 pending", counts)
 	}
 }

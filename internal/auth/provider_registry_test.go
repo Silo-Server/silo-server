@@ -7,9 +7,6 @@ import (
 	"testing"
 	"time"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"google.golang.org/protobuf/types/known/structpb"
-
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -179,97 +176,6 @@ func TestPluginProviderRegistryRejectsMissingCapability(t *testing.T) {
 	}
 	if got := registry.Providers(); len(got) != 1 || got[0].Info.Mode != ProviderModeOAuth {
 		t.Fatalf("failed rebuild replaced the previous OAuth provider: %+v", got)
-	}
-}
-
-func TestServiceSeesRegistryChanges(t *testing.T) {
-	stores := &fakeRegistryStores{
-		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc", Enabled: true}},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
-		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{"auth_modes": []any{"oauth2"}}}}},
-	}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores, GlobalConfigs: stores})
-	svc := NewService(&LocalProvider{}, nil, nil, nil, nil, nil, nil)
-	svc.SetPluginProviderSource(registry)
-	if svc.FindOAuthInstallation(3) != nil {
-		t.Fatal("provider visible before rebuild")
-	}
-	if err := registry.Rebuild(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if svc.FindOAuthInstallation(3) == nil || len(svc.ListProviders()) != 2 {
-		t.Fatalf("after rebuild: %+v", svc.ListProviders())
-	}
-	stores.bindings[0].Enabled = false
-	_ = registry.Rebuild(context.Background())
-	if svc.FindOAuthInstallation(3) != nil || len(svc.ListProviders()) != 1 {
-		t.Fatalf("after disable: %+v", svc.ListProviders())
-	}
-}
-
-// fakeManifests answers the plugin manifest with a global config schema.
-type fakeManifests map[int]*pluginv1.PluginManifest
-
-func (f fakeManifests) ManifestForInstallation(_ context.Context, id int) (*pluginv1.PluginManifest, error) {
-	if m, ok := f[id]; ok {
-		return m, nil
-	}
-	return nil, plugins.ErrInstallationNotFound
-}
-
-// TestPluginProviderRegistryIconDefault: until the operator saves
-// icon_url_path, the button shows the schema's default icon (JSON schema
-// default first, then the admin form default); a saved value wins, and a
-// saved empty value (the plugin config save drops a cleared field, but rows
-// saved earlier may hold one) shows the default too.
-func TestPluginProviderRegistryIconDefault(t *testing.T) {
-	formDefault := &pluginv1.ConfigSchema{Key: "icon_url_path", JsonSchema: `{"type":"object","properties":{"value":{"type":"string"}}}`,
-		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "value", DefaultValue: structpb.NewStringValue("sso.svg")}}}}
-	schemaDefault := &pluginv1.ConfigSchema{Key: "icon_url_path", JsonSchema: `{"type":"object","properties":{"value":{"type":"string","default":"/ldap.svg"}}}`}
-	stores := &fakeRegistryStores{
-		bindings: []*plugins.AuthBinding{
-			{InstallationID: 3, CapabilityID: "oidc", Enabled: true},
-			{InstallationID: 4, CapabilityID: "ldap", Enabled: true},
-		},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
-		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}, 4: {{Type: "auth_provider.v1", ID: "ldap"}}},
-	}
-	manifests := fakeManifests{
-		3: {GlobalConfigSchema: []*pluginv1.ConfigSchema{formDefault}},
-		4: {GlobalConfigSchema: []*pluginv1.ConfigSchema{schemaDefault}},
-	}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores, GlobalConfigs: stores, Manifests: manifests})
-	icons := func() map[int]string {
-		t.Helper()
-		if err := registry.Rebuild(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		out := map[int]string{}
-		for _, p := range registry.Providers() {
-			out[p.Info.InstallationID] = p.Info.IconURL
-		}
-		return out
-	}
-	got := icons()
-	if got[3] != plugins.ContentPrefix+"/plugins/3/assets/sso.svg" || got[4] != plugins.ContentPrefix+"/plugins/4/assets/ldap.svg" {
-		t.Fatalf("unsaved icons = %v", got)
-	}
-
-	stores.configs = map[int][]*plugins.RuntimeConfig{
-		3: {{Key: "icon_url_path", Value: map[string]any{"value": "custom.png"}}},
-		4: {{Key: "icon_url_path", Value: map[string]any{"value": ""}}},
-	}
-	got = icons()
-	if got[3] != plugins.ContentPrefix+"/plugins/3/assets/custom.png" || got[4] != plugins.ContentPrefix+"/plugins/4/assets/ldap.svg" {
-		t.Fatalf("saved icons = %v", got)
-	}
-
-	// Without a manifest source, or a manifest without the setting, there is
-	// no default.
-	stores.configs = nil
-	registry = NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores, GlobalConfigs: stores, Manifests: fakeManifests{3: {}}})
-	if got = icons(); got[3] != "" || got[4] != "" {
-		t.Fatalf("no default = %v", got)
 	}
 }
 

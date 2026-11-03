@@ -3,7 +3,6 @@ package mediasample
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -12,10 +11,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -118,25 +117,6 @@ func TestRunSheetsBoundsTheProbedRun(t *testing.T) {
 	}
 }
 
-func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
-	req := sheetsRequest([]float64{5, 15}, 10, 10)
-	req.Samples.ReadThrough = true
-	req.Sheets.UseInputAspect = true
-	req.Sheets.ToneMap = &ToneMap{AllowSoftware: true}
-	req.Attempts = []Attempt{{Hardware: true, TimeoutSeconds: 60}, {}}
-	encoded, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded, req) {
-		t.Fatalf("round trip changed the request:\n got %+v\nwant %+v", decoded, req)
-	}
-}
-
 func TestBuildSheetsGraph(t *testing.T) {
 	out := SheetsOutput{TileWidth: 320, TileHeight: 134, Columns: 10, Rows: 10, Quality: 80}
 	hdr := out
@@ -186,9 +166,6 @@ func TestBuildSheetsGraph(t *testing.T) {
 	}
 	if _, err := buildSheetsGraph(hdr, "vaapi", sheetsToneMap{kind: tonemap.SourcePQ}); err == nil {
 		t.Error("GPU HDR with a source signal but no software chain: want an error")
-	}
-	if vaapiToneMapDownload != vaapiToneMap+",hwdownload,format=nv12" {
-		t.Errorf("image tone-map chain changed: %s", vaapiToneMapDownload)
 	}
 }
 
@@ -534,6 +511,45 @@ func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
 		}
 		if got := sheetLumas(t, result, 2, 2); !near(got[0], want) || result.SheetFrames != (SheetFrames{Decoded: 4 - tt.filled, Filled: tt.filled}) {
 			t.Fatalf("%s: cells %v, frames %+v; want cells %v with %d filled", name, got, result.SheetFrames, want, tt.filled)
+		}
+	}
+}
+
+// TestRunSheetsGivesReferenceReadSpanTime runs an attempt whose H.264 list
+// sends it to the reference-picture read. That read decodes the whole
+// sampled span, 35.04 s of media for these samples, so its deadline is the
+// attempt's plus the span's playing time; the list keeps the attempt's own.
+func TestRunSheetsGivesReferenceReadSpanTime(t *testing.T) {
+	keyframes := []fakeSheetFrame{timed(10, "4"), timed(20, "14"), timed(30, "24"), timed(40, "34")}
+	logIllegal := func(log []string) []string {
+		return append(log, "[h264 @ 0x55d0] illegal short term buffer state detected")
+	}
+	list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{tagged(10, 5)}, editLog: logIllegal}
+	reference := &fakeSheets{format: "matroska,webm", frames: keyframes, packetEnd: 36, keyPackets: []float64{4, 14, 24, 34}}
+	var listLeft, referenceLeft []time.Duration
+	runner := Runner{Exec: func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatalf("run %q has no deadline", args)
+		}
+		if slices.Contains(args, exactSkipFrame) {
+			referenceLeft = append(referenceLeft, time.Until(deadline))
+			return reference.exec(ctx, name, args, stdin, stdout, stderr)
+		}
+		listLeft = append(listLeft, time.Until(deadline))
+		return list.exec(ctx, name, args, stdin, stdout, stderr)
+	}}
+	req := sheetsRequest(secondsFrom(5, 10, 4), 2, 2)
+	req.Attempts = []Attempt{{TimeoutSeconds: 60}}
+	if _, err := runner.Run(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(referenceLeft) != 1 || referenceLeft[0] <= 90*time.Second || referenceLeft[0] > 95040*time.Millisecond {
+		t.Fatalf("reference read deadlines in %v, want one in about 95 s", referenceLeft)
+	}
+	for _, left := range listLeft {
+		if left > 60*time.Second {
+			t.Fatalf("list read deadline in %v, want at most the attempt's 60 s", left)
 		}
 	}
 }

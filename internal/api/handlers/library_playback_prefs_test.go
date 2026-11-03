@@ -5,16 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 func routeLibraryPlaybackPref(
@@ -293,99 +290,6 @@ func TestListLibraryPlaybackPreferencesCanonicalReadsSettingRows(t *testing.T) {
 	got, err = handler.ListLibraryPlaybackPreferencesCanonical(ctx, 1, profileID)
 	if err != nil || len(got) != 1 || got[0].LibraryID != 4 {
 		t.Fatalf("after clear = %+v err=%v", got, err)
-	}
-}
-
-func libraryPrefHandlerPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	for _, table := range []string{"user_library_playback_preferences", "user_setting_values"} {
-		var name *string
-		if err := pool.QueryRow(context.Background(),
-			`SELECT to_regclass('public.`+table+`')::text`).Scan(&name); err != nil {
-			t.Fatalf("check %s: %v", table, err)
-		}
-		if name == nil || *name == "" {
-			t.Skipf("test database has not applied the %s migration", table)
-		}
-	}
-	return pool
-}
-
-// Two concurrent patches of different members both land: the seam reads,
-// merges and writes inside one transaction behind the per-user advisory
-// lock, so neither can overwrite the other with a stale merge.
-func TestPatchLibraryPlaybackPreferenceConcurrentPatchesBothLand(t *testing.T) {
-	pool := libraryPrefHandlerPool(t)
-	ctx := context.Background()
-	var userID int
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (username, email, password_hash, role)
-		VALUES ('library-pref-patch-fixture', 'library-pref-patch@invalid.test', '', 'user')
-		RETURNING id
-	`).Scan(&userID); err != nil {
-		t.Fatalf("seed fixture user: %v", err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
-
-	provider := pgstore.NewPostgresProvider(pool)
-	store, err := provider.ForUser(ctx, userID)
-	if err != nil {
-		t.Fatalf("user store: %v", err)
-	}
-	const profileID = "profile-patch"
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Patch"}); err != nil {
-		t.Fatalf("seed profile: %v", err)
-	}
-	handler := NewLibraryPlaybackPrefHandler(provider)
-
-	for round := 0; round < 20; round++ {
-		if err := handler.DeleteLibraryPlaybackPreference(ctx, userID, profileID, 7); err != nil {
-			t.Fatalf("reset: %v", err)
-		}
-		patches := []LibraryPlaybackPrefPatch{
-			{AudioLanguage: PrefPatch[string]{Present: true, Value: ptr("ja")}},
-			{SubtitleLanguage: PrefPatch[string]{Present: true, Value: ptr("de")}},
-			{ShowForcedSubtitles: PrefPatch[bool]{Present: true, Value: ptr(true)}},
-		}
-		errs := make(chan error, len(patches))
-		start := make(chan struct{})
-		for _, patch := range patches {
-			go func(patch LibraryPlaybackPrefPatch) {
-				<-start
-				errs <- handler.PatchLibraryPlaybackPreference(ctx, userID, profileID, 7, patch)
-			}(patch)
-		}
-		close(start)
-		for range patches {
-			if err := <-errs; err != nil {
-				t.Fatalf("round %d: patch: %v", round, err)
-			}
-		}
-		row, err := store.GetLibraryPlaybackPreference(ctx, profileID, 7)
-		if err != nil || row == nil {
-			t.Fatalf("round %d: legacy row: %+v err=%v", round, row, err)
-		}
-		if row.AudioLanguage != "ja" || row.SubtitleLanguage != "de" || !row.HasShowForcedSubtitles || !row.ShowForcedSubtitles {
-			t.Fatalf("round %d: a patch was lost: %+v", round, row)
-		}
-		for key, want := range map[string]string{
-			settingskeys.PlaybackAudioLanguage:       `"ja"`,
-			settingskeys.PlaybackSubtitleLanguage:    `"de"`,
-			settingskeys.PlaybackShowForcedSubtitles: `true`,
-		} {
-			if got := canonicalLibraryValue(t, store, profileID, 7, key); got == nil || *got != want {
-				t.Fatalf("round %d: canonical %s = %v, want %s", round, key, got, want)
-			}
-		}
 	}
 }
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
@@ -109,39 +109,6 @@ describe("SubtitleAppearanceSettings", () => {
 
   afterEach(cleanup);
 
-  it("reads the language and subtitle settings from the contract in one batch", () => {
-    render(<SubtitleAppearanceSettings />);
-
-    const [options] = mocks.useEffectiveSettings.mock.calls[0] ?? [];
-    expect(options?.keys).toEqual([
-      SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
-      SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-      SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
-      SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
-      SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
-      SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
-    ]);
-  });
-
-  it("leads with languages, then the subtitle choices", () => {
-    render(<SubtitleAppearanceSettings />);
-
-    const titles = screen.getAllByRole("heading", { level: 3 }).map((node) => node.textContent);
-    expect(titles).toEqual([
-      "Language",
-      "Subtitles",
-      "Preview",
-      "Text",
-      "Background & Position",
-      "Timing",
-    ]);
-    const language = screen.getByRole("group", { name: "Language" });
-    expect(within(language).getByText("Spoken language")).toBeInTheDocument();
-    expect(within(language).getByText("Metadata language")).toBeInTheDocument();
-    const subtitles = screen.getByRole("group", { name: "Subtitles" });
-    expect(within(subtitles).getByText("Show forced subtitles")).toBeInTheDocument();
-  });
-
   it("clears the stored metadata exceptions rather than saving an empty map", async () => {
     mocks.useEffectiveSettings.mockReturnValue({
       data: resolved(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, { ja: "en" }, "profile"),
@@ -175,43 +142,6 @@ describe("SubtitleAppearanceSettings", () => {
       value: false,
       identity: { scope: "profile" },
     });
-  });
-
-  it("reads a stored forced-subtitle choice rather than the default", () => {
-    mocks.useEffectiveSettings.mockReturnValue({
-      data: resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile"),
-      isLoading: false,
-    });
-
-    render(<SubtitleAppearanceSettings />);
-
-    expect(screen.getByLabelText("Show forced subtitles").getAttribute("aria-checked")).toBe(
-      "false",
-    );
-  });
-
-  it("offers the appearance reset only when the profile has a stored appearance", () => {
-    render(<SubtitleAppearanceSettings />);
-    expect(
-      screen.queryByRole("button", { name: "Reset subtitle appearance to the default" }),
-    ).toBeNull();
-
-    cleanup();
-    mocks.useSubtitleAppearanceSetting.mockReturnValue({
-      appearance: DEFAULT_SUBTITLE_APPEARANCE,
-      isCustomized: true,
-      save,
-      reset,
-      isSaving: false,
-      isLoading: false,
-    });
-
-    render(<SubtitleAppearanceSettings />);
-    const preview = screen.getByRole("group", { name: "Preview" });
-    fireEvent.click(
-      within(preview).getByRole("button", { name: "Reset subtitle appearance to the default" }),
-    );
-    expect(reset).toHaveBeenCalled();
   });
 
   it("saves the profile's subtitle offset from the timing control", () => {

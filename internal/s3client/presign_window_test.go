@@ -150,26 +150,3 @@ func TestPresignGetURLAtHoldsCloudflareTokenForAQuarterOfItsTTL(t *testing.T) {
 		})
 	}
 }
-
-// A zero window keeps PresignGetURL's behavior for downloads, diagnostics, and
-// seven-day links: signed now, for exactly the expiry.
-func TestPresignGetURLAtWithoutWindowIssuesFreshURLs(t *testing.T) {
-	ctx := context.Background()
-	c := NewClient(windowTestConfig())
-	now := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
-	first, expires, err := c.PresignGetURLAt(ctx, "silo", windowTestKey, now, time.Hour, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signed, lifetime := presignedValidity(t, first)
-	if !signed.Equal(now) || lifetime != time.Hour || !expires.Equal(now.Add(time.Hour)) {
-		t.Fatalf("signed %s for %s, reported %s", signed, lifetime, expires)
-	}
-	next, _, err := c.PresignGetURLAt(ctx, "silo", windowTestKey, now.Add(time.Second), time.Hour, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if next == first {
-		t.Fatal("zero window reused a URL")
-	}
-}

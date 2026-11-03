@@ -318,13 +318,11 @@ func (r *CatalogResolver) resolveLibraryMembershipQueryCursor(ctx context.Contex
 		return nil, err
 	}
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
 	executor.SourceArgs = []any{req.CollectionID}
 	if req.Query.Sort.Field == "" {
-		executor.SourceOrder = []queryCursorTerm{
-			{expression: "COALESCE((SELECT position FROM library_collection_items cursor_position WHERE cursor_position.collection_id=$1 AND cursor_position.media_item_id=mi.content_id),0)", kind: cursorKindNumber, nullsLast: true},
-			{expression: cursorContentIDExpression, kind: cursorKindText, nullsLast: true},
-		}
+		applyCollectionPositionOrder(executor, libraryMembershipOrderJoin)
+	} else {
+		executor.SourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
 	}
 	return resolveCollectionExecutorCursor(ctx, executor, req, req.Query, access)
 }
@@ -431,16 +429,43 @@ func (r *CatalogResolver) applyCollectionDisplayPredicate(ctx context.Context, e
 
 func (r *CatalogResolver) resolvePersonalMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter, display string) (*CatalogResult, error) {
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = personalMembershipSourceWhere
 	executor.SourceArgs = []any{access.UserID, req.CollectionID}
 	if req.Query.Sort.Field == "" {
-		executor.SourceOrder = []queryCursorTerm{
-			{expression: "COALESCE((SELECT position FROM user_personal_collection_items cursor_position WHERE cursor_position.user_id=$1 AND cursor_position.collection_id=$2 AND cursor_position.sub_item_id='' AND cursor_position.media_item_id=mi.content_id),0)", kind: cursorKindNumber, nullsLast: true},
-			{expression: cursorContentIDExpression, kind: cursorKindText, nullsLast: true},
-		}
+		applyCollectionPositionOrder(executor, personalMembershipOrderJoin)
+	} else {
+		executor.SourceWhere = personalMembershipSourceWhere
 	}
 	if err := r.applyCollectionDisplayPredicate(ctx, executor, display, access); err != nil {
 		return nil, err
 	}
 	return resolveCollectionExecutorCursor(ctx, executor, req, req.Query, access)
+}
+
+// The membership joins for curated order. Their SourceArgs are those of the
+// matching membership EXISTS: the collection ID for a library collection, and
+// the account ID and collection ID for a personal one.
+const (
+	libraryMembershipOrderJoin  = "JOIN library_collection_items cursor_membership ON cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id"
+	personalMembershipOrderJoin = "JOIN user_personal_collection_items cursor_membership ON cursor_membership.user_id=$1 AND cursor_membership.collection_id=$2 AND cursor_membership.sub_item_id='' AND cursor_membership.media_item_id=mi.content_id"
+)
+
+// applyCollectionPositionOrder pages a membership source in curated order. It
+// joins each member's row, one per member by the table's primary key, instead
+// of testing membership with EXISTS, and orders by that row's
+// (COALESCE(position,0), media_item_id). That matches the table's continuation
+// index, so PostgreSQL reads a page in index order and stops, and a
+// continuation starts its index range at the cursor, which is why the position
+// binds as integer. Ordering by a correlated
+// position subquery evaluated and sorted every member for each page. The tie
+// breaker equals mi.content_id through the join, so the order and the cursor
+// keys are unchanged.
+func applyCollectionPositionOrder(executor *QueryExecutor, membershipJoin string) {
+	// TRUE keeps the display filter and collection search able to AND onto the
+	// source predicate.
+	executor.SourceWhere = cursorTruePredicate
+	executor.SourceJoin = membershipJoin
+	executor.SourceOrder = []queryCursorTerm{
+		{expression: "COALESCE(cursor_membership.position,0)", kind: cursorKindNumber, nullsLast: true, notNull: true, sqlType: "integer"},
+		{expression: "cursor_membership.media_item_id", kind: cursorKindText, nullsLast: true, notNull: true},
+	}
 }

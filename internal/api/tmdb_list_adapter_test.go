@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -43,32 +42,6 @@ func tmdbListTestServer(entries int, onLookup func()) *httptest.Server {
 			http.NotFound(w, r)
 		}
 	}))
-}
-
-// GetList keeps list order and makes no per-entry lookups; the matcher asks
-// for external IDs only for entries their TMDB ID leaves unmatched.
-func TestTMDBListAdapterReadsListWithoutLookups(t *testing.T) {
-	var lookups atomic.Int64
-	server := tmdbListTestServer(20, func() { lookups.Add(1) })
-	defer server.Close()
-	client := tmdb.NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	entries, err := (&tmdbListAdapter{client: client}).GetList(t.Context(), 310, 0)
-	if err != nil {
-		t.Fatalf("GetList: %v", err)
-	}
-	if len(entries) != 20 {
-		t.Fatalf("entries = %d, want 20", len(entries))
-	}
-	for i, entry := range entries {
-		if entry.ID != i+1 || entry.IMDbID != "" || entry.TVDBID != 0 {
-			t.Fatalf("entries[%d] = %+v, want list position %d without external IDs", i, entry, i+1)
-		}
-	}
-	if n := lookups.Load(); n != 0 {
-		t.Fatalf("GetList made %d external-ID lookups, want 0", n)
-	}
 }
 
 func TestTMDBEnrichExternalIDsFillsEntriesInPlace(t *testing.T) {

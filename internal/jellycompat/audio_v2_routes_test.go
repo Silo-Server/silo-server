@@ -86,19 +86,6 @@ func TestMasterManifestKeepsRemuxV1AndLegacySessionsIsolated(t *testing.T) {
 			requestURL: "/Videos/item-1/remux-dv-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
 		},
 		{
-			name: "remux-dv-v1 route rejects a legacy transcode",
-			source: func() PlaybackMediaSource {
-				source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
-				source.ID = "source-1"
-				for index := range source.Version.AudioTracks {
-					source.Version.AudioTracks[index].Channels = 2
-				}
-				return source
-			}(),
-			serve:      (*PlaybackHandler).HandleRemuxDVV1MasterManifest,
-			requestURL: "/Videos/item-1/remux-dv-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
-		},
-		{
 			name:       "remux-ts-v1 route rejects fMP4 remux",
 			source:     PlaybackMediaSource{ID: "source-1", FileID: 42, HLSRemux: true, Version: testCompatVersion()},
 			serve:      (*PlaybackHandler).HandleRemuxTSV1MasterManifest,

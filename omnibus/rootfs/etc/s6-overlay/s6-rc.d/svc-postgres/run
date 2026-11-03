@@ -1,0 +1,23 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+if ! enabled postgres; then
+  notify_ready
+  exec sleep infinity
+fi
+export HOME=/config/postgres
+# The server inherits the descriptor holding PG_LOCK and keeps it until it and
+# every backend exit, so a second container on this /config cannot start one.
+# Holding it, nothing else can be using the data directory, so a pid file left
+# by an unclean stop is stale: it can name a PID this container now uses for
+# something else, which PostgreSQL would take for a live server.
+# shellcheck disable=SC2016 # expanded by the inner shell
+exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
+  s6-setuidgid postgres bash -c 'exec 9<>"$1" && flock -n 9 || {
+      echo "another PostgreSQL server holds $1; is a second container using this /config?" >&2
+      exit 1
+    }
+    rm -f /config/postgres/data/postmaster.pid
+    exec postgres -D /config/postgres/data' _ "$PG_LOCK"

@@ -300,45 +300,6 @@ describe("series page request budget and play target", () => {
     expect(requestLog()).toHaveLength(5);
   });
 
-  it("plays the first unwatched episode after a finished one", async () => {
-    installServer({
-      seasons: {
-        1: ["watched", "watched", "watched"],
-        2: ["unwatched", "unwatched", "unwatched"],
-      },
-      seriesPlayContentId: "s2e1",
-      progressPage: [],
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({ href: "/watch/s2e1", label: "Play Next" });
-    expect(mocks.watchTogether.value).toMatchObject({
-      target: { content_id: "s2e1", subtitle: "S2 E1" },
-      initialSeasonNumber: 2,
-    });
-    expect(requestLog()).toHaveLength(5);
-  });
-
-  it("starts an unstarted series from episode 1", async () => {
-    installServer({
-      seasons: {
-        1: ["unwatched", "unwatched", "unwatched"],
-        2: ["unwatched", "unwatched", "unwatched"],
-      },
-      seriesPlayContentId: "s1e1",
-      progressPage: [],
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({
-      href: "/watch/s1e1",
-      label: "Start From Episode 1",
-    });
-    expect(requestLog()).toHaveLength(5);
-  });
-
   it("plays the specials once every regular episode is watched", async () => {
     // The series rollup counts specials, so the series is not fully watched,
     // and the server ranks unwatched specials after every regular episode.

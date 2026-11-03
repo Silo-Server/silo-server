@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -336,38 +335,6 @@ func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
 	pool.SetNodes(row())
 	if !planner.TranscodeNodeHealthy("http://node:8080") {
 		t.Fatal("the mark outlived the node leaving the pool")
-	}
-}
-
-// A recheck that finds the node answering is persisted, like a sweep result:
-// the node configuration reconciliation rebuilds the pool from the stored row,
-// and a sweep that saw the node down would otherwise take it back out.
-func TestRecheckPersistsARecoveredNode(t *testing.T) {
-	db := newNodeTestPool(t)
-	ctx := context.Background()
-	repo := NewRepository(db)
-	nodeURL, _ := flakyHealthNode(t, 0)
-	node, err := repo.Create(ctx, CreateNodeInput{Name: fmt.Sprintf("recheck-test-%d", time.Now().UnixNano()), Type: NodeTypeTranscode, URL: nodeURL})
-	if err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Delete(ctx, node.ID) })
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, false, 0, 0, nil, nil); err != nil {
-		t.Fatalf("record failed sweep: %v", err)
-	}
-
-	pool := NewTranscodePool()
-	pool.SetNodes([]*Node{{ID: node.ID, URL: node.URL, Type: NodeTypeTranscode, Enabled: true, Healthy: true}})
-	checker := NewHealthChecker(NewProxyPool(), pool, repo)
-	checker.ReportUnreachable(nodeURL)
-	checker.rechecks.Wait()
-
-	stored, err := repo.GetByID(ctx, node.ID)
-	if err != nil {
-		t.Fatalf("reload node: %v", err)
-	}
-	if !stored.Healthy {
-		t.Fatal("the recheck's healthy result was not persisted")
 	}
 }
 

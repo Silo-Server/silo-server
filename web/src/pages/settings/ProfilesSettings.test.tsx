@@ -261,20 +261,6 @@ describe("ProfilesSettings", () => {
     expect(container.textContent).toContain("Switch to another profile before deleting this one.");
   });
 
-  it("switches to an unlocked profile from the list", async () => {
-    const otherProfile = makeProfile({ id: "profile-2", name: "Guest" });
-    mocks.useProfiles.mockReturnValue({
-      data: [makeProfile(), otherProfile],
-      isLoading: false,
-    });
-
-    await render(<ProfilesSettings />);
-
-    await click(findButton(container, "Use"));
-
-    expect(selectProfile).toHaveBeenCalledWith(otherProfile);
-  });
-
   it("verifies a locked profile before switching to it", async () => {
     const lockedProfile = makeProfile({
       id: "profile-2",

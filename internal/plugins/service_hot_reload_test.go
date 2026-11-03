@@ -68,6 +68,39 @@ func TestServiceEnsureClientRestartsOnManifestDrift(t *testing.T) {
 	}
 }
 
+// A plugin built on a newer SDK may use an enum value this server doesn't
+// know; its installed manifest.json keeps it as a number, while the running
+// client's copy dropped it at start. That is not drift, so the client stays.
+func TestServiceEnsureClientIgnoresEnumValuesTheServerDoesNotKnow(t *testing.T) {
+	ctx := context.Background()
+	installed := testPluginManifest(t, "silo.metadb", "0.0.36")
+	installed.Capabilities[0].ConfigSchema = []*pluginv1.ConfigSchema{{
+		Key:        "connection",
+		JsonSchema: `{"type":"object","properties":{"accent":{"type":"string"}}}`,
+		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
+			{Key: "accent", Control: pluginv1.AdminFormControl(99)},
+		}},
+	}}
+	installPath := writeInstalledPluginManifest(t, installed)
+
+	store := newFakeServiceInstallationStore(&Installation{
+		ID:          3,
+		PluginID:    installed.GetPluginId(),
+		Version:     installed.GetVersion(),
+		InstallPath: installPath,
+		Enabled:     true,
+	})
+	host := &fakeServiceHost{clientResult: &fakePluginClient{manifest: pluginhost.KnownManifest(installed)}}
+	service := &Service{installations: store, host: host}
+
+	if _, err := service.MetadataProviderClient(ctx, 3, "metadb"); err != nil {
+		t.Fatalf("MetadataProviderClient() returned error: %v", err)
+	}
+	if len(host.stopped) != 0 || len(host.started) != 0 {
+		t.Fatalf("stopped = %v, started %d times; want the running client kept", host.stopped, len(host.started))
+	}
+}
+
 func TestServiceEnsureClientKeepsHealthyClientWhenInstalledManifestUnavailable(t *testing.T) {
 	ctx := context.Background()
 
@@ -150,7 +183,6 @@ func (f *fakeServiceHost) Shutdown(context.Context) error {
 type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
-	metadataProviderErr   error
 	markerProvider        *pluginhost.MarkerProviderClient
 }
 
@@ -160,7 +192,7 @@ func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
 
 func (f *fakePluginClient) MetadataProvider(string) (*pluginhost.MetadataProviderClient, error) {
 	f.metadataProviderCalls++
-	return nil, f.metadataProviderErr
+	return nil, nil
 }
 
 func (f *fakePluginClient) ImageResolver(string) (*pluginhost.ImageResolverClient, error) {
@@ -240,6 +272,15 @@ func newFakeServiceInstallationStore(installations ...*Installation) *fakeServic
 		store.byPluginID[cloned.PluginID] = append(store.byPluginID[cloned.PluginID], &cloned)
 	}
 	return store
+}
+
+// installedPluginStore holds manifest, written to disk, as enabled installation id.
+func installedPluginStore(t *testing.T, id int, manifest *pluginv1.PluginManifest) *fakeServiceInstallationStore {
+	t.Helper()
+	return newFakeServiceInstallationStore(&Installation{
+		ID: id, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: writeInstalledPluginManifest(t, manifest), Enabled: true,
+	})
 }
 
 func (s *fakeServiceInstallationStore) Create(_ context.Context, input CreateInstallationInput) (*Installation, error) {

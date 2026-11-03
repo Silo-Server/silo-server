@@ -185,6 +185,8 @@ type DownloadRequest struct {
 	ReleaseName     string
 	Score           float64
 	HearingImpaired bool
+	// Target is the media file's episode, resolved by the server.
+	Target DownloadTarget
 }
 
 // StoreSubtitleRequest contains metadata and content for persisting a subtitle.
@@ -223,7 +225,7 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, req.ProviderName)
 	}
 
-	data, format, err := prov.Download(ctx, req.SubtitleID)
+	data, format, err := prov.Download(ctx, req.SubtitleID, req.Target)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
 	}
@@ -259,8 +261,16 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 	if err != nil {
 		return nil, err
 	}
+	// Subtitles are served as UTF-8, so UTF-16 uploads are stored converted.
+	data := decodeUTF16WithBOM(req.Data)
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("subtitle file exceeds maximum size of %d bytes", MaxUploadSize)
+	}
+	if err := ValidateSubtitleContent(format, data); err != nil {
+		return nil, err
+	}
 
-	detected, err := ResolveUploadLanguage(req.Filename, format, req.Data, req.Language, req.PreferUserLanguage)
+	detected, err := ResolveUploadLanguage(req.Filename, format, data, req.Language, req.PreferUserLanguage)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +289,7 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 		ReleaseName:     releaseName,
 		Score:           0,
 		HearingImpaired: req.HearingImpaired,
-		Data:            req.Data,
+		Data:            data,
 	})
 }
 

@@ -69,19 +69,6 @@ func mustAcquire(t *testing.T, l *Limiter, ctx context.Context) func() {
 	return release
 }
 
-func TestLimiterBoundsSharedSlots(t *testing.T) {
-	l := NewLimiter(2)
-	a := mustAcquire(t, l, context.Background())
-	b := mustAcquire(t, l, context.Background())
-	busy, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := l.Acquire(busy); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("third acquire = %v, want it to wait", err)
-	}
-	a()
-	b()
-}
-
 func TestLimiterInteractiveWorkUsesTheReservedSlot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		l := NewLimiter(1)

@@ -2,8 +2,12 @@ package access
 
 // Scope is the resolved effective access policy for a viewer request.
 type Scope struct {
-	UserID              int
-	ProfileID           string
+	UserID    int
+	ProfileID string
+	// ProfilePINRevision is the selected profile's PIN revision
+	// (userstore.Profile.PINRevision), 0 without a profile. A credential that
+	// records the revision it was verified at can tell when the PIN changed.
+	ProfilePINRevision  int64
 	AllowedLibraryIDs   []int
 	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
 	LibrariesRestricted bool

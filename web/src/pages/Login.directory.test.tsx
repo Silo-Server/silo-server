@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Login from "./Login";
+import { cleanup, waitFor } from "@testing-library/react";
+import { renderLogin, signInWithPassword } from "./loginPage.test-support";
 
 const auth = vi.hoisted(() => ({
   login: vi.fn(),
@@ -42,16 +40,8 @@ const LOCAL = { id: "local", mode: "credentials", display_name: "Local", default
 const LDAP = { id: "plugin:6:ldap", mode: "credentials", display_name: "Directory" };
 
 async function submit() {
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "alice" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  renderLogin();
+  signInWithPassword("alice");
   await waitFor(() => expect(auth.login).toHaveBeenCalled());
   return auth.login.mock.calls[0];
 }

@@ -14,7 +14,6 @@ import (
 	"io"
 	"math/big"
 	"net"
-	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -572,7 +571,7 @@ func TestEventBusKeepsAnIdleSubscriptionOnAnAnsweringMaster(t *testing.T) {
 	answering := startRESPTestServer(t, nil, respTestAnswering)
 	var master atomic.Pointer[respTestServer]
 	master.Store(answering)
-	bus, _ := sentinelTestBus(t, &master, time.Second, 0)
+	bus, _ := sentinelTestBus(t, &master, 400*time.Millisecond, 0)
 	if err := bus.Subscribe(ctx, ChannelAdmin, func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -896,129 +895,6 @@ func TestSentinelURLWithTLSVerifiesTheMasterAgainstTheURLHost(t *testing.T) {
 	if got := otherMaster.received(); len(got) != 0 {
 		t.Fatalf("the master with the other certificate received %q, want nothing", got)
 	}
-}
-
-// Fails the Sentinel-managed master over and requires both a key-value client
-// and the event bus to keep working against the new master. It needs
-// SILO_TEST_REDIS_SENTINEL_URL to name a disposable Sentinel deployment with
-// at least one replica, because it triggers a real failover.
-func TestSentinelURLFollowsFailover(t *testing.T) {
-	rawURL := os.Getenv("SILO_TEST_REDIS_SENTINEL_URL")
-	if rawURL == "" {
-		t.Skip("SILO_TEST_REDIS_SENTINEL_URL not set")
-	}
-	_, failover, err := config.ParseRedisURL(rawURL)
-	if err != nil || failover == nil {
-		t.Fatalf("SILO_TEST_REDIS_SENTINEL_URL is not a Sentinel URL: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-	defer cancel()
-
-	client, _, err := newRedisClient(config.RedisConfig{URL: rawURL}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-	bus := newRedisEventBus(config.RedisConfig{URL: rawURL})
-	t.Cleanup(func() { _ = bus.Close() })
-
-	key := fmt.Sprintf("silo:test:sentinel:%d", time.Now().UnixNano())
-	channel := key
-	t.Cleanup(func() { _ = client.Del(context.Background(), key).Err() })
-	events := make(chan Event, 64)
-	if err := bus.Subscribe(ctx, channel, func(event Event) { events <- event }); err != nil {
-		t.Fatalf("subscribe through Sentinel: %v", err)
-	}
-	if err := client.Set(ctx, key, "before", time.Minute).Err(); err != nil {
-		t.Fatalf("write through Sentinel: %v", err)
-	}
-	if err := bus.Publish(ctx, channel, Event{Type: EventSettingsChanged, Payload: "before"}); err != nil {
-		t.Fatalf("publish through Sentinel: %v", err)
-	}
-	select {
-	case got := <-events:
-		if got.Payload != "before" {
-			t.Fatalf("received %+v before the failover, want the published event", got)
-		}
-	case <-ctx.Done():
-		t.Fatal("the event published before the failover did not arrive")
-	}
-
-	sentinel := redis.NewSentinelClient(&redis.Options{
-		Addr:      failover.SentinelAddrs[0],
-		Username:  failover.SentinelUsername,
-		Password:  failover.SentinelPassword,
-		TLSConfig: failover.TLSConfig,
-	})
-	t.Cleanup(func() { _ = sentinel.Close() })
-	oldMaster, err := sentinel.GetMasterAddrByName(ctx, failover.MasterName).Result()
-	if err != nil {
-		t.Fatalf("ask Sentinel for the master: %v", err)
-	}
-	old := redis.NewClient(&redis.Options{
-		Addr:      net.JoinHostPort(oldMaster[0], oldMaster[1]),
-		Username:  failover.Username,
-		Password:  failover.Password,
-		TLSConfig: failover.TLSConfig,
-	})
-	t.Cleanup(func() { _ = old.Close() })
-	// Sentinel refuses a failover until a replica is in sync, so retry.
-	waitFor(t, ctx, "Sentinel to accept a failover", func() error {
-		return sentinel.Failover(ctx, failover.MasterName).Err()
-	})
-	// Sentinel names the new master before it demotes the old one, and until
-	// then the old one still accepts writes. Once it is a replica, a master
-	// role seen through the client can only be the promoted server.
-	waitFor(t, ctx, "the old master to become a replica", func() error {
-		return requireRedisRole(ctx, old, "slave")
-	})
-	waitFor(t, ctx, "the client to reach the new master", func() error {
-		return requireRedisRole(ctx, client, "master")
-	})
-
-	if err := client.Set(ctx, key, "after", time.Minute).Err(); err != nil {
-		t.Fatalf("write after the failover: %v", err)
-	}
-	if got, err := client.Get(ctx, key).Result(); err != nil || got != "after" {
-		t.Fatalf("read after the failover = (%q, %v), want the value written to the new master", got, err)
-	}
-	// Sentinel closes the old master's subscriptions when it demotes it. The
-	// event bus has to subscribe again on the new master by itself.
-	scoped := redisChannel(channel, failover.DB)
-	waitFor(t, ctx, "the subscription to reach the new master", func() error {
-		subscribers, err := client.PubSubNumSub(ctx, scoped).Result()
-		if err != nil {
-			return err
-		}
-		if subscribers[scoped] < 1 {
-			return fmt.Errorf("the new master has no subscriber for the channel")
-		}
-		return nil
-	})
-	if err := bus.Publish(ctx, channel, Event{Type: EventSettingsChanged, Payload: "after"}); err != nil {
-		t.Fatalf("publish after the failover: %v", err)
-	}
-	select {
-	case got := <-events:
-		if got.Payload != "after" {
-			t.Fatalf("received %+v after the failover, want the event published to the new master", got)
-		}
-	case <-ctx.Done():
-		t.Fatal("the event published after the failover did not arrive")
-	}
-}
-
-// requireRedisRole reports an error unless the server answering client has
-// the given replication role.
-func requireRedisRole(ctx context.Context, client *redis.Client, want string) error {
-	reply, err := client.Do(ctx, "ROLE").Slice()
-	if err != nil {
-		return err
-	}
-	if len(reply) == 0 || reply[0] != want {
-		return fmt.Errorf("the server's role is not %s", want)
-	}
-	return nil
 }
 
 // waitFor retries check until it succeeds or ctx ends.

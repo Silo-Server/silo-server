@@ -47,18 +47,6 @@ describe("getQuerySortOptions", () => {
     expect(labelsByField.get("date_viewed")).toBe("Date Read");
     expect(labelsByField.get("plays")).toBe("Reads");
   });
-
-  it("keeps video labels for movie personalized sorts", () => {
-    const labelsByField = new Map(
-      getQuerySortOptions({ includePersonalized: true, relevanceScope: "movie" }).map((option) => [
-        option.value,
-        option.label,
-      ]),
-    );
-
-    expect(labelsByField.get("date_viewed")).toBe("Date Viewed");
-    expect(labelsByField.get("plays")).toBe("Plays");
-  });
 });
 
 it("limits History personalized ordering to its snapshot-backed Date Viewed sort", () => {

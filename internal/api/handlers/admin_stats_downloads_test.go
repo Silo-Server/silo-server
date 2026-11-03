@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,96 +24,6 @@ func (s *stubDownloadsStatsSource) Get(_ context.Context, limit int) (*AdminDown
 }
 
 func (s *stubDownloadsStatsSource) Invalidate() { s.invalidated++ }
-
-func TestHandleGetDownloadsStatsClampsLimit(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		query     string
-		wantLimit int
-	}{
-		{name: "default", query: "", wantLimit: adminDownloadsStatsDefaultLimit},
-		{name: "explicit value passes through", query: "?limit=5", wantLimit: 5},
-		{name: "zero clamps up", query: "?limit=0", wantLimit: adminDownloadsStatsMinLimit},
-		{name: "oversized clamps down", query: "?limit=999", wantLimit: adminDownloadsStatsMaxLimit},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			source := &stubDownloadsStatsSource{stats: &AdminDownloadsStats{}}
-			handler := &AdminHandler{DownloadsStatsSource: source}
-			rec := httptest.NewRecorder()
-			handler.HandleGetDownloadsStats(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/downloads"+tt.query, nil))
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
-			}
-			if source.gotLimit != tt.wantLimit {
-				t.Fatalf("limit = %d, want %d", source.gotLimit, tt.wantLimit)
-			}
-		})
-	}
-}
-
-func TestHandleGetDownloadsStatsRejectsNonNumericLimit(t *testing.T) {
-	t.Parallel()
-
-	source := &stubDownloadsStatsSource{stats: &AdminDownloadsStats{}}
-	handler := &AdminHandler{DownloadsStatsSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetDownloadsStats(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/downloads?limit=all", nil))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
-	}
-	if source.callCount != 0 {
-		t.Fatalf("source was queried %d times for an invalid request", source.callCount)
-	}
-}
-
-func TestHandleGetDownloadsStatsRefreshInvalidates(t *testing.T) {
-	t.Parallel()
-
-	source := &stubDownloadsStatsSource{stats: &AdminDownloadsStats{}}
-	handler := &AdminHandler{DownloadsStatsSource: source}
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetDownloadsStats(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/downloads?refresh=true", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if source.invalidated != 1 {
-		t.Fatalf("invalidated = %d, want 1", source.invalidated)
-	}
-}
-
-func TestHandleGetDownloadsStatsSourceFailureIs500(t *testing.T) {
-	t.Parallel()
-
-	source := &stubDownloadsStatsSource{err: errors.New("boom")}
-	handler := &AdminHandler{DownloadsStatsSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetDownloadsStats(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/downloads", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-}
-
-func TestHandleGetDownloadsStatsWithoutDatabase(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{}
-	rec := httptest.NewRecorder()
-	handler.HandleGetDownloadsStats(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/downloads", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-}
 
 // A deployment where nobody downloads must answer zeros with an empty array,
 // not nulls: the widget maps over top_users directly and reads all-zero

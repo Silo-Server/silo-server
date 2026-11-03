@@ -10,6 +10,12 @@ import {
 import { resetSessionMutations, sessionInstallation } from "./session-mutations";
 import { playbackCapabilitiesV2, resetPlaybackCapabilitiesV2, startPlaybackV2 } from "./start-v2";
 
+const startEnded = vi.hoisted(() => vi.fn());
+vi.mock("./bandwidth-probe", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./bandwidth-probe")>()),
+  cancelBandwidthProbe: () => startEnded,
+}));
+
 const config: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
@@ -62,6 +68,7 @@ const problem = (status: number, type: string) =>
 beforeEach(() => {
   resetPlaybackCapabilitiesV2();
   resetSessionMutations();
+  startEnded.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -69,6 +76,28 @@ afterEach(() => {
 });
 
 describe("startPlaybackV2", () => {
+  // A start's hold on speed tests ends when it loads nothing.
+  it("ends the hold on speed tests when the start is refused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(json(capabilities))
+        .mockResolvedValueOnce(problem(403, "playback_forbidden")),
+    );
+    await expect(startPlaybackV2(config, fixtureStartRequestV3())).rejects.toThrow();
+    expect(startEnded).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the hold on speed tests for a start with a plan to load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(json(capabilities)).mockResolvedValueOnce(json(wireDecision())),
+    );
+    await startPlaybackV2(config, fixtureStartRequestV3());
+    expect(startEnded).not.toHaveBeenCalled();
+  });
+
   it("requires advertised support before starting playback with a fixed version", async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(capabilities));
     vi.stubGlobal("fetch", fetcher);
@@ -356,6 +385,31 @@ describe("startPlaybackV2", () => {
     fetcher.mockResolvedValueOnce(json({ ...capabilities, protocol_versions: [2] }));
     await expect(startPlaybackV2(config, fixtureStartRequestV3())).rejects.toThrow("protocol v3");
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  // F1: a capabilities read stalled behind the server's speed-test target.
+  it("does not fail a start on a capabilities read that times out", async () => {
+    vi.useFakeTimers();
+    const timedOut = () => Promise.reject(new DOMException("signal timed out", "TimeoutError"));
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(timedOut)
+      .mockResolvedValueOnce(json(capabilities))
+      .mockResolvedValueOnce(json(wireDecision(), 201));
+    vi.stubGlobal("fetch", fetcher);
+    // Without capabilities to fall back on, the read is retried within the start's budget.
+    const first = startPlaybackV2(config, fixtureStartRequestV3());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await first).toMatchObject({ outcome: "playable" });
+    // Once they are stale, a refresh that times out starts with the last ones at once.
+    vi.advanceTimersByTime(61_000);
+    fetcher.mockImplementationOnce(timedOut).mockResolvedValueOnce(json(wireDecision(), 201));
+    expect(await startPlaybackV2(config, fixtureStartRequestV3())).toMatchObject({
+      outcome: "playable",
+    });
+    expect(JSON.parse(fetcher.mock.calls[4]![1].body).installation_id).toBe(
+      capabilities.installation_id,
+    );
   });
 
   it("memoizes capabilities per origin and forces a refresh on demand", async () => {

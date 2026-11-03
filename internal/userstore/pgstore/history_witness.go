@@ -26,7 +26,7 @@ func (s *PostgresUserStore) LatestHistoryIDs(ctx context.Context, profileID stri
   FROM user_watch_history h
   WHERE h.user_id = $1 AND h.profile_id = $2 AND h.media_item_id = member.media_item_id
    AND h.watched_at > COALESCE((
-    SELECT hidden.hidden_before FROM user_history_hidden_items hidden
+    SELECT COALESCE(hidden.removed_before, hidden.hidden_before) FROM user_history_hidden_items hidden
     WHERE hidden.user_id = h.user_id AND hidden.profile_id = h.profile_id
      AND hidden.media_item_id = h.media_item_id
    ), '-infinity'::timestamptz)

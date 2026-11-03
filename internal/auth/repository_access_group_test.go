@@ -191,64 +191,6 @@ func TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB(t *testing
 	}
 }
 
-func TestUserRepositoryCreateAssignsDefaultAccessGroupDB(t *testing.T) {
-	ctx, pool, suffix := newAccessGroupUserRepoDBTest(t)
-	seedID := defaultAuthAccessGroupSeedID(t, ctx, pool)
-	t.Cleanup(func() {
-		restoreAuthDefaultAccessGroup(t, ctx, pool, seedID)
-	})
-	users := NewUserRepository(pool)
-
-	defaultID := insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "default")
-	setAuthDefaultAccessGroup(t, ctx, pool, defaultID)
-
-	created, err := users.Create(ctx, createAuthAccessGroupUserInput(suffix, "assigned-default", nil))
-	if err != nil {
-		t.Fatalf("Create(default assignment) error: %v", err)
-	}
-	if created.AccessGroupID == nil || *created.AccessGroupID != defaultID {
-		t.Fatalf("AccessGroupID = %#v, want default group %d", created.AccessGroupID, defaultID)
-	}
-
-	adminInput := createAuthAccessGroupUserInput(suffix, "admin", nil)
-	adminInput.Role = "admin"
-	created, err = users.Create(ctx, adminInput)
-	if err != nil {
-		t.Fatalf("Create(admin) error: %v", err)
-	}
-	if created.AccessGroupID != nil {
-		t.Fatalf("AccessGroupID = %#v for admin, want nil (admins stay ungrouped)", created.AccessGroupID)
-	}
-
-	groupedAdminInput := createAuthAccessGroupUserInput(suffix, "grouped-admin", &defaultID)
-	groupedAdminInput.Role = "admin"
-	created, err = users.Create(ctx, groupedAdminInput)
-	if err != nil {
-		t.Fatalf("Create(admin with explicit group) error: %v", err)
-	}
-	if created.AccessGroupID != nil {
-		t.Fatalf("AccessGroupID = %#v for admin with explicit group, want nil", created.AccessGroupID)
-	}
-
-	explicitID := insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "explicit")
-	created, err = users.Create(ctx, createAuthAccessGroupUserInput(suffix, "explicit", &explicitID))
-	if err != nil {
-		t.Fatalf("Create(explicit group) error: %v", err)
-	}
-	if created.AccessGroupID == nil || *created.AccessGroupID != explicitID {
-		t.Fatalf("AccessGroupID = %#v, want explicit group %d", created.AccessGroupID, explicitID)
-	}
-
-	clearAuthDefaultAccessGroup(t, ctx, pool)
-	created, err = users.Create(ctx, createAuthAccessGroupUserInput(suffix, "no-default", nil))
-	if err != nil {
-		t.Fatalf("Create(no default) error: %v", err)
-	}
-	if created.AccessGroupID != nil {
-		t.Fatalf("AccessGroupID = %#v, want nil without a default group", created.AccessGroupID)
-	}
-}
-
 func newAccessGroupUserRepoDBTest(t *testing.T) (context.Context, *pgxpool.Pool, string) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

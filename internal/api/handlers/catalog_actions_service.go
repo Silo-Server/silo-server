@@ -90,7 +90,7 @@ func (h *ItemsHandler) RequestTrailersRefresh(ctx context.Context, userID int, c
 		if !result.Allowed {
 			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many trailer refresh requests")
 			if result.RetryAfter > 0 {
-				limited.RetryAfter = max(1, int(result.RetryAfter.Seconds()))
+				limited.RetryAfter = ratelimit.RetryAfterSeconds(result.RetryAfter)
 			}
 			return TrailerRefreshView{}, limited
 		}
@@ -200,7 +200,7 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 	// The account budget comes first, so a refused request cannot fan out
 	// into the pending-language reads below without spending it.
 	if h.Limiter != nil && requestedBy != nil {
-		result := h.onViewAllow(ctx, *requestedBy)
+		result := h.Limiter.Allow(ctx, metadataAIOnViewLimiterKey(*requestedBy), metadataAIOnViewRate)
 		if !result.Allowed {
 			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many translation requests")
 			if result.RetryAfter > 0 {
@@ -318,7 +318,7 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64,
 	if !result.Allowed {
 		limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many person refresh requests")
 		if result.RetryAfter > 0 {
-			limited.RetryAfter = max(1, int(result.RetryAfter.Seconds()))
+			limited.RetryAfter = ratelimit.RetryAfterSeconds(result.RetryAfter)
 		}
 		return limited
 	}

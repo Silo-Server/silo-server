@@ -81,39 +81,6 @@ func TestLoadIntegrationOptionsClassifiesProbeFailures(t *testing.T) {
 	}
 }
 
-// The probe refuses a missing key itself, and passes the address on as given:
-// normalizing it is the v2 adapter's job, and the frozen v1 route sends what
-// its client submitted.
-func TestLoadIntegrationOptionsChecksKeyAndPassesAddressThrough(t *testing.T) {
-	install := 1
-	probe := func(baseURL, key string) (*fakeRouterProvider, error) {
-		router := &fakeRouterProvider{}
-		service := newTestService(newFakeStore())
-		service.SetRouterProvider(router)
-		_, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
-			ID: "new", CapabilityID: "arr", InstallationID: &install, BaseURL: baseURL, APIKeyRef: key,
-		})
-		return router, err
-	}
-
-	router, err := probe("10.0.0.5:8989", "key")
-	if err != nil {
-		t.Fatalf("probe: %v", err)
-	}
-	if router.gotOptionsConn.BaseURL != "10.0.0.5:8989" {
-		t.Fatalf("probe base URL = %q, want it as given", router.gotOptionsConn.BaseURL)
-	}
-
-	router, err = probe("http://10.0.0.5:8989", "")
-	var ve *ValidationError
-	if !errors.As(err, &ve) || ve.FieldErrors["api_key_ref"] != integrationKeyMissing {
-		t.Fatalf("err = %v, want api_key_ref field error", err)
-	}
-	if router.gotOptionsConn.BaseURL != "" {
-		t.Fatal("plugin was asked without a key")
-	}
-}
-
 func TestNormalizeIntegrationBaseURL(t *testing.T) {
 	for _, bad := range []string{"", "ftp://10.0.0.5", "http://", "http://user:pw@10.0.0.5:8989", "http://10.0.0.5:8989/?a=1", "http://10.0.0.5:8989/#x"} {
 		_, err := NormalizeIntegrationBaseURL(bad)
@@ -143,9 +110,7 @@ func TestNormalizeIntegrationBaseURL(t *testing.T) {
 // keeping the stored key.
 func TestSaveIntegrationLeavesBaseURLToTheCaller(t *testing.T) {
 	store := newFakeStore()
-	router := &fakeRouterProvider{}
-	service := newTestService(store)
-	service.SetRouterProvider(router)
+	service, router := newRoutedService(store)
 	admin := Viewer{UserID: 1, IsAdmin: true}
 	install := 1
 

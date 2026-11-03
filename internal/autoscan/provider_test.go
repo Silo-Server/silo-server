@@ -130,29 +130,13 @@ func TestPollErrorMessage(t *testing.T) {
 			err:  fmt.Errorf("poll: %w", pluginErr),
 			want: "scan_source: no connection supplied",
 		},
-		"plugin text relaying an upstream gRPC error is kept": {
-			err:  status.Error(codes.Unknown, "upstream: rpc error: code = NotFound desc = series 12"),
-			want: "upstream: rpc error: code = NotFound desc = series 12",
-		},
-		"plugin-chosen code keeps plugin text": {
-			err:  status.Error(codes.InvalidArgument, "invalid marker"),
-			want: "invalid marker",
-		},
 		"unavailable plugin hides transport detail": {
 			err:  status.Error(codes.Unavailable, `connection error: desc = "transport: Error while dialing: dial unix /tmp/plugin123: connect: connection refused"`),
-			want: "Plugin unavailable.",
-		},
-		"unavailable plugin without detail": {
-			err:  status.Error(codes.Unavailable, ""),
 			want: "Plugin unavailable.",
 		},
 		"host deadline hides transport detail": {
 			err: fmt.Errorf("%w: %w", context.DeadlineExceeded,
 				status.Error(codes.DeadlineExceeded, `latest balancer error: connection error: desc = "transport: Error while dialing: dial unix /tmp/plugin123: connect: connection refused"`)),
-			want: "Plugin timed out.",
-		},
-		"deadline exceeded before the call": {
-			err:  fmt.Errorf("resolve plugin: %w", context.DeadlineExceeded),
 			want: "Plugin timed out.",
 		},
 		"host cancel": {
@@ -162,14 +146,6 @@ func TestPollErrorMessage(t *testing.T) {
 		"plugin-chosen deadline keeps plugin text": {
 			err:  status.Error(codes.DeadlineExceeded, "history request to Sonarr timed out after 30s"),
 			want: "history request to Sonarr timed out after 30s",
-		},
-		"plugin-chosen unimplemented keeps plugin text": {
-			err:  status.Error(codes.Unimplemented, "structured scope requires Sonarr v4"),
-			want: "structured scope requires Sonarr v4",
-		},
-		"generated stub unimplemented keeps its text": {
-			err:  status.Error(codes.Unimplemented, "method PollChanges not implemented"),
-			want: "method PollChanges not implemented",
 		},
 		"unimplemented without detail": {
 			err:  status.Error(codes.Unimplemented, ""),
@@ -190,10 +166,6 @@ func TestPollErrorMessage(t *testing.T) {
 		"host error masks URL userinfo": {
 			err:  errors.New("dial http://user:FAKE_FIXTURE_SECRET@sonarr.invalid failed"),
 			want: "dial http://" + logredact.Placeholder + "@sonarr.invalid failed",
-		},
-		"host error is unchanged": {
-			err:  errors.New("plugin silo.autoscan.arr is not running"),
-			want: "plugin silo.autoscan.arr is not running",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

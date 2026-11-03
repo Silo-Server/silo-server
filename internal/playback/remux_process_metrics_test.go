@@ -45,10 +45,13 @@ func remuxOutcomeCount(t *testing.T, outcome string) float64 {
 	return total
 }
 
-func TestRemuxCleanupPreservesCompletedFailureOutcome(t *testing.T) {
+// startDrainedRemuxSession runs script as the remux child and reads its
+// output to EOF, leaving the session for the test to close.
+func startDrainedRemuxSession(t *testing.T, script string) (*RemuxSession, *exec.Cmd) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "printf failed; exit 7")
+	t.Cleanup(cancel)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +63,11 @@ func TestRemuxCleanupPreservesCompletedFailureOutcome(t *testing.T) {
 	if _, err := io.Copy(io.Discard, session); err != nil {
 		t.Fatal(err)
 	}
+	return session, cmd
+}
+
+func TestRemuxCleanupPreservesCompletedFailureOutcome(t *testing.T) {
+	session, cmd := startDrainedRemuxSession(t, "printf failed; exit 7")
 	before := remuxOutcomeCount(t, "error")
 	if err := session.Close(); err == nil {
 		t.Fatal("expected child failure")
@@ -73,20 +81,7 @@ func TestRemuxCleanupPreservesCompletedFailureOutcome(t *testing.T) {
 }
 
 func TestRemuxRepeatedCloseReapsAndAccountsOnce(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "printf complete")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	session := &RemuxSession{cmd: cmd, ctx: ctx, cancel: cancel, outputPipe: stdout}
-	if _, err := io.Copy(io.Discard, session); err != nil {
-		t.Fatal(err)
-	}
+	session, cmd := startDrainedRemuxSession(t, "printf complete")
 	before := remuxCompletedCount(t)
 	var wg sync.WaitGroup
 	for range 5 {

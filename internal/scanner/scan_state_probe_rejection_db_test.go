@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -17,16 +15,8 @@ import (
 // reads: a file ffprobe rejected keeps its mark there, so a rescan of the
 // unchanged file skips the probe repair.
 func TestScanStateCarriesProbeRejectionDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := newScannerTestPool(t)
 
 	suffix := time.Now().UnixNano()
 	var folderID int
@@ -75,7 +65,7 @@ func TestScanStateCarriesProbeRejectionDB(t *testing.T) {
 // sidecar probes it again and fails; that must record the subtitle without
 // overwriting the probe facts the row still has.
 func TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB(t *testing.T) {
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	ctx := t.Context()
 	root := t.TempDir()
 	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("rejected-legacy-%d", time.Now().UnixNano()))

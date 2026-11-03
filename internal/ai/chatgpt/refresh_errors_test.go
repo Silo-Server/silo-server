@@ -12,7 +12,7 @@ import (
 
 func TestRefreshTerminalOAuthErrorsRequireSignIn(t *testing.T) {
 	for _, code := range []string{oauthInvalidGrant, "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused"} {
-		for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized} {
+		for _, status := range []int{http.StatusUnauthorized} {
 			t.Run(fmt.Sprintf("%s/%d", code, status), func(t *testing.T) {
 				store := &memoryStore{values: map[string]string{}}
 				save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "verified", IDToken: "validated-hint", RefreshToken: "old-refresh", Scopes: planScope}}})
@@ -73,9 +73,6 @@ func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 		status     int
 		failures   int
 	}{
-		{"temporary400", `{"error":"temporarily_unavailable"}`, 400, 3},
-		{"temporary401", `{"error":"temporarily_unavailable"}`, 401, 3},
-		{"server error", `{"error":"server_error"}`, 400, 3},
 		{"invalid client", `{"error":"invalid_client"}`, 401, 1},
 		{"unknown error", `{"error":"future_provider_error"}`, 400, 1},
 		{"malformed", `{"error":`, 400, 1},

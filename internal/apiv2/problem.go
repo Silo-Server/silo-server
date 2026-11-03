@@ -88,6 +88,7 @@ var (
 	TypeTokenRefreshRequired                          = ProblemType{"token_refresh_required", http.StatusUnauthorized, "Token refresh required"}
 	TypePermissionDenied                              = ProblemType{"permission_denied", http.StatusForbidden, "Permission denied"}
 	TypeProfileVerificationRequired                   = ProblemType{"profile_verification_required", http.StatusForbidden, "Profile verification required"}
+	TypePushInstallationKeyMismatch                   = ProblemType{"push_installation_key_mismatch", http.StatusForbidden, "Push installation key mismatch"}
 	TypePasswordChangeRequired                        = ProblemType{"password_change_required", http.StatusForbidden, "Password change required"}
 	TypeNotFound                                      = ProblemType{"not_found", http.StatusNotFound, "Not found"}
 	TypeMethodNotAllowed                              = ProblemType{"method_not_allowed", http.StatusMethodNotAllowed, "Method not allowed"}
@@ -109,7 +110,7 @@ var (
 	TypeCapabilityUnsupported                         = ProblemType{"capability_unsupported", http.StatusNotImplemented, "Capability unsupported"}
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)
@@ -400,12 +401,17 @@ func validationCode(msg string) string {
 	return codeInvalid
 }
 
-// validationLocation lifts the property a "required" message names into the
-// location, so a missing body.name is reported at body.name like every other
-// field-level failure rather than at its parent.
+// msgExpectedURI opens Huma's message for a uri or uri-reference value that
+// does not parse; the rest is the parser's error, which quotes the value.
+const msgExpectedURI = "expected string to be RFC 3986 uri: "
+
 // validationDetail keeps Huma's message except where it echoes the rejected
-// value: a multipart part's media type is restated without it.
+// value: a multipart part's media type is restated without it, and a URL
+// that does not parse, which can carry a token, loses the parser's quote of it.
 func validationDetail(msg string) string {
+	if strings.HasPrefix(msg, msgExpectedURI) {
+		return strings.TrimSuffix(msgExpectedURI, ": ")
+	}
 	if strings.HasPrefix(msg, "Invalid mime type: ") {
 		if _, want, ok := strings.Cut(msg, ", expected "); ok {
 			return "expected a part of media type " + strings.ReplaceAll(want, ",", ", ")
@@ -414,13 +420,25 @@ func validationDetail(msg string) string {
 	return msg
 }
 
+// validationLocation lifts the property a "required" message names into the
+// location, so a missing body.name is reported at body.name like every other
+// field-level failure rather than at its parent.
 func validationLocation(d *huma.ErrorDetail) string {
+	location := d.Location
+	// Huma validates a multipart text field at form.<name>; the contract's
+	// grammar puts it under the body, like a file part.
+	if location == "form" || strings.HasPrefix(location, "form.") {
+		location = locationBody + strings.TrimPrefix(location, "form")
+	}
 	const prefix = "expected required property "
 	if strings.HasPrefix(d.Message, prefix) {
 		name := strings.TrimSuffix(strings.TrimPrefix(d.Message, prefix), " to be present")
 		if name != "" && !strings.ContainsAny(name, " .[") {
-			return d.Location + "." + name
+			return location + "." + name
 		}
+	}
+	if location != d.Location {
+		return location
 	}
 	// A multipart part the form decoder refused is reported at the bare part
 	// name; the contract's grammar puts it under the body.

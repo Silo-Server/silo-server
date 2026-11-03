@@ -24,7 +24,7 @@ type AdminHardwareAcceleration struct {
 	IntelDetected             bool                             `json:"intel_detected"`
 	DetectedBackends          []playback.DetectedBackend       `json:"detected_backends,omitempty"`
 	Source                    string                           `json:"source"`
-	NodeURL                   string                           `json:"node_url,omitempty"`
+	NodeURL                   string                           `json:"node_url,omitempty" doc:"Configured address of the node that answered, with credentials removed, or [invalid URL] when it does not parse; not validated as a URI"`
 	Transformations           []playback.TransformationV3      `json:"transformations,omitempty"`
 	TransportFeatures         []string                         `json:"transport_features,omitempty"`
 	ToneMapCapabilities       []AdminHardwareToneMapCapability `json:"tone_map_capabilities,omitempty"`
@@ -70,7 +70,7 @@ func registerAdminHardwareAcceleration(reg *Registry) {
 
 // NodeHWAccel is the native transport projection, independent of handler views.
 type NodeHWAccel struct {
-	NodeURL             string                      `json:"node_url"`
+	NodeURL             string                      `json:"node_url" doc:"Configured node address with credentials removed, or [invalid URL] when it does not parse; not validated as a URI"`
 	NodeName            string                      `json:"node_name,omitempty"`
 	Resolved            string                      `json:"resolved,omitempty"`
 	RenderDevices       []string                    `json:"render_devices,omitempty"`

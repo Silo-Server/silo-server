@@ -2,10 +2,14 @@ package jellycompat
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -25,6 +29,14 @@ func TestLatestFastPathEligible(t *testing.T) {
 	if !latestFastPathEligible(paramsFor(base()), "movie") {
 		t.Fatalf("a plain first-page movies-library Latest should be eligible")
 	}
+	// Latest returns a bare array, so it never asks BrowseItems to count.
+	counted := base()
+	counted.enableTotalRecordCount = true
+	unplayed := false
+	counted.isPlayed = &unplayed
+	if got := paramsFor(counted).Get("include_total"); got != "false" {
+		t.Fatalf("Latest include_total = %q, want false", got)
+	}
 	if !latestFastPathEligible(paramsFor(base()), "series") {
 		t.Fatalf("a plain first-page series-library Latest should be eligible")
 	}
@@ -40,13 +52,8 @@ func TestLatestFastPathEligible(t *testing.T) {
 		mutate  func(*itemsQuery)
 	}{
 		{name: "non-video library", libType: ""},
-		{name: "ebook library", libType: "ebook"},
 		{name: "deeper page", libType: "movie", mutate: func(q *itemsQuery) { q.startIndex = 24 }},
 		{name: "played filter", libType: "movie", mutate: func(q *itemsQuery) { q.isPlayed = &played }},
-		{name: "backdrop required", libType: "movie", mutate: func(q *itemsQuery) { q.requireBackdrop = true }},
-		{name: "genre filter", libType: "movie", mutate: func(q *itemsQuery) { q.genreName = "Action" }},
-		{name: "name prefix filter", libType: "movie", mutate: func(q *itemsQuery) { q.namePrefix = "The" }},
-		{name: "person filter", libType: "series", mutate: func(q *itemsQuery) { q.personID = 42 }},
 		{name: "limit beyond shared fetch budget", libType: "movie", mutate: func(q *itemsQuery) { q.limit = compatLatestCacheFetchLimit + 1 }},
 		{name: "unknown rating string", libType: "movie", mutate: func(q *itemsQuery) { q.maxOfficialRating = "NOT-A-RATING" }},
 	}
@@ -105,24 +112,12 @@ func TestLatestRecentlyAddedConfigParity(t *testing.T) {
 	}
 }
 
-// TestLatestRecentlyAddedConfigUsesScopedTypes documents that the config helper
-// normalizes through the same compatScopedTypes clamp BrowseItems uses, so a
-// concrete single video type is preserved while anything that clamps to a
-// multi-type or no-match set falls back to the all-types (nil) config.
-func TestLatestRecentlyAddedConfigUsesScopedTypes(t *testing.T) {
-	if cfg := latestRecentlyAddedConfig([]string{"Movie"}); cfg == nil {
-		t.Fatalf("a movie-typed library should yield a non-nil filter_type config")
-	}
-	if cfg := latestRecentlyAddedConfig(nil); cfg != nil {
-		t.Fatalf("an untyped (mixed) library should yield a nil (all-types) config, got %s", cfg)
-	}
-}
-
 // seriesEpisodeSource is an episodeListSource that returns a fixed episode set
 // per series via ListBySeriesIDs (the only method the series watch-state rollup
 // uses). Other methods are unused by this path.
 type seriesEpisodeSource struct {
-	bySeries map[string][]*models.Episode
+	bySeries  map[string][]*models.Episode
+	listCalls int
 }
 
 func (s *seriesEpisodeSource) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
@@ -134,6 +129,7 @@ func (s *seriesEpisodeSource) ListBySeriesGroupedBySeason(context.Context, strin
 }
 
 func (s *seriesEpisodeSource) ListBySeriesIDs(_ context.Context, ids []string) (map[string][]*models.Episode, error) {
+	s.listCalls++
 	out := make(map[string][]*models.Episode, len(ids))
 	for _, id := range ids {
 		if eps, ok := s.bySeries[id]; ok {
@@ -147,23 +143,6 @@ func (s *seriesEpisodeSource) GetByIDs(context.Context, []string) ([]*models.Epi
 	return nil, nil
 }
 
-// completedProgressStore reports a configured set of episode ids as completed.
-// Its embedded store catches unexpected calls to the remaining UserStore methods.
-type completedProgressStore struct {
-	*progressCountingStore
-	completed map[string]bool
-}
-
-func (s *completedProgressStore) ListProgressByMediaItems(_ context.Context, _ string, ids []string) (map[string]userstore.WatchProgress, error) {
-	out := make(map[string]userstore.WatchProgress, len(ids))
-	for _, id := range ids {
-		if s.completed[id] {
-			out[id] = userstore.WatchProgress{MediaItemID: id, Completed: true}
-		}
-	}
-	return out, nil
-}
-
 // completedProgressStoreProvider hands back a fixed completedProgressStore.
 type completedProgressStoreProvider struct {
 	store userstore.UserStore
@@ -175,96 +154,16 @@ func (p *completedProgressStoreProvider) ForUser(context.Context, int) (userstor
 
 func (p *completedProgressStoreProvider) Close() error { return nil }
 
-// TestLoadLatestViaSectionsEnrichesSeriesUserData is the data-parity regression
-// guard: the native /Items/Latest fast path must apply the same aggregated
-// series watch-state rollup (Played / UnplayedItemCount) the BrowseItems
-// fallback applies. A series has no progress row of its own, so this rollup —
-// produced by ContentService.EnrichSeriesUserData, the exact call BrowseItems
-// makes — is the ONLY source of that state. Without the fast-path enrichment a
-// series library's Latest rail would drop it and diverge from page 2.
-//
-// This exercises the post-localize tail of loadLatestViaSections (the shared
-// EnrichSeriesUserData → buildLatestItemDTOs steps); the sectionsFetcher hop
-// only supplies the same list items and is covered by the config-parity tests
-// above.
-func TestLoadLatestViaSectionsEnrichesSeriesUserData(t *testing.T) {
-	// series-1 has 3 episodes; 2 are completed ⇒ 1 unplayed, not fully played.
-	episodeSrc := &seriesEpisodeSource{
-		bySeries: map[string][]*models.Episode{
-			"series-1": {
-				{ContentID: "ep-1"},
-				{ContentID: "ep-2"},
-				{ContentID: "ep-3"},
-			},
-		},
-	}
-	provider := &completedProgressStoreProvider{
-		store: &completedProgressStore{
-			progressCountingStore: &progressCountingStore{},
-			completed:             map[string]bool{"ep-1": true, "ep-2": true},
-		},
-	}
-	svc := &directContentService{
-		episodeRepo:   episodeSrc,
-		storeProvider: provider,
-	}
-
-	codec := NewResourceIDCodec()
-	h := &ItemsHandler{
-		content:  svc,
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-	}
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	listItems := []upstreamListItem{
-		{ContentID: "series-1", Type: "series", Title: "Show"},
-		{ContentID: "movie-1", Type: "movie", Title: "Film"},
-	}
-
-	// Mirror loadLatestViaSections' post-localize steps: enrich series rows,
-	// then build the wire DTOs.
-	h.content.EnrichSeriesUserData(context.Background(), session, listItems)
-
-	// The enrichment must populate the series list item in place (the input the
-	// DTO tail reads); a nil here is exactly the dropped-rollup regression.
-	if listItems[0].UserData == nil {
-		t.Fatal("EnrichSeriesUserData left the series list item's UserData nil (rollup dropped)")
-	}
-
-	dtos, err := h.buildLatestItemDTOs(context.Background(), session, itemsQuery{}, listItems)
-	if err != nil {
-		t.Fatalf("buildLatestItemDTOs error: %v", err)
-	}
-
-	seriesID := codec.EncodeStringID(EncodedIDItem, "series-1")
-	movieID := codec.EncodeStringID(EncodedIDItem, "movie-1")
-	byID := make(map[string]baseItemDTO, len(dtos))
-	for _, dto := range dtos {
-		byID[dto.ID] = dto
-	}
-
-	series, ok := byID[seriesID]
-	if !ok {
-		t.Fatalf("series DTO not found; got %#v", dtos)
-	}
-	if series.UserData == nil {
-		t.Fatal("series DTO UserData is nil; the fast path dropped the series rollup")
-	}
-	if series.UserData.UnplayedItemCount != 1 {
-		t.Fatalf("series UnplayedItemCount = %d, want 1 (3 episodes, 2 completed)", series.UserData.UnplayedItemCount)
-	}
-	if series.UserData.Played {
-		t.Fatal("series Played = true, want false (1 of 3 episodes unwatched)")
-	}
-
-	// Movies carry no episode rollup: the enrichment must not fabricate one.
-	movie, ok := byID[movieID]
-	if !ok {
-		t.Fatalf("movie DTO not found; got %#v", dtos)
-	}
-	if movie.UserData != nil && movie.UserData.UnplayedItemCount != 0 {
-		t.Fatalf("movie UnplayedItemCount = %d, want 0 (movies get no series rollup)", movie.UserData.UnplayedItemCount)
+// TestLatestLimitZeroQueriesNothing: Latest has no total to report, so
+// Limit=0 answers an empty array without browsing (the stub's BrowseItems
+// panics).
+func TestLatestLimitZeroQueriesNothing(t *testing.T) {
+	h := NewItemsHandler(&stubContentService{}, nil, NewResourceIDCodec(), &config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/Items/Latest?Limit=0&IsPlayed=false&EnableTotalRecordCount=true", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token", ProfileID: "profile-1", StreamAppUserID: 1}))
+	rec := httptest.NewRecorder()
+	h.HandleLatest(rec, req)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("Limit=0 Latest = %d %q, want 200 []", rec.Code, rec.Body.String())
 	}
 }

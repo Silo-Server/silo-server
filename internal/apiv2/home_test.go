@@ -119,7 +119,12 @@ func (f *fakeHome) HomeSectionItems(_ context.Context, sectionID string, viewer 
 	f.lastViewer = viewer
 	switch sectionID {
 	case "continue_watching":
-		return handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}, nil
+		row := handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}
+		if viewer.ItemLimitCap > 0 {
+			// A capped read of a row that holds one card more.
+			row.ItemLimit, row.TotalCount, row.HasMore = min(row.ItemLimit, viewer.ItemLimitCap), 2, true
+		}
+		return row, nil
 	case "next_up":
 		return handlers.SectionView{ID: sectionID, SectionType: "next_up", Title: "Next Up", ItemLimit: 20, TotalCount: 1, Customized: true, Items: []handlers.SectionItemView{fakeCard()}}, nil
 	}
@@ -255,61 +260,6 @@ func TestGetHomeLayout(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
-// TestGetHomeLayoutIncludedSections pins the include_items option: absent
-// or 0 answers the layout with an empty included_sections, N answers the
-// first N rows byte for byte as getHomeSectionItems does, and the bound is
-// a validation failure.
-func TestGetHomeLayoutIncludedSections(t *testing.T) {
-	deps, fake := homeDeps(t)
-	h := newTestHandler(t, deps)
-	type layoutBody struct {
-		Sections         []json.RawMessage `json:"sections"`
-		IncludedSections []json.RawMessage `json:"included_sections"`
-	}
-	decode := func(t *testing.T, path string) layoutBody {
-		t.Helper()
-		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
-		if rec.Code != 200 {
-			t.Fatal(path, rec.Code, rec.Body.String())
-		}
-		var body layoutBody
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		return body
-	}
-
-	plain := do(t, h, http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()).Body.String()
-	if !strings.HasSuffix(plain, `,"included_sections":[]}`+"\n") || fake.lastInclude != 0 {
-		t.Fatalf("include_items absent: %s (seam saw %d)", plain, fake.lastInclude)
-	}
-	if zero := do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=0", "", viewerHeaders()).Body.String(); zero != plain {
-		t.Fatalf("include_items=0 = %s, want %s", zero, plain)
-	}
-
-	body := decode(t, "/api/v2/home/layout?include_items=2&image_size=large")
-	if fake.lastInclude != 2 || fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.ProfileID != "p-owner" {
-		t.Fatalf("seam saw include=%d viewer=%+v", fake.lastInclude, fake.lastViewer)
-	}
-	if len(body.Sections) != 2 || len(body.IncludedSections) != 2 {
-		t.Fatalf("sections=%d included=%d, want 2 and 2", len(body.Sections), len(body.IncludedSections))
-	}
-	for i, id := range []string{"continue_watching", "next_up"} {
-		row := do(t, h, http.MethodGet, "/api/v2/home/sections/"+id+"/items?image_size=large", "", viewerHeaders())
-		if got, want := string(body.IncludedSections[i]), strings.TrimSuffix(row.Body.String(), "\n"); got != want {
-			t.Fatalf("included_sections[%d] = %s, want the getHomeSectionItems body %s", i, got, want)
-		}
-	}
-
-	for _, bad := range []string{"-1", "5", "two"} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items="+bad, "", viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != "query.include_items" {
-			t.Fatalf("include_items=%s errors = %+v", bad, p.Errors)
-		}
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=1&image_size=huge", "", viewerHeaders()), TypeValidationFailed)
-}
-
 func TestListHomeSections(t *testing.T) {
 	deps, fake := homeDeps(t)
 	h := newTestHandler(t, deps)
@@ -328,6 +278,40 @@ func TestListHomeSections(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections", "", viewerHeaders()), TypeInternalError)
 	deps.HomeSections = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/sections", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// TestSectionsItemLimit pins item_limit on every section read that takes it:
+// a value in range reaches the seam as the viewer's cap, absent leaves the
+// cap unset, and a value outside 1..100 is a validation failure naming it.
+func TestSectionsItemLimit(t *testing.T) {
+	deps, home := homeDeps(t)
+	library := deps.LibrarySections.(*fakeLibraryViews)
+	h := newTestHandler(t, deps)
+	for _, tc := range []struct {
+		path string
+		seen func() handlers.SectionViewer
+	}{
+		{"/api/v2/home/sections", func() handlers.SectionViewer { return home.lastViewer }},
+		{"/api/v2/home/sections/continue_watching/items", func() handlers.SectionViewer { return home.lastViewer }},
+		{"/api/v2/home/layout", func() handlers.SectionViewer { return home.lastViewer }},
+		{"/api/v2/library/1/sections", func() handlers.SectionViewer { return library.lastViewer }},
+	} {
+		for query, want := range map[string]int{"?item_limit=20": 20, "?item_limit=100": 100, "": 0} {
+			if rec := do(t, h, http.MethodGet, tc.path+query, "", viewerHeaders()); rec.Code != http.StatusOK {
+				t.Fatalf("%s%s: %d %s", tc.path, query, rec.Code, rec.Body.String())
+			}
+			if got := tc.seen().ItemLimitCap; got != want {
+				t.Errorf("%s%s: ItemLimitCap = %d, want %d", tc.path, query, got, want)
+			}
+		}
+		for _, bad := range []string{"0", "101", "-1", "x"} {
+			rec := do(t, h, http.MethodGet, tc.path+"?item_limit="+bad, "", viewerHeaders())
+			requireProblem(t, rec, TypeValidationFailed)
+			if !strings.Contains(rec.Body.String(), "query.item_limit") {
+				t.Errorf("%s?item_limit=%s: problem does not name the parameter: %s", tc.path, bad, rec.Body.String())
+			}
+		}
+	}
 }
 
 func TestGetHomeSectionItems(t *testing.T) {
@@ -382,9 +366,9 @@ func TestListSectionRecipeCandidates(t *testing.T) {
 }
 
 // TestHomeCapabilities pins the home capability document: available with
-// include_items_max where the home sections service is wired, revalidated by
-// its ETag, not_configured without it, and include_items_max equal to the
-// include_items maximum getHomeLayout validates.
+// include_items_max and the item_limit maxima where the home sections
+// service is wired, revalidated by its ETag, not_configured without them, and
+// each advertised bound equal to the maximum its parameter validates.
 func TestHomeCapabilities(t *testing.T) {
 	path := Prefix + "/home/capabilities"
 	deps, _ := homeDeps(t)
@@ -397,7 +381,8 @@ func TestHomeCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusOK || out.State != StateAvailable || out.Allowed == nil || !*out.Allowed || out.Revision == "" ||
-		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections {
+		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections || out.SectionItemLimitMax != handlers.MaxSectionItemLimitCap ||
+		out.RowItemLimitMax != handlers.MaxSectionItemLimitCap {
 		t.Fatalf("capabilities: %d %s", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get("Cache-Control"); got != cachePrivateNoCache {
@@ -410,7 +395,7 @@ func TestHomeCapabilities(t *testing.T) {
 
 	deps.HomeSections = nil
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders())
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") {
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") || strings.Contains(rec.Body.String(), "item_limit_max") {
 		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
 	}
 	out = HomeCapabilities{}
@@ -436,14 +421,21 @@ func TestHomeCapabilities(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	var maximum *float64
-	for _, p := range doc.Paths[Prefix+"/home/layout"]["get"].Parameters {
-		if p.Name == "include_items" {
-			maximum = p.Schema.Maximum
+	paramMaximum := func(path, name string) *float64 {
+		for _, p := range doc.Paths[path]["get"].Parameters {
+			if p.Name == name {
+				return p.Schema.Maximum
+			}
 		}
+		return nil
 	}
-	if maximum == nil || int(*maximum) != handlers.MaxHomeLayoutIncludedSections {
+	if maximum := paramMaximum(Prefix+"/home/layout", "include_items"); maximum == nil || int(*maximum) != handlers.MaxHomeLayoutIncludedSections {
 		t.Fatalf("getHomeLayout include_items maximum = %v, want %d", maximum, handlers.MaxHomeLayoutIncludedSections)
+	}
+	for _, path := range []string{Prefix + "/home/sections", Prefix + "/library/{id}/sections", Prefix + "/home/sections/{id}/items", Prefix + "/home/layout"} {
+		if maximum := paramMaximum(path, "item_limit"); maximum == nil || int(*maximum) != handlers.MaxSectionItemLimitCap {
+			t.Fatalf("%s item_limit maximum = %v, want %d", path, maximum, handlers.MaxSectionItemLimitCap)
+		}
 	}
 	if rec := do(t, h, http.MethodGet, fmt.Sprintf("%s/home/layout?include_items=%d", Prefix, handlers.MaxHomeLayoutIncludedSections+1), "", viewerHeaders()); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("include_items above the advertised maximum: %d", rec.Code)

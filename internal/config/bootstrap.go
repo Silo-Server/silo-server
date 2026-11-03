@@ -12,12 +12,19 @@ import (
 // the bootstrap loader dependency-free, so the two constants must stay in sync.
 const minSecretKeyLen = 32
 
+// The server modes that run as a node of a main server.
+const (
+	modeProxy     = "proxy"
+	modeTranscode = "transcode"
+)
+
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
 	DatabaseURL string
 	RedisURL    string // optional override; empty means use DB setting
 	Listen      string
 	JFListen    string
+	ABSListen   string
 	Mode        string
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
@@ -66,9 +73,21 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 		jfPort = "8096"
 	}
 
+	absPort := os.Getenv("ABS_PORT")
+	if absPort == "" {
+		absPort = "13378"
+	}
+
 	mode := os.Getenv("MODE")
 	if mode == "" {
 		mode = "integrated"
+	}
+	// NODE_URL is a node's whole identity: it keys session bookkeeping and
+	// selects the stream_nodes row whose acceleration overrides the node adopts.
+	// A URL guessed from the listen port would give two nodes on the same port
+	// one identity.
+	if (mode == modeProxy || mode == modeTranscode) && os.Getenv("NODE_URL") == "" {
+		return nil, fmt.Errorf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -78,6 +97,7 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 		RedisURL:    redisURL,
 		Listen:      ":" + port,
 		JFListen:    ":" + jfPort,
+		ABSListen:   ":" + absPort,
 		Mode:        mode,
 		SecretKey:   []byte(secretKey),
 	}, nil

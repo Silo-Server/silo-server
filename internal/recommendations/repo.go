@@ -2648,7 +2648,10 @@ func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID stri
 		SELECT DISTINCT item_id
 		FROM   watched_activity
 		WHERE  user_id = $1 AND profile_id = $2`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, userID, profileID)
+	// An unnamed statement plans each read for its profile. A cached
+	// statement's generic plan assumes the average history, and with a long
+	// one it hash-joins every episode even for a profile with a short one.
+	rows, err := r.pool.Query(ctx, query, pgx.QueryExecModeCacheDescribe, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get watched item IDs: %w", err)
 	}

@@ -41,21 +41,6 @@ func requestWithItemID(role string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-func runMetadataCurationMiddleware(user *models.User, libraryIDs []int, role string) int {
-	mw := NewPermissionMiddleware(
-		fakePermissionUserLoader{user: user},
-		fakeTargetLibraryResolver{ids: libraryIDs},
-		nil,
-		nil,
-	)
-	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	rec := httptest.NewRecorder()
-	next.ServeHTTP(rec, requestWithItemID(role))
-	return rec.Code
-}
-
 func runMetadataCurationMiddlewareWithProfile(
 	user *models.User,
 	libraryIDs []int,
@@ -80,73 +65,39 @@ func runMetadataCurationMiddlewareWithProfile(
 	return rec.Code
 }
 
-func TestRequireMetadataCurationForItem_AdminOnPrimaryProfileBypasses(t *testing.T) {
-	code := runMetadataCurationMiddlewareWithProfile(nil, nil, "admin", "prof-1", primaryChecker(true, true, nil))
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
+// TestRequireMetadataCurationForItem pins the legacy gate's absolute answers;
+// the policy-backed parity test compares against these.
+func TestRequireMetadataCurationForItem(t *testing.T) {
+	admin := func(perms []string) *models.User {
+		return &models.User{ID: 7, Role: "admin", Enabled: true, Permissions: perms}
 	}
-}
-
-func TestRequireMetadataCurationForItem_AdminOnNonPrimaryProfileWithoutAssignedPermission(t *testing.T) {
-	admin := &models.User{ID: 7, Role: "admin", Enabled: true, LibraryIDs: nil, Permissions: nil}
-	code := runMetadataCurationMiddlewareWithProfile(admin, []int{1}, "admin", "prof-2", primaryChecker(false, true, nil))
-	if code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
+	curator := func(libraries []int) *models.User {
+		return &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: libraries, Permissions: []string{"metadata_curation"}}
 	}
-}
-
-func TestRequireMetadataCurationForItem_AdminOnNonPrimaryProfileWithAssignedPermission(t *testing.T) {
-	admin := &models.User{ID: 7, Role: "admin", Enabled: true, LibraryIDs: nil, Permissions: []string{"metadata_curation"}}
-	code := runMetadataCurationMiddlewareWithProfile(admin, []int{1}, "admin", "prof-2", primaryChecker(false, true, nil))
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
-	}
-}
-
-func TestRequireMetadataCurationForItem_AllowsAdmin(t *testing.T) {
-	code := runMetadataCurationMiddleware(nil, nil, "admin")
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
-	}
-}
-
-func TestRequireMetadataCurationForItem_RejectsUserWithoutPermission(t *testing.T) {
-	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: []int{1}, Permissions: nil}
-	code := runMetadataCurationMiddleware(user, []int{1}, "user")
-	if code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
-	}
-}
-
-func TestRequireMetadataCurationForItem_AllowsUnrestrictedCurator(t *testing.T) {
-	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: nil, Permissions: []string{"metadata_curation"}}
-	code := runMetadataCurationMiddleware(user, []int{1, 2}, "user")
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
-	}
-}
-
-func TestRequireMetadataCurationForItem_AllowsWhenAllTargetLibrariesAreAllowed(t *testing.T) {
-	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: []int{1, 2, 3}, Permissions: []string{"metadata_curation"}}
-	code := runMetadataCurationMiddleware(user, []int{1, 3}, "user")
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
-	}
-}
-
-func TestRequireMetadataCurationForItem_RejectsWhenAnyTargetLibraryIsOutsideAccess(t *testing.T) {
-	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: []int{1}, Permissions: []string{"metadata_curation"}}
-	code := runMetadataCurationMiddleware(user, []int{1, 2}, "user")
-	if code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
-	}
-}
-
-func TestRequireMetadataCurationForItem_NotFoundWhenTargetHasNoLibraries(t *testing.T) {
-	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: nil, Permissions: []string{"metadata_curation"}}
-	code := runMetadataCurationMiddleware(user, nil, "user")
-	if code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", code, http.StatusNotFound)
+	for _, tc := range []struct {
+		name      string
+		user      *models.User
+		targetIDs []int
+		role      string
+		profileID string
+		check     PrimaryProfileChecker
+		want      int
+	}{
+		{"admin on primary profile bypasses", nil, nil, "admin", "prof-1", primaryChecker(true, true, nil), http.StatusNoContent},
+		{"admin on non-primary profile without permission", admin(nil), []int{1}, "admin", "prof-2", primaryChecker(false, true, nil), http.StatusForbidden},
+		{"admin on non-primary profile with permission", admin([]string{"metadata_curation"}), []int{1}, "admin", "prof-2", primaryChecker(false, true, nil), http.StatusNoContent},
+		{"admin without profile", nil, nil, "admin", "", nil, http.StatusNoContent},
+		{"user without permission", &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: []int{1}}, []int{1}, "user", "", nil, http.StatusForbidden},
+		{"unrestricted curator", curator(nil), []int{1, 2}, "user", "", nil, http.StatusNoContent},
+		{"all target libraries allowed", curator([]int{1, 2, 3}), []int{1, 3}, "user", "", nil, http.StatusNoContent},
+		{"a target library outside access", curator([]int{1}), []int{1, 2}, "user", "", nil, http.StatusForbidden},
+		{"target has no libraries", curator(nil), nil, "user", "", nil, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if code := runMetadataCurationMiddlewareWithProfile(tc.user, tc.targetIDs, tc.role, tc.profileID, tc.check); code != tc.want {
+				t.Fatalf("status = %d, want %d", code, tc.want)
+			}
+		})
 	}
 }
 
@@ -201,5 +152,74 @@ func TestRequireMetadataCurationForItem_GroupLookupFailureIsForbidden(t *testing
 
 	if code := runMetadataCurationMiddlewareWithGroup(user, []int{1}, groups); code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d when the group policy cannot be resolved", code, http.StatusForbidden)
+	}
+}
+
+// The legacy gates apply the access group's permission mask, as the
+// PDP-backed gates and the account payload do.
+func TestLegacyPermissionGatesApplyGroupPermissionMask(t *testing.T) {
+	groupID := int64(3)
+	user := &models.User{
+		ID:            7,
+		Role:          "user",
+		Enabled:       true,
+		AccessGroupID: &groupID,
+		Permissions:   []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration)},
+	}
+	masked := middlewareGroupProvider{group: &access.GroupPolicy{AllowedPermissions: []string{}}}
+	unmasked := middlewareGroupProvider{group: &access.GroupPolicy{}}
+
+	if code := runMetadataCurationMiddlewareWithGroup(user, []int{1}, masked); code != http.StatusForbidden {
+		t.Fatalf("curation status = %d, want %d when the group masks metadata_curation", code, http.StatusForbidden)
+	}
+	if code := runMetadataCurationMiddlewareWithGroup(user, []int{1}, unmasked); code != http.StatusNoContent {
+		t.Fatalf("curation status = %d, want %d when the group does not mask", code, http.StatusNoContent)
+	}
+
+	runMarker := func(groups access.GroupPolicyProvider) int {
+		mw := NewPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, nil, nil, groups)
+		next := mw.RequireMarkerEdit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		rec := httptest.NewRecorder()
+		next.ServeHTTP(rec, requestWithItemID("user"))
+		return rec.Code
+	}
+	if code := runMarker(masked); code != http.StatusForbidden {
+		t.Fatalf("marker status = %d, want %d when the group masks marker_edit", code, http.StatusForbidden)
+	}
+	if code := runMarker(unmasked); code != http.StatusNoContent {
+		t.Fatalf("marker status = %d, want %d when the group does not mask", code, http.StatusNoContent)
+	}
+	if code := runMarker(middlewareGroupProvider{err: errors.New("group store down")}); code != http.StatusForbidden {
+		t.Fatalf("marker status = %d, want %d when the group policy cannot be resolved", code, http.StatusForbidden)
+	}
+}
+
+func TestLegacyMarkerEditUsesActingAdminAndEffectiveGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		primary, grant, enabled bool
+		want                    int
+	}{
+		{"primary role bypass", true, false, true, http.StatusNoContent},
+		{"secondary no role bypass", false, false, true, http.StatusForbidden},
+		{"secondary explicit grant", false, true, true, http.StatusNoContent},
+		{"disabled primary", true, true, false, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user := &models.User{ID: 7, Role: "admin", Enabled: tc.enabled}
+			if tc.grant {
+				user.Permissions = []string{string(auth.PermissionMarkerEdit)}
+			}
+			mw := NewPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, primaryChecker(tc.primary, true, nil), nil)
+			req := requestWithItemID("admin")
+			req.Header.Set("X-Profile-Id", "profile")
+			rec := httptest.NewRecorder()
+			mw.RequireMarkerEdit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want=%d", rec.Code, tc.want)
+			}
+		})
 	}
 }

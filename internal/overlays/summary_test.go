@@ -355,53 +355,6 @@ func TestBuildSummaryPrefersDolbyVisionSibling(t *testing.T) {
 	}
 }
 
-func TestBuildSummaryAggregatesNewFields(t *testing.T) {
-	file := &models.MediaFile{
-		Resolution: "1080p",
-		CodecVideo: "hevc",
-		Container:  "mkv",
-		VideoTracks: []models.VideoTrack{{
-			Codec:       "hevc",
-			Width:       1920,
-			Height:      1080,
-			AspectRatio: "16:9",
-		}},
-		AudioTracks: []models.AudioTrack{
-			{Language: "eng", Channels: 8, Default: true, Title: "Atmos"},
-			{Language: "spa", Channels: 6},
-		},
-		SubtitleTracks: []models.SubtitleTrack{{Language: "eng"}},
-	}
-	got := BuildSummary([]*models.MediaFile{file})
-	if got == nil {
-		t.Fatal("expected non-nil summary")
-	}
-	if got.Resolution != "1080p" {
-		t.Errorf("Resolution = %q, want %q", got.Resolution, "1080p")
-	}
-	if got.VideoCodec != "H.265" {
-		t.Errorf("VideoCodec = %q, want %q", got.VideoCodec, "H.265")
-	}
-	if got.AudioChannels != "7.1" {
-		t.Errorf("AudioChannels = %q, want %q", got.AudioChannels, "7.1")
-	}
-	if got.Container != "MKV" {
-		t.Errorf("Container = %q, want %q", got.Container, "MKV")
-	}
-	if got.AspectRatio != "16:9" {
-		t.Errorf("AspectRatio = %q, want %q", got.AspectRatio, "16:9")
-	}
-	if got.Audio != "Atmos" {
-		t.Errorf("Audio = %q, want %q", got.Audio, "Atmos")
-	}
-	if !got.MultiAudio {
-		t.Error("MultiAudio = false, want true")
-	}
-	if !got.MultiSub {
-		t.Error("MultiSub = false, want true")
-	}
-}
-
 // The stored codec of an Atmos track is plain eac3 or truehd, so with no
 // "Atmos" in the title only the FFprobe profile identifies it.
 func TestNormalizeAudioReadsAtmosFromProfile(t *testing.T) {

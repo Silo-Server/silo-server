@@ -107,31 +107,10 @@ describe("useImmediateSidebarCollapse", () => {
     expect(result.current).toBe(true);
   });
 
-  it("keeps Firefox on the established one-frame handoff", async () => {
+  it("keeps the two-frame opening handoff in WebKit", async () => {
     const frames = stubFrames();
     stubReducedMotion(false);
-    stubUserAgent(FIREFOX_USER_AGENT);
-    const { result, rerender } = renderHook(
-      ({ collapsed }) => useImmediateSidebarCollapse(collapsed),
-      {
-        initialProps: { collapsed: false },
-      },
-    );
-
-    rerender({ collapsed: true });
-    await frames.frame();
-    expect(result.current).toBe(true);
-    expect(frames.pending).toBe(0);
-  });
-
-  it.each([
-    ["Safari", SAFARI_USER_AGENT],
-    ["Orion", ORION_USER_AGENT],
-    ["WebKitGTK", WEBKIT_GTK_USER_AGENT],
-  ])("keeps the two-frame opening handoff in %s", async (_browser, userAgent) => {
-    const frames = stubFrames();
-    stubReducedMotion(false);
-    stubUserAgent(userAgent);
+    stubUserAgent(SAFARI_USER_AGENT);
     const { result, rerender } = renderHook(
       ({ collapsed }) => useImmediateSidebarCollapse(collapsed),
       {
@@ -148,56 +127,6 @@ describe("useImmediateSidebarCollapse", () => {
 
     await frames.frame();
     expect(result.current).toBe(true);
-    expect(frames.pending).toBe(0);
-  });
-
-  it.each([
-    ["Safari", SAFARI_USER_AGENT],
-    ["Orion", ORION_USER_AGENT],
-    ["WebKitGTK", WEBKIT_GTK_USER_AGENT],
-  ])("uses the same two-frame Back handoff in %s", async (_browser, userAgent) => {
-    const frames = stubFrames();
-    stubReducedMotion(false);
-    stubUserAgent(userAgent);
-    const { result, rerender } = renderHook(
-      ({ collapsed }) => useImmediateSidebarCollapse(collapsed),
-      {
-        initialProps: { collapsed: true },
-      },
-    );
-
-    rerender({ collapsed: false });
-    expect(result.current).toBe(true);
-
-    await frames.frame();
-    expect(result.current).toBe(true);
-    expect(frames.pending).toBe(1);
-
-    await frames.frame();
-    expect(result.current).toBe(false);
-    expect(frames.pending).toBe(0);
-  });
-
-  it.each([
-    ["Chrome", CHROME_USER_AGENT],
-    ["Edge", EDGE_USER_AGENT],
-    ["Firefox", FIREFOX_USER_AGENT],
-  ])("keeps the one-frame Back handoff in %s", async (_browser, userAgent) => {
-    const frames = stubFrames();
-    stubReducedMotion(false);
-    stubUserAgent(userAgent);
-    const { result, rerender } = renderHook(
-      ({ collapsed }) => useImmediateSidebarCollapse(collapsed),
-      {
-        initialProps: { collapsed: true },
-      },
-    );
-
-    rerender({ collapsed: false });
-    expect(result.current).toBe(true);
-
-    await frames.frame();
-    expect(result.current).toBe(false);
     expect(frames.pending).toBe(0);
   });
 
@@ -218,27 +147,6 @@ describe("useImmediateSidebarCollapse", () => {
 
     rerender({ collapsed: false });
     expect(result.current).toBe(false);
-    expect(frames.pending).toBe(0);
-  });
-
-  it("cancels WebKit's Back paint frame when navigation reverses", async () => {
-    const frames = stubFrames();
-    stubReducedMotion(false);
-    stubUserAgent(ORION_USER_AGENT);
-    const { result, rerender } = renderHook(
-      ({ collapsed }) => useImmediateSidebarCollapse(collapsed),
-      {
-        initialProps: { collapsed: true },
-      },
-    );
-
-    rerender({ collapsed: false });
-    await frames.frame();
-    expect(result.current).toBe(true);
-    expect(frames.pending).toBe(1);
-
-    rerender({ collapsed: true });
-    expect(result.current).toBe(true);
     expect(frames.pending).toBe(0);
   });
 

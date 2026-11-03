@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // playlistBody is the JSON body for POST and PATCH /playlists[/{id}].
@@ -47,6 +49,10 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playlist store unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 
 	var body playlistBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
@@ -79,11 +85,6 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	access, err := h.accessFilterForAuth(r.Context(), a)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
-	}
 	// Add any items the client sent on the same POST — real-ABS mobile
 	// builds the playlist + initial member list in one round-trip
 	// (see audiobookshelf-app components/modals/playlists/
@@ -113,13 +114,13 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(a.UserID, "playlist_added", map[string]any{"id": p.ID, "name": p.Name})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // playlistFullShape renders a Playlist in full-shape, hydrating items[]
 // via MediaStore for audiobook items (episode items echo bare refs).
-func (h *Handler) playlistFullShape(r *http.Request, p Playlist) map[string]any {
-	items := h.playlistItems(r, p.ID)
+func (h *Handler) playlistFullShape(r *http.Request, p Playlist, access catalog.AccessFilter) map[string]any {
+	items := h.playlistItems(r, p.ID, access)
 	return playlistToABS(p, items)
 }
 
@@ -131,7 +132,7 @@ func (h *Handler) playlistFullShape(r *http.Request, p Playlist) map[string]any 
 // "cannot read properties of undefined (reading mediaType)" on every
 // playlist view. Episode items keep the bare ref shape; the official
 // client treats episode rows separately via `item.episode`.
-func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string]any {
+func (h *Handler) playlistItems(r *http.Request, playlistID string, access catalog.AccessFilter) []map[string]any {
 	if h.deps.PlaylistStore == nil {
 		return []map[string]any{}
 	}
@@ -140,7 +141,6 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		slog.WarnContext(r.Context(), "abs playlist list-items failed", "component", "audiobooks", "err", err, "playlist", playlistID)
 		return []map[string]any{}
 	}
-	access, _, _ := h.accessFilterFromRequest(r)
 	lib := h.resolveDefaultLibrary(r.Context(), access)
 	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
@@ -193,6 +193,10 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}, "total": 0})
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs library playlist list failed", "component", "audiobooks", "err", err, "user", a.UserID)
@@ -203,7 +207,7 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 	for _, p := range rows {
 		// Full-shape (with items[]) so the modal can check
 		// existing-membership via playlist.items.some(...).
-		out = append(out, h.playlistFullShape(r, p))
+		out = append(out, h.playlistFullShape(r, p, access))
 	}
 	// LazyBookshelf reads payload.total to compute pagination; emit both
 	// for the bookshelf grid AND the create modal (modal ignores total).
@@ -249,6 +253,10 @@ func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), playlistURLID(r))
 	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID) && !p.IsPublic) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
@@ -259,7 +267,7 @@ func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, p))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, p, access))
 }
 
 // handleUpdatePlaylist — PATCH /playlists/{id}.
@@ -272,6 +280,10 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.PlaylistStore == nil {
 		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := playlistURLID(r)
@@ -314,7 +326,7 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // handleAddPlaylistItem — POST /playlists/{id}/item.
@@ -331,6 +343,10 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 	}
 	if h.deps.PlaylistStore == nil {
 		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := playlistURLID(r)
@@ -357,11 +373,6 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 
 	// Audiobook items validated; episodes skip validation.
 	if body.EpisodeID == "" {
-		access, err := h.accessFilterForAuth(r.Context(), a)
-		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-			return
-		}
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID, access)
 		if err != nil || item == nil {
 			http.Error(w, "item not found", http.StatusNotFound)
@@ -380,7 +391,7 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // handleDeletePlaylist — DELETE /playlists/{id}.
@@ -437,6 +448,10 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
 	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
@@ -462,11 +477,6 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 		}
 		// Audiobook validation; episode items skip.
 		if it.EpisodeID == "" {
-			access, accessErr := h.accessFilterForAuth(r.Context(), a)
-			if accessErr != nil {
-				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping access-denied audiobook", "component", "audiobooks", "id", it.LibraryItemID, "err", accessErr)
-				continue
-			}
 			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
 			if lookupErr != nil || item == nil {
 				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
@@ -483,7 +493,7 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // handleBatchRemovePlaylistItems — POST /playlists/{id}/batch/remove.
@@ -497,6 +507,10 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 	}
 	if h.deps.PlaylistStore == nil {
 		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := playlistURLID(r)
@@ -532,7 +546,7 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // handleRemovePlaylistItem — DELETE /playlists/{id}/item/{libraryItemId}.
@@ -560,6 +574,10 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 	}
 	if h.deps.PlaylistStore == nil {
 		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := playlistURLID(r)
@@ -595,7 +613,7 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
-	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted, access))
 }
 
 // autoDeleteIfEmpty mirrors the official audiobookshelf-server behavior

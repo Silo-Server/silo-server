@@ -76,6 +76,13 @@
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
+# Jellyfin Items/Latest with MediaSources: a fixed number of statements per
+# page, and every card identical to its single-item detail rendering.
+./internal/jellycompat TestLatestStatementBudgetDB
+./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
@@ -98,6 +105,10 @@
 ./internal/catalog TestEpisodeSearchRefreshWorkPostgres
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
+
+# People search: each query is planned for its own words, exact names rank
+# first, and viewer access applies before the limit.
+./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query, and the PostgreSQL path picks what the general path
@@ -166,6 +177,9 @@
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestNextUpModeStatementBudgetPostgres
 
+# Home sections: one statement for a content ID lookup of any length.
+./internal/sections TestContentIDLookupsKeepOneStatementPostgres
+
 # Server collection rows: a cached row costs one revision read, which shows an
 # edit on the next read, and lists what the collection's page lists.
 ./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB
@@ -176,6 +190,10 @@
 # Subtree file reads bound file_path on the folder path index under a generic
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+
+# Subtree theme passes read the scanned subtree and probe canonical roots above
+# it on their indexes instead of reading every file in the library.
+./internal/themesongs TestDirectoriesReadsOnlyTheScannedSubtreeDB
 ./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
 
 # Book scans (beta): unchanged files skip without per-file or literary-works
@@ -289,3 +307,24 @@
 # the only person field search documents carry.
 ./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
 ./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
+
+# Server collection counts for a restricted viewer: one statement for stored
+# members and at most four for smart collections, however many are listed.
+./internal/catalog TestViewerCollectionCountsStatementBudgetDB
+
+# Person lookups resolve their metadata providers with one statement and reuse
+# them: later lookups in the window issue none, and a plugin change drops them.
+./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
+
+# A Jellyfin NextUp page that asks for detail fields, and an Ids list, fetch
+# their details as one batch and answer exactly what per-item lookups did.
+./internal/jellycompat TestCompatDetailBatchesMatchPerItemDB
+
+# A Jellyfin item request resolves the viewer access scope once, however many
+# catalog reads in the request need it.
+./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB
+
+# Administrator catalog listing: present movies, series and episodes only, per-library
+# versus earliest first-seen times, every present file with one track's facts, and two
+# statements for a page with files, whatever else it holds.
+./internal/catalog TestListAdminCatalogItemsDB

@@ -56,7 +56,7 @@ type RequestMediaResult struct {
 	Overview         string            `json:"overview,omitempty"`
 	PosterPath       string            `json:"poster_path,omitempty" doc:"TMDB image path" example:"/abc.jpg"`
 	BackdropPath     string            `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	ReleaseDate      string            `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
+	ReleaseDate      string            `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
 	Popularity       float64           `json:"popularity,omitempty"`
 	VoteAverage      float64           `json:"vote_average,omitempty"`
 	Availability     string            `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
@@ -85,7 +85,7 @@ type RequestMediaDetail struct {
 	Overview            string                   `json:"overview,omitempty"`
 	PosterPath          string                   `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath        string                   `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	ReleaseDate         string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	ReleaseDate         string                   `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Year                int                      `json:"year,omitempty" example:"1995"`
 	Runtime             int                      `json:"runtime,omitempty" doc:"Minutes" example:"170"`
 	Genres              []string                 `json:"genres" doc:"Empty, never null"`
@@ -97,8 +97,8 @@ type RequestMediaDetail struct {
 	ProductionCompanies []string                 `json:"production_companies" doc:"Empty, never null"`
 	NumberOfSeasons     int                      `json:"number_of_seasons,omitempty"`
 	NumberOfEpisodes    int                      `json:"number_of_episodes,omitempty"`
-	FirstAirDate        string                   `json:"first_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	LastAirDate         string                   `json:"last_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	FirstAirDate        string                   `json:"first_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
+	LastAirDate         string                   `json:"last_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Networks            []string                 `json:"networks" doc:"Empty, never null"`
 	Cast                []RequestMediaCastMember `json:"cast" doc:"Empty, never null"`
 	Director            string                   `json:"director,omitempty"`
@@ -116,7 +116,7 @@ type RequestMediaSeason struct {
 	SeasonNumber int    `json:"season_number" example:"2"`
 	Name         string `json:"name,omitempty" example:"Season 2"`
 	EpisodeCount int    `json:"episode_count" doc:"Episodes TMDB lists for the season, aired or not" example:"10"`
-	AirDate      string `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
+	AirDate      string `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	Availability string `json:"availability" enum:"missing,partial,available" doc:"Whether every aired episode is in the library" example:"partial"`
 	Requested    bool   `json:"requested" doc:"The title's active request covers this season"`
@@ -141,18 +141,19 @@ type RequestMediaPage struct {
 
 // DiscoverSection is one discovery row.
 type DiscoverSection struct {
-	Key          string               `json:"key" example:"trending_movies"`
+	Key          string               `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID" example:"trending_movies"`
 	Title        string               `json:"title" example:"Trending Movies"`
 	Page         int                  `json:"page" example:"1"`
 	TotalPages   int                  `json:"total_pages" example:"500"`
 	TotalResults int                  `json:"total_results" example:"10000"`
 	Results      []RequestMediaResult `json:"results" doc:"Empty, never null"`
-	NextPage     int                  `json:"next_page,omitempty" doc:"The page to request next when rating backfill consumed more than one provider page; absent when page+1 applies or there are no more pages"`
+	NextPage     int                  `json:"next_page,omitempty" doc:"The page to request next when filling this page read more than one provider page (for a rating limit, or a row that leaves out titles the library has), since page+1 would repeat titles. After such a read reaches the end it is past total_pages, which means there are no more pages. Absent when page+1 applies or there are no more pages"`
 }
 
 // DiscoverSectionCollection is the listDiscoverSections envelope.
 type DiscoverSectionCollection struct {
 	Collection[DiscoverSection]
+	RowOrder []DiscoverRowRef `json:"row_order" doc:"Every row the page shows, in order. items holds the title rows that have titles; a brand row (type studios, networks or genres) draws the cards of the matching brand list operation. A client skips a type it does not know. Empty, never null"`
 }
 
 // DiscoverBrand is a studio, network, or genre card.
@@ -160,7 +161,7 @@ type DiscoverBrand struct {
 	TMDBID          int     `json:"tmdb_id,omitempty" doc:"TMDB identifier (external, not a Silo ID)" example:"420"`
 	Slug            string  `json:"slug" example:"marvel-studios"`
 	DisplayName     string  `json:"display_name" example:"Marvel Studios"`
-	LogoURL         *string `json:"logo_url,omitempty" nullable:"true"`
+	LogoURL         *string `json:"logo_url,omitempty" format:"uri" nullable:"true"`
 	GradientFrom    string  `json:"gradient_from,omitempty" example:"#1a1a2e"`
 	GradientTo      string  `json:"gradient_to,omitempty" example:"#16213e"`
 	SeriesSupported bool    `json:"series_supported,omitempty" doc:"Whether the brand can be browsed for series"`
@@ -176,7 +177,7 @@ type DiscoverBrowsePage struct {
 	Kind        string               `json:"kind" doc:"studio, network, or genre" example:"studio"`
 	Slug        string               `json:"slug" example:"marvel-studios"`
 	DisplayName string               `json:"display_name" example:"Marvel Studios"`
-	LogoURL     *string              `json:"logo_url,omitempty" nullable:"true"`
+	LogoURL     *string              `json:"logo_url,omitempty" format:"uri" nullable:"true"`
 	MediaType   string               `json:"media_type" doc:"movie or series" example:"movie"`
 	Sort        string               `json:"sort" example:"popularity"`
 	Page        int                  `json:"page" example:"1"`
@@ -366,6 +367,7 @@ const (
 	opGetRequestMediaDetail = "getRequestMediaDetail"
 	opListDiscoverSections  = "listDiscoverSections"
 	opGetDiscoverSection    = "getDiscoverSection"
+	opGetDiscoverRow        = "getDiscoverRow"
 	opListDiscoverGenres    = "listDiscoverGenres"
 	opListDiscoverNetworks  = "listDiscoverNetworks"
 	opListDiscoverStudios   = "listDiscoverStudios"
@@ -408,14 +410,19 @@ func registerRequests(reg *Registry) {
 	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequestMediaDetail)
 
 	sections := humaOp(http.MethodGet, Prefix+"/requests/discover", opListDiscoverSections, requestsTag,
-		"List the discovery rows with their first page.")
+		"List the Discover page's rows in the admin's order, with each title row's first page.")
 	sections.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{Operation: sections, Class: ClassProfileScoped, ServiceBacked: true}, reg.listDiscoverSections)
 
 	section := humaOp(http.MethodGet, Prefix+"/requests/discover/{section}", opGetDiscoverSection, requestsTag,
-		"Get one page of a discovery row.")
-	section.Errors = []int{http.StatusConflict}
+		"Get one page of a built-in discovery row; getDiscoverRow serves every row.")
+	section.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, Operation{Operation: section, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverSection)
+
+	row := humaOp(http.MethodGet, Prefix+"/requests/discover/rows/{row_id}", opGetDiscoverRow, requestsTag,
+		"Get one page of a Discover title row, for its see all page.")
+	row.Errors = []int{http.StatusNotFound, http.StatusConflict}
+	Register(reg, Operation{Operation: row, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverRow)
 
 	for _, brand := range []struct{ id, segment, summary string }{
 		{opListDiscoverGenres, "genres", "List the browsable genres."},
@@ -647,41 +654,31 @@ func (reg *Registry) unfollowRequestMedia(ctx context.Context, in *RequestMediaD
 	return nil, nil
 }
 
-// listDiscoverSections is v1 GET /requests/discover.
+// listDiscoverSections is v1 GET /requests/discover, laid out by the admin's
+// Discover layout.
 func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*DiscoverSectionCollectionOutput, error) {
 	svc, viewer, p := reg.requestViewer(ctx)
 	if p != nil {
 		return nil, p
 	}
-	sections, err := svc.DiscoverAll(ctx, viewer)
+	page, err := svc.DiscoverRows(ctx, viewer)
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	items := make([]DiscoverSection, 0, len(sections))
+	items := make([]DiscoverSection, 0, len(page.Sections))
 	var marks []watchlistMark
-	for i := range sections {
-		items = append(items, discoverSectionOf(&sections[i]))
+	for i := range page.Sections {
+		items = append(items, discoverSectionOf(&page.Sections[i]))
 	}
 	for i := range items {
 		marks = append(marks, watchlistMarksOf(items[i].Results)...)
 	}
 	reg.markInWatchlist(ctx, marks)
-	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items)}}, nil
-}
-
-// getDiscoverSection is v1 GET /requests/discover/{section}.
-func (reg *Registry) getDiscoverSection(ctx context.Context, in *DiscoverSectionInput) (*DiscoverSectionOutput, error) {
-	svc, viewer, p := reg.requestViewer(ctx)
-	if p != nil {
-		return nil, p
+	order := make([]DiscoverRowRef, 0, len(page.Order))
+	for _, r := range page.Order {
+		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title})
 	}
-	section, err := svc.Discover(ctx, viewer, in.Section, in.Page)
-	if err != nil {
-		return nil, requestProblem(err)
-	}
-	out := discoverSectionOf(section)
-	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
-	return &DiscoverSectionOutput{Body: out}, nil
+	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items), RowOrder: order}}, nil
 }
 
 // listDiscoverBrands is v1 GET /requests/discover/{genres,networks,studios}.
@@ -923,7 +920,7 @@ func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaRe
 	for _, r := range results {
 		out = append(out, RequestMediaResult{
 			MediaType: string(r.MediaType), TMDBID: r.TMDBID, Title: r.Title, Year: r.Year, Overview: r.Overview,
-			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: r.ReleaseDate,
+			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: calendarDate(r.ReleaseDate),
 			Popularity: r.Popularity, VoteAverage: r.VoteAverage, Availability: string(r.Availability),
 			LibraryContentID: r.LibraryContentID, Request: requestMediaStateOf(r.Request),
 		})
@@ -943,11 +940,11 @@ func requestMediaDetailOf(d *mediarequests.MediaDetail) RequestMediaDetail {
 	return RequestMediaDetail{
 		MediaType: string(d.MediaType), TMDBID: d.TMDBID, IMDbID: d.IMDbID, TVDBID: d.TVDBID,
 		Title: d.Title, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, Overview: d.Overview,
-		PosterPath: d.PosterPath, BackdropPath: d.BackdropPath, ReleaseDate: d.ReleaseDate, Year: d.Year,
+		PosterPath: d.PosterPath, BackdropPath: d.BackdropPath, ReleaseDate: calendarDate(d.ReleaseDate), Year: d.Year,
 		Runtime: d.Runtime, Genres: NonNil(d.Genres), VoteAverage: d.VoteAverage, VoteCount: d.VoteCount,
 		Status: d.Status, Homepage: d.Homepage, ContentRating: d.ContentRating,
 		ProductionCompanies: NonNil(d.ProductionCompanies), NumberOfSeasons: d.NumberOfSeasons,
-		NumberOfEpisodes: d.NumberOfEpisodes, FirstAirDate: d.FirstAirDate, LastAirDate: d.LastAirDate,
+		NumberOfEpisodes: d.NumberOfEpisodes, FirstAirDate: calendarDate(d.FirstAirDate), LastAirDate: calendarDate(d.LastAirDate),
 		Networks: NonNil(d.Networks), Cast: cast, Director: d.Director, Creators: NonNil(d.Creators),
 		Recommendations: requestMediaResultsOf(d.Recommendations), Availability: string(d.Availability),
 		LibraryContentID: d.LibraryContentID, Request: requestMediaStateOf(d.Request),
@@ -959,7 +956,7 @@ func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMedia
 	out := make([]RequestMediaSeason, 0, len(seasons))
 	for _, s := range seasons {
 		out = append(out, RequestMediaSeason{
-			SeasonNumber: s.Number, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: s.AirDate,
+			SeasonNumber: s.Number, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: calendarDate(s.AirDate),
 			PosterPath: s.PosterPath, Availability: string(s.Availability), Requested: s.Requested,
 		})
 	}

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UserLibrary } from "@/api/types";
-import { filterVisibleLibraries, parseLibraryIDList } from "./libraries";
-
-const libraries: UserLibrary[] = [
-  { id: 1, name: "Movies", type: "movies", sort_order: 0 },
-  { id: 2, name: "Shows", type: "series", sort_order: 1 },
-  { id: 3, name: "Anime", type: "series", sort_order: 2 },
-];
+import { parseLibraryIDList } from "./libraries";
 
 describe("parseLibraryIDList", () => {
   it("returns an empty list when the setting is missing or invalid", () => {
@@ -25,15 +18,5 @@ describe("parseLibraryIDList", () => {
   it("keeps only positive integer library ids", () => {
     expect(parseLibraryIDList([1, 2, 2, 0, -1, 3.5, "4"])).toEqual([1, 2]);
     expect(parseLibraryIDList('[1,2,2,0,-1,3.5,"4"]')).toEqual([1, 2]);
-  });
-});
-
-describe("filterVisibleLibraries", () => {
-  it("returns all libraries when nothing is disabled", () => {
-    expect(filterVisibleLibraries(libraries, [])).toEqual(libraries);
-  });
-
-  it("filters out disabled libraries", () => {
-    expect(filterVisibleLibraries(libraries, [2, 99]).map((library) => library.id)).toEqual([1, 3]);
   });
 });

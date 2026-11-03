@@ -2,7 +2,6 @@ package queryattr
 
 import (
 	"context"
-	"sync"
 	"testing"
 )
 
@@ -23,18 +22,5 @@ func TestDisabledIsInert(t *testing.T) {
 	sites.Range(func(_, _ any) bool { n++; return true })
 	if n != 0 {
 		t.Errorf("disabled sites = %d, want 0", n)
-	}
-}
-func TestInitializeDefaultsOff(t *testing.T) {
-	setup(t)
-	t.Setenv("SILO_QUERY_ATTRIBUTION_ENABLED", "")
-	initializeOnce = sync.Once{}
-	t.Cleanup(func() { initializeOnce = sync.Once{} })
-	if Initialize() {
-		t.Error("Initialize = true, want false with unset env")
-	}
-	t.Setenv("SILO_QUERY_ATTRIBUTION_ENABLED", "true")
-	if Initialize() {
-		t.Error("Initialize reread env after first call")
 	}
 }

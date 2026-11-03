@@ -8,19 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func newRewatchTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	return db
-}
-
 func rewatchGetProgress(t *testing.T, db *sql.DB, profileID, itemID string) *WatchProgress {
 	t.Helper()
 	wp, err := GetProgress(db, profileID, itemID)
@@ -52,7 +39,7 @@ func rewatchInProgressIDs(t *testing.T, db *sql.DB, profileID string) []string {
 // in-progress set through plain MAX while completed stays true; finishing the
 // rewatch resets the resume point again.
 func TestProgressRewatchLifecycle(t *testing.T) {
-	db := newRewatchTestDB(t)
+	db := newSchemaDB(t)
 	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
 
 	// First watch in progress.
@@ -108,7 +95,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
 
 	t.Run("zero position heartbeat does not disturb watched item", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "m", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -126,7 +113,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("below min-resume heartbeat is discarded", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "m", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -141,7 +128,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("mark watched cancels rewatch resume point", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "m", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -158,7 +145,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("mark progress batch clears stale resume points", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		// In-progress row at 40%, then series-level mark played.
 		if err := UpdateProgress(db, "p", "ep", 2880, 7200, th); err != nil {
 			t.Fatalf("UpdateProgress: %v", err)
@@ -176,7 +163,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("playback stop mid-rewatch keeps the watched latch", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "m", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -192,7 +179,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("set progress if newer keeps the watched latch", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "m", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -210,7 +197,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("stale mark batch does not zero a newer rewatch", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		if err := MarkWatched(db, "p", "ep", 7200); err != nil {
 			t.Fatalf("MarkWatched: %v", err)
 		}
@@ -229,7 +216,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 
 	t.Run("set progress at completed normalizes position to zero", func(t *testing.T) {
-		db := newRewatchTestDB(t)
+		db := newSchemaDB(t)
 		// Import path (trakt/jellyfin) reporting a completed watch with a
 		// raw end-of-file position.
 		if err := SetProgressAt(db, "p", "m", 7200, 7200, true, time.Time{}); err != nil {
@@ -247,14 +234,7 @@ func TestProgressRewatchGuards(t *testing.T) {
 // pinned to duration) reset to 0, and the version gate prevents re-runs from
 // wiping rewatch state.
 func TestMigrateToV11ResetsCompletedPositions(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	// Simulate an existing pre-v11 database: schema already at v10 with a
 	// legacy completed row written under the old model.

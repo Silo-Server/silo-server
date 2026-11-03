@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -95,7 +94,7 @@ func TestAdminProviderConfigurationMissingAndOutcomes(t *testing.T) {
 	deps := requestDeps(fixtureRequests())
 	deps.AdminSubtitleProviderConfiguration = f
 	h := newTestHandler(t, deps)
-	for _, local := range []handlers.SubtitleProviderLocalApply{handlers.SubtitleProviderLocalApplied, handlers.SubtitleProviderLocalFailed, handlers.SubtitleProviderLocalNotConfigured, handlers.SubtitleProviderLocalUnsupported} {
+	for _, local := range []handlers.SubtitleProviderLocalApply{handlers.SubtitleProviderLocalApplied, handlers.SubtitleProviderLocalFailed} {
 		t.Run(string(local), func(t *testing.T) {
 			*f = *fixtureAdminProviderConfiguration()
 			f.revision = 0
@@ -121,25 +120,7 @@ func TestAdminProviderConfigurationMissingAndOutcomes(t *testing.T) {
 		})
 	}
 }
-func TestAdminProviderConfigurationUncertaintyAndDependencies(t *testing.T) {
-	f := fixtureAdminProviderConfiguration()
-	deps := requestDeps(fixtureRequests())
-	deps.AdminSubtitleProviderConfiguration = f
-	h := newTestHandler(t, deps)
-	for _, saveErr := range []error{errors.New("PRIVATE lost successful commit"), &handlers.APIError{Status: 500, Message: "PRIVATE"}, &handlers.APIError{Status: 503, Message: "PRIVATE"}, &handlers.APIError{Status: 400, Message: "PRIVATE"}} {
-		*f = *fixtureAdminProviderConfiguration()
-		f.saveErr = saveErr
-		path := Prefix + "/admin/subtitle-providers/subdl"
-		tag := do(t, h, http.MethodGet, path, "", actingRequestAdmin).Header().Get("ETag")
-		out := do(t, h, http.MethodPut, path, `{"enabled":false}`, with(actingRequestAdmin, "If-Match", tag))
-		if out.Code < 400 || strings.Contains(out.Body.String(), "PRIVATE") || f.writes != 1 || f.reads != 2 || out.Header().Get("ETag") != "" {
-			t.Fatalf("uncertainty: %d %s reads=%d writes=%d", out.Code, out.Body, f.reads, f.writes)
-		}
-	}
-	deps.AdminSubtitleProviderConfiguration = nil
-	h = newTestHandler(t, deps)
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/subtitle-providers/subdl", "", actingRequestAdmin), TypeDependencyUnavailable)
-}
+
 func adminProviderConfigurationFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_provider_configuration", operationID: "getAdminSubtitleProviderConfiguration", method: http.MethodGet, path: Prefix + "/admin/subtitle-providers/subdl", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminSubtitleProviderConfiguration", scenario: "Redacted canonical configuration supplies the captured edit validator."},

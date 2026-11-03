@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 )
 
@@ -91,6 +92,11 @@ func (s *MetadataService) MergeItems(ctx context.Context, fromContentID, toConte
 		return fmt.Errorf("cannot merge %s item into %s item", from.Type, to.Type)
 	}
 
+	// V2's acting-admin gate has already authorized this explicit operation.
+	// Still use the transaction guard for current existence and type checks.
+	if !access.HasMetadataCurationAuthorizer(ctx) {
+		ctx = access.WithMetadataCurationAuthorizer(ctx, func(ctx context.Context, _ []int) error { return ctx.Err() })
+	}
 	// allowMatchedSource: an operator merging duplicates typically merges two
 	// fully matched items; the source row must still be deletable.
 	return s.rebindItemToExistingItem(ctx, fromContentID, toContentID, true)

@@ -195,35 +195,126 @@ func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinL
 	}), nil
 }
 
+// FetchPlayedSince reads the user's played movies and episodes whose
+// LastPlayedDate is at or after since. It asks Jellyfin for the newest plays
+// first and stops after a page that holds older plays and none in the window,
+// so a short lookback costs a page or two however long the user's history is.
+// Every in-window item on a page is kept even when the page is not strictly
+// newest first, which happens where the sort key and the reported play date
+// disagree. Items with no LastPlayedDate are skipped: a full import covers them.
+//
+// The early stop is only as good as the server's sort, so sorted is false,
+// with no items, when the plays visibly are not newest first: a page starts
+// with a play newer than the last one on the page before it, or the read would
+// stop early after any page that was itself out of order. The caller then
+// falls back to the full played read.
+//
+// A play during the read moves its item to the top of the list. When that
+// item was still unread, every unread item shifts down one place, the next
+// page repeats the last item already read, and the moved item is never
+// returned. A repeated item therefore starts the read over once; if the list
+// moves again, sorted is false and the caller reads the full history.
+func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLocalAuth, since time.Time) (items []jellyfinItem, sorted bool, err error) {
+	for range 2 {
+		items, sorted, moved, err := c.readPlayedSince(ctx, auth, since)
+		if err != nil || !moved {
+			return items, sorted, err
+		}
+	}
+	return nil, false, nil
+}
+
+// readPlayedSince makes one FetchPlayedSince pass. moved reports a page that
+// repeated an item from an earlier page, with no items.
+func (c *JellyfinClient) readPlayedSince(ctx context.Context, auth jellyfinLocalAuth, since time.Time) (items []jellyfinItem, sorted, moved bool, err error) {
+	query := url.Values{}
+	query.Set("UserId", auth.UserID)
+	query.Set("Filters", "IsPlayed")
+	query.Set("IncludeItemTypes", jellyfinPlayableItemTypes)
+	query.Set("Recursive", "true")
+	query.Set("EnableUserData", "true")
+	query.Set("Fields", jellyfinItemFields)
+	query.Set("SortBy", "DatePlayed")
+	query.Set("SortOrder", "Descending")
+
+	endpoint := auth.endpoint("/Items")
+	var budget listingBudget
+	var previous *time.Time // the last dated play on the pages read so far
+	disordered := false     // some page read so far was not newest first
+	seen := map[string]struct{}{}
+	startIndex := 0
+	window := since.UTC().Format(time.RFC3339)
+	for {
+		payload, err := c.fetchPage(ctx, auth, endpoint, query, startIndex, &budget)
+		if err != nil {
+			return nil, false, false, fmt.Errorf("fetching Jellyfin items played since %s: %w", window, err)
+		}
+		for _, item := range payload.Items {
+			if _, ok := seen[item.ID]; ok {
+				releaseItems(ctx, items)
+				return nil, false, true, nil
+			}
+		}
+		for _, item := range payload.Items {
+			seen[item.ID] = struct{}{}
+		}
+		kept := len(items)
+		inWindow, older := 0, 0
+		var first, last *time.Time
+		for _, item := range payload.Items {
+			played := item.UserData.LastPlayedDate
+			if played == nil {
+				continue
+			}
+			if first == nil {
+				first = played
+			}
+			if last != nil && played.After(*last) {
+				disordered = true
+			}
+			last = played
+			if played.Before(since) {
+				older++
+			} else {
+				inWindow++
+				items = append(items, item)
+			}
+		}
+		// Only in-window plays are kept, so only they count against the
+		// run's retained-memory budget.
+		if err := retainItems(ctx, items[kept:]); err != nil {
+			return nil, false, false, fmt.Errorf("fetching Jellyfin items played since %s: %w", window, err)
+		}
+		if previous != nil && first != nil && first.After(*previous) {
+			// The full read that follows charges these plays again.
+			releaseItems(ctx, items)
+			return nil, false, false, nil
+		}
+		startIndex += len(payload.Items)
+		if older > 0 && inWindow == 0 {
+			if disordered {
+				releaseItems(ctx, items)
+				return nil, false, false, nil
+			}
+			return items, true, false, nil
+		}
+		if lastJellyfinPage(payload, startIndex) {
+			return items, true, false, nil
+		}
+		if last != nil {
+			previous = last
+		}
+	}
+}
+
 func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocalAuth, endpoint string, query url.Values) ([]jellyfinItem, error) {
 	var allItems []jellyfinItem
 	var budget listingBudget
 	startIndex := 0
 
 	for {
-		if err := budget.startPage(); err != nil {
-			return nil, err
-		}
-		pageQuery := url.Values{}
-		for key, values := range query {
-			copied := make([]string, len(values))
-			copy(copied, values)
-			pageQuery[key] = copied
-		}
-		pageQuery.Set("Limit", strconv.Itoa(jellyfinPageSize))
-		pageQuery.Set("StartIndex", strconv.Itoa(startIndex))
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+pageQuery.Encode(), nil)
+		payload, err := c.fetchPage(ctx, auth, endpoint, query, startIndex, &budget)
 		if err != nil {
-			return nil, err
-		}
-		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
-
-		var payload jellyfinItemsResponse
-		if err := c.doJSONWithBudget(req, &payload, &budget); err != nil {
-			return nil, err
-		}
-		if err := budget.addItems(len(payload.Items)); err != nil {
 			return nil, err
 		}
 		if err := retainItems(ctx, payload.Items); err != nil {
@@ -232,12 +323,50 @@ func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocal
 
 		allItems = append(allItems, payload.Items...)
 		startIndex += len(payload.Items)
-		if len(payload.Items) == 0 || (payload.TotalRecordCount > 0 && startIndex >= payload.TotalRecordCount) || len(payload.Items) < jellyfinPageSize {
+		if lastJellyfinPage(payload, startIndex) {
 			break
 		}
 	}
 
 	return allItems, nil
+}
+
+// fetchPage reads one page of query starting at startIndex, charging it to
+// budget. Callers charge the items they keep to the run's retained-memory
+// budget.
+func (c *JellyfinClient) fetchPage(ctx context.Context, auth jellyfinLocalAuth, endpoint string, query url.Values, startIndex int, budget *listingBudget) (jellyfinItemsResponse, error) {
+	if err := budget.startPage(); err != nil {
+		return jellyfinItemsResponse{}, err
+	}
+	pageQuery := url.Values{}
+	for key, values := range query {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		pageQuery[key] = copied
+	}
+	pageQuery.Set("Limit", strconv.Itoa(jellyfinPageSize))
+	pageQuery.Set("StartIndex", strconv.Itoa(startIndex))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+pageQuery.Encode(), nil)
+	if err != nil {
+		return jellyfinItemsResponse{}, err
+	}
+	setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
+
+	var payload jellyfinItemsResponse
+	if err := c.doJSONWithBudget(req, &payload, budget); err != nil {
+		return jellyfinItemsResponse{}, err
+	}
+	if err := budget.addItems(len(payload.Items)); err != nil {
+		return jellyfinItemsResponse{}, err
+	}
+	return payload, nil
+}
+
+// lastJellyfinPage reports whether paging is done after a page that brought
+// the running offset to startIndex.
+func lastJellyfinPage(payload jellyfinItemsResponse, startIndex int) bool {
+	return len(payload.Items) == 0 || (payload.TotalRecordCount > 0 && startIndex >= payload.TotalRecordCount) || len(payload.Items) < jellyfinPageSize
 }
 
 func (c *JellyfinClient) doJSON(req *http.Request, out any) error {

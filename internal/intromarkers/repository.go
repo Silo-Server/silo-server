@@ -91,6 +91,7 @@ const candidateFileColumns = `
 	       COALESCE(mf.season_number, 0),
 	       COALESCE(mf.episode_number, 0),
 	       mf.file_modified_at,
+	       mf.markers_invalidated_at,
 	       COALESCE(mf.codec_video, ''),
 	       COALESCE(mf.codec_audio, ''),
 	       mf.video_tracks->0`
@@ -436,6 +437,7 @@ func scanCandidates(rows pgx.Rows, extra ...any) ([]Candidate, error) {
 			&c.SeasonNumber,
 			&c.EpisodeNumber,
 			&c.FileModifiedAt,
+			&c.MarkersInvalidatedAt,
 			&c.CodecVideo,
 			&c.CodecAudio,
 			&videoTrackJSON,
@@ -756,17 +758,27 @@ func effectiveAudioLanguage(tracks []models.AudioTrack) string {
 	return ""
 }
 
+// InputSignature identifies what a season group's analysis read. It also
+// covers when the database last invalidated each file's markers: a rematch or
+// a new modification time clears the markers the analysis wrote without
+// changing anything it reads, and must send the group back to analysis. A file
+// that was never invalidated adds nothing, so its signature is the one stored
+// before invalidation times existed.
 func InputSignature(candidates []Candidate) string {
 	parts := make([]string, 0, len(candidates))
 	for _, c := range candidates {
-		parts = append(parts, fmt.Sprintf("%d:%s:%d:%.3f:%s:%s",
+		part := fmt.Sprintf("%d:%s:%d:%.3f:%s:%s",
 			c.FileID,
 			c.FileHash,
 			c.FileSize,
 			c.DurationSeconds,
 			c.EpisodeID,
 			subtitleInventorySignature(c),
-		))
+		)
+		if c.MarkersInvalidatedAt != nil {
+			part += fmt.Sprintf(":invalidated=%d", c.MarkersInvalidatedAt.UnixMicro())
+		}
+		parts = append(parts, part)
 	}
 	sort.Strings(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))

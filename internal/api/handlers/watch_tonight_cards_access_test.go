@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -110,25 +108,6 @@ func TestWatchTonightItemLookupFailureIsAnError(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
 		t.Fatalf("err = %v, want a 500 API error", err)
-	}
-}
-
-// The frozen v1 route keeps answering 200 with no items when the lookup
-// fails, as it did before the v2 seam started reporting the error.
-func TestV1WatchTonightItemLookupFailureAnswersEmpty(t *testing.T) {
-	h := NewRecommendationsHandler(nil, watchTonightReader{result: recommendations.WatchTonightResult{Items: []recommendations.ScoredItem{{MediaItemID: "a", Score: 1}}}}, nil, nil, nil, true)
-	h.Fetcher = hydratingFetcher{err: errors.New("db down")}
-
-	rr := httptest.NewRecorder()
-	h.HandleWatchTonight(rr, newAuthorizedProfileRequestWithRole(http.MethodGet, "/api/v1/recommendations/watch-tonight", "", "user", "p1"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	var body struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || len(body.Items) != 0 {
-		t.Fatalf("body = %s (%v), want no items", rr.Body.String(), err)
 	}
 }
 

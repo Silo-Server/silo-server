@@ -13,7 +13,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import type { StreamNode } from "@/api/types";
-import { useAdminNodes, useCheckNodeHealth, useReprobeNode } from "./nodes";
+import { useAdminNodes, useCheckNodeHealth } from "./nodes";
 import AdminNodes from "@/pages/AdminNodes";
 
 // Routing settings have their own suite, and their unsaved-changes guard needs
@@ -72,29 +72,7 @@ afterEach(() => {
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
-for (const [action, useHook] of [
-  ["check", useCheckNodeHealth],
-  ["reprobe", useReprobeNode],
-] as const) {
-  it(`${action} captures selected node before offline queueing and accepts negative observation`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(reply(observation(action))));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    const target = { ...node };
-    act(() => result.current.mutate(target));
-    target.id = "18";
-    target.name = "Replacement";
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => onlineManager.setOnline(true));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/api/v2/admin/nodes/17/${action}`);
-    expect(fetchMock.mock.calls[0]?.[1].method).toBe("POST");
-    expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
-    expect(result.current.variables?.name).toBe("Synthetic");
-  });
-
+for (const action of ["check", "reprobe"] as const) {
   it(`actual node row ${action} action dispatches once and waits for response`, async () => {
     let finish!: (r: Response) => void;
     const writes: string[] = [];

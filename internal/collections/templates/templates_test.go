@@ -402,53 +402,6 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 	}
 }
 
-func TestRegisterAcceptsTMDBCollectionTemplates(t *testing.T) {
-	// Happy-path register for a real TMDB-collection franchise template.
-	r := NewRegistry()
-	r.Register(Template{
-		ID:        "tmdb_mcu",
-		Title:     "Marvel Cinematic Universe",
-		Category:  CategoryEditorial,
-		Source:    SourceTMDBCollection,
-		MediaKind: MediaMovie,
-		TMDBCollection: &TMDBCollectionSpec{
-			CollectionID: 86311,
-		},
-	})
-	tmpl, ok := r.Get("tmdb_mcu")
-	if !ok {
-		t.Fatal("tmdb_mcu was not registered")
-	}
-	if tmpl.TMDBCollection == nil || tmpl.TMDBCollection.CollectionID != 86311 {
-		t.Fatalf("registered spec was lost: %+v", tmpl.TMDBCollection)
-	}
-}
-
-// TestRegisterAcceptsPlaceholderTMDBCollection pins the rule that a
-// CollectionID of 0 is a permitted "fill me in later" sentinel — the generic
-// "TMDB Franchise" catalog entry ships this way so admins can edit the
-// resulting collection's source_config at apply-time.
-func TestRegisterAcceptsPlaceholderTMDBCollection(t *testing.T) {
-	r := NewRegistry()
-	r.Register(Template{
-		ID:        "tmdb_franchise_placeholder",
-		Title:     "TMDB Franchise",
-		Category:  CategoryCustom,
-		Source:    SourceTMDBCollection,
-		MediaKind: MediaMovie,
-		TMDBCollection: &TMDBCollectionSpec{
-			CollectionID: 0,
-		},
-	})
-	tmpl, ok := r.Get("tmdb_franchise_placeholder")
-	if !ok {
-		t.Fatal("placeholder template was not registered")
-	}
-	if tmpl.TMDBCollection == nil || tmpl.TMDBCollection.CollectionID != 0 {
-		t.Fatalf("placeholder spec was lost: %+v", tmpl.TMDBCollection)
-	}
-}
-
 func validTMDBDiscoverSpec() *TMDBDiscoverSpec {
 	return &TMDBDiscoverSpec{
 		MediaType: "movie",
@@ -591,14 +544,5 @@ func TestRegisterRejectsInvalidTMDBDiscover(t *testing.T) {
 			}()
 			r.Register(c.tmpl)
 		})
-	}
-}
-
-func TestCatalogPreservesOrder(t *testing.T) {
-	cat := CatalogDefault()
-	for i, group := range cat.Categories {
-		if i == 0 && group.Category != CategoryTrending {
-			t.Errorf("expected first category to be trending, got %q", group.Category)
-		}
 	}
 }

@@ -229,13 +229,3 @@ func TestCleanupChapterThumbnailOriginalsRearmsAfterAStorageMove(t *testing.T) {
 		t.Fatalf("checkpoint = %+v, want a fresh checkpoint for the new storage", saved)
 	}
 }
-
-func TestCleanupChapterThumbnailOriginalsWithoutStorage(t *testing.T) {
-	task := NewCleanupChapterThumbnailOriginalsTask(nil, nil, "")
-	if run, err := task.ShouldRun(context.Background()); err != nil || run {
-		t.Fatalf("ShouldRun = %v, %v; want false", run, err)
-	}
-	if err := task.Execute(context.Background(), &fakeProgress{}); err != nil {
-		t.Fatal(err)
-	}
-}

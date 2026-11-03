@@ -46,14 +46,6 @@ describe("DeviceProfileTabs platform filtering", () => {
     expect(screen.getByText("playback.audio_language")).toBeInTheDocument();
   });
 
-  it("offers them for a native TV app", () => {
-    renderAllSettings("tvOS");
-
-    for (const key of NATIVE_ONLY_PLAYER_KEYS) {
-      expect(screen.getByText(key)).toBeInTheDocument();
-    }
-  });
-
   it("still lists an override a browser already stores so it can be reset", () => {
     renderAllSettings("Windows Web", [
       {

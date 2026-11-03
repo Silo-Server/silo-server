@@ -93,6 +93,109 @@ shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
 
+## Reset after a lost installation key
+
+The server binds an Apple installation (`device_id`) to the installation key and
+account of its first ordered registration. An app that loses the key keeps its
+`device_id` but sends a new key, for example after a reinstall, and every
+registration is refused. When the refused account is the one that owns the
+installation, the refusal is `403` with the problem type
+`push_installation_key_mismatch` instead of `permission_denied`; the status and
+the refusal are otherwise the same. Any other account still gets
+`permission_denied`, so the code says nothing about who owns a `device_id`.
+
+`GET /api/v2/devices/push/apple/capabilities` reports
+`installation_reset_available: true` when the server can reset an installation.
+On `push_installation_key_mismatch` the app resets its own installation:
+
+```
+POST /api/v2/devices/push/apple/reset
+Authorization: Bearer <access token>
+X-Profile-Id: <profile>
+X-Push-Installation-Key: <the app's current installation secret>
+
+{"device_id": "<installation device_id>"}
+```
+
+`resetApplePushInstallation` needs a current login session of the account the
+installation is bound to, from any of its profiles. Display tokens and API keys
+are refused. Under the installation lock it deletes the installation's Apple
+push rows, which also drops their queued delivery attempts, and clears the
+stored key and generation. The installation stays reserved for the account
+until that account registers again: another account's ordered or legacy
+registration for the `device_id` is still refused. It answers `200`:
+
+- `{"reset": true}` when it cleared a binding.
+- `{"reset": false}` when there was nothing to clear: the server has no ordered
+  record for that `device_id`, or the installation is already bound to the sent
+  key. The second case makes a retry safe: a reset repeated after its answer
+  was lost leaves the registration that followed it alone, and that
+  registration's generation still orders later intents.
+- `403 permission_denied` when another account owns the installation, when
+  `X-Push-Installation-Key` is not a canonical installation key, or when the
+  credential is not a current login session. Nothing changes.
+
+Then register again with the same key the reset carried. The cleared
+installation accepts any positive generation, so the app can restart its counter
+at 1. A provider request already sent cannot be recalled, and a registration
+from the same account that reaches the server after the reset binds the
+installation, as a first registration would. The app should send the reset and the registration after
+it on the same serialized path as its other registrations for that device. A
+registration with an older key that is still in flight can otherwise bind first,
+and the next registration with the new key gets `push_installation_key_mismatch`
+again; the app recovers by resetting on that later attempt.
+
+The retained-owner guarantee requires every API writer sharing the database to
+enforce it. Upgrade all API replicas before allowing reset requests. An older
+writer can treat a cleared generation as an unowned installation and overwrite
+the reserved account. `installation_reset_available` describes the responding
+server; it does not certify that other replicas have been upgraded. Recovery to
+an older release must follow the [backup and rollback policy](release-versioning.md#backups-and-rollback),
+restoring the pre-upgrade database instead of running older writers against
+reservations created by reset.
+
+## Retirement without a session
+
+```
+POST /api/v2/devices/push/apple/retire
+X-Push-Installation-Key: <installation secret>
+X-Push-Generation: <positive decimal int64>
+
+{"device_id": "<installation device_id>"}
+```
+
+`retireApplePushInstallation` stops delivery to an installation when the app no
+longer has a login session, for example after it removed this server and
+discarded its session before a `push_mode: "off"` registration got through. The
+route is public: the installation key is the only authority, checked against the
+hash stored at registration. It spends the `apple_push_retire` per-IP rate-limit
+budget.
+
+Use the next unused generation, the same counter registration uses. The
+retirement becomes the installation's newest intent:
+
+- A higher generation than the stored one deletes the installation's Apple push
+  rows, which also drops their queued delivery attempts, and returns `200`
+  `{"generation": "<sent generation>", "removed": true}`. A provider request
+  already sent cannot be recalled.
+- Replaying the newest retirement exactly returns the same `200` and writes
+  nothing.
+- A lower generation, or the stored generation when it belongs to a
+  registration, returns `409`. A late retirement therefore never removes a
+  newer registration.
+- A key that does not match the stored hash returns `403`, as registration does.
+- An installation the server has no ordered record of returns `200` with
+  `removed: true` and writes nothing. Without a stored key the server cannot
+  authorize removal, so a legacy unordered registration for that `device_id` is
+  left in place.
+
+The server keeps the key hash and owner. To receive pushes again, register
+through `registerApplePushDevice` with the same key and a higher generation.
+
+Retirement does not revoke the login session, so a display token minted for that
+session keeps working until the session is revoked or expires. No pushes reach
+the installation after retirement, so the extension has no reason to use it.
+
 ## Display fetch
 
 ```
@@ -172,10 +275,13 @@ Bootstrap may bind an unclaimed installation or one whose legacy Android rows
 belong to the acting account. It cannot take over a legacy row belonging to a
 different account. Initial removal additionally requires the existing profile.
 Bind while the existing account is selected; do not resolve a conflict by
-silently changing ownership or replaying under another account. Losing the
-installation secret, resetting the generation counter, or exhausting int64 has
-no automatic recovery/rebinding path in this contract. Native persistence must
-handle that state explicitly without sending guessed replacement credentials.
+silently changing ownership or replaying under another account. An Apple app
+that lost its installation secret recovers through
+[the owner reset](#reset-after-a-lost-installation-key): the account that owns
+the installation clears it and registers again with the new key. Android has no
+such path, and resetting the generation counter or exhausting int64 has no
+recovery path on either platform. Native persistence must handle those states
+explicitly without sending guessed replacement credentials.
 
 The installation authority, last intent and generation survive device-row and
 profile deletion. Removal keeps a tombstone. Changed registrations receive new
@@ -194,6 +300,44 @@ registration; older binaries that do not acquire the installation lock are not
 safe concurrent writers. No existing installation is enrolled by the migration.
 Native consumer adoption and its independent review remain required before the
 two existing registration/removal mappings can be ratified.
+
+### Android retirement without a session
+
+```
+POST /api/v2/notifications/push/devices/{device_id}/retire
+X-Push-Installation-Key: <installation secret>
+X-Push-Generation: <positive decimal int64>
+```
+
+`retirePushDevice` stops delivery to an Android installation when the app no
+longer has a login session, for example after it removed this server or signed
+out and cleared its login before `unregisterPushDevice` got through. It takes no
+body. The route is public: the installation key is the only authority, checked
+against the hash stored at registration. It spends the `android_push_retire`
+per-IP rate-limit budget.
+
+Use the next unused generation, the same counter registration and removal use.
+The retirement is an ordered removal at that generation on behalf of the
+installation's stored account/profile:
+
+- A higher generation than the stored one deletes the installation's Android
+  push rows, which also drops their queued delivery attempts, and returns `200`
+  `{"generation": "<sent generation>", "removed": true}`. A provider request
+  already sent cannot be recalled.
+- The stored generation returns the same `200` and writes nothing when the
+  stored intent is a removal or retirement, so a replay after a lost response is
+  safe. The owner's `unregisterPushDevice` at that generation also replays.
+- A lower generation, or the stored generation when it belongs to a
+  registration, returns `409`. A late retirement therefore never removes a
+  newer registration.
+- A key that does not match the stored hash returns `403`, as registration does.
+- An installation the server has no ordered record of (unknown, or bridge-only
+  at generation 0) returns `200` with `removed: true` and writes nothing.
+  Without a stored key the server cannot authorize removal, so a bridge
+  registration for that `device_id` is left in place.
+
+The server keeps the key hash and owner. To receive pushes again, register
+through `registerPushDevice` with the same key and a higher generation.
 
 ### Remove a browser subscription by row ID
 

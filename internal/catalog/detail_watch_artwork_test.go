@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -64,30 +63,6 @@ func TestGetWatchDetailArtwork(t *testing.T) {
 			t.Fatalf("artwork for an item without any: poster=%q backdrop=%q", detail.PosterURL, detail.BackdropURL)
 		}
 	})
-}
-
-func TestWatchDetailLegacyJSONOmitsArtwork(t *testing.T) {
-	detail := WatchDetail{
-		ContentID: "movie:test", Title: "Test",
-		PosterURL: "https://images.invalid/poster.jpg", PosterThumbhash: "poster-hash",
-		BackdropURL: "https://images.invalid/backdrop.jpg", BackdropThumbhash: "backdrop-hash",
-	}
-	payload, err := json.Marshal(detail)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"poster_url", "poster_thumbhash", "backdrop_url", "backdrop_thumbhash"} {
-		if _, exists := body[key]; exists {
-			t.Errorf("frozen v1 watch JSON includes %s", key)
-		}
-	}
-	if _, exists := body["content_id"]; !exists {
-		t.Fatal("watch JSON lost content_id")
-	}
 }
 
 func TestGetWatchDetailOmitsArtworkResolution(t *testing.T) {

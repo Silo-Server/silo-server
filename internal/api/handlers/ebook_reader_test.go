@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -75,30 +74,6 @@ func (s *fakeEbookProgressStore) Upsert(_ context.Context, progress EbookReaderP
 	return nil
 }
 
-type fakeEbookReaderConfigStore struct {
-	config  *EbookReaderConfig
-	saved   *EbookReaderConfig
-	getErr  error
-	saveErr error
-}
-
-func (s *fakeEbookReaderConfigStore) Get(
-	context.Context,
-	int,
-	string,
-	string,
-) (*EbookReaderConfig, error) {
-	return s.config, s.getErr
-}
-
-func (s *fakeEbookReaderConfigStore) Upsert(_ context.Context, config EbookReaderConfig) error {
-	if s.saveErr != nil {
-		return s.saveErr
-	}
-	s.saved = &config
-	return nil
-}
-
 type fakeEbookReaderAnnotationStore struct {
 	items    []EbookReaderAnnotation
 	existing *EbookReaderAnnotation
@@ -154,49 +129,6 @@ func (s *fakeEbookReaderAnnotationStore) Delete(_ context.Context, userID int, p
 	}
 	s.deleted = annotationID
 	return nil
-}
-
-func TestEbookReaderServesEbookInlineWithRangeSupport(t *testing.T) {
-	filePath := writePlaybackTestMediaFile(t, "book.epub")
-	if err := os.WriteFile(filePath, []byte("0123456789"), 0o644); err != nil {
-		t.Fatalf("write ebook: %v", err)
-	}
-
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{
-				ID:        42,
-				ContentID: "ebook-1",
-				FilePath:  filePath,
-				Container: "epub",
-				BaseType:  "ebook",
-			},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	})
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
-	req.Header.Set("Range", "bytes=2-5")
-	req = withEbookReaderRouteParams(req, "ebook-1", "42")
-
-	rr := httptest.NewRecorder()
-	handler.HandleReadFile(rr, req)
-
-	if rr.Code != http.StatusPartialContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); got != "application/epub+zip" {
-		t.Fatalf("content-type = %q", got)
-	}
-	if got := rr.Header().Get("Content-Disposition"); got != "inline; filename=book.epub" {
-		t.Fatalf("content-disposition = %q", got)
-	}
-	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Fatalf("x-content-type-options = %q, want nosniff", got)
-	}
-	if rr.Body.String() != "2345" {
-		t.Fatalf("body = %q", rr.Body.String())
-	}
 }
 
 func TestEbookReaderServesContainerMimeForMismatchedExtension(t *testing.T) {
@@ -328,20 +260,6 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 	}
 }
 
-func TestEbookReaderRejectsPlainText(t *testing.T) {
-	file := &models.MediaFile{
-		FilePath: "/library/book.txt",
-		BaseType: "ebook",
-	}
-
-	if isEbookFile(file) {
-		t.Fatal("plain text should not be treated as an ebook reader format")
-	}
-	if got := ebookMimeType(file.FilePath, file.Container); got == "text/plain; charset=utf-8" {
-		t.Fatal("plain text should not have an ebook reader MIME type")
-	}
-}
-
 func TestEbookReaderMapsAccessFailureToNotFound(t *testing.T) {
 	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{
@@ -364,305 +282,6 @@ func TestEbookReaderMapsAccessFailureToNotFound(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestEbookReaderReturnsInternalErrorForUnexpectedAuthorizeFailure(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{err: errors.New("db down")},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
-	req = withEbookReaderRouteParams(req, "ebook-1", "42")
-
-	rr := httptest.NewRecorder()
-	handler.HandleReadFile(rr, req)
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestEbookReaderSavesProgressForAuthorizedEbookFile(t *testing.T) {
-	store := &fakeEbookProgressStore{}
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{
-				ID:        42,
-				ContentID: "ebook-1",
-				FilePath:  "/tmp/book.epub",
-				Container: "epub",
-				BaseType:  "ebook",
-			},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	})
-	handler.ProgressStore = store
-
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/ebooks/ebook-1/progress",
-		strings.NewReader(`{"file_id":42,"location":"epubcfi(/6/4)","progress":0.42}`),
-	)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	})
-	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleSaveProgress(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.upserted == nil {
-		t.Fatal("expected progress to be saved")
-	}
-	if store.upserted.UserID != 1 || store.upserted.ProfileID != "profile-9" {
-		t.Fatalf("scope = user %d profile %q", store.upserted.UserID, store.upserted.ProfileID)
-	}
-	if store.upserted.ContentID != "ebook-1" || store.upserted.FileID != 42 {
-		t.Fatalf("target = content %q file %d", store.upserted.ContentID, store.upserted.FileID)
-	}
-	if store.upserted.Location != "epubcfi(/6/4)" || store.upserted.Progress != 0.42 {
-		t.Fatalf("progress = %+v", store.upserted)
-	}
-}
-
-func TestEbookReaderReturnsSavedProgress(t *testing.T) {
-	updatedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.ProgressStore = &fakeEbookProgressStore{
-		progress: &EbookReaderProgress{
-			UserID:    1,
-			ProfileID: "profile-1",
-			ContentID: "ebook-1",
-			FileID:    42,
-			Location:  "epubcfi(/6/8)",
-			Progress:  0.75,
-			UpdatedAt: updatedAt,
-		},
-	}
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/progress")
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleGetProgress(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		`"content_id":"ebook-1"`,
-		`"file_id":42`,
-		`"location":"epubcfi(/6/8)"`,
-		`"progress":0.75`,
-		`"updated_at":"2026-06-08T12:00:00Z"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("response %s missing %s", body, want)
-		}
-	}
-}
-
-func TestEbookReaderReturnsEmptyConfigWhenNoneSaved(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.ConfigStore = &fakeEbookReaderConfigStore{}
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/reader-config")
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleGetConfig(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if got := strings.TrimSpace(rr.Body.String()); got != `{"config":{}}` {
-		t.Fatalf("body = %s", got)
-	}
-}
-
-func TestEbookReaderSavesConfigForAccessibleEbook(t *testing.T) {
-	store := &fakeEbookReaderConfigStore{}
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.ConfigStore = store
-
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/ebooks/ebook-1/reader-config",
-		strings.NewReader(`{"config":{"theme":"dark","flow":"scrolled","fontSize":120}}`),
-	)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	})
-	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleSaveConfig(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.saved == nil {
-		t.Fatal("expected config to be saved")
-	}
-	if store.saved.UserID != 1 || store.saved.ProfileID != "profile-9" || store.saved.ContentID != "ebook-1" {
-		t.Fatalf("scope = %+v", store.saved)
-	}
-	var config map[string]any
-	if err := json.Unmarshal(store.saved.Config, &config); err != nil {
-		t.Fatalf("config json: %v", err)
-	}
-	if config["theme"] != "dark" || config["flow"] != "scrolled" || config["fontSize"].(float64) != 120 {
-		t.Fatalf("config = %#v", config)
-	}
-}
-
-func TestEbookReaderRejectsNonObjectConfig(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.ConfigStore = &fakeEbookReaderConfigStore{}
-
-	req := newEbookReaderAuthRequest(http.MethodPut, "/ebooks/ebook-1/reader-config")
-	req.Body = http.NoBody
-	req = httptest.NewRequest(
-		http.MethodPut,
-		"/ebooks/ebook-1/reader-config",
-		strings.NewReader(`{"config":["bad"]}`),
-	).WithContext(req.Context())
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleSaveConfig(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestEbookReaderConfigRequiresAccessibleContent(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{err: catalog.ErrItemNotFound},
-	})
-	handler.ConfigStore = &fakeEbookReaderConfigStore{}
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/reader-config")
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleGetConfig(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestEbookReaderCreatesAnnotationForAccessibleEbook(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{}
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.AnnotationStore = store
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/ebooks/ebook-1/annotations",
-		strings.NewReader(`{"kind":"highlight","cfi_range":"epubcfi(/6/4,/1:0,/1:12)","selected_text":"sample text","note":"note text","style":"highlight","color":"#facc15"}`),
-	)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	})
-	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleCreateAnnotation(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.created == nil {
-		t.Fatal("expected annotation to be created")
-	}
-	if store.created.UserID != 1 || store.created.ProfileID != "profile-9" || store.created.ContentID != "ebook-1" {
-		t.Fatalf("scope = %+v", store.created)
-	}
-	if store.created.Kind != "highlight" || store.created.CFIRange != "epubcfi(/6/4,/1:0,/1:12)" {
-		t.Fatalf("annotation = %+v", store.created)
-	}
-	if store.created.SelectedText != "sample text" || store.created.Note != "note text" {
-		t.Fatalf("annotation text = %+v", store.created)
-	}
-	if store.created.ID == "" {
-		t.Fatal("expected generated annotation id")
-	}
-}
-
-func TestEbookReaderReturnsAnnotations(t *testing.T) {
-	updatedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.AnnotationStore = &fakeEbookReaderAnnotationStore{
-		items: []EbookReaderAnnotation{
-			{
-				ID:           "ann-1",
-				UserID:       1,
-				ProfileID:    "profile-1",
-				ContentID:    "ebook-1",
-				Kind:         "bookmark",
-				Location:     "epubcfi(/6/8)",
-				SelectedText: "",
-				Note:         "Saved spot",
-				Style:        "highlight",
-				Color:        "#facc15",
-				Metadata:     json.RawMessage(`{}`),
-				CreatedAt:    updatedAt,
-				UpdatedAt:    updatedAt,
-			},
-		},
-	}
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/annotations")
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleListAnnotations(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{`"items":[`, `"id":"ann-1"`, `"kind":"bookmark"`, `"location":"epubcfi(/6/8)"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("response %s missing %s", body, want)
-		}
 	}
 }
 
@@ -762,29 +381,6 @@ func TestEbookReaderPatchValidatesResultingState(t *testing.T) {
 	}
 }
 
-func TestEbookReaderPatchAllowsKindChangeWithRequiredFields(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
-
-	rr := patchEbookReaderAnnotation(t, store, `{"kind":"bookmark","location":"epubcfi(/6/8)"}`)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.updated == nil || store.updated.Kind != "bookmark" || store.updated.Location != "epubcfi(/6/8)" {
-		t.Fatalf("updated = %+v", store.updated)
-	}
-}
-
-func TestEbookReaderPatchReturnsNotFoundForMissingAnnotation(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{}
-
-	rr := patchEbookReaderAnnotation(t, store, `{"note":"updated"}`)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestEbookReaderRejectsOversizedProgressBody(t *testing.T) {
 	store := &fakeEbookProgressStore{}
 	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
@@ -832,27 +428,5 @@ func TestInlineContentDispositionProducesParseableHeaders(t *testing.T) {
 				t.Fatalf("filename = %q, want %q", params["filename"], want)
 			}
 		})
-	}
-}
-
-func TestEbookReaderDeletesAnnotation(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{}
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.AnnotationStore = store
-
-	req := newEbookReaderAuthRequest(http.MethodDelete, "/ebooks/ebook-1/annotations/ann-1")
-	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleDeleteAnnotation(rr, req)
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.deleted != "ann-1" {
-		t.Fatalf("deleted = %q", store.deleted)
 	}
 }

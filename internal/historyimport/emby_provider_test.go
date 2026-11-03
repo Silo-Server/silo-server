@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -470,29 +471,6 @@ func TestEmbyProviderFetchContinuesWhenSeriesMetadataFails(t *testing.T) {
 	}
 }
 
-func TestEmbyClientPagesItemLists(t *testing.T) {
-	t.Parallel()
-
-	fake := &fakeEmby{}
-	for i := range 1100 {
-		fake.played = append(fake.played, playedEmbyItem(embyItem{ID: fmt.Sprintf("movie-%d", i), Type: "Movie"}, time.Now(), 1))
-	}
-	records, _ := fetchEmbyRecords(t, fake.provider(t))
-	if len(records) != 1100 {
-		t.Fatalf("records = %d, want 1100", len(records))
-	}
-	var starts []string
-	for _, query := range fake.requestsFor("IsPlayed") {
-		if query.Get("Limit") != strconv.Itoa(embyPageSize) {
-			t.Fatalf("Limit = %q, want %d", query.Get("Limit"), embyPageSize)
-		}
-		starts = append(starts, query.Get("StartIndex"))
-	}
-	if !slices.Equal(starts, []string{"0", "500", "1000"}) {
-		t.Fatalf("StartIndex pages = %v", starts)
-	}
-}
-
 func TestEmbyClientReadsPastServerPageCap(t *testing.T) {
 	t.Parallel()
 
@@ -560,10 +538,21 @@ func TestEmbyWatchedRecordsExpandsPlayedEpisodeRanges(t *testing.T) {
 	if got := embyWatchedRecords(partial, embyItem{}); len(got) != 1 {
 		t.Fatalf("partly watched range = %d records, want 1", len(got))
 	}
-	wide := played
-	wide.IndexNumberEnd = wide.IndexNumber + maxEmbyEpisodeRange
-	if got := embyWatchedRecords(wide, embyItem{}); len(got) != 1 {
-		t.Fatalf("over-wide range = %d records, want 1", len(got))
+	for _, tc := range []struct {
+		name        string
+		first, last int
+		want        int
+	}{
+		{"over-wide range", 1, 1 + maxEmbyEpisodeRange, 1},
+		{"negative start", -2, 1, 1},
+		{"end at MaxInt", math.MaxInt - 1, math.MaxInt, 2},
+		{"start at MaxInt", math.MaxInt, math.MinInt, 1},
+	} {
+		ranged := played
+		ranged.IndexNumber, ranged.IndexNumberEnd = tc.first, tc.last
+		if got := embyWatchedRecords(ranged, embyItem{}); len(got) != tc.want {
+			t.Fatalf("%s = %d records, want %d", tc.name, len(got), tc.want)
+		}
 	}
 }
 

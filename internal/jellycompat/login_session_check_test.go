@@ -31,16 +31,13 @@ func (f *loginSessionsFake) LoginSessionActive(_ context.Context, id string) (bo
 	return f.live[id], nil
 }
 
-// TestLookupChecksTheLoginSession: every lookup, from memory or from the
-// stored row, asks whether the session's login session is live. A signed-out
+// TestLookupChecksTheLoginSession: every lookup of the stored row asks
+// whether the session's login session is live. A signed-out
 // one ends the compat session; a check that fails keeps it and reports an
 // error that is not ErrSessionNotFound; a session with no login session is
 // not checked.
 func TestLookupChecksTheLoginSession(t *testing.T) {
 	stores := map[string]func() (*SessionStore, *rowSessionRepo){
-		"memory": func() (*SessionStore, *rowSessionRepo) {
-			return NewSessionStore(time.Hour, fixedNow), nil
-		},
 		"stored row": func() (*SessionStore, *rowSessionRepo) {
 			repo := &rowSessionRepo{rows: map[string]Session{}}
 			return NewPersistentSessionStore(time.Hour, fixedNow, repo), repo
@@ -113,43 +110,6 @@ func TestRequireSession_LoginSessionCheckOutageIsRetryable(t *testing.T) {
 	}
 	if _, ok := store.sessions["tok"]; !ok {
 		t.Fatal("an unreachable database ended the compat session")
-	}
-}
-
-// TestSocketRechecksTheLoginSession: the socket refuses a session whose login
-// session was signed out, on a store with no database too.
-func TestSocketRechecksTheLoginSession(t *testing.T) {
-	store := NewSessionStore(time.Hour, fixedNow).WithLoginSessions(&loginSessionsFake{live: map[string]bool{"login-1": true}})
-	for _, s := range []Session{
-		{Token: "live", StreamAppUserID: 1, LoginSessionID: "login-1"},
-		{Token: "signed-out", StreamAppUserID: 1, LoginSessionID: "login-2"},
-	} {
-		if err := store.Put(s); err != nil {
-			t.Fatal(err)
-		}
-	}
-	socket := NewSocketHandler(store, nil)
-	if status := serveCompat(socket, compatRequest("/socket", "signed-out")); status != http.StatusUnauthorized {
-		t.Fatalf("signed-out session: status = %d, want 401", status)
-	}
-	// A recorder cannot be upgraded: 400 means the token was accepted.
-	if status := serveCompat(socket, compatRequest("/socket", "live")); status == http.StatusUnauthorized {
-		t.Fatalf("live session: status = %d", status)
-	}
-}
-
-// TestSocketKeepsTheSessionWhenTheCheckFails: a login session that cannot be
-// checked answers a new socket with a retryable 503 rather than 401.
-func TestSocketKeepsTheSessionWhenTheCheckFails(t *testing.T) {
-	store := NewSessionStore(time.Hour, fixedNow).WithLoginSessions(&loginSessionsFake{err: errors.New("database down")})
-	if err := store.Put(Session{Token: "tok", StreamAppUserID: 1, LoginSessionID: "login-1"}); err != nil {
-		t.Fatal(err)
-	}
-	if status := serveCompat(NewSocketHandler(store, nil), compatRequest("/socket", "tok")); status != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", status)
-	}
-	if _, ok := store.sessions["tok"]; !ok {
-		t.Fatal("a failed check ended the session")
 	}
 }
 

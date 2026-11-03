@@ -40,7 +40,7 @@ func TestProxyCapabilityRefreshNeverLatchesDrift(t *testing.T) {
 	node := &Node{
 		ID: 1, Name: "proxy-1", Type: NodeTypeProxy, URL: url, Enabled: true,
 		Capabilities:            json.RawMessage(previousProxyPayload),
-		CapabilitiesHash:        stringPtr("sha256:proxy-old"),
+		CapabilitiesHash:        strPtr("sha256:proxy-old"),
 		CapabilityDrift:         &stale,
 		CapabilityDriftBaseline: json.RawMessage(`{"devices":[{"aliases":["/dev/dri/renderD128"]}]}`),
 	}

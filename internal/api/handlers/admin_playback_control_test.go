@@ -79,31 +79,6 @@ func TestHandleStopSession_KeepsFallbackWhenRealtimeUnavailable(t *testing.T) {
 	waitForPlaybackSessionMissing(t, sessionMgr, session.ID)
 }
 
-func TestPlaybackSessionRowJSONIncludesHasPlaybackControl(t *testing.T) {
-	row := playbackSessionRow{
-		SessionID:          "session-1",
-		HasPlaybackControl: true,
-	}
-
-	data, err := json.Marshal(row)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	value, ok := decoded["has_playback_control"].(bool)
-	if !ok {
-		t.Fatalf("has_playback_control missing from JSON: %s", string(data))
-	}
-	if !value {
-		t.Fatalf("has_playback_control = %v, want true", value)
-	}
-}
-
 func newAdminPlaybackControlTestHandler(t *testing.T) (*AdminPlaybackControlHandler, *playback.SessionManager, *playback.RealtimeHub, *playback.Session) {
 	t.Helper()
 

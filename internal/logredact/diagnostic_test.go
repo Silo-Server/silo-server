@@ -174,3 +174,19 @@ func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
 		t.Fatalf("SanitizeText changed ordinary text: %q", got)
 	}
 }
+
+// TestSanitizeTextMasksURLUserinfo checks that a password holding unescaped
+// @, ? or # is masked in full, and that an @ in the path is not userinfo.
+func TestSanitizeTextMasksURLUserinfo(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"fetch ftp://user:pa@ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch ftp://user:pa#ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch redis://default:pa?ss@cache:6379 failed", "fetch redis://" + Placeholder + "@cache:6379 failed"},
+		{"fetch ftp://user:pw@host/a@example.test failed", "fetch ftp://" + Placeholder + "@host/a@example.test failed"},
+		{"fetch ftp://host/a@example.test failed", "fetch ftp://host/a@example.test failed"},
+	} {
+		if got := SanitizeText(tc.in); got != tc.want {
+			t.Errorf("SanitizeText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

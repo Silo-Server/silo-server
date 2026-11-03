@@ -14,9 +14,7 @@ import (
 
 func writeImageFile(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("fake-image-bytes"), 0o644); err != nil {
-		t.Fatalf("writing %s: %v", path, err)
-	}
+	writeFile(t, path, "fake-image-bytes")
 }
 
 var fingerprintedSource = regexp.MustCompile(`^file://(.+)\?v=\d+--?\d+$`)
@@ -57,15 +55,7 @@ func TestGetImagesFilenamePrecedence(t *testing.T) {
 	writeImageFile(t, filepath.Join(dir, "clearlogo.png"))
 	writeImageFile(t, filepath.Join(dir, "logo.webp"))
 
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
+	images := discoverImages(t, "movie", moviePath, dir)
 	byType := imagesByType(images)
 	if len(byType) != 3 {
 		t.Fatalf("expected poster/backdrop/logo, got %+v", images)
@@ -81,35 +71,6 @@ func TestGetImagesFilenamePrecedence(t *testing.T) {
 	}
 	if got := sidecarPath(t, byType[metadata.ImageLogo].URL); got != filepath.Join(dir, "logo.webp") {
 		t.Fatalf("logo URL = %q, want logo.webp", got)
-	}
-}
-
-func TestGetImagesBasenameScopedArtwork(t *testing.T) {
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film (2020).mkv")
-	writeImageFile(t, moviePath)
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-poster.jpg"))
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-fanart.jpg"))
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-logo.png"))
-
-	p := NewProvider()
-	// No directory search paths: basename-scoped art still applies.
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:            "movie",
-		RepresentativeFilePath: moviePath,
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	byType := imagesByType(images)
-	if got := sidecarPath(t, byType[metadata.ImagePoster].URL); got != filepath.Join(dir, "Film (2020)-poster.jpg") {
-		t.Fatalf("poster URL = %q", got)
-	}
-	if got := sidecarPath(t, byType[metadata.ImageBackdrop].URL); got != filepath.Join(dir, "Film (2020)-fanart.jpg") {
-		t.Fatalf("backdrop URL = %q", got)
-	}
-	if got := sidecarPath(t, byType[metadata.ImageLogo].URL); got != filepath.Join(dir, "Film (2020)-logo.png") {
-		t.Fatalf("logo URL = %q", got)
 	}
 }
 
@@ -138,34 +99,63 @@ func TestGetImagesFlatFolderGenericArtSuppressed(t *testing.T) {
 	}
 }
 
-func TestGetImagesExtensionSet(t *testing.T) {
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film.mkv")
-	writeImageFile(t, moviePath)
-	// .gif and Kodi's .tbn (a JPEG) decode in the image pipeline; .bmp does
-	// not, so it is not discovered.
-	writeImageFile(t, filepath.Join(dir, "poster.gif"))
-	writeImageFile(t, filepath.Join(dir, "fanart.bmp"))
-	writeImageFile(t, filepath.Join(dir, "logo.tbn"))
-
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	byType := imagesByType(images)
-	if len(byType) != 2 {
-		t.Fatalf("expected poster.gif and logo.tbn only, got %+v", images)
-	}
-	if got := sidecarPath(t, byType[metadata.ImagePoster].URL); got != filepath.Join(dir, "poster.gif") {
-		t.Fatalf("poster = %q, want poster.gif", got)
-	}
-	if got := sidecarPath(t, byType[metadata.ImageLogo].URL); got != filepath.Join(dir, "logo.tbn") {
-		t.Fatalf("logo = %q, want logo.tbn", got)
+// Discovery picks one sidecar per image type by name. The source keeps the
+// on-disk spelling, which is what the processor reads.
+func TestGetImagesPicksByName(t *testing.T) {
+	for _, tc := range []struct {
+		name, media string
+		files       []string
+		want        map[metadata.ImageType]string
+		wantTypes   int // checked when set
+	}{
+		{
+			// .gif and Kodi's .tbn (a JPEG) decode in the image pipeline; .bmp
+			// does not, so it is not discovered.
+			name: "extension set", media: "Film.mkv",
+			files:     []string{"poster.gif", "fanart.bmp", "logo.tbn"},
+			want:      map[metadata.ImageType]string{metadata.ImagePoster: "poster.gif", metadata.ImageLogo: "logo.tbn"},
+			wantTypes: 2,
+		},
+		{
+			name: "names match ignoring case", media: "Film (2020).MKV",
+			files: []string{"Poster.JPG", "FanArt.Jpeg", "film (2020)-CLEARLOGO.png"},
+			want: map[metadata.ImageType]string{
+				metadata.ImagePoster:   "Poster.JPG",
+				metadata.ImageBackdrop: "FanArt.Jpeg",
+				metadata.ImageLogo:     "film (2020)-CLEARLOGO.png",
+			},
+		},
+		{
+			name: "basename art beats generic names", media: "Film (2020).mkv",
+			files: []string{
+				"poster.jpg", "Film (2020)-poster.jpg", "fanart.jpg", "Film (2020)-fanart.jpg",
+				"logo.png", "Film (2020)-clearlogo.png",
+			},
+			want: map[metadata.ImageType]string{
+				metadata.ImagePoster:   "Film (2020)-poster.jpg",
+				metadata.ImageBackdrop: "Film (2020)-fanart.jpg",
+				metadata.ImageLogo:     "Film (2020)-clearlogo.png",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			moviePath := filepath.Join(dir, tc.media)
+			writeImageFile(t, moviePath)
+			for _, file := range tc.files {
+				writeImageFile(t, filepath.Join(dir, file))
+			}
+			images := discoverImages(t, "movie", moviePath, dir)
+			byType := imagesByType(images)
+			if tc.wantTypes != 0 && len(byType) != tc.wantTypes {
+				t.Fatalf("got %d image types, want %d: %+v", len(byType), tc.wantTypes, images)
+			}
+			for imageType, want := range tc.want {
+				if got := sidecarPath(t, byType[imageType].URL); got != filepath.Join(dir, want) {
+					t.Errorf("image type %d = %q, want %s", imageType, got, want)
+				}
+			}
+		})
 	}
 }
 
@@ -182,15 +172,7 @@ func TestGetImagesRejectsSymlinksAndNonRegularFiles(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
+	images := discoverImages(t, "movie", moviePath, dir)
 	if len(images) != 0 {
 		t.Fatalf("expected symlinked/non-regular sidecars rejected, got %+v", images)
 	}
@@ -220,83 +202,13 @@ func TestGetImagesSizeCapMatchesRemoteImages(t *testing.T) {
 	writeSizedFile(t, filepath.Join(dir, "fanart.jpg"), metadata.MaxArtworkSourceBytes+1)
 	writeImageFile(t, filepath.Join(dir, "backdrop.jpg"))
 
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
+	images := discoverImages(t, "movie", moviePath, dir)
 	byType := imagesByType(images)
 	if got := sidecarPath(t, byType[metadata.ImagePoster].URL); got != filepath.Join(dir, "poster.jpg") {
 		t.Fatalf("poster = %q, want the image at the cap", got)
 	}
 	if got := sidecarPath(t, byType[metadata.ImageBackdrop].URL); got != filepath.Join(dir, "backdrop.jpg") {
 		t.Fatalf("backdrop = %q, want backdrop.jpg after the oversized fanart.jpg", got)
-	}
-}
-
-func TestGetImagesMatchesNamesIgnoringCase(t *testing.T) {
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film (2020).MKV")
-	writeImageFile(t, moviePath)
-	writeImageFile(t, filepath.Join(dir, "Poster.JPG"))
-	writeImageFile(t, filepath.Join(dir, "FanArt.Jpeg"))
-	writeImageFile(t, filepath.Join(dir, "film (2020)-CLEARLOGO.png"))
-
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	byType := imagesByType(images)
-	// The source keeps the on-disk spelling, which is what the processor reads.
-	for imageType, want := range map[metadata.ImageType]string{
-		metadata.ImagePoster:   "Poster.JPG",
-		metadata.ImageBackdrop: "FanArt.Jpeg",
-		metadata.ImageLogo:     "film (2020)-CLEARLOGO.png",
-	} {
-		if got := sidecarPath(t, byType[imageType].URL); got != filepath.Join(dir, want) {
-			t.Errorf("image type %d = %q, want %s", imageType, got, want)
-		}
-	}
-}
-
-func TestGetImagesBasenameArtBeatsGenericNames(t *testing.T) {
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film (2020).mkv")
-	writeImageFile(t, moviePath)
-	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-poster.jpg"))
-	writeImageFile(t, filepath.Join(dir, "fanart.jpg"))
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-fanart.jpg"))
-	writeImageFile(t, filepath.Join(dir, "logo.png"))
-	writeImageFile(t, filepath.Join(dir, "Film (2020)-clearlogo.png"))
-
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	byType := imagesByType(images)
-	for imageType, want := range map[metadata.ImageType]string{
-		metadata.ImagePoster:   "Film (2020)-poster.jpg",
-		metadata.ImageBackdrop: "Film (2020)-fanart.jpg",
-		metadata.ImageLogo:     "Film (2020)-clearlogo.png",
-	} {
-		if got := sidecarPath(t, byType[imageType].URL); got != filepath.Join(dir, want) {
-			t.Errorf("image type %d = %q, want %s", imageType, got, want)
-		}
 	}
 }
 
@@ -312,10 +224,7 @@ func TestGetImagesKodiAndJellyfinNames(t *testing.T) {
 		{"movie", "show.jpg", metadata.ImagePoster, false},
 		{"series", "show.jpg", metadata.ImagePoster, true},
 		{"series", "movie.jpg", metadata.ImagePoster, false},
-		{"series", "default.png", metadata.ImagePoster, true},
 		{"movie", "art.jpg", metadata.ImageBackdrop, true},
-		{"series", "background.webp", metadata.ImageBackdrop, true},
-		{"series", "clearlogo.png", metadata.ImageLogo, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.contentType+"/"+tc.file, func(t *testing.T) {
@@ -323,15 +232,7 @@ func TestGetImagesKodiAndJellyfinNames(t *testing.T) {
 			mediaPath := filepath.Join(dir, "Media.mkv")
 			writeImageFile(t, mediaPath)
 			writeImageFile(t, filepath.Join(dir, tc.file))
-			p := NewProvider()
-			images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-				ContentType:               tc.contentType,
-				RepresentativeFilePath:    mediaPath,
-				PrimarySidecarSearchPaths: []string{dir},
-			})
-			if err != nil {
-				t.Fatalf("GetImages: %v", err)
-			}
+			images := discoverImages(t, tc.contentType, mediaPath, dir)
 			img, ok := imagesByType(images)[tc.imageType]
 			if ok != tc.found {
 				t.Fatalf("found = %v, want %v (%+v)", ok, tc.found, images)
@@ -348,9 +249,6 @@ func TestGetImagesKodiAndJellyfinNames(t *testing.T) {
 func TestGetImagesSeriesIgnoresEpisodeBasenameArt(t *testing.T) {
 	root := t.TempDir()
 	seasonDir := filepath.Join(root, "Season 01")
-	if err := os.MkdirAll(seasonDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	episode := filepath.Join(seasonDir, "Show S01E01.mkv")
 	writeImageFile(t, episode)
 	writeImageFile(t, filepath.Join(seasonDir, "Show S01E01-poster.jpg"))
@@ -508,20 +406,9 @@ func TestGetImagesExecuteOnlyFolderUsesExactNames(t *testing.T) {
 	moviePath := filepath.Join(dir, "Film.mkv")
 	writeImageFile(t, moviePath)
 	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
-	if err := os.Chmod(dir, 0o311); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	setMode(t, dir, 0o311)
 
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
+	images := discoverImages(t, "movie", moviePath, dir)
 	if got := sidecarPath(t, imagesByType(images)[metadata.ImagePoster].URL); got != filepath.Join(dir, "poster.jpg") {
 		t.Fatalf("poster = %q, want poster.jpg found by exact name", got)
 	}

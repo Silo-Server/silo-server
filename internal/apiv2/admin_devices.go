@@ -3,11 +3,13 @@ package apiv2
 import (
 	"cmp"
 	"context"
+	"net/http"
 	"slices"
 	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 type AdminDeviceService interface {
@@ -45,6 +47,7 @@ type AdminLegacyDeviceSetting struct {
 	UpdatedAt      NullableInstant `json:"updated_at"`
 }
 type AdminDeviceDetail struct {
+	Connections []AdminDeviceConnection `json:"connections,omitempty"`
 	AdminDeviceMetadata
 	Settings []AdminLegacyDeviceSetting `json:"settings" doc:"Legacy compatibility rows only. Read canonical overrides through the administrator settings-values operations."`
 }
@@ -113,6 +116,7 @@ func compareDevicePosition(a, b adminDevicePosition) int {
 	return cmp.Or(cmp.Compare(b.Updated, a.Updated), cmp.Compare(a.Username, b.Username), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Device, b.Device), cmp.Compare(a.User, b.User))
 }
 func registerAdminDevices(reg *Registry) {
+	registerAdminConnectionReset(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := func(path, id string) Operation {
 		return Operation{Operation: humaOp("GET", Prefix+"/admin/devices"+path, id, "admin", "Read device registration and settings metadata across account stores."), Class: ClassActingAdmin, ServiceBacked: true}
@@ -179,10 +183,63 @@ func registerAdminDevices(reg *Registry) {
 		for _, s := range v.Settings {
 			out.Settings = append(out.Settings, AdminLegacyDeviceSetting{UserID: IDFromInt(int64(s.UserID)), ProfileID: ID(s.ProfileID), ProfileName: s.ProfileName, DeviceID: s.DeviceID, DeviceName: s.DeviceName, DevicePlatform: s.DevicePlatform, Key: s.Key, Value: s.Value, UpdatedAt: deviceMetadataInstant(s.UpdatedAt)})
 		}
+		if service, ok := reg.deps.Playback.(adminPlaybackConnectionService); ok {
+			connections, err := service.AdminPlaybackConnections(ctx, v.UserID, in.DeviceID)
+			if err != nil {
+				return nil, serviceProblem(err)
+			}
+			for _, c := range connections {
+				item := AdminDeviceConnection{ID: c.ID, Connection: c.Connection, Probe: NullableObject[PlaybackProbe]{playbackProbeOf(c.Probe)}, PlaybackSample: NullableObject[PlaybackSample]{playbackSampleOf(c.PlaybackSample)}, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(c.LearnedLimit)}}
+				if c.PlanSummary != nil {
+					item.PlanSummary.Value = &PlaybackPlanSummary{PlanID: c.PlanSummary.PlanID, ReportedAt: NewInstant(c.PlanSummary.ReportedAt), Diagnostics: c.PlanSummary.Diagnostics}
+				}
+				out.Connections = append(out.Connections, item)
+			}
+		}
 		return &AdminDeviceOutput{Body: out}, nil
 	})
 }
 
 func (c AdminDeviceCapabilitiesOutputBody) capabilityState() string {
 	return configuredCapabilityState(c.Available)
+}
+
+type adminPlaybackConnectionService interface {
+	AdminPlaybackConnections(context.Context, int, string) ([]connectionstore.AdminConnection, error)
+	ClearAdminPlaybackLimit(context.Context, int, string, string) error
+}
+type AdminConnectionResetInput struct {
+	AdminDeviceInput
+	ConnectionID string `path:"connection_id" minLength:"1" maxLength:"256"`
+}
+
+func registerAdminConnectionReset(reg *Registry) {
+	Register(reg, Operation{Operation: humaOp(http.MethodDelete, Prefix+"/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit", "resetAdminDeviceLearnedLimit", "admin", "Clear a device connection's learned limit, preserving measurements."), Class: ClassActingAdmin, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *AdminConnectionResetInput) (*PlaybackConnectionResetOutput, error) {
+		service, ok := reg.deps.Playback.(adminPlaybackConnectionService)
+		if !ok {
+			return nil, unavailable("connection observations")
+		}
+		user, p := in.UserID.positive("path.user_id")
+		if p != nil {
+			return nil, p
+		}
+		if err := service.ClearAdminPlaybackLimit(ctx, user, in.DeviceID, in.ConnectionID); err != nil {
+			return nil, serviceProblem(err)
+		}
+		return &PlaybackConnectionResetOutput{Status: http.StatusNoContent}, nil
+	})
+}
+
+type AdminDeviceConnection struct {
+	ID             string                               `json:"id"`
+	Connection     string                               `json:"connection"`
+	Probe          NullableObject[PlaybackProbe]        `json:"probe"`
+	PlaybackSample NullableObject[PlaybackSample]       `json:"playback_sample"`
+	LearnedLimit   NullableObject[PlaybackLearnedLimit] `json:"learned_limit"`
+	PlanSummary    NullableObject[PlaybackPlanSummary]  `json:"plan_summary"`
+}
+type PlaybackPlanSummary struct {
+	PlanID      string            `json:"plan_id"`
+	ReportedAt  Instant           `json:"reported_at"`
+	Diagnostics map[string]string `json:"diagnostics"`
 }

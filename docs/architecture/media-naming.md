@@ -115,6 +115,21 @@ Air-date names link through `selectAirDateEpisodeCandidate` in the same file: on
 links; several are narrowed by the series' TVDB, then TMDB, then IMDb ID; a date that stays
 ambiguous is skipped with a warning.
 
+A by-date file has no episode number, so it never gets a `scanner_fallback` placeholder. Instead,
+the series completeness sweep (`refreshSeriesEpisodeMetadataState`) checks for an unlinked by-date
+file in a matched series that aired after the newest episode the series has in a library and
+matches no stored episode. Such a file shows the stored episode list is behind, so the sweep
+marks the series episode-incomplete and queues episode-incomplete debt on the series item. An
+unknown date inside that range does not count, and neither does a date after tomorrow (UTC),
+which has not aired anywhere yet. Existing episode-incomplete debt keeps its backoff. Debt that
+has used up its attempts, on the episode reason or any other, restarts with no attempts only for a
+file that aired on or after the day of the debt's last attempt. The restart updates the row in
+place, so its other reasons stay queued and restart their backoff with it, and it skips a row that
+is due or leased. A rejected reset still records the episode reason without changing the
+schedule, attempts or lease, so settling a core-metadata refresh keeps the episode retry.
+`TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`,
+`TestRestartTerminalEpisodeDebtDB` and `TestByDateEpisodeDebtSurvivesCoreRefreshDB` cover these rules.
+
 ## A changed root waits for a rescan
 
 Before matching a queued series root, `MatchWorker.processSeriesRoot`
@@ -139,6 +154,17 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
   movie can leave that state when `resolveMovieTitleAmbiguity` confirms its provider IDs.
   Tests: `TestCollectScannedRoots_ContradictorySingleMovieFileBecomesAmbiguous`,
   `TestInferGroupIdentity_TitleConflictWithoutIDsStaysAmbiguous`.
+- A folder and a file name can carry different IDs from one provider. The folder's ID wins, and
+  the file name fills only providers the folder leaves out. The scanner stores a group's IDs this
+  way (`naming.GroupProviderIDs`), and the matcher reads path IDs in the same order
+  (`trustedStructuredIDsForSkeleton`). Its "filename identity changed since the last scan"
+  check compares the stored group with what a rescan would store (`rescannedGroupIDs`), so a
+  disagreement a rescan can't change never asks for one. A bare IMDb ID ending the folder name
+  beats an IMDb tag in the file name but adds no trusted ID on its own. A forced IMDb ID from a
+  group override beats it. A rerun of a matched item keeps the item's stored IDs. Tests:
+  `TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer`,
+  `TestQueuedMovieRerunKeepsMatchedItemProviderIDs`,
+  `TestCreateOrFindSkeletonForcedIDBeatsHeuristicFolderID`.
 - Manual overrides win over inference:
   - A root override makes the deepest overridden ancestor the file's root
     (`deepestOverrideAncestor`) and replaces the inferred type, title, year, and provider IDs.
@@ -161,7 +187,10 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
       item's files to it and removes the provisional item (`rebindItemToExistingItem`).
     - An ambiguous item is stored as `pending`, so the match replaces its scanned title.
     - A matched item keeps its identity, even when its queue row runs again, and so does an
-      item that a split pinned as unmatched.
+      item that a split pinned as unmatched or that an admin ignored, while it stays pinned or
+      ignored. An ignored item's files also leave the matcher queues, so its override applies
+      only after the item is restored, when it is matched like any other unmatched item,
+      re-anchoring included ([unmatched items](../libraries-api.md#unmatched-items)).
     - Roots that are different titles can share a group key (two bare `Season` folders, or one
       title with no year), each on its own item. A movie or series item gets the override only
       when its present files and the group's present files are the same

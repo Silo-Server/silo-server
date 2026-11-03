@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,25 +10,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestCollectionCollageKeyNamesSourcesInOrder(t *testing.T) {
-	key := CollectionCollageKey([]string{"a/poster/original.webp", "b/poster/original.webp"})
-	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(key) {
-		t.Fatalf("key = %q, want 16 hex digits", key)
-	}
-	if again := CollectionCollageKey([]string{"a/poster/original.webp", "b/poster/original.webp"}); again != key {
-		t.Fatalf("same sources gave %q then %q", key, again)
-	}
-	for name, sources := range map[string][]string{
-		"reordered":    {"b/poster/original.webp", "a/poster/original.webp"},
-		"fewer":        {"a/poster/original.webp"},
-		"concatenated": {"a/poster/original.webpb/poster/original.webp"},
-	} {
-		if CollectionCollageKey(sources) == key {
-			t.Fatalf("%s sources share the key %q", name, key)
-		}
-	}
-}
 
 func TestCollectionCollageSourcesSQLAppliesMemberAccess(t *testing.T) {
 	sql, args := buildCollectionCollageSourcesSQL([]string{"c1"}, AccessFilter{

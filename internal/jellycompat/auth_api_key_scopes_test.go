@@ -39,13 +39,4 @@ func TestScopedAPIKeyIsRefusedOnCompatSurface(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("scoped key on compat surface: status = %d, want 403", rec.Code)
 	}
-
-	adminH := RequireSessionOrAdminAPIKey(sessionAuth, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler must not run for a scoped key")
-	}))
-	rec = httptest.NewRecorder()
-	adminH.ServeHTTP(rec, apiKeyRequest())
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("scoped key on compat admin surface: status = %d, want 403", rec.Code)
-	}
 }

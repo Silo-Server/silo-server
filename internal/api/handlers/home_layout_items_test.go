@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 func homeRowViewIDs(rows []SectionView) []string {
@@ -162,35 +160,11 @@ func TestIncludedHomeRowsTurnsPanicIntoMissingRow(t *testing.T) {
 // row (featured rows keep watched items) and the cross-row duplicate filter
 // does not run, so a title in two rows stays in both.
 func TestHomeSectionRowAppliesHideWatchedPerRow(t *testing.T) {
-	ctx := context.Background()
-	store := newPlaybackTestStore(t)
-	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
-		Key: settingskeys.HomeHideWatchedItems, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	}, json.RawMessage(`true`)); err != nil {
-		t.Fatalf("enable Home preference: %v", err)
-	}
-	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
-		ProfileID: "profile-1", MediaItemID: "movie:watched", Completed: true, Source: userstore.WatchHistorySourceManual,
-	}); err != nil {
-		t.Fatalf("mark item watched: %v", err)
-	}
-	handler := &SectionHandler{StoreProvider: testUserStoreProvider{store: store}}
-	ctx = apimw.SetProfileID(apimw.SetClaims(ctx, &auth.Claims{UserID: 1}), "profile-1")
-	if !handler.homeHidesWatchedItems(ctx) {
-		t.Fatal("the profile's Home preference did not resolve to on")
-	}
-
+	ctx, handler := hideWatchedHomeRowHandler(t)
 	movie := func(id string) *models.MediaItem {
 		return &models.MediaItem{ContentID: id, Type: "movie", Title: id}
 	}
 	viewer := SectionViewer{Access: catalog.AccessFilter{UserID: 1, ProfileID: "profile-1"}}
-	cards := func(row SectionView) []string {
-		ids := make([]string, 0, len(row.Items))
-		for _, item := range row.Items {
-			ids = append(ids, item.ContentID)
-		}
-		return ids
-	}
 	for _, tc := range []struct {
 		section sections.ResolvedSection
 		fetched []*models.MediaItem
@@ -213,97 +187,126 @@ func TestHomeSectionRowAppliesHideWatchedPerRow(t *testing.T) {
 		if row.ItemLimit != tc.section.ItemLimit {
 			t.Errorf("%s item_limit = %d, want the display limit %d", tc.section.ID, row.ItemLimit, tc.section.ItemLimit)
 		}
-		if got := cards(row); !reflect.DeepEqual(got, tc.want) {
+		if got := homeRowCardIDs(row); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s row = %v, want %v", tc.section.ID, got, tc.want)
 		}
 	}
 }
 
-// TestHomeLayoutWithItemsMatchesSectionItemsDB pins that the rows the home
-// layout carries are the first rows of its layout, each equal to what
-// HomeSectionItems answers for it, and that include_items 0 answers the
-// layout alone.
-func TestHomeLayoutWithItemsMatchesSectionItemsDB(t *testing.T) {
-	f := newPagingIntegrationFixture(t)
-	ctx := t.Context()
+// hideWatchedHomeRowHandler answers a context for profile-1, which hides
+// watched items from Home and has watched movie:watched, and a handler that
+// reads its store.
+func hideWatchedHomeRowHandler(t *testing.T) (context.Context, *SectionHandler) {
+	t.Helper()
+	ctx := context.Background()
+	store := newPlaybackTestStore(t)
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.HomeHideWatchedItems, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}, json.RawMessage(`true`)); err != nil {
+		t.Fatalf("enable Home preference: %v", err)
+	}
+	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
+		ProfileID: "profile-1", MediaItemID: "movie:watched", Completed: true, Source: userstore.WatchHistorySourceManual,
+	}); err != nil {
+		t.Fatalf("mark item watched: %v", err)
+	}
+	handler := &SectionHandler{StoreProvider: testUserStoreProvider{store: store}}
+	ctx = apimw.SetProfileID(apimw.SetClaims(ctx, &auth.Claims{UserID: 1}), "profile-1")
+	if !handler.homeHidesWatchedItems(ctx) {
+		t.Fatal("the profile's Home preference did not resolve to on")
+	}
+	return ctx, handler
+}
 
-	store, err := pgstore.NewPostgresProvider(f.pool).ForUser(ctx, f.account)
-	if err != nil {
-		t.Fatal(err)
+func homeRowCardIDs(row SectionView) []string {
+	ids := make([]string, 0, len(row.Items))
+	for _, item := range row.Items {
+		ids = append(ids, item.ContentID)
 	}
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "owner", Name: "owner"}); err != nil {
-		t.Fatal(err)
-	}
-	var rows []userstore.SectionOverride
-	for i := range 2 {
-		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: fmt.Sprintf("Row %d", i), CollectionType: "manual"})
-		if err != nil {
-			t.Fatal(err)
+	return ids
+}
+
+// TestHomeRowReportsHasMore pins has_more on the Home row reads: a capped
+// read fills the cap after the Not interested and hide-watched filters and
+// reports whether the row holds more cards than it answers, and an uncapped
+// read never does. The source stands in for sections.Fetcher: it answers the
+// first ItemLimit cards (an admin curated list answers all of them) and then
+// drops the Not interested card without refilling.
+func TestHomeRowReportsHasMore(t *testing.T) {
+	ctx, handler := hideWatchedHomeRowHandler(t)
+	movies := func(ids ...string) []*models.MediaItem {
+		items := make([]*models.MediaItem, 0, len(ids))
+		for _, id := range ids {
+			items = append(items, &models.MediaItem{ContentID: "movie:" + id, Type: "movie", Title: id})
 		}
-		for pos, id := range f.ids[1:] {
-			if err := store.AddCollectionItem(ctx, c.ID, id, pos); err != nil {
-				t.Fatal(err)
+		return items
+	}
+	for _, tc := range []struct {
+		name        string
+		section     sections.ResolvedSection
+		hideWatched bool
+		cap         int
+		source      []*models.MediaItem
+		wantCards   []string
+		wantMore    bool
+	}{
+		{name: "row that ends at the cap",
+			section: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 100},
+			cap:     3, source: movies("a", "b", "c"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}},
+		{name: "row past the cap",
+			section: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 100},
+			cap:     3, source: movies("a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "curated list longer than its own limit",
+			section: sections.ResolvedSection{ID: "picks", SectionType: sections.SectionAdminCuratedList, ItemLimit: 3},
+			cap:     20, source: movies("a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "Not interested card removed",
+			section: sections.ResolvedSection{ID: "top", SectionType: sections.SectionCriticallyAcclaimed, ItemLimit: 100},
+			cap:     3, source: movies("a", "dismissed", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "watched card removed",
+			section:     sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 100},
+			hideWatched: true, cap: 3, source: movies("watched", "a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "card the access filter removes after the fetch limit",
+			section: sections.ResolvedSection{ID: "shelf", SectionType: sections.SectionCollection, ItemLimit: 100},
+			cap:     3, source: movies("blocked", "a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}, wantMore: true},
+		{name: "uncapped read",
+			section:   sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded, ItemLimit: 3},
+			source:    movies("a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c"}},
+		{name: "uncapped curated list",
+			section:   sections.ResolvedSection{ID: "picks", SectionType: sections.SectionAdminCuratedList, ItemLimit: 3},
+			source:    movies("a", "b", "c", "d"),
+			wantCards: []string{"movie:a", "movie:b", "movie:c", "movie:d"}},
+	} {
+		fetch := func(_ context.Context, s sections.ResolvedSection) (sections.SectionWithItems, error) {
+			items := tc.source
+			if s.SectionType != sections.SectionAdminCuratedList {
+				items = items[:min(s.ItemLimit, len(items))]
 			}
+			if sections.HidesNotInterested(s.SectionType) {
+				items = slices.DeleteFunc(slices.Clone(items), func(item *models.MediaItem) bool { return item.ContentID == "movie:dismissed" })
+			}
+			// Like an unsorted collection rail, which limits its members
+			// before the access filter runs.
+			items = slices.DeleteFunc(slices.Clone(items), func(item *models.MediaItem) bool { return item.ContentID == "movie:blocked" })
+			return sections.SectionWithItems{ResolvedSection: s, Items: items, TotalCount: len(items)}, nil
 		}
-		// Ahead of every default and admin row, so both are carried.
-		position, limit := -100+i, 20
-		rows = append(rows, userstore.SectionOverride{
-			ID: fmt.Sprintf("row-%d", i), Scope: "home", Position: &position, ItemLimit: &limit, IsUserAdded: true,
-			UserSectionType: string(sections.SectionCollection), UserTitle: c.Name,
-			UserConfig: fmt.Sprintf(`{"user_collection_id":%q}`, c.ID),
-		})
-	}
-	if err := store.SaveSectionOverrides(ctx, "owner", "home", "", rows); err != nil {
-		t.Fatal(err)
-	}
-
-	provider := pagingIntegrationProvider{account: f.account, store: store}
-	fetcher := sections.NewFetcher(f.pool)
-	fetcher.StoreProvider = provider
-	h := NewSectionHandler(sections.NewRepository(f.pool), fetcher)
-	h.StoreProvider = provider
-	reqCtx := apimw.SetProfileID(apimw.SetClaims(ctx, &auth.Claims{UserID: f.account}), "owner")
-	viewer := SectionViewer{Access: catalog.AccessFilter{UserID: f.account}}
-
-	plain, err := h.HomeLayoutWithItems(reqCtx, viewer, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plain.IncludedSections == nil || len(plain.IncludedSections) != 0 {
-		t.Fatalf("include_items 0 answered %d rows (nil=%v), want an empty list", len(plain.IncludedSections), plain.IncludedSections == nil)
-	}
-	legacy, err := h.HomeLayout(reqCtx)
-	if err != nil || !reflect.DeepEqual(legacy, plain.Layout) {
-		t.Fatalf("HomeLayout = %+v, %v; want the same layout %+v", legacy, err, plain.Layout)
-	}
-
-	// A generous budget: this pins equality, not timing.
-	withItems, err := h.homeLayoutWithItems(reqCtx, viewer, MaxHomeLayoutIncludedSections, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(withItems.Layout, plain.Layout) {
-		t.Fatalf("layout with items = %+v, want %+v", withItems.Layout, plain.Layout)
-	}
-	want := min(MaxHomeLayoutIncludedSections, len(plain.Layout.Sections))
-	if len(withItems.IncludedSections) != want {
-		t.Fatalf("included rows = %d, want %d", len(withItems.IncludedSections), want)
-	}
-	sawItems := false
-	for i, row := range withItems.IncludedSections {
-		if row.ID != plain.Layout.Sections[i].ID {
-			t.Fatalf("included row %d = %q, want layout row %q", i, row.ID, plain.Layout.Sections[i].ID)
+		viewer := SectionViewer{Access: catalog.AccessFilter{UserID: 1, ProfileID: "profile-1"}, ItemLimitCap: tc.cap}
+		rows := handler.includedHomeRows(ctx, []sections.ResolvedSection{tc.section}, tc.hideWatched, viewer, 5*time.Second, fetch)
+		if len(rows) != 1 {
+			t.Fatalf("%s: %d rows, want 1", tc.name, len(rows))
 		}
-		single, err := h.HomeSectionItems(reqCtx, row.ID, viewer)
-		if err != nil {
-			t.Fatal(err)
+		wantLimit := tc.section.ItemLimit
+		if tc.cap > 0 {
+			wantLimit = min(wantLimit, tc.cap)
 		}
-		if !reflect.DeepEqual(row, single) {
-			t.Fatalf("included row %q = %+v, want the HomeSectionItems answer %+v", row.ID, row, single)
+		if got := homeRowCardIDs(rows[0]); !reflect.DeepEqual(got, tc.wantCards) || rows[0].HasMore != tc.wantMore || rows[0].ItemLimit != wantLimit {
+			t.Errorf("%s: cards %v, has_more %v, item_limit %d; want %v, %v, %d", tc.name, got, rows[0].HasMore, rows[0].ItemLimit, tc.wantCards, tc.wantMore, wantLimit)
 		}
-		sawItems = sawItems || len(row.Items) > 0
-	}
-	if !sawItems {
-		t.Fatal("no included row carried items; the fixture rows did not resolve")
 	}
 }

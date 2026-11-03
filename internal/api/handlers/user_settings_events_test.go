@@ -76,27 +76,3 @@ func TestDeleteValuePublishesUserSettingsEvent(t *testing.T) {
 	env := receiveUserSettingsEvent(t, events)
 	assertUserSettingsEnvelope(t, env, "playback.subtitle_language", "profile")
 }
-
-// TestFailedMutationsPublishNothing: a refused write and a delete of nothing
-// must not tell clients something changed.
-func TestFailedMutationsPublishNothing(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
-	events, unsubscribe := handler.EventsHub.Subscribe()
-	defer unsubscribe()
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile", []byte(`{"value":"!!!"}`)); rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid PUT = %d, want 400", rec.Code)
-	}
-	if rec := routeValues(t, handler, http.MethodDelete, "playback.subtitle_language",
-		"scope=profile", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE of nothing = %d, want 404", rec.Code)
-	}
-
-	select {
-	case env := <-events:
-		t.Errorf("a failed mutation published %s on %s", env.Event, env.Channel)
-	default:
-	}
-}

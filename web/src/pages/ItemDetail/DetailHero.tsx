@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 
 import "./detailLayout.css";
@@ -46,6 +47,11 @@ interface DetailHeroProps {
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
   variant?: "full" | "compact" | "episode" | "series" | "season";
+  /**
+   * Shortens the full hero so the first row of the content below it starts
+   * inside the viewport, for pages whose hero leads into a grid of titles.
+   */
+  shortHero?: boolean;
   topNav?: ReactNode;
 }
 
@@ -77,6 +83,7 @@ export default function DetailHero({
   scoreRow,
   crewLine,
   variant = "full",
+  shortHero = false,
   topNav,
 }: DetailHeroProps) {
   const {
@@ -101,6 +108,10 @@ export default function DetailHero({
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
   const isViewportBounded = variant === "episode" || variant === "series" || variant === "season";
+  // Below lg a viewport-bounded hero hides its poster (detailLayout.css), so
+  // it is not rendered there and its image is never downloaded.
+  const wideViewport = useMediaQuery("(min-width: 64rem)", true);
+  const showPoster = !hidePoster && (!isViewportBounded || wideViewport);
 
   const posterSizeClass = (() => {
     switch (posterOrientation) {
@@ -181,7 +192,9 @@ export default function DetailHero({
               // taller than the hero would otherwise overflow out the top, under
               // the floating back button.
               "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
-            : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
+            : shortHero
+              ? "min-h-[50dvh] pt-24 lg:min-h-[54dvh]"
+              : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >
         <div
@@ -190,10 +203,10 @@ export default function DetailHero({
           }`}
         >
           <div
-            className={`detail-hero-primary-content flex flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
+            className={`detail-hero-primary-content flex min-w-0 flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
           >
             {/* Poster */}
-            {!hidePoster && (
+            {showPoster && (
               <div
                 className={`media-card-image border-border/20 relative border shadow-[var(--shadow-md)] ${posterSizeClass}`}
               >

@@ -83,32 +83,6 @@ describe("SectionItemCard", () => {
     expect(markup).toContain('aria-label="Play American Dad!"');
   });
 
-  it("keeps series cards linked to the series destination", () => {
-    const markup = renderToStaticMarkup(
-      <SectionItemCard
-        item={{
-          content_id: "series-1",
-          type: "series",
-          title: "American Dad!",
-          year: 2005,
-          genres: ["Animation"],
-          status: "matched",
-          rating_imdb: 7.4,
-          overview: "Overview",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        }}
-      />,
-    );
-
-    expect(markup).toContain("American Dad!");
-    expect(markup).toContain('href="/item/series-1"');
-    expect(markup).not.toContain("S22E10");
-  });
-
   it("renders premiere metadata when an upcoming event is present", () => {
     const markup = renderToStaticMarkup(
       <SectionItemCard
@@ -139,7 +113,7 @@ describe("SectionItemCard", () => {
     );
 
     expect(markup).toContain("Series A");
-    expect(markup).toContain("Season Premiere");
+    expect(markup).toContain("New Season");
     expect(markup).toContain("Season 2 · Back Again");
     expect(markup).toContain("Wed, Apr 8");
     expect(markup).toContain("8:00 PM");

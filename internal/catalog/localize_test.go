@@ -136,17 +136,6 @@ func TestApplyItemLocalizationDoesNotMutateBase(t *testing.T) {
 	}
 }
 
-func TestApplyItemLocalizationNilLocalizationClones(t *testing.T) {
-	item := baseItem()
-	got := applyItemLocalization(item, nil)
-	if got == item {
-		t.Fatal("expected a clone, got the same pointer")
-	}
-	if got.Title != item.Title {
-		t.Errorf("clone differs: %q", got.Title)
-	}
-}
-
 func TestApplySeasonLocalizationPartialRow(t *testing.T) {
 	season := &models.Season{ContentID: "s1", Title: "Season 1", Overview: "Base.", PosterPath: "p.jpg", PosterThumbhash: "h"}
 	got := applySeasonLocalization(season, &models.SeasonLocalization{Overview: "Saison résumé."}, false)

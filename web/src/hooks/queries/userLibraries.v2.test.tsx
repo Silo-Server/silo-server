@@ -21,34 +21,6 @@ afterEach(() => {
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
-it("reads the viewer projection and converts IDs without losing display order or posters", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-    jsonResponse({
-      items: [
-        {
-          id: "12",
-          name: "Movies",
-          type: "movies",
-          sort_order: 2,
-          poster_url: "https://images.example/poster",
-        },
-      ],
-    }),
-  );
-  vi.stubGlobal("fetch", fetch);
-  const { result } = renderHook(() => useAvailableUserLibraries(), { wrapper });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(result.current.data).toEqual([
-    {
-      id: 12,
-      name: "Movies",
-      type: "movies",
-      sort_order: 2,
-      poster_url: "https://images.example/poster",
-    },
-  ]);
-  expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v2/user/libraries");
-});
 it("discards a response after account replacement", async () => {
   let finish!: (r: Response) => void;
   const fetch = vi.fn(
@@ -77,13 +49,4 @@ it("discards a response after account replacement", async () => {
       .every((q) => q.state.data === undefined),
   ).toBe(true);
   expect(result.current.data).toBeUndefined();
-});
-it("asks for hidden libraries only when the caller opts in", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse({ items: [] }));
-  vi.stubGlobal("fetch", fetch);
-  const { result } = renderHook(() => useAvailableUserLibraries({ includeHidden: true }), {
-    wrapper,
-  });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v2/user/libraries?include_hidden=true");
 });

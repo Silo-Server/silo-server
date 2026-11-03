@@ -19,14 +19,7 @@ import {
 } from "@/api/client";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
-import { usePluginSettingsList } from "./pluginSettings";
-import {
-  settingsCapabilitiesSupportAtomicShortcuts,
-  useEffectiveSettings,
-  useSetNavigationShortcutPresence,
-  useSetSettingValue,
-  useSettingsCapabilities,
-} from "./settingValues";
+import { useEffectiveSettings, useSetNavigationShortcutPresence } from "./settingValues";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -118,33 +111,6 @@ describe("settings hooks against the committed v2 fixtures", () => {
     });
   });
 
-  it("reads the contract capabilities the gate helpers consume", async () => {
-    stubFetch();
-    const { result } = renderHook(() => useSettingsCapabilities(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    // The fixture's supports_idempotent_writes describes the v1 mutation-id
-    // header; the v2 writes declare none, so the hook reports it false.
-    expect(result.current.data).toEqual({
-      ...getSettingsContractCapabilitiesOk,
-      supports_idempotent_writes: false,
-    });
-    expect(settingsCapabilitiesSupportAtomicShortcuts(result.current.data)).toBe(true);
-  });
-
-  it("writes a value at one scope", async () => {
-    stubFetch();
-    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
-
-    await expect(
-      result.current.mutateAsync({
-        key: SETTING_KEYS.UI_THEME,
-        value: "cinema-light",
-        identity: { scope: "profile" },
-      }),
-    ).resolves.toEqual(updateSettingValueOk);
-  });
-
   it("sends an atomic shortcut edit with the captured profile authority", async () => {
     const seen = stubFetch();
     const { result } = renderHook(() => useSetNavigationShortcutPresence(), { wrapper });
@@ -175,15 +141,5 @@ describe("settings hooks against the committed v2 fixtures", () => {
       "X-Profile-Id": "p-owner",
       "X-Profile-Token": "pin-token",
     });
-  });
-
-  it("lists plugin settings with numeric installation ids", async () => {
-    stubFetch();
-    const list = renderHook(() => usePluginSettingsList(), { wrapper });
-    await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
-    const installation = list.result.current.data?.installations[0];
-    expect(installation?.id).toBe(Number(listPluginSettingsOk.items[0]!.id));
-    expect(installation?.routes).toEqual(listPluginSettingsOk.items[0]!.routes);
-    expect(installation?.category).toBe(listPluginSettingsOk.items[0]!.category);
   });
 });

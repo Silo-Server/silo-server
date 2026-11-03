@@ -115,6 +115,12 @@ templates only, never bundles. The rules the web keeps:
   until a real ID is set. `Template.NeedsSetup` reports this case: bundle apply creates the
   collection without a first sync, and the `/api/v2` bundle list marks its summary `needs_setup`.
 
+The `tmdb` and `tmdb_discover` rules are exported (`ValidateTMDBSpec`,
+`ValidateTMDBDiscoverSpec`) and also check the Requests Discover page's chart and
+filter rows ([Request Discover rows](request-discover-rows.md)). Stored layouts are
+not checked again, so tightening a rule here changes what the next layout save
+accepts.
+
 ## Templates in the Synced list step
 
 The web has no template gallery. Templates are suggestions inside the editor's Synced list step

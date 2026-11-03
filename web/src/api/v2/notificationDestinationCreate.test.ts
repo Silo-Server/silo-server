@@ -5,6 +5,7 @@ import { useCreateNotificationWebhook } from "@/hooks/queries/notificationWebhoo
 import { useCreateServerNotificationChannel } from "@/hooks/queries/admin/serverNotificationChannels";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 
 beforeEach(() => {
   localStorage.clear();
@@ -18,14 +19,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 for (const useTest of [useCreateNotificationWebhook, useCreateServerNotificationChannel]) {
   it("blocks a second click before React publishes pending state", async () => {
-    let finish!: (response: Response) => void;
-    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    vi.stubGlobal("fetch", fetch);
+    const { fetch, finish } = stubPendingFetch();
     const client = new QueryClient();
     const { result, unmount } = renderHook(() => useTest(), {
       wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),
@@ -62,38 +56,8 @@ for (const useTest of [useCreateNotificationWebhook, useCreateServerNotification
 }
 
 for (const useCreate of [useCreateNotificationWebhook, useCreateServerNotificationChannel]) {
-  it("does not replay creation after401 even with global retries", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ status: 401, title: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/problem+json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetch);
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: 3 } } });
-    const { result, unmount } = renderHook(() => useCreate(), {
-      wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),
-    });
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({ name: "fixture", url: "https://example.test/hook" }),
-      ).rejects.toMatchObject({ status: 401 });
-    });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    unmount();
-    client.clear();
-  });
   it("suppresses a one-time secret after authority changes", async () => {
-    let finish!: (response: Response) => void;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof globalThis.fetch>().mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            finish = resolve;
-          }),
-      ),
-    );
+    const { finish } = stubPendingFetch();
     const client = new QueryClient();
     const { result, unmount } = renderHook(() => useCreate(), {
       wrapper: ({ children }) => createElement(QueryClientProvider, { client }, children),

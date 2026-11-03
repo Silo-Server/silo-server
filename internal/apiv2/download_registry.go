@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type DownloadRegistryService interface {
@@ -56,7 +57,7 @@ type DownloadRegistryInput struct {
 }
 type DownloadStatusBody struct {
 	Status    string  `json:"status" enum:"downloading,completed"`
-	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Future times are rejected."`
+	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Times more than two minutes ahead of the server clock are rejected."`
 	Revision  int     `json:"revision" minimum:"1" doc:"Registry revision whose bytes this event describes; retain on retry."`
 }
 type DownloadStatusInput struct {
@@ -198,6 +199,8 @@ func downloadProblem(err error) *Problem {
 		return NewProblem(TypePermissionDenied, "Downloads are not allowed.")
 	case errors.Is(err, downloads.ErrManifestUnavailable), errors.Is(err, downloads.ErrSubscriptionsUnavailable):
 		return NewProblem(TypeDependencyUnavailable, "Offline assets are not configured.")
+	case errors.Is(err, playback.ErrSubtitleReadsBusy):
+		return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").WithRetryAfter(playback.SubtitleReadsRetryAfter)
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		return NewProblem(TypeMalformedRequest, "Invalid subtitle reference.")
 	case errors.Is(err, downloads.ErrStatusConflict):

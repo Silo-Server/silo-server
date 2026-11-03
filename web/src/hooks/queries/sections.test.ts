@@ -5,8 +5,9 @@ import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layo
 import getHomeLayoutIncludeItemsOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_layout_include_items_out_of_range.json";
 import getHomeLayoutWithItemsOk from "../../../../contracts/api/v2/fixtures/get_home_layout_with_items_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
-import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
-import listProfileSectionOverridesOk from "../../../../contracts/api/v2/fixtures/list_profile_section_overrides_ok.json";
+import getHomeSectionItemsCappedOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_capped_ok.json";
+import getHomeSectionItemsItemLimitOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_section_items_item_limit_out_of_range.json";
+import getHomeLayoutItemLimitOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_layout_item_limit_out_of_range.json";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
@@ -28,27 +29,41 @@ vi.mock("@/api/client", () => ({
 
 import {
   fetchHomeSectionItems,
-  fetchLibrarySectionItems,
   homeLayoutQueryOptions,
   HOME_LAYOUT_INCLUDED_ROWS,
-  HOME_SECTION_GC_TIME,
-  profileSectionOverridesFromV2,
 } from "./sections";
+import { completeHomeRow, HOME_ROW_ITEM_LIMIT } from "./homeRowLimit";
 import { sectionKeys } from "./keys";
+import type { ResolvedSection } from "@/api/types";
 
 type QueryOptions = {
   queryKey: unknown;
   queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
 };
 
-function jsonResponse(body: unknown) {
+function jsonResponse(body: unknown, status = 200) {
   return {
     res: new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
+      status,
+      headers: { "Content-Type": status === 200 ? "application/json" : "application/problem+json" },
     }),
     requestProfileId: "p-owner",
     requestProfileToken: null,
+  };
+}
+
+function row(ids: string[], fields: Partial<ResolvedSection> = {}): ResolvedSection {
+  return {
+    id: "row",
+    section_type: "recently_added",
+    title: "Row",
+    featured: false,
+    item_limit: 20,
+    total_count: ids.length,
+    is_custom: false,
+    customized: false,
+    items: ids.map((content_id) => ({ content_id }) as ResolvedSection["items"][number]),
+    ...fields,
   };
 }
 
@@ -60,38 +75,58 @@ describe("sections query helpers", () => {
     mocks.useQuery.mockImplementation((options: unknown) => options);
   });
 
-  it("fetches the home layout from v2 and keeps the { sections } shape", async () => {
-    mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutOk));
-
-    const options = homeLayoutQueryOptions(new QueryClient()) as unknown as QueryOptions;
-    const response = await options.queryFn({});
-
-    expect(options.queryKey).toEqual(["sections", "home", "layout"]);
-    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
-      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
-    );
-    expect(response).toEqual({ sections: getHomeLayoutOk.sections });
-  });
-
   it("reads the layout alone when the server rejects include_items", async () => {
+    const rejected = () => ({
+      ...jsonResponse(getHomeLayoutIncludeItemsOutOfRange),
+      res: new Response(JSON.stringify(getHomeLayoutIncludeItemsOutOfRange), {
+        status: 422,
+        headers: { "Content-Type": "application/problem+json" },
+      }),
+    });
     mocks.fetchWithSession
-      .mockResolvedValueOnce({
-        ...jsonResponse(getHomeLayoutIncludeItemsOutOfRange),
-        res: new Response(JSON.stringify(getHomeLayoutIncludeItemsOutOfRange), {
-          status: 422,
-          headers: { "Content-Type": "application/problem+json" },
-        }),
-      })
+      .mockResolvedValueOnce(rejected())
+      .mockResolvedValueOnce(rejected())
       .mockResolvedValueOnce(jsonResponse({ sections: getHomeLayoutOk.sections }));
 
     const options = homeLayoutQueryOptions(new QueryClient()) as unknown as QueryOptions;
     const response = await options.queryFn({});
 
     expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual([
+      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}&item_limit=${HOME_ROW_ITEM_LIMIT}`,
       `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
       "/api/v2/home/layout",
     ]);
     expect(response).toEqual({ sections: getHomeLayoutOk.sections });
+  });
+
+  it("keeps included rows whole when the server rejects only item_limit", async () => {
+    // A whole row longer than the cap, as a server without item_limit sends it.
+    const row = getHomeLayoutWithItemsOk.included_sections[0]!;
+    const items = Array.from({ length: HOME_ROW_ITEM_LIMIT + 5 }, (_, i) => ({
+      ...row.items[0]!,
+      content_id: `${row.items[0]!.content_id}-${i}`,
+    }));
+    const whole = {
+      ...getHomeLayoutWithItemsOk,
+      included_sections: [{ ...row, item_limit: 100, total_count: items.length, items }],
+    };
+    mocks.fetchWithSession
+      .mockResolvedValueOnce(jsonResponse(getHomeLayoutItemLimitOutOfRange, 422))
+      .mockResolvedValueOnce(jsonResponse(whole));
+    const queryClient = new QueryClient();
+
+    const options = homeLayoutQueryOptions(queryClient) as unknown as QueryOptions;
+    await options.queryFn({});
+
+    expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual([
+      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}&item_limit=${HOME_ROW_ITEM_LIMIT}`,
+      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
+    ]);
+    const cached = queryClient.getQueryData<{ partial?: boolean; section: { items: unknown[] } }>(
+      sectionKeys.homeItems(row.id),
+    );
+    expect(cached?.section.items).toHaveLength(items.length);
+    expect(cached?.partial).toBeUndefined();
   });
 
   it("seeds each included row's item cache before the layout resolves", async () => {
@@ -109,83 +144,69 @@ describe("sections query helpers", () => {
     expect(cached?.section.items).toHaveLength(included.items.length);
   });
 
-  it("keeps seeded rows for the home section gcTime, not the client default", async () => {
-    mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutWithItemsOk));
-    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 10 * 60_000 } } });
+  it.each([
+    {
+      name: "a capped row the server says holds more as partial",
+      responses: () => [jsonResponse(getHomeSectionItemsCappedOk)],
+      urls: ["/api/v2/home/sections/continue_watching/items?item_limit=20"],
+      partial: true,
+    },
+    {
+      name: "a capped row the server answered in full as whole",
+      responses: () => [jsonResponse(getHomeSectionItemsOk)],
+      urls: ["/api/v2/home/sections/continue_watching/items?item_limit=20"],
+      partial: undefined,
+    },
+    {
+      name: "a row whole when the server rejects item_limit",
+      responses: () => [
+        jsonResponse(getHomeSectionItemsItemLimitOutOfRange, 422),
+        jsonResponse(getHomeSectionItemsOk),
+      ],
+      urls: [
+        "/api/v2/home/sections/continue_watching/items?item_limit=20",
+        "/api/v2/home/sections/continue_watching/items",
+      ],
+      partial: undefined,
+    },
+  ])("reads $name", async ({ responses, urls, partial }) => {
+    for (const response of responses()) mocks.fetchWithSession.mockResolvedValueOnce(response);
 
-    const options = homeLayoutQueryOptions(queryClient) as unknown as QueryOptions;
-    await options.queryFn({});
+    const row = await fetchHomeSectionItems("continue_watching", { itemLimit: 20 });
 
-    for (const included of getHomeLayoutWithItemsOk.included_sections) {
-      const query = queryClient.getQueryCache().find({
-        queryKey: sectionKeys.homeItems(included.id),
-        exact: true,
-      });
-      expect(query?.gcTime).toBe(HOME_SECTION_GC_TIME);
-    }
+    expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual(urls);
+    expect(row.partial).toBe(partial);
+  });
+});
+
+describe("home row limit", () => {
+  it("completes a row with the shown cards in place and the rest after them", () => {
+    const shown = { section: row(["a", "b", "c"]), partial: true };
+    const whole = { section: row(["a", "x", "b", "y"], { item_limit: 100, total_count: 4 }) };
+
+    const completed = completeHomeRow(shown, whole);
+
+    expect(completed.partial).toBeUndefined();
+    expect(completed.shown).toBe(3);
+    expect(completed.section.item_limit).toBe(100);
+    expect(completed.section.items.map((item) => item.content_id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "x",
+      "y",
+    ]);
   });
 
-  it("fetches home section items from the v2 home section and keeps the { section } shape", async () => {
-    mocks.fetchWithSession.mockResolvedValue({
-      res: new Response(JSON.stringify(getHomeSectionItemsOk), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-      requestProfileId: "p-owner",
-      requestProfileToken: null,
-    });
+  it("orders rows completed within the same millisecond", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000_000_000);
+    const shown = { section: row(["a"]), partial: true };
+    const whole = { section: row(["a", "b"], { item_limit: 100, total_count: 2 }) };
 
-    const response = await fetchHomeSectionItems("continue_watching");
+    const first = completeHomeRow(shown, whole);
+    const second = completeHomeRow(shown, whole);
 
-    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
-      "/api/v2/home/sections/continue_watching/items",
-    );
-    expect(response.section.id).toBe("continue_watching");
-    expect(response.section.items[0]?.content_id).toBe("movie:heat-1995");
-  });
-
-  it("fetches library section items from the v2 library section and keeps the { section } shape", async () => {
-    mocks.fetchWithSession.mockResolvedValue({
-      res: new Response(JSON.stringify(getLibrarySectionItemsOk), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-      requestProfileId: "p-owner",
-      requestProfileToken: null,
-    });
-
-    const response = await fetchLibrarySectionItems(1, "continue_watching");
-
-    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
-      "/api/v2/library/1/sections/continue_watching/items",
-    );
-    expect(response.section.id).toBe("continue_watching");
-    expect(response.section.items[0]?.content_id).toBe("movie:heat-1995");
-    // The card components read "" for absent art and null for an absent rating.
-    expect(response.section.items[0]?.logo_url).toBe("");
-    expect(response.section.items[0]?.rating_imdb).toBe(8.3);
-  });
-
-  it("projects stored v2 section overrides onto the editor's override fields", () => {
-    const overrides = profileSectionOverridesFromV2(listProfileSectionOverridesOk.items);
-
-    expect(overrides[0]).toEqual({
-      id: "o-1",
-      section_id: "s-continue",
-      position: 2,
-      hidden: true,
-      removed: false,
-      section_type: undefined,
-      title: "Keep watching",
-      featured: false,
-      item_limit: 10,
-      config: undefined,
-    });
-    expect(overrides[1]).toMatchObject({
-      section_id: undefined,
-      position: undefined,
-      featured: undefined,
-      item_limit: undefined,
-    });
+    expect(second.shownAt).toBeGreaterThan(first.shownAt ?? Infinity);
+    vi.restoreAllMocks();
   });
 });

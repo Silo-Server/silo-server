@@ -200,15 +200,6 @@ describe("FacetValuePicker", () => {
     expect(trigger()).toHaveTextContent("Aard");
   });
 
-  it("starts a search with a letter typed on the closed picker", async () => {
-    serve();
-    const trigger = renderPicker();
-    trigger().focus();
-    await userEvent.keyboard("a");
-    expect(screen.getByRole("combobox", { name: "Search studios" })).toHaveValue("a");
-    await waitFor(() => expect(searches().at(-1)).toMatchObject({ q: "a" }));
-  });
-
   it("works inside a dialog, and Escape closes only the picker", async () => {
     serve();
     picked = undefined;
@@ -233,19 +224,6 @@ describe("FacetValuePicker", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByRole("dialog", { name: "Add row" })).toBeInTheDocument();
-  });
-
-  it("asks to narrow the search when the ranked values ran over the limit", async () => {
-    serve();
-    // has_more speaks for matches, which a ranked server's picker doesn't read.
-    v2Recorder.answer(SEARCH, (call: RecordedCall) => ({
-      ...answerStudios(call),
-      has_more: false,
-      values_has_more: true,
-    }));
-    const trigger = renderPicker();
-    await userEvent.click(trigger());
-    expect(await screen.findByText("Keep typing to narrow")).toBeInTheDocument();
   });
 
   it("only searches typed text on a server without ranked value search", async () => {

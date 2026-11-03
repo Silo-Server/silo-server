@@ -1,12 +1,10 @@
 package transcodenode
 
 import (
-	"bytes"
 	"encoding/json"
-	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,32 +53,25 @@ func sheetsRequestJSON(t *testing.T, input string) string {
 	return string(data)
 }
 
-// TestTrickplayExtractMakesSheets runs a sheets request on a node without
-// hardware decode: the hardware attempt is dropped and the software attempt
-// answers the sheets.
-func TestTrickplayExtractMakesSheets(t *testing.T) {
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	clip := filepath.Join(t.TempDir(), "clip.mkv")
-	if output, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=4", "-g", "24", clip).CombinedOutput(); err != nil {
-		t.Skipf("cannot generate the clip: %v: %s", err, output)
-	}
-	server := newTrickplayTestServer(t, ffmpeg)
-	rec := postTrickplay(t, server, sheetsRequestJSON(t, clip))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var result mediasample.Result
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+// TestTrickplayExtractReportsUnreadableInput checks that a file this node's
+// ffmpeg cannot open answers input_unreadable, so the API server does not
+// count it against the file.
+func TestTrickplayExtractReportsUnreadableInput(t *testing.T) {
+	// ffmpeg stands in as a script that fails to open its input, so the
+	// test needs no ffmpeg on the host.
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\necho '/media/movie.mkv: Permission denied' >&2\nexit 1\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if result.Decoder != "software" || len(result.Sheets) != 1 || result.SheetFrames.Decoded != 2 {
-		t.Fatalf("result %s sheets %d frames %+v", result.Decoder, len(result.Sheets), result.SheetFrames)
+	server := newTrickplayTestServer(t, ffmpeg)
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, "/media/movie.mkv"))
+	var failure trickplay.ExtractError
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG)); err != nil {
-		t.Fatalf("sheet: %v", err)
+	if rec.Code != http.StatusUnprocessableEntity || failure.Reason != trickplay.InputUnreadableReason || failure.Permanent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }
 

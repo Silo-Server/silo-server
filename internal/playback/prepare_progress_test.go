@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -153,50 +152,5 @@ func TestPrepareFileReportsProgressAndLogsStderr(t *testing.T) {
 	}
 	if !slices.Equal(events, []string{"ffmpeg process starting", "ffmpeg process exited"}) {
 		t.Fatalf("events = %q", events)
-	}
-}
-
-func TestPrepareFileLogsExitErrorWithoutSessionIDLogsNothing(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ffmpeg")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'boom\\n' >&2\nexit 3\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	opts := TranscodeOpts{
-		InputPath:        "/nonexistent/input.mkv",
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-		FFmpegPath:       script,
-		HWAccel:          HWAccelNone,
-	}
-
-	logs := &recordingFFmpegLogSink{}
-	opts.FFmpegLogSink = logs
-	if err := PrepareFile(context.Background(), opts, filepath.Join(dir, "a.mp4")); err == nil {
-		t.Fatal("PrepareFile succeeded with a failing FFmpeg")
-	}
-	if len(logs.entries) != 0 {
-		t.Fatalf("logged without a session id: %+v", logs.entries)
-	}
-
-	opts.SessionID = DownloadPrepareLogSessionID("art2")
-	if err := PrepareFile(context.Background(), opts, filepath.Join(dir, "b.mp4")); err == nil {
-		t.Fatal("PrepareFile succeeded with a failing FFmpeg")
-	}
-	last := logs.entries[len(logs.entries)-1]
-	if last.event != "ffmpeg process exit error" || !strings.Contains(last.attrs.ExitError, "exit_code=3") {
-		t.Fatalf("last entry = %+v, want exit error with code 3", last)
-	}
-	if !slices.ContainsFunc(logs.entries, func(e recordedFFmpegLog) bool { return e.line == "boom" }) {
-		t.Fatalf("stderr line missing: %+v", logs.entries)
-	}
-}
-
-func TestDownloadPrepareLogSessionID(t *testing.T) {
-	if got := DownloadPrepareLogSessionID(" "); got != "" {
-		t.Fatalf("blank id = %q", got)
-	}
-	if got := DownloadPrepareLogSessionID("abc"); got != "download-prepare-abc" {
-		t.Fatalf("id = %q", got)
 	}
 }

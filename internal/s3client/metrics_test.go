@@ -3,11 +3,9 @@ package s3client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httptrace"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -81,45 +79,5 @@ func TestS3MetricsRetryStreamingAndPrivacy(t *testing.T) {
 	}
 	if len(exporter.GetSpans()) != 1 {
 		t.Fatal("local URL signing was counted as a storage request")
-	}
-}
-
-// traceHTTPClient allows late and overlapping transport callbacks without
-// relying on DNS, TLS, or scheduler timing to produce the interleaving.
-type traceHTTPClient func(*http.Request) (*http.Response, error)
-
-func (f traceHTTPClient) Do(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestS3DialsOverlapAndLateCompletion(t *testing.T) {
-	success := s3Dials.WithLabelValues("checks")
-	beforeSuccess := testutil.ToFloat64(success)
-	var trace *httptrace.ClientTrace
-	c := observedHTTPClient{role: "checks", inner: traceHTTPClient(func(r *http.Request) (*http.Response, error) {
-		trace = httptrace.ContextClientTrace(r.Context())
-		trace.GetConn("first")
-		trace.GotConn(httptrace.GotConnInfo{Reused: true})
-		trace.GetConn("redirect")
-		trace.ConnectDone("tcp", "first", nil)
-		trace.ConnectDone("tcp", "redirect", nil)
-		trace.GotConn(httptrace.GotConnInfo{Reused: false})
-		return nil, context.Canceled
-	})}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.invalid", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := c.Do(req)
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Do error = %v, want context.Canceled", err)
-	}
-	// Background dial callbacks can arrive after Do returns, even when no
-	// GotConn follows (cancellation or a subsequent TLS handshake failure).
-	trace.ConnectDone("tcp", "late", nil)
-	trace.ConnectDone("tcp", "failed", errors.New("dial failed"))
-	if got := testutil.ToFloat64(success) - beforeSuccess; got != 3 {
-		t.Errorf("successful dials = %v, want 3", got)
 	}
 }

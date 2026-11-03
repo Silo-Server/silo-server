@@ -89,20 +89,6 @@ func TestRowBackedSectionSourceTotalIsInexactAtTheCap(t *testing.T) {
 	}
 }
 
-func TestRowBackedSectionSourceKeepsV1Empty(t *testing.T) {
-	rows := &rowBackedSectionResolver{sectionType: "trending_on_server", items: numberedItems(5)}
-	resolver := new(CatalogResolver).WithSectionResolver(rows)
-	req := CatalogRequest{Source: CatalogSourceSection, Scope: "home", SectionID: "trending", Limit: 20}
-	result, err := resolver.resolveSectionSource(t.Context(), req, AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Items) != 0 || result.Total != 0 || len(rows.limits) != 0 {
-		t.Fatalf("v1 row-backed read = %d items, total %d, %d fetches; want the frozen empty answer",
-			len(result.Items), result.Total, len(rows.limits))
-	}
-}
-
 func TestRowBackedSectionSourcePropagatesFetchErrors(t *testing.T) {
 	want := errors.New("recommendations unavailable")
 	resolver := new(CatalogResolver).WithSectionResolver(&rowBackedSectionResolver{sectionType: "taste_match", err: want})

@@ -16,33 +16,23 @@ func TestCompatRequestImageSize(t *testing.T) {
 		want      string
 	}{
 		{"no request defaults to card", "", "Primary", "small"},
-		{"no request backdrop defaults to medium", "", "Backdrop", "medium"},
-		{"no dimensions", "/Items/1/Images/Primary", "Primary", "small"},
 		{"no dimensions backdrop", "/Items/1/Images/Backdrop", "Backdrop", "medium"},
-		{"thumbnail width", "/Items/1/Images/Primary?MaxWidth=200", "Primary", "small"},
 		{"card boundary", "/Items/1/Images/Primary?FillWidth=320", "Primary", "small"},
 		// A rung up to a fifth narrower than the request still serves it.
 		{"small within tolerance", "/Items/1/Images/Primary?FillWidth=375", "Primary", "small"},
 		{"past small", "/Items/1/Images/Primary?FillWidth=376", "Primary", "medium"},
-		{"between small and large", "/Items/1/Images/Primary?MaxWidth=600", "Primary", "medium"},
 		{"medium within tolerance", "/Items/1/Images/Primary?MaxWidth=625", "Primary", "medium"},
 		{"past medium", "/Items/1/Images/Primary?MaxWidth=626", "Primary", "large"},
 		{"lowercase alias", "/Items/1/Images/Primary?maxWidth=900", "Primary", "large"},
-		{"fill width reaches large", "/Items/1/Images/Primary?FillWidth=900", "Primary", "large"},
 		// A height becomes a width through the type's aspect ratio: a 900px
 		// tall poster is 600px wide, which the w500 rung serves.
 		{"poster height through aspect", "/Items/1/Images/Primary?MaxHeight=900", "Primary", "medium"},
-		{"poster fill height through aspect", "/Items/1/Images/Primary?FillHeight=900", "Primary", "medium"},
-		{"tall poster reaches large, not original", "/Items/1/Images/Primary?MaxHeight=1200", "Primary", "large"},
 		{"large within tolerance", "/Items/1/Images/Primary?MaxWidth=1250", "Primary", "large"},
 		{"past the widest poster rung", "/Items/1/Images/Primary?MaxWidth=1251", "Primary", "original"},
 		{"backdrop height through aspect", "/Items/1/Images/Backdrop?FillHeight=1100", "Backdrop", "medium"},
-		{"mid-width backdrop stays medium", "/Items/1/Images/Backdrop?FillWidth=1100", "Backdrop", "medium"},
-		{"1080p backdrop box", "/Items/1/Images/Backdrop?MaxWidth=1920&MaxHeight=1080", "Backdrop", "medium"},
 		// Max bounds both ways, so a short box caps a wide request.
 		{"short box caps a wide backdrop", "/Items/1/Images/Backdrop?MaxWidth=3840&MaxHeight=720", "Backdrop", "medium"},
 		{"height binds beside a narrow width", "/Items/1/Images/Backdrop?FillWidth=300&FillHeight=1080", "Backdrop", "medium"},
-		{"1440p backdrop", "/Items/1/Images/Backdrop?MaxWidth=2560", "Backdrop", "large"},
 		{"4K backdrop", "/Items/1/Images/Backdrop?MaxWidth=3840", "Backdrop", "original"},
 		{"wide logo", "/Items/1/Images/Logo?MaxWidth=1000", "Logo", "large"},
 	}

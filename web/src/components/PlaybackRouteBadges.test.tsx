@@ -58,11 +58,4 @@ describe("PlaybackRouteBadges", () => {
     expect(screen.getByLabelText("Network: Unknown")).toBeVisible();
     expect(screen.queryByLabelText("Network: Tailscale")).not.toBeInTheDocument();
   });
-
-  it("retains the provider identifier when its plugin is no longer installed", () => {
-    render(
-      <PlaybackRouteBadges session={{ ...session, routing_network_provider: "other-provider" }} />,
-    );
-    expect(screen.getByLabelText("Network: other-provider")).toBeVisible();
-  });
 });

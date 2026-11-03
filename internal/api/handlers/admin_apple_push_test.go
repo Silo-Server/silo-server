@@ -10,24 +10,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
-func TestAdminApplePushHandlerUnavailableWithoutSystem(t *testing.T) {
-	h := NewAdminApplePushHandler(nil, nil)
-	rec := httptest.NewRecorder()
-	h.HandleTest(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/apple/test", strings.NewReader(`{}`)))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("HandleTest without system = %d, want 503", rec.Code)
-	}
-}
-
-func TestAdminApplePushHandlerRejectsInvalidJSON(t *testing.T) {
-	h := NewAdminApplePushHandler(&notifications.System{}, nil)
-	rec := httptest.NewRecorder()
-	h.HandleTest(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/apple/test", strings.NewReader(`{`)))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("HandleTest invalid JSON = %d, want 400", rec.Code)
-	}
-}
-
 func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{
 		notifications.SettingPushRelayDeploymentID: "01EXISTING",

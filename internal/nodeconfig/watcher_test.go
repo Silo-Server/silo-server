@@ -2,6 +2,7 @@ package nodeconfig
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,10 @@ func TestWatcherNodeRowID(t *testing.T) {
 	}
 }
 
+// testJWTSecret is the signing secret every settings fixture carries: the
+// watcher refuses a snapshot without one.
+const testJWTSecret = "watcher-test-secret"
+
 func newTestWatcher(t *testing.T, bootstrap BootstrapOverrides) *Watcher {
 	t.Helper()
 	return NewWatcher(nil, nil, nil, bootstrap)
@@ -50,7 +55,7 @@ func TestApplySettingsSkipsCallbacksOnNoopReload(t *testing.T) {
 		calls++
 	})
 
-	settings := map[string]string{"server.log_level": "debug"}
+	settings := map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "debug"}
 	if err := w.applySettings(context.Background(), settings); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
@@ -67,7 +72,7 @@ func TestApplySettingsSkipsCallbacksOnNoopReload(t *testing.T) {
 	}
 
 	// A real change fires callbacks again.
-	if err := w.applySettings(context.Background(), map[string]string{"server.log_level": "warn"}); err != nil {
+	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "warn"}); err != nil {
 		t.Fatalf("third apply: %v", err)
 	}
 	if calls != 2 {
@@ -82,8 +87,9 @@ func TestApplySettingsReappliesBootstrapOverrides(t *testing.T) {
 	})
 
 	err := w.applySettings(context.Background(), map[string]string{
-		"server.listen": ":8080",
-		"redis.url":     "redis://db-host:6379",
+		"auth.jwt_secret": testJWTSecret,
+		"server.listen":   ":8080",
+		"redis.url":       "redis://db-host:6379",
 	})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
@@ -100,8 +106,9 @@ func TestApplySettingsReappliesBootstrapOverrides(t *testing.T) {
 
 func TestApplySettingsAppliesRedisDBToTheSavedURLOnly(t *testing.T) {
 	settings := map[string]string{
-		"redis.url": "redis://db-host:6379/3",
-		"redis.db":  "5",
+		"auth.jwt_secret": testJWTSecret,
+		"redis.url":       "redis://db-host:6379/3",
+		"redis.db":        "5",
 	}
 
 	saved := newTestWatcher(t, BootstrapOverrides{})
@@ -122,6 +129,44 @@ func TestApplySettingsAppliesRedisDBToTheSavedURLOnly(t *testing.T) {
 	}
 }
 
+// A config without auth.jwt_secret would let anyone sign stream tokens the
+// node then honors. The first load must fail rather than start the node, and a
+// reload must keep the last config that had a secret.
+func TestReloadRefusesConfigWithoutJWTSecret(t *testing.T) {
+	w := &Watcher{}
+	var changes int
+	w.OnChange(func(_, _ *config.Config) { changes++ })
+
+	snapshot := map[string]string{"server.log_level": "info"}
+	w.fetchSettingsFn = func(context.Context) (map[string]string, error) { return snapshot, nil }
+
+	if err := w.reload(t.Context()); !errors.Is(err, ErrNoJWTSecret) {
+		t.Fatalf("first load without a secret: error = %v, want ErrNoJWTSecret", err)
+	}
+	if w.Config() != nil || changes != 0 {
+		t.Fatalf("first load without a secret published config %v (%d callbacks)", w.Config(), changes)
+	}
+
+	snapshot = map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "info"}
+	if err := w.reload(t.Context()); err != nil {
+		t.Fatalf("load with a secret: %v", err)
+	}
+	valid := w.Config()
+
+	for _, secret := range []string{"", "  \t"} {
+		snapshot = map[string]string{"auth.jwt_secret": secret, "server.log_level": "debug"}
+		if err := w.reload(t.Context()); !errors.Is(err, ErrNoJWTSecret) {
+			t.Errorf("reload with secret %q: error = %v, want ErrNoJWTSecret", secret, err)
+		}
+		if got := w.Config(); got != valid || got.Auth.JWTSecret != testJWTSecret {
+			t.Errorf("reload with secret %q replaced the last valid config", secret)
+		}
+	}
+	if changes != 1 {
+		t.Errorf("OnChange calls = %d, want 1 (only the valid load)", changes)
+	}
+}
+
 func TestRequestReloadCoalesces(t *testing.T) {
 	w := newTestWatcher(t, BootstrapOverrides{})
 
@@ -139,7 +184,7 @@ func TestRequestReloadCoalesces(t *testing.T) {
 func TestOnChangeAfterFirstApplySeesLaterChanges(t *testing.T) {
 	w := newTestWatcher(t, BootstrapOverrides{})
 
-	if err := w.applySettings(context.Background(), map[string]string{"server.log_level": "info"}); err != nil {
+	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "info"}); err != nil {
 		t.Fatalf("initial apply: %v", err)
 	}
 
@@ -149,7 +194,7 @@ func TestOnChangeAfterFirstApplySeesLaterChanges(t *testing.T) {
 		gotNew = updated.Server.LogLevel
 	})
 
-	if err := w.applySettings(context.Background(), map[string]string{"server.log_level": "error"}); err != nil {
+	if err := w.applySettings(context.Background(), map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "error"}); err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
 	if gotOld != "info" || gotNew != "error" {
@@ -164,6 +209,7 @@ func TestOnLoadNormalizersApplyOnEveryLoad(t *testing.T) {
 	})
 
 	if err := w.applySettings(context.Background(), map[string]string{
+		"auth.jwt_secret":      testJWTSecret,
 		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
 	}); err != nil {
 		t.Fatalf("applySettings() error = %v", err)
@@ -174,6 +220,7 @@ func TestOnLoadNormalizersApplyOnEveryLoad(t *testing.T) {
 
 	// A reload constructs a fresh config; the normalizer must apply again.
 	if err := w.applySettings(context.Background(), map[string]string{
+		"auth.jwt_secret":      testJWTSecret,
 		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
 	}); err != nil {
 		t.Fatalf("applySettings() reload error = %v", err)
@@ -218,10 +265,10 @@ func TestReloadDoesNotLetAnEarlierSnapshotSupersedeALaterOne(t *testing.T) {
 			case <-forced:
 			case <-time.After(staleReloadWindow):
 			}
-			return map[string]string{"server.log_level": "info"}, nil
+			return map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "info"}, nil
 		}
 		record("fetch error")
-		return map[string]string{"server.log_level": "error"}, nil
+		return map[string]string{"auth.jwt_secret": testJWTSecret, "server.log_level": "error"}, nil
 	}
 
 	polled := make(chan error, 1)

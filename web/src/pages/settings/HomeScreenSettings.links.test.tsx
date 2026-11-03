@@ -7,6 +7,7 @@ import { setAccessToken, setProfileId } from "@/api/client";
 import type { SectionOverride, SettingsSectionEntry } from "@/api/types";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import HomeScreenSettings from "./HomeScreenSettings";
+import { resolveSectionRows, sectionEntry } from "./homeScreenSettings.test-support";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -50,22 +51,6 @@ type Args = {
   body?: { overrides: SectionOverride[] };
 };
 
-function entry(id: string, position: number): SettingsSectionEntry {
-  return {
-    id,
-    section_type: "recently_added",
-    title: `Row ${id}`,
-    default_title: `Row ${id}`,
-    featured: false,
-    item_limit: 20,
-    hidden: false,
-    is_custom: false,
-    customized: false,
-    position,
-    config: {},
-  };
-}
-
 let saved: Record<string, SectionOverride[]>;
 let puts: Array<{ page: string; overrides: SectionOverride[] }>;
 /** When set, a profile PUT waits for it and fails when it rejects. */
@@ -86,25 +71,8 @@ function deferred() {
 
 /** The server rows with this profile's overrides applied, as the server resolves them. */
 function resolve(key: string): SettingsSectionEntry[] {
-  const overrides = saved[key] ?? [];
-  const server = key === "home" ? [entry("a", 0), entry("b", 1)] : [];
-  const rows: SettingsSectionEntry[] = server.map((row) => {
-    const o = overrides.find((override) => override.section_id === row.id);
-    return { ...row, hidden: o?.hidden ?? false, customized: Boolean(o) };
-  });
-  for (const own of overrides.filter((o) => !o.section_id)) {
-    rows.push({
-      ...entry(own.id!, own.position ?? 0),
-      section_type: own.section_type!,
-      title: own.title!,
-      default_title: "",
-      hidden: Boolean(own.hidden),
-      is_custom: true,
-      customized: true,
-      config: own.config ?? {},
-    });
-  }
-  return rows.sort((a, b) => a.position - b.position);
+  const server = key === "home" ? [sectionEntry("a", 0), sectionEntry("b", 1)] : [];
+  return resolveSectionRows(server, saved[key] ?? []);
 }
 
 beforeEach(() => {
@@ -213,17 +181,9 @@ describe("?add= on Settings > Home Screen", () => {
     ]);
   });
 
-  it("opens Add row on a server collection the profile can see", async () => {
-    setup("/settings/home-screen?add=collection:library:lib-c");
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    expect(within(form).getByRole("radio", { name: "Studio Ghibli" })).toBeChecked();
-  });
-
   it.each([
-    ["an unknown", "collection:user:gone"],
     // Another profile's collection it hasn't shared isn't among the options.
     ["an unshared", "collection:user:theirs"],
-    ["a server collection under the wrong kind", "collection:user:lib-c"],
   ])("says %s collection can't be added and opens nothing", async (_name, value) => {
     setup(`/settings/home-screen?add=${value}`);
     await waitFor(() =>
@@ -343,12 +303,6 @@ describe("?add= on Settings > Home Screen", () => {
 });
 
 describe("?edit= on Settings > Home Screen", () => {
-  it("opens the row in Edit row", async () => {
-    setup("/settings/home-screen?edit=a");
-    const dialog = await screen.findByRole("dialog", { name: "Edit row" });
-    expect(within(dialog).getByLabelText("Row name")).toHaveValue("Row a");
-  });
-
   it("says a row that is gone no longer exists and opens nothing", async () => {
     setup("/settings/home-screen?edit=gone");
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("That row no longer exists."));

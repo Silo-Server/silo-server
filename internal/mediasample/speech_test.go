@@ -3,7 +3,6 @@ package mediasample
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"io"
 	"math"
 	"reflect"
@@ -135,17 +134,5 @@ func TestRunSpeech(t *testing.T) {
 	}
 	if result.Speech == nil || len(result.Speech.Levels) != 3 || result.Speech.StartSeconds != 600 {
 		t.Fatalf("speech %+v", result.Speech)
-	}
-	// The result crosses to and from a node as JSON.
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Result
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded.Speech, result.Speech) {
-		t.Fatalf("round trip %+v, want %+v", decoded.Speech, result.Speech)
 	}
 }

@@ -65,6 +65,12 @@ vi.mock("hls.js", () => ({
       BUFFER_APPENDED: "bufferAppended",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+    static ErrorDetails = {
+      MANIFEST_LOAD_ERROR: "manifestLoadError",
+      MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
+      MANIFEST_PARSING_ERROR: "manifestParsingError",
+      FRAG_LOAD_ERROR: "fragLoadError",
+    };
     static isSupported = () => true;
 
     handlers = new Map<string, (event: string, data: unknown) => void>();

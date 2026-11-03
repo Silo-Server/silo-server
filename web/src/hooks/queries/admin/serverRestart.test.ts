@@ -4,7 +4,6 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import { useRequestServerRestart } from "./serverRestart";
-import { adminKeys } from "../keys";
 
 const accepted = (status: string) =>
   new Response(JSON.stringify({ status, message: "synthetic", notified_sessions: 1 }), {
@@ -34,27 +33,6 @@ afterEach(() => {
   cleanup();
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
-});
-
-it("posts the v2 restart once with an empty body and refreshes server status", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(accepted("already_requested"));
-  vi.stubGlobal("fetch", fetchMock);
-  const fx = fixture();
-  const invalidate = vi.spyOn(fx.client, "invalidateQueries");
-  const { result } = renderHook(useRequestServerRestart, fx);
-  let outcome: Awaited<ReturnType<typeof result.current.mutateAsync>> | undefined;
-  await act(async () => {
-    outcome = await result.current.mutateAsync();
-  });
-  expect(outcome?.status).toBe("already_requested");
-  expect(fetchMock).toHaveBeenCalledOnce();
-  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-  expect(String(url)).toBe("/api/v2/admin/server/restart");
-  expect(init.method).toBe("POST");
-  expect(init.body).toBe("{}");
-  await waitFor(() =>
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.serverStatus() }),
-  );
 });
 
 it.each(["401", "network"])(

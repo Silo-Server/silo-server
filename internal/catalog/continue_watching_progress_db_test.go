@@ -73,3 +73,59 @@ func TestSupersededCutoffIgnoresInProgressMoviesPostgres(t *testing.T) {
 		t.Fatalf("movie-only: superseded = %v, walks = %v; want none", superseded, store.sinceAt)
 	}
 }
+
+// TestSupersededSpecialsNeedALaterSpecialPostgres pins that specials, which
+// have no airing position, leave Continue Watching only for a later special:
+// finishing a regular episode afterwards keeps a half-watched special.
+func TestSupersededSpecialsNeedALaterSpecialPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	cleanup := func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id LIKE 'cwspecial-%'`)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE 'cwspecial-%'`)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := pool.Exec(ctx, `
+ INSERT INTO media_items(content_id,type,title) VALUES ('cwspecial-series','series','Series');
+ INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES
+ ('cwspecial-s5','cwspecial-series',0,5,'Special Five'),
+ ('cwspecial-s6','cwspecial-series',0,6,'Special Six'),
+ ('cwspecial-e1','cwspecial-series',1,1,'One');`); err != nil {
+		t.Fatal(err)
+	}
+
+	startedAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(time.Hour).Format(time.RFC3339)
+	inProgress := []userstore.WatchProgress{{MediaItemID: "cwspecial-s5", UpdatedAt: startedAt.Format(time.RFC3339)}}
+	filter := NewContinueWatchingProgressFilter(pool)
+
+	for _, tc := range []struct {
+		name, completed string
+		want            int
+	}{
+		{"regular episode finished later", "cwspecial-e1", 0},
+		{"later special finished later", "cwspecial-s6", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &stubSinceLister{stubProgressLister: stubProgressLister{entries: []userstore.WatchProgress{
+				{MediaItemID: tc.completed, UpdatedAt: finishedAt},
+			}}}
+			superseded, err := filter.SupersededEpisodeProgressIDs(ctx, store, "p1", inProgress)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(superseded) != tc.want {
+				t.Fatalf("superseded = %v, want %d entries", superseded, tc.want)
+			}
+		})
+	}
+}

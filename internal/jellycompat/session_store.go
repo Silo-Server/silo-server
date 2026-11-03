@@ -186,7 +186,7 @@ func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, erro
 	s.mu.RUnlock()
 	if ok && s.repo == nil {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
-			s.Delete(token)
+			_ = s.Delete(token)
 			return nil, ErrSessionNotFound
 		}
 		if err := s.checkLoginSession(ctx, &session); err != nil {
@@ -272,7 +272,7 @@ func (s *SessionStore) checkLoginSession(ctx context.Context, session *Session) 
 		// next lookup.
 		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signedOutDeleteTimeout)
 		defer cancel()
-		s.delete(deleteCtx, session.Token)
+		_ = s.delete(deleteCtx, session.Token)
 		return ErrSessionNotFound
 	}
 	return nil
@@ -325,18 +325,21 @@ func (s *SessionStore) uncache(token string) {
 	s.mu.Unlock()
 }
 
-// Delete removes a compat session.
-func (s *SessionStore) Delete(token string) {
-	s.delete(context.Background(), token)
+// Delete evicts a compat session locally and removes its stored row. An
+// already-absent row is success; any other storage error is returned.
+func (s *SessionStore) Delete(token string) error {
+	return s.delete(context.Background(), token)
 }
 
-func (s *SessionStore) delete(ctx context.Context, token string) {
+func (s *SessionStore) delete(ctx context.Context, token string) error {
 	s.uncache(token)
 	if s.repo != nil {
 		if err := s.repo.DeleteByToken(ctx, token); err != nil && !errors.Is(err, ErrSessionNotFound) {
 			slog.WarnContext(ctx, "jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+			return err
 		}
 	}
+	return nil
 }
 
 // EvictUser drops a Silo account's compat sessions from this store's memory.
@@ -379,7 +382,7 @@ func (s *SessionStore) Update(token string, fn func(*Session) error) error {
 	}
 
 	if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
-		s.Delete(token)
+		_ = s.Delete(token)
 		return ErrSessionNotFound
 	}
 	if err := fn(&session); err != nil {

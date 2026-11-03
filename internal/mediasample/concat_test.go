@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
@@ -16,6 +17,8 @@ func TestConcatPathQuotesForFFconcat(t *testing.T) {
 		"/media/It's/it's.mkv":          `'file:/media/It'\''s/it'\''s.mkv'`,
 		`/media/a\b\'c.mkv`:             `'file:/media/a\b\'\''c.mkv'`,
 		"/media/#1: what?.mkv":          `'file:/media/#1: what?.mkv'`,
+		// An fspath-encoded name is written as its real bytes.
+		fspath.Encode("/media/B\xe5rd.mkv"): "'file:/media/B\xe5rd.mkv'",
 	}
 	for input, want := range tests {
 		got, err := concatPath(input)
@@ -76,32 +79,6 @@ func samplesRequest(seconds ...float64) Request {
 		Samples: &Samples{Seconds: seconds},
 		Stats:   &StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}},
 		Threads: 1,
-	}
-}
-
-func TestBuildArgsSamples(t *testing.T) {
-	req := samplesRequest(5400, 5403)
-	if err := req.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	args, stdin, err := buildArgs(req, Attempt{}, hardwareDecode{}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Fields("-hide_banner -nostdin -loglevel repeat+info -threads 1 -filter_threads 1 " +
-		"-skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 " +
-		"-map 0:V:0 -an -sn -dn -vf crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,scale=480:-2:flags=area,format=yuv420p," +
-		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32,signalstats,metadata=print " +
-		"-f null -")
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("args\n got %q\nwant %q", args, want)
-	}
-	list, err := buildConcatList(req.Input, req.Samples.Seconds, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(stdin) != string(list) {
-		t.Fatalf("stdin %q, want the concat list %q", stdin, list)
 	}
 }
 

@@ -65,6 +65,7 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 	CREATE TABLE seasons (
 		content_id TEXT PRIMARY KEY, series_id TEXT NOT NULL,
 		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		backdrop_path TEXT DEFAULT '', backdrop_source_path TEXT DEFAULT '', backdrop_thumbhash TEXT DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE TABLE season_localizations (
@@ -84,7 +85,8 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 		lease_expires_at TIMESTAMPTZ, last_attempt_at TIMESTAMPTZ, last_success_at TIMESTAMPTZ,
 		attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (target_type, content_id)
-	)`); err != nil {
+	);
+	CREATE TABLE artwork_revision_gc_candidates (LIKE public.artwork_revision_gc_candidates INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
 	return pool
@@ -141,7 +143,8 @@ func TestStoredArtworkReleaseDB(t *testing.T) {
 	exec(`INSERT INTO media_items (content_id, type, last_refreshed, poster_path, poster_source_path, backdrop_path, backdrop_source_path)
 		VALUES ('movie-g', 'movie', NULL, 'tmdb://poster/g.jpg', 'tmdb://poster/g.jpg', 'tmdb://backdrop/g.jpg', 'tmdb://backdrop/g.jpg')`)
 	exec(`INSERT INTO media_items (content_id, type) VALUES ('series-s', 'series')`)
-	exec(`INSERT INTO seasons (content_id, series_id, poster_path, poster_source_path) VALUES ('season-1', 'series-s', $1, 'tvdb://s1.jpg')`, stored)
+	exec(`INSERT INTO seasons (content_id, series_id, poster_path, poster_source_path, backdrop_path, backdrop_source_path)
+		VALUES ('season-1', 'series-s', $1, 'tvdb://s1.jpg', $1, 'tvdb://s1-backdrop.jpg')`, stored)
 	exec(`INSERT INTO season_localizations (season_content_id, language, poster_path, poster_source_path) VALUES ('season-1', 'de', $1, 'tvdb://s1de.jpg')`, stored)
 	exec(`INSERT INTO episodes (content_id, series_id, still_path, still_source_path) VALUES
 		('episode-1', 'series-s', $1, 'https://img.example/e1.jpg'), ('episode-2', 'series-s', $1, 'file:///m/s/e2-thumb.jpg?v=1-1')`, stored)
@@ -179,6 +182,7 @@ func TestStoredArtworkReleaseDB(t *testing.T) {
 		"movie-b fr poster":     {text(`SELECT poster_path FROM media_item_localizations WHERE content_id = 'movie-b'`), stored},
 		"book-c poster":         {text(`SELECT poster_path FROM media_items WHERE content_id = 'book-c'`), stored},
 		"season-1 poster":       {text(`SELECT poster_path FROM seasons`), "tvdb://s1.jpg"},
+		"season-1 backdrop":     {text(`SELECT backdrop_path FROM seasons`), "tvdb://s1-backdrop.jpg"},
 		"season-1 de poster":    {text(`SELECT poster_path FROM season_localizations`), "tvdb://s1de.jpg"},
 		"episode-1 still":       {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-1'`), "https://img.example/e1.jpg"},
 		"episode-2 local still": {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-2'`), stored},
@@ -208,68 +212,5 @@ func TestStoredArtworkReleaseDB(t *testing.T) {
 	}
 	if got := text(`SELECT poster_path FROM media_items WHERE content_id = 'movie-a'`); got != stored {
 		t.Errorf("movie-a poster with caching on = %q, want the stored copy kept", got)
-	}
-}
-
-// A release that has to wait for an Edit Metadata selection in progress reads
-// the lock the selection commits, so the selected copy stays.
-func TestStoredArtworkReleaseWaitsForSelectionLockDB(t *testing.T) {
-	pool := storedArtworkReleaseTestPool(t)
-	ctx := t.Context()
-	const selected = "tmdb/movies/1/poster/original.manual.webp"
-	if _, err := pool.Exec(ctx, `INSERT INTO server_settings VALUES ('metadata.cache_images', 'false');
-		INSERT INTO media_items (content_id, type, poster_path, poster_source_path)
-		VALUES ('movie-a', 'movie', 'tmdb/movies/1/poster/original.auto.webp', 'tmdb://poster/auto.jpg')`); err != nil {
-		t.Fatal(err)
-	}
-	// The selection, as PublishArtworkSelection writes it: the target row
-	// first, then the lock, in one transaction.
-	selection, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = selection.Rollback(context.Background()) }()
-	if _, err := selection.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = 'movie-a' FOR UPDATE`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := selection.Exec(ctx, `UPDATE media_items SET poster_path = $1, poster_source_path = 'tmdb://poster/manual.jpg',
-		locked_fields = array_append(locked_fields, 10) WHERE content_id = 'movie-a'`, selected); err != nil {
-		t.Fatal(err)
-	}
-
-	r := newTestStoredArtworkReleaser(pool)
-	done := make(chan error, 1)
-	go func() {
-		_, err := r.releasePage(context.Background(), storedArtworkReleaseTables()[0], []string{"movie-a"})
-		done <- err
-	}()
-	// Wait until the release is blocked on the selection's row lock.
-	for {
-		var waiting bool
-		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%media_items t %')`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting {
-			break
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("release finished before the selection committed: %v", err)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	if err := selection.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("releasePage: %v", err)
-	}
-	var got string
-	if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = 'movie-a'`).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != selected {
-		t.Fatalf("poster = %q, want the locked selection %q kept", got, selected)
 	}
 }

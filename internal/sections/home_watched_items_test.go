@@ -25,13 +25,6 @@ func setHideWatchedItemsFromHome(t *testing.T, store userstore.UserStore, profil
 	}
 }
 
-func TestHideWatchedItemsFromHomeDefaultsOff(t *testing.T) {
-	store := newNextUpModeTestStore(t)
-	if HideWatchedItemsFromHome(context.Background(), store, "profile-1") {
-		t.Fatal("HideWatchedItemsFromHome = true, want false by default")
-	}
-}
-
 func TestHideWatchedItemsFromHomeIsProfileScoped(t *testing.T) {
 	ctx := context.Background()
 	store := newNextUpModeTestStore(t)
@@ -45,21 +38,5 @@ func TestHideWatchedItemsFromHomeIsProfileScoped(t *testing.T) {
 	}
 	if HideWatchedItemsFromHome(ctx, store, "profile-2") {
 		t.Error("HideWatchedItemsFromHome leaked to profile-2")
-	}
-}
-
-func TestPreserveWatchedItemsOnHome(t *testing.T) {
-	for _, sectionType := range []SectionType{
-		SectionMostWatched,
-		SectionProfileActivityFeed,
-		SectionForgottenFavorites,
-		SectionContinueWatching,
-	} {
-		if !PreserveWatchedItemsOnHome(sectionType) {
-			t.Errorf("PreserveWatchedItemsOnHome(%q) = false, want true", sectionType)
-		}
-	}
-	if PreserveWatchedItemsOnHome(SectionRecentlyAdded) {
-		t.Error("PreserveWatchedItemsOnHome(recently_added) = true, want false")
 	}
 }

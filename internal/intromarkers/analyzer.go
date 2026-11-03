@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,12 +16,11 @@ import (
 )
 
 type Analyzer struct {
-	repo               introRepository
-	extractor          fingerprintExtractor
-	refiner            boundaryRefiner
-	chromaprintRefiner chromaprintStartRefiner
-	config             Config
-	logger             *slog.Logger
+	repo      introRepository
+	extractor fingerprintExtractor
+	refiner   boundaryRefiner
+	config    Config
+	logger    *slog.Logger
 	// tailSampler runs credits tail passes. Nil leaves credits to chapters
 	// and audio.
 	tailSampler creditsTailSampler
@@ -119,18 +117,17 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 	extractor := NewChromaprintExtractor(config)
 	extractor.logger = logger
 	return &Analyzer{
-		repo:               repo,
-		extractor:          extractor,
-		tailSampler:        extractor,
-		movieSampler:       extractor,
-		hardware:           extractor.hardware,
-		refiner:            NewSilenceBoundaryRefiner(config),
-		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
-		config:             config,
-		logger:             logger,
-		node:               node,
-		workers:            config.MaxParallelFFmpeg,
-		ffmpegSlots:        mediasample.NewLimiter(config.MaxParallelFFmpeg),
+		repo:         repo,
+		extractor:    extractor,
+		tailSampler:  extractor,
+		movieSampler: extractor,
+		hardware:     extractor.hardware,
+		refiner:      NewSilenceBoundaryRefiner(config),
+		config:       config,
+		logger:       logger,
+		node:         node,
+		workers:      config.MaxParallelFFmpeg,
+		ffmpegSlots:  mediasample.NewLimiter(config.MaxParallelFFmpeg),
 	}
 }
 
@@ -727,20 +724,23 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		if !opts.deadline.IsZero() && time.Now().After(opts.deadline) {
 			return remaining, summary
 		}
-		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
-			continue
-		}
-
-		hasIntro := candidate.marker(kindIntro).present()
-		effectiveSource := candidate.effectiveSource(kindIntro)
-		if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
-			continue
-		}
-		if hasIntro && !opts.forceExistingScanner {
-			continue
-		}
-
 		segment, ok := DetectChapterIntro(candidate.Chapters)
+		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
+			// Only an online intro rated below the file's own chapter gives
+			// way to it. Refinement can only raise the chapter's confidence.
+			if !ok || !candidate.yieldsToChapter(kindIntro, segment) {
+				continue
+			}
+		} else {
+			hasIntro := candidate.marker(kindIntro).present()
+			effectiveSource := candidate.effectiveSource(kindIntro)
+			if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
+				continue
+			}
+			if hasIntro && !opts.forceExistingScanner {
+				continue
+			}
+		}
 		if !ok {
 			remaining = append(remaining, candidate)
 			continue
@@ -1239,27 +1239,11 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	for _, candidate := range group.Candidates {
 		byFileID[candidate.FileID] = candidate
 	}
-	// When subtitle refinement fails, a file that already has a
-	// subtitle-refined marker keeps it: the unrefined result would outrank it.
-	// Other files still get the unrefined marker. Either way the group is
-	// recorded as failed so the next run retries the refinement.
-	refinementFailures := 0
 	for fileID, segment := range segments {
 		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
 			continue
 		}
 		candidate := byFileID[fileID]
-		var refineErr error
-		segment, refineErr = a.refineChromaprintSegment(ctx, candidate, segment, &summary)
-		if refineErr != nil {
-			if err := ctx.Err(); err != nil {
-				return summary, err
-			}
-			refinementFailures++
-			if candidate.hasSubtitleRefinedIntro() {
-				continue
-			}
-		}
 		applied, patchErr := a.repo.PatchMarker(ctx, MarkerPatch{
 			Kind:         kindIntro,
 			ExpectedFile: candidate.expectedFile(),
@@ -1284,47 +1268,12 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 
 	if opts.persistState {
 		settle(seasonStatusComplete)
-		if refinementFailures > 0 {
-			state.Status = seasonStatusFailed
-			state.LastError = fmt.Sprintf("subtitle refinement failed for %d file(s)", refinementFailures)
-		}
 		state.MarkersWritten = summary.ChromaprintMarkersWritten
 		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 			return summary, err
 		}
 	}
 	return summary, nil
-}
-
-// refineChromaprintSegment returns the segment to write, unchanged when
-// refinement is disabled or does not apply, and the refinement error if any.
-func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) (Segment, error) {
-	if a.chromaprintRefiner == nil || !a.config.normalized().DialogueRefinementEnabled {
-		return segment, nil
-	}
-	summary.DialogueRefinementsAttempted++
-	refined, ok, err := a.chromaprintRefiner.RefineChromaprintStart(ctx, candidate, segment)
-	if err != nil {
-		summary.DialogueRefinementErrors++
-		a.logger.WarnContext(ctx, "intro marker dialogue refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
-		return segment, err
-	}
-	if ok {
-		summary.DialogueRefinementsApplied++
-		// A later start can leave a short intro, which rates as one.
-		if refined.End-refined.Start < shortIntroSeconds {
-			refined.Confidence = min(refined.Confidence, chromaprintShortConfidence)
-		}
-		return refined, nil
-	}
-	return segment, nil
-}
-
-// hasSubtitleRefinedIntro reports whether the file's current intro came from
-// Chromaprint with subtitle refinement, in any version.
-func (c Candidate) hasSubtitleRefinedIntro() bool {
-	return c.IntroMarkersAlgorithm != nil &&
-		strings.HasPrefix(*c.IntroMarkersAlgorithm, chromaprintDialogueAlgorithmPrefix)
 }
 
 func candidateFileIDs(candidates []Candidate) map[int]struct{} {
@@ -1502,9 +1451,6 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.SilenceRefinementErrors += src.SilenceRefinementErrors
 	dst.EpisodeVersionMarkersCopied += src.EpisodeVersionMarkersCopied
 	dst.SilenceBackfillConsidered += src.SilenceBackfillConsidered
-	dst.DialogueRefinementsAttempted += src.DialogueRefinementsAttempted
-	dst.DialogueRefinementsApplied += src.DialogueRefinementsApplied
-	dst.DialogueRefinementErrors += src.DialogueRefinementErrors
 	dst.CreditsSeasonGroupsConsidered += src.CreditsSeasonGroupsConsidered
 	dst.CreditsGroupsNotFound += src.CreditsGroupsNotFound
 	dst.CreditsGroupsSkipped += src.CreditsGroupsSkipped

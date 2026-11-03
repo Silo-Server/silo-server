@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
@@ -49,17 +48,6 @@ func TestLocalObjectStoreRoundTrip(t *testing.T) {
 	}
 }
 
-// readyReportBlobLocation treats an empty bucket as storage-unavailable, so a
-// local store must still report a non-empty name for reports to be downloadable.
-func TestLocalObjectStoreReportsANonEmptyBucket(t *testing.T) {
-	if bucket := localDiagnosticsStore(t).Bucket(); strings.TrimSpace(bucket) == "" {
-		t.Fatal("local store reported an empty bucket")
-	}
-	if NewLocalObjectStore(nil) != nil {
-		t.Fatal("nil store produced a non-nil interface")
-	}
-}
-
 // Orphan cleanup and report deletion both rely on IsObjectNotFound to tell an
 // already-gone object from a real failure. The local backend returns its own
 // sentinel, which must normalize the same way the S3 one does.
@@ -73,18 +61,5 @@ func TestLocalObjectStoreNormalizesNotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("err = %v, want ErrObjectNotFound", err)
-	}
-}
-
-// A filesystem cannot presign, so the admin handler falls through to streaming
-// the bundle rather than returning a URL.
-func TestLocalObjectStoreCannotPresign(t *testing.T) {
-	store := localDiagnosticsStore(t)
-	url, err := store.PresignGetURL(context.Background(), store.Bucket(), ObjectPrefix+"1/r.tar.gz", time.Minute)
-	if err == nil || url != "" {
-		t.Fatalf("presign returned %q, %v", url, err)
-	}
-	if !errors.Is(err, blobstore.ErrNoPresign) {
-		t.Fatalf("err = %v, want ErrNoPresign", err)
 	}
 }

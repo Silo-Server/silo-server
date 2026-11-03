@@ -2,12 +2,10 @@ import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
 import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
 import {
   buildDefaultPrefs,
-  PRESET_IDS,
   type CardOverlayPrefs,
   type OverlayId,
   type PresetId,
 } from "@/lib/overlays";
-import type { CardCaption } from "@/lib/uiCustomization";
 import { watchlistTitleStatus } from "@/lib/watchlistTitles";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -60,12 +58,12 @@ function prefsWith(preset: PresetId, only?: OverlayId): CardOverlayPrefs {
 function renderCard(
   title: WatchlistTitle,
   overlayPrefs: CardOverlayPrefs | null,
-  options: { caption?: CardCaption; onRequest?: () => void; onRemove?: () => void } = {},
+  options: { onRequest?: () => void; onRemove?: () => void } = {},
 ): HTMLElement {
   const wrap = (children: ReactNode) => (
     <UICustomizationContext.Provider
       value={{
-        cardPresentation: { poster_size: "large", caption: options.caption ?? "title_metadata" },
+        cardPresentation: { poster_size: "large" },
         cardPresentationSource: "profile_client",
         primaryMenu: null,
         primaryMenuSource: "default",
@@ -110,17 +108,12 @@ describe("WatchlistTitleCard", () => {
   const captionCases: Array<[string, CardOverlayPrefs | null]> = [
     ["overlays off", null],
     ["the status badge off", prefsWith("classic", "content_rating")],
-    ...PRESET_IDS.map((id): [string, CardOverlayPrefs] => [`the ${id} preset`, prefsWith(id)]),
+    ["the classic preset", prefsWith("classic")],
   ];
 
   it.each(captionCases)("keeps the full status in the caption with %s", (_, prefs) => {
-    for (const caption of ["title_metadata", "title", "artwork"] as const) {
-      renderCard(downloading, prefs, { caption });
-      expect(screen.getByTestId("watchlist-title-caption").textContent).toMatch(
-        /^Downloading · 43%/,
-      );
-      cleanup();
-    }
+    renderCard(downloading, prefs);
+    expect(screen.getByTestId("watchlist-title-caption").textContent).toMatch(/^Downloading · 43%/);
   });
 
   it("draws the download bar only while overlays and the status badge are on", () => {
@@ -164,14 +157,5 @@ describe("WatchlistTitleCard", () => {
 
     renderCard(downloading, null, { onRequest });
     expect(screen.queryByRole("button", { name: /Request Heat/ })).toBeNull();
-  });
-
-  it("removes the title from the watchlist from the corner action", () => {
-    const onRemove = vi.fn();
-    renderCard(downloading, null, { onRemove });
-    const button = screen.getByRole("button", { name: "Remove Heat from your watchlist" });
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(button);
-    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });

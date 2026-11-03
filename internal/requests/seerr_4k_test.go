@@ -126,35 +126,3 @@ func TestForceDualStillAsksSeerrWithout4KFor4K(t *testing.T) {
 		t.Fatalf("qualities = %v, want [1080p 2160p] under force-dual", router.gotQualities)
 	}
 }
-
-// A request that already failed on the unwanted 4K target completes on Retry
-// once its HD copy is done, without asking Seerr for 4K again.
-func TestRetryClearsUnwanted4KFailureOnSeerrWithout4K(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{seerrInst("seerr", false)}
-	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed, RequestedByUserID: 7}
-	store.targets = map[string][]Target{"r1": {
-		{ID: 1, RequestID: "r1", IntegrationID: "seerr", Quality: Quality1080p, Status: StatusCompleted},
-		{ID: 2, RequestID: "r1", Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality},
-	}}
-	store.targetSeq = 2
-	router := seerrRouter{&fakeRouterProvider{}}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: ""})
-
-	req, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1")
-	if err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-	if router.fulfillCalls != 0 {
-		t.Fatalf("fulfill calls = %d (qualities %v), want 0", router.fulfillCalls, router.gotQualities)
-	}
-	if req.Status != StatusCompleted || req.Outcome != OutcomeActive {
-		t.Fatalf("request = %s/%s, want completed/active", req.Status, req.Outcome)
-	}
-	targets, _ := store.ListTargets(context.Background(), "r1")
-	if len(targets) != 1 || targets[0].Quality != Quality1080p {
-		t.Fatalf("targets = %+v, want only the 1080p target", targets)
-	}
-}

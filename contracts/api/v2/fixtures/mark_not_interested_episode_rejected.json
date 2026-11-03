@@ -3,5 +3,5 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "Only a movie or series can be marked Not interested",
-  "instance": "urn:silo:request:000000000000000000000307"
+  "instance": "urn:silo:request:000000000000000000000308"
 }

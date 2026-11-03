@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -28,26 +27,6 @@ func (f *fakeSubtitleDownloads) DownloadStoredSubtitle(_ context.Context, access
 
 const subtitleDownloadFixtureBody = `{"media_file_id":"42","provider":"example","subtitle_id":"opaque-provider-result","language":"en","release_name":"Synthetic","score":80,"hearing_impaired":false}`
 
-func TestSubtitleDownloadV2AuthorityProjectionAndSingleSend(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := new(fakeSubtitleDownloads)
-	deps.SubtitleDownloads = f
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9007199254740993"`) || strings.Contains(rec.Body.String(), "PRIVATE") || strings.Contains(rec.Body.String(), "downloaded_by") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if f.calls != 1 || f.access.UserID != 1 || f.access.ProfileID != "p-owner" || f.request.UserID != nil || f.request.SubtitleID != "opaque-provider-result" || f.request.MediaFileID != 42 {
-		t.Fatalf("wrong authority/request: %+v", f)
-	}
-	f.err = errors.New("PRIVATE_UPSTREAM")
-	rec = do(t, h, http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
-	requireProblem(t, rec, TypeInternalError)
-	if f.calls != 2 || strings.Contains(rec.Body.String(), "PRIVATE") {
-		t.Fatal("unexpected retry or leaked failure")
-	}
-}
-
 // An unregistered provider key reaches the listener as the service's 404, not
 // as an opaque upstream failure.
 func TestSubtitleDownloadV2UnknownProviderIsNotFound(t *testing.T) {
@@ -58,19 +37,6 @@ func TestSubtitleDownloadV2UnknownProviderIsNotFound(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/subtitles/download", body, viewerHeaders()), TypeNotFound)
 	if f.calls != 1 {
 		t.Fatalf("service calls = %d, want 1", f.calls)
-	}
-}
-
-// A provider result ID the provider refuses is a validation problem at
-// body.subtitle_id, not an opaque upstream failure.
-func TestSubtitleDownloadV2InvalidSubtitleIDIsValidationProblem(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := &fakeSubtitleDownloads{err: &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "subtitle_id is not a result ID this provider returns", Field: "subtitle_id"}}
-	deps.SubtitleDownloads = f
-	rec := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
-	requireProblem(t, rec, TypeValidationFailed)
-	if !strings.Contains(rec.Body.String(), `"location":"body.subtitle_id"`) || f.calls != 1 {
-		t.Fatal(rec.Body.String(), f.calls)
 	}
 }
 

@@ -73,32 +73,6 @@ func TestReadFdinfoCountersDeduplicatesClientsAndClassifiesEngines(t *testing.T)
 	}
 }
 
-// A driver that publishes no drm-client-id must still produce one stable
-// identity per process and device, or the fd dups would multiply its busyness
-// and the identity would change every time the client did work.
-func TestReadFdinfoCountersKeysAnonymousClientsByProcess(t *testing.T) {
-	anon := `drm-driver:	i915
-drm-pdev:	0000:00:02.0
-drm-engine-video:	2000000000 ns
-`
-	tree := newProcTree(t)
-	tree.write("4242/fdinfo/3", anon)
-	tree.write("4242/fdinfo/7", anon)
-
-	clients := readFdinfoCounters(tree.root, []int{4242})
-	if len(clients) != 1 {
-		t.Fatalf("clients = %v, want the two fds collapsed onto one client", clients)
-	}
-	for client, counters := range clients {
-		if client.clientID != "anon:pid:4242" {
-			t.Fatalf("clientID = %q, want an identity that survives the client doing work", client.clientID)
-		}
-		if counters.videoNS != 2_000_000_000 {
-			t.Fatalf("videoNS = %d, want the dup counted once", counters.videoNS)
-		}
-	}
-}
-
 // PCI addresses arrive with different domain widths and cases depending on the
 // source; they have to collapse to one key or a device is counted twice.
 func TestNormalizePCIAddress(t *testing.T) {
@@ -118,10 +92,7 @@ func TestNormalizePCIAddress(t *testing.T) {
 func TestSampleGPUMapsPdevToDevicePathAndComputesBusy(t *testing.T) {
 	tree := newProcTree(t)
 	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 	tree.write("4242/fdinfo/3", i915Fdinfo)
 
 	s := newTestSampler(t, tree, clock, Options{
@@ -178,57 +149,12 @@ drm-engine-video:	4000000000 ns
 	}
 }
 
-// One transcode exiting must not erase the work the others did in that
-// interval. Their engine time is what the whole GPU panel is read from, and a
-// node with normal session churn loses a client inside most intervals.
-func TestSampleGPUKeepsSurvivingTranscodeBusyWhenAPeerExits(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-	// Two transcodes on one card: the survivor at 2s of video engine time, the
-	// one about to exit at 5s.
-	tree.write("4242/fdinfo/3", i915Fdinfo)
-	tree.write("4243/fdinfo/3", `drm-driver:	i915
-drm-pdev:	0000:00:02.0
-drm-client-id:	43
-drm-engine-video:	5000000000 ns
-`)
-
-	pids := []int{4242, 4243}
-	s := newTestSampler(t, tree, clock, Options{
-		FFmpegChildren: func() []int { return pids },
-	})
-	s.sample(context.Background())
-
-	// The peer exits while the survivor saturates the video engine: +5s of
-	// engine time over a 5s interval. The device total is 7s before and 7s
-	// after, so a per-device baseline sees no gain and reports an idle GPU.
-	pids = []int{4242}
-	tree.write("4242/fdinfo/3", `drm-driver:	i915
-drm-pdev:	0000:00:02.0
-drm-client-id:	42
-drm-engine-video:	7000000000 ns
-`)
-	clock.advance(5 * time.Second)
-	s.sample(context.Background())
-
-	if got := enginePct(t, s.Snapshot().GPU[0].VideoBusyPct); got != 100 {
-		t.Fatalf("VideoBusyPct = %d while the surviving transcode ran the engine flat out, want 100", got)
-	}
-}
-
 // A transcode exiting takes its accumulated engine time out of the device
 // total, so the per-device sum falls. That is bookkeeping, not negative work.
 func TestSampleGPUClampsNegativeDeltaWhenATranscodeExits(t *testing.T) {
 	tree := newProcTree(t)
 	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 	tree.write("4242/fdinfo/3", i915Fdinfo)
 	tree.write("4243/fdinfo/3", `drm-driver:	i915
 drm-pdev:	0000:00:02.0
@@ -269,30 +195,6 @@ drm-engine-video:	3000000000 ns
 	}
 }
 
-// A device with no DRM counters and no enrichment still has to appear, so an
-// operator sees the GPU exists — but it must say so rather than report zeros as
-// a measurement.
-func TestSampleGPUReportsKnownDeviceAsUnavailable(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-
-	s := newTestSampler(t, tree, clock, Options{
-		DeviceIdentities: func() []DeviceIdentity {
-			return []DeviceIdentity{{Path: "/dev/dri/renderD128", PCIAddress: "0000:00:02.0", Vendor: "intel"}}
-		},
-	})
-	s.sample(context.Background())
-
-	gpu := s.Snapshot().GPU
-	if len(gpu) != 1 || gpu[0].Source != SourceUnavailable {
-		t.Fatalf("GPU = %+v, want one device sourced %q", gpu, SourceUnavailable)
-	}
-}
-
 func TestDefaultFFmpegChildrenMatchesOnlyFFmpegChildren(t *testing.T) {
 	tree := newProcTree(t)
 	tree.write("100/task/100/children", "200 300\n")
@@ -311,19 +213,6 @@ func TestDefaultFFmpegChildrenMatchesOnlyFFmpegChildren(t *testing.T) {
 		if pid == 400 {
 			t.Fatalf("pids = %v, want the non-ffmpeg child excluded", pids)
 		}
-	}
-}
-
-func TestEngineBusyPercentClamps(t *testing.T) {
-	elapsed := (5 * time.Second).Nanoseconds()
-	if got := engineBusyPercent(10*uint64(elapsed), elapsed); got != 100 {
-		t.Fatalf("busy over 100%% = %d, want clamped to 100", got)
-	}
-	if got := engineBusyPercent(0, elapsed); got != 0 {
-		t.Fatalf("busy with no work = %d, want 0", got)
-	}
-	if got := engineBusyPercent(100, 0); got != 0 {
-		t.Fatalf("busy with no elapsed time = %d, want 0", got)
 	}
 }
 

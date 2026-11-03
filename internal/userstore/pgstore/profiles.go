@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -176,7 +176,7 @@ func updateProfile(
 	var setClauses []string
 	var args []any
 	argIdx := 1
-	accessPolicyChanged := u.PIN != nil ||
+	accessPolicyChanged := u.PINHash != nil ||
 		u.IsChild != nil ||
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
@@ -197,17 +197,8 @@ func updateProfile(
 	if u.Avatar != nil {
 		addArg("avatar", *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			addArg("pin_hash", "")
-		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			addArg("pin_hash", string(hash))
-		}
+	if u.PINHash != nil {
+		addArg("pin_hash", *u.PINHash)
 		// The user_profiles_pin_revision trigger advances pin_revision in
 		// this same UPDATE whenever pin_hash changes, which invalidates every
 		// token minted for the old PIN, and only this profile's. It lives in
@@ -352,12 +343,52 @@ var profileCascadeTables = []string{
 	"ebook_reader_annotations",
 }
 
+// lockProfileForDelete locks the profile row and reads the image the delete
+// will remove. Setting clears delete user_setting_values rows and then update
+// the profile's legacy columns under the account's preference-settings lock.
+// Taking that lock before the profile row lock keeps that order; locking the
+// profile first and then deleting its settings would deadlock against a clear.
+func (s *PostgresUserStore) lockProfileForDelete(ctx context.Context, tx pgx.Tx, id string) (*userstore.Profile, error) {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
+		preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil { //nolint:gosec // users.id is a 32-bit serial, keyed as in WithPreferenceSettingsTransaction
+		return nil, fmt.Errorf("locking preference settings transaction: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
+		return nil, fmt.Errorf("locking profile %s: %w", id, err)
+	}
+	deleted, err := getProfile(ctx, tx, s.userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if deleted == nil {
+		return nil, fmt.Errorf("profile %s not found", id)
+	}
+	return deleted, nil
+}
+
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
+	return s.DeleteProfileAudited(ctx, id, nil)
+}
+
+var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
+
+// DeleteProfileAudited is DeleteProfile with audit run in the delete's
+// transaction before it commits; a nil audit records nothing. The profile row
+// is locked before it is read, so audit sees the image that was deleted.
+func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Deleting the account locks it before its cascade reaches the profile
+	// and its collections, so the audit row's account keys come first.
+	if audit != nil {
+		if err := auditmutation.LockActors(ctx, tx); err != nil {
+			return err
+		}
+	}
 
 	// Lock every collection whose revision the deletes below advance, in id
 	// order, before taking any revision row: the profile's own collections
@@ -373,6 +404,13 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		ORDER BY id FOR UPDATE`,
 		s.userID, id); err != nil {
 		return fmt.Errorf("locking collections of profile %s: %w", id, err)
+	}
+
+	var deleted *userstore.Profile
+	if audit != nil {
+		if deleted, err = s.lockProfileForDelete(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 
 	// Preferences belong to viewers, not creators, so remove every override
@@ -427,34 +465,13 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("profile %s not found", id)
 	}
+	if audit != nil {
+		if err := audit(tx, deleted); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit(ctx)
-}
-
-func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string) (bool, error) {
-	var pinHash string
-	err := s.pool.QueryRow(ctx,
-		"SELECT pin_hash FROM user_profiles WHERE user_id = $1 AND id = $2",
-		s.userID, profileID,
-	).Scan(&pinHash)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }
 
 // deleteProfileSectionOverrides takes a profile's entries out of the account's

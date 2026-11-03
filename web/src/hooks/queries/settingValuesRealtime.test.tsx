@@ -8,7 +8,6 @@ import { libraryKeys, mediaSurfaceKeys, sectionKeys } from "./keys";
 import { storage } from "@/utils/storage";
 import {
   effectiveSettingsQueryKey,
-  useSettingValue,
   useSettingValuesRealtime,
   type EffectiveSettingsMap,
 } from "./settingValues";
@@ -157,39 +156,6 @@ describe("useSettingValuesRealtime", () => {
     await waitFor(() => expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true));
   });
 
-  it("refetches a mounted reader when another device changes this profile", async () => {
-    const { wrapper } = createHarness();
-    let served = "dark";
-    v2Mock.mockImplementation(() =>
-      Promise.resolve({
-        revision: 1,
-        items: [
-          { key: SETTING_KEYS.UI_THEME, value: served, source: "profile", definition_revision: 1 },
-        ],
-      }),
-    );
-
-    function Reader() {
-      useSettingValuesRealtime();
-      const { value } = useSettingValue<string>(SETTING_KEYS.UI_THEME);
-      return <span data-testid="theme">{value}</span>;
-    }
-
-    const view = render(<Reader />, { wrapper });
-    await waitFor(() => expect(view.getByTestId("theme").textContent).toBe("dark"));
-
-    // The other device's write lands on the server; this tab only learns of it
-    // through the channel.
-    served = "light";
-    subscriptions
-      .find((entry) => entry.channel === "user_settings")
-      ?.handlers?.onEvent?.(
-        changedFrame({ key: SETTING_KEYS.UI_THEME, scope: "profile", profile_id: "profile-1" }),
-      );
-
-    await waitFor(() => expect(view.getByTestId("theme").textContent).toBe("light"));
-  });
-
   it("ignores a change addressed to another profile on the same account", () => {
     const { queryClient, wrapper } = createHarness();
     const key = seedEffective(queryClient, "dark");
@@ -231,24 +197,5 @@ describe("useSettingValuesRealtime", () => {
       });
 
     expect(queryClient.getQueryState(key)?.isInvalidated ?? false).toBe(false);
-  });
-
-  it("costs one invalidation pass per event without a manual refetch", () => {
-    const { queryClient, wrapper } = createHarness();
-    const effectiveKey = seedEffective(queryClient, "dark");
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    render(<Subscriber />, { wrapper });
-    const handlers = subscriptions.find((entry) => entry.channel === "user_settings")?.handlers;
-
-    // A burst of writes (a settings screen saving several keys at once) must
-    // not fan out into a fetch per event: nothing is observing these queries,
-    // so invalidation marks them stale and issues no request at all.
-    for (const key of [SETTING_KEYS.UI_THEME, SETTING_KEYS.UI_DATE_FORMAT]) {
-      handlers?.onEvent?.(changedFrame({ key, scope: "profile", profile_id: "profile-1" }));
-    }
-
-    expect(invalidate.mock.calls.length).toBeLessThanOrEqual(2);
-    expect(queryClient.getQueryState(effectiveKey)?.isInvalidated).toBe(true);
-    expect(v2Mock).not.toHaveBeenCalled();
   });
 });

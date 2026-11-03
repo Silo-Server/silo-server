@@ -5,7 +5,6 @@ import {
   displayDeviceCode,
   formatDeviceCode,
   isCompleteDeviceCode,
-  spokenDeviceCode,
   tooManyCodesMessage,
 } from "./deviceCode";
 
@@ -33,10 +32,5 @@ describe("device codes", () => {
     expect(tooManyCodesMessage(900)).toBe("You've tried too many codes. Try again in 15 minutes.");
     expect(tooManyCodesMessage(30)).toBe("You've tried too many codes. Try again in 1 minute.");
     expect(tooManyCodesMessage(null)).toBe("You've tried too many codes. Try again later.");
-  });
-
-  it("spells the code one character at a time", () => {
-    expect(spokenDeviceCode("ABCD 1234")).toBe("A B C D 1 2 3 4");
-    expect(spokenDeviceCode("4821-7730")).toBe("4 8 2 1 7 7 3 0");
   });
 });

@@ -254,10 +254,5 @@ func boundedPlaybackControlDeadline(deadlineMS int) time.Duration {
 // is told to exit (410) when it next reports progress or replans, instead of
 // renewing into a fresh session.
 func (h *AdminPlaybackControlHandler) endSessionForAdmin(sessionID string) error {
-	ctx := context.Background()
-	err := h.playback.stopPlaybackSessionByID(ctx, sessionID, true)
-	if err == nil || errors.Is(err, playback.ErrSessionNotFound) {
-		h.playback.markAttemptStoppedByAdmin(ctx, sessionID)
-	}
-	return err
+	return h.playback.endSessionAsAdmin(context.Background(), sessionID)
 }

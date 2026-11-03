@@ -1,13 +1,18 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Exercise the real repository against a task-owned schema. Do not print the
@@ -112,21 +117,13 @@ func TestAPIKeyVerifierUpgrade(t *testing.T) {
 			t.Fatal("stored verifier was accepted as a bearer")
 		}
 	}
-	// The existing unique B-tree must still support a bounded lookup.
-	tx, err := repo.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
-		t.Fatal(err)
-	}
-	var plan string
-	if err := tx.QueryRow(ctx, `EXPLAIN (FORMAT JSON) SELECT `+apiKeyColumns+` FROM api_keys WHERE key_hash=$1`, HashLinkToken(generated)).Scan(&plan); err != nil || !strings.Contains(plan, "Index") {
+	// The existing unique B-tree must still support a bounded lookup. Read
+	// pg_index rather than a plan: the migration rewrites key_hash in HOT
+	// updates, so the rebuilt index has indcheckxmin set and the planner skips
+	// it while any older transaction on the server is still open.
+	var indexed bool
+	if err := repo.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am am ON am.oid=c.relam WHERE i.indrelid='api_keys'::regclass AND i.indisunique AND i.indisvalid AND i.indpred IS NULL AND am.amname='btree' AND i.indnkeyatts=1 AND i.indkey[0]=(SELECT attnum FROM pg_attribute WHERE attrelid='api_keys'::regclass AND attname='key_hash'))`).Scan(&indexed); err != nil || !indexed {
 		t.Fatal("verifier lookup has no usable index")
-	}
-	if err := tx.Rollback(ctx); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := repo.pool.Exec(ctx, down); err == nil {
 		t.Fatal("nonempty verifier table allowed an irreversible downgrade")
@@ -285,4 +282,67 @@ func TestAPIKeyVerifierDownSeesConcurrentInsert(t *testing.T) {
 	if _, err := repo.GetByKey(ctx, "sa_in_flight"); err != nil {
 		t.Fatal("refused downgrade damaged the in-flight credential")
 	}
+}
+
+func apiKeyMetadataRepository(t *testing.T) *APIKeyRepository {
+	t.Helper()
+	repo := apiKeyLegacyRepository(t)
+	up, _ := apiKeyVerifierMigration(t)
+	if _, err := repo.pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func apiKeyVerifierMigration(t *testing.T) (up, down string) {
+	t.Helper()
+	migration, err := os.ReadFile("../../migrations/sql/20261019181724_hash_api_key_verifiers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, down, _ = strings.Cut(string(migration), "-- +goose Down")
+	return up, down
+}
+
+func apiKeyLegacyRepository(t *testing.T) *APIKeyRepository {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	admin, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admin.Close)
+	schema := fmt.Sprintf("api_key_metadata_%d", time.Now().UnixNano())
+	quoted := pgx.Identifier{schema}.Sanitize()
+	if _, err = admin.Exec(t.Context(), `CREATE SCHEMA `+quoted); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA `+quoted+` CASCADE`) })
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY,username text); INSERT INTO users VALUES(1,'one'),(2,'two');
+ CREATE TABLE api_keys(id bigserial PRIMARY KEY,user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,label text NOT NULL,api_key text NOT NULL UNIQUE,rate_tier text NOT NULL DEFAULT 'standard' CHECK(rate_tier IN ('standard','elevated')),scopes text[],created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz);
+ INSERT INTO api_keys(user_id,label,api_key) VALUES(1,'Existing','sa_existing_credential_kept_unchanged')`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../migrations/sql/20260905214731_add_api_key_configuration_revisions.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+	if _, err = pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	return NewAPIKeyRepository(pool)
 }

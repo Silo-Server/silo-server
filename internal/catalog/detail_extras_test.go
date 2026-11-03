@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -33,4 +34,23 @@ func TestFetchItemExtrasSignsStillsInOneBatch(t *testing.T) {
 			t.Errorf("%s: still = %q, %q; want a batch URL under %s and %q", got.ContentID, got.StillURL, got.StillThumbhash, want.dir, want.thumbhash)
 		}
 	}
+}
+
+// batchImageResolver records every batch resolve so a test can assert the
+// page was signed once, and answers with a recognizable URL per path.
+type batchImageResolver struct {
+	batches [][]string
+}
+
+func (r *batchImageResolver) ResolveImageURL(_ context.Context, path, _ string) string {
+	return "single://" + path
+}
+
+func (r *batchImageResolver) ResolveImageURLs(_ context.Context, paths []string, _ string) map[string]string {
+	r.batches = append(r.batches, append([]string(nil), paths...))
+	out := make(map[string]string, len(paths))
+	for _, p := range paths {
+		out[p] = "batch://" + p
+	}
+	return out
 }

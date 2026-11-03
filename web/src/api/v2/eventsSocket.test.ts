@@ -5,6 +5,7 @@ import {
   isEventsAuthorityActive,
   mintEventsSocketTicket,
 } from "./eventsSocket";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 
 beforeEach(() => {
   localStorage.clear();
@@ -31,14 +32,7 @@ it("refuses dispatch after captured profile changes", async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 it("refuses a delayed ticket after the login account changes", async () => {
-  let finish!: (response: Response) => void;
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  vi.stubGlobal("fetch", fetch);
+  const { fetch, finish } = stubPendingFetch();
   const pending = mintEventsSocketTicket(captureEventsAuthority()!);
   setAccessToken("replacement-session");
   finish(

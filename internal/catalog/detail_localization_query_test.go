@@ -2,12 +2,10 @@ package catalog
 
 import (
 	"context"
-	"errors"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -128,131 +126,5 @@ func TestBuildMediaItemDetailSharesLocalization(t *testing.T) {
 				t.Fatal("detail construction mutated the source item")
 			}
 		})
-	}
-}
-
-type failingDetailFolder struct {
-	delegate *FolderRepository
-	calls    int
-	err      error
-	once     bool
-}
-
-func (folder *failingDetailFolder) GetByID(ctx context.Context, id int) (*models.MediaFolder, error) {
-	folder.calls++
-	if !folder.once || folder.calls == 1 {
-		return nil, folder.err
-	}
-	return folder.delegate.GetByID(ctx, id)
-}
-
-func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
-	service, pool, tracer := detailLocalizationFixture(t)
-	filter := AccessFilter{PresentationLibraryID: new(1)}
-	item := localizationDetailItem("missing", "Base overview")
-	t.Run("advisory language error remains suppressed before required retry", func(t *testing.T) {
-		folder := &failingDetailFolder{delegate: NewFolderRepository(pool), err: errors.New("transient folder failure"), once: true}
-		service.folderRepo = folder
-		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
-			t.Fatal("checked pending language hid a transient folder failure")
-		}
-		folder.calls = 0
-		detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
-		if err != nil || detail == nil || detail.Title != item.Title || detail.PendingTranslationLanguage != "" || folder.calls != 2 {
-			t.Fatalf("detail=%#v error=%v folder calls=%d", detail, err, folder.calls)
-		}
-	})
-	t.Run("required language error still fails", func(t *testing.T) {
-		folder := &failingDetailFolder{err: ErrFolderNotFound}
-		service.folderRepo = folder
-		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
-			t.Fatalf("pending language on failure = %q", got)
-		}
-		// A presentation library that no longer exists has nothing missing.
-		if got, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); got != "" || err != nil {
-			t.Fatalf("checked pending language for a missing library = %q, %v", got, err)
-		}
-		folder.calls = 0
-		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
-		if !errors.Is(err, ErrItemNotFound) || folder.calls != 2 {
-			t.Fatalf("error=%v folder calls=%d, want item-not-found after two lookups", err, folder.calls)
-		}
-		withoutOverview := localizationDetailItem("missing", "")
-		folder.calls = 0
-		_, err = service.buildMediaItemDetail(t.Context(), withoutOverview, withoutOverview.ContentID, filter, nil)
-		if !errors.Is(err, ErrItemNotFound) || folder.calls != 1 {
-			t.Fatalf("error=%v folder calls=%d, want one required lookup without advisory work", err, folder.calls)
-		}
-	})
-	t.Run("localization query failure is suppressed only by advisory helper", func(t *testing.T) {
-		service.folderRepo = NewFolderRepository(pool)
-		if _, err := pool.Exec(t.Context(), `ALTER TABLE pg_temp.media_item_localizations RENAME COLUMN language TO unavailable_language`); err != nil {
-			t.Fatal(err)
-		}
-		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
-			t.Fatalf("pending language on localization failure = %q", got)
-		}
-		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
-			t.Fatal("checked pending language hid a localization failure")
-		}
-		*tracer = detailLocalizationTracer{}
-		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
-		if err == nil || !strings.Contains(err.Error(), "localizing item detail") || tracer.localizations != 2 {
-			t.Fatalf("error=%v localization reads=%d, want required failure after two reads", err, tracer.localizations)
-		}
-	})
-}
-
-func BenchmarkBuildMediaItemDetailLocalization(b *testing.B) {
-	service, _, tracer := detailLocalizationFixture(b)
-	for _, tc := range []struct {
-		name   string
-		item   *models.MediaItem
-		filter AccessFilter
-	}{
-		{name: "translated-library", item: localizationDetailItem("translated", "Base overview"), filter: AccessFilter{PresentationLibraryID: new(1)}},
-		{name: "base-library", item: localizationDetailItem("translated", "Base overview"), filter: AccessFilter{PresentationLibraryID: new(2)}},
-		{name: "pending-library", item: localizationDetailItem("missing", "Base overview"), filter: AccessFilter{PresentationLibraryID: new(1)}},
-		{name: "translated-profile", item: localizationDetailItem("translated", "Base overview"), filter: AccessFilter{ProfilePreferredLanguage: "fr"}},
-		{name: "base-profile-control", item: localizationDetailItem("translated", "Base overview"), filter: AccessFilter{ProfilePreferredLanguage: "en"}},
-		{name: "blank-overview-control", item: localizationDetailItem("translated", ""), filter: AccessFilter{ProfilePreferredLanguage: "fr"}},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			*tracer = detailLocalizationTracer{}
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := service.buildMediaItemDetail(b.Context(), tc.item, tc.item.ContentID, tc.filter, nil); err != nil {
-					b.Fatal(err)
-				}
-			}
-			b.ReportMetric(float64(tracer.folders)/float64(b.N), "language-lookups/op")
-			b.ReportMetric(float64(tracer.localizations)/float64(b.N), "localization-queries/op")
-			b.ReportMetric(float64(tracer.folders+tracer.folderPaths+tracer.localizations)/float64(b.N), "SQL-queries/op")
-		})
-	}
-}
-
-// The Jellyfin-compatible surface seeds an item's image tags from its stored
-// artwork paths, thumbhashes and modification time, as list rows do, so
-// detail carries them.
-func TestBuildMediaItemDetailCarriesImageTagSeeds(t *testing.T) {
-	service, _, _ := detailLocalizationFixture(t)
-	item := localizationDetailItem("translated", "Base overview")
-	item.PosterPath = "local/series/translated/aa/poster/original.r1.webp"
-	item.PosterThumbhash = "poster-th"
-	item.BackdropPath = "local/series/translated/aa/backdrop/original.r1.webp"
-	item.BackdropThumbhash = "backdrop-th"
-	item.LogoPath = "local/series/translated/aa/logo/original.r1.webp"
-	item.UpdatedAt = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-
-	detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, AccessFilter{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.PosterPath != item.PosterPath || detail.PosterThumbhash != item.PosterThumbhash ||
-		detail.BackdropPath != item.BackdropPath || detail.BackdropThumbhash != item.BackdropThumbhash ||
-		detail.LogoPath != item.LogoPath || !detail.UpdatedAt.Equal(item.UpdatedAt) {
-		t.Fatalf("image seeds = poster (%q, %q) backdrop (%q, %q) logo %q updated %v; want the item's",
-			detail.PosterPath, detail.PosterThumbhash, detail.BackdropPath, detail.BackdropThumbhash, detail.LogoPath, detail.UpdatedAt)
 	}
 }

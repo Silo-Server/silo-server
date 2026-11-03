@@ -12,28 +12,40 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
-func TestForwardRestartPreservesConfiguredBackBuffer(t *testing.T) {
+// trueBinaryPath resolves `true`, which starts and exits cleanly and stands
+// in for ffmpeg. It lives in /bin on Linux but /usr/bin on macOS.
+func trueBinaryPath(t *testing.T) string {
+	t.Helper()
 	truePath, err := exec.LookPath("true")
 	if err != nil {
 		t.Skipf("`true` not found in PATH: %v", err)
 	}
+	return truePath
+}
 
+// restartRetentionSession writes the given segments into a fresh output dir
+// (stamped with modTime unless it is zero) and returns an h264 session with a
+// 20s retention window whose player has requested segment 70.
+func restartRetentionSession(t *testing.T, segments []int, modTime time.Time, lastCompleted, pruneFloor int) (*TranscodeSession, string) {
+	t.Helper()
+	truePath := trueBinaryPath(t)
 	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	for _, segment := range []int{3, 40, 64, 65, 69, 70, 100} {
+	for _, segment := range segments {
 		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
 		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chtimes(name, old, old); err != nil {
-			t.Fatal(err)
+		if !modTime.IsZero() {
+			if err := os.Chtimes(name, modTime, modTime); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	session := &TranscodeSession{
+	return &TranscodeSession{
 		outputDir:            dir,
 		lastRequestedSegment: 70,
-		lastCompletedSegment: 70,
-		lastPruneFloor:       -1,
+		lastCompletedSegment: lastCompleted,
+		lastPruneFloor:       pruneFloor,
 		opts: TranscodeOpts{
 			OutputDir:               dir,
 			TargetCodecVideo:        "h264",
@@ -42,7 +54,11 @@ func TestForwardRestartPreservesConfiguredBackBuffer(t *testing.T) {
 			StartSegmentNumber:      0,
 			FFmpegPath:              truePath,
 		},
-	}
+	}, dir
+}
+
+func TestForwardRestartPreservesConfiguredBackBuffer(t *testing.T) {
+	session, dir := restartRetentionSession(t, []int{3, 40, 64, 65, 69, 70, 100}, time.Now().Add(-time.Minute), 70, -1)
 
 	if err := session.Restart(context.Background(), 400, 100); err != nil {
 		t.Fatalf("Restart: %v", err)
@@ -73,36 +89,7 @@ func TestForwardRestartPreservesConfiguredBackBuffer(t *testing.T) {
 }
 
 func TestNonForwardRestartKeepsPreservedRangePrunable(t *testing.T) {
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
-
-	dir := t.TempDir()
-	old := time.Now().Add(-time.Minute)
-	for _, segment := range []int{3, 40, 64, 65, 70} {
-		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
-		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(name, old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session := &TranscodeSession{
-		outputDir:            dir,
-		lastRequestedSegment: 70,
-		lastCompletedSegment: 70,
-		lastPruneFloor:       40,
-		opts: TranscodeOpts{
-			OutputDir:               dir,
-			TargetCodecVideo:        "h264",
-			SegmentDuration:         4,
-			SegmentRetentionSeconds: 20,
-			StartSegmentNumber:      0,
-			FFmpegPath:              truePath,
-		},
-	}
+	session, dir := restartRetentionSession(t, []int{3, 40, 64, 65, 70}, time.Now().Add(-time.Minute), 70, 40)
 
 	// Audio switches commonly restart from the reported playback position,
 	// which can trail the player's completed-download high-water mark.
@@ -132,31 +119,7 @@ func TestNonForwardRestartKeepsPreservedRangePrunable(t *testing.T) {
 }
 
 func TestForwardRestartWithoutCompletedDownloadPreservesFreshFiles(t *testing.T) {
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
-
-	dir := t.TempDir()
-	for _, segment := range []int{3, 40, 70} {
-		if err := os.WriteFile(filepath.Join(dir, segmentFilename(segment, TranscodeOpts{})), []byte("segment"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session := &TranscodeSession{
-		outputDir:            dir,
-		lastRequestedSegment: 70,
-		lastCompletedSegment: -1,
-		lastPruneFloor:       -1,
-		opts: TranscodeOpts{
-			OutputDir:               dir,
-			TargetCodecVideo:        "h264",
-			SegmentDuration:         4,
-			SegmentRetentionSeconds: 20,
-			StartSegmentNumber:      0,
-			FFmpegPath:              truePath,
-		},
-	}
+	session, dir := restartRetentionSession(t, []int{3, 40, 70}, time.Time{}, -1, -1)
 
 	if err := session.Restart(context.Background(), 400, 100); err != nil {
 		t.Fatalf("Restart: %v", err)
@@ -169,71 +132,6 @@ func TestForwardRestartWithoutCompletedDownloadPreservesFreshFiles(t *testing.T)
 	}
 }
 
-func TestForwardRestartKeepsSegmentsWhenRetentionDisabled(t *testing.T) {
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
-
-	dir := t.TempDir()
-	for _, segment := range []int{3, 40, 70} {
-		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
-		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session := &TranscodeSession{
-		outputDir:            dir,
-		lastRequestedSegment: 70,
-		lastCompletedSegment: 70,
-		opts: TranscodeOpts{
-			OutputDir:          dir,
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    4,
-			StartSegmentNumber: 0,
-			FFmpegPath:         truePath,
-		},
-	}
-
-	if err := session.Restart(context.Background(), 400, 100); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
-	for _, segment := range []int{3, 40, 70} {
-		path := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("disabled retention removed segment %d: %v", segment, err)
-		}
-	}
-}
-
-// TestSegmentRecoveryDecisionWaitsWhileRestarting covers half of issue #243's
-// seek-freeze: while a restart is already in flight, a concurrent segment
-// request must WAIT for the restart's output rather than trigger another
-// restart. Without this, pipelined HLS segment requests spawn dueling ffmpeg
-// restarts that keep preempting the segment the player is blocked on.
-func TestSegmentRecoveryDecisionWaitsWhileRestarting(t *testing.T) {
-	session := &TranscodeSession{
-		outputDir:  t.TempDir(),
-		restarting: &restartFlight{done: make(chan struct{})},
-		opts: TranscodeOpts{
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    2,
-			StartSegmentNumber: 0,
-		},
-	}
-
-	decision := session.SegmentRecoveryDecision(10, time.Now())
-	if decision.Reason != "transcode_restarting" {
-		t.Fatalf("Reason = %q, want transcode_restarting", decision.Reason)
-	}
-	if !decision.Wait {
-		t.Error("Wait = false, want true (concurrent requests must wait out an in-flight restart)")
-	}
-	if decision.RestartOnTimeout {
-		t.Error("RestartOnTimeout = true, want false (a timed-out wait must re-decide, not blindly restart)")
-	}
-}
-
 // TestRestartInvokesRestartHook verifies that a successful Restart fires the
 // session's restart hook. The API handler uses the hook to re-arm the
 // throttler and the exit monitor; firing it from Restart itself keeps every
@@ -241,12 +139,7 @@ func TestSegmentRecoveryDecisionWaitsWhileRestarting(t *testing.T) {
 // switch) consistent instead of each call site remembering to re-arm by
 // hand.
 func TestRestartInvokesRestartHook(t *testing.T) {
-	// `true` starts and exits cleanly, standing in for ffmpeg. Resolve it
-	// via PATH — it lives in /bin on Linux but /usr/bin on macOS.
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
+	truePath := trueBinaryPath(t)
 
 	session := &TranscodeSession{
 		outputDir: t.TempDir(),
@@ -274,10 +167,7 @@ func TestRestartInvokesRestartHook(t *testing.T) {
 }
 
 func TestRestartCopySeekOriginIsReplacedOrCleared(t *testing.T) {
-	truePath, err := exec.LookPath("true")
-	if err != nil {
-		t.Skipf("`true` not found in PATH: %v", err)
-	}
+	truePath := trueBinaryPath(t)
 
 	newSession := func() *TranscodeSession {
 		return &TranscodeSession{

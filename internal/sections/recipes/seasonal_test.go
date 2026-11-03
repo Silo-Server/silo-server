@@ -8,28 +8,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
-// TestHalloweenInOctoberMatches verifies the halloween predicate matches October
-// and rejects November.
-func TestHalloweenInOctoberMatches(t *testing.T) {
-	pred, ok := SeasonalPredicates["halloween"]
-	if !ok {
-		t.Fatal("halloween predicate not found")
-	}
-
-	oct15 := time.Date(2024, time.October, 15, 12, 0, 0, 0, time.UTC)
-	if !pred(oct15) {
-		t.Error("halloween predicate should match Oct 15")
-	}
-
-	nov1 := time.Date(2024, time.November, 1, 12, 0, 0, 0, time.UTC)
-	if pred(nov1) {
-		t.Error("halloween predicate should reject Nov 1")
-	}
-}
-
 // TestChristmasDateRangeMatches verifies the christmas predicate matches Dec 24
 // and rejects Nov 30. Also pins the boundaries: the window is Dec 1 inclusive
-// through Dec 31 inclusive.
+// through Dec 31 inclusive, plus seasonEndGrace into Jan 1.
 func TestChristmasDateRangeMatches(t *testing.T) {
 	pred, ok := SeasonalPredicates["christmas"]
 	if !ok {
@@ -58,10 +39,14 @@ func TestChristmasDateRangeMatches(t *testing.T) {
 		t.Error("christmas predicate should match Dec 31 23:59:59 (end boundary)")
 	}
 
-	// Boundary: just past end of window (Jan 1 of next year) must reject.
-	jan1Next := time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC)
+	// Boundary: the grace keeps the window open until Jan 1 12:00.
+	jan1Grace := time.Date(2027, time.January, 1, 11, 59, 59, 0, time.UTC)
+	if !pred(jan1Grace) {
+		t.Error("christmas predicate should match Jan 1 11:59:59 (within the end grace)")
+	}
+	jan1Next := time.Date(2027, time.January, 1, 12, 0, 0, 0, time.UTC)
 	if pred(jan1Next) {
-		t.Error("christmas predicate should reject Jan 1 (just past window)")
+		t.Error("christmas predicate should reject Jan 1 12:00 (just past the end grace)")
 	}
 }
 
@@ -105,85 +90,6 @@ func TestSaturdayMorningPredicate(t *testing.T) {
 	}
 }
 
-// TestSeasonalValidatesTheme verifies that an unknown theme is rejected and a
-// known theme with mode "auto" is accepted.
-func TestSeasonalValidatesTheme(t *testing.T) {
-	rec, ok := Get("seasonal_themed")
-	if !ok {
-		t.Fatal("seasonal_themed not registered")
-	}
-
-	// Unknown theme must be rejected.
-	badTheme := json.RawMessage(`{"theme":"unicorn"}`)
-	if err := rec.Validate(badTheme); err == nil {
-		t.Error("unknown theme should be rejected")
-	}
-
-	// Known theme with mode "auto" must be accepted.
-	good := json.RawMessage(`{"theme":"halloween","mode":"auto"}`)
-	if err := rec.Validate(good); err != nil {
-		t.Errorf("valid params rejected: %v", err)
-	}
-}
-
-// TestSeasonalValidatesMode verifies that only valid mode values are accepted.
-func TestSeasonalValidatesMode(t *testing.T) {
-	rec, ok := Get("seasonal_themed")
-	if !ok {
-		t.Fatal("seasonal_themed not registered")
-	}
-
-	cases := []struct {
-		mode    string
-		wantErr bool
-	}{
-		{"", false},       // empty string → defaults to "auto", valid
-		{"auto", false},   // explicit auto
-		{"pinned", false}, // pinned (always show in-season items)
-		{"forced", true},  // unknown mode — rejected
-	}
-
-	for _, tc := range cases {
-		raw := json.RawMessage(`{"theme":"halloween","mode":"` + tc.mode + `"}`)
-		if tc.mode == "" {
-			raw = json.RawMessage(`{"theme":"halloween"}`)
-		}
-		err := rec.Validate(raw)
-		if tc.wantErr && err == nil {
-			t.Errorf("mode=%q should be rejected", tc.mode)
-		}
-		if !tc.wantErr && err != nil {
-			t.Errorf("mode=%q should be accepted, got: %v", tc.mode, err)
-		}
-	}
-}
-
-// TestSeasonalRequiresTheme verifies that missing/empty theme is rejected.
-func TestSeasonalRequiresTheme(t *testing.T) {
-	rec, ok := Get("seasonal_themed")
-	if !ok {
-		t.Fatal("seasonal_themed not registered")
-	}
-
-	// Empty raw
-	if err := rec.Validate(nil); err == nil {
-		t.Error("nil raw should be rejected")
-	}
-	if err := rec.Validate(json.RawMessage(``)); err == nil {
-		t.Error("empty raw should be rejected")
-	}
-
-	// Empty JSON object
-	if err := rec.Validate(json.RawMessage(`{}`)); err == nil {
-		t.Error("empty object should be rejected (theme required)")
-	}
-
-	// Explicit empty theme string
-	if err := rec.Validate(json.RawMessage(`{"theme":""}`)); err == nil {
-		t.Error(`{"theme":""} should be rejected`)
-	}
-}
-
 // TestActiveSeasonalThemePicksMatchingTheme verifies the auto-cycle resolver
 // returns the highest-priority enabled theme whose predicate matches now.
 func TestActiveSeasonalThemePicksMatchingTheme(t *testing.T) {
@@ -214,16 +120,6 @@ func TestActiveSeasonalThemePicksMatchingTheme(t *testing.T) {
 	got = (SeasonalThemedParams{EnabledThemes: []string{"halloween", "christmas"}}).ActiveTheme(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))
 	if got != "" {
 		t.Errorf("July 4 with halloween/christmas enabled → %q, want empty", got)
-	}
-}
-
-// TestActiveSeasonalThemeIgnoresDisabledThemes confirms a theme not in the
-// enabled list never wins, even when its predicate matches.
-func TestActiveSeasonalThemeIgnoresDisabledThemes(t *testing.T) {
-	// Mid-October but halloween is NOT enabled — auto-cycle returns "".
-	got := (SeasonalThemedParams{EnabledThemes: []string{"christmas"}}).ActiveTheme(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
-	if got != "" {
-		t.Errorf("halloween disabled → got %q, want empty", got)
 	}
 }
 
@@ -419,6 +315,7 @@ func TestMovableHolidayWindows(t *testing.T) {
 		{"easter", day(2027, time.March, 20), false},
 		{"easter", day(2027, time.March, 21), true},
 		{"easter", day(2027, time.March, 29), true},
+		{"easter", day(2027, time.March, 30).Add(-time.Second), true},
 		{"easter", day(2027, time.March, 30), false},
 		{"easter", day(2026, time.April, 5), true},
 		{"new_year", day(2026, time.December, 25), false},

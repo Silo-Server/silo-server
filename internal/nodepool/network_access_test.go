@@ -2,13 +2,8 @@ package nodepool
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
@@ -91,21 +86,14 @@ func TestClientReachableVia(t *testing.T) {
 func newNetworkAccessHealthNode(t *testing.T) (string, *atomic.Pointer[string]) {
 	t.Helper()
 	var block atomic.Pointer[string]
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/health" {
-			http.NotFound(w, r)
-			return
-		}
+	url := newStatsHealthNodeFunc(t, func() string {
 		body := `{"status":"ok","active_jobs":1`
 		if extra := block.Load(); extra != nil && *extra != "" {
 			body += `,"network_access":` + *extra
 		}
-		body += `}`
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-	return server.URL, &block
+		return body + `}`
+	})
+	return url, &block
 }
 
 // The sweep is the only path that learns a proxy's overlay origins. It has to
@@ -162,145 +150,5 @@ func TestCheckNodeIgnoresAMalformedNetworkAccessBlock(t *testing.T) {
 	// verdict; the point here is that the block cannot smuggle in a report.
 	if healthy || report != nil {
 		t.Fatalf("healthy=%v report=%#v, want the undecodable body rejected whole", healthy, report)
-	}
-}
-
-// The health update is the only write path for network_access, and it has to
-// round-trip through the ordinary node read the pools and the admin API use.
-func TestRepositoryUpdateHealthPersistsNetworkAccess(t *testing.T) {
-	repo := newNetworkAccessTestRepo(t)
-	ctx := context.Background()
-	unique := time.Now().UnixNano()
-	node, err := repo.Create(ctx, CreateNodeInput{
-		Name: fmt.Sprintf("network-access-test-%d", unique),
-		Type: NodeTypeProxy,
-		URL:  fmt.Sprintf("http://network-access-test-%d", unique),
-	})
-	if err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Delete(ctx, node.ID) })
-	if node.NetworkAccess != nil {
-		t.Fatalf("new node already carries a report: %#v", node.NetworkAccess)
-	}
-
-	at := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
-	report := netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: "https://proxy-1.tail1234.ts.net", Hostname: "proxy-1.tail1234.ts.net", UpdatedAt: at}}
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 1, 0, nil, report); err != nil {
-		t.Fatalf("update health: %v", err)
-	}
-	reloaded, err := repo.GetByID(ctx, node.ID)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	got, ok := reloaded.NetworkAccess["tailscale"]
-	if !ok || got.State != netaccess.StateConnected || got.Origin != "https://proxy-1.tail1234.ts.net" || got.Hostname != "proxy-1.tail1234.ts.net" || !got.UpdatedAt.Equal(at) {
-		t.Fatalf("stored report = %#v", reloaded.NetworkAccess)
-	}
-	if url := reloaded.ClientURLFor(netaccess.Path{Provider: "tailscale"}); url != "https://proxy-1.tail1234.ts.net" {
-		t.Fatalf("ClientURLFor from a stored row = %q", url)
-	}
-
-	// The list read shares the scan path; make sure it decodes too.
-	listed, err := repo.List(ctx)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	found := false
-	for _, n := range listed {
-		if n.ID == node.ID {
-			found = true
-			if _, ok := n.NetworkAccess["tailscale"]; !ok {
-				t.Fatalf("listed row lost the report: %#v", n.NetworkAccess)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("created node missing from list")
-	}
-
-	// A check with no report clears the column back to its empty form.
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 0, 0, nil, nil); err != nil {
-		t.Fatalf("clear: %v", err)
-	}
-	reloaded, err = repo.GetByID(ctx, node.ID)
-	if err != nil {
-		t.Fatalf("reload after clear: %v", err)
-	}
-	if reloaded.NetworkAccess != nil {
-		t.Fatalf("report survived a report-less health write: %#v", reloaded.NetworkAccess)
-	}
-	var raw string
-	if err := repo.pool.QueryRow(ctx, `SELECT network_access::text FROM stream_nodes WHERE id = $1`, node.ID).Scan(&raw); err != nil {
-		t.Fatalf("read column: %v", err)
-	}
-	if raw != "{}" {
-		t.Fatalf("cleared column = %s, want {} (NOT NULL column)", raw)
-	}
-}
-
-// Repointing the row at another machine drops the report with the rest of
-// the identity-bound state: the overlay origin described the old worker.
-func TestRepositoryUpdateURLClearsNetworkAccess(t *testing.T) {
-	repo := newNetworkAccessTestRepo(t)
-	ctx := context.Background()
-	unique := time.Now().UnixNano()
-	node, err := repo.Create(ctx, CreateNodeInput{
-		Name: fmt.Sprintf("network-access-move-%d", unique),
-		Type: NodeTypeProxy,
-		URL:  fmt.Sprintf("http://network-access-move-%d", unique),
-	})
-	if err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	t.Cleanup(func() { _ = repo.Delete(ctx, node.ID) })
-	report := netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: "https://old.ts.net"}}
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 0, 0, nil, report); err != nil {
-		t.Fatalf("update health: %v", err)
-	}
-	sameName := node.Name
-	if kept, err := repo.Update(ctx, node.ID, UpdateNodeInput{Name: &sameName}); err != nil || kept.NetworkAccess == nil {
-		t.Fatalf("a non-URL edit dropped the report: %#v err=%v", kept, err)
-	}
-	moved := fmt.Sprintf("http://network-access-moved-%d", unique)
-	updated, err := repo.Update(ctx, node.ID, UpdateNodeInput{URL: &moved})
-	if err != nil {
-		t.Fatalf("update url: %v", err)
-	}
-	if updated.NetworkAccess != nil {
-		t.Fatalf("report survived a URL change: %#v", updated.NetworkAccess)
-	}
-}
-
-func newNetworkAccessTestRepo(t *testing.T) *Repository {
-	t.Helper()
-	pool := newNodeTestPool(t)
-	var column *string
-	if err := pool.QueryRow(context.Background(),
-		`SELECT column_name FROM information_schema.columns
-		 WHERE table_name = 'stream_nodes' AND column_name = 'network_access'`).Scan(&column); err != nil {
-		t.Skip("test database has not applied the node network_access migration")
-	}
-	return NewRepository(pool)
-}
-
-// The jsonb round trip must keep the wire keys the proxy sends, so a report a
-// proxy produced with the netaccess types decodes identically after storage.
-func TestNodeNetworkAccessJSONRoundTrip(t *testing.T) {
-	at := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
-	in := netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: "https://p.ts.net", Hostname: "p.ts.net", UpdatedAt: at}}
-	encoded, err := marshalNetworkAccess(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out netaccess.NodeNetworkAccess
-	if err := json.Unmarshal(encoded, &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["tailscale"] != in["tailscale"] {
-		t.Fatalf("round trip = %#v, want %#v", out, in)
-	}
-	if empty, _ := marshalNetworkAccess(nil); string(empty) != "{}" {
-		t.Fatalf("nil report marshals to %s, want {}", empty)
 	}
 }

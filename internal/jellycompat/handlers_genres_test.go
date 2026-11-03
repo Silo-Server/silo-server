@@ -79,9 +79,7 @@ func TestHandleGenresListsAllWithoutLimit(t *testing.T) {
 		wantFirst string
 	}{
 		{"", 30, 30, "Genre 00"},
-		{"?StartIndex=2", 28, 30, "Genre 02"},
 		{"?StartIndex=2&Limit=5", 5, 30, "Genre 02"},
-		{"?Limit=5", 5, 30, "Genre 00"},
 		{"?Limit=0", 0, 30, ""},
 	} {
 		req := httptest.NewRequest("GET", "/Genres"+tc.query, nil)

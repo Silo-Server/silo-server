@@ -18,14 +18,10 @@ import (
 type fakeSessionRegistry struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
-	// maxPerUser, when > 0, caps reconstructs per user via
-	// RegisterReconstructedWithLimits so the admission path can be tested.
-	maxPerUser int
 	// limitsErr, when non-nil, is returned by RegisterReconstructedWithLimits to
-	// simulate a limit-provider failure (e.g. a transient Postgres error). It
-	// takes precedence over the over-cap check so the fail-open admission path
-	// can be exercised. A real SessionManager surfaces such failures wrapped with
-	// ErrLimitProviderUnavailable.
+	// simulate a limit-provider failure (e.g. a transient Postgres error), so the
+	// fail-open admission path can be exercised. A real SessionManager surfaces
+	// such failures wrapped with ErrLimitProviderUnavailable.
 	limitsErr error
 }
 
@@ -52,8 +48,6 @@ func (f *fakeSessionRegistry) RegisterReconstructed(s *Session) *Session {
 }
 
 // RegisterReconstructedWithLimits mirrors RegisterReconstructed for the tests.
-// maxPerUser, when > 0, caps how many sessions a single user may reconstruct so
-// the admission-rejection path can be exercised without a real SessionManager.
 func (f *fakeSessionRegistry) RegisterReconstructedWithLimits(_ context.Context, s *Session) (*Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -65,17 +59,6 @@ func (f *fakeSessionRegistry) RegisterReconstructedWithLimits(_ context.Context,
 	}
 	if f.limitsErr != nil {
 		return nil, f.limitsErr
-	}
-	if f.maxPerUser > 0 {
-		live := 0
-		for _, existing := range f.sessions {
-			if existing.UserID == s.UserID {
-				live++
-			}
-		}
-		if live >= f.maxPerUser {
-			return nil, ErrTooManyStreams
-		}
 	}
 	f.sessions[s.ID] = s
 	return s, nil
@@ -113,18 +96,6 @@ func (f *fakeSessionRegistry) ConfirmReconstructedExecution(expected *Session, r
 		current.TranscodeHWAccel = encoderHWAccel
 	}
 	return current
-}
-
-// CloseTranscodeSession stops the live session and drops it from the transcode
-// map. Under token-carried reconstruction there is no durable card to delete; the
-// segment dir is reaped later by liveness+age cleanup.
-func TestCloseTranscodeSession_DropsLiveSession(t *testing.T) {
-	m := NewTranscodeManager()
-	m.RegisterTranscodeSession("s1", &TranscodeSession{})
-	m.CloseTranscodeSession("s1", "")
-	if got := m.GetTranscodeSession("s1"); got != nil {
-		t.Fatal("session must be removed from the live map on close")
-	}
 }
 
 func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
@@ -190,99 +161,95 @@ func TestStartShutdownCleanup_RejectsLaterRegistrationAndSwap(t *testing.T) {
 
 func TestLoadOrReconstructSession(t *testing.T) {
 	ctx := context.Background()
-
-	newMgr := func(reg *fakeSessionRegistry) *TranscodeManager {
-		m := NewTranscodeManager()
-		m.Sessions = reg
-		return m
-	}
 	cardPtr := func(c RecipeCard) *RecipeCard { return &c }
-
-	t.Run("live session, matching owner -> loaded", func(t *testing.T) {
-		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
-		m := newMgr(reg)
-		got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, nil)
-		if status != SessionLoaded || got == nil || got.ID != "s" {
-			t.Fatalf("got status=%v session=%+v", status, got)
-		}
-	})
-
-	t.Run("live session, mismatched owner -> forbidden", func(t *testing.T) {
-		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
-		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 9, nil); status != SessionForbidden {
-			t.Fatalf("status = %v, want forbidden", status)
-		}
-	})
-
-	t.Run("live session, zero caller -> loaded (UUID as bearer)", func(t *testing.T) {
-		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
-		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 0, nil); status != SessionLoaded {
-			t.Fatalf("status = %v, want loaded", status)
-		}
-	})
-
-	// A v3 transport that negotiated header-authenticated media never treats its
-	// session UUID as a credential, so the front door refuses an anonymous
-	// caller instead of leaving that rule to each serve handler.
-	t.Run("live media-authorized session, zero caller -> unauthorized", func(t *testing.T) {
-		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5, RequireMediaAuthorization: true}}}
-		m := newMgr(reg)
-		if got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 0, nil); status != SessionUnauthorized || got != nil {
-			t.Fatalf("status = %v session = %+v, want unauthorized", status, got)
-		}
-	})
-
-	t.Run("live media-authorized session, owner -> loaded", func(t *testing.T) {
-		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5, RequireMediaAuthorization: true}}}
-		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, nil); status != SessionLoaded {
-			t.Fatalf("status = %v, want loaded", status)
-		}
-	})
-
-	t.Run("miss + remux token + matching owner -> reconstructed with method", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := newMgr(reg)
-		card := NewRemuxRecipeCard("s", 5, "p", 77, true, 2)
-		got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, cardPtr(card))
-		if status != SessionLoaded || got == nil {
-			t.Fatalf("status=%v session=%+v", status, got)
-		}
-		if got.PlayMethod != PlayRemux || got.MediaFileID != 77 || !got.TranscodeAudio || got.AudioTrackIndex != 2 {
-			t.Fatalf("reconstructed remux session wrong: %+v", got)
-		}
+	registered := func(t *testing.T, reg *fakeSessionRegistry) {
+		t.Helper()
 		if _, err := reg.GetSession("s"); err != nil {
 			t.Fatalf("reconstructed session not registered: %v", err)
 		}
-	})
+	}
 
-	t.Run("miss + token + mismatched owner -> missing (reconstruct refuses)", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := newMgr(reg)
-		card := NewDirectRecipeCard("s", 5, "p", 77)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 9, cardPtr(card)); status != SessionMissing {
-			t.Fatalf("status = %v, want missing", status)
-		}
-	})
-
-	t.Run("miss + token for a different session id -> missing", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := newMgr(reg)
-		card := NewDirectRecipeCard("other", 5, "p", 77)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, cardPtr(card)); status != SessionMissing {
-			t.Fatalf("status = %v, want missing (card session id mismatch)", status)
-		}
-	})
-
-	t.Run("miss + no token -> missing", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "nope", 5, nil); status != SessionMissing {
-			t.Fatalf("status = %v, want missing", status)
-		}
-	})
+	tests := []struct {
+		name       string
+		live       *Session // registered under its ID before the lookup
+		limitsErr  error
+		id         string // defaults to "s"
+		caller     int
+		card       *RecipeCard
+		wantStatus SessionLoadStatus
+		check      func(*testing.T, *Session, *fakeSessionRegistry)
+	}{
+		{
+			name: "live session, matching owner -> loaded", live: &Session{ID: "s", UserID: 5}, caller: 5, wantStatus: SessionLoaded,
+			check: func(t *testing.T, got *Session, _ *fakeSessionRegistry) {
+				if got == nil || got.ID != "s" {
+					t.Fatalf("session = %+v", got)
+				}
+			},
+		},
+		{name: "live session, mismatched owner -> forbidden", live: &Session{ID: "s", UserID: 5}, caller: 9, wantStatus: SessionForbidden},
+		{name: "live session, zero caller -> loaded (UUID as bearer)", live: &Session{ID: "s", UserID: 5}, caller: 0, wantStatus: SessionLoaded},
+		// A v3 transport that negotiated header-authenticated media never treats its
+		// session UUID as a credential, so the front door refuses an anonymous
+		// caller instead of leaving that rule to each serve handler.
+		{
+			name: "live media-authorized session, zero caller -> unauthorized", live: &Session{ID: "s", UserID: 5, RequireMediaAuthorization: true},
+			caller: 0, wantStatus: SessionUnauthorized,
+			check: func(t *testing.T, got *Session, _ *fakeSessionRegistry) {
+				if got != nil {
+					t.Fatalf("session = %+v, want unauthorized", got)
+				}
+			},
+		},
+		{name: "live media-authorized session, owner -> loaded", live: &Session{ID: "s", UserID: 5, RequireMediaAuthorization: true}, caller: 5, wantStatus: SessionLoaded},
+		{
+			name: "miss + remux token + matching owner -> reconstructed with method", caller: 5,
+			card: cardPtr(NewRemuxRecipeCard("s", 5, "p", 77, true, 2)), wantStatus: SessionLoaded,
+			check: func(t *testing.T, got *Session, reg *fakeSessionRegistry) {
+				if got == nil || got.PlayMethod != PlayRemux || got.MediaFileID != 77 || !got.TranscodeAudio || got.AudioTrackIndex != 2 {
+					t.Fatalf("reconstructed remux session wrong: %+v", got)
+				}
+				registered(t, reg)
+			},
+		},
+		{name: "miss + token + mismatched owner -> missing (reconstruct refuses)", caller: 9, card: cardPtr(NewDirectRecipeCard("s", 5, "p", 77)), wantStatus: SessionMissing},
+		{name: "miss + token for a different session id -> missing", caller: 5, card: cardPtr(NewDirectRecipeCard("other", 5, "p", 77)), wantStatus: SessionMissing},
+		{name: "miss + no token -> missing", id: "nope", caller: 5, wantStatus: SessionMissing},
+		// The fail-open admission surfaces as SessionLoaded (not SessionMissing
+		// -> 404) when the limit provider is transiently unavailable.
+		{
+			name:      "miss + token + provider error -> loaded (fails open)",
+			limitsErr: fmt.Errorf("load session limits: %w", errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout"))),
+			caller:    5, card: cardPtr(NewDirectRecipeCard("s", 5, "p", 77)), wantStatus: SessionLoaded,
+			check: func(t *testing.T, got *Session, reg *fakeSessionRegistry) {
+				if got == nil || got.ID != "s" || got.UserID != 5 {
+					t.Fatalf("admitted session wrong: %+v", got)
+				}
+				registered(t, reg)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &fakeSessionRegistry{limitsErr: tt.limitsErr}
+			if tt.live != nil {
+				reg.sessions = map[string]*Session{tt.live.ID: tt.live}
+			}
+			m := NewTranscodeManager()
+			m.Sessions = reg
+			id := tt.id
+			if id == "" {
+				id = "s"
+			}
+			got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, id, tt.caller, tt.card)
+			if status != tt.wantStatus {
+				t.Fatalf("status = %v session = %+v, want %v", status, got, tt.wantStatus)
+			}
+			if tt.check != nil {
+				tt.check(t, got, reg)
+			}
+		})
+	}
 }
 
 func TestLoadOrReconstructTranscode_TransientExecutorFailureRetriesWithoutZombie(t *testing.T) {
@@ -460,114 +427,52 @@ func TestFastResumeSeek(t *testing.T) {
 	}
 }
 
-// ReconstructSession must refuse to rebuild a session when the user is already at
-// their per-user concurrency cap (token replay over-cap), while still allowing
-// reconstructs up to the cap.
-func TestReconstructSession_AdmissionCap(t *testing.T) {
+// ReconstructSession admission contract. A genuine over-cap rejection must
+// STILL refuse even after the fail-open change: the ErrTooManyStreams /
+// ErrTooManyTranscodes sentinels are not provider errors. The authless
+// transcode delivery routes (HLS master.m3u8 / segment) present no userID, so
+// a zero caller must be allowed and the rebuilt session bound to the card
+// owner. A non-zero caller that does not match the card owner is still refused.
+func TestReconstructSessionAdmission(t *testing.T) {
 	ctx := context.Background()
-	reg := &fakeSessionRegistry{maxPerUser: 1}
-	m := NewTranscodeManager()
-	m.Sessions = reg
-
-	// First reconstruct for the user admits.
-	card1 := NewDirectRecipeCard("a", 7, "p", 100)
-	if got := m.ReconstructSession(ctx, "a", 7, card1); got == nil {
-		t.Fatal("first reconstruct within cap should succeed")
+	tests := []struct {
+		name      string
+		limitsErr error
+		card      RecipeCard
+		caller    int
+		wantNil   bool
+	}{
+		{name: "too many streams", limitsErr: ErrTooManyStreams, card: NewDirectRecipeCard("a", 7, "p", 100), caller: 7, wantNil: true},
+		{name: "too many transcodes", limitsErr: ErrTooManyTranscodes, card: NewDirectRecipeCard("a", 7, "p", 100), caller: 7, wantNil: true},
+		{name: "zero caller -> reconstructed, bound to card owner", card: NewDirectRecipeCard("s", 5, "p", 77), caller: 0},
+		{name: "non-zero mismatched caller -> refused", card: NewDirectRecipeCard("s", 5, "p", 77), caller: 9, wantNil: true},
 	}
-	// Second distinct session for the same user is over cap -> refused.
-	card2 := NewDirectRecipeCard("b", 7, "p", 101)
-	if got := m.ReconstructSession(ctx, "b", 7, card2); got != nil {
-		t.Fatal("over-cap reconstruct must be refused")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &fakeSessionRegistry{limitsErr: tt.limitsErr}
+			m := NewTranscodeManager()
+			m.Sessions = reg
+			got := m.ReconstructSession(ctx, tt.card.SessionID, tt.caller, tt.card)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("ReconstructSession = %+v, want refused (nil)", got)
+				}
+				if _, err := reg.GetSession("a"); errors.Is(tt.limitsErr, ErrTooManyStreams) && err == nil {
+					t.Fatal("over-cap reconstruct must not register the session")
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("zero caller (UUID-as-bearer route) must reconstruct")
+			}
+			if got.UserID != 5 {
+				t.Fatalf("reconstructed session UserID = %d, want 5 (card owner)", got.UserID)
+			}
+			if _, err := reg.GetSession("s"); err != nil {
+				t.Fatalf("reconstructed session not registered: %v", err)
+			}
+		})
 	}
-}
-
-// LoadOrReconstructSession must surface the fail-open admission as SessionLoaded
-// (not SessionMissing -> 404) when the limit provider is transiently unavailable.
-func TestLoadOrReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
-	ctx := context.Background()
-	reg := &fakeSessionRegistry{
-		limitsErr: fmt.Errorf("load session limits: %w", errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout"))),
-	}
-	m := NewTranscodeManager()
-	m.Sessions = reg
-
-	card := NewDirectRecipeCard("s", 5, "p", 77)
-	got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, &card)
-	if status != SessionLoaded || got == nil {
-		t.Fatalf("provider error must yield SessionLoaded, got status=%v session=%+v", status, got)
-	}
-	if got.ID != "s" || got.UserID != 5 {
-		t.Fatalf("admitted session wrong: %+v", got)
-	}
-	if _, err := reg.GetSession("s"); err != nil {
-		t.Fatalf("failed-open session not registered: %v", err)
-	}
-}
-
-// A genuine over-cap rejection must STILL refuse even after the fail-open change:
-// the ErrTooManyStreams / ErrTooManyTranscodes sentinels are not provider errors.
-func TestReconstructSession_OverCapStillRefused(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("too many streams", func(t *testing.T) {
-		reg := &fakeSessionRegistry{limitsErr: ErrTooManyStreams}
-		m := NewTranscodeManager()
-		m.Sessions = reg
-		card := NewDirectRecipeCard("a", 7, "p", 100)
-		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
-			t.Fatal("ErrTooManyStreams over-cap must still be refused (nil)")
-		}
-		if _, err := reg.GetSession("a"); err == nil {
-			t.Fatal("over-cap reconstruct must not register the session")
-		}
-	})
-
-	t.Run("too many transcodes", func(t *testing.T) {
-		reg := &fakeSessionRegistry{limitsErr: ErrTooManyTranscodes}
-		m := NewTranscodeManager()
-		m.Sessions = reg
-		card := NewDirectRecipeCard("a", 7, "p", 100)
-		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
-			t.Fatal("ErrTooManyTranscodes over-cap must still be refused (nil)")
-		}
-	})
-}
-
-// ReconstructSession ownership contract: the authless transcode delivery routes
-// (HLS master.m3u8 / segment) present no userID, so a zero caller must be allowed
-// and the rebuilt session bound to the card owner. A non-zero caller that does not
-// match the card owner is still refused.
-func TestReconstructSession_Ownership(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("zero caller -> reconstructed, bound to card owner", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := NewTranscodeManager()
-		m.Sessions = reg
-
-		card := NewDirectRecipeCard("s", 5, "p", 77)
-		got := m.ReconstructSession(ctx, "s", 0, card)
-		if got == nil {
-			t.Fatal("zero caller (UUID-as-bearer route) must reconstruct")
-		}
-		if got.UserID != 5 {
-			t.Fatalf("reconstructed session UserID = %d, want 5 (card owner)", got.UserID)
-		}
-		if _, err := reg.GetSession("s"); err != nil {
-			t.Fatalf("reconstructed session not registered: %v", err)
-		}
-	})
-
-	t.Run("non-zero mismatched caller -> refused", func(t *testing.T) {
-		reg := &fakeSessionRegistry{}
-		m := NewTranscodeManager()
-		m.Sessions = reg
-
-		card := NewDirectRecipeCard("s", 5, "p", 77)
-		if got := m.ReconstructSession(ctx, "s", 9, card); got != nil {
-			t.Fatal("non-zero caller mismatching the card owner must be refused")
-		}
-	})
 }
 
 // acquireReconstructSlot must bound concurrent reconstructs and let a caller

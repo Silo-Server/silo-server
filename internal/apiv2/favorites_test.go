@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -276,32 +275,6 @@ func favoritesDeps(lists *fakePersonalLists) Dependencies {
 	return deps
 }
 
-func TestListFavorites(t *testing.T) {
-	lists := &fakePersonalLists{favorites: favoriteRows()}
-	h := newTestHandler(t, favoritesDeps(lists))
-
-	rec := do(t, h, http.MethodGet, "/api/v2/favorites", "", viewerHeaders())
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	page := decodeCards(t, rec.Body.String())
-	if len(page.Items) != 3 || page.Items[0].ContentID != "movie:c" || page.Page.HasMore || page.Page.NextCursor != "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"title":"Title movie:c"`) || !strings.Contains(rec.Body.String(), `"genres":[]`) {
-		t.Fatalf("card = %s", rec.Body.String())
-	}
-	// The seam is probed for one row past the page and sees the viewer's
-	// profile and the requested artwork size.
-	if lists.limits[0] != DefaultLimit+1 || lists.viewers[0].ProfileID != "p-owner" || lists.viewers[0].UserID != 1 {
-		t.Fatalf("call = %d %+v", lists.limits[0], lists.viewers[0])
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/favorites?image_size=large", "", viewerHeaders())
-	if rec.Code != 200 || lists.viewers[1].ImageSize != imagesize.Large {
-		t.Fatalf("%d image size = %v", rec.Code, lists.viewers[1].ImageSize)
-	}
-}
-
 func TestListFavoritesCursor(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows()}
 	// The first page ends inside a timestamp tie, so continuation must keep the item ID.
@@ -327,20 +300,6 @@ func TestListFavoritesCursor(t *testing.T) {
 	}
 }
 
-func TestListFavoritesValidation(t *testing.T) {
-	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
-	for _, tc := range []struct{ query, location, code string }{
-		{"offset=10", "query.offset", codeUnknownParameter},
-		{"limit=0", "query.limit", codeOutOfRange},
-		{"image_size=huge", "query.image_size", codeInvalidEnum},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites?"+tc.query, "", viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.query, p.Errors)
-		}
-	}
-}
-
 func TestGetFavorite(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows(), missing: map[string]bool{"movie:hidden": true}}
 	h := newTestHandler(t, favoritesDeps(lists))
@@ -355,38 +314,39 @@ func TestGetFavorite(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:z", "", viewerHeaders()), TypeNotFound)
 }
 
-func TestAddAndDeleteFavorite(t *testing.T) {
+// The membership read answers 200 for every item the viewer may see, so a
+// client checking an item that is not a favorite does not log a 404 (issue
+// #952: proxies such as CrowdSec count those as probing). An item the viewer
+// may not see stays 404.
+func TestGetFavoriteMembership(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows(), missing: map[string]bool{"movie:hidden": true}}
 	h := newTestHandler(t, favoritesDeps(lists))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodPut, "/api/v2/favorites/movie:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("put %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.favorites) != 5 || lists.favorites[0].MediaItemID != "movie:new" {
-		t.Fatalf("favorites = %+v", lists.favorites)
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/favorites/movie:hidden", "", viewerHeaders()), TypeNotFound)
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodDelete, "/api/v2/favorites/movie:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("delete %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.favorites) != 4 {
-		t.Fatalf("favorites = %+v", lists.favorites)
-	}
-	// Demo mode lets the mutations through, as v1's demo guard does.
-	demo := favoritesDeps(lists)
-	demo.DemoSettings = fakeSettings{demo: true}
-	dh := newTestHandler(t, demo)
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPut, "/api/v2/favorites/movie:new"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
+	for _, tc := range []struct{ id, want string }{
+		{"movie:c", `{"item_id":"movie:c","is_member":true,"added_at":"2026-01-02T03:04:05.000Z"}`},
+		{"movie:nope", `{"item_id":"movie:nope","is_member":false}`},
+		// Another profile's favorite is not this profile's.
+		{"movie:z", `{"item_id":"movie:z","is_member":false}`},
 	} {
-		if rec := do(t, dh, tc.method, tc.path, "", viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("demo %s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
+		rec := do(t, h, http.MethodGet, "/api/v2/favorites/"+tc.id+"/membership", "", viewerHeaders())
+		if rec.Code != 200 || rec.Body.String() != tc.want+"\n" {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
 		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:hidden/membership", "", viewerHeaders()), TypeNotFound)
+}
+
+func TestPersonalListCapability(t *testing.T) {
+	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
+	rec := do(t, h, http.MethodGet, "/api/v2/capabilities/personal-lists", "", viewerHeaders())
+	if rec.Code != 200 || rec.Header().Get("ETag") == "" || !strings.Contains(rec.Body.String(), `"state":"available"`) ||
+		!strings.Contains(rec.Body.String(), `"allowed":true`) || !strings.Contains(rec.Body.String(), `"membership_supported":true`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	deps := pilotDeps(nil, nil)
+	deps.PersonalLists = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/personal-lists", "", viewerHeaders())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) || !strings.Contains(rec.Body.String(), `"allowed":false`) {
+		t.Fatalf("unwired: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -394,7 +354,7 @@ func TestFavoritesDenied(t *testing.T) {
 	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{err: errStore}))
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v2/favorites"}, {http.MethodGet, "/api/v2/favorites/movie:c"},
-		{http.MethodPut, "/api/v2/favorites/movie:c"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
+		{http.MethodGet, "/api/v2/favorites/movie:c/membership"}, {http.MethodPut, "/api/v2/favorites/movie:c"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
 	} {
 		requireProblem(t, do(t, h, tc.method, tc.path, "", nil), TypeAuthenticationRequired)
 		p := requireProblem(t, do(t, h, tc.method, tc.path, "", bearer(memberToken)), TypeValidationFailed)

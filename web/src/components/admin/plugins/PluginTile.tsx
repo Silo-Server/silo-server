@@ -1,16 +1,21 @@
-import type { ReactNode } from "react";
+import { useRef, useState } from "react";
+import type { ReactNode, Ref } from "react";
 import { Check, Download } from "lucide-react";
 import { useLocation } from "react-router";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
 import { useInstallPlugin } from "@/hooks/queries/admin/plugins";
 import {
+  installationTier,
+  pendingUpdateVersion,
   pluginDisplayName,
   pluginPagePath,
   pluginSummary,
   sourceLabel,
+  tierNotice,
 } from "@/lib/pluginPresentation";
 import { pluginStatus } from "@/lib/pluginStatus";
 import { cn } from "@/lib/utils";
@@ -61,11 +66,13 @@ function TileHeading({
   subline,
   to,
   dimmed,
+  linkRef,
 }: {
   name: string;
   subline: string;
   to: string;
   dimmed: boolean;
+  linkRef?: Ref<HTMLAnchorElement>;
 }) {
   const location = useLocation();
   const state: PluginPageLinkState = { from: location.search };
@@ -75,6 +82,7 @@ function TileHeading({
       <div className="flex min-w-0 flex-col">
         {/* The name link stretches over the whole tile, so the tile is one target with a short name. */}
         <ViewTransitionLink
+          ref={linkRef}
           to={to}
           state={state}
           className={cn(
@@ -120,23 +128,26 @@ export function InstalledPluginTile({
   const name = pluginDisplayName(installation.plugin_id, presentation);
   const status = pluginStatus(installation);
   const off = !installation.enabled;
+  const updateVersion = pendingUpdateVersion(installation);
 
   return (
     <TileShell attention={status.attention} dimmed={off} state={off ? "off" : undefined}>
       <TileHeading
         name={name}
-        subline={`${installation.version}, ${sourceLabel(installation.source_kind)}`}
+        subline={`${installation.version}, ${sourceLabel(installationTier(installation))}`}
         to={pluginPagePath(installation.plugin_id)}
         dimmed={off}
       />
       <TileSummary>{pluginSummary(presentation, capabilities)}</TileSummary>
       <TileFooter>
         <PluginStatusLabel {...status} />
-        {installation.available_version ? (
+        {updateVersion ? (
           <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px]">
             <Download aria-hidden="true" className="size-3.5" />
-            {installation.available_version} available
+            {updateVersion} available
           </span>
+        ) : installation.updates_paused ? (
+          <span className="text-muted-foreground text-[12.5px]">Updates paused</span>
         ) : (
           <PluginCapabilityIcons capabilities={capabilities} />
         )}
@@ -156,6 +167,25 @@ export function CatalogPluginTile({
   const capabilities = entry.capabilities ?? [];
   const name = pluginDisplayName(entry.plugin_id, entry.presentation);
   const publisher = entry.presentation?.publisher_name?.trim();
+  // Community and external plugins carry a tier notice; the admin confirms it
+  // before installing, since the tile skips the plugin page that shows it.
+  const notice = tierNotice(entry.source_kind);
+  const [confirmInstall, setConfirmInstall] = useState(false);
+  // The dialog has no Radix trigger, so focus returns to the Install button by
+  // hand; otherwise it falls to the page body and a keyboard user loses their
+  // place in the catalog. After Confirm the button is disabled while the
+  // install runs, then replaced by "Installed", so focus goes to the tile's
+  // name link instead.
+  const installButton = useRef<HTMLButtonElement>(null);
+  const nameLink = useRef<HTMLAnchorElement>(null);
+
+  function install() {
+    installPlugin.mutate({
+      repository_id: entry.repository_id,
+      plugin_id: entry.plugin_id,
+      version: entry.version,
+    });
+  }
 
   return (
     <TileShell dimmed={isInstalled} state={isInstalled ? "installed" : undefined}>
@@ -168,6 +198,7 @@ export function CatalogPluginTile({
           version: entry.version,
         })}
         dimmed={isInstalled}
+        linkRef={nameLink}
       />
       <TileSummary>{pluginSummary(entry.presentation, capabilities)}</TileSummary>
       <TileFooter>
@@ -182,21 +213,32 @@ export function CatalogPluginTile({
             size="xs"
             variant="outline"
             className="relative z-10"
+            ref={installButton}
             aria-label={`Install ${name}`}
             disabled={installPlugin.isPending}
-            onClick={() =>
-              installPlugin.mutate({
-                repository_id: entry.repository_id,
-                plugin_id: entry.plugin_id,
-                version: entry.version,
-              })
-            }
+            onClick={() => (notice ? setConfirmInstall(true) : install())}
           >
             <Download aria-hidden="true" />
             {installPlugin.isPending ? "Installing…" : "Install"}
           </Button>
         )}
       </TileFooter>
+      {notice ? (
+        <ConfirmDialog
+          open={confirmInstall}
+          onOpenChange={setConfirmInstall}
+          title={`Install ${name}?`}
+          description={`${sourceLabel(entry.source_kind)}. ${notice}`}
+          confirmLabel="Install plugin"
+          onConfirm={install}
+          isPending={installPlugin.isPending}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const button = installButton.current;
+            (button && !button.disabled ? button : nameLink.current)?.focus();
+          }}
+        />
+      ) : null}
     </TileShell>
   );
 }

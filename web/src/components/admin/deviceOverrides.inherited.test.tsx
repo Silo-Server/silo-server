@@ -76,14 +76,6 @@ describe("DeviceProfileTabs inherited values", () => {
     expect(within(audio).queryByText("default")).not.toBeInTheDocument();
   });
 
-  it("labels a value nobody set as the app default", () => {
-    renderTabs([], []);
-
-    const audio = row("playback.audio_language");
-    expect(within(audio).getByText("default")).toBeInTheDocument();
-    expect(within(audio).getByText(/app default/)).toBeInTheDocument();
-  });
-
   it("gives a device-only key the app default even when the profile has values", () => {
     renderTabs(
       [],

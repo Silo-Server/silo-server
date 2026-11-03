@@ -88,6 +88,59 @@ export async function putAdminRequestSettingsV2(
   });
   return { ...body, updated_at: "", etag: requireETag(etag) };
 }
+/** The Requests Discover page's layout, with the validator of the read it came from. */
+export type DiscoverLayout = Schemas["AdminDiscoverLayout"] & { etag: string };
+export type DiscoverRow = Schemas["AdminDiscoverRow"];
+/** One row as the editor sends it: a row without its stored list's status. */
+export type DiscoverRowBody = Schemas["AdminDiscoverRowBody"];
+export type DiscoverRowType = DiscoverRowBody["type"];
+export type DiscoverChart = Schemas["AdminDiscoverChart"];
+export type DiscoverFilter = Schemas["AdminDiscoverFilter"];
+export type DiscoverWatchProvider = Schemas["AdminWatchProvider"];
+
+export async function getAdminDiscoverLayoutV2(): Promise<DiscoverLayout> {
+  let etag = "";
+  const body = await v2("GET /api/v2/admin/request-discover/layout", {
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+export async function putAdminDiscoverLayoutV2(
+  rows: DiscoverRowBody[],
+  current: Pick<DiscoverLayout, "etag">,
+): Promise<DiscoverLayout> {
+  let etag = "";
+  const body = await v2("PUT /api/v2/admin/request-discover/layout", {
+    headers: { "If-Match": requireETag(current.etag) },
+    body: { rows },
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+/** Drops the stored layout so the default one applies again. */
+export async function resetAdminDiscoverLayoutV2(
+  current: Pick<DiscoverLayout, "etag">,
+): Promise<void> {
+  await v2("DELETE /api/v2/admin/request-discover/layout", {
+    headers: { "If-Match": requireETag(current.etag) },
+  });
+}
+export function previewAdminDiscoverRowV2(row: DiscoverRowBody) {
+  return v2("POST /api/v2/admin/request-discover/preview", { body: row });
+}
+export function listAdminWatchProvidersV2(
+  mediaType: RequestMediaType,
+  region: string,
+): Promise<DiscoverWatchProvider[]> {
+  return v2("GET /api/v2/admin/request-discover/watch-providers", {
+    query: { media_type: mediaType, region },
+  }).then((c) => c.items);
+}
+
 /** How requests find their server: Standard, or Advanced with the rules. */
 export type RequestRouting = Schemas["AdminRequestRouting"] & { etag: string };
 export type RequestRoutingMode = RequestRouting["mode"];

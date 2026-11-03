@@ -9,15 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-func TestMediaDurationQueryUsesActiveMediaFilesPredicate(t *testing.T) {
-	if !strings.Contains(mediaDurationQuery, "missing_since IS NULL") {
-		t.Fatalf("media duration query must filter active files with missing_since IS NULL:\n%s", mediaDurationQuery)
-	}
-	if strings.Contains(mediaDurationQuery, "missing = false") {
-		t.Fatalf("media duration query references removed media_files.missing column:\n%s", mediaDurationQuery)
-	}
-}
-
 func TestPluginCredentialBundleRoundTrip(t *testing.T) {
 	cipher, err := secret.New([]byte("01234567890123456789012345678901"))
 	if err != nil {

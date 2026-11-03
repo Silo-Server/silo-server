@@ -18,9 +18,7 @@ import (
 
 func TestServiceIngestStoresReadyReport(t *testing.T) {
 	bundle, manifest, info := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_1")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
+	repo, store, svc := newIngestFixture()
 
 	result, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
 	if err != nil {
@@ -57,50 +55,39 @@ func TestServiceIngestStoresReadyReport(t *testing.T) {
 	}
 }
 
-func TestServiceIngestRejectsDestinationMismatch(t *testing.T) {
-	bundle, info := testDiagnosticsBundle(t)
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
+func TestServiceIngestRejectsBeforeReserving(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		serverID      string
+		noticeVersion int
+		want          error
+	}{
+		{"destination mismatch", "other-server", DefaultConsentNoticeVer, ErrDestinationMismatch},
+		{"stale consent", "server-1", DefaultConsentNoticeVer + 1, ErrStaleConsent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, info := testDiagnosticsBundle(t)
+			repo, store, svc := newIngestFixture()
 
-	manifest := testManifestJSON(t, "other-server", DefaultConsentNoticeVer, info)
-	_, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
-	if !errors.Is(err, ErrDestinationMismatch) {
-		t.Fatalf("Ingest error = %v, want ErrDestinationMismatch", err)
-	}
-	if repo.insertCalls != 0 {
-		t.Fatalf("InsertReceiving calls = %d, want 0", repo.insertCalls)
-	}
-	if len(store.puts) != 0 {
-		t.Fatalf("PutStream calls = %d, want 0", len(store.puts))
-	}
-}
-
-func TestServiceIngestRejectsStaleConsent(t *testing.T) {
-	bundle, info := testDiagnosticsBundle(t)
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-
-	manifest := testManifestJSON(t, "server-1", DefaultConsentNoticeVer+1, info)
-	_, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
-	if !errors.Is(err, ErrStaleConsent) {
-		t.Fatalf("Ingest error = %v, want ErrStaleConsent", err)
-	}
-	if repo.insertCalls != 0 {
-		t.Fatalf("InsertReceiving calls = %d, want 0", repo.insertCalls)
-	}
-	if len(store.puts) != 0 {
-		t.Fatalf("PutStream calls = %d, want 0", len(store.puts))
+			manifest := testManifestJSON(t, tc.serverID, tc.noticeVersion, info)
+			_, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Ingest error = %v, want %v", err, tc.want)
+			}
+			if repo.insertCalls != 0 {
+				t.Fatalf("InsertReceiving calls = %d, want 0", repo.insertCalls)
+			}
+			if len(store.puts) != 0 {
+				t.Fatalf("PutStream calls = %d, want 0", len(store.puts))
+			}
+		})
 	}
 }
 
 func TestServiceIngestArchiveMismatchCompensates(t *testing.T) {
 	bundle, info := testDiagnosticsBundle(t)
 	info.SHA256 = strings.Repeat("0", 64)
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
+	repo, store, svc := newIngestFixture()
 
 	manifest := testManifestJSON(t, "server-1", DefaultConsentNoticeVer, info)
 	_, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
@@ -140,9 +127,7 @@ func TestServiceIngestRejectsEmbeddedManifestMismatch(t *testing.T) {
 		t.Fatalf("test manifest invalid: %v\n%s", err, manifest)
 	}
 
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
+	repo, store, svc := newIngestFixture()
 
 	_, err = svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
 	if !errors.Is(err, ErrArchiveMismatch) {
@@ -259,85 +244,70 @@ func TestServiceIngestCompensatesWithDetachedContext(t *testing.T) {
 	}
 }
 
-func TestServiceIngestStoresOnlyValidatedProfileAttribution(t *testing.T) {
-	// Header-only attribution (manifest carries no profile_id): the header is
-	// the single source, so it is validated and stored.
-	bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-	svc.SetProfileAttributionValidator(ProfileAttributionValidatorFunc(func(_ context.Context, userID int, profileID string) (bool, error) {
-		return userID == 42 && profileID == "prof_header", nil
-	}))
+// Attribution comes from the X-Profile-Id header and the manifest's
+// profile_id, and only a validated, non-child profile is stored.
+func TestServiceIngestProfileAttribution(t *testing.T) {
+	accept := func(want string) ProfileAttributionValidatorFunc {
+		return func(_ context.Context, userID int, profileID string) (bool, error) {
+			return userID == 42 && profileID == want, nil
+		}
+	}
+	for _, tc := range []struct {
+		name            string
+		manifestProfile string
+		header          string // empty: no X-Profile-Id
+		validator       ProfileAttributionValidatorFunc
+		wantErr         error
+		wantProfile     string // empty: no attribution stored
+	}{
+		// The header is the single source, so it is validated and stored.
+		{name: "header only", header: "prof_header", validator: accept("prof_header"), wantProfile: "prof_header"},
+		// Manifest-only attribution that fails validation is dropped, not stored.
+		{name: "unvalidated manifest profile", manifestProfile: "prof_1",
+			validator: func(context.Context, int, string) (bool, error) { return false, nil }},
+		// Header and manifest agree: attribution resolves to that single value.
+		{name: "matching header and manifest", manifestProfile: "prof_1", header: "prof_1", validator: accept("prof_1"), wantProfile: "prof_1"},
+		// The client switched profiles between capture and upload. The two
+		// sources must not be silently reconciled; even a validator that would
+		// accept any profile must not paper over the mismatch, because
+		// resolution fails before attribution validation runs.
+		{name: "mismatched header and manifest", manifestProfile: "prof_manifest", header: "prof_header",
+			validator: func(context.Context, int, string) (bool, error) { return true, nil }, wantErr: ErrProfileMismatch},
+		// A nonconforming client attributes the report to a child profile. The
+		// upload is refused outright rather than silently stored without
+		// attribution.
+		{name: "child profile", manifestProfile: "prof_child",
+			validator: func(context.Context, int, string) (bool, error) { return false, ErrChildProfileForbidden }, wantErr: ErrChildProfileForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, tc.manifestProfile)
+			repo, store, svc := newIngestFixture()
+			svc.SetProfileAttributionValidator(tc.validator)
+			var header *string
+			if tc.header != "" {
+				header = &tc.header
+			}
 
-	headerProfileID := "prof_header"
-	if _, err := svc.Ingest(context.Background(), 42, &headerProfileID, manifest, bytes.NewReader(bundle)); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-	if repo.insertInput.ProfileID == nil || *repo.insertInput.ProfileID != "prof_header" {
-		t.Fatalf("ProfileID = %v, want prof_header", repo.insertInput.ProfileID)
-	}
-
-	// Manifest-only attribution that fails validation is dropped, not stored.
-	bundle, manifest, _ = testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_1")
-	repo = &fakeDiagnosticReportStore{}
-	store = &fakeDiagnosticObjectStore{bucket: "private"}
-	svc = newTestDiagnosticsService(repo, store)
-	svc.SetProfileAttributionValidator(ProfileAttributionValidatorFunc(func(context.Context, int, string) (bool, error) {
-		return false, nil
-	}))
-	if _, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle)); err != nil {
-		t.Fatalf("Ingest with unvalidated profile: %v", err)
-	}
-	if repo.insertInput.ProfileID != nil {
-		t.Fatalf("ProfileID = %v, want nil for unvalidated attribution", *repo.insertInput.ProfileID)
-	}
-}
-
-func TestServiceIngestRejectsMismatchedProfileID(t *testing.T) {
-	// The manifest was captured under prof_manifest but the request carries a
-	// different X-Profile-Id (prof_header) because the client switched profiles
-	// between capture and upload. The two sources must not be silently
-	// reconciled; the upload is rejected and no report row is created.
-	bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_manifest")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-	// Even a validator that would accept any profile must not paper over the
-	// mismatch: resolution fails before attribution validation runs.
-	svc.SetProfileAttributionValidator(ProfileAttributionValidatorFunc(func(context.Context, int, string) (bool, error) {
-		return true, nil
-	}))
-
-	headerProfileID := "prof_header"
-	_, err := svc.Ingest(context.Background(), 42, &headerProfileID, manifest, bytes.NewReader(bundle))
-	if !errors.Is(err, ErrProfileMismatch) {
-		t.Fatalf("Ingest error = %v, want ErrProfileMismatch", err)
-	}
-	if repo.insertInput.ProfileID != nil {
-		t.Fatalf("ProfileID = %v, want no insert on profile mismatch", *repo.insertInput.ProfileID)
-	}
-	if len(repo.ready) != 0 || len(store.puts) != 0 {
-		t.Fatalf("no report should be stored on mismatch: ready=%v puts=%v", repo.ready, store.puts)
-	}
-}
-
-func TestServiceIngestAcceptsMatchingProfileID(t *testing.T) {
-	// Header and manifest agree: attribution resolves to that single value.
-	bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_1")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-	svc.SetProfileAttributionValidator(ProfileAttributionValidatorFunc(func(_ context.Context, userID int, profileID string) (bool, error) {
-		return userID == 42 && profileID == "prof_1", nil
-	}))
-
-	headerProfileID := "prof_1"
-	if _, err := svc.Ingest(context.Background(), 42, &headerProfileID, manifest, bytes.NewReader(bundle)); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-	if repo.insertInput.ProfileID == nil || *repo.insertInput.ProfileID != "prof_1" {
-		t.Fatalf("ProfileID = %v, want prof_1", repo.insertInput.ProfileID)
+			_, err := svc.Ingest(context.Background(), 42, header, manifest, bytes.NewReader(bundle))
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("Ingest error = %v, want %v", err, tc.wantErr)
+				}
+				if len(repo.ready) != 0 || len(store.puts) != 0 {
+					t.Fatalf("no report should be stored: ready=%v puts=%v", repo.ready, store.puts)
+				}
+			} else if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			got := repo.insertInput.ProfileID
+			if tc.wantProfile == "" {
+				if got != nil {
+					t.Fatalf("ProfileID = %v, want no attribution", *got)
+				}
+			} else if got == nil || *got != tc.wantProfile {
+				t.Fatalf("ProfileID = %v, want %s", got, tc.wantProfile)
+			}
+		})
 	}
 }
 
@@ -381,44 +351,6 @@ func TestNewProfileAttributionValidatorRejectsChildProfiles(t *testing.T) {
 				t.Fatalf("ProfileBelongsToUser = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestServiceIngestRejectsChildProfileAttribution(t *testing.T) {
-	// A nonconforming client attributes the report to a child profile. The
-	// validator rejects it with ErrChildProfileForbidden, so the upload is
-	// refused outright rather than silently stored without attribution.
-	bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "prof_child")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-	svc.SetProfileAttributionValidator(ProfileAttributionValidatorFunc(func(context.Context, int, string) (bool, error) {
-		return false, ErrChildProfileForbidden
-	}))
-
-	_, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle))
-	if !errors.Is(err, ErrChildProfileForbidden) {
-		t.Fatalf("Ingest error = %v, want ErrChildProfileForbidden", err)
-	}
-	if repo.insertInput.ProfileID != nil {
-		t.Fatalf("ProfileID = %v, want no insert on child profile", *repo.insertInput.ProfileID)
-	}
-	if len(repo.ready) != 0 || len(store.puts) != 0 {
-		t.Fatalf("no report should be stored on child rejection: ready=%v puts=%v", repo.ready, store.puts)
-	}
-}
-
-func TestServiceIngestAcceptsManifestWithoutProfileID(t *testing.T) {
-	bundle, manifest, _ := testDiagnosticsUpload(t, "server-1", DefaultConsentNoticeVer, "")
-	repo := &fakeDiagnosticReportStore{}
-	store := &fakeDiagnosticObjectStore{bucket: "private"}
-	svc := newTestDiagnosticsService(repo, store)
-
-	if _, err := svc.Ingest(context.Background(), 42, nil, manifest, bytes.NewReader(bundle)); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-	if repo.insertInput.ProfileID != nil {
-		t.Fatalf("ProfileID = %v, want nil", *repo.insertInput.ProfileID)
 	}
 }
 
@@ -485,6 +417,13 @@ func TestServiceDeleteReportSucceedsWhenBlobDeletionFails(t *testing.T) {
 	if len(store.deleted) == 0 {
 		t.Fatal("blob deletion was not attempted after row removal")
 	}
+}
+
+// newIngestFixture returns a service over empty fakes with a private bucket.
+func newIngestFixture() (*fakeDiagnosticReportStore, *fakeDiagnosticObjectStore, *Service) {
+	repo := &fakeDiagnosticReportStore{}
+	store := &fakeDiagnosticObjectStore{bucket: "private"}
+	return repo, store, newTestDiagnosticsService(repo, store)
 }
 
 func newTestDiagnosticsService(repo ReportStore, store ObjectStore) *Service {

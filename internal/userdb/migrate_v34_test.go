@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"slices"
 	"testing"
 )
@@ -10,15 +9,7 @@ import (
 // legacy section_type, and leaves every other override, including an
 // override of an admin row, as it was.
 func TestMigrateToV34DeletesAddedNextUpRows(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSingleConnSchemaDB(t)
 	if _, err := db.Exec(`
 INSERT INTO profile_section_overrides (id, profile_id, scope, library_id, section_id, hidden, section_type, is_user_added, user_section_type, created_at, updated_at) VALUES
     ('added', 'p1', 'home', NULL, NULL, 0, NULL, 1, 'next_up', 'now', 'now'),

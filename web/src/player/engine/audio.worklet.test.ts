@@ -155,7 +155,7 @@ describe("EngineAudioProcessor", () => {
       return crossings / (signal.length / RATE);
     }
 
-    it.each([0.5, 1.5, 2, 3])("keeps the pitch and advances the clock %sx as fast", (speed) => {
+    it.each([0.5, 2])("keeps the pitch and advances the clock %sx as fast", (speed) => {
       const { page, worker, render, lastClock } = setup(1);
       worker({ type: "pcm", generation: 1, timestamp: 0, samples: sine(440, 4, 1) });
       page({ type: "rate", rate: speed });

@@ -206,6 +206,11 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 			!strings.HasPrefix(vtt.Body.String(), "WEBVTT") || !strings.Contains(vtt.Body.String(), "00:00:01.000 --> 00:00:02.000") {
 			t.Fatalf("%s%s must serve the WebVTT conversion: %d %q", converted.track, converted.query, vtt.Code, vtt.Body.String())
 		}
+		// Packaged TV apps fetch the sidecar with an opaque Origin, so the
+		// external branch needs the same CORS answer as an embedded extract.
+		if got := vtt.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Fatalf("%s%s Access-Control-Allow-Origin = %q, want *", converted.track, converted.query, got)
+		}
 	}
 
 	for _, tc := range []struct{ track, query, want string }{

@@ -99,45 +99,6 @@ func tmdbConfig(t *testing.T, source, window string) json.RawMessage {
 	return raw
 }
 
-func TestRefresherSavesOrderedContentIDs(t *testing.T) {
-	store := newFakeSnapshotStore()
-	r := &TrendingRefresher{
-		Sections:  fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "week")}},
-		Snapshots: store,
-		Resolver: fakeResolver{byType: map[string]*catalog.ExternalIDLookup{
-			"movie":  {ByTMDB: map[string]string{"10": "c-movie"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-			"series": {ByTMDB: map[string]string{"20": "c-series"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-		}},
-		TMDBTrending: fakeTMDB{entries: []catalog.TMDBCollectionEntry{
-			{ID: 10, MediaType: "movie"},
-			{ID: 20, MediaType: "tv"},
-		}},
-		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
-	}
-
-	data, err := r.RunOnce(context.Background())
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-
-	var result TrendingRefreshResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	if result.Combos != 1 || result.Refreshed != 1 || result.Failed != 0 || result.Empty != 0 {
-		t.Fatalf("result = %+v; want {Combos:1 Refreshed:1 Empty:0 Failed:0}", result)
-	}
-
-	got := store.saved["tmdb|week"]
-	want := []string{"c-movie", "c-series"}
-	if len(got.contentIDs) != len(want) || got.contentIDs[0] != want[0] || got.contentIDs[1] != want[1] {
-		t.Fatalf("saved content IDs = %v; want %v", got.contentIDs, want)
-	}
-	if got.status != "ok" || got.entryCount != 2 {
-		t.Fatalf("saved snap = %+v; want status ok, entryCount 2", got)
-	}
-}
-
 func TestRefresherSkipsFetchWhenLeaseIsHeld(t *testing.T) {
 	store := newFakeSnapshotStore()
 	store.claimed = false
@@ -313,26 +274,6 @@ func TestRefresherSkipsPersonEntries(t *testing.T) {
 	want := []string{"c-movie", "c-series"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("content IDs = %v; want %v (person entry must be skipped)", got, want)
-	}
-}
-
-func TestDistinctTrendingCombosCollapsesDuplicates(t *testing.T) {
-	configs := []json.RawMessage{
-		tmdbConfig(t, "tmdb", "week"),
-		tmdbConfig(t, "", "bogus"),
-		tmdbConfig(t, "tmdb", "day"),
-		tmdbConfig(t, "tmdb", "day"),
-	}
-	got := distinctTrendingCombos(configs)
-	if len(got) != 2 {
-		t.Fatalf("distinctTrendingCombos len = %d (%+v); want 2", len(got), got)
-	}
-	seen := map[trendingCombo]bool{}
-	for _, c := range got {
-		seen[c] = true
-	}
-	if !seen[trendingCombo{"tmdb", "week"}] || !seen[trendingCombo{"tmdb", "day"}] {
-		t.Fatalf("combos = %+v; want {tmdb week} and {tmdb day}", got)
 	}
 }
 

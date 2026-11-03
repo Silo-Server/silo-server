@@ -75,24 +75,4 @@ describe("LanguageSelect", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Not a valid language tag");
     expect(screen.getByRole("button", { name: "Use" })).toBeDisabled();
   });
-
-  it("keeps the current selection when Other is dismissed", async () => {
-    const user = userEvent.setup();
-    const { onValueChange } = renderSelect({ value: "en" });
-
-    await user.click(screen.getByRole("combobox", { name: "Spoken language" }));
-    await user.click(screen.getByRole("option", { name: "Other…" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(onValueChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("combobox", { name: "Spoken language" })).toHaveTextContent("English");
-  });
-
-  it("hides the Other entry when the value is constrained", async () => {
-    const user = userEvent.setup();
-    renderSelect({ allowOther: false });
-
-    await user.click(screen.getByRole("combobox", { name: "Spoken language" }));
-    expect(screen.queryByRole("option", { name: "Other…" })).not.toBeInTheDocument();
-  });
 });

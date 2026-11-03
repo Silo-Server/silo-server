@@ -2,12 +2,8 @@ package pgstore
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -19,24 +15,10 @@ import (
 // event_at so an older provider resume point cannot restore the position.
 // Skips unless SILO_TEST_DATABASE_URL names a migrated database.
 func TestPostgresClearResumePosition(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := testPool(t)
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
 
-	var userID int
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-		fmt.Sprintf("conf-resume-reset-%d", time.Now().UnixNano()),
-	).Scan(&userID); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
+	userID := seedTestUser(t, pool, "conf-resume-reset")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM user_watch_history WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_history_hidden_items WHERE user_id = $1`, userID)

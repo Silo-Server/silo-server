@@ -107,6 +107,14 @@ export function franchiseIdOf(typed: string): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+/** "mdblist.com/lists/u/top": a list link as the source card shows it. */
+export function shownLink(link: string) {
+  return link
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/json$/, "");
+}
+
 /**
  * True for a list page on mdblist.com (`/lists/...`), with or without `/json`.
  * Mirrors the server's `ValidateMDBListURL`: no credentials, and no port but 80 or 443.

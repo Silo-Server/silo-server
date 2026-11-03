@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { PluginInstallation } from "@/api/types";
 
-import { capabilityKind, capabilityListLabel, catalogJobs } from "./pluginCapabilities";
+import { capabilityListLabel, catalogJobs } from "./pluginCapabilities";
 import { parsePluginMarkdown } from "./pluginMarkdown";
 import {
-  licenseLabel,
-  pluginDisplayName,
+  installationTier,
+  pendingUpdateVersion,
   pluginPagePath,
   pluginResourceLinks,
   safeExternalURL,
@@ -78,6 +78,28 @@ describe("pluginPresentation", () => {
     expect(tierNotice("silo")).toBeNull();
     expect(tierNotice("approved_community")).toMatch(/Reviewed by Silo maintainers/);
     expect(tierNotice("external")).toMatch(/Silo has not reviewed this plugin/);
+    expect(sourceLabel("unverified")).toBe("Unverified");
+    expect(tierNotice("unverified")).toMatch(/can't verify it or check it for updates/);
+  });
+
+  it("treats an installation without a repository as Unverified", () => {
+    const fromCatalog = { repository_id: 3, source_kind: "external" } as PluginInstallation;
+    const fromFile = { repository_id: null, source_kind: "external" } as PluginInstallation;
+    expect(installationTier(fromCatalog)).toBe("external");
+    expect(installationTier(fromFile)).toBe("unverified");
+  });
+
+  it("offers a recorded update only while updates can run", () => {
+    const base = {
+      repository_id: 3,
+      source_kind: "approved_community",
+      updates_paused: false,
+      available_version: "1.1.0",
+    } as PluginInstallation;
+    expect(pendingUpdateVersion(base)).toBe("1.1.0");
+    expect(pendingUpdateVersion({ ...base, updates_paused: true })).toBeNull();
+    expect(pendingUpdateVersion({ ...base, repository_id: null })).toBeNull();
+    expect(pendingUpdateVersion({ ...base, available_version: null })).toBeNull();
   });
 
   it("only allows http and https links", () => {
@@ -108,27 +130,9 @@ describe("pluginPresentation", () => {
       ),
     ).toEqual([{ label: "Source code", url: "https://github.com/Silo-Server/x" }]);
   });
-
-  it("falls back to a readable name and license", () => {
-    expect(pluginDisplayName("silo.requests.seerr")).toBe("Requests Seerr");
-    expect(pluginDisplayName("silo")).toBe("silo");
-    expect(pluginDisplayName("silo_")).toBe("silo_");
-    expect(licenseLabel("NOASSERTION")).toBe("Not specified");
-    expect(licenseLabel("")).toBe("Not specified");
-    expect(licenseLabel("MIT")).toBe("MIT");
-  });
 });
 
 describe("pluginCapabilities", () => {
-  it("maps known capability types and falls back for unknown ones", () => {
-    expect(capabilityKind("metadata_provider.v1")).toMatchObject({ label: "Metadata" });
-    expect(capabilityKind("http_routes.v1").primary).toBe(false);
-    expect(capabilityKind("weird_thing.v2")).toMatchObject({
-      label: "Weird thing",
-      primary: false,
-    });
-  });
-
   it("lists a plugin's jobs once each, in a fixed order, without plumbing", () => {
     expect(
       capabilityListLabel([
@@ -210,36 +214,6 @@ describe("pluginStatus", () => {
 });
 
 describe("pluginStatusIndicator", () => {
-  it("reads runtime.state only for resident plugins and calls disabled plugins Off", () => {
-    const base = installation();
-    expect(pluginStatusIndicator(base)).toMatchObject({ dotClass: "bg-success", label: "Active" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "running", restart_count: 0 },
-      }),
-    ).toMatchObject({ dotClass: "bg-success", label: "Running" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "backoff", restart_count: 3, last_error: "exited" },
-      }),
-    ).toMatchObject({ dotClass: "bg-warning", label: "Restarting (3)", title: "exited" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "failed", restart_count: 9, last_error: "boom" },
-      }),
-    ).toMatchObject({ dotClass: "bg-destructive", label: "Failed", title: "boom" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        enabled: false,
-        runtime: { resident: true, state: "failed", restart_count: 9 },
-      }),
-    ).toMatchObject({ dotClass: "bg-muted-foreground", label: "Off" });
-  });
-
   it("shows a non-resident plugin whose last launch failed as Failed with the error", () => {
     const base = installation();
     expect(

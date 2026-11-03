@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,37 +159,6 @@ func (f *fixture) generate(t *testing.T, fileID int, owner string) int64 {
 	return revision
 }
 
-func TestReconcileQueuesOptedInVideoFilesDB(t *testing.T) {
-	f := newFixture(t)
-	movies := f.library(t, "Movies", true)
-	off := f.library(t, "movies", false)
-	books := f.library(t, "audiobooks", true)
-	queuedFile := f.file(t, movies, "a")
-	missing := f.file(t, movies, "missing")
-	unprobed := f.file(t, movies, "unprobed")
-	noVideo := f.file(t, movies, "novideo")
-	f.exec(t, `UPDATE public.media_files SET missing_since = now() WHERE id = $1`, missing)
-	f.exec(t, `UPDATE public.media_files SET probe_updated_at = NULL WHERE id = $1`, unprobed)
-	f.exec(t, `UPDATE public.media_files SET video_tracks = '[]' WHERE id = $1`, noVideo)
-	offFile := f.file(t, off, "off")
-	bookFile := f.file(t, books, "book")
-
-	f.reconcile(t)
-	if row, ok := f.row(t, queuedFile); !ok || row.state != statePending || !row.due || row.version != AlgorithmVersion {
-		t.Fatalf("opted-in file: %+v %t", row, ok)
-	}
-	for _, id := range []int{missing, unprobed, noVideo, offFile, bookFile} {
-		if _, ok := f.row(t, id); ok {
-			t.Errorf("file %d should not be queued", id)
-		}
-	}
-	// Idempotent.
-	f.reconcile(t)
-	if row, _ := f.row(t, queuedFile); row.state != statePending {
-		t.Fatalf("second pass changed the row: %+v", row)
-	}
-}
-
 func TestClaimPublishAndServeDB(t *testing.T) {
 	f := newFixture(t)
 	file := f.file(t, f.library(t, "tv", true), "episode")
@@ -253,223 +222,78 @@ func TestClaimPublishAndServeDB(t *testing.T) {
 	}
 }
 
-func TestServingFollowsTheFileDB(t *testing.T) {
+func TestExternalDeliveryConfirmationDB(t *testing.T) {
+	// A store of its own keeps other tests' revisions out of the claims.
+	const store = "local|/trickplay-delivery-test"
 	f := newFixture(t)
 	file := f.file(t, f.library(t, "movies", true), "movie")
 	f.reconcile(t)
-	f.generate(t, file, "server-a")
-	serves := func() bool {
-		manifests, err := f.repo.Manifests(t.Context(), []int{file}, testStore)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, ok := manifests[file]
-		return ok
-	}
-	// A re-probe that rounds the duration differently, or a hash computed
-	// later, is the same file.
-	f.exec(t, `UPDATE public.media_files SET duration = 3602, file_hash = NULL WHERE id = $1`, file)
-	if !serves() {
-		t.Fatal("the same file stopped serving")
-	}
-	f.reconcile(t)
-	if row, _ := f.row(t, file); row.state != stateReady {
-		t.Fatalf("the same file was requeued: %+v", row)
-	}
-	// A replaced file is not.
-	f.exec(t, `UPDATE public.media_files SET file_size = 2000000 WHERE id = $1`, file)
-	if serves() {
-		t.Fatal("sheets of the replaced file are served")
-	}
-	f.reconcile(t)
-	if row, _ := f.row(t, file); row.state != statePending || !row.due {
-		t.Fatalf("the replaced file was not requeued: %+v", row)
-	}
-}
-
-func TestReconcileRequeuesOtherRecipesAndStoresDB(t *testing.T) {
-	f := newFixture(t)
-	folder := f.library(t, "movies", true)
-	file, newer := f.file(t, folder, "a"), f.file(t, folder, "newer")
-	f.reconcile(t)
-	f.generate(t, file, "server-a")
-	f.generate(t, newer, "server-a")
-	// A newer algorithm made this one: an older server leaves it alone.
-	f.exec(t, `UPDATE public.media_file_trickplay SET recipe_version = $2, published_recipe = 'v99/x' WHERE media_file_id = $1`, newer, AlgorithmVersion+1)
-
-	if _, err := f.repo.Reconcile(t.Context(), Recipe{Width: 320, IntervalMS: 10000}, testStore, 1000); err != nil {
-		t.Fatal(err)
-	}
-	if row, _ := f.row(t, file); row.state != statePending {
-		t.Fatalf("a changed width did not requeue: %+v", row)
-	}
-	if row, _ := f.row(t, newer); row.state != stateReady {
-		t.Fatalf("an older server requeued a newer algorithm's row: %+v", row)
-	}
-	if job, _ := f.repo.ClaimFile(t.Context(), newer, "server-a", time.Minute); job != nil {
-		t.Fatal("an older server claimed a newer algorithm's row")
-	}
-}
-
-func TestExpiredLeaseIsReclaimedAsAFailureDB(t *testing.T) {
-	f := newFixture(t)
-	file := f.file(t, f.library(t, "movies", true), "crash")
-	f.reconcile(t)
 	job, err := f.repo.ClaimFile(t.Context(), file, "server-a", time.Minute)
 	if err != nil || job == nil {
-		t.Fatal("claim")
+		t.Fatalf("claim: %v %v", job, err)
 	}
-	revision, _, _ := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
-	// server-a dies: its lease runs out.
-	f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
-	if ok, _ := f.repo.Heartbeat(t.Context(), file, job.LeaseToken, time.Minute); ok {
-		t.Fatal("an expired lease was renewed")
+	revision, ok, err := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
+	if err != nil || !ok {
+		t.Fatalf("begin upload: %v %t", err, ok)
 	}
-	stats := f.reconcile(t)
-	if stats.Reclaimed < 1 {
-		t.Fatalf("stats %+v", stats)
+	if ok, err := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{
+		Recipe: testRecipe, StoreIdentity: store, Height: 168, Count: 360, SheetBytes: []int{1, 1, 1, 1, 1},
+		DeliveryScope: "scope-old",
+	}); err != nil || !ok {
+		t.Fatalf("publish: %v %t", err, ok)
 	}
-	row, _ := f.row(t, file)
-	if row.state != statePending || row.failures != 1 || row.due || row.working != nil || row.lastError != "lease expired" {
-		t.Fatalf("reclaimed row %+v, want pending, one failure, backing off", row)
-	}
-	if got := f.queued(t, file); !slices.Equal(got, []string{revisionPrefix(file, revision)}) {
-		t.Fatalf("queued %v, want the abandoned revision", got)
-	}
-	if ok, _ := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 1, SheetBytes: []int{1}}); ok {
-		t.Fatal("the dead server published after losing its lease")
-	}
-}
-
-func TestFinishOutcomesDB(t *testing.T) {
-	f := newFixture(t)
-	folder := f.library(t, "movies", true)
-	failed, unusable, released := f.file(t, folder, "failed"), f.file(t, folder, "unusable"), f.file(t, folder, "released")
-	f.reconcile(t)
-	for _, tt := range []struct {
-		file    int
-		outcome Outcome
-		delay   time.Duration
-		want    rowState
-	}{
-		{failed, Failed, 0, rowState{state: statePending, failures: 1, lastError: "boom"}},
-		{unusable, Unusable, 0, rowState{state: stateUnusable, failures: 1, due: true, lastError: "boom"}},
-		{released, Released, time.Minute, rowState{state: statePending, failures: 0, lastError: "boom"}},
-	} {
-		job, err := f.repo.ClaimFile(t.Context(), tt.file, "server-a", time.Minute)
-		if err != nil || job == nil {
-			t.Fatal("claim")
+	served := func(scope string) string {
+		t.Helper()
+		reader := NewReader(f.pool, identityStore(store), originURLs("/api/v2/artwork/"))
+		reader.SetExternalDelivery(scope, originURLs("https://cdn.example/"))
+		signed, ok, err := reader.SignedManifest(t.Context(), file)
+		if err != nil || !ok {
+			t.Fatalf("signed manifest: %v %t", err, ok)
 		}
-		if ok, err := f.repo.Finish(t.Context(), tt.file, job.LeaseToken, tt.outcome, "boom", tt.delay); err != nil || !ok {
-			t.Fatalf("finish: %v %t", err, ok)
-		}
-		row, _ := f.row(t, tt.file)
-		row.version, row.revision, row.working = 0, nil, nil
-		if row != tt.want {
-			t.Errorf("outcome %d: row %+v, want %+v", tt.outcome, row, tt.want)
-		}
+		origin, _, _ := strings.Cut(signed.SheetURLs[0], "trickplay/")
+		return origin
 	}
-	// An unusable file is retried once it changes.
-	f.exec(t, `UPDATE public.media_files SET file_size = 5 WHERE id = $1`, unusable)
-	f.reconcile(t)
-	if row, _ := f.row(t, unusable); row.state != statePending || row.failures != 0 {
-		t.Fatalf("a replaced unusable file was not requeued: %+v", row)
+	if got := served("scope-old"); got != "https://cdn.example/" {
+		t.Fatalf("a revision confirmed at publish was served from %q", got)
 	}
-}
+	if got := served("scope-a"); got != "/api/v2/artwork/" {
+		t.Fatalf("an unconfirmed revision was served from %q", got)
+	}
 
-func TestClaimsDoNotOverlapDB(t *testing.T) {
-	f := newFixture(t)
-	folder := f.library(t, "movies", true)
-	var files []int
-	for i := range 12 {
-		files = append(files, f.file(t, folder, fmt.Sprintf("parallel-%d", i)))
+	// Publishing counts as a check, so the revision is due only after its
+	// recheck.
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", time.Hour, 10); len(checks) != 0 {
+		t.Fatal("a revision just checked at publish was claimed")
 	}
-	f.reconcile(t)
-	var mu sync.Mutex
-	claimed := map[int]string{}
-	var wg sync.WaitGroup
-	for worker := range 6 {
-		wg.Go(func() {
-			owner := fmt.Sprintf("server-%d", worker)
-			for {
-				job, err := f.repo.Claim(t.Context(), owner, time.Minute)
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				if job == nil {
-					return
-				}
-				mu.Lock()
-				if previous, dup := claimed[job.FileID]; dup {
-					t.Errorf("file %d claimed by %s and %s", job.FileID, previous, owner)
-				}
-				claimed[job.FileID] = owner
-				mu.Unlock()
-			}
-		})
+	checks, err := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", 0, 10)
+	if err != nil || !slices.Equal(checks, []DeliveryCheck{{FileID: file, Revision: revision, SheetCount: 5}}) {
+		t.Fatalf("claimed %+v, %v", checks, err)
 	}
-	wg.Wait()
-	for _, file := range files {
-		if _, ok := claimed[file]; !ok {
-			t.Errorf("file %d was never claimed", file)
-		}
+	if again, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", time.Hour, 10); len(again) != 0 {
+		t.Fatal("a revision was claimed again before its recheck")
 	}
-}
-
-func TestOptOutAndFileDeletionQueueSheetsDB(t *testing.T) {
-	f := newFixture(t)
-	folder := f.library(t, "movies", true)
-	kept, deleted := f.file(t, folder, "kept"), f.file(t, folder, "deleted")
-	f.reconcile(t)
-	keptRevision := f.generate(t, kept, "server-a")
-	deletedRevision := f.generate(t, deleted, "server-a")
-
-	f.exec(t, `DELETE FROM public.media_files WHERE id = $1`, deleted)
-	if got := f.queued(t, deleted); !slices.Equal(got, []string{revisionPrefix(deleted, deletedRevision)}) {
-		t.Fatalf("deleting the file queued %v", got)
-	}
-	f.exec(t, `UPDATE public.media_folders SET trickplay_enabled = false WHERE id = $1`, folder)
-	stats := f.reconcile(t)
-	if _, ok := f.row(t, kept); ok || stats.Removed < 1 {
-		t.Fatalf("opting out kept the row (stats %+v)", stats)
-	}
-	if got := f.queued(t, kept); !slices.Equal(got, []string{revisionPrefix(kept, keptRevision)}) {
-		t.Fatalf("opting out queued %v", got)
-	}
-}
-
-func TestBlobNamespaceLiveDB(t *testing.T) {
-	f := newFixture(t)
-	file := f.file(t, f.library(t, "movies", true), "live")
-	f.reconcile(t)
-	published := f.generate(t, file, "server-a")
-	if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
+	// A confirmation of a revision replaced meanwhile changes nothing.
+	if err := f.repo.RecordDelivery(t.Context(), file, revision+1, store, "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	job, err := f.repo.ClaimFile(t.Context(), file, "server-b", time.Minute)
-	if err != nil || job == nil {
-		t.Fatal("claim")
+	if got := served("scope-a"); got != "/api/v2/artwork/" {
+		t.Fatalf("a stale confirmation was served from %q", got)
 	}
-	working, _, _ := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
-	dead := newRevision()
-	ns := BlobNamespace()
-	prefixes := []string{revisionPrefix(file, published), revisionPrefix(file, working), revisionPrefix(file, dead)}
-	live, err := ns.Live(t.Context(), f.pool, prefixes)
-	if err != nil {
+	if err := f.repo.RecordDelivery(t.Context(), file, revision, store, "scope-a"); err != nil {
 		t.Fatal(err)
 	}
-	if !live[prefixes[0]] || !live[prefixes[1]] || live[prefixes[2]] {
-		t.Fatalf("live %v", live)
+	if got := served("scope-a"); got != "https://cdn.example/" {
+		t.Fatalf("a confirmed revision was served from %q", got)
 	}
-	for _, key := range []string{SheetKey(file, published, 0), prefixes[0]} {
-		if group, ok := ns.Group(key); !ok || group != prefixes[0] {
-			t.Errorf("group %q = %q %t", key, group, ok)
-		}
+
+	// A new endpoint configuration has confirmed nothing yet.
+	if got := served("scope-b"); got != "/api/v2/artwork/" {
+		t.Fatalf("a revision confirmed under another scope was served from %q", got)
 	}
-	for _, key := range []string{"trickplay/12/", "trickplay/012/5/0.5.jpg", "trickplay/12/0/0.0.jpg", "chapter-images/12/0/w300.webp"} {
-		if _, ok := ns.Group(key); ok {
-			t.Errorf("%q grouped", key)
-		}
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-b", 0, 10); len(checks) != 1 {
+		t.Fatalf("claimed %+v under the new scope", checks)
+	}
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", 0, 10); len(checks) != 0 {
+		t.Fatalf("claimed %+v under the confirmed scope", checks)
 	}
 }

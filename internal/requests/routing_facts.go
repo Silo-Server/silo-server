@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -28,6 +29,11 @@ type RoutingFacts struct {
 	// when TMDB has neither, nil when it was never looked up (requests from
 	// before it was captured).
 	ContentRating *string `json:"content_rating,omitempty"`
+	// SeriesStatus is a series' lifecycle status in the catalog's terms
+	// (showstatus: "returning", "ended", ...); "" when TMDB has none, nil for
+	// a movie or a series captured before status was. It is read once, when
+	// the request is made: a show that ends later keeps its route.
+	SeriesStatus *string `json:"series_status,omitempty"`
 	// CapturedAt is unset on requests from before capture, which is how
 	// routing tells "no facts yet" from a title TMDB knows little about.
 	CapturedAt *time.Time `json:"captured_at,omitempty"`
@@ -54,8 +60,19 @@ func routingFactsFrom(detail *tmdb.MediaDetail, listed bool, now time.Time) Rout
 		CompanyIDs:       detail.CompanyIDs,
 		Anime:            detectAnime(detail, listed),
 		ContentRating:    &rating,
+		SeriesStatus:     seriesStatusOf(detail),
 		CapturedAt:       &now,
 	}
+}
+
+// seriesStatusOf reads a series' status off its TMDB detail; nil for a movie,
+// whose TMDB status ("Released") routing does not match on.
+func seriesStatusOf(detail *tmdb.MediaDetail) *string {
+	if detail.MediaType != string(MediaTypeSeries) {
+		return nil
+	}
+	status := showstatus.Normalize(detail.Status)
+	return &status
 }
 
 // routingRating picks the rating routing matches a title on. Most rules are

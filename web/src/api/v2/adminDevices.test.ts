@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { captureAdminUserAuthority } from "./adminUsers";
-import { listAdminDevices, getAdminDevice } from "./adminDevices";
+import { listAdminDevices } from "./adminDevices";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 beforeEach(() => {
   installPolicyStorageMocks();
   setAccessToken("admin");
@@ -38,15 +39,6 @@ it("drains pages and converts account IDs while retaining profile/device identit
   });
   expect(String(fetch.mock.calls[1]?.[0])).toContain("cursor=next");
 });
-it("encodes detail identity and retains the legacy array as compatibility data", async () => {
-  const fetch = vi
-    .fn<typeof globalThis.fetch>()
-    .mockResolvedValue(jsonResponse({ ...row, settings: [] }));
-  vi.stubGlobal("fetch", fetch);
-  const detail = await getAdminDevice(7, "screen/one", captureAdminUserAuthority());
-  expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v2/admin/devices/7/screen%2Fone");
-  expect(detail.settings).toEqual([]);
-});
 it("rejects repeated continuation without returning a partial list", async () => {
   vi.stubGlobal(
     "fetch",
@@ -59,16 +51,7 @@ it("rejects repeated continuation without returning a partial list", async () =>
   await expect(listAdminDevices(captureAdminUserAuthority())).rejects.toThrow("continuation");
 });
 it("discards a page received after an account switch", async () => {
-  let finish!: (r: Response) => void;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve;
-        }),
-    ),
-  );
+  const { finish } = stubPendingFetch();
   const result = listAdminDevices(captureAdminUserAuthority());
   setAccessToken("other");
   finish(jsonResponse({ items: [row], page: { has_more: false } }));

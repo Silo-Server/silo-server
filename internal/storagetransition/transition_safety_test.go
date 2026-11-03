@@ -72,13 +72,9 @@ func TestCancelRequeuedCopyingStageAllowsNewTarget(t *testing.T) {
 
 func TestCancelRequeuedJobPreservesCommittedStage(t *testing.T) {
 	stage := stagedTarget{ID: "committed-copy", Phase: transitionPhaseRestartPending}
-	raw, err := json.Marshal(stage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}
+	settings := stagedSettings(t, stage)
 	service := New(nil, settings, nil, nil, nil)
-	err = service.CancelStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID})
+	err := service.CancelStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID})
 	if !errors.Is(err, adminjob.ErrStorageTransitionAlreadyCommitted) {
 		t.Fatalf("committed stage cancellation = %v", err)
 	}
@@ -138,15 +134,11 @@ func TestCopyRejectsDestinationsOverlappingOppositeSource(t *testing.T) {
 				privateTarget = publicSource
 			}
 			stage := stagedTarget{ID: "cross-source", Policy: PolicyMigrateAll, SourceIdentity: publicSource.Identity(), Phase: transitionPhaseStaged, Values: map[string]string{settingArtworkBackend: blobstore.BackendS3, settingPrivateBucket: "private-new"}}
-			raw, err := json.Marshal(stage)
-			if err != nil {
-				t.Fatal(err)
-			}
-			settings := &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}
+			settings := stagedSettings(t, stage)
 			service := New(nil, settings, nil, publicSource, privateSource)
 			service.openPublic = func(map[string]string) (blobstore.Store, error) { return publicTarget, nil }
 			service.openPrivate = func(map[string]string) blobstore.Store { return privateTarget }
-			_, err = service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: stage.Policy}, func(adminjob.StorageTransitionProgress) {})
+			_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: stage.Policy}, func(adminjob.StorageTransitionProgress) {})
 			if err == nil || !strings.Contains(err.Error(), "overlap") {
 				t.Fatalf("expected overlap rejection before copying, got %v; public source=%v private source=%v", err, publicSource.objects, privateSource.objects)
 			}

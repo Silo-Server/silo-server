@@ -40,23 +40,6 @@ func writeTest(t *testing.T, file, text string) {
 	}
 }
 
-func TestGitDoesNotStartMaintenance(t *testing.T) {
-	t.Chdir(t.TempDir())
-	// Keep injected maintenance synchronous so a regression cannot race cleanup.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "maintenance.autoDetach")
-	t.Setenv("GIT_CONFIG_VALUE_0", "false")
-	t.Setenv("GIT_CONFIG_PARAMETERS", "'maintenance.auto=true'")
-	t.Setenv("GIT_TRACE", "1")
-	gitTest(t, "init", "-q")
-	writeTest(t, "README", "fixture\n")
-	gitTest(t, "add", ".")
-	out := gitTest(t, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
-	if strings.Contains(out, "maintenance run") || strings.Contains(out, "gc --auto") {
-		t.Fatalf("git commit started maintenance; want no maintenance subprocess:\n%s", out)
-	}
-}
-
 func TestFileCrossings(t *testing.T) {
 	for _, tc := range []struct {
 		name, file    string

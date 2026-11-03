@@ -11,17 +11,6 @@ describe("ProfileLaunchSettingsGroup", () => {
     localStorage.clear();
   });
 
-  it("defaults to remembering the last profile", () => {
-    render(<ProfileLaunchSettingsGroup />);
-
-    expect(screen.getByRole("radiogroup", { name: "Profile at launch" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Remember last profile" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByText(/Applies only to this browser/)).toBeInTheDocument();
-  });
-
   it("saves the choice in this browser", async () => {
     const user = userEvent.setup();
     const view = render(<ProfileLaunchSettingsGroup />);

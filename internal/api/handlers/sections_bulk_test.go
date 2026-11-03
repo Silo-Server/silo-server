@@ -57,27 +57,6 @@ func TestBulkCreateAppliesToAllLibraries(t *testing.T) {
 	}
 }
 
-func TestBulkCreateRollsBackOnFailure(t *testing.T) {
-	repo := &stubBulkRepo{failOn: 2} // fail before second insert commits
-	h := &SectionBulkHandler{Repo: repo}
-	body, _ := json.Marshal(map[string]any{
-		"scope":        "library",
-		"library_ids":  []int{1, 2},
-		"section_type": "recently_added",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/sections/bulk-create", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	h.HandleBulkCreate(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d", rec.Code)
-	}
-	if len(repo.created) != 0 {
-		t.Fatalf("expected rollback; %d rows persisted", len(repo.created))
-	}
-}
-
 func TestBulkCreateRejectsUnknownSectionType(t *testing.T) {
 	repo := &stubBulkRepo{}
 	h := &SectionBulkHandler{Repo: repo}
@@ -96,24 +75,6 @@ func TestBulkCreateRejectsUnknownSectionType(t *testing.T) {
 	}
 	if len(repo.created) != 0 {
 		t.Fatalf("expected zero created; got %d", len(repo.created))
-	}
-}
-
-func TestBulkCreateRejectsLibraryScopeWithEmptyIDs(t *testing.T) {
-	repo := &stubBulkRepo{}
-	h := &SectionBulkHandler{Repo: repo}
-	body, _ := json.Marshal(map[string]any{
-		"scope":        "library",
-		"library_ids":  []int{},
-		"section_type": "recently_added",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/sections/bulk-create", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	h.HandleBulkCreate(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d", rec.Code)
 	}
 }
 

@@ -105,6 +105,7 @@ export type TransformationExecutorV3 = "client" | "server";
 
 /** Route-event names the server accepts as playback diagnostics. */
 export type RouteEventNameV3 =
+  | "plan_summary"
   | "plan_selected"
   | "plan_invalidated"
   | "plan_failed"
@@ -343,6 +344,10 @@ export interface StartRequestV3 {
   subtitle_track_id?: string;
   subtitle_track_index?: number;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   client_capabilities: ClientCodecCapabilitiesV3;
   client_playback_context: ClientPlaybackContextV3;
@@ -379,6 +384,10 @@ export interface ReplanRequestV3 {
   quality_preference: string;
   position_seconds: number;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;
   failure?: FailureV3;
@@ -577,6 +586,7 @@ export interface AvailableQualityV3 {
 }
 
 export interface PlanV3 {
+  bandwidth_limit?: { kbps: number; source: "observed_rebuffer"; expires_at: string };
   protocol_version: number;
   plan_id: string;
   plan_attempt_key: string;
@@ -593,6 +603,12 @@ export interface PlanV3 {
   applied_quirks: AppliedQuirkV3[];
   runtime_corrections: string[];
   available_qualities: AvailableQualityV3[];
+  /**
+   * The `available_qualities` label this plan delivers, which the quality
+   * menu marks. Absent when the plan delivers no listed entry, such as the
+   * source played unchanged or an encode between two rungs.
+   */
+  active_quality?: string;
   degradation_warnings: DegradationWarningV3[];
   decision_reason: string;
   requested_media_file_id: number;

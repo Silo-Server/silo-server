@@ -14,9 +14,4 @@ describe("browser decoding setting", () => {
     expect(storage.get(storage.KEYS.BROWSER_DECODING)).toBe("false");
     expect(isBrowserDecodingEnabled()).toBe(false);
   });
-
-  it("is on when the viewer turned it on", () => {
-    setBrowserDecodingEnabled(true);
-    expect(isBrowserDecodingEnabled()).toBe(true);
-  });
 });

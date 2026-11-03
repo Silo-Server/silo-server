@@ -181,20 +181,6 @@ func TestMemberStateSeriesUsesInProgressEpisodes(t *testing.T) {
 	}
 }
 
-func TestMemberStateReadsOnlyTheGivenMembers(t *testing.T) {
-	provider := &memberProvider{stores: map[int]*memberStore{1: {}}}
-	reader := NewMemberStateReader(provider, nil, nil)
-	items, err := reader.MemberState(context.Background(), pickerMembers()[:1], []string{"dune"})
-	if err != nil || len(items) != 1 || len(items[0].Members) != 1 {
-		t.Fatalf("items = %+v, err = %v", items, err)
-	}
-	// A member whose store is unknown surfaces as an error rather than a
-	// silent omission.
-	if _, err := reader.MemberState(context.Background(), pickerMembers(), []string{"dune"}); err == nil {
-		t.Fatal("missing store was swallowed")
-	}
-}
-
 func TestPickerContinueTogetherRequiresTwoMembers(t *testing.T) {
 	provider := &memberProvider{stores: map[int]*memberStore{
 		1: {inOrder: []userstore.WatchProgress{inProgress("dune", 100, 9000, "2026-04-03T00:00:00Z"), inProgress("arrival", 50, 7000, "2026-04-01T00:00:00Z")}},

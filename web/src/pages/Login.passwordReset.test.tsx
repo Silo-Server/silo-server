@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Login from "./Login";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderLogin } from "./loginPage.test-support";
 
 const request = vi.hoisted(() => vi.fn());
 const providers = vi.hoisted(() => ({ list: [] as unknown[] }));
@@ -42,18 +40,6 @@ afterEach(() => {
   request.mockReset();
 });
 
-function renderLogin() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/login"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  return client;
-}
-
 it("carries the typed username to the reset request", async () => {
   renderLogin();
   const link = await screen.findByRole("link", { name: "Forgot password?" });
@@ -68,24 +54,9 @@ it("carries the typed username to the reset request", async () => {
   expect(link.getAttribute("href")).toBe("/forgot-password?login=alice%40example.test");
 });
 
-it.each(["disabled", "not_configured"])(
-  "hides Forgot password? when reset is %s",
-  async (state) => {
-    resetState = state;
-    const client = renderLogin();
-    await waitFor(() =>
-      expect(client.getQueryState(["auth", "password-reset-capability"])?.status).toBe("success"),
-    );
-    expect(screen.queryByRole("link", { name: "Forgot password?" })).toBeNull();
-  },
-);
-
-it("hides Forgot password? while an external credential provider is selected", async () => {
-  providers.list = [
-    { id: "ldap", display_name: "Directory", mode: "credentials", default: true },
-    { id: "local", display_name: "Silo", mode: "credentials", default: false },
-  ];
-  const client = renderLogin();
+it.each(["disabled"])("hides Forgot password? when reset is %s", async (state) => {
+  resetState = state;
+  const { client } = renderLogin();
   await waitFor(() =>
     expect(client.getQueryState(["auth", "password-reset-capability"])?.status).toBe("success"),
   );

@@ -8,7 +8,7 @@ import {
   getFilterRuleFieldOptions,
 } from "@/components/FilterRuleEditor";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
-import { useExtendedQueryRules } from "@/hooks/queries/personSearch";
+import { useQueryRuleCapabilities } from "@/hooks/queries/personSearch";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,12 +100,12 @@ export function RuleBuilder({
   const { groups } = value;
   const scope: MediaScope = value.media_scope ?? "all";
   const shownRatingSources = useShownRatingSources();
-  const extendedRules = useExtendedQueryRules();
+  const capabilities = useQueryRuleCapabilities();
   const fieldOptions = getFilterRuleFieldOptions(
     allowPersonalized,
     scope,
     shownRatingSources,
-    extendedRules,
+    capabilities,
   );
   const several = groups.length > 1;
   // Follows the picker's summary: "library"/"libraries" only follows a summary that shows a

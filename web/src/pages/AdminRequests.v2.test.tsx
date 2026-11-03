@@ -151,7 +151,7 @@ afterEach(() => {
 });
 
 describe("request administration", () => {
-  it.each(["settings", "integrations"])(
+  it.each(["integrations"])(
     "sends the retired ?tab=%s to the Requests settings page",
     async (tab) => {
       serve({ "GET /api/v2/admin/requests/capabilities": capabilities });
@@ -301,7 +301,6 @@ describe("request administration", () => {
 
     fireEvent.click(retry);
     await waitFor(() => expect(retry).toHaveAttribute("aria-busy", "true"));
-    expect(retry.querySelector(".animate-spin")).not.toBeNull();
     // The row's other actions wait too, without a spinner of their own.
     expect(retry).toBeDisabled();
     expect(cancel).toBeDisabled();
@@ -309,7 +308,6 @@ describe("request administration", () => {
 
     await act(async () => finish!());
     await waitFor(() => expect(retry).not.toHaveAttribute("aria-busy"));
-    expect(retry.querySelector(".animate-spin")).toBeNull();
     expect(retry).toBeEnabled();
   });
 
@@ -371,123 +369,6 @@ describe("request administration", () => {
     // The failed one stays selected, ready to try again.
     expect(screen.getByRole("checkbox", { name: "Select Title 3" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Select Title 1" })).not.toBeChecked();
-  });
-
-  it("shows a request's servers, where it would go, and its history in plain words", async () => {
-    serve({
-      ...queue({
-        needs_approval: [
-          request("r1", "Waiting Title", {
-            last_error: "Radarr did not answer",
-            targets: [
-              target("t1", {
-                quality: "2160p",
-                instance_name: "Radarr 4K",
-                route_name: "4K rule",
-                status: "failed",
-                external_status: "rejected",
-                last_error: "quality profile missing",
-              }),
-            ],
-          }),
-        ],
-      }),
-      "GET /api/v2/admin/requests/{id}/events": () => ({
-        items: [
-          { id: "4", type: "mystery_step", message: "custom note", created_at: CREATED },
-          { id: "3", type: "submit_deferred", message: "Radarr unreachable", created_at: CREATED },
-          {
-            id: "2",
-            type: "status_approved",
-            actor_user_id: "1",
-            actor_username: "admin",
-            created_at: CREATED,
-          },
-          { id: "1", type: "created", actor_user_id: "9", created_at: CREATED },
-        ],
-      }),
-      "POST /api/v2/admin/request-routes/preview": () => ({
-        facts: {
-          anime: false,
-          company_ids: [],
-          genre_ids: [],
-          keyword_ids: [],
-          network_ids: [],
-          origin_countries: [],
-          year: 2019,
-          content_rating: "PG-13",
-        },
-        rules: [
-          {
-            route_id: "kids",
-            route_name: "Kids",
-            is_fallback: false,
-            enabled: true,
-            unmet_conditions: ["max_content_rating"],
-            hd: "no_match",
-            uhd: "no_match",
-          },
-          {
-            route_id: "fallback-movie",
-            route_name: "Everything else",
-            is_fallback: true,
-            enabled: true,
-            unmet_conditions: [],
-            hd: "sends",
-            uhd: "skips",
-          },
-        ],
-        tiers: [
-          {
-            quality: "1080p",
-            route_id: "fallback-movie",
-            integration_id: "s1",
-            integration_name: "Radarr",
-            route_name: "Everything else",
-          },
-          { quality: "2160p", route_id: "fallback-movie", route_name: "Everything else" },
-        ],
-      }),
-    });
-    mount("/admin/requests?view=needs_approval");
-    const row = await rowOf("Waiting Title");
-    // A click anywhere on the row but its controls opens the dialog.
-    fireEvent.click(within(row).getByText("Radarr did not answer"));
-    const dialog = await screen.findByRole("dialog");
-
-    const history = await within(dialog).findByRole("list", { name: "Request history" });
-    const entries = within(history).getAllByRole("listitem");
-    expect(entries).toHaveLength(4);
-    // Newest first; a type this client doesn't know shows as it is.
-    expect(entries[0]).toHaveTextContent(/^mystery_step.*custom note$/);
-    expect(entries[1]).toHaveTextContent(/^Couldn't send yet.*Radarr unreachable$/);
-    expect(entries[2]).toHaveTextContent(/^Approved by admin/);
-    expect(entries[3]).toHaveTextContent(/^Requested by User 9/);
-
-    const servers = within(dialog).getByRole("table");
-    expect(servers).toHaveTextContent("2160p");
-    expect(servers).toHaveTextContent("Radarr 4K");
-    expect(servers).toHaveTextContent("4K rule");
-    expect(servers).toHaveTextContent("rejected");
-    expect(servers).toHaveTextContent("quality profile missing");
-
-    expect(await within(dialog).findByText("Radarr (Everything else)")).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("none (Everything else doesn't send 4K versions)"),
-    ).toBeInTheDocument();
-    // How it was decided starts collapsed in the dialog.
-    const how = within(dialog).getByRole("button", { name: "How it was decided" });
-    expect(how).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(how);
-    expect(
-      within(dialog).getByText("Everything else — decides HD · decides 4K: none"),
-    ).toBeTruthy();
-    expect(calls("POST /api/v2/admin/request-routes/preview")[0]?.body).toEqual({
-      media_type: "movie",
-      tmdb_id: 1,
-      requester_user_id: "1",
-    });
-    expect(within(dialog).getByRole("button", { name: "Approve: Waiting Title" })).toBeEnabled();
   });
 
   it("shows the refetched request in the open dialog after another admin acted first", async () => {

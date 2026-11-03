@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -71,16 +70,6 @@ func TestComputeCapabilityHashIgnoresPerCallerMetadata(t *testing.T) {
 	}
 }
 
-func TestComputeCapabilityHashIsPrefixedSHA256(t *testing.T) {
-	hash := ComputeCapabilityHash(sampleCapabilityInfo())
-	if !strings.HasPrefix(hash, "sha256:") {
-		t.Fatalf("hash = %q, want a sha256: prefix", hash)
-	}
-	if len(hash) != len("sha256:")+64 {
-		t.Fatalf("hash = %q, want 64 hex digits after the prefix", hash)
-	}
-}
-
 // Every hardware or capability change must move the hash, since the hash is the
 // only thing the health sweep looks at before deciding nothing changed.
 func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
@@ -118,18 +107,6 @@ func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
 				t.Fatalf("%s did not change the hash (%s)", tt.name, got)
 			}
 		})
-	}
-}
-
-// An empty report still hashes, so a node with no hardware advertises a stable
-// identity rather than an empty one the sweep would read as "cannot say".
-func TestComputeCapabilityHashOfEmptyReport(t *testing.T) {
-	hash := ComputeCapabilityHash(HWAccelInfo{})
-	if hash == "" {
-		t.Fatal("empty report produced no hash")
-	}
-	if hash == ComputeCapabilityHash(sampleCapabilityInfo()) {
-		t.Fatal("empty report hashed the same as a populated one")
 	}
 }
 

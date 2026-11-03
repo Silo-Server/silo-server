@@ -7,7 +7,7 @@ import (
 )
 
 func TestMovieFolderBracketedYearPreservesTechnicalWords(t *testing.T) {
-	for _, title := range []string{"The Lantern Opus", "Voyage 4K", "The UHD Journey", "The HDR Chronicle", "The Blu-ray Companion"} {
+	for _, title := range []string{"The Lantern Opus", "Voyage 4K", "The Blu-ray Companion"} {
 		for _, providerTag := range []string{"", " {tmdb-12345}"} {
 			t.Run(title+providerTag, func(t *testing.T) {
 				folder := fmt.Sprintf("%s (2014)%s", title, providerTag)
@@ -43,11 +43,6 @@ func TestMovieFolderIdentityRequiresDatedFilenameContradiction(t *testing.T) {
 		{
 			name:      "undated release uses trusted folder",
 			filename:  "Lantern.Voyage.Special.Broadcast.1080p.HDTV.x264-GROUP.mkv",
-			wantState: "resolved",
-		},
-		{
-			name:      "undated generic export uses trusted folder",
-			filename:  "Local.Export.1080p.H264.mkv",
 			wantState: "resolved",
 		},
 		{

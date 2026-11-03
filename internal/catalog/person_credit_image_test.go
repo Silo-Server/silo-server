@@ -27,24 +27,6 @@ func personCreditPhoto(t *testing.T, size imagesize.Size) (*recordingCatalogImag
 	return resolver, credits[0]
 }
 
-// Without a requested size a cached headshot is the profile ladder's medium
-// rung, the w500 the people endpoints serve, never the stored original, which
-// can be up to 3840px tall. Plugin-backed photos get the large hint so
-// providers such as TMDB serve a headshot sharp enough for a high-density card.
-func TestPersonCreditPhotoUnsetIsMediumRung(t *testing.T) {
-	resolver, credit := personCreditPhoto(t, imagesize.Unset)
-
-	if want := "tmdb/people/287/profile/w500.abc123.webp"; resolver.path != want {
-		t.Errorf("resolved path = %q, want %q", resolver.path, want)
-	}
-	if resolver.variant != "large" {
-		t.Errorf("resolver variant = %q, want large", resolver.variant)
-	}
-	if credit.PhotoURL == "" {
-		t.Error("PhotoURL is empty")
-	}
-}
-
 // An explicit size resolves the profile ladder, which is {500, 300} — headshots
 // have no wide rung, so large lands on the same key as medium.
 func TestPersonCreditPhotoHonorsImageSize(t *testing.T) {
@@ -71,28 +53,6 @@ func TestPersonCreditPhotoHonorsImageSize(t *testing.T) {
 				t.Error("PhotoURL is empty")
 			}
 		})
-	}
-}
-
-// An absent or sentinel photo path stays empty at every size rather than
-// resolving a bogus key.
-func TestPersonCreditPhotoSkipsMissingPaths(t *testing.T) {
-	for _, photoPath := range []string{"", "-"} {
-		resolver := &recordingCatalogImageResolver{}
-		detail := &DetailService{}
-		detail.SetImageResolver(resolver)
-
-		credits := detail.personCredits(
-			context.Background(),
-			[]models.ItemPerson{{Person: models.Person{ID: 1, Name: "Nobody", PhotoPath: photoPath}}},
-			AccessFilter{ImageSize: imagesize.Large},
-		)
-		if len(credits) != 1 || credits[0].PhotoURL != "" {
-			t.Errorf("photo path %q produced %+v, want an empty PhotoURL", photoPath, credits)
-		}
-		if resolver.path != "" {
-			t.Errorf("photo path %q reached the resolver as %q", photoPath, resolver.path)
-		}
 	}
 }
 

@@ -424,6 +424,10 @@ export const adminKeys = {
   topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
   downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
   downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
+  apiClientsRoot: () => ["admin", "dashboard", "api-clients"] as const,
+  apiClients: (hours: number) => ["admin", "dashboard", "api-clients", hours] as const,
+  apiClientEndpoints: (sessionId: string, hours: number) =>
+    ["admin", "dashboard", "api-clients", "endpoints", sessionId, hours] as const,
   restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
@@ -458,6 +462,12 @@ export const adminKeys = {
   requestRouteTitles: (mediaType: string, q: string) =>
     ["admin", "requestRouteTitles", mediaType, q] as const,
   requestIntegrationOptionsRoot: () => ["admin", "requestIntegrationOptions"] as const,
+  // The Discover layout sits outside requestsRoot: a request or settings write
+  // changes nothing it holds.
+  requestDiscoverLayout: () => ["admin", "requestDiscover", "layout"] as const,
+  requestDiscoverPreview: (row: unknown) => ["admin", "requestDiscover", "preview", row] as const,
+  requestWatchProviders: (mediaType: string, region: string) =>
+    ["admin", "requestDiscover", "watchProviders", mediaType, region] as const,
   requestIntegrationOptions: (integrationId: string) =>
     ["admin", "requestIntegrationOptions", integrationId] as const,
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,

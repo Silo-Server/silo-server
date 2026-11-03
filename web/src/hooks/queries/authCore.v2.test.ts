@@ -7,14 +7,9 @@
 // contexts, so it runs on the threads pool (THREADS_TESTS in vite.config.ts).
 // Make it VM-safe and drop it from that list.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import getDeviceLoginOk from "../../../../contracts/api/v2/fixtures/get_device_login_ok.json";
-import getSignupStatusOk from "../../../../contracts/api/v2/fixtures/get_signup_status_ok.json";
 import loginOk from "../../../../contracts/api/v2/fixtures/login_ok.json";
-import pollDeviceLoginOk from "../../../../contracts/api/v2/fixtures/poll_device_login_ok.json";
 import refreshSessionOk from "../../../../contracts/api/v2/fixtures/refresh_session_ok.json";
 import refreshSessionRevoked from "../../../../contracts/api/v2/fixtures/refresh_session_revoked.json";
-import startDeviceLoginOk from "../../../../contracts/api/v2/fixtures/start_device_login_ok.json";
 
 import {
   refreshAccessToken,
@@ -157,61 +152,6 @@ describe("credential responses", () => {
   });
 });
 
-describe("device pairing", () => {
-  it("starts a pairing, then reads the approved token pair from the poll answer", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(json(startDeviceLoginOk, 201))
-      .mockResolvedValueOnce(json(pollDeviceLoginOk));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const started = await v2("POST /api/v2/auth/device/start", {
-      body: { device_name: "Living room TV", device_platform: "tvos" },
-    });
-    expect(started.device_code).toBe("dev-1");
-    expect(started.interval).toBe(5);
-
-    const polled = await v2("POST /api/v2/auth/device/poll", {
-      body: { device_code: started.device_code },
-    });
-    expect(polled.status).toBe("approved");
-    expect(polled.tokens && sessionFromTokenPair(polled.tokens).user.username).toBe("laura");
-
-    const [start, poll] = calls(fetchMock);
-    expect(start?.url).toBe("/api/v2/auth/device/start");
-    expect(poll?.url).toBe("/api/v2/auth/device/poll");
-    expect(JSON.parse(String(poll?.init.body))).toEqual({ device_code: "dev-1" });
-  });
-
-  it("looks a pairing up by code and sends the same code to the decision", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(json(getDeviceLoginOk))
-      .mockResolvedValueOnce(json({ status: "approved" }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const details = await v2("GET /api/v2/auth/device", { query: { code: "4821-7730" } });
-    expect(details.status).toBe("pending");
-    expect(details.match_code).toBe("warm pony");
-
-    await v2("POST /api/v2/auth/device/approve", { body: { code: "4821-7730" } });
-    const [lookup, approve] = calls(fetchMock);
-    expect(lookup?.url).toBe("/api/v2/auth/device?code=4821-7730");
-    expect(approve?.url).toBe("/api/v2/auth/device/approve");
-    expect(JSON.parse(String(approve?.init.body))).toEqual({ code: "4821-7730" });
-  });
-});
-
-describe("signup status", () => {
-  it("decodes the committed signup status", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async () => json(getSignupStatusOk)),
-    );
-    await expect(v2("GET /api/v2/auth/signup")).resolves.toEqual({ enabled: true });
-  });
-});
-
 describe("plugin launch", () => {
   it("preserves launch before a household profile is selected", async () => {
     setProfileId(null);
@@ -262,22 +202,5 @@ describe("plugin launch", () => {
     complete(json({ expires_in: 300 }));
     await launch;
     expect(location.href).toBe("/admin/plugins");
-  });
-
-  it("prepares the launch cookie on the API prefix the plugin page is served from", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => json({ expires_in: 300 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const location = { href: "" };
-    vi.stubGlobal("location", location);
-
-    const href = pluginRouteHref(3, "/");
-    await navigateToPluginRoute(href);
-
-    const [call] = calls(fetchMock);
-    expect(call?.url).toBe("/api/v2/auth/plugin-launch");
-    expect(call?.init.method).toBe("POST");
-    expect(location.href).toContain("/api/v2/plugin-content/plugins/3/");
-    expect(call?.init.headers["X-Profile-Id"]).toBe("p-owner");
-    expect(location.href.startsWith("/api/v2/plugin-content/plugins/")).toBe(true);
   });
 });

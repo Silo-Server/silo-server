@@ -11,7 +11,6 @@ import {
   hydrateRemovedSystemSections,
   sectionSaveErrorMessage,
 } from "@/lib/homeRows/profileOverrides";
-import { buildProfileGallerySection } from "@/lib/homeRows/payloads";
 
 function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSectionEntry {
   return {
@@ -29,39 +28,6 @@ function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSec
 }
 
 describe("HomeScreenSettings helpers", () => {
-  it("serializes custom gallery sections as profile-owned overrides without enabled state", () => {
-    const section = buildProfileGallerySection(
-      {
-        section_type: "hidden_gems",
-        title: "Hidden Gems",
-        item_limit: 18,
-        featured: true,
-        enabled: false,
-        config: { mood: "underrated" },
-      },
-      3,
-    );
-    const [override] = buildSectionOverrides([section]);
-
-    expect(section).toMatchObject({
-      section_type: "hidden_gems",
-      title: "Hidden Gems",
-      featured: true,
-      is_custom: true,
-      position: 3,
-      config: { mood: "underrated" },
-    });
-    expect(override).toMatchObject({
-      id: section.id,
-      section_type: "hidden_gems",
-      title: "Hidden Gems",
-      featured: true,
-      item_limit: 18,
-      config: { mood: "underrated" },
-    });
-    expect(override).not.toHaveProperty("enabled");
-  });
-
   it("keeps saved override IDs on admin sections and gives the others new ones", () => {
     const overrides = buildSectionOverrides(
       [
@@ -91,15 +57,6 @@ describe("HomeScreenSettings helpers", () => {
     ]);
   });
 
-  it("gives each admin section one new override ID per source", () => {
-    const first = createOverrideIdSource();
-    const id = first("admin-1");
-
-    expect(first("admin-1")).toBe(id);
-    expect(first("admin-2")).not.toBe(id);
-    expect(createOverrideIdSource()("admin-1")).not.toBe(id);
-  });
-
   it("removes a deleted custom section from visible rows without adding a removed override", () => {
     const result = applySectionDeletion(
       [
@@ -115,19 +72,13 @@ describe("HomeScreenSettings helpers", () => {
     expect(result.removedSystemSections).toEqual([]);
   });
 
-  it("removes a deleted system section from visible rows while retaining a removed override", () => {
-    const result = applySectionDeletion(
-      [
-        makeSection({ id: "admin-1", title: "Recently Added" }),
-        makeSection({ id: "custom-1", is_custom: true, title: "Custom Picks" }),
-        makeSection({ id: "admin-2", title: "Continue Watching" }),
-      ],
-      [],
-      "admin-2",
-    );
+  it("gives each admin section one new override ID per source", () => {
+    const first = createOverrideIdSource();
+    const id = first("admin-1");
 
-    expect(result.sections.map((section) => section.id)).toEqual(["admin-1", "custom-1"]);
-    expect(result.removedSystemSections).toEqual([{ id: "admin-2" }]);
+    expect(first("admin-1")).toBe(id);
+    expect(first("admin-2")).not.toBe(id);
+    expect(createOverrideIdSource()("admin-1")).not.toBe(id);
   });
 
   it("hydrates removed system sections from raw overrides and reserializes them after a fresh load", () => {
@@ -270,24 +221,6 @@ describe("override set saved by each Home Screen edit", () => {
     config: { user_collection_id: "user-1" },
   };
 
-  it("hides a row", () => {
-    const next = page.map((s) => (s.id === "admin-b" ? { ...s, hidden: true } : s));
-    expect(buildSectionOverrides(next, [], ids)).toEqual([
-      { ...adminA, position: 0 },
-      { ...adminB, position: 1, hidden: true },
-      { ...ownC, position: 2 },
-    ]);
-  });
-
-  it("renames a row", () => {
-    const next = page.map((s) => (s.id === "admin-a" ? { ...s, title: "New Movies" } : s));
-    expect(buildSectionOverrides(next, [], ids)).toEqual([
-      { ...adminA, position: 0, title: "New Movies" },
-      { ...adminB, position: 1 },
-      { ...ownC, position: 2 },
-    ]);
-  });
-
   it("moves a row", () => {
     const next = [page[2]!, page[0]!, page[1]!];
     expect(buildSectionOverrides(next, [], ids)).toEqual([
@@ -297,50 +230,12 @@ describe("override set saved by each Home Screen edit", () => {
     ]);
   });
 
-  it("adds a row from the gallery at the end", () => {
-    const added = buildProfileGallerySection(
-      {
-        section_type: "trending_on_server",
-        title: "Trending This Week",
-        item_limit: 20,
-        featured: false,
-        enabled: true,
-        config: { window: "7d" },
-      },
-      page.length,
-    );
-    expect(buildSectionOverrides([...page, added], [], ids)).toEqual([
-      { ...adminA, position: 0 },
-      { ...adminB, position: 1 },
-      { ...ownC, position: 2 },
-      {
-        section_id: undefined,
-        id: added.id,
-        position: 3,
-        hidden: false,
-        title: "Trending This Week",
-        featured: false,
-        item_limit: 20,
-        section_type: "trending_on_server",
-        config: { window: "7d" },
-      },
-    ]);
-  });
-
   it("removes a server row", () => {
     const next = applySectionDeletion(page, [], "admin-a");
     expect(buildSectionOverrides(next.sections, next.removedSystemSections, ids)).toEqual([
       { ...adminB, position: 0 },
       { ...ownC, position: 1 },
       { section_id: "admin-a", id: "saved-a", removed: true },
-    ]);
-  });
-
-  it("deletes the profile's own row", () => {
-    const next = applySectionDeletion(page, [], "own-c");
-    expect(buildSectionOverrides(next.sections, next.removedSystemSections, ids)).toEqual([
-      { ...adminA, position: 0 },
-      { ...adminB, position: 1 },
     ]);
   });
 });

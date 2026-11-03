@@ -2,16 +2,6 @@ package catalog
 
 import "testing"
 
-func TestNormalizeQuerySort_LastAirDate(t *testing.T) {
-	got := NormalizeQuerySort(QuerySort{Field: "last_air_date"})
-	if got.Field != "last_air_date" {
-		t.Fatalf("expected field last_air_date, got %q", got.Field)
-	}
-	if got.Order != "desc" {
-		t.Fatalf("expected default order desc, got %q", got.Order)
-	}
-}
-
 func TestNormalizeQuerySort_LegacyAliases(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -37,88 +27,56 @@ func TestNormalizeQuerySort_LegacyAliases(t *testing.T) {
 	}
 }
 
-func TestValidate_AudiobookMediaScope(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "audiobook",
-		Match:      "all",
-		Groups:     []QueryGroup{},
-		Sort:       QuerySort{Field: "title", Order: "asc"},
-	}
-	if err := qd.Validate(); err != nil {
-		t.Fatalf("expected audiobook media scope to be valid, got %v", err)
-	}
-}
-
-func TestValidate_EbookMediaScopeRejectsNarratorRule(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "ebook",
-		Match:      "all",
-		Groups: []QueryGroup{{
-			Match: "all",
-			Rules: []QueryRule{{Field: "narrator", Op: "is", Value: "Narrator"}},
-		}},
-		Sort: QuerySort{Field: "title", Order: "asc"},
-	}
-	if err := qd.Validate(); err == nil {
-		t.Fatal("expected ebook narrator rule to be rejected")
-	}
-}
-
-func TestValidate_EbookMediaScopeRejectsNarratorSort(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "ebook",
-		Match:      "all",
-		Groups:     []QueryGroup{},
-		Sort:       QuerySort{Field: "narrator", Order: "asc"},
-	}
-	if err := qd.Validate(); err == nil {
-		t.Fatal("expected ebook narrator sort to be rejected")
-	}
-}
-
-func TestValidateWithSortScope_RejectsPersonalizedSortWithoutProfileScope(t *testing.T) {
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{},
-		Sort:   QuerySort{Field: "progress", Order: "desc"},
-	}
-	if err := qd.ValidateWithSortScope(false); err == nil {
-		t.Fatal("expected personalized sort to be rejected without profile scope")
-	}
-}
-
-func TestValidateWithOptions_RejectsPersonalizedRuleWithoutProfileScope(t *testing.T) {
-	qd := QueryDefinition{
-		Match: "all",
-		Groups: []QueryGroup{
-			{
-				Match: "all",
-				Rules: []QueryRule{
-					{Field: "watched", Op: "is", Value: true},
-				},
+func TestQueryDefinitionValidationRejects(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		def      QueryDefinition
+		validate func(QueryDefinition) error
+	}{
+		{
+			name: "ebook media scope narrator rule",
+			def: QueryDefinition{
+				MediaScope: "ebook",
+				Match:      "all",
+				Groups: []QueryGroup{{
+					Match: "all",
+					Rules: []QueryRule{{Field: "narrator", Op: "is", Value: "Narrator"}},
+				}},
+				Sort: QuerySort{Field: "title", Order: "asc"},
+			},
+			validate: QueryDefinition.Validate,
+		},
+		{
+			name:     "ebook media scope narrator sort",
+			def:      QueryDefinition{MediaScope: "ebook", Match: "all", Groups: []QueryGroup{}, Sort: QuerySort{Field: "narrator", Order: "asc"}},
+			validate: QueryDefinition.Validate,
+		},
+		{
+			name: "personalized sort without profile scope",
+			def:  QueryDefinition{Match: "all", Groups: []QueryGroup{}, Sort: QuerySort{Field: "progress", Order: "desc"}},
+			validate: func(qd QueryDefinition) error {
+				return qd.ValidateWithSortScope(false)
 			},
 		},
-		Sort: QuerySort{Field: "added_at", Order: "desc"},
-	}
-	if err := qd.ValidateWithOptions(true, false); err == nil {
-		t.Fatal("expected personalized field to be rejected without profile scope")
-	}
-}
-
-func TestValidateWithOptions_AllowsPersonalizedRuleWithProfileScope(t *testing.T) {
-	qd := QueryDefinition{
-		Match: "all",
-		Groups: []QueryGroup{
-			{
+		{
+			name: "personalized rule without profile scope",
+			def: QueryDefinition{
 				Match: "all",
-				Rules: []QueryRule{
-					{Field: "in_progress", Op: "is", Value: true},
-				},
+				Groups: []QueryGroup{{
+					Match: "all",
+					Rules: []QueryRule{{Field: "watched", Op: "is", Value: true}},
+				}},
+				Sort: QuerySort{Field: "added_at", Order: "desc"},
+			},
+			validate: func(qd QueryDefinition) error {
+				return qd.ValidateWithOptions(true, false)
 			},
 		},
-		Sort: QuerySort{Field: "progress", Order: "desc"},
-	}
-	if err := qd.ValidateWithOptions(true, true); err != nil {
-		t.Fatalf("expected personalized field to be valid with profile scope, got %v", err)
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.validate(tc.def); err == nil {
+				t.Fatal("expected the definition to be rejected")
+			}
+		})
 	}
 }

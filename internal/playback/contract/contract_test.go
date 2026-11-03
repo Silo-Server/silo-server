@@ -134,6 +134,9 @@ var (
 	// plan_v3.go and internal/api/handlers/playback_v3.go.
 	subtitleFidelityPoliciesV3 = []string{"require_authored_fidelity", "allow_simplified_rendering"}
 	seekRestorationsV3         = []string{"player_position", "source_position"}
+
+	bandwidthEstimateSourcesV3 = []string{playback.BandwidthEstimateProbeV3, playback.BandwidthEstimateObservedRebufferV3}
+	learnedLimitControlsV3     = []string{playback.LearnedLimitIgnoreV3, playback.LearnedLimitClearV3}
 )
 
 func TestValidFixtures(t *testing.T) {
@@ -149,34 +152,6 @@ func TestValidFixtures(t *testing.T) {
 		t.Run(filepath.Base(fixture), func(t *testing.T) {
 			if err := validateFixture(t, schemas, fixture); err != nil {
 				t.Fatalf("validate: %v", err)
-			}
-		})
-	}
-}
-
-func TestClientProgressPersistenceRequiresExplicitStartPosition(t *testing.T) {
-	schemas := compileSchemasV3(t)
-	request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "start_request.json"))).(map[string]any)
-	delete(request, "start_position")
-	if err := schemas["start-request.schema.json"].Validate(request); err == nil {
-		t.Fatal("client progress_persistence without start_position satisfied the schema")
-	}
-}
-
-func TestIntentOnlyReplansRejectFailureEvidence(t *testing.T) {
-	schemas := compileSchemasV3(t)
-	for _, operation := range []playback.ReplanOperationV3{
-		playback.ReplanOperationTrackChangeV3,
-		playback.ReplanOperationQualityChangeV3,
-		playback.ReplanOperationOutputChangeV3,
-	} {
-		t.Run(string(operation), func(t *testing.T) {
-			request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "replan_request.json"))).(map[string]any)
-			request["operation"] = string(operation)
-			request["quality_preference"] = "720p"
-			request["failure"] = map[string]any{"classification": "decoder_failure"}
-			if err := schemas["replan-request.schema.json"].Validate(request); err == nil {
-				t.Fatal("intent-only replan with failure satisfied the schema")
 			}
 		})
 	}
@@ -323,6 +298,8 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "start.progress_persistence.enum", schemaStrings(t, start, "properties", "progress_persistence", "enum"), progressPersistenceV3)
 	assertStringsEqual(t, "start.capability_evidence.enum", schemaStrings(t, start, "$defs", "capability_evidence", "enum"), evidenceV3)
 	assertStringsEqual(t, "start.transformation_capability.executor.enum", schemaStrings(t, start, "$defs", "transformation_capability", "properties", "executor", "enum"), executorsV3)
+	assertStringsEqual(t, "start.bandwidth_estimate_source.enum", schemaStrings(t, start, "properties", "bandwidth_estimate_source", "enum"), bandwidthEstimateSourcesV3)
+	assertStringsEqual(t, "start.learned_limit.enum", schemaStrings(t, start, "properties", "learned_limit", "enum"), learnedLimitControlsV3)
 
 	replan := mustReadObject(t, filepath.Join(schemaRootV3, "v3", "replan-request.schema.json"))
 	assertConstInt(t, "replan.protocol_version.const", schemaValue(t, replan, "properties", "protocol_version", "const"), playback.ProtocolV3)
@@ -330,6 +307,8 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "replan.operation.enum", schemaStrings(t, replan, "properties", "operation", "enum"), replanOperationsV3)
 	assertStringsEqual(t, "replan.capability_evidence.enum", schemaStrings(t, replan, "$defs", "capability_evidence", "enum"), evidenceV3)
 	assertStringsEqual(t, "replan.transformation_capability.executor.enum", schemaStrings(t, replan, "$defs", "transformation_capability", "properties", "executor", "enum"), executorsV3)
+	assertStringsEqual(t, "replan.bandwidth_estimate_source.enum", schemaStrings(t, replan, "properties", "bandwidth_estimate_source", "enum"), bandwidthEstimateSourcesV3)
+	assertStringsEqual(t, "replan.learned_limit.enum", schemaStrings(t, replan, "properties", "learned_limit", "enum"), learnedLimitControlsV3)
 	assertStringsEqual(t, "replan.classification-required operations", schemaStrings(t, replan, "allOf", "0", "if", "anyOf", "1", "properties", "operation", "enum"), classificationRequiredOperationsV3)
 	if got := schemaValue(t, replan, "allOf", "1", "if", "properties", "operation", "const"); got != string(playback.ReplanOperationQualityChangeV3) {
 		t.Fatalf("replan quality-change conditional = %v, want %q", got, playback.ReplanOperationQualityChangeV3)
@@ -342,6 +321,9 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "decision.transformation.executor.enum", schemaStrings(t, decision, "$defs", "transformation", "properties", "executor", "enum"), executorsV3)
 	assertStringsEqual(t, "decision.plan.delivery.enum", schemaStrings(t, decision, "$defs", "plan", "properties", "delivery", "enum"), deliveriesV3)
 	assertStringsEqual(t, "decision.plan.subtitle_fidelity_policy.enum", schemaStrings(t, decision, "$defs", "plan", "properties", "subtitle_fidelity_policy", "enum"), subtitleFidelityPoliciesV3)
+	if got := schemaValue(t, decision, "$defs", "plan", "properties", "bandwidth_limit", "properties", "source", "const"); got != playback.BandwidthEstimateObservedRebufferV3 {
+		t.Fatalf("decision.plan.bandwidth_limit.source.const = %v, want %q", got, playback.BandwidthEstimateObservedRebufferV3)
+	}
 	assertStringsEqual(t, "decision.stream.protocol.enum", schemaStrings(t, decision, "$defs", "stream", "properties", "protocol", "enum"), streamProtocolsV3)
 	assertStringsEqual(t, "decision.stream.header_refresh.enum", schemaStrings(t, decision, "$defs", "stream", "properties", "header_refresh", "enum"), headerRefreshModesV3)
 	assertStringsEqual(t, "decision.timeline.seek_restoration.enum", schemaStrings(t, decision, "$defs", "timeline", "properties", "seek_restoration", "enum"), seekRestorationsV3)
@@ -406,6 +388,7 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 		{"decision-response.schema.json", []string{"$defs", "track_identity"}, playback.TrackIdentityV3{}},
 		{"decision-response.schema.json", []string{"$defs", "transformation"}, playback.TransformationV3{}},
 		{"decision-response.schema.json", []string{"$defs", "plan"}, playback.PlanV3{}},
+		{"decision-response.schema.json", []string{"$defs", "plan", "properties", "bandwidth_limit"}, playback.BandwidthLimitV3{}},
 		{"decision-response.schema.json", []string{"$defs", "plan", "properties", "selected_tracks"}, playback.SelectedTracksV3{}},
 		{"decision-response.schema.json", []string{"$defs", "stream"}, playback.StreamV3{}},
 		{"decision-response.schema.json", []string{"$defs", "timeline"}, playback.TimelineV3{}},
@@ -439,47 +422,58 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 	}
 }
 
-func TestResponseSchemasEnforcePublishedInvariants(t *testing.T) {
+// TestSchemasRejectMutatedGoldenBodies breaks one published rule in a golden
+// body the schema accepts and requires the schema to refuse the result.
+func TestSchemasRejectMutatedGoldenBodies(t *testing.T) {
 	schemas := compileSchemasV3(t)
-
-	capability := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	capability["protocol_versions"] = []any{}
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a response that omitted protocol v3")
+	type mutation struct {
+		name   string
+		golden string
+		mutate func(body map[string]any)
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	features := capability["features"].([]any)
-	capability["features"] = features[:len(features)-1]
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a response that omitted a baseline feature")
+	cases := []mutation{
+		{"client progress_persistence without start_position", "start_request.json", func(body map[string]any) {
+			delete(body, "start_position")
+		}},
+		{"capability response that omitted protocol v3", "capability_response.json", func(body map[string]any) {
+			body["protocol_versions"] = []any{}
+		}},
+		{"capability response that omitted a baseline feature", "capability_response.json", func(body map[string]any) {
+			features := body["features"].([]any)
+			body["features"] = features[:len(features)-1]
+		}},
+		{"partial delivery registry", "capability_response.json", func(body map[string]any) {
+			body["deliveries"] = []any{"original_http"}
+		}},
+		{"client-executed server transformation", "capability_response.json", func(body map[string]any) {
+			body["transformations"].([]any)[0].(map[string]any)["executor"] = "client"
+		}},
+		{"malformed server plan identity", "decision_response.json", func(body map[string]any) {
+			body["playback_plan"].(map[string]any)["plan_id"] = "plan:opaque-but-not-the-server-shape"
+		}},
+		{"playable plan with no source quality rung", "decision_response.json", func(body map[string]any) {
+			body["playback_plan"].(map[string]any)["available_qualities"] = []any{}
+		}},
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	capability["deliveries"] = []any{"original_http"}
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a partial delivery registry")
+	for _, operation := range []playback.ReplanOperationV3{
+		playback.ReplanOperationTrackChangeV3,
+		playback.ReplanOperationQualityChangeV3,
+		playback.ReplanOperationOutputChangeV3,
+	} {
+		cases = append(cases, mutation{"intent-only " + string(operation) + " replan with failure", "replan_request.json", func(body map[string]any) {
+			body["operation"] = string(operation)
+			body["quality_preference"] = "720p"
+			body["failure"] = map[string]any{"classification": "decoder_failure"}
+		}})
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	transformations := capability["transformations"].([]any)
-	transformations[0].(map[string]any)["executor"] = "client"
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a client-executed server transformation")
-	}
-
-	decision := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
-	plan := decision["playback_plan"].(map[string]any)
-	plan["plan_id"] = "plan:opaque-but-not-the-server-shape"
-	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
-		t.Fatal("decision schema accepted a malformed server plan identity")
-	}
-
-	decision = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
-	plan = decision["playback_plan"].(map[string]any)
-	plan["available_qualities"] = []any{}
-	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
-		t.Fatal("decision schema accepted a playable plan with no source quality rung")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, tc.golden))).(map[string]any)
+			tc.mutate(body)
+			if err := schemas[fixtureSchemasV3[tc.golden]].Validate(body); err == nil {
+				t.Fatalf("%s satisfied the schema", tc.name)
+			}
+		})
 	}
 }
 
@@ -750,5 +744,38 @@ func assertStringsEqual(t *testing.T, label string, got, want []string) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("%s mismatch\ngot:  %v\nwant: %v", label, got, want)
+	}
+}
+
+// A replan that omits the hls delivery still persists it as a disabled
+// placeholder carrying the start-time playlist-form opt-in. The placeholder is
+// written into the durable normalized request, so it must stay a schema-valid
+// delivery: JSON null where the schema requires an array would not be.
+func TestPinnedHLSPlaceholderSatisfiesReplanSchema(t *testing.T) {
+	schemas := compileSchemasV3(t)
+	var replan playback.ReplanRequestV3
+	if err := json.Unmarshal(mustReadFile(t, filepath.Join(goldenRootV3, "replan_request.json")), &replan); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := replan.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3]; ok {
+		t.Fatal("golden replan must omit the hls delivery for this test")
+	}
+	var negotiated playback.StartRequestV3
+	negotiated.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassHLSV3: {Features: []string{playback.FeatureHLSVariableSubstitutionV3}},
+	}
+
+	playback.PinHLSVariableSubstitutionV3(&replan.ClientPlaybackContext, negotiated)
+
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schemas["replan-request.schema.json"].Validate(instance); err != nil {
+		t.Fatalf("pinned replan violates the schema: %v", err)
 	}
 }
