@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
  */
 
 export interface ChartLegendEntry {
+  /** React identity when labels may repeat; defaults to the label. */
+  id?: string;
   label: string;
   /** A `var(--chart-N)` token, from `chartSeriesColor`. */
   color: string;
@@ -40,7 +42,7 @@ export function ChartLegend({
       )}
     >
       {entries.map((entry) => (
-        <span key={entry.label} className="flex items-center gap-1.5">
+        <span key={entry.id ?? entry.label} className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
             className={cn(

@@ -140,10 +140,14 @@ func (s *Service) TestGlobalConfigWithClears(
 		return err
 	}
 
+	binaryPath, err := s.localInstallPath(installation)
+	if err != nil {
+		return err
+	}
 	testInstallationID := -int(s.testConfigSeq.Add(1))
 	client, err := s.host.Start(ctx, pluginhost.StartRequest{
 		InstallationID: testInstallationID,
-		BinaryPath:     s.localInstallPath(installation),
+		BinaryPath:     binaryPath,
 		Manifest:       manifest,
 		Config:         configEntries,
 	})

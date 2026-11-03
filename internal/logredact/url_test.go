@@ -15,6 +15,25 @@ func TestSanitizeURLRemovesSecretBearingComponents(t *testing.T) {
 	}
 }
 
+func TestSanitizersMaskSignedTokenPathSegments(t *testing.T) {
+	const token = "eyJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uX2lkIjoic2VjcmV0In0.c2lnbmF0dXJl"
+	for _, tc := range []struct{ name, got, want string }{
+		{"url", SanitizeURL("http://node.example:8090/downloads/file/" + token), "http://node.example:8090/downloads/file/[REDACTED]"},
+		{"url error", SanitizeURLError(&url.Error{Op: "Head", URL: "http://node.example:8090/downloads/file/" + token, Err: errors.New("connection refused")}).Error(),
+			`Head "http://node.example:8090/downloads/file/[REDACTED]": connection refused`},
+		{"wrapped url error", SanitizeURLError(fmt.Errorf("probe %s: %w", "http://node.example/stream/direct/"+token, &url.Error{Op: "Get", URL: "http://node.example/stream/direct/" + token, Err: errors.New("EOF")})).Error(),
+			`probe http://node.example/stream/direct/[REDACTED]: Get "http://node.example/stream/direct/[REDACTED]": EOF`},
+		{"request url", SanitizeRequestURL("/stream/transcode/" + token + "/master.m3u8?Static=true"), "/stream/transcode/[REDACTED]/master.m3u8?Static=true"},
+		{"percent-encoded token", SanitizeURL("http://node.example/downloads/file/%65" + token[1:]), "http://node.example/downloads/file/[REDACTED]"},
+		{"json", string(SanitizeJSON([]byte(`{"DirectStreamUrl":"https://node.example/stream/direct/` + token + `"}`))), `"https://node.example/stream/direct/[REDACTED]"`},
+		{"ordinary segment", SanitizeURL("http://node.example/media/eyJane.mkv"), "http://node.example/media/eyJane.mkv"},
+	} {
+		if strings.Contains(tc.got, token) || !strings.Contains(tc.got, tc.want) {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
 func TestSanitizeURLErrorRemovesRequestedURLSecretsAndPreservesCause(t *testing.T) {
 	cause := errors.New("connection refused")
 	err := &url.Error{

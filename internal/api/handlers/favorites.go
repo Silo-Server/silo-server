@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"maps"
 	"net/http"
 	"slices"
@@ -15,6 +16,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -224,7 +226,7 @@ func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalLi
 		return userstore.Favorite{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return userstore.Favorite{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return userstore.Favorite{}, false, itemLookupError(ctx, itemID, err)
 	}
 	fav, err := store.GetFavorite(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -246,7 +248,7 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+		return itemLookupError(ctx, itemID, err)
 	}
 	added, err := store.AddFavorite(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -515,7 +517,7 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return userstore.WatchlistEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return userstore.WatchlistEntry{}, false, itemLookupError(ctx, itemID, err)
 	}
 	h.promoteWatchlistItem(ctx, viewer, itemID)
 	e, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
@@ -538,7 +540,7 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+		return itemLookupError(ctx, itemID, err)
 	}
 	added, err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -1128,6 +1130,11 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 	if h.itemRepo == nil {
 		return nil
 	}
+	// An ID Postgres refuses as text names no item; querying with it would
+	// fail with an encoding error that reads as a server fault.
+	if !auth.ValidTextKey(itemID) {
+		return catalog.ErrItemNotFound
+	}
 	err := h.itemRepo.EnsureAccessible(ctx, itemID, access)
 	if err == nil {
 		return nil
@@ -1138,8 +1145,24 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 		if epErr == nil {
 			return h.itemRepo.EnsureAccessible(ctx, ep.SeriesID, access)
 		}
+		if !errors.Is(epErr, catalog.ErrEpisodeNotFound) {
+			return epErr
+		}
 	}
 	return err
+}
+
+// itemLookupError answers a failed item lookup or access check: 404 when the
+// item is missing or outside the viewer's scope, 500 when the query itself
+// failed, so a database fault never tells a client a visible item is gone.
+func itemLookupError(ctx context.Context, itemID string, err error) *APIError {
+	if isNotFound(err) {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	if !errors.Is(err, context.Canceled) {
+		slog.ErrorContext(ctx, "personal list: item lookup failed", "component", "api", "content_id", itemID, "error", err)
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
 }
 
 // listCardImages collects a listing's card image fields for batch resolution.

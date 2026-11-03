@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS hidden_history_items (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
     hidden_before TEXT NOT NULL,
+    removed_before TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, media_item_id)
 );

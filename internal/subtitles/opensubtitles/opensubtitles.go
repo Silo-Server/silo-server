@@ -149,7 +149,7 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 	return results, nil
 }
 
-func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *Provider) Download(ctx context.Context, id string, _ subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	if err := p.limiter.Wait(ctx); err != nil {
 		return nil, "", err
 	}
@@ -243,6 +243,9 @@ func (p *Provider) fetchDownloadLink(ctx context.Context, body io.Reader) ([]byt
 		return nil, "", fmt.Errorf("opensubtitles: fetch file: %w", err)
 	}
 	defer fileResp.Body.Close()
+	if fileResp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("opensubtitles: file download returned %d: %s", fileResp.StatusCode, subtitles.ProviderErrorBody(fileResp.Body))
+	}
 
 	data, err := subtitles.ReadProviderResponse(fileResp.Body)
 	if err != nil {

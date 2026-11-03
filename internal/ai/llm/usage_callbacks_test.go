@@ -123,6 +123,7 @@ func TestSubscriptionUsageCallbacksLeaveAPIKeyAndSpeechRequestsUnaffected(t *tes
 			t.Run(name, func(t *testing.T) {
 				unexpected := func(context.Context, string) error { t.Fatal("request changed ChatGPT usage state"); return nil }
 				cfg := Config{BaseURL: "https://provider.example.test", APIKey: "api-key", ChatModel: "test-model", ASRModel: "whisper-1",
+					ASRBaseURL: "https://provider.example.test", ASRAPIKey: "api-key",
 					ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
 						t.Fatal("request used subscription credentials")
 						return "", nil

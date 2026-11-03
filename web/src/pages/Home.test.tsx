@@ -9,8 +9,10 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
+import type { HomeSectionItemsResponse } from "@/api/types";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { sectionKeys } from "@/hooks/queries/keys";
+import { removeItemFromHomeSectionCaches } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
@@ -56,16 +58,22 @@ vi.mock("@/components/SectionRow", () => ({
   default: ({
     section,
     priority,
+    onNearEnd,
   }: {
     section: { id: string; items: Array<{ title: string }> };
     priority?: boolean;
+    onNearEnd?: (sectionId: string) => void;
   }) => (
     <div
       data-kind="section-row"
       data-section-id={section.id}
       data-first-item={section.items[0]?.title}
+      data-item-count={section.items.length}
       data-priority={String(Boolean(priority))}
-    />
+    >
+      {/* Stands in for the carousel nearing its last card. */}
+      <button type="button" onClick={() => onNearEnd?.(section.id)} />
+    </div>
   ),
 }));
 
@@ -363,6 +371,107 @@ describe("Home", () => {
     expect(container.querySelectorAll("[data-home-section-placeholder]")).toHaveLength(0);
   });
 
+  it.each([
+    { name: "reads the rest of a row the server says holds more", partial: true, cards: "21" },
+    {
+      name: "reads nothing more for a row the server answered in full",
+      partial: false,
+      cards: "20",
+    },
+  ])("$name when its carousel nears the end", async ({ partial, cards }) => {
+    // An admin curated list at its own item_limit, which a whole read can
+    // answer past.
+    const picks = { ...homeLayout("picks"), section_type: "admin_curated_list", item_limit: 20 };
+    showLayout([picks]);
+    const all = Array.from({ length: 21 }, (_, index) => ({
+      ...homeSection("picks").section.items[0]!,
+      content_id: `pick-${index}`,
+    }));
+    const read = (count: number) => ({
+      section: { ...picks, total_count: count, items: all.slice(0, count) },
+    });
+    mockFetchHomeSectionItems.mockImplementation(
+      async (_sectionId: string, options: { itemLimit?: number }) =>
+        options.itemLimit !== undefined && partial
+          ? { ...read(20), partial: true }
+          : read(options.itemLimit ?? 21),
+    );
+    const itemCount = () =>
+      container.querySelector('[data-section-id="picks"]')?.getAttribute("data-item-count");
+
+    await renderHome(new QueryClient());
+    await waitFor(() => expect(itemCount()).toBe("20"));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-section-id="picks"] button')!.click();
+    });
+
+    await waitFor(() => expect(itemCount()).toBe(cards));
+    expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(partial ? 2 : 1);
+  });
+
+  it.each([
+    ["the whole row arrives", false],
+    ["Home refreshes before the whole row arrives", true],
+  ])(
+    "keeps a card removed while the rest of its row loads out of it when %s",
+    async (_, refresh) => {
+      const row = homeLayout("row");
+      showLayout([row]);
+      const read = (ids: string[]) => ({
+        section: {
+          ...row,
+          total_count: ids.length,
+          items: ids.map((id) => ({
+            ...homeSection("row").section.items[0]!,
+            content_id: id,
+            title: id,
+          })),
+        },
+      });
+      let answerWhole: (whole: HomeSectionItemsResponse) => void = () => undefined;
+      mockFetchHomeSectionItems.mockImplementation(
+        (_sectionId: string, options: { itemLimit?: number }) =>
+          options.itemLimit === undefined
+            ? new Promise((resolve) => (answerWhole = resolve))
+            : Promise.resolve({ ...read(["dismissed", "kept"]), partial: true }),
+      );
+      const nearEnd = () =>
+        act(async () => {
+          container.querySelector<HTMLButtonElement>('[data-section-id="row"] button')!.click();
+        });
+      const queryClient = new QueryClient();
+      const cached = () =>
+        queryClient.getQueryData<HomeSectionItemsResponse>(sectionKeys.homeItems("row"));
+
+      await renderHome(queryClient);
+      await waitForRenderedFirstItems({ row: "dismissed" });
+      await nearEnd();
+      await waitFor(() => expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(2));
+      // The viewer dismisses the first card, and the whole row, read before
+      // the server heard of it, still holds that card.
+      removeItemFromHomeSectionCaches(queryClient, "dismissed");
+      if (refresh) {
+        // The refresh the dismissal sends cancels the read, which restores the
+        // row as last written, the edit included. Nearing the end again reads
+        // the rest anew, from a server that has heard.
+        await act(async () => bumpHomeRefreshSignal(queryClient));
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+        await waitForRenderedFirstItems({ row: "kept" });
+        expect(sectionErrorCount()).toBe(0);
+        await nearEnd();
+        await waitFor(() => expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(3));
+      }
+      const whole = refresh ? ["kept", "more"] : ["dismissed", "kept", "more"];
+      await act(async () => answerWhole(read(whole)));
+
+      await waitFor(() =>
+        expect(cached()?.section.items.map((item) => item.content_id)).toEqual(["kept", "more"]),
+      );
+      expect(cached()?.shown).toBe(1);
+      await waitForRenderedFirstItems({ row: "kept" });
+    },
+  );
+
   it.each([["WebKit", SAFARI_USER_AGENT]])(
     "renders every Home row immediately for reduced motion in %s",
     (_browser, userAgent) => {
@@ -512,75 +621,6 @@ describe("Home", () => {
     });
   });
 
-  it("drops what an earlier row shows from avoid-duplicates rows, whatever order rows load in", async () => {
-    mockFetchRecipeCatalog.mockResolvedValue({
-      categories: {
-        personalized: [
-          {
-            type: "recommended_for_you",
-            category: "personalized",
-            presets: [],
-            avoid_duplicates: true,
-            supports_rotation: false,
-            admin_only: false,
-          },
-          {
-            type: "taste_match",
-            category: "personalized",
-            presets: [],
-            avoid_duplicates: true,
-            supports_rotation: false,
-            admin_only: false,
-          },
-        ],
-      },
-    });
-    const layout = [
-      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
-      { ...homeLayout("top-picks"), section_type: "taste_match" },
-      homeLayout("recent"),
-    ];
-    const rows: Record<string, string[]> = {
-      "for-you": ["Shared", "For You Only"],
-      "top-picks": ["Shared", "Top Pick Only"],
-      recent: ["Shared"],
-    };
-    showLayout(layout);
-    const requests = deferSectionRequests();
-    const respond = (sectionId: string) => {
-      const request = requests.find((candidate) => candidate.sectionId === sectionId)!;
-      const entry = layout.find((candidate) => candidate.id === sectionId)!;
-      request.respond({
-        section: {
-          ...entry,
-          total_count: rows[sectionId]!.length,
-          items: rows[sectionId]!.map((title) => ({
-            ...homeSection(sectionId).section.items[0],
-            content_id: title,
-            title,
-          })),
-        },
-      });
-    };
-
-    await renderHome(new QueryClient());
-    await waitForRequestCount(requests, 3);
-
-    // The later rows answer first and show the shared title.
-    respond("top-picks");
-    respond("recent");
-    await waitForRenderedFirstItems({ "top-picks": "Shared", recent: "Shared" });
-
-    // Once the first row loads, the later avoid-duplicates row gives it up;
-    // the plain row keeps it.
-    respond("for-you");
-    await waitForRenderedFirstItems({
-      "for-you": "Shared",
-      "top-picks": "Top Pick Only",
-      recent: "Shared",
-    });
-  });
-
   // Renders Home and lets one microtask run, optionally inside the sidebar's main stage.
   async function mountHome(queryClient: QueryClient, onStage = false) {
     const home = (
@@ -722,7 +762,7 @@ function homeLayout(id: string) {
   };
 }
 
-function homeSection(id: string, label = "item") {
+function homeSection(id: string, label = "item"): HomeSectionItemsResponse {
   return {
     section: {
       ...homeLayout(id),

@@ -49,7 +49,8 @@ const (
 // S3-compatible backends require parts of at least 5 MiB (except the last).
 const streamUploadPartSize = 8 * 1024 * 1024
 
-// publicDeliveryProbeTimeout bounds background artwork delivery verification.
+// publicDeliveryProbeTimeout bounds one ObjectAvailable probe of the
+// client-facing read URL.
 const publicDeliveryProbeTimeout = 5 * time.Second
 
 const mutationFenceWeight int64 = 1 << 30
@@ -561,9 +562,10 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string) (ObjectInfo
 	return ObjectInfo{Key: key, SizeBytes: aws.ToInt64(result.ContentLength), LastModified: result.LastModified, ETag: aws.ToString(result.ETag)}, nil
 }
 
-// ArtworkDeliveryScope invalidates verification when storage or delivery
-// endpoint or URL policy changes. Credentials are excluded from this persisted
-// digest. Rotated credentials sign fresh URLs and use normal background checks.
+// ArtworkDeliveryScope names the storage, delivery endpoint, and URL policy, so
+// a confirmation recorded under one (see internal/trickplay) lapses when any
+// of them changes. Credentials are excluded from this persisted digest:
+// rotated credentials sign fresh URLs for the same objects.
 func (c *Client) ArtworkDeliveryScope() string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		c.endpoint, c.bucket, c.keyPrefix, c.publicEndpoint, c.urlAuth,

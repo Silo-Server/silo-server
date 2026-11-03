@@ -20,7 +20,7 @@ func newReuseTestService(t *testing.T, repo *recordingRepo, file *models.MediaFi
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cfg := Config{Configured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "chat", ASRModel: "asr"}
+	cfg := Config{Configured: true, SpeechConfigured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "chat", ASRModel: "asr"}
 	return NewService(ctx, cfg, repo, nil, stubTranscriber{}, nil, nil, singleFileResolver{file: file}, nil, "", nil, nil)
 }
 

@@ -18,6 +18,8 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 		quality         string
 		capKbps         int
 		serverLimitKbps int
+		estimateKbps    int
+		local           bool
 		decoder720p     bool
 		width, height   int
 		want            string
@@ -29,7 +31,13 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 		{name: "a requested rung of a scope film", quality: QualityRung720pMediumV3, width: 1920, height: 800, want: QualityRung720pMediumV3},
 		{name: "a requested rung of an ultrawide film", quality: QualityRung1080pMediumV3, width: 2560, height: 1080, want: QualityRung1080pMediumV3},
 		{name: "a requested rung of a scope film a decoder held to 720p", quality: QualityRung1080pMediumV3, width: 1920, height: 800, decoder720p: true, want: QualityRung720pMediumV3},
-		{name: "auto plays the source", quality: QualityAutoV3, want: ""},
+		// The 15 Mbps source needs converting; Auto encodes it at no more
+		// than its class's best rung.
+		{name: "auto converts the source at its class's top rung", quality: QualityAutoV3, want: QualityRung1080pHighV3},
+		// On the local network only an estimate or a cap bounds it; without
+		// either it keeps the source's 15 Mbps, which no rung names.
+		{name: "auto on the local network converts at the source's bitrate", quality: QualityAutoV3, local: true, want: ""},
+		{name: "auto on the local network under an estimate", quality: QualityAutoV3, local: true, estimateKbps: 100_000, want: QualityRung1080pHighV3},
 		{name: "a resolution the source fits plays the source", quality: "1080p", want: ""},
 		{name: "a lower resolution names its class rung", quality: "720p", want: QualityRung720pMediumV3},
 		{name: "a resolution a cap held to its low rung", quality: "1080p", capKbps: 3_000, want: QualityRung1080pLowV3},
@@ -41,6 +49,9 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 			req.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 			if test.capKbps > 0 {
 				req.BandwidthCapKbps = &test.capKbps
+			}
+			if test.estimateKbps > 0 {
+				req.BandwidthEstimateKbps = &test.estimateKbps
 			}
 			if test.decoder720p {
 				req.Capabilities.CodecsVideo = []string{"h264"}
@@ -54,7 +65,7 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 			result := PlanPlaybackV3(PlannerInputV3{
 				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
-				ServerBitrateCapKbps: test.serverLimitKbps,
+				ServerBitrateCapKbps: test.serverLimitKbps, LocalNetwork: test.local,
 			})
 			if result.Plan == nil {
 				t.Fatalf("result = %s", ExplainPlannerResultV3(result))

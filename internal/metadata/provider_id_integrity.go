@@ -817,13 +817,14 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"move ebook reader annotations", `UPDATE ebook_reader_annotations SET content_id = $2 WHERE content_id = $1`},
 	{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"merge hidden history", `
-			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)
-			SELECT user_id, profile_id, $2, MAX(hidden_before), MAX(updated_at)
+			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
+			SELECT user_id, profile_id, $2, MAX(hidden_before), '-infinity', MAX(updated_at)
 			FROM user_history_hidden_items
 			WHERE media_item_id = $1
 			GROUP BY user_id, profile_id
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
+			    removed_before = COALESCE(user_history_hidden_items.removed_before, user_history_hidden_items.hidden_before),
 			    updated_at = GREATEST(user_history_hidden_items.updated_at, EXCLUDED.updated_at)`},
 	{"delete source hidden history", `DELETE FROM user_history_hidden_items WHERE media_item_id = $1`},
 	{"delete duplicate home item dismissals", `

@@ -10,16 +10,19 @@ import { cn } from "@/lib/utils";
  * The server setup the admin still owes: storage nobody configured, a restart
  * a saved setting is waiting on, mail that cannot send. Each item links to the
  * settings page that fixes it. Setup a server can deliberately go without
- * carries a hide button when `onDismiss` is given. Renders nothing while
- * everything is in order.
+ * carries a hide button when `onDismiss` is given; `dismissDisabled` holds
+ * those buttons while a change saves. Renders nothing while everything is in
+ * order.
  */
 export function SettingsAttention({
   items,
   onDismiss,
+  dismissDisabled = false,
   className,
 }: {
   items: readonly SettingsHealthItem[];
   onDismiss?: (item: SettingsHealthItem) => void;
+  dismissDisabled?: boolean;
   className?: string;
 }) {
   if (items.length === 0) return null;
@@ -61,9 +64,10 @@ export function SettingsAttention({
                 <button
                   type="button"
                   onClick={() => onDismiss(item)}
+                  disabled={dismissDisabled}
                   aria-label={`Hide ${item.label} notice`}
                   title="Hide"
-                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>

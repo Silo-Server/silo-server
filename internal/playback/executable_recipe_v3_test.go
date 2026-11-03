@@ -2,6 +2,7 @@ package playback
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -217,7 +218,7 @@ func TestExecutableRecipeV3SurvivesJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatalf("unmarshal recipe: %v", err)
 	}
-	if decoded != recipe {
+	if !reflect.DeepEqual(decoded, recipe) {
 		t.Fatalf("decoded recipe = %#v, want %#v", decoded, recipe)
 	}
 	if !decoded.ValidFor(*plan) {

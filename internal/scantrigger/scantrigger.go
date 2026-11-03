@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -237,7 +238,7 @@ func (r *Resolver) resolveVanished(ctx context.Context, path, trigger string, fi
 	if strings.TrimSpace(path) == "" || cleanPath == "." {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathRequired, Reason: ReasonPathRequired}
 	}
-	if _, err := os.Lstat(cleanPath); err == nil {
+	if _, err := fspath.Lstat(cleanPath); err == nil {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path still exists", Reason: ReasonPathStillExists}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		// Only a confirmed ENOENT counts as vanished. Permission or other
@@ -248,7 +249,7 @@ func (r *Resolver) resolveVanished(ctx context.Context, path, trigger string, fi
 	if err != nil {
 		return nil, err
 	}
-	if info, statErr := os.Stat(matchedRoot); statErr != nil || !info.IsDir() {
+	if info, statErr := fspath.Stat(matchedRoot); statErr != nil || !info.IsDir() {
 		return nil, &RequestError{Status: http.StatusConflict, Code: codeConflict, Message: "Library root is not available", Reason: ReasonLibraryRootOffline}
 	}
 	trigger = normalizeTrigger(trigger)
@@ -404,7 +405,7 @@ func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string,
 	if filepath.Clean(dir) == filepath.Clean(matchedRoot) {
 		return ModeFile, cleanPath, nil
 	}
-	info, err := os.Stat(dir)
+	info, err := fspath.Stat(dir)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return ModeFile, cleanPath, nil
@@ -544,7 +545,7 @@ func ClassifyLibraryPath(targetPath, matchedRoot, folderType string) (string, er
 		return ModeLibrary, nil
 	}
 
-	info, err := os.Stat(targetPath)
+	info, err := fspath.Stat(targetPath)
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):

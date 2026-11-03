@@ -15,6 +15,7 @@ import {
 export function DeleteRowDialog({
   rowTitle,
   pageLabel,
+  description,
   open,
   conflict,
   busy,
@@ -26,6 +27,8 @@ export function DeleteRowDialog({
 }: {
   rowTitle: string;
   pageLabel: string;
+  /** Replaces the line about the row and its collection. */
+  description?: string;
   open: boolean;
   conflict: boolean;
   busy: boolean;
@@ -41,8 +44,8 @@ export function DeleteRowDialog({
         <DialogHeader>
           <DialogTitle>Delete {rowTitle}?</DialogTitle>
           <DialogDescription>
-            The row goes away from {pageLabel} for everyone. If Silo made a collection just for this
-            row, it removes that collection too when nothing else uses it.
+            {description ??
+              `The row goes away from ${pageLabel} for everyone. If Silo made a collection just for this row, it removes that collection too when nothing else uses it.`}
           </DialogDescription>
         </DialogHeader>
         {conflict ? (

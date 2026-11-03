@@ -179,7 +179,24 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, withoutForeignHistory(r.Context(), out))
+}
+
+// withoutForeignHistory drops the ambiguous-history samples, which name other
+// accounts' profiles and watch times, unless the caller is the acting admin.
+// The v1 route also admits delegated metadata curators (v2 split is
+// admin-only); they keep the counts. An undecidable caller gets no samples.
+func withoutForeignHistory(ctx context.Context, out AdminSplitResult) AdminSplitResult {
+	if out.Reattribution == nil || len(out.Reattribution.AmbiguousHistory) == 0 {
+		return out
+	}
+	if acting, err := middleware.ActingAdmin(ctx); err == nil && acting {
+		return out
+	}
+	report := *out.Reattribution
+	report.AmbiguousHistory = nil
+	out.Reattribution = &report
+	return out
 }
 
 type AdminSplitRequest = splitItemRequest

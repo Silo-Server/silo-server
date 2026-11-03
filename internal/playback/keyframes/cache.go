@@ -8,9 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // ErrUnverified means the file's index passed the quick check and is being
@@ -73,7 +74,7 @@ func LoadVerified(ctx context.Context, path string) (Index, error) {
 }
 
 func load(ctx context.Context, path string, wait bool) (Index, error) {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		return Index{}, err
 	}
@@ -167,7 +168,7 @@ func verifyInBackground(key cacheKey) {
 	defer func() { <-verifySlots }()
 
 	idx, err := func() (Index, error) {
-		f, err := os.Open(key.path)
+		f, err := fspath.Open(key.path)
 		if err != nil {
 			return Index{}, err
 		}

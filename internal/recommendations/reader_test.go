@@ -379,7 +379,7 @@ func TestWatchTonightFallsBackToTheLiveRecentlyAddedRow(t *testing.T) {
 	repo := &fakeReaderRepo{
 		defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: {{MediaItemID: "watched", Score: 2}, {MediaItemID: "recent", Score: 1}}},
 	}
-	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}).WithPersonalRows(false)
+	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}).WithPersonalRows(false)
 	tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", 8, catalog.AccessFilter{})
 	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"recent"}) {
 		t.Fatalf("watch tonight = %+v, %v; want the live Recently Added row", tonight, err)
@@ -451,7 +451,7 @@ func TestFilterRowsDropsWatchedAndFavoritedTitles(t *testing.T) {
 	signals := NewSignalReader(&fakeSignalRepo{canonical: map[string]string{
 		"episode-watched":  "series-watched",
 		"episode-favorite": "series-favorite",
-	}}, fakeSignalProvider{store: store})
+	}}, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true)
 	r := &Reader{repo: &fakeReaderRepo{}, signals: signals}
 
 	items := func(ids ...string) []ScoredItem {

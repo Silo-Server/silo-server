@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -256,6 +258,8 @@ func (failingSessionManager) UpdateStreamState(string, playback.SessionStreamSta
 	return nil
 }
 
+func (failingSessionManager) MarkPlanCommitted(string) error { return nil }
+
 func (failingSessionManager) TouchActivity(string) error { return nil }
 
 func (failingSessionManager) BeginTransport(string) error { return nil }
@@ -408,6 +412,62 @@ func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 	}
 }
 
+func TestV1ProgressAndStopRequireTheOwningProfile(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stop      bool
+		userID    int
+		profileID string
+		want      int
+	}{
+		{name: "progress from another account", userID: 2, profileID: "profile-1", want: http.StatusForbidden},
+		{name: "progress from a sibling profile", userID: 1, profileID: "profile-2", want: http.StatusForbidden},
+		{name: "progress from the owning profile", userID: 1, profileID: "profile-1", want: http.StatusNoContent},
+		{name: "stop from another account", stop: true, userID: 2, profileID: "profile-1", want: http.StatusForbidden},
+		{name: "stop from a sibling profile", stop: true, userID: 1, profileID: "profile-2", want: http.StatusForbidden},
+		{name: "stop from the owning profile", stop: true, userID: 1, profileID: "profile-1", want: http.StatusNoContent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := playback.NewSessionManager(0, 0)
+			manager.RegisterReconstructed(&playback.Session{
+				ID: "owned-session", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayDirect, Position: 10,
+			})
+			handler := NewPlaybackHandler(manager)
+
+			method, path, body, handle := http.MethodPost, "/api/v1/playback/owned-session/progress", `{"position":42}`, handler.HandleUpdateProgress
+			if test.stop {
+				method, path, body, handle = http.MethodDelete, "/api/v1/playback/owned-session", "", handler.HandleStopPlayback
+			}
+			req := httptest.NewRequest(method, path, strings.NewReader(body))
+			ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: test.userID, Role: "user", TokenType: auth.TokenTypeAccess})
+			ctx = apimw.SetProfileID(ctx, test.profileID)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("session_id", "owned-session")
+			rr := httptest.NewRecorder()
+			handle(rr, req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx)))
+			if rr.Code != test.want {
+				t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), test.want)
+			}
+
+			session, err := manager.GetSession("owned-session")
+			switch {
+			case test.want == http.StatusForbidden:
+				if err != nil || session.Position != 10 {
+					t.Fatalf("refused caller changed the session: %+v, %v", session, err)
+				}
+			case test.stop:
+				if !errors.Is(err, playback.ErrSessionNotFound) {
+					t.Fatalf("owner stop left the session: %+v, %v", session, err)
+				}
+			default:
+				if err != nil || session.Position != 42 {
+					t.Fatalf("owner progress not applied: %+v, %v", session, err)
+				}
+			}
+		})
+	}
+}
+
 func TestGetTranscodeSegment_CopyMPEGTSRecoveryUsesResolvedManifestNumberWithoutLookaheadDelay(t *testing.T) {
 	outputDir := t.TempDir()
 	ffmpegPath := filepath.Join(outputDir, "ffmpeg")
@@ -492,6 +552,54 @@ exec sleep 30
 	}
 }
 
+// A segment request whose context ends while it waits for FFmpeg stops waiting
+// at once, instead of holding the request until the wait times out. It still
+// answers 404: net/http also ends the context of a client that only
+// half-closed, and writing nothing would reach it as an empty 200.
+func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
+	const sessionID = "departed-segment"
+	transcodeSession, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
+		SessionID:          sessionID,
+		InputPath:          "/media/slow.mkv",
+		OutputDir:          t.TempDir(),
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		FFmpegPath:         writePlaybackTestFFmpegNeverReady(t),
+		HWAccel:            "none",
+		AudioTrackIndex:    -1,
+		SubtitleTrackIndex: -1,
+	})
+	if err != nil {
+		t.Fatalf("StartTranscode: %v", err)
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+
+	sessions := playback.NewSessionManager(0, 0)
+	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
+	handler := NewPlaybackHandler(sessions)
+	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
+
+	// No playlist yet, so the first segment would wait for FFmpeg's startup.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00000.ts", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", sessionID)
+	routeCtx.URLParams.Add("name", "seg_00000.ts")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+
+	started := time.Now()
+	handler.HandleGetTranscodeSegment(rr, req)
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("segment request waited %v after it ended", elapsed)
+	}
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d %q, want 404", rr.Code, rr.Body.String())
+	}
+}
+
 func withPlaybackRouteParam(req *http.Request, key, value string) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add(key, value)
@@ -546,9 +654,11 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	// Discovery and one-frame smoke commands finish immediately. Only a
 	// transport stays alive; exec keeps it one process so cancellation closes
 	// its pipes without waiting for an orphaned shell child.
+	// The playlist is the HLS output's, which a subtitle rendition's outputs
+	// may follow.
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
-		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) last=\"$arg\" ;; esac; done\n" +
 		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
@@ -672,7 +782,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 	tests := []struct {
 		name               string
 		position           float64
-		userInitiated      bool
+		reason             PlaybackEndReason
 		disablePersistence bool
 		wantPauseCalls     int
 		wantStopCalls      int
@@ -681,7 +791,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		{
 			name:              "user exit stops below-resume-threshold scrobble",
 			position:          120,
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 120,
 		},
@@ -699,14 +809,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		},
 		{
 			name:              "user exit at zero still stops scrobble",
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 0,
 		},
 		{
 			name:               "disabled persistence does not scrobble",
 			position:           120,
-			userInitiated:      true,
+			reason:             PlaybackEndStopped,
 			disablePersistence: true,
 		},
 	}
@@ -733,7 +843,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.userInitiated)
+			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)
@@ -762,12 +872,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 
 // Expiry and abort retire the session id, so their pause tells providers the
 // session ended. A session that keeps no progress is not scrobbled on abort.
-// A Jellyfin play's upstream session can be revived under the same id, and
-// jellycompat sends that play's own stop, so its expiry stays a plain pause.
+// A Jellyfin play's own stop still reaches providers from its client's
+// Stopped report after the expiry, so its expiry stays a plain pause.
 func TestRetiredSessionsReportEndedPause(t *testing.T) {
-	expire := func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }
+	expire := func(h *PlaybackHandler, s *playback.Session) {
+		h.finalizeSessionStopWithResult(context.Background(), s, false, "", PlaybackEndExpired)
+	}
 	abort := func(h *PlaybackHandler, s *playback.Session) {
-		h.finalizeSessionAbort(context.Background(), s, false, "")
+		h.finalizeSessionAbort(context.Background(), s, false, "", nativeEndClaim{owned: true})
 	}
 	tests := []struct {
 		name               string
@@ -813,19 +925,25 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-// A start remembers the version and audio track it played: under the series
-// for an episode, so the next episode opens on the same traits, and under the
-// movie itself, naming the exact file, so a play too short to leave progress
-// still keeps the viewer's choice.
-func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
+// A start remembers the version it played: under the series for an episode,
+// so the next episode opens on the same traits, and under the movie itself,
+// naming the exact file, so a play too short to leave progress still keeps
+// the viewer's choice. On /api/v2 it never saves the audio track: a start
+// cannot tell a pick from Auto, a Next Up carry, or a fallback, and a saved
+// track would outrank the profile's language for the rest of the series, so
+// picks reach the audio preference through PUT /audio-prefs. The frozen
+// /api/v1 bridge keeps saving it.
+func TestHandleStartPlaybackV3_RemembersVersionButNotAudioTrack(t *testing.T) {
 	tests := []struct {
 		name       string
 		episodeID  string
 		key        string
 		wantFileID int
+		v1         bool
 	}{
 		{name: "episode", episodeID: "episode-1", key: "series-1", wantFileID: 0},
 		{name: "movie", key: "movie-1", wantFileID: 42},
+		{name: "v1 bridge episode", episodeID: "episode-1", key: "series-1", wantFileID: 0, v1: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -848,7 +966,16 @@ func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
 			request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 			audioTrack := 1
 			request.AudioTrackIndex = &audioTrack
-			response := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, request))
+			ctx, path := WithNativeAPIV2(newAuthorizedPlaybackContext()), "/api/v2/playback/start"
+			if tt.v1 {
+				ctx, path = newAuthorizedPlaybackContext(), "/api/v1/playback/start"
+			}
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, path, strings.NewReader(marshalV3StartRequest(t, request))).WithContext(ctx))
+			var response playback.DecisionResponseV3
+			if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil {
+				t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+			}
 			handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
 
 			pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", tt.key)
@@ -867,11 +994,13 @@ func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
 			}
 
 			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
-			if err != nil || audio == nil {
-				t.Fatalf("GetAudioPreference(%q) = %+v, %v", tt.key, audio, err)
-			}
-			if audio.AudioTrackIndex != 1 {
-				t.Fatalf("stored audio track = %d, want 1", audio.AudioTrackIndex)
+			switch {
+			case err != nil:
+				t.Fatalf("GetAudioPreference(%q): %v", tt.key, err)
+			case tt.v1 && (audio == nil || audio.AudioTrackIndex != 1):
+				t.Fatalf("v1 bridge saved audio %+v, want track 1", audio)
+			case !tt.v1 && audio != nil:
+				t.Fatalf("GetAudioPreference(%q) = %+v; want no saved audio preference", tt.key, audio)
 			}
 		})
 	}
@@ -1215,6 +1344,37 @@ func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
 	}
 }
 
+// The finalizing request is not the viewer's: an admin terminate carries the
+// admin's address and an expiry carries none. History keeps the viewer's.
+func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"admin terminate": clientip.SetContext(context.Background(), "198.51.100.7"),
+		"expiry":          context.Background(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+				file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600},
+			})
+			handler.AdminStore = noopPlaybackAdminStore{}
+
+			entry, err := handler.buildAdminHistoryEntry(ctx, &playback.Session{
+				ID:          "session-1",
+				UserID:      1,
+				ProfileID:   "profile-1",
+				MediaFileID: 42,
+				ClientIP:    "203.0.113.20",
+				StartedAt:   time.Now().Add(-time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("buildAdminHistoryEntry: %v", err)
+			}
+			if entry == nil || entry.ClientIP != "203.0.113.20" {
+				t.Fatalf("entry = %+v, want ClientIP 203.0.113.20", entry)
+			}
+		})
+	}
+}
+
 func TestPersistStopAndHistory_SkipsZeroProgressStops(t *testing.T) {
 	store := newPlaybackTestStore(t)
 	if err := store.SetProgress(context.Background(), "profile-1", "movie-1", 900, 3600, userstore.ProgressThresholds{}); err != nil {
@@ -1390,5 +1550,62 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+type testSeasonEpisodeLookup struct {
+	testEpisodeLookup
+	season []*models.Episode
+}
+
+func (l testSeasonEpisodeLookup) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
+	return l.season, nil
+}
+
+// A completed multi-episode file marks the episodes of its range it serves
+// watched, so the next episode offered is not the same file again (issue
+// #739). Episodes past the lookup bound don't resolve to the file and stay
+// unwatched.
+func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "series-1",
+		EpisodeID:         "episode-1",
+		FilePath:          "/media/Show/Season 01/Show - S01E01-E12.mkv",
+		Duration:          3600,
+		MultiEpisodeStart: 1,
+		MultiEpisodeEnd:   12,
+	}
+	episode := func(number int) *models.Episode {
+		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	season := make([]*models.Episode, 0, 12)
+	for number := 1; number <= 12; number++ {
+		season = append(season, episode(number))
+	}
+	handler.EpisodeLookup = testSeasonEpisodeLookup{
+		testEpisodeLookup: testEpisodeLookup{episode: episode(1)},
+		season:            season,
+	}
+
+	handler.persistStopAndHistory(context.Background(), &playback.Session{
+		ID:          "session-1",
+		UserID:      1,
+		ProfileID:   "profile-1",
+		MediaFileID: 42,
+		Position:    3590,
+	})
+
+	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-11", "episode-12"})
+	if err != nil {
+		t.Fatalf("list progress: %v", err)
+	}
+	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-11": true, "episode-12": false} {
+		if got := progress[id].Completed; got != want {
+			t.Errorf("%s completed = %v, want %v", id, got, want)
+		}
 	}
 }

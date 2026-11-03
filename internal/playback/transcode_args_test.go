@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -31,6 +33,12 @@ func TestActivityOutputContainerMatchesFFmpeg(t *testing.T) {
 			args := strings.Join(buildFFmpegArgs(tc.opts), " ")
 			if !strings.Contains(args, "-hls_segment_type "+tc.want) {
 				t.Fatal("activity format does not match the FFmpeg muxer")
+			}
+			// Segments are served by extension. Hosts with shared-mime-info
+			// would otherwise label .ts as Qt Linguist text.
+			wantMIME := map[string]string{OutputContainerFMP4: "video/mp4", OutputContainerMPEGTS: mimeVideoMPEGTS}[tc.want]
+			if got := mime.TypeByExtension(hlsSegmentExtension(tc.opts)); got != wantMIME {
+				t.Fatalf("segment content type = %q, want %q", got, wantMIME)
 			}
 		})
 	}
@@ -1092,6 +1100,18 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		want: []string{"-c:v copy -bsf:v hevc_mp4toannexb -tag:v dvh1 -strict unofficial"},
 	},
 	{
+		// MPEG-TS has no sample entry, but -strict unofficial is what makes the
+		// MPEG-TS muxer write the DOVI video stream descriptor, so a preserved
+		// Dolby Vision copy keeps its configuration in TS as well.
+		name: "MPEG-TS copy video keeps Dolby Vision configuration",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+			VideoSampleEntry: VideoSampleEntryDVH1, CopyVideoMPEGTS: true, SegmentDuration: 2,
+		},
+		want:   []string{"-c:v copy -bsf:v hevc_mp4toannexb", "-strict unofficial", "-hls_segment_type mpegts", "seg_%05d.ts"},
+		forbid: []string{"movflags=+frag_discont", ".m4s"},
+	},
+	{
 		name: "copy video sample entry HDR10",
 		opts: TranscodeOpts{
 			InputPath: "/media/movie.mkv", SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
@@ -1431,7 +1451,7 @@ type ffmpegArgsTokenCase struct {
 }
 
 // TestStartTranscodeRejectsUnvalidatedRecipes covers admission of bitstream
-// filter and sample-entry recipes before FFmpeg starts.
+// filter, sample-entry, and HLS video range recipes before FFmpeg starts.
 func TestStartTranscodeRejectsUnvalidatedRecipes(t *testing.T) {
 	for _, tc := range []struct {
 		opts    TranscodeOpts
@@ -1441,6 +1461,9 @@ func TestStartTranscodeRejectsUnvalidatedRecipes(t *testing.T) {
 		{TranscodeOpts{VideoBitstreamFilter: DV7ToHDR10BitstreamFilter, TargetCodecVideo: "h264"}, "unsupported video bitstream filter recipe"},
 		{TranscodeOpts{TargetCodecVideo: "copy", VideoSampleEntry: "dvhe"}, "unsupported video sample-entry recipe"},
 		{TranscodeOpts{TargetCodecVideo: "h264", VideoSampleEntry: VideoSampleEntryDVH1}, "unsupported video sample-entry recipe"},
+		// The range is written into the playlist verbatim.
+		{TranscodeOpts{TargetCodecVideo: "copy", VideoRange: "PQ\n#EXT-X-ENDLIST"}, "unsupported HLS video range"},
+		{TranscodeOpts{TargetCodecVideo: "h264", VideoRange: HLSVideoRangePQ}, "unsupported HLS video range"},
 	} {
 		if _, err := StartTranscode(context.Background(), tc.opts); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Fatalf("StartTranscode(%+v) error = %v, want %q", tc.opts, err, tc.wantErr)
@@ -1475,5 +1498,32 @@ func TestValidateToneMapOptsAcceptsOnlyCompleteRecipes(t *testing.T) {
 		if err := validateToneMapOpts(tc.opts); (err == nil) != tc.wantOK {
 			t.Errorf("%s: err = %v, want ok %t", tc.name, err, tc.wantOK)
 		}
+	}
+}
+
+// The alias for an fspath-encoded input must point at the real file name, and
+// a restart that finds the alias already in place must accept it.
+func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
+	outputDir := t.TempDir()
+	rawInput := "/media/B\xe5rd.mkv"
+	opts := TranscodeOpts{
+		InputPath:          fspath.Encode(rawInput),
+		OutputDir:          outputDir,
+		SubtitleBurnIn:     true,
+		SubtitleTrackIndex: 0,
+		SubtitleCodec:      "subrip",
+	}
+
+	for attempt := range 2 {
+		if err := prepareSubtitleFilterInput(&opts); err != nil {
+			t.Fatalf("prepareSubtitleFilterInput() attempt %d error = %v", attempt, err)
+		}
+	}
+	target, err := os.Readlink(filepath.Join(outputDir, subtitleFilterAliasName))
+	if err != nil {
+		t.Fatalf("read subtitle filter alias: %v", err)
+	}
+	if target != rawInput {
+		t.Fatalf("subtitle filter alias target = %q, want %q", target, rawInput)
 	}
 }

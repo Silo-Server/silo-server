@@ -13,6 +13,12 @@ vi.mock("@/components/MediaItemMenu", () => ({
   },
 }));
 
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`}>Play {title}</a>
+  ),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null, quickActionMode: "watched" }),
 }));
@@ -72,7 +78,7 @@ describe("SeasonEpisodeGrid", () => {
     }
   });
 
-  it("marks an episode only when none of its files can be read", () => {
+  it("marks an episode and drops its play button only when none of its files can be read", () => {
     const file = {
       resolution: "",
       codec_video: "",
@@ -104,6 +110,7 @@ describe("SeasonEpisodeGrid", () => {
               { ...file, file_id: 5, resolution: "1080p" },
             ]),
             episode("ep-5", 5, [{ ...file, file_id: 6, resolution: "1080p" }]),
+            episode("ep-6", 6, []),
           ]}
         />
       </MemoryRouter>,
@@ -129,5 +136,11 @@ describe("SeasonEpisodeGrid", () => {
     const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
+
+    // Quick play needs a readable file; an episode without files has nothing
+    // to play either.
+    expect(screen.getAllByRole("link", { name: /^Play / }).map((link) => link.textContent)).toEqual(
+      ["Play Episode title 4", "Play Episode title 5"],
+    );
   });
 });

@@ -413,31 +413,6 @@ func (p *PluginProvider) listRemoteState(
 	return pluginRemoteTraversal{}, errors.New("watch sync plugin exceeded the remote-state page limit")
 }
 
-func (p *PluginProvider) RemoveHistory(
-	ctx context.Context,
-	_ ServerConfig,
-	conn Connection,
-	plays []LocalPlay,
-) (ExportResult, error) {
-	result := ExportResult{Failed: make(map[string]string)}
-	events := make([]*pluginv1.WatchSyncEvent, 0, len(plays))
-	keys := make([]string, 0, len(plays))
-	for _, play := range plays {
-		event := watchEventFromLocalPlay(play, pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_MANUAL)
-		event.EventId = "unwatched:" + play.HistoryID
-		event.Operation = pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_UNWATCHED
-		event.ProviderItemKey = play.ProviderItemKey
-		if !p.supportsMedia(event.GetMedia().GetMediaType()) {
-			result.Failed[play.HistoryID] = unsupportedWatchSyncMediaMessage(event.GetMedia().GetMediaType())
-			continue
-		}
-		events = append(events, event)
-		keys = append(keys, play.HistoryID)
-	}
-	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
-	return mergeExportFailures(applied, result.Failed), err
-}
-
 func (p *PluginProvider) ExportFavorites(ctx context.Context, _ ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error) {
 	return p.applyListEvents(ctx, conn, items, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_ADD_FAVORITE)
 }

@@ -138,16 +138,16 @@ type Series struct {
 // revocable-token surface (login, refresh, logout, bearerAuth).
 // Real impl: a thin repo over the abs_tokens table added in Stage 2.
 type TokenStore interface {
-	// InsertToken persists a newly minted JTI.
-	InsertToken(ctx context.Context, tok ABSToken) error
+	// IssueTokens persists newly minted tokens for one account only while
+	// the credential they were minted from is still live, and returns
+	// ErrNotFound, storing nothing, once it is not. A sign-out everywhere
+	// that commits after the request checked its credential must not leave
+	// tokens the request stores afterwards.
+	IssueTokens(ctx context.Context, from TokenSource, tokens ...ABSToken) error
 	// GetTokenByJTI looks up a token by its JTI; returns ErrNotFound if absent.
 	GetTokenByJTI(ctx context.Context, jti string) (ABSToken, error)
 	// RevokeTokenByJTI marks a JTI as revoked (sets revoked_at).
 	RevokeTokenByJTI(ctx context.Context, jti string) error
-	// RevokeTokenIfActive atomically marks an unrevoked token as revoked and
-	// returns its previous row. Returns ErrNotFound when the token is absent or
-	// was already revoked.
-	RevokeTokenIfActive(ctx context.Context, jti string) (ABSToken, error)
 	// RevokeTokensForPrincipal revokes every active access/refresh token for a
 	// user profile. Logout uses this to invalidate refresh tokens as well as the
 	// presented access token.
@@ -167,6 +167,19 @@ type ABSToken struct {
 	RevokedAt *time.Time
 }
 
+// TokenSource is the credential a request mints tokens from, which
+// TokenStore.IssueTokens checks is still live.
+type TokenSource struct {
+	// JTI is the token the request presented.
+	JTI string
+	// Rotate revokes JTI as the new tokens are stored, so a refresh token
+	// is exchanged once.
+	Rotate bool
+	// LoginSessionID is the login session a sign-in's credential check
+	// opened.
+	LoginSessionID string
+}
+
 // Principal is who an ABS sign-in authenticated.
 type Principal struct {
 	UserID string
@@ -177,6 +190,10 @@ type Principal struct {
 	// checked. Tokens carry it so a later PIN change ends them (see
 	// ProfileVerifier).
 	PINRevision int64
+	// LoginSessionID is the login session the credential check opened. A
+	// sign-out everywhere revokes it, so the sign-in's tokens are stored
+	// only while it is live.
+	LoginSessionID string
 }
 
 // Sign-in refusals for a profile's PIN. "username#profile" names the profile

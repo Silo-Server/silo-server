@@ -19,7 +19,21 @@
       "played_seconds": 120,
       "series_title": "",
       "season_number": null,
-      "episode_number": null
+      "episode_number": null,
+      "measured": true,
+      "start_position_seconds": 3480,
+      "paused_seconds": 15,
+      "measured_since": "2026-01-02T03:01:05.678Z",
+      "measured_until": "2026-01-02T03:03:05.678Z",
+      "client_ip": "2001:db8::7",
+      "device_id": "iphone-1",
+      "device_platform": "iOS",
+      "client_name": null,
+      "client_version": null,
+      "video_decision": "direct",
+      "audio_decision": null,
+      "end_reason": "stopped",
+      "lifecycle_seq": null
     }
   ],
   "page": {

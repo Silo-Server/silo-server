@@ -37,7 +37,8 @@ const jwtSecretSetting = "auth.jwt_secret"
 
 const (
 	// remoteOverhead covers the transfer and the node's own start on top of
-	// a request's attempt timeouts.
+	// the longest a request's attempts can run (see
+	// mediasample.Request.AttemptSeconds).
 	remoteOverhead = 30 * time.Second
 	// Generation caps chunks at 32 million pixels, including the initial
 	// geometry sample. This also fits the base64 form of uncompressible JPEGs.
@@ -215,7 +216,7 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 	req.Attempts = AttemptPlan(true, len(req.Samples.Seconds))
 	timeout := remoteOverhead
 	for _, attempt := range req.Attempts {
-		timeout += time.Duration(attempt.TimeoutSeconds * float64(time.Second))
+		timeout += time.Duration(req.AttemptSeconds(attempt) * float64(time.Second))
 	}
 	body, err := json.Marshal(req)
 	if err != nil {

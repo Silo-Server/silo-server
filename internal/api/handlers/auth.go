@@ -36,7 +36,7 @@ type AuthHandler struct {
 
 type accountPasswordService interface {
 	PasswordChangeAvailable(ctx context.Context, userID int) (bool, error)
-	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -152,6 +152,10 @@ type UserView struct {
 	Impersonation   *ImpersonationView `json:"impersonation,omitempty"`
 	// PasswordChangeRequired is v2-only: the frozen v1 body does not carry it.
 	PasswordChangeRequired bool `json:"-"`
+	// PolicyPermissions is v2-only (Account.permissions): the permissions
+	// after the access-group mask, without the admin role grant that the
+	// frozen v1 Permissions list keeps (v1AccountPermissions).
+	PolicyPermissions []string `json:"-"`
 }
 
 // sessionResponse represents a session in JSON responses.
@@ -253,7 +257,7 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -297,7 +301,7 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
+		User:         buildUserResponse(pair.User, effectiveAccountPolicy(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -480,7 +484,7 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 	}
 
 	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
+	token, err := h.PluginLaunchToken(r.Context(), claims, apimw.GetProfileID(r.Context()))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -539,14 +543,14 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 		return UserView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
 }
 
 // OAuthUserView projects the account read while redemption opened its login
 // session. Reading that account again could lose an already-redeemed login
 // during a temporary database failure.
 func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)
 }
 
 // HandleListSessions handles GET /auth/sessions. Requires authentication.
@@ -633,42 +637,70 @@ func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 
 // --- Helper functions ---
 
-func buildLoginResponse(pair *auth.TokenPair, user *models.User, downloadAllowed bool, impersonator *models.User) loginResponse {
+func buildLoginResponse(pair *auth.TokenPair, user *models.User, policy accountPolicy, impersonator *models.User) loginResponse {
 	return loginResponse{
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, downloadAllowed, impersonatorUserID(impersonator), impersonator),
+		User:         buildUserResponse(user, policy, impersonatorUserID(impersonator), impersonator),
 	}
 }
 
-// effectiveDownloadAllowed resolves the account's download gate through the
-// inherit/override policy (user override, else access group, else permissive
-// default). A failed group lookup reports downloads as unavailable rather than
-// falling back to the raw account value, which is not meaningful on its own.
-func effectiveDownloadAllowed(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
+// accountPolicy is the slice of the effective access policy the account
+// payload reports, so clients show only what the server's gates allow.
+type accountPolicy struct {
+	DownloadAllowed bool
+	Permissions     []string
+}
+
+// effectiveAccountPolicy resolves the account's download gate and permissions
+// through the inherit/override policy (user override, else access group, else
+// permissive default), the same resolution the route gates enforce. A failed
+// group lookup fails closed: no downloads and no permissions, matching the
+// gates, which deny when the policy cannot be resolved.
+func effectiveAccountPolicy(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) accountPolicy {
 	if user == nil {
-		return false
+		return accountPolicy{Permissions: []string{}}
 	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, groups)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve effective download policy", "component", "api", "user_id", user.ID, "error", err)
-		return false
+		slog.WarnContext(ctx, "failed to resolve effective account policy", "component", "api", "user_id", user.ID, "error", err)
+		return accountPolicy{Permissions: []string{}}
 	}
-	return effective.DownloadAllowed
+	policy := accountPolicy{DownloadAllowed: effective.DownloadAllowed, Permissions: []string{}}
+	if user.Enabled {
+		policy.Permissions = auth.PolicyPermissions(effective)
+	}
+	return policy
 }
 
-func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUserID *int, impersonator *models.User) UserView {
+// v1AccountPermissions keeps the frozen v1 account list: an enabled admin
+// reports every assignable permission from its role, as v1 always has, and
+// every other account reports its policy permissions. No gate reads this list;
+// the role grant itself applies only while an admin acts as administrator.
+func v1AccountPermissions(user *models.User, policyPermissions []string) []string {
+	if user.Enabled && user.Role == models.RoleAdmin {
+		return auth.AssignablePermissions()
+	}
+	return policyPermissions
+}
+
+func buildUserResponse(user *models.User, policy accountPolicy, impersonatorUserID *int, impersonator *models.User) UserView {
 	resp := UserView{
 		ID:              user.ID,
 		Username:        user.Username,
 		Email:           user.Email,
 		Role:            user.Role,
-		Permissions:     auth.EffectivePermissions(user),
-		DownloadAllowed: downloadAllowed,
+		DownloadAllowed: policy.DownloadAllowed,
 		// An impersonating administrator is not restricted (auth.Service.Refresh).
 		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
+		PolicyPermissions:      policy.Permissions,
 	}
+	if resp.PolicyPermissions == nil {
+		// Clients iterate permissions; never serialize it as null.
+		resp.PolicyPermissions = []string{}
+	}
+	resp.Permissions = v1AccountPermissions(user, resp.PolicyPermissions)
 	if impersonatorUserID != nil {
 		resp.Impersonation = &ImpersonationView{
 			Active:             true,

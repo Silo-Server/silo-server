@@ -77,6 +77,9 @@ type Envelope struct {
 	// names no account and no profile, and is reserved for server-wide changes
 	// such as an administrator default.
 	AllViewers bool `json:"all_viewers,omitempty"`
+	// V2Only keeps the event off the frozen v1 bridge socket and away from
+	// plugins: only connections opened through the v2 handshake receive it.
+	V2Only bool `json:"v2_only,omitempty"`
 	// TargetPluginID, when non-empty, restricts dispatch to a single installed
 	// plugin (and only if it is already a subscriber). Used by
 	// RuntimeHostServer.PublishEventTo.
@@ -89,6 +92,7 @@ type PublishOptions struct {
 	ProfileID  string
 	AdminOnly  bool
 	AllViewers bool
+	V2Only     bool
 }
 
 type EventsHelloMessage struct {

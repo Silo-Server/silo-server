@@ -430,7 +430,8 @@ func (r *catalogRuleBuilder) scalars(raw []string) []any {
 // scalar reads a raw value as a bool or a number when it looks like one. A
 // title is text whatever it looks like, so a film called "1917" stays a string.
 func (r *catalogRuleBuilder) scalar(raw string) any {
-	if strings.EqualFold(strings.TrimSpace(r.field), querySortTitle) {
+	field := strings.ToLower(strings.TrimSpace(r.field))
+	if field == querySortTitle || field == ruleFieldShowTitle {
 		return strings.TrimSpace(raw)
 	}
 	return parseCatalogScalar(raw)

@@ -3,7 +3,10 @@ package imageutil
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/png"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/h2non/bimg"
@@ -51,6 +54,65 @@ func TestGenerateVariantsPreservesEncodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateSquareVariantsBoundsTheSquare pins the square crop, including
+// one taken after EXIF rotation, and the limits that keep an upload from
+// making libvips decode or libwebp encode a huge raster.
+func TestGenerateSquareVariantsBoundsTheSquare(t *testing.T) {
+	grayPNG := func(width, height int) []byte {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, width, height))); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	for _, tc := range []struct {
+		name         string
+		data         []byte
+		wantOriginal int // 0 when the source is rejected
+	}{
+		{"portrait", largeTestJPEG(t, 300, 500), 300},
+		{"smaller than the variant", largeTestJPEG(t, 100, 150), 100},
+		{"rotated by EXIF", withEXIFOrientation6(largeTestJPEG(t, 400, 300)), 300},
+		{"over the original cap", grayPNG(4000, 4100), MaxCachedOriginalDimension},
+		{"over the pixel budget", grayPNG(10_001, 10_000), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GenerateSquareVariants(tc.data, []int{256})
+			if tc.wantOriginal == 0 {
+				if err == nil {
+					t.Fatal("accepted a source over the pixel budget")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, want := range []int{tc.wantOriginal, 256} {
+				size, err := bimg.NewImage(got.Variants[i].Data).Size()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if size.Width != want || size.Height != want {
+					t.Errorf("%s = %dx%d, want %dx%d", got.Variants[i].Key, size.Width, size.Height, want, want)
+				}
+			}
+		})
+	}
+}
+
+// withEXIFOrientation6 inserts an EXIF segment after the JPEG start marker
+// that tells viewers to turn the image 90° clockwise, as phone cameras do.
+func withEXIFOrientation6(jpg []byte) []byte {
+	exif := []byte{
+		0xFF, 0xE1, 0, 34, 'E', 'x', 'i', 'f', 0, 0, // APP1 and its length
+		'M', 'M', 0, 42, 0, 0, 0, 8, // big-endian TIFF header, IFD at offset 8
+		0, 1, // one IFD entry
+		0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, // Orientation, one SHORT: 6
+		0, 0, 0, 0, // no next IFD
+	}
+	return slices.Concat(jpg[:2], exif, jpg[2:])
 }
 
 func TestEncodeWebPWidthMatchesVariantRung(t *testing.T) {

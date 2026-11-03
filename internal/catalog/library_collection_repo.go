@@ -113,7 +113,8 @@ const libraryCollectionColumns = `lc.id, lc.library_id, lc.slug, lc.title, lc.de
 	lc.management_mode, lc.management_source, lc.management_key, lc.last_sync_status,
 	lc.last_sync_message, lc.last_sync_at, lc.sync_schedule, lc.next_sync_at,
 	CASE WHEN lc.collection_type = 'smart' THEN lc.item_count_cached
-	     ELSE COALESCE(COUNT(DISTINCT lci.media_item_id), 0) END,
+	     ELSE COALESCE(COUNT(DISTINCT lci.media_item_id) FILTER (WHERE EXISTS (
+	         SELECT 1 FROM media_item_libraries in_library WHERE in_library.content_id = lci.media_item_id)), 0) END,
 	lc.created_at, lc.updated_at,
 	COALESCE(ARRAY_AGG(DISTINCT lcl.library_id) FILTER (WHERE lcl.library_id IS NOT NULL), ARRAY[]::integer[])`
 

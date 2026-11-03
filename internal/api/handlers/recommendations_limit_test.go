@@ -21,7 +21,8 @@ func (failingStoreProvider) Close() error { return nil }
 // watched set from Postgres progress, which a SQLite user store does not
 // keep. The repo has no pool, so a fallback read would panic.
 func TestWatchedFilterDoesNotFallBackToPostgres(t *testing.T) {
-	h := NewRecommendationsHandler(nil, nil, failingStoreProvider{}, nil, recommendations.NewRepo(nil), false)
+	h := NewRecommendationsHandler(nil, nil, failingStoreProvider{}, nil, recommendations.NewRepo(nil), false).
+		WithUserStoreOutsidePostgres(true)
 	items := []recommendations.ScoredItem{{MediaItemID: "a"}, {MediaItemID: "b"}}
 	got := h.excludeWatchedRecommendations(context.Background(), 7, "profile-1", items)
 	if len(got) != 2 {

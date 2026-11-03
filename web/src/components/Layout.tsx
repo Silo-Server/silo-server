@@ -116,6 +116,7 @@ export default function Layout({ children }: LayoutProps) {
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");
+  const isBoxSetRoute = location.pathname.startsWith("/box-sets/");
   const isSettingsRoute = /^\/settings(\/|$)/.test(location.pathname);
   const settingsReturnPath = useSettingsReturnPath(isSettingsRoute, "/");
   const sidebarSwap = useSidebarSwap(isSettingsRoute);
@@ -151,6 +152,7 @@ export default function Layout({ children }: LayoutProps) {
     isWatchPartyRoomRoute ||
     isLibraryRoute ||
     isItemRoute ||
+    isBoxSetRoute ||
     isRequestsRoute ||
     isTitleRoute ||
     isSearchLandingRoute ||
@@ -160,7 +162,7 @@ export default function Layout({ children }: LayoutProps) {
   // Cold item routes commit a lightweight shell while the sidebar collapses.
   // A detail already cached before navigation skips that gate and renders on
   // the destination's first frame.
-  const isDetailImmersion = isItemRoute || isPersonRoute || isTitleRoute;
+  const isDetailImmersion = isItemRoute || isPersonRoute || isTitleRoute || isBoxSetRoute;
   const targetDetailImmersion = isDetailImmersion;
   const visualDetailImmersion = useImmediateSidebarCollapse(targetDetailImmersion);
   const {

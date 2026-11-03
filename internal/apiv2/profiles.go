@@ -14,13 +14,22 @@ import (
 
 // The profiles domain: household members of a login account.
 
+// ProfileAvatar is a profile's avatar as every profile projection reports it.
+type ProfileAvatar struct {
+	Avatar       string `json:"avatar" doc:"Avatar reference; empty when none" example:"preset:fox"`
+	AvatarURL    string `json:"avatar_url,omitempty" format:"uri-reference" doc:"Where to fetch the avatar; absent when there is none to fetch" example:"/avatars/presets/fox.png"`
+	AvatarSource string `json:"avatar_source" enum:"none,preset,upload" example:"preset"`
+}
+
+func profileAvatarOf(avatar, url, source string) ProfileAvatar {
+	return ProfileAvatar{Avatar: avatar, AvatarURL: url, AvatarSource: source}
+}
+
 // Profile is one household member.
 type Profile struct {
-	ID                         ID      `json:"id" example:"1"`
-	Name                       string  `json:"name" example:"Alice"`
-	Avatar                     string  `json:"avatar" doc:"Avatar reference; empty when none" example:"preset:fox"`
-	AvatarURL                  string  `json:"avatar_url,omitempty" format:"uri-reference" doc:"Where to fetch the avatar; absent when there is none to fetch" example:"/avatars/presets/fox.png"`
-	AvatarSource               string  `json:"avatar_source" enum:"none,preset,upload" example:"preset"`
+	ID   ID     `json:"id" example:"1"`
+	Name string `json:"name" example:"Alice"`
+	ProfileAvatar
 	HasPIN                     bool    `json:"has_pin" example:"false"`
 	IsChild                    bool    `json:"is_child" example:"false"`
 	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)" example:"true"`
@@ -205,6 +214,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(create.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.createProfile)
 
 	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
@@ -231,6 +241,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(update.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.updateProfile)
 
 	del := humaOp(http.MethodDelete, Prefix+"/profiles/{id}", "deleteProfile", "profiles",
@@ -251,6 +262,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: isMutatingMethod(del.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Audited:        true,
 	}, reg.deleteProfile)
 
 	Register(reg, Operation{
@@ -974,9 +986,7 @@ func profileOf(v handlers.ProfileView) (Profile, *Problem) {
 	return Profile{
 		ID:                         ID(v.ID),
 		Name:                       v.Name,
-		Avatar:                     v.Avatar,
-		AvatarURL:                  v.AvatarURL,
-		AvatarSource:               v.AvatarSource,
+		ProfileAvatar:              profileAvatarOf(v.Avatar, v.AvatarURL, v.AvatarSource),
 		HasPIN:                     v.HasPIN,
 		IsChild:                    v.IsChild,
 		IsPrimary:                  v.IsPrimary,

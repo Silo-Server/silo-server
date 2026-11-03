@@ -285,6 +285,14 @@ function InstalledPluginPage({
   const restartDisabled = restartInstallation.isPending || runtime.state === "starting";
   const tier = installationTier(installation);
   const updateVersion = pendingUpdateVersion(installation);
+  // Updates pause when the plugin's repository is disabled; the approved
+  // community catalog is disabled by hiding it.
+  const pausedBy =
+    tier === "approved_community"
+      ? "Approved community plugins are turned off"
+      : installation.repository_name
+        ? `Its repository, ${installation.repository_name}, is disabled`
+        : "Its repository is disabled";
   const hasMenuActions = canRestart || Boolean(updateVersion) || adminRoutes.length > 0;
   const policy = installation.update_policy || "auto";
   const policyOptions = UPDATE_POLICY_LABELS[policy]
@@ -326,8 +334,9 @@ function InstalledPluginPage({
         actions={
           <>
             {/* Without a repository there is nothing to check; with the
-                approved community catalog hidden, checks are paused. Either
-                way the stored policy does nothing, so it is not offered. */}
+                repository disabled or the approved community catalog hidden,
+                checks are paused. Either way the stored policy does nothing,
+                so it is not offered. */}
             {tier === "unverified" ? (
               <UpdatesState>Updated by upload</UpdatesState>
             ) : installation.updates_paused ? (
@@ -478,13 +487,13 @@ function InstalledPluginPage({
           }
         >
           <p>
-            <strong className="font-semibold">Update checks are paused.</strong> Approved community
-            plugins are turned off, so Silo doesn't look for new versions of {name}.{" "}
+            <strong className="font-semibold">Update checks are paused.</strong> {pausedBy}, so Silo
+            doesn't look for new versions of {name}.{" "}
             <ViewTransitionLink
               to="/admin/plugins?tab=catalog"
               className="underline underline-offset-4"
             >
-              Turn them back on
+              {tier === "approved_community" ? "Turn them back on" : "Enable it"}
             </ViewTransitionLink>{" "}
             to resume its{" "}
             {UPDATE_POLICY_LABELS[policy] ? `“${UPDATE_POLICY_LABELS[policy]}” setting` : "updates"}

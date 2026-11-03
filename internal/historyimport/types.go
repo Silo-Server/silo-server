@@ -162,6 +162,17 @@ type Run struct {
 	CreatedAt         time.Time         `json:"created_at"`
 	StartedAt         *time.Time        `json:"started_at,omitempty"`
 	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
+	// PlayedSince is the lookback cutoff an admin run was queued with; nil
+	// reads the full history. The runner reads it and /api/v2 admin run
+	// responses show it; v1 does not.
+	PlayedSince *time.Time `json:"-"`
+}
+
+// AdminRunOptions shapes an admin-queued run. The zero value is a full import.
+type AdminRunOptions struct {
+	// PlayedSince limits the played-history read to items last played at or
+	// after it. Only Jellyfin sources support it.
+	PlayedSince *time.Time
 }
 
 type UnmatchedSample struct {

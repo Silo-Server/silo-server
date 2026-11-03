@@ -148,7 +148,7 @@ describe("EpisodeCarousel", () => {
           title: "Rewatch",
           runtime: 44,
           // Watched before and partly rewatched: no progress bar, but a
-          // resume position Reset Progress can clear.
+          // resume position Mark Unwatched can clear.
           user_data: { played: true, position_seconds: 300, duration_seconds: 1800 },
         }),
       ]),

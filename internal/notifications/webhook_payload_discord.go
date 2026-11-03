@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Discord embed accent colors per reason (decimal RGB), in reason precedence
@@ -444,9 +445,11 @@ func truncateWithEllipsis(value string, limit int) string {
 	if limit <= len(ellipsis) {
 		return value[:0]
 	}
-	runes := []rune(value)
-	for len(runes) > 0 && len(string(runes))+len(ellipsis) > limit {
-		runes = runes[:len(runes)-1]
+	// Cut at the byte budget, backed up to a rune start. The cost must not
+	// grow with len(value): a client-supplied request overview can be ~1 MiB.
+	cut := limit - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
 	}
-	return string(runes) + ellipsis
+	return value[:cut] + ellipsis
 }

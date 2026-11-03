@@ -190,7 +190,7 @@ it rejects silently counts as "no NFO".
   `<writer>` (both writers, one credit per name), split on Kodi's ` / `
   separator. A show's `<studio>` also fills its networks; Kodi has no network
   element. `<tag>` is not split.
-- Shows: `<status>` through `NormalizeShowStatus`.
+- Shows: `<status>` through `showstatus.Normalize`.
 - Trailers: `<trailer>` as a YouTube or Vimeo video, from the YouTube add-on
   link Kodi's scrapers write (`plugin://plugin.video.youtube/...`) or a web
   link. A link to any other site is dropped: videos are stored as a site and a
@@ -402,9 +402,11 @@ Caching and refresh:
 - The metadata image-cache processor caches the file under
   `local/{contentType}/{contentID}/{hash8}/{imageType}/...` (`hash8` = content
   hash; the discriminator sits before the imageType segment because variant
-  clamping reads the parent directory). A replaced image rotates the key; the
-  stale hashed prefix is deleted after a successful re-cache, and item
-  deletion trims local paths to the content prefix.
+  clamping reads the parent directory). A replaced image rotates the key. The
+  catalog update that points at the new copy displaces the old one to the
+  artwork revision GC, which deletes it only once nothing references it: an
+  admin pick of the same bytes shares the key. Item deletion trims local
+  paths to the content prefix.
 - The process that discovered the sidecar copies it
   (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
   processes run refreshes and the image cache, and a refresh can only discover
@@ -433,7 +435,17 @@ Caching and refresh:
   library root is opened as an `os.Root` before the path is resolved, and the
   file is opened through the handle that is the same directory as the resolved
   root, so a root or folder swapped for a symlink after that point cannot lead
-  the open out of the library. When
+  the open out of the library. A path whose folders lead out of every root
+  through a symlink, as a per-title folder linked into another tree does, is
+  read only when a folder it physically sits in, below the library root, also
+  holds a present `media_files` row of the same title (the series, for season
+  and episode images): the scanner reached that file through the same link.
+  That folder is opened as an `os.Root`, that file must be the same file
+  reached through it, and the image is read through it. Every cataloged
+  file under the folder is tried before it is refused. Anything else stays
+  the outside-roots failure, except that a storage error while checking, or
+  a failed listing, is a read failure retried as usual. The admin image
+  picker reads sidecars the same way. When
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
   folder, searching no higher than the library root: unless it lists entries
@@ -619,6 +631,20 @@ lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
 choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
+
+An admin can also upload a poster, backdrop or logo for a movie or series, or
+a season's poster (`POST .../images/upload`). Silo does not write into library
+folders, which are usually mounted read-only, so the upload is stored only in
+artwork storage: under the same `local/...` keys as cached sidecar art, with
+the image's digest as the key discriminator. It is published with the images
+lock, and its source is `upload://sha256:<hex>`, one of the non-provider
+schemes image caching, artwork reconcile and the ladder backfill never try to
+download. A storage reconcile that resets cached artwork in bulk still checks
+each upload's object and clears the row only when the object is gone. The list offers the upload as a local choice only while the item
+shows it; applying another image replaces it, and revision GC reclaims it
+after the grace period like any displaced revision. Its only record is the
+item's artwork columns, so there is no upload table to keep in step with
+content ID moves or GC references.
 
 The reads open each library root as an `os.Root`, which needs read (list)
 permission on the root directory, not only search permission. The scanner lists

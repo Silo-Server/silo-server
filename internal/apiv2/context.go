@@ -7,6 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Handlers read the caller's identity from the context the gates populated,
@@ -29,14 +30,20 @@ func scopeFrom(ctx context.Context) (access.Scope, bool) { return access.GetScop
 // the requested profile is the verified profile for this request. API-key
 // profile scopes may skip the ordinary PIN gate, but that exemption does not
 // authorize household changes.
-func verifyHouseholdProfile(ctx context.Context) func(profileID string) error {
-	return func(profileID string) error {
-		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-			return nil
+func verifyHouseholdProfile(ctx context.Context) func(profile *userstore.Profile) error {
+	return func(profile *userstore.Profile) error {
+		if scope, ok := scopeFrom(ctx); ok {
+			return scope.CheckProfileVerification(profile)
 		}
 		return access.ErrProfileUnverified
 	}
 }
+
+// scopedAPIKey reports whether a scoped API key authenticated the request.
+// Scoped keys are allowlist credentials for outside tools, so the operations
+// they may reach withhold deployment details (filesystem paths, raw failure
+// text) that unscoped keys and login sessions still see.
+func scopedAPIKey(ctx context.Context) bool { return apimw.IsScopedAPIKey(ctx) }
 
 func hasScope(ctx context.Context) bool {
 	_, ok := scopeFrom(ctx)

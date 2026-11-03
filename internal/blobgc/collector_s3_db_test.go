@@ -110,3 +110,31 @@ func TestCollectorDeletesSingleImagesS3DB(t *testing.T) {
 		}
 	}
 }
+
+// A namespace whose objects live in another store, such as kept subtitle
+// tracks in a private bucket, is collected there, and the collector's own
+// store keeps its copy of the key.
+func TestCollectorDeletesFromTheNamespaceStoreS3DB(t *testing.T) {
+	key := fmt.Sprintf("chapter-images/%d/0/w300.webp", time.Now().UnixNano())
+	pool := singleConnectionPool(t, []string{key})
+	assets, private := chapterS3Store(t), chapterS3Store(t)
+	for _, store := range []*blobstore.S3{assets, private} {
+		if err := store.Put(t.Context(), key, []byte("image")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := blobgc.NewQueue(pool).Schedule(t.Context(), []string{key}, 0); err != nil {
+		t.Fatal(err)
+	}
+	ns := chapterthumbs.ImageBlobNamespace()
+	ns.Store = private
+	if stats, err := blobgc.NewCollector(pool, assets, ns).Collect(t.Context(), 1); err != nil || stats.Deleted != 1 {
+		t.Fatalf("collection: stats=%+v err=%v", stats, err)
+	}
+	if _, err := private.Stat(t.Context(), key); !errors.Is(err, blobstore.ErrNotFound) {
+		t.Errorf("object remains in the namespace's store: %v", err)
+	}
+	if _, err := assets.Stat(t.Context(), key); err != nil {
+		t.Errorf("collector's own store lost its copy: %v", err)
+	}
+}

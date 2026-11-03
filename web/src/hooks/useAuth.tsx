@@ -22,11 +22,17 @@ import {
   type SessionIdentitySnapshot,
 } from "@/api/client";
 import { endProfileEpoch, storage } from "@/utils/storage";
+import { forgetBandwidthEstimate } from "@/player/bandwidth-readings";
 import { isProfileLaunchPending } from "@/lib/profileLaunch";
 import type { LoginResponse, Profile, User } from "@/api/types";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
-import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
+import {
+  restoreUserSession,
+  sessionFromTokenPair,
+  userFromAccount,
+  type RestoredUserSession,
+} from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import { authProviderQueryOptions } from "@/hooks/queries/authProviders";
 import { homeLayoutQueryOptions } from "@/hooks/queries/sections";
@@ -79,7 +85,8 @@ interface AuthState {
   setupInitialUser: (username: string, email: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
   beginImpersonation: (data: LoginResponse, returnPath: string) => void;
-  endImpersonation: () => Promise<void>;
+  /** Resolves false when a sign-out or another sign-in overtook it, leaving that session alone. */
+  endImpersonation: () => Promise<boolean>;
   /** Signs out of Silo and, when the sign-in provider offers it, out of the provider too. */
   logout: () => void;
   /**
@@ -242,23 +249,37 @@ export async function initializeAuthSession<TUser>({
   }
 }
 
+/**
+ * Ends impersonation and returns to the preserved administrator session.
+ * Resolves true once the administrator session is back, or once this tab
+ * follows the browser's stored session because another tab already finished
+ * the impersonation. Resolves false when a sign-out or another sign-in
+ * replaced the session first: from then on nothing here applies, neither the
+ * administrator's tokens nor a failure's cleanup.
+ */
 export async function endImpersonationWithRecovery({
+  isCurrent,
   endImpersonationRequest,
   loadStoredImpersonationAdminSession,
   restoreAdminUser,
-  clearAuthState,
+  followBrowserSession,
   clearActiveAuthState,
 }: {
+  /** Whether the session that started ending impersonation is still the browser's. */
+  isCurrent: () => boolean;
   endImpersonationRequest: () => Promise<void>;
   loadStoredImpersonationAdminSession: () => StoredImpersonationAdminSession | null;
-  restoreAdminUser: (storedSession: StoredImpersonationAdminSession) => Promise<void>;
-  clearAuthState: () => void;
+  /** Resolves false, installing nothing, when the session was replaced meanwhile. */
+  restoreAdminUser: (storedSession: StoredImpersonationAdminSession) => Promise<boolean>;
+  /** Drops this tab's session from memory and restores the browser's stored one. */
+  followBrowserSession: () => void;
   clearActiveAuthState: () => void;
-}): Promise<void> {
+}): Promise<boolean> {
   const restorePreservedAdminSession = async (storedSession: StoredImpersonationAdminSession) => {
     try {
-      await restoreAdminUser(storedSession);
+      return await restoreAdminUser(storedSession);
     } catch (error) {
+      if (!isCurrent()) return false;
       clearActiveAuthState();
       throw error;
     }
@@ -267,21 +288,24 @@ export async function endImpersonationWithRecovery({
   try {
     await endImpersonationRequest();
   } catch (error) {
+    if (!isCurrent()) return false;
     const storedSession = loadStoredImpersonationAdminSession();
     if (storedSession && isRecoverableImpersonationAuthError(error)) {
-      await restorePreservedAdminSession(storedSession);
-      return;
+      return restorePreservedAdminSession(storedSession);
     }
     throw error;
   }
 
+  if (!isCurrent()) return false;
   const storedSession = loadStoredImpersonationAdminSession();
   if (!storedSession) {
-    clearAuthState();
-    return;
+    // Nothing to return to: another tab finished this impersonation, and the
+    // stored session is now whatever that tab left.
+    followBrowserSession();
+    return true;
   }
 
-  await restorePreservedAdminSession(storedSession);
+  return restorePreservedAdminSession(storedSession);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -353,6 +377,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // an empty cache instead of being thrown away a render later.
       if (signedInUserIdRef.current !== null && signedInUserIdRef.current !== data.user.id) {
         queryClient.clear();
+        // The connection speed the server kept for the old account is not this one's.
+        forgetBandwidthEstimate();
       }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
@@ -376,6 +402,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     endProfileEpoch();
     clearProfile();
     queryClient.clear();
+    // A speed reading from before a sign-out is discarded.
+    forgetBandwidthEstimate();
     setUser(null);
     setSetupRequired(false);
   }, [clearProfile]);
@@ -385,29 +413,89 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearStoredImpersonationAdminSession();
   }, [clearActiveAuthState]);
 
+  // Bumped by each boot restore run; a run whose number is no longer current
+  // stops applying results and does not end the loading state.
+  const restoreRunRef = useRef(0);
+  // Drops this tab's session from memory only and restores the browser's
+  // stored session, as a reload would. Used when another tab has taken over
+  // the stored session, which this tab must neither clear nor overwrite.
+  const followBrowserSession = useCallback(() => {
+    restoreRunRef.current += 1;
+    setAccessToken(null);
+    // The profile proof in memory is this tab's; take the stored one, as a
+    // page load does. The stored value itself is left as it is.
+    setProfileToken(storage.get(storage.KEYS.PROFILE_TOKEN));
+    queryClient.clear();
+    setProfile(null);
+    setUser(null);
+    setSessionRestoreUnavailable(false);
+    setLoading(true);
+    setRestoreAttempt((attempt) => attempt + 1);
+  }, []);
+
+  // The preserved administrator tokens are a copy taken before the account
+  // read, so a sign-out or sign-in during it does not reach them: isCurrent
+  // answers for the session the caller started from, and a result for a
+  // replaced session is discarded. When the stored copy is gone instead,
+  // another tab finished this impersonation (it restored the administrator,
+  // signed out, or signed in), so the browser's stored session is that tab's;
+  // this tab follows it rather than clearing it, whether its own read
+  // succeeded or failed.
+  // Callers starting from the same session share one restore, such as a
+  // refused End session request and the session rejection it sets off, so
+  // the admin refresh token is spent once and neither caller sees the other's
+  // install as a replaced session.
+  const adminRestoreRef = useRef<{
+    refreshToken: string;
+    session: SessionIdentitySnapshot;
+    restored: Promise<boolean>;
+  } | null>(null);
   const restoreAdminUser = useCallback(
-    async (
-      storedSession: { accessToken: string; refreshToken: string },
-      isCurrent: () => boolean = () => true,
-    ) => {
-      const restoredSession = await restoreUserSession(storedSession);
-      // A sign-in that replaced the session during the exchange keeps it.
-      if (!isCurrent()) return false;
-      endProfileEpoch();
-      clearProfile();
-      queryClient.clear();
-      setAccessToken(restoredSession.accessToken);
-      setRefreshToken(restoredSession.refreshToken);
-      clearStoredImpersonationAdminSession();
-      setUser(restoredSession.user);
-      setSetupRequired(false);
-      return true;
+    (storedSession: StoredImpersonationAdminSession, isCurrent: () => boolean) => {
+      const inFlight = adminRestoreRef.current;
+      if (
+        inFlight?.refreshToken === storedSession.refreshToken &&
+        isSessionIdentityCurrent(inFlight.session)
+      ) {
+        return inFlight.restored;
+      }
+      const session = captureSessionIdentity();
+      const handedOff = () =>
+        loadStoredImpersonationAdminSession()?.refreshToken !== storedSession.refreshToken;
+      const restored = (async () => {
+        let restoredSession: RestoredUserSession;
+        try {
+          restoredSession = await restoreUserSession(storedSession);
+        } catch (error) {
+          if (!isCurrent() || !handedOff()) throw error;
+          followBrowserSession();
+          return true;
+        }
+        if (!isCurrent()) return false;
+        if (handedOff()) {
+          followBrowserSession();
+          return true;
+        }
+        endProfileEpoch();
+        clearProfile();
+        queryClient.clear();
+        setAccessToken(restoredSession.accessToken);
+        setRefreshToken(restoredSession.refreshToken);
+        clearStoredImpersonationAdminSession();
+        setUser(restoredSession.user);
+        setSetupRequired(false);
+        return true;
+      })().finally(() => {
+        if (adminRestoreRef.current?.restored === restored) adminRestoreRef.current = null;
+      });
+      adminRestoreRef.current = { refreshToken: storedSession.refreshToken, session, restored };
+      return restored;
     },
-    [clearProfile],
+    [clearProfile, followBrowserSession],
   );
 
   const recoverPreservedAdminSession = useCallback(
-    async (isCurrent?: () => boolean) => {
+    async (isCurrent: () => boolean) => {
       const storedSession = loadStoredImpersonationAdminSession();
       if (!storedSession) {
         return false;
@@ -441,17 +529,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyAuthenticatedUser],
   );
 
-  const endImpersonation = useCallback(async () => {
-    await endImpersonationWithRecovery({
+  const endImpersonation = useCallback(() => {
+    // A sign-out or another sign-in changes the session identity. So does an
+    // admin restore, which a refused end request also starts through the
+    // session rejection; restoreAdminUser lets this flow join that one.
+    const session = captureSessionIdentity();
+    const isCurrent = () => isSessionIdentityCurrent(session);
+    return endImpersonationWithRecovery({
+      isCurrent,
       endImpersonationRequest: () => v2("POST /api/v2/auth/impersonation/end"),
       loadStoredImpersonationAdminSession,
-      restoreAdminUser: async (storedSession) => {
-        await restoreAdminUser(storedSession);
-      },
-      clearAuthState,
+      restoreAdminUser: (storedSession) => restoreAdminUser(storedSession, isCurrent),
+      followBrowserSession,
       clearActiveAuthState,
     });
-  }, [clearActiveAuthState, clearAuthState, restoreAdminUser]);
+  }, [clearActiveAuthState, followBrowserSession, restoreAdminUser]);
 
   const refreshSetupStatus = useCallback(async () => {
     try {
@@ -591,7 +683,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // session that is gone: it must not apply its user or clear the new
       // session's tokens.
       let session = captureSessionIdentity();
-      const superseded = () => cancelled || !isSessionIdentityCurrent(session);
+      const run = ++restoreRunRef.current;
+      const superseded = () =>
+        cancelled || run !== restoreRunRef.current || !isSessionIdentityCurrent(session);
       let providerOutage = false;
       try {
         await initializeAuthSession({
@@ -636,7 +730,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (superseded()) {
               return false;
             }
-            return recoverPreservedAdminSession();
+            return recoverPreservedAdminSession(() => !superseded());
           },
           clearTokens: () => {
             if (superseded()) {
@@ -653,7 +747,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         });
       } finally {
-        if (!cancelled) {
+        if (!cancelled && run === restoreRunRef.current) {
           setLoading(false);
         }
       }

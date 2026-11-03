@@ -5,8 +5,10 @@ import {
   ChevronDown,
   Copy,
   KeyRound,
+  LogIn,
   MonitorSmartphone,
   Server,
+  Tv,
   TriangleAlert,
   Users,
   X,
@@ -20,6 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
+import { useAccountIdentities } from "@/hooks/queries/account";
+import { useAuthProviders } from "@/hooks/queries/authProviders";
 import { useCompatConnectInfo } from "@/hooks/queries/compat";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -30,10 +34,14 @@ import {
   isLoopbackURL,
   jellyfinUsernameIssue,
   JELLYFIN_APP_EXAMPLES,
+  resolveSiloSignIn,
   SILO_APP_EXAMPLES,
 } from "./connectApps";
 
 type AppKind = "silo" | "jellyfin";
+
+const PROFILE_PICKER_NOTE =
+  "After signing in you'll choose a profile from the profile picker, and PIN-protected profiles prompt for their PIN there.";
 
 /** Renders `name#Profile` with the separator tinted so `#` reads as structure. */
 function HashString({ before, after }: { before: string; after: string }) {
@@ -99,7 +107,7 @@ function FieldRow({ label, icon: Icon, kind, hint, children, copyValue }: FieldR
   );
 }
 
-function ScopeBanner({ kind }: { kind: AppKind }) {
+function ScopeBanner({ kind, typedCredentials }: { kind: AppKind; typedCredentials: boolean }) {
   const isJellyfin = kind === "jellyfin";
   return (
     <div
@@ -121,7 +129,9 @@ function ScopeBanner({ kind }: { kind: AppKind }) {
           {isJellyfin ? JELLYFIN_APP_EXAMPLES : SILO_APP_EXAMPLES}.{" "}
           {isJellyfin
             ? "These credentials will not work on a Silo sign-in screen."
-            : "Don't add a # to either field here."}
+            : typedCredentials
+              ? "Don't add a # to either field here."
+              : null}
         </p>
       </div>
     </div>
@@ -258,6 +268,12 @@ export default function ConnectAppsSettings() {
     isError: connectInfoFailed,
   } = useCompatConnectInfo();
 
+  const {
+    data: authProviders,
+    isLoading: authProvidersLoading,
+    isError: authProvidersFailed,
+  } = useAuthProviders();
+
   const [kind, setKind] = useState<AppKind>("silo");
   const [selectedProfileID, setSelectedProfileID] = useState<string | null>(null);
 
@@ -280,11 +296,40 @@ export default function ConnectAppsSettings() {
   const compatURLIsLoopback = compatURL !== null && isLoopbackURL(compatURL);
   // Absent field (older server) means the account can use a password.
   const passwordLoginAvailable = connectInfo?.account?.password_login_available ?? true;
+  const passwordFormShown = authProviders?.password_login ?? true;
+  // Discovery lists the local provider only while the server allows password
+  // sign-in, which tells a switched-off server apart from a provider account.
+  const serverPasswordSignInOff =
+    authProviders !== undefined && !authProviders.items.some((entry) => entry.id === "local");
+  // Linked identities matter only when the password form isn't the answer.
+  const needsIdentities =
+    connectInfo !== undefined &&
+    authProviders !== undefined &&
+    !(passwordLoginAvailable && passwordFormShown);
+  const {
+    data: identities,
+    isLoading: identitiesLoading,
+    isError: identitiesFailed,
+  } = useAccountIdentities(needsIdentities);
+  const siloSignIn = resolveSiloSignIn(
+    passwordLoginAvailable,
+    passwordFormShown,
+    authProviders?.items ?? [],
+    identities?.items ?? [],
+  );
   const isJellyfin = kind === "jellyfin";
-  const isLoading = profilesLoading || connectInfoLoading;
+  // The Silo tab also needs the server's sign-in options; the Jellyfin tab
+  // doesn't, so their failures stay out of it.
+  const isLoading =
+    profilesLoading ||
+    connectInfoLoading ||
+    (!isJellyfin && (authProvidersLoading || (needsIdentities && identitiesLoading)));
   // A failed load must not read as "compat is switched off", and an empty
   // profile list must not read as "your account name alone is enough".
-  const loadFailed = connectInfoFailed || profilesFailed;
+  const loadFailed =
+    connectInfoFailed ||
+    profilesFailed ||
+    (!isJellyfin && (authProvidersFailed || (needsIdentities && identitiesFailed)));
   // Everything below the credential panel is only meaningful when we actually
   // showed credentials above it.
   const showCompatCredentials =
@@ -294,6 +339,12 @@ export default function ConnectAppsSettings() {
     ? buildJellyfinUsername(accountUsername, selectedProfile.name)
     : "";
   const usernameIssue = selectedProfile ? jellyfinUsernameIssue(selectedProfile.name) : null;
+  // A directory account signs in with its directory username, which can
+  // differ from the Silo account name.
+  const siloUsername =
+    siloSignIn.kind === "directory" && siloSignIn.username.trim() !== ""
+      ? siloSignIn.username
+      : accountUsername;
 
   return (
     <div className="space-y-6">
@@ -343,7 +394,12 @@ export default function ConnectAppsSettings() {
           isJellyfin && "border-info/35",
         )}
       >
-        <ScopeBanner kind={kind} />
+        <ScopeBanner
+          kind={kind}
+          typedCredentials={
+            isJellyfin || siloSignIn.kind === "password" || siloSignIn.kind === "directory"
+          }
+        />
 
         {isLoading ? (
           <div className="space-y-2.5">
@@ -363,9 +419,9 @@ export default function ConnectAppsSettings() {
           <div className="border-border rounded-md border border-dashed px-3.5 py-4">
             <p className="text-sm font-medium">This account can't sign in to a Jellyfin app</p>
             <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-              It signs in through an external provider rather than a Silo password, and the
-              compatibility API only accepts Silo passwords. Use a Silo app, or ask an administrator
-              about an account with password sign-in.
+              {serverPasswordSignInOff
+                ? "An administrator turned off password sign-in on this server, and the compatibility API only accepts Silo passwords. Use a Silo app instead."
+                : "It signs in through an external provider rather than a Silo password, and the compatibility API only accepts Silo passwords. Use a Silo app, or ask an administrator about an account with password sign-in."}
             </p>
           </div>
         ) : isJellyfin && !compatEnabled ? (
@@ -381,6 +437,86 @@ export default function ConnectAppsSettings() {
                 : "Third-party Jellyfin apps can't reach this server until an administrator enables it in Admin → Settings → Compatibility."}
             </p>
           </div>
+        ) : !isJellyfin && siloSignIn.kind === "none" ? (
+          <div className="border-border rounded-md border border-dashed px-3.5 py-4">
+            <p className="text-sm font-medium">
+              {passwordLoginAvailable
+                ? "Silo's phone apps don't offer this account a way to sign in"
+                : "This account can't sign in to a new device yet"}
+            </p>
+            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+              {passwordLoginAvailable ? (
+                <>
+                  Password sign-in is off on this server, so Silo's apps and TVs hide the password
+                  form. As a recovery account, this one can still use its password on this website
+                  at{" "}
+                  <span className="text-foreground font-mono break-all">
+                    {siloURL}/login?local=1
+                  </span>
+                  . On Apple TV or Android TV, sign in there, then approve the code the TV shows at{" "}
+                  <span className="text-foreground font-mono break-all">{siloURL}/activate</span>.
+                  To sign in on a phone, connect a sign-in provider in Settings → Account.
+                </>
+              ) : (
+                "Silo's sign-in screens don't offer a password sign-in it can use, and it isn't connected to a sign-in provider. Connect one in Settings → Account, or ask an administrator."
+              )}
+            </p>
+          </div>
+        ) : !isJellyfin && siloSignIn.kind === "network" ? (
+          <>
+            <div className="space-y-2.5">
+              <FieldRow label="Server" icon={Server} kind={kind} copyValue={siloURL}>
+                <code className="font-mono">{siloURL}</code>
+              </FieldRow>
+
+              <FieldRow
+                label="Sign in with"
+                icon={LogIn}
+                kind={kind}
+                hint={`On a device connected to ${siloSignIn.providerName}, open the server through ${siloSignIn.providerName} and choose Continue as on the sign-in screen. There's no Silo password to type.`}
+              >
+                <span className="font-medium">{siloSignIn.providerName}</span>
+              </FieldRow>
+            </div>
+
+            <div className="border-border/70 rounded-md border border-dashed px-3.5 py-2.5">
+              <p className="text-muted-foreground text-xs leading-relaxed">{PROFILE_PICKER_NOTE}</p>
+            </div>
+          </>
+        ) : !isJellyfin && siloSignIn.kind === "provider" ? (
+          <>
+            <div className="space-y-2.5">
+              <FieldRow label="Server" icon={Server} kind={kind} copyValue={siloURL}>
+                <code className="font-mono">{siloURL}</code>
+              </FieldRow>
+
+              <FieldRow
+                label="Sign in with"
+                icon={LogIn}
+                kind={kind}
+                hint={
+                  siloSignIn.provider.native_start_path
+                    ? `Choose ${siloSignIn.provider.display_name} on the sign-in screen and sign in there. There's no Silo password to type.`
+                    : `Sign-in with ${siloSignIn.provider.display_name} can't start until an administrator sets the server's public address.`
+                }
+              >
+                <span className="font-medium">{siloSignIn.provider.display_name}</span>
+              </FieldRow>
+            </div>
+
+            <div className="border-border/70 space-y-2 rounded-md border border-dashed px-3.5 py-2.5">
+              <p className="text-muted-foreground flex items-start gap-1.5 text-xs leading-relaxed">
+                <Tv className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  On Apple TV or Android TV, the TV shows a code instead. Scan it with your phone,
+                  or go to{" "}
+                  <span className="text-foreground font-mono break-all">{siloURL}/activate</span>{" "}
+                  and enter it, then approve the TV there.
+                </span>
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">{PROFILE_PICKER_NOTE}</p>
+            </div>
+          </>
         ) : (
           <>
             {isJellyfin && profiles.length > 0 ? (
@@ -437,19 +573,21 @@ export default function ConnectAppsSettings() {
                     ? usernameIssue
                       ? undefined
                       : jellyfinUsername || undefined
-                    : accountUsername || undefined
+                    : siloUsername || undefined
                 }
                 hint={
                   isJellyfin
                     ? (usernameIssue ??
                       `Your account name, then #, then the profile name — not just "${accountUsername}".`)
-                    : "Just your account name."
+                    : siloSignIn.kind === "directory"
+                      ? `Your ${siloSignIn.provider.display_name} username.`
+                      : "Just your account name."
                 }
               >
                 {isJellyfin && selectedProfile ? (
                   <HashString before={accountUsername} after={selectedProfile.name} />
                 ) : (
-                  <code className="font-mono">{accountUsername}</code>
+                  <code className="font-mono">{siloUsername}</code>
                 )}
               </FieldRow>
 
@@ -460,7 +598,9 @@ export default function ConnectAppsSettings() {
                 hint={
                   isJellyfin
                     ? buildJellyfinPasswordHint(selectedProfile)
-                    : "Your account password. The profile PIN is asked for separately, in the app."
+                    : siloSignIn.kind === "directory"
+                      ? `Your ${siloSignIn.provider.display_name} password, not a Silo one. The profile PIN is asked for separately, in the app.`
+                      : "Your account password. The profile PIN is asked for separately, in the app."
                 }
               >
                 {isJellyfin && selectedProfile?.has_pin ? (
@@ -482,8 +622,7 @@ export default function ConnectAppsSettings() {
             ) : (
               <div className="border-border/70 rounded-md border border-dashed px-3.5 py-2.5">
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  After signing in you'll choose a profile from the profile picker, and
-                  PIN-protected profiles prompt for their PIN there.
+                  {PROFILE_PICKER_NOTE}
                 </p>
               </div>
             )}

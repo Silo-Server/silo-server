@@ -397,3 +397,32 @@ func TestLoadManifestFromBinaryClassifiesRunFailures(t *testing.T) {
 		t.Fatalf("canceled manifest read = %v, want context.Canceled and no PackageError", err)
 	}
 }
+
+// Reading the manifest runs the package's binary before an admin enables it,
+// so it gets the plugin environment, not the server's, including when the
+// server has no variable the plugin environment keeps.
+func TestLoadManifestFromBinaryWithholdsServerEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	for _, onlyHostVariable := range []bool{false, true} {
+		if onlyHostVariable {
+			for _, kv := range os.Environ() {
+				name, _, _ := strings.Cut(kv, "=")
+				t.Setenv(name, "")
+				_ = os.Unsetenv(name)
+			}
+		}
+		t.Setenv("SILO_TEST_HOST_ONLY", "secret")
+		seen := filepath.Join(t.TempDir(), "seen")
+		script := "#!/bin/sh\nprintf '%s' \"${SILO_TEST_HOST_ONLY-absent}\" > '" + seen + "'\n"
+		_, _, _ = loadManifestFromBinary(context.Background(), []byte(script))
+		got, err := os.ReadFile(seen)
+		if err != nil {
+			t.Fatalf("only host variable %v: manifest command did not run: %v", onlyHostVariable, err)
+		}
+		if string(got) != "absent" {
+			t.Fatalf("only host variable %v: manifest command saw SILO_TEST_HOST_ONLY=%q, want it absent", onlyHostVariable, got)
+		}
+	}
+}

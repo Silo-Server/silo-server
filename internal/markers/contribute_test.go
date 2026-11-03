@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ type fakeSubmitter struct {
 	result    SubmissionResult
 	err       error
 	required  []string
+	amend     bool
+	absent    bool
 	onSubmit  func()
 	deadline  chan time.Time
 }
@@ -51,7 +54,7 @@ func (f *fakeSubmitter) SubmitMarker(ctx context.Context, req SubmissionRequest)
 }
 func (f *fakeSubmitter) FetchUserStats(context.Context) (UserStats, error) { return UserStats{}, nil }
 func (f *fakeSubmitter) SubmissionRequirements() SubmissionRequirements {
-	return SubmissionRequirements{RequiredExternalIDs: f.required}
+	return SubmissionRequirements{RequiredExternalIDs: f.required, SupportsAmend: f.amend, SupportsAbsent: f.absent}
 }
 
 type fakeResolver struct{ ids ExternalIDs }
@@ -62,7 +65,14 @@ func (f fakeResolver) ResolveForFile(context.Context, *models.MediaFile) (Extern
 
 type fakeConfig map[string]ProviderConfig
 
-func (f fakeConfig) Get(p string) (ProviderConfig, bool) { c, ok := f[p]; return c, ok }
+func (f fakeConfig) Load(context.Context) (map[string]ProviderConfig, error) { return f, nil }
+
+// unreadableConfig is provider config whose stored rows cannot be read.
+type unreadableConfig struct{}
+
+func (unreadableConfig) Load(context.Context) (map[string]ProviderConfig, error) {
+	return nil, errors.New("database unavailable")
+}
 
 type fakeRecorder struct {
 	mu       sync.Mutex
@@ -162,6 +172,38 @@ func TestContributeSubmitsManualOnDemand(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending {
 		t.Errorf("outcomes = %+v", outcomes)
+	}
+}
+
+// A manual clear says the item has no segment of the kind. It goes only to a
+// provider that accepts absent submissions, and a provider's own absent answer
+// is never passed on.
+func TestContributeSendsManualClearsAsAbsentOnlyWhereAccepted(t *testing.T) {
+	reg := NewRegistry(nil)
+	accepts, declines := &fakeSubmitter{id: "accepts", absent: true}, &fakeSubmitter{id: "declines"}
+	_ = reg.Register(accepts)
+	_ = reg.Register(declines)
+	cfg := fakeConfig{"accepts": {Provider: "accepts", ContributeEnabled: true}, "declines": {Provider: "declines", ContributeEnabled: true}}
+	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
+	rec := &fakeRecorder{}
+	svc := NewContributionService(reg, resolver, cfg, rec, nil)
+
+	file := newContribFile()
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	file.CreditsMarkersSource, file.CreditsMarkersProvider = strPtr(models.MarkerSourcePlugin), strPtr("accepts")
+	if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(declines.submitted) != 0 || len(accepts.submitted) != 1 {
+		t.Fatalf("submissions: accepts %+v, declines %+v; want one clear to accepts", accepts.submitted, declines.submitted)
+	}
+	got := accepts.submitted[0]
+	if got.Segment != MarkerKindIntro || !got.Absent || got.Start != nil || got.End != nil ||
+		got.Source != models.MarkerSourceManual || got.Algorithm != "manual:v1" || got.Confidence != 1 {
+		t.Fatalf("submission = %+v, want an absent manual intro", got)
+	}
+	if len(rec.recorded) != 1 || rec.recorded[0].SubmittedStartMs != nil || rec.recorded[0].SubmittedEndMs != nil {
+		t.Fatalf("recorded = %+v, want one row without times", rec.recorded)
 	}
 }
 
@@ -289,6 +331,8 @@ func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sub := &fakeSubmitter{id: "introdb"}
 			file := newContribIntroFile(models.MarkerSourceManual)
+			file.FileHash, file.FileSize = "8e245d9679d31e12", 734003200
+			file.IntroMarkersAlgorithm, file.IntroMarkersConfidence = strPtr("manual:v1"), floatPtr(1)
 			reg := NewRegistry(nil)
 			_ = reg.Register(sub)
 			resolver := fakeResolver{ids: ExternalIDs{
@@ -318,6 +362,10 @@ func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
 			if got.SeasonNumber != tt.season || got.EpisodeNumber != tt.episode ||
 				got.EpisodeExternalIDs[ExternalIDKeyTVDB] != "4242" || got.EpisodeTitle != "Inside the Episode" {
 				t.Fatalf("submission = %+v, want the special with its episode identity", got)
+			}
+			if got.FileHash != file.FileHash || got.FileSize != file.FileSize || got.Source != models.MarkerSourceManual ||
+				got.Algorithm != "manual:v1" || got.Confidence != 1 {
+				t.Fatalf("submission = %+v, want the file facts and the intro's stored provenance", got)
 			}
 		})
 	}
@@ -443,42 +491,81 @@ func TestContributeStopsOnRetryAfterError(t *testing.T) {
 	}
 }
 
+// A provider whose stored config has contribution off, or whose config cannot
+// be read, receives nothing, including from the background run a manual save
+// starts.
 func TestContributeDisabledProviderNoop(t *testing.T) {
-	sub := &fakeSubmitter{id: "introdb"}
-	file := newContribIntroFile(models.MarkerSourceManual)
-	// contribute_enabled defaults false
-	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb"}}, &fakeRecorder{})
+	for name, config := range map[string]providerConfigReader{
+		"contribution off":  fakeConfig{"introdb": {Provider: "introdb"}},
+		"config unreadable": unreadableConfig{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sub := &fakeSubmitter{id: "introdb"}
+			reg := NewRegistry(nil)
+			_ = reg.Register(sub)
+			resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
+			svc := NewContributionService(reg, resolver, config, &fakeRecorder{}, nil)
 
-	outcomes, _ := svc.ContributeFile(context.Background(), file, ContributeOptions{})
-	if len(sub.submitted) != 0 || len(outcomes) != 0 {
-		t.Errorf("disabled provider must be a no-op, submitted=%d outcomes=%d", len(sub.submitted), len(outcomes))
+			outcomes, _ := svc.ContributeFile(context.Background(), newContribIntroFile(models.MarkerSourceManual), ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}})
+			if len(sub.submitted) != 0 || len(outcomes) != 0 {
+				t.Errorf("submitted=%d outcomes=%d, want a no-op", len(sub.submitted), len(outcomes))
+			}
+		})
 	}
 }
 
 // AutoContributors lists only registered submitters with automatic sharing on,
-// carrying each one's own minimum and required IDs.
+// carrying each one's own minimum and required IDs. AmendContributors lists
+// every enabled one that supports amend, automatic sharing on or off, with
+// whether it takes manual clears. Both list none when the stored config cannot
+// be read.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
-		{id: "keyed", required: []string{ExternalIDKeyTVDB}},
-		{id: "manual-only"},
-		{id: "disabled"},
+		{id: "keyed", required: []string{ExternalIDKeyTVDB}, amend: true},
+		{id: "manual-only", amend: true, absent: true},
+		{id: "disabled", amend: true},
 	} {
 		_ = reg.Register(sub)
 	}
-	cfg := fakeConfig{
+	stored := fakeConfig{
 		"keyed":       {Provider: "keyed", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.97},
 		"manual-only": {Provider: "manual-only", ContributeEnabled: true},
 		"disabled":    {Provider: "disabled", ContributeAutoLocal: true},
 		// A configured provider whose plugin is not loaded cannot submit.
 		"unregistered": {Provider: "unregistered", ContributeEnabled: true, ContributeAutoLocal: true},
 	}
-	svc := NewContributionService(reg, fakeResolver{}, cfg, &fakeRecorder{}, nil)
-
-	got := svc.AutoContributors()
-	want := []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}}
-	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
-		t.Fatalf("AutoContributors = %+v, want %+v", got, want)
+	tests := []struct {
+		name      string
+		config    providerConfigReader
+		want      []AutoContributor
+		wantAmend []AmendContributor
+		wantErr   bool
+	}{
+		{
+			name:      "stored config",
+			config:    stored,
+			want:      []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
+			wantAmend: []AmendContributor{{Provider: "keyed"}, {Provider: "manual-only", SupportsAbsent: true}},
+		},
+		{
+			name:    "config unreadable",
+			config:  unreadableConfig{},
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := NewContributionService(reg, fakeResolver{}, test.config, &fakeRecorder{}, nil)
+			got, err := svc.AutoContributors(context.Background())
+			if (err != nil) != test.wantErr || fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", test.want) {
+				t.Fatalf("AutoContributors = %+v, %v; want %+v, error %v", got, err, test.want, test.wantErr)
+			}
+			amend, err := svc.AmendContributors(context.Background())
+			if (err != nil) != test.wantErr || !slices.Equal(amend, test.wantAmend) {
+				t.Fatalf("AmendContributors = %v, %v; want %v, error %v", amend, err, test.wantAmend, test.wantErr)
+			}
+		})
 	}
 }
 

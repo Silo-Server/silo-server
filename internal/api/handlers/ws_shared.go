@@ -27,8 +27,13 @@ const (
 	wsMaxClientMessageBytes = 64 * 1024
 )
 
+// Every upgrader negotiates permessage-deflate when the client offers it, as
+// browsers and OkHttp do. Gorilla supports only no context takeover, so each
+// message is compressed on its own at gorilla's default level 1. Each socket
+// reads through wsconn, which bounds a message's size after decompression.
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: checkWebSocketOrigin,
+	CheckOrigin:       checkWebSocketOrigin,
+	EnableCompression: true,
 }
 
 // wsOverlayOrigins feeds the shared v1 upgrader the overlay origins connected

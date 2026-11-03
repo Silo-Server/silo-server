@@ -67,6 +67,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
 	RequestUsage         bool `json:"request_usage" doc:"Whether getAdminRequestUserUsage can report an account's request quota use"`
 	PolicyDefaults       bool `json:"policy_defaults" doc:"Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override"`
+	ProfileAvatars       bool `json:"profile_avatars" doc:"Whether listAdminUserProfiles returns each profile's avatar, avatar_url and avatar_source as listProfiles does"`
 	ProfileSections      bool `json:"profile_sections" doc:"Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout"`
 }
 
@@ -126,8 +127,9 @@ type AdminAccountImpersonateInput struct {
 	UserAgent string `header:"User-Agent"`
 }
 type AdminAccountProfile struct {
-	ID         ID              `json:"id"`
-	Name       string          `json:"name"`
+	ID   ID     `json:"id"`
+	Name string `json:"name"`
+	ProfileAvatar
 	LastSeenAt NullableInstant `json:"last_seen_at" doc:"Latest time any device reported this profile; null when no device has"`
 }
 type AdminAccountProfilesOutput struct {
@@ -257,6 +259,7 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.AccountDownloads = reg.deps.AdminAccountDownloads != nil
 		out.Body.RequestUsage = reg.deps.AdminRequestUsage != nil
 		out.Body.PolicyDefaults = true
+		out.Body.ProfileAvatars = reg.deps.AdminAccounts != nil
 		out.Body.ProfileSections = reg.deps.AdminAccounts != nil && reg.deps.AdminProfileSections != nil
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
@@ -290,6 +293,10 @@ func registerAdminAccounts(reg *Registry) {
 	})
 	create := adminAccountOperation(http.MethodPost, "", "createAdminUser", false)
 	create.DefaultStatus = 201
+	// A taken username or email, or an access group on a server without
+	// access groups, is 409; a default profile the user store cannot create
+	// in the same transaction is 501 capability_unsupported.
+	create.Errors = append(create.Errors, http.StatusConflict, http.StatusNotImplemented)
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
@@ -312,7 +319,11 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		return &struct{}{}, nil
 	})
-	Register(reg, adminAccountOperation(http.MethodPost, "/{id}/impersonate", "impersonateAdminUser", false), func(ctx context.Context, in *AdminAccountImpersonateInput) (*TokenPairOutput, error) {
+	// Impersonating while already impersonating, or on a server without
+	// impersonation configured, is 409.
+	impersonate := adminAccountOperation(http.MethodPost, "/{id}/impersonate", "impersonateAdminUser", false)
+	impersonate.Errors = append(impersonate.Errors, http.StatusConflict)
+	Register(reg, impersonate, func(ctx context.Context, in *AdminAccountImpersonateInput) (*TokenPairOutput, error) {
 		svc, p := reg.adminAccounts()
 		if p != nil {
 			return nil, p
@@ -364,7 +375,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, ProfileAvatar: profileAvatarOf(row.Avatar, row.AvatarURL, row.AvatarSource), LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})

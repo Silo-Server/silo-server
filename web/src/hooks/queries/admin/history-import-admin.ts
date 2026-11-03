@@ -93,12 +93,15 @@ export function useDeleteAdminMapping() {
 
 // --- Runs ---
 
+/** A mapping or source to import, with an optional lookback window in hours. */
+export type AdminRunStart = { id: number; lookbackHours?: number };
+
 export function useCreateAdminRunForMapping() {
   const queryClient = useQueryClient();
   const scope = adminImportScope();
   return useMutation({
     retry: false,
-    mutationFn: createAdminImportRun,
+    mutationFn: ({ id, lookbackHours }: AdminRunStart) => createAdminImportRun(id, lookbackHours),
     onSuccess: (run) => {
       queryClient.setQueryData([...adminKeys.historyImportAdminRun(run.id), scope], run);
       toast.success("Import queued");
@@ -116,7 +119,7 @@ export function useAdminBulkRun() {
   const scope = adminImportScope();
   return useMutation({
     retry: false,
-    mutationFn: bulkAdminImportRuns,
+    mutationFn: ({ id, lookbackHours }: AdminRunStart) => bulkAdminImportRuns(id, lookbackHours),
     onSuccess: (data) => {
       for (const outcome of data.outcomes)
         if (outcome.run)

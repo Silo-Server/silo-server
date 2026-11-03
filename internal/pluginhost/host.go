@@ -207,18 +207,22 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	}
 
 	command := exec.Command(req.BinaryPath)
+	command.Env = ProcessEnv()
 	process := plugin.NewClient(&plugin.ClientConfig{
 		HandshakeConfig: HandshakeConfig(),
 		GRPCDialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(observePluginRPC)},
 		AllowedProtocols: []plugin.Protocol{
 			plugin.ProtocolGRPC,
 		},
-		Cmd:        command,
-		Plugins:    sdkruntime.DefaultPluginSet(sdkruntime.CapabilityServers{}),
-		Logger:     h.logger,
-		Stderr:     os.Stderr,
-		SyncStdout: os.Stdout,
-		SyncStderr: os.Stderr,
+		Cmd: command,
+		// go-plugin appends the server's whole environment to Cmd.Env
+		// unless told not to.
+		SkipHostEnv: true,
+		Plugins:     sdkruntime.DefaultPluginSet(sdkruntime.CapabilityServers{}),
+		Logger:      h.logger,
+		Stderr:      os.Stderr,
+		SyncStdout:  os.Stdout,
+		SyncStderr:  os.Stderr,
 	})
 	retained := false
 	defer func() {

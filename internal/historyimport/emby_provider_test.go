@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -537,10 +538,21 @@ func TestEmbyWatchedRecordsExpandsPlayedEpisodeRanges(t *testing.T) {
 	if got := embyWatchedRecords(partial, embyItem{}); len(got) != 1 {
 		t.Fatalf("partly watched range = %d records, want 1", len(got))
 	}
-	wide := played
-	wide.IndexNumberEnd = wide.IndexNumber + maxEmbyEpisodeRange
-	if got := embyWatchedRecords(wide, embyItem{}); len(got) != 1 {
-		t.Fatalf("over-wide range = %d records, want 1", len(got))
+	for _, tc := range []struct {
+		name        string
+		first, last int
+		want        int
+	}{
+		{"over-wide range", 1, 1 + maxEmbyEpisodeRange, 1},
+		{"negative start", -2, 1, 1},
+		{"end at MaxInt", math.MaxInt - 1, math.MaxInt, 2},
+		{"start at MaxInt", math.MaxInt, math.MinInt, 1},
+	} {
+		ranged := played
+		ranged.IndexNumber, ranged.IndexNumberEnd = tc.first, tc.last
+		if got := embyWatchedRecords(ranged, embyItem{}); len(got) != tc.want {
+			t.Fatalf("%s = %d records, want %d", tc.name, len(got), tc.want)
+		}
 	}
 }
 

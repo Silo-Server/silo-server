@@ -43,6 +43,18 @@ type Namespace struct {
 	// Live reports which of prefixes something still references. An error
 	// stops the collector and the sweep: neither deletes on a guess.
 	Live func(ctx context.Context, db Querier, prefixes []string) (map[string]bool, error)
+	// Store holds the namespace's objects when they live outside the store
+	// its collector or sweep was given, such as a private bucket. Nil uses
+	// that store.
+	Store Store
+}
+
+// storeOr returns the store holding ns's objects, fallback when it names none.
+func (ns Namespace) storeOr(fallback Store) Store {
+	if ns.Store != nil {
+		return ns.Store
+	}
+	return fallback
 }
 
 // Store is the storage surface blobgc needs.

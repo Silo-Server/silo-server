@@ -32,12 +32,17 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 	duration := 5400.5
 	// A play resumed near its end: watched_seconds is the end position, the
 	// measurement is the two minutes actually watched.
-	played := 120.0
+	played, start, paused := 120.0, 3480.0, 15.0
+	since, until := fixedTime().Add(-3*time.Minute), fixedTime().Add(-time.Minute)
+	ip, device, platform, decision, reason := "2001:db8::7", "iphone-1", "iOS", "direct", "stopped"
 	rows := []handlers.AdminPlaybackHistoryRow{{
 		SessionID: "sess-9007199254740993", UserID: 9007199254740993, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
 		MediaItemID: "movie-1", MediaFileID: 42, MediaTitle: "Synthetic Movie", MediaType: "movie", PlayMethod: "direct_play",
 		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), WatchedSeconds: 3600, DurationSeconds: &duration, Completed: true,
-		PlayedSeconds: &played,
+		PlayedSeconds: &played, Measured: true, StartPositionSeconds: &start, PausedSeconds: &paused,
+		MeasuredSince: &since, MeasuredUntil: &until, ClientIP: &ip, DeviceID: &device, DevicePlatform: &platform,
+		// audio_decision stays null, as on a row recorded before decisions were.
+		VideoDecision: &decision, EndReason: &reason,
 	}}
 	if f.episode {
 		season, episode := 2, 4
@@ -65,13 +70,13 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 		t.Fatalf("filters: %+v limit=%d", fake.filter, fake.limit)
 	}
 	body := first.Body.String()
-	for _, want := range []string{`"user_id":"9007199254740993"`, `"media_file_id":"42"`, `"duration_seconds":5400.5`, `"ended_at":"2026-01-02T03:04:05.678Z"`, `"has_more":true`, `"watched_seconds":3600`, `"played_seconds":120`} {
+	for _, want := range []string{`"user_id":"9007199254740993"`, `"media_file_id":"42"`, `"duration_seconds":5400.5`, `"ended_at":"2026-01-02T03:04:05.678Z"`, `"has_more":true`, `"watched_seconds":3600`, `"played_seconds":120`,
+		`"measured":true`, `"start_position_seconds":3480`, `"paused_seconds":15`, `"measured_since":"2026-01-02T03:01:05.678Z"`,
+		`"client_ip":"2001:db8::7"`, `"device_id":"iphone-1"`, `"device_platform":"iOS"`, `"client_name":null`,
+		`"video_decision":"direct"`, `"end_reason":"stopped"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %s in %s", want, body)
 		}
-	}
-	if strings.Contains(body, "client_ip") {
-		t.Fatalf("client address projected: %s", body)
 	}
 	var page AdminPlaybackHistoryCollection
 	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
@@ -85,6 +90,12 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 		t.Fatalf("next: %d %s after=%+v", second.Code, second.Body, fake.after)
 	}
 
+	// ended_after is inclusive and ended_before exclusive; both reach the store.
+	if rec := do(t, h, http.MethodGet, path+"?ended_after=2026-01-01T00:00:00Z&ended_before=2026-01-02T00:00:00%2B01:00", "", actingRequestAdmin); rec.Code != 200 ||
+		fake.filter.EndedAfter == nil || fake.filter.EndedBefore == nil || !fake.filter.EndedBefore.Equal(time.Date(2026, 1, 1, 23, 0, 0, 0, time.UTC)) {
+		t.Fatalf("window: %d %+v", rec.Code, fake.filter)
+	}
+
 	// The completed filter defaults to every attempt, and "all" is the same.
 	for _, q := range []string{"", "?completed=all"} {
 		if rec := do(t, h, http.MethodGet, path+q, "", actingRequestAdmin); rec.Code != 200 || fake.filter.Completed != nil || fake.filter.UserID != 0 {
@@ -96,6 +107,7 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 	// A cursor is bound to its filters, limit, account and profile.
 	for _, bad := range []string{
 		strings.Replace(nextPath, "completed=false", "completed=true", 1),
+		strings.Replace(nextPath, "completed=false", "completed=false&ended_before=2026-01-02T03:04:05Z", 1),
 		strings.Replace(nextPath, "limit=1", "limit=2", 1),
 		strings.Replace(nextPath, "user_id=2", "user_id=3", 1),
 		path + "?cursor=invalid",
@@ -103,7 +115,7 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodGet, bad, "", actingRequestAdmin), TypeInvalidCursor)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, nextPath, "", bearer(adminToken)), TypeInvalidCursor)
-	for _, q := range []string{"?limit=0", "?limit=201", "?offset=1", "?user_id=-1", "?user_id=0", "?user_id=abc", "?completed=maybe"} {
+	for _, q := range []string{"?limit=0", "?limit=201", "?offset=1", "?user_id=-1", "?user_id=0", "?user_id=abc", "?completed=maybe", "?ended_before=yesterday"} {
 		requireProblem(t, do(t, h, http.MethodGet, path+q, "", actingRequestAdmin), TypeValidationFailed)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, path, "", with(bearer(adminToken), "X-Profile-Id", "p-owner")), TypePermissionDenied)
@@ -129,5 +141,8 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 }
 
 func adminPlaybackHistoryFixtureCases() []fixtureCase {
-	return []fixtureCase{{name: "list_admin_playback_history_ok", operationID: opListAdminPlaybackHistory, method: http.MethodGet, path: Prefix + "/admin/playback-history?limit=1", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminPlaybackHistoryCollection", scenario: "Administrator playback history page carries string IDs, instants, a nullable duration and a scoped cursor."}}
+	return []fixtureCase{
+		{name: "list_admin_playback_history_ok", operationID: opListAdminPlaybackHistory, method: http.MethodGet, path: Prefix + "/admin/playback-history?limit=1", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminPlaybackHistoryCollection", scenario: "Administrator playback history page carries string IDs, instants, a nullable duration and a scoped cursor."},
+		{name: "get_admin_playback_history_capabilities_ok", operationID: "getAdminPlaybackHistoryCapabilities", method: http.MethodGet, path: Prefix + "/admin/playback-history/capabilities", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminPlaybackHistoryCapabilities", scenario: "Administrator playback history capabilities name the window filter and the entry fields the server records."},
+	}
 }

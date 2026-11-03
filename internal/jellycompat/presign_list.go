@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 )
 
 // presignCompatListItems presigns every list item's poster/backdrop/logo/still
@@ -55,7 +56,7 @@ func attachListExtraBackdrops(ctx context.Context, detailSvc *catalog.DetailServ
 	}
 	paths, err := detailSvc.ExtraBackdropPaths(ctx, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "jellycompat: loading item backdrops failed; advertising the primary only", "component", "jellycompat", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: loading item backdrops failed; advertising the primary only", "component", "jellycompat", "error", err)
 		return
 	}
 	for i := range items {

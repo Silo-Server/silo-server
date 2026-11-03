@@ -39,11 +39,12 @@ rebuilt or failed at least one profile. A profile whose rebuild keeps failing
 stays pending and shows as `failed` in each sweep's `result`.
 
 `lock_conflict` is empty unless the stored embedding lock rejects the
-embedding base URL or model this server runs with, or records a vector size
-Silo cannot store. It is then a sentence for the administrator that never
-quotes a base URL. Embedding settings take effect after a restart, so a saved
-but not yet applied change does not show here; the embedding connection check
-reports it instead. `cache_refreshed_at` is when the newest cached
+embedding endpoint or model this server runs with (including running with no
+embedding provider chosen), or records a vector size Silo cannot store. It is
+then a sentence for the administrator that never quotes a base URL. The
+embedding provider and model take effect after a restart, so a saved but not
+yet applied change does not show here; the embedding connection check reports
+it instead. A new key for the provider applies without a restart. `cache_refreshed_at` is when the newest cached
 recommendation row was written, by the cache job or a profile refresh; it is
 absent when nothing is cached. Profile refreshes keep it recent even while the
 cache job fails, so it does not show job health; `recommendations.last_run`

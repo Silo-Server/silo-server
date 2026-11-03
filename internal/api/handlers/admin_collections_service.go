@@ -634,11 +634,13 @@ func (h *LibraryCollectionHandler) DeleteAdminCollectionArtwork(ctx context.Cont
 	if kind != collectionImagePoster && kind != adminCollectionBackdrop {
 		return apiError(400, "bad_request", "Artwork kind must be poster or backdrop")
 	}
-	if _, err := h.repo.GetByID(ctx, id); err != nil {
+	collection, err := h.repo.GetByID(ctx, id)
+	if err != nil {
 		return err
 	}
-	if err := h.deleteCollectionImages(ctx, id, kind); err != nil {
-		return err
+	oldPath := collection.PosterURL
+	if kind == adminCollectionBackdrop {
+		oldPath = collection.BackdropURL
 	}
 	input := catalog.UpdateLibraryCollectionInput{ID: id}
 	if kind == collectionImagePoster {
@@ -653,6 +655,7 @@ func (h *LibraryCollectionHandler) DeleteAdminCollectionArtwork(ctx context.Cont
 	if err := h.repo.Update(ctx, input); err != nil {
 		return err
 	}
+	h.cleanUpReplacedCollectionImage(ctx, id, kind, oldPath)
 	if kind == collectionImagePoster && h.service != nil {
 		h.service.MaybeGenerateCollage(ctx, id)
 	}

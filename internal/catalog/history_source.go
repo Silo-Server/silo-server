@@ -128,6 +128,22 @@ func scopeHistoryFacetFilters(filters *BrowseFilters, req CatalogRequest, access
 	filters.contentSourceArgs = args
 }
 
+// HistoryCountsAsWatchedSQL is the condition under which the watch-history row
+// alias counts as a watch: it is newer than the profile's watched-state cutoff
+// for the item. A mark unwatched raises that cutoff and keeps the row in
+// history, so a query that counts plays, rather than listing history, applies
+// this condition.
+func HistoryCountsAsWatchedSQL(alias string) string {
+	return fmt.Sprintf(`NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = %[1]s.user_id
+			  AND hhi.profile_id = %[1]s.profile_id
+			  AND hhi.media_item_id = %[1]s.media_item_id
+			  AND %[1]s.watched_at <= hhi.hidden_before
+		)`, alias)
+}
+
 func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time, episodeScope bool) (string, []any) {
 	args := []any{access.UserID, access.ProfileID}
 	argIdx := 3
@@ -135,13 +151,15 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time, epis
 	conditions := []string{
 		"h.user_id = $1",
 		"h.profile_id = $2",
+		// The history-listing cutoff, so plays a mark unwatched kept stay
+		// listed; a NULL removed_before predates the column.
 		`NOT EXISTS (
 			SELECT 1
 			FROM user_history_hidden_items hhi
 			WHERE hhi.user_id = h.user_id
 			  AND hhi.profile_id = h.profile_id
 			  AND hhi.media_item_id = h.media_item_id
-			  AND h.watched_at <= hhi.hidden_before
+			  AND h.watched_at <= COALESCE(hhi.removed_before, hhi.hidden_before)
 		)`,
 	}
 

@@ -35,24 +35,31 @@ const (
 // it; see PixelDataUndecodable for damaged pixel data.
 var ErrInvalidImage = errors.New("imageutil: invalid image")
 
-// maxPixelCheckPixels bounds the raster PixelDataUndecodable lets the
-// standard library allocate. A few-kilobyte upload can declare large
-// dimensions, and image.Decode allocates the whole raster before it reads the
-// pixel data. At 4 megapixels that is 32 MB for a 16-bit PNG, and about twice
-// that for an interlaced one, whose passes are decoded into separate images.
-const maxPixelCheckPixels = 4_000_000
+// maxGoDecodePixels bounds the raster this package lets the standard library
+// allocate, in PixelDataUndecodable and the thumbhash fallback. A
+// few-kilobyte file can declare large dimensions, and image.Decode allocates
+// the whole raster before it reads the pixel data. At 4 megapixels that is
+// 32 MB for a 16-bit PNG, and about twice that for an interlaced one, whose
+// passes are decoded into separate images.
+const maxGoDecodePixels = 4_000_000
+
+// maxSquareSourcePixels bounds the source GenerateSquareVariants accepts.
+// Avatar and logo uploads are capped in bytes, but a few megabytes of PNG can
+// declare billions of pixels, all of which libvips decodes. 100 megapixels is
+// twice a 48-megapixel phone photo.
+const maxSquareSourcePixels = 100_000_000
 
 // PixelDataUndecodable reports whether data is a JPEG or PNG whose header
 // reads but whose pixel data does not decode. libvips reads only the header in
 // Size, so such a file first fails inside Process, where the error looks like
 // an encoder failure. Callers use it after GenerateVariants fails to tell
 // damaged input from a server fault. Other formats, including those other
-// packages register with image, sources above maxPixelCheckPixels, and
+// packages register with image, sources above maxGoDecodePixels, and
 // features the standard library does not support report false.
 func PixelDataUndecodable(data []byte) bool {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || (format != "jpeg" && format != "png") ||
-		int64(cfg.Width)*int64(cfg.Height) > maxPixelCheckPixels {
+		int64(cfg.Width)*int64(cfg.Height) > maxGoDecodePixels {
 		return false
 	}
 	_, _, err = image.Decode(bytes.NewReader(data))
@@ -203,35 +210,25 @@ func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, h
 }
 
 // GenerateSquareVariants center-crops the source image to a square and returns
-// a square original plus resized square variants, all encoded as WebP.
+// a square original plus resized square variants, all encoded as WebP. The
+// original is capped at MaxCachedOriginalDimension, because libwebp holds the
+// whole picture while it encodes.
 func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
-	img := bimg.NewImage(data)
-	size, err := img.Size()
+	size, err := bimg.NewImage(data).Size()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
 	}
 
-	squareSize := size.Width
-	if size.Height < squareSize {
-		squareSize = size.Height
-	}
+	squareSize := min(size.Width, size.Height)
 	if squareSize <= 0 {
 		return nil, fmt.Errorf("imageutil: invalid image size")
 	}
-
-	top := (size.Height - squareSize) / 2
-	left := (size.Width - squareSize) / 2
-	cropped, err := img.Extract(top, left, squareSize, squareSize)
-	if err != nil {
-		return nil, fmt.Errorf("imageutil: crop square: %w", err)
+	if int64(size.Width)*int64(size.Height) > maxSquareSourcePixels {
+		return nil, fmt.Errorf("imageutil: %dx%d image exceeds %d pixels", size.Width, size.Height, maxSquareSourcePixels)
 	}
 
 	variants := make([]Variant, 0, len(sizes)+1)
-	original, err := bimg.NewImage(cropped).Process(bimg.Options{
-		Type:          bimg.WEBP,
-		Quality:       webpQuality,
-		StripMetadata: true,
-	})
+	original, err := encodeSquare(data, min(squareSize, MaxCachedOriginalDimension), squareSize)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: encode square original: %w", err)
 	}
@@ -245,16 +242,7 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 		if square <= 0 {
 			continue
 		}
-		opts := bimg.Options{
-			Type:          bimg.WEBP,
-			Quality:       webpQuality,
-			StripMetadata: true,
-			Width:         square,
-			Height:        square,
-			Force:         true,
-			Enlarge:       squareSize < square,
-		}
-		out, err := bimg.NewImage(cropped).Process(opts)
+		out, err := encodeSquare(data, square, squareSize)
 		if err != nil {
 			return nil, fmt.Errorf("imageutil: resize square to %d: %w", square, err)
 		}
@@ -262,6 +250,22 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 	}
 
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
+}
+
+// encodeSquare encodes the centered side×side WebP square of data, whose
+// shorter edge is squareSize. libvips scales the source so that edge fills
+// the square, then crops, in one pass: no full-resolution intermediate, and
+// the crop is taken after EXIF auto-rotation.
+func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
+	return bimg.NewImage(data).Process(bimg.Options{
+		Type:          bimg.WEBP,
+		Quality:       webpQuality,
+		StripMetadata: true,
+		Width:         side,
+		Height:        side,
+		Crop:          true,
+		Enlarge:       squareSize < side,
+	})
 }
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.
@@ -272,7 +276,8 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 // the heap — well over a hundred MiB for a large poster — per concurrent
 // caller, while vips shrinks it to thumbhashSourceDimension with
 // shrink-on-load and hands Go a raster of a few KiB. The pure-Go decode of
-// the raw bytes remains as the fallback for anything vips cannot parse.
+// the raw bytes remains as the fallback for anything vips cannot parse, for
+// sources up to maxGoDecodePixels.
 //
 // Changing this pipeline changes the emitted hash bytes for a given image.
 // Stored thumbhashes remain valid placeholders, and the one site that
@@ -296,7 +301,7 @@ func decodeThumbhashSource(data []byte) (image.Image, error) {
 			return img, nil
 		}
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := decodeWithinBudget(data)
 	if err != nil {
 		// Bytes neither libvips nor the standard library can read keep
 		// ErrInvalidImage, as GenerateVariants reports them.
@@ -306,6 +311,20 @@ func decodeThumbhashSource(data []byte) (image.Image, error) {
 		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
 	}
 	return img, nil
+}
+
+// decodeWithinBudget decodes data with the standard library unless its header
+// declares more than maxGoDecodePixels.
+func decodeWithinBudget(data []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxGoDecodePixels {
+		return nil, fmt.Errorf("%dx%d image exceeds %d pixels", cfg.Width, cfg.Height, maxGoDecodePixels)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	return img, err
 }
 
 func normalizeThumbhashSource(data []byte) ([]byte, error) {

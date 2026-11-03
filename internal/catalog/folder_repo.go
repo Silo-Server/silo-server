@@ -59,6 +59,12 @@ func retryOnDeadlock(ctx context.Context, op func() error) error {
 	}
 }
 
+// RetryOnDeadlock is retryOnDeadlock for catalog writers outside this package.
+// op must run a whole transaction, so a retry starts it again.
+func RetryOnDeadlock(ctx context.Context, op func() error) error {
+	return retryOnDeadlock(ctx, op)
+}
+
 // deleteInBatches repeatedly runs deleteBatch (each a single autocommit
 // statement) until a batch removes fewer than batchSize rows. Each batch is
 // retried on deadlock. It returns the total number of rows deleted.
@@ -99,6 +105,12 @@ type CreateFolderInput struct {
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
 	TrickplayEnabled         bool
+	BoxSetsEnabled           bool
+	// BoxSetMinMovies is the fewest library movies that make a box set;
+	// zero applies the default.
+	BoxSetMinMovies int
+	// BoxSetsInSearch nil means on.
+	BoxSetsInSearch *bool
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh; nil applies the default (all provider kinds), an
 	// empty slice disables remote videos.
@@ -126,6 +138,9 @@ type UpdateFolderInput struct {
 	ChapterThumbnailsEnabled *bool
 	IntroDetectionEnabled    *bool
 	TrickplayEnabled         *bool
+	BoxSetsEnabled           *bool
+	BoxSetMinMovies          *int
+	BoxSetsInSearch          *bool
 	TrailerKinds             *[]string // nil = no change; empty slice disables remote videos
 	// RealtimeMonitoring is nil on the frozen /api/v1 update path, which
 	// never sets it, so the column stays unchanged there.
@@ -194,7 +209,7 @@ func normalizeTrailerKindsInput(kinds []string) []string {
 
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
-const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trickplay_enabled, realtime_monitoring, trailer_kinds, poster_path, last_scanned_at,
+const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trickplay_enabled, box_sets_enabled, box_set_min_movies, box_sets_in_search, realtime_monitoring, trailer_kinds, poster_path, last_scanned_at,
 	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order`
 
 // scanFolder scans a single row into a *models.MediaFolder.
@@ -211,6 +226,9 @@ func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
 		&f.ChapterThumbnailsEnabled,
 		&f.IntroDetectionEnabled,
 		&f.TrickplayEnabled,
+		&f.BoxSetsEnabled,
+		&f.BoxSetMinMovies,
+		&f.BoxSetsInSearch,
 		&f.RealtimeMonitoring,
 		&f.TrailerKinds,
 		&f.PosterPath,
@@ -247,6 +265,9 @@ func scanFolders(rows pgx.Rows) ([]*models.MediaFolder, error) {
 			&f.ChapterThumbnailsEnabled,
 			&f.IntroDetectionEnabled,
 			&f.TrickplayEnabled,
+			&f.BoxSetsEnabled,
+			&f.BoxSetMinMovies,
+			&f.BoxSetsInSearch,
 			&f.RealtimeMonitoring,
 			&f.TrailerKinds,
 			&f.PosterPath,
@@ -329,8 +350,17 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		realtimeMonitoring = *input.RealtimeMonitoring
 	}
 
-	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, trickplay_enabled, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
+	boxSetMinMovies := input.BoxSetMinMovies
+	if boxSetMinMovies <= 0 {
+		boxSetMinMovies = DefaultBoxSetMinMovies
+	}
+	boxSetsInSearch := true
+	if input.BoxSetsInSearch != nil {
+		boxSetsInSearch = *input.BoxSetsInSearch
+	}
+
+	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, trickplay_enabled, box_sets_enabled, box_set_min_movies, box_sets_in_search, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
 		RETURNING ` + folderColumns
 
 	row := tx.QueryRow(ctx, query,
@@ -342,6 +372,9 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		realtimeMonitoring,
 		trailerKinds,
 		input.TrickplayEnabled,
+		input.BoxSetsEnabled,
+		boxSetMinMovies,
+		boxSetsInSearch,
 	)
 
 	folder, err := scanFolder(row)
@@ -516,6 +549,21 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 	if input.TrickplayEnabled != nil {
 		setClauses = append(setClauses, fmt.Sprintf("trickplay_enabled = $%d", argIndex))
 		args = append(args, *input.TrickplayEnabled)
+		argIndex++
+	}
+	if input.BoxSetsEnabled != nil {
+		setClauses = append(setClauses, fmt.Sprintf("box_sets_enabled = $%d", argIndex))
+		args = append(args, *input.BoxSetsEnabled)
+		argIndex++
+	}
+	if input.BoxSetMinMovies != nil {
+		setClauses = append(setClauses, fmt.Sprintf("box_set_min_movies = $%d", argIndex))
+		args = append(args, *input.BoxSetMinMovies)
+		argIndex++
+	}
+	if input.BoxSetsInSearch != nil {
+		setClauses = append(setClauses, fmt.Sprintf("box_sets_in_search = $%d", argIndex))
+		args = append(args, *input.BoxSetsInSearch)
 		argIndex++
 	}
 	if input.IntroDetectionEnabled != nil {
@@ -762,7 +810,20 @@ func (r *FolderRepository) DeleteWithStats(
 		if e := moveCollectionsOffFolder(ctx, tx, id); e != nil {
 			return e
 		}
+		// The folder's episode memberships cascade with it; series that
+		// survive in other libraries recompute the denorms read from them.
+		var seriesIDs []string
+		if e := tx.QueryRow(ctx, `
+			SELECT COALESCE(array_agg(DISTINCT e.series_id), ARRAY[]::text[])
+			FROM episode_libraries el
+			JOIN episodes e ON e.content_id = el.episode_id
+			WHERE el.media_folder_id = $1`, id).Scan(&seriesIDs); e != nil {
+			return e
+		}
 		if _, e := tx.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id); e != nil {
+			return e
+		}
+		if e := RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, seriesIDs); e != nil {
 			return e
 		}
 		return tx.Commit(ctx)
@@ -1156,7 +1217,7 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 		UNION ALL
 		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = ANY($1)
 		UNION ALL
-		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
+		SELECT poster_path, backdrop_path, '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
 		UNION ALL
@@ -1192,7 +1253,7 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 
 // filterUnreferencedImageDirs returns the candidate directories that no
 // surviving row still has artwork under: no item artwork slot, extra backdrop,
-// season poster or episode still outside deletingContentIDs has a path that
+// season poster or backdrop, or episode still outside deletingContentIDs has a path that
 // starts with the directory.
 //
 // The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
@@ -1256,8 +1317,9 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			SELECT b.path FROM media_item_backdrops b
 				WHERE NOT (b.content_id = ANY($2::text[])) AND b.path <> ''
 			UNION ALL
-			SELECT s.poster_path FROM seasons s
-				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''
+			SELECT a.path FROM seasons s
+				CROSS JOIN LATERAL (VALUES (s.poster_path), (s.backdrop_path)) AS a(path)
+				WHERE NOT (s.series_id = ANY($2::text[])) AND a.path <> ''
 			UNION ALL
 			SELECT e.still_path FROM episodes e
 				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
@@ -1363,6 +1425,30 @@ func (r *FolderRepository) LibraryRootsForContent(ctx context.Context, contentID
 		paths = append(paths, path)
 	}
 	return paths, rows.Err()
+}
+
+// CatalogedFilesUnder returns up to limit present media file paths of
+// contentID under dir that sort after after, in path order, as the scanner
+// recorded them; pass the last path of a page to read the next one. An
+// episode's file carries its series' content ID, so a series lists its
+// episodes' files. The metadata image-cache processor uses this to accept
+// local artwork in a title folder that is a symlink out of the library
+// (metadata.catalogedFileLister).
+func (r *FolderRepository) CatalogedFilesUnder(ctx context.Context, contentID, dir, after string, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT file_path
+		FROM media_files
+		WHERE content_id = $1
+		  AND missing_since IS NULL
+		  AND starts_with(file_path, $2)
+		  AND file_path > $3
+		ORDER BY file_path
+		LIMIT $4
+	`, contentID, strings.TrimSuffix(dir, "/")+"/", after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying cataloged files of %q under %q: %w", contentID, dir, err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func (r *FolderRepository) UpdateLastScanned(ctx context.Context, id int, scannedAt time.Time) error {
