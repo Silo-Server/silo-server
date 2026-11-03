@@ -45,6 +45,10 @@ func resolveItemUserStatesWithOptions(
 	}
 
 	contentIDs := make([]string, 0, len(items))
+	// Played reads an item's own watch progress unless the item is a series or
+	// season, decided by its episodes, or an ebook, decided by reading progress.
+	progressIDs := make([]string, 0, len(items))
+	ebookIDs := make([]string, 0)
 	seriesIDs := make([]string, 0)
 	seasonIDs := make([]string, 0)
 	seenContent := make(map[string]struct{}, len(items))
@@ -71,23 +75,16 @@ func resolveItemUserStatesWithOptions(
 				seenSeason[item.ContentID] = struct{}{}
 				seasonIDs = append(seasonIDs, item.ContentID)
 			}
+		case itemTypeEbook:
+			ebookIDs = append(ebookIDs, item.ContentID)
+		default:
+			progressIDs = append(progressIDs, item.ContentID)
 		}
 	}
 
-	favoriteMap, err := store.ListFavoritesByMediaItems(ctx, profileID, contentIDs)
-	if err != nil {
-		return nil, err
-	}
-	watchlistMap, err := store.ListWatchlistByMediaItems(ctx, profileID, contentIDs)
-	if err != nil {
-		return nil, err
-	}
-	notInterestedMap, err := store.ListNotInterestedByMediaItems(ctx, profileID, contentIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	progressIDs := append([]string{}, contentIDs...)
+	// Series and season completion runs before the flag reads: when it falls
+	// back to listing episodes, their IDs join the played reads.
+	var err error
 	seriesEpisodes := map[string][]string{}
 	seasonEpisodes := map[string][]string{}
 	var seriesCompletion, seasonCompletion map[string]bool
@@ -146,11 +143,11 @@ func resolveItemUserStatesWithOptions(
 		}
 	}
 
-	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, progressIDs)
+	flags, err := readItemUserFlags(ctx, store, profileID, contentIDs, progressIDs)
 	if err != nil {
 		return nil, err
 	}
-	ebookProgressMap, err := resolveEbookProgressForUserStates(ctx, options, profileID, contentIDs)
+	ebookProgressMap, err := resolveEbookProgressForUserStates(ctx, options, profileID, ebookIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -160,30 +157,81 @@ func resolveItemUserStatesWithOptions(
 			continue
 		}
 		state := &itemUserStateResponse{
-			IsFavorite:    favoriteMap[item.ContentID],
-			InWatchlist:   watchlistMap[item.ContentID],
-			NotInterested: notInterestedMap[item.ContentID],
+			IsFavorite:    flags.favorite[item.ContentID],
+			InWatchlist:   flags.watchlist[item.ContentID],
+			NotInterested: flags.notInterested[item.ContentID],
 		}
 		switch item.Type {
 		case "series":
-			state.Played = allEpisodesCompleted(seriesEpisodes[item.ContentID], progressMap)
+			state.Played = allEpisodesCompleted(seriesEpisodes[item.ContentID], flags.played)
 			if seriesCompletion != nil {
 				state.Played = seriesCompletion[item.ContentID]
 			}
 		case "season":
-			state.Played = allEpisodesCompleted(seasonEpisodes[item.ContentID], progressMap)
+			state.Played = allEpisodesCompleted(seasonEpisodes[item.ContentID], flags.played)
 			if seasonCompletion != nil {
 				state.Played = seasonCompletion[item.ContentID]
 			}
 		case "ebook":
 			state.Played = ebookProgressMap[item.ContentID].Progress >= models.EbookFinishedProgressThreshold
 		default:
-			state.Played = progressMap[item.ContentID].Completed
+			state.Played = flags.played[item.ContentID]
 		}
 		result[item.ContentID] = state
 	}
 
 	return result, nil
+}
+
+// itemUserFlagReads holds a profile's list memberships for a page of items and
+// which of its played IDs are completed.
+type itemUserFlagReads struct {
+	favorite, watchlist, notInterested, played map[string]bool
+}
+
+// readItemUserFlags reads the list memberships of contentIDs and the played
+// state of playedIDs in one round trip when the store supports it. When it
+// does not, or that read fails, it makes the per-table reads, whose separate
+// failure handling the combined read cannot tell apart.
+func readItemUserFlags(ctx context.Context, store userstore.UserStore, profileID string, contentIDs, playedIDs []string) (itemUserFlagReads, error) {
+	if reader, ok := store.(userstore.ItemUserFlagStore); ok {
+		if flags, ok, err := reader.ItemUserFlags(ctx, profileID, contentIDs, playedIDs); ok && err == nil {
+			reads := itemUserFlagReads{
+				favorite:      map[string]bool{},
+				watchlist:     map[string]bool{},
+				notInterested: map[string]bool{},
+				played:        map[string]bool{},
+			}
+			for id, flag := range flags {
+				reads.favorite[id] = flag.Favorite
+				reads.watchlist[id] = flag.InWatchlist
+				reads.notInterested[id] = flag.NotInterested
+				reads.played[id] = flag.Played
+			}
+			return reads, nil
+		}
+	}
+
+	var reads itemUserFlagReads
+	var err error
+	if reads.favorite, err = store.ListFavoritesByMediaItems(ctx, profileID, contentIDs); err != nil {
+		return reads, err
+	}
+	if reads.watchlist, err = store.ListWatchlistByMediaItems(ctx, profileID, contentIDs); err != nil {
+		return reads, err
+	}
+	if reads.notInterested, err = store.ListNotInterestedByMediaItems(ctx, profileID, contentIDs); err != nil {
+		return reads, err
+	}
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, playedIDs)
+	if err != nil {
+		return reads, err
+	}
+	reads.played = make(map[string]bool, len(progressMap))
+	for id, progress := range progressMap {
+		reads.played[id] = progress.Completed
+	}
+	return reads, nil
 }
 
 func resolveEbookProgressForUserStates(
@@ -198,16 +246,12 @@ func resolveEbookProgressForUserStates(
 	return options.EbookProgressStore.ListByContentIDs(ctx, options.UserID, profileID, contentIDs)
 }
 
-func allEpisodesCompleted(episodes []string, progressMap map[string]userstore.WatchProgress) bool {
+func allEpisodesCompleted(episodes []string, played map[string]bool) bool {
 	if len(episodes) == 0 {
 		return false
 	}
 	for _, episodeID := range episodes {
-		if episodeID == "" {
-			return false
-		}
-		progress, ok := progressMap[episodeID]
-		if !ok || !progress.Completed {
+		if episodeID == "" || !played[episodeID] {
 			return false
 		}
 	}
