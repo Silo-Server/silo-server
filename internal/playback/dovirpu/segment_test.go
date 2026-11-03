@@ -3,6 +3,7 @@ package dovirpu
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -13,6 +14,18 @@ func mp4Box(typ string, parts ...[]byte) []byte {
 
 func nal(payload []byte) []byte {
 	return append(binary.BigEndian.AppendUint32(nil, uint32(len(payload))), payload...)
+}
+
+func TestConvertInitNotReadyIsNotUnsupported(t *testing.T) {
+	// FFmpeg recreates init.mp4 empty on a restart; that is not ready, not unsupported.
+	for _, b := range [][]byte{nil, mp4Box("ftyp", make([]byte, 8))} {
+		if _, err := ConvertInit(b); err == nil || errors.Is(err, ErrUnsupportedInit) {
+			t.Fatalf("ConvertInit(% x) = %v, want a not-ready error", b, err)
+		}
+	}
+	if _, err := ConvertInit(mp4Box("moov")); !errors.Is(err, ErrUnsupportedInit) {
+		t.Fatalf("ConvertInit(moov without video) = %v, want ErrUnsupportedInit", err)
+	}
 }
 
 func TestConvertInitAndSegment(t *testing.T) {

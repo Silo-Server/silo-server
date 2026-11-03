@@ -83,10 +83,12 @@ func ConvertInit(b []byte) (Track, error) {
 	if err != nil {
 		return Track{}, err
 	}
+	sawMoov := false
 	for _, moov := range top {
 		if moov.typ != "moov" {
 			continue
 		}
+		sawMoov = true
 		traks, err := boxes(b, moov.body, moov.end)
 		if err != nil {
 			return Track{}, err
@@ -98,6 +100,10 @@ func ConvertInit(b []byte) (Track, error) {
 			}
 			return convertVideoTrak(b, trak)
 		}
+	}
+	if !sawMoov {
+		// FFmpeg is still writing it, e.g. recreated empty after a restart.
+		return Track{}, errors.New("dovirpu: init segment has no moov yet")
 	}
 	return Track{}, fmt.Errorf("%w: no video track", ErrUnsupportedInit)
 }
