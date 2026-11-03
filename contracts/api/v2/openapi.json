@@ -12064,16 +12064,19 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
           },
           "worker_database_url": {
+            "description": "Database URL the worker uses instead of the core's; not validated as a URI",
             "maxLength": 8192,
             "type": "string",
             "writeOnly": true
           },
           "worker_redis_url": {
+            "description": "Redis URL the worker uses instead of the core's; not validated as a URI",
             "maxLength": 8192,
             "type": "string",
             "writeOnly": true

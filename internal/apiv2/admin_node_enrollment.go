@@ -18,12 +18,12 @@ type AdminNodeEnrollmentService interface {
 type AdminNodeEnrollmentBody struct {
 	Name              string `json:"name" minLength:"1" maxLength:"1024"`
 	Type              string `json:"type" enum:"transcode"`
-	URL               string `json:"url" minLength:"1" maxLength:"8192"`
+	URL               string `json:"url" format:"uri-reference" minLength:"1" maxLength:"8192"`
 	Group             string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs           *int   `json:"max_jobs,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
 	EnrollmentToken   string `json:"enrollment_token" minLength:"32" maxLength:"512" writeOnly:"true"`
-	WorkerDatabaseURL string `json:"worker_database_url,omitempty" maxLength:"8192" writeOnly:"true"`
-	WorkerRedisURL    string `json:"worker_redis_url,omitempty" maxLength:"8192" writeOnly:"true"`
+	WorkerDatabaseURL string `json:"worker_database_url,omitempty" maxLength:"8192" writeOnly:"true" doc:"Database URL the worker uses instead of the core's; not validated as a URI"`
+	WorkerRedisURL    string `json:"worker_redis_url,omitempty" maxLength:"8192" writeOnly:"true" doc:"Redis URL the worker uses instead of the core's; not validated as a URI"`
 }
 type AdminNodeEnrollmentInput struct{ Body AdminNodeEnrollmentBody }
 

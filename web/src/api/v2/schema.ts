@@ -17462,8 +17462,11 @@ export interface components {
       name: string;
       /** @enum {string} */
       type: "transcode";
+      /** Format: uri-reference */
       url: string;
+      /** @description Database URL the worker uses instead of the core's; not validated as a URI */
       worker_database_url?: string;
+      /** @description Redis URL the worker uses instead of the core's; not validated as a URI */
       worker_redis_url?: string;
     };
     AdminNodeHealth: {
