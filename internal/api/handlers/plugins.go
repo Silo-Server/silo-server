@@ -1172,7 +1172,12 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list plugin settings")
 	}
 
-	views := make([]PluginUserSettingsView, 0, len(installations))
+	type offerable struct {
+		installation *plugins.Installation
+		manifest     *pluginv1.PluginManifest
+	}
+	offers := make([]offerable, 0, len(installations))
+	ids := make([]int, 0, len(installations))
 	for _, installation := range installations {
 		// The reserved builtin row has no manifest on disk; without this skip
 		// the whole user-scoped settings list would 500.
@@ -1200,7 +1205,18 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 		if len(manifest.GetUserConfigSchema()) == 0 && !manifestHasUserNavigableRoute(manifest) {
 			continue
 		}
-		views = append(views, toUserPluginSettingsSummary(installation, manifest, h.configuredGlobalKeys(ctx, installation.ID)))
+		offers = append(offers, offerable{installation: installation, manifest: manifest})
+		ids = append(ids, installation.ID)
+	}
+
+	// One read for the whole list: the eligible installations are known only after
+	// their manifests load, and a per-installation read would cost a query for
+	// every plugin on each request.
+	configuredKeys := h.configuredGlobalKeysForInstallations(ctx, ids)
+
+	views := make([]PluginUserSettingsView, 0, len(offers))
+	for _, offer := range offers {
+		views = append(views, toUserPluginSettingsSummary(offer.installation, offer.manifest, configuredKeys[offer.installation.ID]))
 	}
 	return views, nil
 }
@@ -1245,7 +1261,7 @@ func (h *PluginHandler) GetUserPluginSettings(ctx context.Context, userID, insta
 	}
 
 	return PluginUserSettingsDetailView{
-		Installation: toUserPluginSettingsSummary(installation, manifest, h.configuredGlobalKeys(ctx, installation.ID)),
+		Installation: toUserPluginSettingsSummary(installation, manifest, h.configuredGlobalKeysForInstallations(ctx, []int{installation.ID})[installation.ID]),
 		Values:       values,
 	}, nil
 }
@@ -1592,20 +1608,21 @@ func toUserPluginSettingsSummary(
 	}
 }
 
-// configuredGlobalKeys names the installation's stored global config entries that hold
-// a usable value, reading only their keys.
+// configuredGlobalKeysForInstallations names each installation's stored global config
+// entries that hold a usable value, reading only their keys and answering for all of
+// them in one round trip.
 //
 // A cleared entry still has a row, so presence alone would keep a dependent setting on
 // offer after an operator removed the credential behind it. A read failure reports none
 // rather than failing the request: the answer decides whether a screen may offer a
 // setting, and an unprovable yes is worse than no.
-func (h *PluginHandler) configuredGlobalKeys(ctx context.Context, installationID int) []string {
+func (h *PluginHandler) configuredGlobalKeysForInstallations(ctx context.Context, installationIDs []int) map[int][]string {
 	if h.configs == nil {
 		return nil
 	}
-	keys, err := h.configs.ListConfiguredGlobalConfigKeys(ctx, installationID)
+	keys, err := h.configs.ListConfiguredGlobalConfigKeysForInstallations(ctx, installationIDs)
 	if err != nil {
-		slog.WarnContext(ctx, "listing plugin global config keys", "component", "api", "installation_id", installationID, "error", err)
+		slog.WarnContext(ctx, "listing plugin global config keys", "component", "api", "installation_ids", installationIDs, "error", err)
 		return nil
 	}
 	return keys

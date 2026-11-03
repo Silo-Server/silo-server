@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+// configuredKeysFor reads one installation's configured global config keys through the
+// batched form, which is the one the user-facing settings list calls.
+func configuredKeysFor(t *testing.T, store *RuntimeConfigStore, installationID int) []string {
+	t.Helper()
+	byInstallation, err := store.ListConfiguredGlobalConfigKeysForInstallations(context.Background(), []int{installationID})
+	if err != nil {
+		t.Fatalf("ListConfiguredGlobalConfigKeysForInstallations: %v", err)
+	}
+	return byInstallation[installationID]
+}
+
 // The answer decides whether a screen may offer a feature that needs an operator's
 // credential, so an entry that has been cleared must not count. The seeded value is
 // credential-shaped so a leak fails an assertion here rather than needing a reviewer to
@@ -24,10 +35,7 @@ func TestListConfiguredGlobalConfigKeysCountsOnlyFilledInEntries(t *testing.T) {
 		t.Fatalf("seed global config: %v", err)
 	}
 
-	keys, err := store.ListConfiguredGlobalConfigKeys(ctx, installationID)
-	if err != nil {
-		t.Fatalf("ListConfiguredGlobalConfigKeys: %v", err)
-	}
+	keys := configuredKeysFor(t, store, installationID)
 	if len(keys) != 1 || keys[0] != "account" {
 		t.Fatalf("keys = %v, want [account]", keys)
 	}
@@ -45,23 +53,39 @@ func TestListConfiguredGlobalConfigKeysCountsOnlyFilledInEntries(t *testing.T) {
 		t.Fatalf("clear global config: %v", err)
 	}
 
-	cleared, err := store.ListConfiguredGlobalConfigKeys(ctx, installationID)
-	if err != nil {
-		t.Fatalf("ListConfiguredGlobalConfigKeys after clearing: %v", err)
-	}
+	cleared := configuredKeysFor(t, store, installationID)
 	if len(cleared) != 0 {
 		t.Fatalf("keys after clearing = %v, want none", cleared)
 	}
 
 	// The answer is per installation: another installation's configuration must not make
-	// this one look configured.
+	// this one look configured, and one call covering both must keep them apart.
 	other := seedResidentQueryInstallation(t, pool, true)
-	otherKeys, err := store.ListConfiguredGlobalConfigKeys(ctx, other)
-	if err != nil {
-		t.Fatalf("ListConfiguredGlobalConfigKeys(other): %v", err)
+	if err := store.PutGlobalConfig(ctx, other, "region", map[string]any{
+		"region": "us-east",
+	}); err != nil {
+		t.Fatalf("seed other global config: %v", err)
 	}
-	if len(otherKeys) != 0 {
-		t.Fatalf("other installation keys = %v, want none", otherKeys)
+
+	both, err := store.ListConfiguredGlobalConfigKeysForInstallations(ctx, []int{installationID, other})
+	if err != nil {
+		t.Fatalf("ListConfiguredGlobalConfigKeysForInstallations: %v", err)
+	}
+	if len(both[installationID]) != 0 {
+		t.Fatalf("keys = %v, want none for the installation whose entry was cleared", both[installationID])
+	}
+	if len(both[other]) != 1 || both[other][0] != "region" {
+		t.Fatalf("other installation keys = %v, want [region]", both[other])
+	}
+
+	// An installation that holds nothing at all is absent rather than present and empty.
+	empty := seedResidentQueryInstallation(t, pool, true)
+	both, err = store.ListConfiguredGlobalConfigKeysForInstallations(ctx, []int{installationID, empty})
+	if err != nil {
+		t.Fatalf("ListConfiguredGlobalConfigKeysForInstallations: %v", err)
+	}
+	if _, present := both[empty]; present {
+		t.Fatalf("installation with no stored entry is present in %v", both)
 	}
 }
 
@@ -77,10 +101,7 @@ func TestListConfiguredGlobalConfigKeysTreatsAnEmptyObjectAsUnset(t *testing.T) 
 		t.Fatalf("seed empty global config: %v", err)
 	}
 
-	keys, err := store.ListConfiguredGlobalConfigKeys(ctx, installationID)
-	if err != nil {
-		t.Fatalf("ListConfiguredGlobalConfigKeys: %v", err)
-	}
+	keys := configuredKeysFor(t, store, installationID)
 	if len(keys) != 0 {
 		t.Fatalf("keys = %v, want none for an entry holding nothing", keys)
 	}
@@ -100,10 +121,7 @@ func TestListConfiguredGlobalConfigKeysTreatsBlankStringsAsUnset(t *testing.T) {
 		t.Fatalf("seed blank global config: %v", err)
 	}
 
-	keys, err := store.ListConfiguredGlobalConfigKeys(ctx, installationID)
-	if err != nil {
-		t.Fatalf("ListConfiguredGlobalConfigKeys: %v", err)
-	}
+	keys := configuredKeysFor(t, store, installationID)
 	if len(keys) != 0 {
 		t.Fatalf("keys = %v, want none for a blank entry", keys)
 	}
