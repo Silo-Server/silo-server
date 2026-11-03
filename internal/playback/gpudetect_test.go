@@ -73,7 +73,7 @@ func TestNVIDIADeviceCandidatesRequireSuccessfulNVENCProbe(t *testing.T) {
 				if info.Resolved != want {
 					t.Fatalf("resolved = %q, want %q", info.Resolved, want)
 				}
-				if log := string(fakeFFmpegLog(t, ffmpeg)); !strings.Contains(log, "h264_nvenc") {
+				if log := fakeFFmpegLog(t, ffmpeg); !strings.Contains(log, "h264_nvenc") {
 					t.Fatalf("NVENC smoke encode missing from probe log: %s", log)
 				}
 			})
