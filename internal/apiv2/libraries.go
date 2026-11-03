@@ -36,7 +36,7 @@ type Library struct {
 	IntroDetectionEnabled      bool     `json:"intro_detection_enabled" example:"false"`
 	TrickplayEnabled           bool     `json:"trickplay_enabled" doc:"Generate seek-bar preview images for the library's video files" example:"false"`
 	TrickplaySupported         bool     `json:"trickplay_supported" doc:"Whether the server can produce seek-bar previews (public asset storage is configured)" example:"true"`
-	BoxSetsEnabled             bool     `json:"box_sets_enabled" doc:"Browse the movies TMDB lists in one collection (a franchise such as Harry Potter) as one box set; movie and mixed libraries only" example:"false"`
+	BoxSetsEnabled             bool     `json:"box_sets_enabled" doc:"Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and in search; library browse still lists each movie. Movie and mixed libraries only" example:"false"`
 	BoxSetMinMovies            int      `json:"box_set_min_movies" doc:"The fewest of a collection's movies the library must hold for them to form a box set" example:"2"`
 	BoxSetsInSearch            bool     `json:"box_sets_in_search" doc:"List matching box sets of this library in search, ahead of their movies" example:"true"`
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
