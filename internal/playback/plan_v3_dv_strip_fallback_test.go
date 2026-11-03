@@ -244,8 +244,9 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 // A single-track Profile 7 source goes to an output that takes Profile 8.1 as
 // the server's HLS 8.1 conversion (fMP4 only) before the HDR10 strip. A
 // dual-track source keeps its RPUs on the enhancement-layer track, which a
-// remux does not copy, so it goes straight to the strip. Without the strip, a
-// failed 8.1 plan falls through to a transcode, not to a raw Profile 7 copy.
+// remux does not copy, so it goes straight to the strip, as does a client that
+// needs MPEG-TS copies. Without the strip, a failed 8.1 plan falls through to a
+// transcode, not to a raw Profile 7 copy.
 func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
@@ -257,9 +258,9 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 	})
 	for _, tc := range []struct {
-		singleTrack bool
-		registry    *TransformationRegistryV3
-	}{{true, registry}, {false, registry}, {true, stripless}} {
+		singleTrack, mpegts bool
+		registry            *TransformationRegistryV3
+	}{{true, false, registry}, {false, false, registry}, {true, false, stripless}, {true, true, registry}} {
 		singleTrack := tc.singleTrack
 		file, req := dv81NativeAndHDR10FixtureV3()
 		track := &file.VideoTracks[0]
@@ -267,7 +268,12 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 		track.DVConfigPresent, track.DVRPUPresent, track.DVBLPresent, track.DVELPresent = true, true, true, singleTrack
 		track.DVEnhancementLayer = string(EnhancementFELV3)
 		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-		hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3) // the 8.1 plan must still pick fMP4
+		// A delivery's own HDR details must accept the 8.1 output, not reject
+		// the Profile 7 source.
+		hls.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+		if tc.mpegts {
+			hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3) // the conversion is fMP4-only
+		}
 		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
 
 		plans, _ := replanChainV3(t, PlannerInputV3{
@@ -300,8 +306,12 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 		if tc.registry == stripless {
 			wantStrip = -1
 		}
-		if want := map[bool]int{true: 1, false: 0}[singleTrack]; dv81 != want || firstStrip != wantStrip {
-			t.Fatalf("single track %v: %d 8.1 plans, first strip at %d", singleTrack, dv81, firstStrip)
+		want := 0
+		if singleTrack && !tc.mpegts {
+			want = 1
+		}
+		if dv81 != want || firstStrip != wantStrip {
+			t.Fatalf("single track %v, mpegts %v: %d 8.1 plans, first strip at %d", singleTrack, tc.mpegts, dv81, firstStrip)
 		}
 	}
 }

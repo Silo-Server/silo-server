@@ -37,8 +37,8 @@ func TestConvertRPUMatchesDoviTool(t *testing.T) {
 				t.Errorf("%s:\n got %s\nwant %s", tc.in, hex.EncodeToString(got), hex.EncodeToString(want))
 			}
 		}
-		if _, err := ConvertRPU(got); !errors.Is(err, ErrNotProfile7) {
-			t.Errorf("%s: converting again: %v, want ErrNotProfile7", tc.in, err)
+		if _, err := ConvertRPU(got); !errors.Is(err, ErrProfile8) {
+			t.Errorf("%s: converting again: %v, want ErrProfile8", tc.in, err)
 		}
 	}
 }
@@ -102,48 +102,59 @@ func FuzzConvertRPU(f *testing.F) {
 	})
 }
 
-// A garbage polynomial order must fail at once, not loop over it.
-func TestConvertRPURejectsHugePolynomialOrder(t *testing.T) {
-	w := bitWriter{}
-	w.bits(2, 6)   // rpu_type
-	w.bits(18, 11) // rpu_format
-	w.bits(1, 4)   // vdr_rpu_profile
-	w.bits(0, 4)   // vdr_rpu_level
-	w.flag(true)   // vdr_seq_info_present_flag
-	w.flag(false)  // chroma_resampling_explicit_filter_flag
-	w.bits(0, 2)   // coefficient_data_type
-	w.ue(23)       // coefficient_log2_denom
-	w.bits(1, 2)   // vdr_rpu_normalized_idc
-	w.flag(false)  // bl_video_full_range_flag
-	w.ue(2)        // bl_bit_depth_minus8
-	w.ue(2)        // el_bit_depth_minus8
-	w.ue(4)        // vdr_bit_depth_minus8
-	w.flag(false)  // spatial_resampling_filter_flag
-	w.bits(0, 3)   // reserved_zero_3bits
-	w.flag(true)   // el_spatial_resampling_filter_flag
-	w.flag(false)  // disable_residual_flag
-	w.flag(false)  // vdr_dm_metadata_present_flag
-	w.flag(false)  // use_prev_vdr_rpu_flag
-	w.ue(0)        // vdr_rpu_id
-	w.ue(0)        // mapping_color_space
-	w.ue(0)        // mapping_chroma_format_idc
-	for range 3 {
-		w.ue(0)
-		w.bits(0, 10)
-		w.bits(1023, 10)
-	}
-	w.bits(0, 3)     // nlq_method_idc
-	w.bits(0, 10)    // nlq_pred_pivot_value
-	w.bits(1023, 10) // nlq_pred_pivot_value
-	w.ue(0)          // num_x_partitions_minus1
-	w.ue(0)          // num_y_partitions_minus1
-	w.ue(0)          // mapping_idc: polynomial
-	w.ue(1<<32 - 1)  // poly_order_minus1
-	w.align()
-	body := append([]byte{0x19}, w.out...)
-	rpu := binary.BigEndian.AppendUint32(body, crc32MPEG2(w.out))
-	rpu = append(rpu, 0x80)
-	if _, err := ConvertRPU(escape(rpu)); err == nil || errors.Is(err, ErrNotProfile7) {
-		t.Fatalf("err = %v, want a parse error", err)
+// Hand-built RPUs that must fail as errors, not as ErrProfile8 (which leaves
+// the RPU in place): a garbage polynomial order, which must fail at once
+// rather than loop over it, and a Profile 4 RPU (10-bit VDR).
+func TestConvertRPURejectsUnsupportedRPUs(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		vdrBitDepth   uint64
+		polyOrderMin1 uint64
+	}{
+		{"huge polynomial order", 4, 1<<32 - 1},
+		{"profile 4", 2, 0},
+	} {
+		w := bitWriter{}
+		w.bits(2, 6)         // rpu_type
+		w.bits(18, 11)       // rpu_format
+		w.bits(1, 4)         // vdr_rpu_profile
+		w.bits(0, 4)         // vdr_rpu_level
+		w.flag(true)         // vdr_seq_info_present_flag
+		w.flag(false)        // chroma_resampling_explicit_filter_flag
+		w.bits(0, 2)         // coefficient_data_type
+		w.ue(23)             // coefficient_log2_denom
+		w.bits(1, 2)         // vdr_rpu_normalized_idc
+		w.flag(false)        // bl_video_full_range_flag
+		w.ue(2)              // bl_bit_depth_minus8
+		w.ue(2)              // el_bit_depth_minus8
+		w.ue(tc.vdrBitDepth) // vdr_bit_depth_minus8
+		w.flag(false)        // spatial_resampling_filter_flag
+		w.bits(0, 3)         // reserved_zero_3bits
+		w.flag(true)         // el_spatial_resampling_filter_flag
+		w.flag(false)        // disable_residual_flag
+		w.flag(false)        // vdr_dm_metadata_present_flag
+		w.flag(false)        // use_prev_vdr_rpu_flag
+		w.ue(0)              // vdr_rpu_id
+		w.ue(0)              // mapping_color_space
+		w.ue(0)              // mapping_chroma_format_idc
+		for range 3 {
+			w.ue(0)
+			w.bits(0, 10)
+			w.bits(1023, 10)
+		}
+		w.bits(0, 3)           // nlq_method_idc
+		w.bits(0, 10)          // nlq_pred_pivot_value
+		w.bits(1023, 10)       // nlq_pred_pivot_value
+		w.ue(0)                // num_x_partitions_minus1
+		w.ue(0)                // num_y_partitions_minus1
+		w.ue(0)                // mapping_idc: polynomial
+		w.ue(tc.polyOrderMin1) // poly_order_minus1
+		w.align()
+		body := append([]byte{0x19}, w.out...)
+		rpu := binary.BigEndian.AppendUint32(body, crc32MPEG2(w.out))
+		rpu = append(rpu, 0x80)
+		if _, err := ConvertRPU(escape(rpu)); err == nil || errors.Is(err, ErrProfile8) {
+			t.Errorf("%s: err = %v, want a conversion error", tc.name, err)
+		}
 	}
 }

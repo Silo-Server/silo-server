@@ -9,6 +9,11 @@ import (
 	"os"
 )
 
+// ErrUnsupportedInit reports an init segment that parsed completely but
+// cannot be relabelled as Profile 8.1: no video track, no Dolby Vision record,
+// or a profile other than 7 or 8. A partly written one fails differently.
+var ErrUnsupportedInit = errors.New("dovirpu: init segment cannot carry Profile 8.1")
+
 // Track describes the video track of a fragmented MP4 init segment.
 type Track struct {
 	ID        uint32
@@ -94,7 +99,7 @@ func ConvertInit(b []byte) (Track, error) {
 			return convertVideoTrak(b, trak)
 		}
 	}
-	return Track{}, errors.New("dovirpu: no video track in init segment")
+	return Track{}, fmt.Errorf("%w: no video track", ErrUnsupportedInit)
 }
 
 func convertVideoTrak(b []byte, trak box) (Track, error) {
@@ -135,7 +140,7 @@ func convertVideoTrak(b []byte, trak box) (Track, error) {
 		}
 	}
 	if track.NALLength == 0 || dv == nil || dv.end-dv.body < 5 {
-		return Track{}, errors.New("dovirpu: video track has no hvcC or Dolby Vision record")
+		return Track{}, fmt.Errorf("%w: no hvcC or Dolby Vision record", ErrUnsupportedInit)
 	}
 	p := b[dv.body:]
 	switch profile := p[2] >> 1; profile {
@@ -149,7 +154,7 @@ func convertVideoTrak(b []byte, trak box) (Track, error) {
 		p[4] = 1<<4 | p[4]&0x0F      // compatibility id 1
 		return track, nil
 	default:
-		return Track{}, fmt.Errorf("dovirpu: Dolby Vision profile %d", profile)
+		return Track{}, fmt.Errorf("%w: Dolby Vision profile %d", ErrUnsupportedInit, profile)
 	}
 }
 
@@ -331,7 +336,7 @@ func convertSample(s []byte, nalLength int, stats *SegmentStats) ([][2]int, erro
 			continue
 		}
 		rpu, err := ConvertRPU(s[start+nalLength+2 : end])
-		if errors.Is(err, ErrNotProfile7) {
+		if errors.Is(err, ErrProfile8) {
 			continue
 		}
 		// The filler takes the bytes the conversion saved: its length prefix,

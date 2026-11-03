@@ -5,9 +5,9 @@ import (
 	"errors"
 )
 
-// ErrNotProfile7 reports an RPU that is valid but not Profile 7, such as one
-// this package already converted.
-var ErrNotProfile7 = errors.New("dovirpu: RPU is not Profile 7")
+// ErrProfile8 reports an RPU that is already Profile 8, such as one this
+// package converted. Any other RPU it cannot convert is an ordinary error.
+var ErrProfile8 = errors.New("dovirpu: RPU is already Profile 8")
 
 // ConvertRPU converts one Profile 7 RPU to Profile 8.1, byte for byte as
 // dovi_tool's mode 2 does: the residual is disabled, the NLQ data is removed,
@@ -140,7 +140,7 @@ func (c *converter) header() (dmPresent, usePrev, compressedDM bool) {
 	vdrRPUProfile := c.copy(4)
 	c.check(c.copy(4) == 0, "vdr_rpu_level is not 0")
 	if c.copy(1) != 1 || rpuFormat&0x700 != 0 { // vdr_seq_info_present_flag
-		c.fail(ErrNotProfile7)
+		c.check(false, "RPU without sequence info")
 		return
 	}
 	c.copy(1) // chroma_resampling_explicit_filter_flag
@@ -158,8 +158,13 @@ func (c *converter) header() (dmPresent, usePrev, compressedDM bool) {
 	compressedDM = c.copy(3) == 1
 	elSpatial := c.read(1) == 1
 	disableResidual := c.read(1) == 1
-	if c.err == nil && (vdrRPUProfile != 1 || !elSpatial || disableResidual || vdrBitDepth != 4) {
-		c.fail(ErrNotProfile7)
+	// dovi_tool's get_dovi_profile: 7 needs the residual and a 12-bit VDR;
+	// without the residual it is 8.
+	switch {
+	case vdrRPUProfile == 1 && (!elSpatial || disableResidual):
+		c.fail(ErrProfile8)
+	case vdrRPUProfile != 1 || vdrBitDepth != 4:
+		c.check(false, "RPU is neither Profile 7 nor Profile 8")
 	}
 	c.check(denom <= 23, "coefficient_log2_denom is above 23")
 	c.check(c.coefDataType <= 1, "invalid coefficient_data_type")
@@ -210,6 +215,10 @@ func (c *converter) mapping() {
 	}
 	paramsEnd := c.r.pos
 	mel := c.isMEL()
+	// The identity curve below is written as integer and fraction parts; with
+	// float coefficients (coefficient_data_type 1) it would map every pixel
+	// to 0, so refuse that RPU and let its frame fall back.
+	c.check(mel || c.coefDataType == 0, "identity mapping with float coefficients")
 	if c.err != nil {
 		return
 	}

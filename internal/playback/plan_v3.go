@@ -786,8 +786,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan := cloneRemuxPlanCandidateV3(remuxBase)
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-				// The 8.1 conversion rewrites fMP4 segments only.
-				if !dv81 && deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
+				if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
 					HLSCopyFitsMPEGTS(source.VideoCodec, "") {
 					// HLS carries only H.264 and HEVC in MPEG-TS; other copied
 					// codecs keep fMP4. MPEG-TS has no sample entry; the
@@ -1907,14 +1906,18 @@ const (
 // Profile 7 source as Profile 8.1 to a client that takes it. Only a
 // single-track source qualifies: its DOVI record says the RPUs and the
 // enhancement layer travel in the base-layer track, which is the track a
-// remux copies. The registry is consulted last because it may fetch node
-// capabilities.
+// remux copies. The conversion rewrites fMP4 only, so a client that needs
+// MPEG-TS copies (hls_copy_mpegts_v1) does not get it. The registry is
+// consulted last because it may fetch node capabilities.
 func canServerConvertDV7ToDV81V3(source SourceDescriptorV3, file *models.MediaFile, request StartRequestV3, registry func() *TransformationRegistryV3) bool {
 	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 7 || source.VideoCodec != transcodeCodecHEVC ||
 		file == nil || len(file.VideoTracks) == 0 {
 		return false
 	}
 	if track := file.VideoTracks[0]; !track.DVConfigPresent || !track.DVRPUPresent || !track.DVELPresent || !track.DVBLPresent {
+		return false
+	}
+	if deliverySupportsFeatureV3(request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) {
 		return false
 	}
 	source.DVBLCompatID = 1
@@ -2836,7 +2839,7 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	case DynamicRangeDolbyVisionV3:
 		candidate := plan.Source
 		for _, transformation := range plan.Transformations {
-			if transformation.Name == ClientDV7ToDV81V3 {
+			if transformation.Name == ClientDV7ToDV81V3 || transformation.Name == TransformationServerDV7DV81V3 {
 				candidate.DVProfile = 8
 				candidate.DVBLCompatID = 1
 				break
