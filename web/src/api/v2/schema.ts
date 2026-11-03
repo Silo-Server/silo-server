@@ -28707,6 +28707,7 @@ export interface components {
        */
       ref: string;
       /**
+       * Format: uri-reference
        * @description Public, immutable path of the image bytes
        * @example /api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp
        */

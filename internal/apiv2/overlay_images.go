@@ -58,7 +58,7 @@ type AdminOverlayImageRefInput struct {
 type OverlayImage struct {
 	Ref    string `json:"ref" doc:"Content reference card overlay documents use; it changes exactly when the stored bytes change" example:"9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"`
 	Name   string `json:"name" doc:"Administrator's label for the image" example:"4K Dolby Vision"`
-	URL    string `json:"url" doc:"Public, immutable path of the image bytes" example:"/api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"`
+	URL    string `json:"url" format:"uri-reference" doc:"Public, immutable path of the image bytes" example:"/api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"`
 	Width  int    `json:"width" doc:"Stored width in pixels" example:"300"`
 	Height int    `json:"height" doc:"Stored height in pixels" example:"120"`
 }
