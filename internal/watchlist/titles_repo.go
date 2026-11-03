@@ -619,6 +619,10 @@ func (r *titlesRepo) profileEntries(ctx context.Context, userID int, profileID s
 	return addedAt, aliases, nil
 }
 
+// profileHasEntriesSQL reports whether a profile ($1 user, $2 profile) has
+// any entry.
+const profileHasEntriesSQL = `SELECT EXISTS (SELECT 1 FROM user_watchlist_titles WHERE user_id = $1 AND profile_id = $2)`
+
 // profileEntriesMatching returns the profile's entries whose title holds any
 // of the given provider IDs, with all of those titles' aliases.
 func (r *titlesRepo) profileEntriesMatching(ctx context.Context, userID int, profileID, mediaType string, providers, providerIDs []string) (map[int64]time.Time, []titleAlias, error) {
