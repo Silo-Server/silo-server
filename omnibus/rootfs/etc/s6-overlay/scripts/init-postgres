@@ -90,11 +90,18 @@ s6-setuidgid postgres install -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf 
 # restart. postgresql.auto.conf, which ALTER SYSTEM writes, loads last and
 # still decides; a file such as 10-local.conf loads after this one. If Silo
 # cannot size them, it says why when it tunes, and the cluster starts untuned.
+# A value PostgreSQL rejects in a configuration file stops it from starting,
+# where ALTER SYSTEM refuses it and the server keeps running, so the file stays
+# only if PostgreSQL reads the configuration with it. postgres -C prints why not.
 tune_conf="$PGDATA/conf.d/02-omnibus-tune.conf"
 if tune="$(s6-setuidgid silo silo postgres-tune-conf -env /config/silo/.env -postgres-major "$PG_MAJOR")" &&
   [[ -n "$tune" ]]; then
   printf '# Written by the Silo omnibus image on every start while POSTGRES_TUNE is on.\n%s\n' "$tune" |
     write_as postgres "$tune_conf"
+  if ! s6-setuidgid postgres postgres -D "$PGDATA" -C shared_buffers >/dev/null; then
+    warn "PostgreSQL rejects its configuration with the POSTGRES_TUNE startup settings; starting without $tune_conf"
+    s6-setuidgid postgres rm -f "$tune_conf"
+  fi
 else
   s6-setuidgid postgres rm -f "$tune_conf"
 fi

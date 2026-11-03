@@ -203,9 +203,15 @@ environment and `/config/silo/.env`. A new cluster then starts with them, and
 Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
 `max_connections` and `io_method` stay out: the first is sized from
 `database.max_connections`, which lives in the database, and an `io_method`
-PostgreSQL rejects would stop the server from starting, where `ALTER SYSTEM`
-refuses it. Both apply at the next restart. With tuning off, or when Silo
-cannot size the settings, the file is removed. On an existing cluster
+PostgreSQL rejects would drop the whole file (below). Both apply at the next
+restart. With tuning off, or when Silo cannot size the settings, the file is
+removed. A value outside a setting's range in a configuration file stops
+PostgreSQL from starting, where `ALTER SYSTEM` refuses it, so `init-postgres`
+also removes the file, with a warning, when `postgres -C` rejects the
+configuration with it in place (for example `POSTGRES_TUNE_MEMORY` below
+512kB). The check cannot catch shared memory the host cannot provide, from an
+overstated `POSTGRES_TUNE_MEMORY`: the first start fails then, as the restart
+after `ALTER SYSTEM` would. On an existing cluster
 `postgresql.auto.conf` still decides, and `10-local.conf` overrides the file.
 Rewriting `pg_hba.conf` matters for a data directory from the official
 PostgreSQL image, whose file trusts every local connection.
