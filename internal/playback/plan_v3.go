@@ -381,6 +381,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		dvStripEligibleHLS = false
 	}
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
+	serverDV81Eligible := hlsDeliveryOK && canServerConvertDV7ToDV81V3(source, file, input.Request, input.hlsRemuxRegistry)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 	// With the server strip gone, a client that cannot take the source range
 	// (either natively or by managing it itself) and cannot run its own DV
@@ -462,7 +463,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// qualities can carry the reduction, so the planner refuses the source and
 	// the handler's alternate-version fallback transcodes that version instead.
 	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
-		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+		(originalRangeOK || dvStripEligible || serverDV81Eligible || clientDV81Eligible || clientHDR10Eligible) &&
 		!videoTranscodeExecutableV3(input, source) && !lowerVersionServesQualitiesV3(input) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
 			Code:    "quality_reduction_unavailable",
@@ -474,7 +475,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	base.DegradationWarnings = append(base.DegradationWarnings, quality.Warnings...)
 
 	if quality.RequiresTranscode || !videoOK ||
-		(!originalRangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
+		(!originalRangeOK && !dvStripEligible && !serverDV81Eligible && !clientDV81Eligible && !clientHDR10Eligible) ||
 		(!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
 		reasonOverride := ""
 		if !quality.RequiresTranscode && !videoOK && videoEvidenceInsufficient {
@@ -486,7 +487,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// True when the burn requirement is the sole disjunct that fired: every
 		// other route condition still permits a source-preserving delivery.
 		subtitleForcedAdaptation := !quality.RequiresTranscode && videoOK &&
-			(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+			(originalRangeOK || dvStripEligible || serverDV81Eligible || clientDV81Eligible || clientHDR10Eligible) &&
 			!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK
 		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride, subtitleForcedAdaptation)
 	}
@@ -505,7 +506,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			plan.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "client_profile7_to_profile81"}
 			plan.Transformations = append(plan.Transformations, TransformationV3{
 				Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3,
-				ValidatedClaims: []string{"profile7_rpu_converted_to_profile81", "hdr10_base_layer_preserved", "enhancement_layer_discarded"},
+				ValidatedClaims: DV7ToDV81ClaimsV3(),
 			})
 			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
 				Code:    "dolby_vision_enhancement_layer_discarded",
@@ -597,11 +598,11 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		}
 	}
 
-	// A progressive remux maps only the base-layer video stream, so dual-layer
-	// Profile 7 can never ship as native Dolby Vision here regardless of the
-	// client's decoder claims; the validated HDR10 strip is the only eligible
-	// P7 remux recipe.
-	remuxRangeOK := rangeOK && source.DVProfile != 7
+	// A remux maps only the base-layer video stream, so dual-layer Profile 7
+	// can never ship as native Dolby Vision here regardless of the client's
+	// decoder claims; its remux recipes are the server's HLS 8.1 conversion
+	// and the validated HDR10 strip.
+	remuxRangeOK := rangeOK && source.DVProfile != 7 || serverDV81Eligible
 	// A copy-unsafe source (H.264 with conflicting in-band PPS) must not take a
 	// video stream-copy route: the avc1/fMP4 segment would desync strict
 	// decoders. Skipping the remux branch drops through to the HLS transcode.
@@ -663,15 +664,31 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// first; once every native-DV remux has been attempted on this output
 		// route, the strip is the next source-preserving recipe, ahead of any
 		// transcode. Profile 7 and outputs without the source range only ever
-		// take the strip.
-		dvStripModes := []bool{dvStripEligible && (source.DVProfile == 7 || !rangeOK)}
-		if !dvStripModes[0] && dvStripEligible {
-			dvStripModes = append(dvStripModes, true)
+		// take the strip, after the server's HLS 8.1 conversion when the output
+		// takes Profile 8.1.
+		var dvModes []dvRemuxModeV3
+		if serverDV81Eligible {
+			dvModes = append(dvModes, dvRemuxDV81V3)
+		}
+		if dvStripEligible && (source.DVProfile == 7 || !rangeOK) {
+			dvModes = append(dvModes, dvRemuxStripV3)
+		} else {
+			dvModes = append(dvModes, dvRemuxPreserveV3)
+			if dvStripEligible {
+				dvModes = append(dvModes, dvRemuxStripV3)
+			}
 		}
 		hlsAudioConversionUnavailable := ""
-		for _, dvStrip := range dvStripModes {
+		for _, dvMode := range dvModes {
+			dvStrip, dv81 := dvMode == dvRemuxStripV3, dvMode == dvRemuxDV81V3
 			hlsTranscodeAudio := hlsTranscodeAudio
 			remuxBase := cloneRemuxPlanCandidateV3(base)
+			if dv81 {
+				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7DV81V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, ValidatedClaims: DV7ToDV81ClaimsV3()})
+				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeDolbyVisionV3
+				remuxBase.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "server_profile7_to_profile81"}
+				remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_enhancement_layer_discarded", Message: "Dolby Vision Profile 7 is converted to Profile 8.1 base-layer Dolby Vision; enhancement-layer pixel data is discarded."})
+			}
 			if dvStrip {
 				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: DV7ToHDR10ClaimsV3()})
 				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
@@ -697,10 +714,10 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			if normalizeMatroskaAAC {
 				appendAppliedQuirkV3(&progressivePlan, *firefoxAACTimingQuirk, "")
 			}
-			if !dvStrip {
+			if !dvStrip && !dv81 {
 				applyCopiedVideoQuirksV3(&progressivePlan, source, input.Request, high10Quirk)
 			}
-			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
+			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive) && !dv81
 			tryProgressive := func() (PlannerResultV3, bool) {
 				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, file, progressiveAudioChannels) {
 					return PlannerResultV3{}, false
@@ -738,7 +755,8 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan := cloneRemuxPlanCandidateV3(remuxBase)
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-				if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
+				// The 8.1 conversion rewrites fMP4 segments only.
+				if !dv81 && deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
 					(source.VideoCodec == transcodeCodecH264 || source.VideoCodec == transcodeCodecHEVC) {
 					// HLS carries only H.264 and HEVC in MPEG-TS; other copied
 					// codecs keep fMP4. MPEG-TS has no sample entry; the
@@ -746,7 +764,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					// configuration (see videoSampleEntryForPlanV3).
 					plan.EffectiveRecipe.SegmentContainer = SegmentContainerMPEGTSV3
 				} else {
-					plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
+					plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip || dv81)
 				}
 				hlsAudioChannels := 0
 				if hlsTranscodeAudio && !hlsQuirkConvertsAudio {
@@ -776,7 +794,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s for this device's HLS route.", audioLayoutForChannelsV3(hlsAudioChannels))})
 					appendAppliedQuirkV3(&plan, *hlsAudioQuirk, "")
 				}
-				if !dvStrip {
+				if !dvStrip && !dv81 {
 					applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 				}
 				if hlsTranscodeAudio {
@@ -1669,6 +1687,37 @@ func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartReques
 	// Profile 7 always carries an HDR10-viewable base layer. Profile 8 is
 	// safe only when the DOVI compatibility id explicitly identifies HDR10.
 	return source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1
+}
+
+// dvRemuxModeV3 is the Dolby Vision recipe of one remux candidate.
+type dvRemuxModeV3 int
+
+const (
+	dvRemuxPreserveV3 dvRemuxModeV3 = iota
+	dvRemuxDV81V3
+	dvRemuxStripV3
+)
+
+// canServerConvertDV7ToDV81V3 reports whether an HLS copy can carry this
+// Profile 7 source as Profile 8.1 to a client that takes it. Only a
+// single-track source qualifies: its DOVI record says the RPUs and the
+// enhancement layer travel in the base-layer track, which is the track a
+// remux copies. The registry is consulted last because it may fetch node
+// capabilities.
+func canServerConvertDV7ToDV81V3(source SourceDescriptorV3, file *models.MediaFile, request StartRequestV3, registry func() *TransformationRegistryV3) bool {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 7 || source.VideoCodec != transcodeCodecHEVC ||
+		file == nil || len(file.VideoTracks) == 0 {
+		return false
+	}
+	if track := file.VideoTracks[0]; !track.DVConfigPresent || !track.DVRPUPresent || !track.DVELPresent || !track.DVBLPresent {
+		return false
+	}
+	source.DVBLCompatID = 1
+	if !clientSupportsDVProfileV3(request, source, 8) {
+		return false
+	}
+	r := registry()
+	return r != nil && r.Available(TransformationServerDV7DV81V3)
 }
 
 func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartRequestV3) bool {

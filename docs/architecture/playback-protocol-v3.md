@@ -2029,12 +2029,27 @@ A transformation is a named, versioned media operation with claims attached.
 | `video_to_hevc` | `server` | `1` | `sdr` output | `hevc_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_dv7_to_dv81` | `server` | `1` | `dolby_vision` Profile 8.1 output | `profile7_rpu_converted_to_profile81`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
 `server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
 enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby
 Vision RPUs with `dovi_rpu`. An executor on recipe 1 is never offered a recipe 2
 plan, and a copy started under recipe 1 cannot be reopened on an upgraded
 executor, so that session replans.
+
+`server_dv7_to_dv81` carries a single-track Profile 7 source (its DOVI
+record lists RPUs, enhancement layer and base layer in the copied track) as
+Profile 8.1 over an fMP4 HLS copy remux, ranked after native playback and the
+client-side `client_dv7_to_dv81` and before `server_dv7_to_hdr10`. FFmpeg only
+removes the enhancement layer (`filter_units=remove_types=63`, `-strict
+unofficial` so the DOVI record is written); the session then rewrites each
+segment as it is first served: `init.mp4`'s Profile 7 `dvcC` becomes a Profile
+8.1 `dvvC` (compatibility id 1), and every RPU is converted as dovi_tool's mode
+2 does (a FEL's mapping is reset to identity). A filler-data NAL placed before
+each converted RPU takes up the bytes it saved, so no sample or box changes
+size; an RPU that cannot be converted becomes filler and that frame plays its
+HDR10 base layer. The output keeps the `hvc1` sample entry: some players (LG
+webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 
 `video_to_hevc` encodes 8-bit SDR HEVC. The planner chooses it over
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
@@ -2104,6 +2119,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | Transformation | Probe |
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
+| `server_dv7_to_dv81` | `ffmpeg -bsfs` contains `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |

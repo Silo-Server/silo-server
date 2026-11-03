@@ -240,3 +240,50 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 		t.Fatalf("terminal = %#v, want the audio conversion cause once every recipe is exhausted", terminal)
 	}
 }
+
+// A single-track Profile 7 source goes to an output that takes Profile 8.1 as
+// the server's HLS 8.1 conversion (fMP4 only) before the HDR10 strip. A
+// dual-track source keeps its RPUs on the enhancement-layer track, which a
+// remux does not copy, so it goes straight to the strip.
+func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+	})
+	for _, singleTrack := range []bool{true, false} {
+		file, req := dv81NativeAndHDR10FixtureV3()
+		track := &file.VideoTracks[0]
+		track.DVProfile, track.DVBLCompatID, track.VideoRangeType = 7, 6, "DOVIWithEL"
+		track.DVConfigPresent, track.DVRPUPresent, track.DVBLPresent, track.DVELPresent = true, true, true, singleTrack
+		track.DVEnhancementLayer = string(EnhancementFELV3)
+		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3) // the 8.1 plan must still pick fMP4
+		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+
+		plans, _ := replanChainV3(t, PlannerInputV3{
+			Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+			Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+			Registry: registry,
+		})
+		dv81, firstStrip := 0, -1
+		for i, plan := range plans {
+			for _, tr := range plan.Transformations {
+				if tr.Name != TransformationServerDV7DV81V3 {
+					continue
+				}
+				dv81++
+				if i != 0 || plan.Delivery != DeliveryRemuxHLSV3 || plan.EffectiveRecipe.SegmentContainer != "" ||
+					!plan.Claims.Video.DolbyVision || plan.EffectiveRecipe.DynamicRange != DynamicRangeDolbyVisionV3 {
+					t.Fatalf("8.1 plan %d = %s %s %#v", i, plan.Delivery, plan.EffectiveRecipe.SegmentContainer, plan.Claims.Video)
+				}
+			}
+			if firstStrip < 0 && planStripsDVToHDR10V3(plan) {
+				firstStrip = i
+			}
+		}
+		if want := map[bool]int{true: 1, false: 0}[singleTrack]; dv81 != want || firstStrip != dv81 {
+			t.Fatalf("single track %v: %d 8.1 plans, first strip at %d", singleTrack, dv81, firstStrip)
+		}
+	}
+}

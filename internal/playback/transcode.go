@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -190,6 +191,12 @@ type TranscodeOpts struct {
 // enhancement layer as NAL unit type 63 in the same video stream, which stream
 // mapping cannot separate, so filter_units removes those units.
 const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
+
+// DV7ToDV81BitstreamFilter keeps a single-track Profile 7 stream's RPUs and
+// removes only its enhancement layer. The session then converts each served
+// fMP4 segment's RPUs to Profile 8.1 in place (see dovirpu), so a client that
+// takes Profile 8.1 gets Dolby Vision instead of the HDR10 strip.
+const DV7ToDV81BitstreamFilter = "filter_units=remove_types=63"
 
 // CopyFMP4RecipeVersion identifies the byte-affecting copy-video HLS recipe.
 // Remote starts attest it so rolling clusters never silently mix the old
@@ -408,7 +415,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		return nil, fmt.Errorf("copy-video MPEG-TS requires video copy")
 	}
 	if opts.VideoBitstreamFilter != "" &&
-		(opts.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter || !strings.EqualFold(opts.TargetCodecVideo, "copy")) {
+		(opts.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter && opts.VideoBitstreamFilter != DV7ToDV81BitstreamFilter ||
+			!strings.EqualFold(opts.TargetCodecVideo, "copy") ||
+			opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter && !copyVideoUsesFMP4(opts)) {
 		return nil, fmt.Errorf("unsupported video bitstream filter recipe")
 	}
 	if opts.SegmentDuration <= 0 {
@@ -881,7 +890,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		if strings.EqualFold(opts.SourceVideoCodec, transcodeCodecHEVC) || strings.EqualFold(opts.SourceVideoCodec, "h265") {
 			videoBitstreamFilter = "hevc_mp4toannexb"
 		}
-		if opts.VideoBitstreamFilter == DV7ToHDR10BitstreamFilter {
+		if opts.VideoBitstreamFilter == DV7ToHDR10BitstreamFilter || opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter {
 			if videoBitstreamFilter != "" {
 				videoBitstreamFilter += ","
 			}
@@ -901,6 +910,11 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		args = append(args, "-tag:v", VideoSampleEntryDVH1, "-strict", "unofficial")
 	case VideoSampleEntryHVC1:
 		args = append(args, "-tag:v", VideoSampleEntryHVC1)
+	}
+	if opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter && opts.VideoSampleEntry != VideoSampleEntryDVH1 {
+		// FFmpeg writes the DOVI record only under -strict unofficial; the
+		// session relabels it as Profile 8.1 when it serves init.mp4.
+		args = append(args, "-strict", "unofficial")
 	}
 
 	// Copy-video sessions only do audio work on the filter/encode side.
@@ -3106,6 +3120,14 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		_ = segment.Close()
 		return nil, ErrSegmentNotFound
 	}
+	if s.opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter {
+		// Under s.mu, so no request is handed a segment mid-rewrite. The
+		// rewrite is idempotent, which also covers a new FFmpeg generation
+		// rewriting init.mp4 or a segment.
+		if err := convertDV81Segment(root, name); err != nil {
+			slog.Warn("playback: dolby vision 8.1 segment conversion failed", "session", s.opts.SessionID, "segment", name, "error", err)
+		}
+	}
 	if s.segmentIncarnation == "" {
 		s.segmentIncarnation = uuid.NewString()
 	}
@@ -3115,6 +3137,33 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		Generation:      s.segmentGeneration,
 		GenerationToken: s.segmentGenerationTokenLocked(),
 	}, nil
+}
+
+// convertDV81Segment rewrites a served file of a DV7ToDV81BitstreamFilter
+// session in place: init.mp4's DOVI record, or a media segment's RPUs.
+func convertDV81Segment(root *os.Root, name string) error {
+	if name != hlsInitSegmentName && !strings.HasSuffix(name, ".m4s") {
+		return nil
+	}
+	initFile, err := root.OpenFile(hlsInitSegmentName, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	track, err := dovirpu.ConvertInitFile(initFile)
+	_ = initFile.Close()
+	if err != nil || name == hlsInitSegmentName {
+		return err
+	}
+	f, err := root.OpenFile(name, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	stats, err := dovirpu.ConvertSegmentFile(f, track)
+	if err == nil && stats.Dropped > 0 {
+		err = fmt.Errorf("%d of %d RPUs could not be converted; those frames play their HDR10 base layer", stats.Dropped, stats.Dropped+stats.Converted)
+	}
+	return err
 }
 
 // servableSegmentName reports whether name is a plain file name the segment

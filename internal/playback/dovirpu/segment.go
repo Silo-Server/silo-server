@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -361,9 +362,16 @@ func putLength(b []byte, nalLength, n int) {
 	}
 }
 
-// ConvertInitFile applies ConvertInit to the init segment at path.
-func ConvertInitFile(path string) (Track, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // a session's own segment file
+// File is the part of *os.File the file converters use.
+type File interface {
+	io.ReaderAt
+	io.WriterAt
+	Stat() (os.FileInfo, error)
+}
+
+// ConvertInitFile applies ConvertInit to an init segment file.
+func ConvertInitFile(f File) (Track, error) {
+	b, err := readAll(f)
 	if err != nil {
 		return Track{}, err
 	}
@@ -372,36 +380,32 @@ func ConvertInitFile(path string) (Track, error) {
 	if err != nil || bytes.Equal(b, orig) {
 		return t, err
 	}
-	return t, writeRanges(path, b, [][2]int{{0, len(b)}})
+	_, err = f.WriteAt(b, 0)
+	return t, err
 }
 
-// ConvertSegmentFile applies ConvertSegment to the media segment at path,
-// writing back only the bytes that changed.
-func ConvertSegmentFile(path string, track Track) (SegmentStats, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // a session's own segment file
+// ConvertSegmentFile applies ConvertSegment to a media segment file, writing
+// back only the bytes that changed.
+func ConvertSegmentFile(f File, track Track) (SegmentStats, error) {
+	b, err := readAll(f)
 	if err != nil {
 		return SegmentStats{}, err
 	}
 	stats, dirty, err := ConvertSegment(b, track)
-	if err != nil {
-		return stats, err
-	}
-	return stats, writeRanges(path, b, dirty)
-}
-
-func writeRanges(path string, b []byte, ranges [][2]int) error {
-	if len(ranges) == 0 {
-		return nil
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // a session's own segment file
-	if err != nil {
-		return err
-	}
-	for _, r := range ranges {
-		if _, err := f.WriteAt(b[r[0]:r[1]], int64(r[0])); err != nil {
-			_ = f.Close()
-			return err
+	for _, r := range dirty {
+		if _, werr := f.WriteAt(b[r[0]:r[1]], int64(r[0])); werr != nil {
+			return stats, werr
 		}
 	}
-	return f.Close()
+	return stats, err
+}
+
+func readAll(f File) ([]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, info.Size())
+	_, err = f.ReadAt(b, 0)
+	return b, err
 }
