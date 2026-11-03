@@ -448,7 +448,11 @@ must use the returned height and reject chunks whose geometry differs.
   with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
   the decoder sees every reference picture, so its state stays whole, and
   the chain still gets only the keyframes. That read costs several
-  keyframes-only reads and runs only for files that fail without it. If the
+  keyframes-only reads and runs only for files that fail without it. Its
+  cost follows the span it decodes, not the sample count attempt timeouts
+  are sized for, so it runs on the attempt's deadline plus the sampled
+  span's playing time; `Request.AttemptSeconds` is that longest attempt,
+  which a caller waiting on another node adds up. If the
   window fails for any reason, the attempt reports the window's failure,
   whose reason and log describe the latest read, and after a list fallback
   its error names the list run's.
@@ -643,6 +647,14 @@ part took effect (there, nice 19 without the idle I/O class) and the first
 failure is logged. Deadlines and the limiter still
 bound background work. If the idle I/O class is seen to starve it on a disk
 that is never idle, switch to the lowest best-effort level (7) instead.
+
+On Unix every ffmpeg run, background or not, starts in a process group of
+its own through `internal/procgroup`, which every other ffmpeg and ffprobe
+run in Silo uses too (`fspath.CommandContext`, which runs the tools on media
+paths, builds its commands with it). A timeout or cancellation kills the whole group, so
+when the ffmpeg path is a wrapper script that runs the real ffmpeg as a
+child, the child dies with the wrapper instead of running on outside the
+limiter. Other platforms kill only the process Silo started.
 
 ## Artifact storage
 

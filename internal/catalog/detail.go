@@ -668,6 +668,9 @@ type VersionSubtitleTrack struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
 	FileName        string `json:"file_name,omitempty"`
+	// IndexOnly is models.SubtitleTrack.IndexOnly, for planners that read
+	// this projection.
+	IndexOnly bool `json:"-"`
 }
 
 // SubtitleInfo represents a subtitle track available for a media item.
@@ -3008,15 +3011,10 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
+	} else {
+		*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = %s.content_id
-				)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`
 			NOT EXISTS (
 				SELECT 1 FROM media_item_libraries mil_disabled
@@ -4811,6 +4809,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			HearingImpaired: sub.HearingImpaired,
 			External:        sub.External,
 			FileName:        sub.FileName,
+			IndexOnly:       sub.IndexOnly,
 		})
 
 		index := sub.Index

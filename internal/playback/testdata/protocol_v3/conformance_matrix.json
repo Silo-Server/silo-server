@@ -4816,7 +4816,8 @@
               "forced": false,
               "default": false,
               "hearing_impaired": false,
-              "delivery": "sidecar"
+              "delivery": "sidecar",
+              "stream_index": 4
             }
           ]
         },
@@ -5065,7 +5066,8 @@
               "forced": false,
               "default": false,
               "hearing_impaired": false,
-              "delivery": "sidecar"
+              "delivery": "sidecar",
+              "stream_index": 4
             }
           ]
         },
@@ -5301,7 +5303,8 @@
               "forced": false,
               "default": false,
               "hearing_impaired": false,
-              "delivery": "burn_in_only"
+              "delivery": "burn_in_only",
+              "stream_index": 4
             }
           ]
         },

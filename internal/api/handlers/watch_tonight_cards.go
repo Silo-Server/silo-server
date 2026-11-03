@@ -112,6 +112,10 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 		writeAPIError(w, err)
 		return
 	}
+	// The swipe card's own runtime stays: v1 always sent it.
+	for i := range resp.Cards {
+		resp.Cards[i].sectionItemResponse = resp.Cards[i].v1WatchTonightCard()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -681,9 +685,9 @@ func parseExcludeIDs(raw []string) map[string]struct{} {
 	return ids
 }
 
-// Card is the section card the swipe card wraps. The v1 body carries runtime
-// on the swipe card itself, not on the embedded section item, so the card
-// view surfaces that outer member.
+// Card is the section card the swipe card wraps. The v1 body's runtime is the
+// swipe card's own member, which hides the embedded item's; production sets
+// both from the same item, and the card view prefers the outer one.
 func (c swipeCardResponse) Card() SectionItemView {
 	card := c.sectionItemResponse
 	if c.Runtime != 0 {
@@ -694,8 +698,7 @@ func (c swipeCardResponse) Card() SectionItemView {
 
 // NewWatchTonightCardView wraps a card with its source, runtime, and cast; the
 // v2 tests build views with it since the embedded card is unexported. Runtime
-// is taken separately because production sets it on the swipe card, not on
-// the embedded section item.
+// is the swipe card's own member, which Card prefers over the embedded card's.
 func NewWatchTonightCardView(card SectionItemView, source string, runtime int, cast []WatchTonightCastMemberView) WatchTonightCardView {
 	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: runtime, Cast: cast}
 }

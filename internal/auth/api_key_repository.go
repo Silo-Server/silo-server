@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -77,7 +78,16 @@ func generateAPIKey() (string, error) {
 // owning user); callers should validate scopes with NormalizeAPIKeyScopes
 // first.
 func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
-	return insertAPIKey(ctx, r.pool, userID, label, scopes)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning api key creation: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	return insertAPIKey(ctx, tx, userID, label, scopes)
 }
 
 // CreateAsActor is Create for a key that actorID mints on account userID,
@@ -97,8 +107,9 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 		defer cancel()
 		_ = tx.Rollback(cleanupCtx)
 	}()
+	// The audit row's accounts, an impersonator included, join that id order.
 	rows, err := tx.Query(ctx, `SELECT id, role, is_owner FROM users
-		WHERE id = ANY($1) ORDER BY id FOR SHARE`, []int{actorID, userID})
+		WHERE id = ANY($1) ORDER BY id FOR SHARE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
 	if err != nil {
 		return nil, fmt.Errorf("locking api key accounts: %w", err)
 	}
@@ -124,19 +135,11 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return nil, err
 	}
-	created, err := insertAPIKey(ctx, tx, userID, label, scopes)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing api key creation: %w", err)
-	}
-	return created, nil
+	return insertAPIKey(ctx, tx, userID, label, scopes)
 }
 
-func insertAPIKey(ctx context.Context, db interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}, userID int, label string, scopes []string) (*models.APIKey, error) {
+// insertAPIKey inserts the key and its audit row in tx and commits tx.
+func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, label string, scopes []string) (*models.APIKey, error) {
 	key, err := generateAPIKey()
 	if err != nil {
 		return nil, err
@@ -149,11 +152,19 @@ func insertAPIKey(ctx context.Context, db interface {
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING ` + apiKeyColumns
 
-	row := db.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes)
-	created, err := scanAPIKey(row)
+	created, err := scanAPIKey(tx.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes))
 	if err != nil {
 		return nil, err
 	}
+	audit, err := recordAPIKeyMutation(ctx, tx, nil, &models.APIKeyMetadata{ID: created.ID, UserID: created.UserID,
+		Label: created.Label, RateTier: created.RateTier, Scopes: created.Scopes})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing api key creation: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
 	// The bearer is disclosed once. No ordinary row projection carries it.
 	created.Key = key
 	return created, nil
@@ -176,13 +187,35 @@ func (r *APIKeyRepository) GetByKey(ctx context.Context, key string) (*models.AP
 
 // Delete removes an API key owned by the given user.
 func (r *APIKeyRepository) Delete(ctx context.Context, id int64, userID int) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM api_keys WHERE id = $1 AND user_id = $2", id, userID)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning api key deletion: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	// The audit row's account locks come before the key row lock, the order
+	// an account deletion takes them in.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
+	deleted, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `DELETE FROM api_keys ak WHERE ak.id = $1 AND ak.user_id = $2 RETURNING `+apiKeyMetadataColumns, id, userID))
+	if errors.Is(err, ErrAPIKeyNotFound) {
+		return ErrAPIKeyNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("deleting api key: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrAPIKeyNotFound
+	audit, err := recordAPIKeyMutation(ctx, tx, deleted, nil)
+	if err != nil {
+		return err
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing api key deletion: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
 	return nil
 }
 

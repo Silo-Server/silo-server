@@ -138,7 +138,7 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
 			return
 		}
-		entries, err = h.filterProgress(r.Context(), entries, libraryID)
+		entries, err = h.filterProgress(r.Context(), entries, libraryID, false)
 	} else {
 		entries, err = h.listProgressFrom(r.Context(), store, profileID, ProgressQuery{Status: status, LibraryID: libraryID, Limit: limit, Offset: offset})
 	}
@@ -172,9 +172,9 @@ type ProgressQuery struct {
 	Offset    int
 }
 
-// ListProgress is the status/pagination listing v1 GET /progress (without
-// ?since=) and v2 listProgress both serve: the store window, then the viewer
-// access and library filters. A failure is an *APIError.
+// ListProgress is the status/offset listing v1 GET /progress (without
+// ?since=) serves: the store window, then the viewer access and library
+// filters. A failure is an *APIError.
 func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileID string, q ProgressQuery) ([]userstore.WatchProgress, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -182,6 +182,10 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 	}
 	return h.listProgressFrom(ctx, store, profileID, q)
 }
+
+// maxProgressRefillBatch caps one store read in ListProgressPage's refill
+// loop, and with it the IDs one access-filter query checks.
+const maxProgressRefillBatch = 1000
 
 // ListProgressPage is the keyset listing v2 listProgress serves: up to limit
 // rows the viewer may see, in the requested library, ordered by
@@ -197,30 +201,35 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 // row; because the store resumes strictly after that key, rows filtered out
 // between two emitted rows are simply re-read and re-dropped on the next
 // page, which costs a little work and never skips or repeats a match. The
-// loop is bounded by the profile's own progress rows (its personal data), a
-// set that stays small relative to the catalog.
+// loop is bounded by the profile's own progress rows (its personal data).
+// Rows the filters drop can still be most of them (removed titles, or IDs a
+// client wrote that never named a catalog item), so each refill doubles the
+// batch up to maxProgressRefillBatch: a long run of dropped rows costs a few
+// large queries, not a query pair per limit+1 rows.
 func (h *ProgressHandler) ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	want := limit + 1
+	size := want
 	matches := make([]userstore.WatchProgress, 0, want)
 	for len(matches) < want {
-		batch, err := store.ListProgressPage(ctx, profileID, status, after, want)
+		batch, err := store.ListProgressPage(ctx, profileID, status, after, size)
 		if err != nil {
 			return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		}
-		kept, err := h.filterProgress(ctx, batch, libraryID)
+		kept, err := h.filterProgress(ctx, batch, libraryID, true)
 		if err != nil {
 			return nil, false, err
 		}
 		matches = append(matches, kept...)
-		if len(batch) < want {
+		if len(batch) < size {
 			break
 		}
 		last := batch[len(batch)-1]
 		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+		size = max(want, min(size*2, maxProgressRefillBatch))
 	}
 	if len(matches) > limit {
 		return matches[:limit], true, nil
@@ -233,20 +242,23 @@ func (h *ProgressHandler) listProgressFrom(ctx context.Context, store userstore.
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 	}
-	return h.filterProgress(ctx, entries, q.LibraryID)
+	return h.filterProgress(ctx, entries, q.LibraryID, false)
 }
 
 // filterProgress drops the rows the viewer may not see, then the rows outside
-// the requested library.
-func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int) ([]userstore.WatchProgress, error) {
+// the requested library. everyViewer is the v2 listing's rule; the frozen v1
+// listings keep checking restricted viewers only, because their offset pages
+// fetch no replacement for a dropped row and would come back short.
+func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int, everyViewer bool) ([]userstore.WatchProgress, error) {
 	var err error
-	// Drop entries the viewer can't access before they reach the client.
-	// Without this, a library-restricted profile receives progress rows for
-	// items outside its scope (e.g. an XXX title) and the client then fans out
-	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
-	// runs for restricted profiles; unrestricted viewers are unaffected.
-	if scope, ok := access.GetScope(ctx); ok &&
-		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active()) {
+	// Drop entries the viewer can't open before they reach the client, or the
+	// client fans out per-item detail fetches that 404: a dead Continue
+	// Watching tile it cannot clear. That covers items outside a restricted
+	// profile's scope (e.g. an XXX title) and, with everyViewer, removed
+	// titles: deleting an item leaves its progress rows behind. The v2 sync
+	// and bootstrap paths check every viewer the same way.
+	scope, ok := access.GetScope(ctx)
+	if everyViewer || (ok && (scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active())) {
 		if h.LibraryLookup == nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
 		}

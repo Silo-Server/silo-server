@@ -188,6 +188,59 @@ func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
 	}
 }
 
+// The home release dates ride the plugin's metadata Struct and decide the day
+// the calendar lists a movie on, so only a real movie date is kept.
+func TestPluginProviderGetMetadata_MapsHomeReleaseDates(t *testing.T) {
+	tests := []struct {
+		name         string
+		contentType  string
+		value        any
+		wantDigital  string
+		wantPhysical string
+	}{
+		{"movie dates", "movie", "2024-03-12", "2024-03-12", "2024-03-12"},
+		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", "", ""},
+		{"number", "movie", 20240312, "", ""},
+		{"series ignore them", "series", "2024-03-12", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata, err := structpb.NewStruct(map[string]any{
+				"digital_release_date":  tt.value,
+				"physical_release_date": tt.value,
+			})
+			if err != nil {
+				t.Fatalf("structpb.NewStruct() error = %v", err)
+			}
+			provider, err := NewPluginProviderWithClientFactory(map[string]string{
+				"plugin_installation_id": "1",
+				"capability_id":          "tmdb",
+			}, func(context.Context, int, string) (pluginMetadataClient, error) {
+				return &fakePluginMetadataClient{
+					response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+						ItemType: tt.contentType, Title: "Example", Metadata: metadata,
+					}},
+				}, nil
+			})
+			if err != nil {
+				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+			}
+
+			result, err := provider.GetMetadata(context.Background(), MetadataRequest{
+				ProviderIDs: map[string]string{"tmdb": "123"},
+				ContentType: tt.contentType,
+			})
+			if err != nil || result == nil {
+				t.Fatalf("GetMetadata() = %v, %v", result, err)
+			}
+			if result.DigitalReleaseDate != tt.wantDigital || result.PhysicalReleaseDate != tt.wantPhysical {
+				t.Fatalf("home release dates = (%q, %q), want (%q, %q)",
+					result.DigitalReleaseDate, result.PhysicalReleaseDate, tt.wantDigital, tt.wantPhysical)
+			}
+		})
+	}
+}
+
 func TestPluginProviderGetMetadata_MapsKeywordsFromMetadata(t *testing.T) {
 	metadata, err := structpb.NewStruct(map[string]any{
 		"keywords": []any{"time loop", "heist", "time loop", "", 42},

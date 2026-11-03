@@ -183,16 +183,17 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		func(respBody []byte) error {
 			var parsed chatCompletionResponse
 			if err := json.Unmarshal(respBody, &parsed); err != nil {
-				return fmt.Errorf("decode chat response: %w", err)
+				return fmt.Errorf("decode chat response: %w: %w", ErrUnusableResponse, err)
 			}
 			if parsed.Error != nil && parsed.Error.Message != "" {
-				// 200 with an upstream error object — transient on gateways.
-				return fmt.Errorf("chat API error: %s", parsed.Error.Message)
+				// 200 with an upstream error object — transient on gateways,
+				// so it reads as an unavailable upstream once retries run out.
+				return &HTTPError{StatusCode: http.StatusBadGateway, message: "chat API error: " + parsed.Error.Message}
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
 					"model", cfg.ChatModel, "response_bytes", len(respBody))
-				return fmt.Errorf("chat API returned no choices")
+				return fmt.Errorf("chat API returned no choices: %w", ErrUnusableResponse)
 			}
 			content = parsed.Choices[0].Message.Content
 			return nil

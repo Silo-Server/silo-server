@@ -3,8 +3,10 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +22,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1060,6 +1063,8 @@ func TestPlanPlaybackV3KeepsSidecarWithoutHLSSubtitleRendition(t *testing.T) {
 			in.SubtitleRenditionExecutable = func() bool { return false }
 		}},
 		{"unknown duration", "subrip", SubtitleFidelityCompatibleV3, func(in *PlannerInputV3) { in.EffectiveFile.Duration = 0 }},
+		// The pipeline rendition demuxes the track with the stream's FFmpeg.
+		{"index-only track", "webvtt", SubtitleFidelityCompatibleV3, func(in *PlannerInputV3) { in.EffectiveFile.SubtitleTracks[0].IndexOnly = true }},
 		{"ASS keeps its styling", "ass", SubtitleFidelityPreserveV3, func(in *PlannerInputV3) {
 			hls := in.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
 			hls.Subtitles.ASSStyling, hls.Subtitles.FontAttachments = true, true
@@ -1206,7 +1211,7 @@ func TestPlanPlaybackV3KeepsTheRemuxPlanForTranscodeRenditionsOnly(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(gotJSON) != string(wantJSON) || FreezeExecutableRecipeV3(got) != FreezeExecutableRecipeV3(want) {
+	if string(gotJSON) != string(wantJSON) || !reflect.DeepEqual(FreezeExecutableRecipeV3(got), FreezeExecutableRecipeV3(want)) {
 		t.Fatalf("plan changed:\n%s\nwant:\n%s", gotJSON, wantJSON)
 	}
 }
@@ -1460,7 +1465,7 @@ func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 
 		started := time.Now()
 		rr := httptest.NewRecorder()
-		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), 5)
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), "sub_00005.vtt")
 		if rr.Code != http.StatusNotFound || time.Since(started) < subtitleSegmentProductionWait {
 			t.Fatalf("segment ahead of FFmpeg = %d after %v, want 404 after the planned wait", rr.Code, time.Since(started))
 		}
@@ -1487,7 +1492,7 @@ func TestPlannedCopySubtitleSegmentPastThePlanLeavesTheThrottle(t *testing.T) {
 		session.startSubtitleSpanLocked(opts)
 
 		rr := httptest.NewRecorder()
-		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_99999.vtt", nil), 99999)
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_99999.vtt", nil), "sub_99999.vtt")
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("segment past the plan = %d, want 404", rr.Code)
 		}
@@ -1818,4 +1823,67 @@ func realSegmentStart(ctx context.Context, t *testing.T, session *TranscodeSessi
 		}
 	}
 	return first - float64(offset90k)/90_000
+}
+
+func TestCanceledSubtitleSegmentHasErrorStatus(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	session := &TranscodeSession{running: true, opts: TranscodeOpts{
+		SubtitleRendition: true, SubtitleTrackIndex: -1,
+		SubtitleRenditionTracks: []SubtitleRenditionTrack{{TrackNumber: 3}},
+		TotalDuration:           120, SegmentDuration: 4, TargetCodecVideo: "h264",
+	}}
+	recorder := httptest.NewRecorder()
+	session.ServeSubtitleSegment(recorder, httptest.NewRequest(http.MethodGet, "/segment/sub_3_00000.vtt", nil).WithContext(ctx), "sub_3_00000.vtt")
+	if got := recorder.Result().StatusCode; got != http.StatusNotFound {
+		t.Fatalf("canceled subtitle segment returned status %d with %d body bytes; want 404", got, recorder.Body.Len())
+	}
+}
+
+func TestRenditionColdProbesExceedConversionLimit(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/usr/bin/env python3\nimport socket\ns=socket.create_connection(('127.0.0.1', %d))\ns.recv(1)\nprint('0.000000')\n", listener.Addr().(*net.TCPAddr).Port)
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cache := newRenditionStartCache(1)
+	var wg sync.WaitGroup
+	results := make(chan error, renditionConversions+1)
+	const requests = renditionConversions + 1
+	for i := 0; i < requests; i++ {
+		wg.Go(func() {
+			_, err := cache.get(t.Context(), filepath.Join(dir, "ffmpeg"), fmt.Sprintf("source-%d", i), &embeddedsub.Index{Size: 1, ModTime: time.Unix(1, 0)})
+			results <- err
+		})
+	}
+	var connections []net.Conn
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+		wg.Wait()
+	}()
+	if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for range renditionConversions {
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Fatalf("only %d probes started: %v", len(connections), err)
+		}
+		connections = append(connections, conn)
+	}
+	select {
+	case err := <-results:
+		if !errors.Is(err, ErrSegmentNotFound) {
+			t.Fatalf("overloaded probe: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("excess probe was not rejected while the slots were occupied")
+	}
 }
