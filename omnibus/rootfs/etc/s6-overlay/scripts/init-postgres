@@ -83,6 +83,22 @@ fi
 s6-setuidgid postgres install -d -m 0755 "$PGDATA/conf.d"
 s6-setuidgid postgres install -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"
 
+# POSTGRES_TUNE applies its settings with ALTER SYSTEM once Silo is up, and
+# PostgreSQL reads some of them, such as shared_buffers, only at start. Silo
+# prints those it sizes from memory and CPUs, read from the environment it
+# will see, so a new cluster starts with them rather than waiting for a
+# restart. postgresql.auto.conf, which ALTER SYSTEM writes, loads last and
+# still decides; a file such as 10-local.conf loads after this one. If Silo
+# cannot size them, it says why when it tunes, and the cluster starts untuned.
+tune_conf="$PGDATA/conf.d/02-omnibus-tune.conf"
+if tune="$(s6-setuidgid silo silo postgres-tune-conf -env /config/silo/.env -postgres-major "$PG_MAJOR")" &&
+  [[ -n "$tune" ]]; then
+  printf '# Written by the Silo omnibus image on every start while POSTGRES_TUNE is on.\n%s\n' "$tune" |
+    write_as postgres "$tune_conf"
+else
+  s6-setuidgid postgres rm -f "$tune_conf"
+fi
+
 # With ENABLE_NODE_ACCESS, listen on every interface and let the silo role in
 # from the network with its password; Silo itself stays on the socket.
 network_conf="$PGDATA/conf.d/01-node-access.conf"
