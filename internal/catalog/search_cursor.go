@@ -135,15 +135,22 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 	if sql == "" {
 		return []*models.MediaItem{}, nil, 0, nil
 	}
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return nil, nil, 0, err
+	// A lone statement already reads one snapshot. The count and the general
+	// query after a partial exact tier need a transaction to share one.
+	var q rowQuerier = r.pool
+	var tx pgx.Tx
+	if includeTotal || options.exactSQL != "" {
+		var err error
+		if tx, err = r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}); err != nil {
+			return nil, nil, 0, err
+		}
+		defer func() {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
+			defer cancel()
+			_ = tx.Rollback(rollbackCtx)
+		}()
+		q = tx
 	}
-	defer func() {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
-		defer cancel()
-		_ = tx.Rollback(rollbackCtx)
-	}()
 	if !includeTotal && options.exactSQL != "" {
 		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 		if err != nil {
@@ -162,7 +169,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return items, wrapped.keys, 0, nil
 		}
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
+	rows, err := q.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -178,8 +185,10 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return nil, nil, 0, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, 0, err
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, nil, 0, err
+		}
 	}
 	return items, wrapped.keys, total, nil
 }

@@ -385,6 +385,7 @@
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
