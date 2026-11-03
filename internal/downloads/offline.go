@@ -466,8 +466,8 @@ func ifNoneMatchMatches(header, etag string) bool {
 
 // serveEmbeddedSubtitle serves one complete embedded ASS/SSA script or PGS
 // stream, the sidecar a multi-track prepared download advertises for subtitles
-// its MP4 cannot carry faithfully. It shares the streaming subtitle cache, so a
-// track is demuxed from the source at most once while its cache entry lives.
+// its MP4 cannot carry faithfully. It shares the streaming subtitle cache, and
+// with it the kept tracks, so a track is read from the source at most once.
 func (s *Service) serveEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, dl *Download, ordinal int) error {
 	file, err := s.fileRepo.GetByID(r.Context(), dl.MediaFileID)
 	if err != nil {
@@ -491,6 +491,7 @@ func (s *Service) serveEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, 
 		InputPath:   file.FilePath,
 		TrackIndex:  ordinal,
 		SourceCodec: track.Codec,
+		Embedded:    playback.EmbeddedSubtitleRefFor(file, ordinal),
 		FFmpegPath:  playback.ResolveFFmpegPath(ffmpegPath),
 	}, playback.StreamExtractSubtitle)
 	if err == nil || response.Status() == 0 || r.Context().Err() != nil {

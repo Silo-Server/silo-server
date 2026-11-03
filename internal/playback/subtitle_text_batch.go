@@ -187,17 +187,22 @@ func (c *SubtitleCache) WarmTextTracks(inputPath string, tracks []TextSubtitleTr
 	}
 	go func() {
 		defer func() { <-c.warmSem }()
-		ctx, cancel := context.WithTimeout(context.Background(), subtitleCacheWarmTimeout)
-		defer cancel()
-		start := time.Now()
-		if err := commitTextFills(ctx, inputPath, fills, batch); err != nil {
-			slog.Warn("subtitle text warm failed", "input", inputPath, "tracks", len(fills),
-				"elapsed_ms", time.Since(start).Milliseconds(), "error", err)
-			return
-		}
-		slog.Info("subtitle text warm finished", "input", inputPath, "tracks", len(fills),
-			"elapsed_ms", time.Since(start).Milliseconds())
+		c.runTextWarm(inputPath, fills, batch)
 	}()
+}
+
+// runTextWarm batch-extracts fills. The caller holds a warm slot.
+func (c *SubtitleCache) runTextWarm(inputPath string, fills []textFill, batch TextSubtitleBatchFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), subtitleCacheWarmTimeout)
+	defer cancel()
+	start := time.Now()
+	if err := commitTextFills(ctx, inputPath, fills, batch); err != nil {
+		slog.Warn("subtitle text warm failed", "input", inputPath, "tracks", len(fills),
+			"elapsed_ms", time.Since(start).Milliseconds(), "error", err)
+		return
+	}
+	slog.Info("subtitle text warm finished", "input", inputPath, "tracks", len(fills),
+		"elapsed_ms", time.Since(start).Milliseconds())
 }
 
 type textFill struct {

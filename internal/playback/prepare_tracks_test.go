@@ -28,6 +28,8 @@ func preparedTracksTestFile() *models.MediaFile {
 			{Codec: "ass", Language: "en", HearingImpaired: true},
 			{Codec: "dvd_subtitle", Language: "de"},
 			{Codec: "webvtt", Language: "es", HearingImpaired: true},
+			// FFmpeg can't demux it from the source, so the encode leaves it out.
+			{Codec: "webvtt", Language: "en", IndexOnly: true},
 		},
 	}
 }

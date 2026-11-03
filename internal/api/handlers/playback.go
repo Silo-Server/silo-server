@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -170,6 +171,19 @@ type PlaybackChapterThumbnailQueuer interface {
 	QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64)
 }
 
+// SubtitleTrackFactsLoaderV3 loads, for one plan, what reading a file's
+// embedded subtitle tracks taught the server (keptsub.Store).
+type SubtitleTrackFactsLoaderV3 interface {
+	SubtitleTrackFacts(ctx context.Context, file *models.MediaFile) playback.SubtitleTrackFactsV3
+}
+
+// SubtitlePrefetcherV3 reads, when a playback starts, the embedded subtitle
+// tracks it will likely want (keptsub.Prefetcher).
+type SubtitlePrefetcherV3 interface {
+	SessionStarted(req keptsub.PrefetchRequest)
+	SessionEnded(sessionID string)
+}
+
 // PlaybackOriginalLanguageLookup fetches the original language for a content item.
 type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
@@ -265,7 +279,9 @@ type PlaybackHandler struct {
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map
-	SubtitleRepo           subtitles.Repository // optional; enables downloaded subtitles in playback
+	SubtitleRepo           subtitles.Repository       // optional; enables downloaded subtitles in playback
+	SubtitleTrackFacts     SubtitleTrackFactsLoaderV3 // optional; what reading embedded tracks taught the server, for native_embedded limitations
+	SubtitlePrefetch       SubtitlePrefetcherV3       // optional; reads the subtitle tracks a playback will likely want, at its start
 	RealtimeHub            *playback.RealtimeHub
 	CommandTracker         *playback.CommandTracker
 	CommandDispatcher      *playback.CommandDispatcher
@@ -607,6 +623,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 			// reconstruction; plain cards just respawn the encode. Either way the
 			// atomic playback+runtime operation is the same front door.
 			card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+			h.withRecordedRenditionTracksV3(r.Context(), card)
 			if card == nil && session.RequireMediaAuthorization {
 				var recipeErr error
 				if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -636,6 +653,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	// decode so the recipe is available for reconstruction. A header-authenticated
 	// session carries no token; its recipe is the server-side recovery card.
 	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	h.withRecordedRenditionTracksV3(r.Context(), card)
 	if card == nil {
 		var recipeErr error
 		if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -2146,6 +2164,10 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "bad_request", "Playlist request query is too long")
 		return
 	}
+	if errors.Is(err, playback.ErrSubtitleRenditionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Subtitle rendition not found")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "build transcode manifest", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode manifest not ready")
@@ -2277,8 +2299,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	segmentName := chi.URLParam(r, "name")
 	if isSubtitleSegment {
 		// Subtitle rendition segments never wait out or restart the video
-		// pipeline: they are answered from the cues already on disk.
-		transcodeSession.ServeSubtitleSegment(w, r, subtitleSegment)
+		// pipeline: they are answered from the cues already on disk, or read
+		// through the source's index.
+		transcodeSession.ServeSubtitleSegment(w, r, segmentName)
 		return
 	}
 	segmentLease, err := transcodeSession.OpenSegment(segmentName)

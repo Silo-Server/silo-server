@@ -145,6 +145,17 @@ type TranscodeOpts struct {
 	// the WebVTT subtitle rendition of its HLS playlist, for a transcode or
 	// an HLS copy remux. See subtitle_rendition.go.
 	SubtitleRendition bool
+	// SubtitleRenditionTracks, with SubtitleRendition, lists every embedded
+	// text track as a rendition of its own, read on demand through the
+	// source's index instead of by this ffmpeg process; SubtitleTrackIndex then
+	// only names the selected one. See subtitle_rendition_tracks.go.
+	SubtitleRenditionTracks []SubtitleRenditionTrack
+	// SubtitleRenditionSource is the source version the on-demand renditions
+	// were planned from; segments are read from that version only.
+	SubtitleRenditionSource SubtitleRenditionSource
+	// MediaFileID is the catalog file InputPath is, or 0 when unknown. On-demand
+	// subtitle renditions find the file's kept tracks by it.
+	MediaFileID int
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
 	subtitleCueFile string
@@ -153,6 +164,8 @@ type TranscodeOpts struct {
 	// subtitle-free layout that older artifacts were encoded with.
 	PreparedTracks  *PreparedTracks
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
+	// RequireAudioTrack rejects sources missing the negotiated audio ordinal.
+	RequireAudioTrack bool
 	// SourceAudioChannels is the selected source stream's channel count. Zero
 	// means unknown and deliberately disables stereo downmix gain: boosting an
 	// already-stereo stream would change its authored level.
@@ -1045,7 +1058,11 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-map", "0:v:0")
 	}
 	if audioTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
+		audioMap := fmt.Sprintf("0:a:%d", audioTrackIndex)
+		if !opts.RequireAudioTrack {
+			audioMap += "?"
+		}
+		args = append(args, "-map", audioMap)
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}
@@ -3214,6 +3231,14 @@ func (s *TranscodeSession) SetAudioTrackIndex(index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.opts.AudioTrackIndex = index
+}
+
+// SetRequireAudioTrack updates whether ffmpeg must fail rather than drop the
+// selected audio track. Must be called before Restart() to take effect.
+func (s *TranscodeSession) SetRequireAudioTrack(required bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.RequireAudioTrack = required
 }
 
 // SetSourceAudioChannels updates the selected source track's channel count in

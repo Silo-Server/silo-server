@@ -16,10 +16,22 @@ import (
 // the seasonal window.
 type DatePredicate func(time.Time) bool
 
+// seasonEndGrace keeps a dated season up this long after its last day ends.
+// Days are the server's (UTC by default), so without it Halloween would end
+// on the evening of October 31 for viewers in the Americas. On a server set
+// to the viewer's own zone, the season runs into the next morning instead.
+const seasonEndGrace = 12 * time.Hour
+
 // inYearlyWindow reports whether t falls between start and end (MM-DD,
-// inclusive). An end before the start wraps across New Year. An unparseable
-// bound never matches.
+// inclusive), or within seasonEndGrace after end. An end before the start
+// wraps across New Year. An unparseable bound never matches.
 func inYearlyWindow(t time.Time, start, end string) bool {
+	return onYearlyWindowDay(t, start, end) || onYearlyWindowDay(t.Add(-seasonEndGrace), start, end)
+}
+
+// onYearlyWindowDay reports whether t's date falls between start and end
+// (MM-DD, inclusive).
+func onYearlyWindowDay(t time.Time, start, end string) bool {
 	sm, sd, ok1 := parseMonthDay(start)
 	em, ed, ok2 := parseMonthDay(end)
 	if !ok1 || !ok2 {
@@ -53,8 +65,15 @@ func weekdaysFromHour(hour int, weekdays ...time.Weekday) DatePredicate {
 	}
 }
 
-// easterWindow matches Palm Sunday through Easter Monday.
+// easterWindow matches Palm Sunday through Easter Monday, and seasonEndGrace
+// after it.
 func easterWindow(t time.Time) bool {
+	return onEasterWindowDay(t) || onEasterWindowDay(t.Add(-seasonEndGrace))
+}
+
+// onEasterWindowDay reports whether t's date is Palm Sunday through Easter
+// Monday.
+func onEasterWindowDay(t time.Time) bool {
 	easter := easterSunday(t.Year(), t.Location())
 	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 	return !day.Before(easter.AddDate(0, 0, -7)) && !day.After(easter.AddDate(0, 0, 1))

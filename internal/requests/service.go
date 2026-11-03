@@ -2356,29 +2356,11 @@ func (s *Service) routingRatingOf(ctx context.Context, req Request) (string, err
 // they were captured, or while TMDB was unreachable, and stores them. Routing
 // without them could send a title to the wrong server, so a TMDB failure is a
 // submission error and the submission retries. A request captured before its
-// rating was is given one, only when an enabled route checks ratings.
+// rating (or, for a series, its status) was is given one, only when an
+// enabled route checks it.
 func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes []Route) error {
 	if req.RoutingFacts.Captured() {
-		// A title TMDB had not rated yet (unreleased) is asked again a day
-		// later, so a rating route can still match it once it is rated.
-		stored := req.RoutingFacts.ContentRating
-		known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
-		if known || !routesCheckRating(routes, req.MediaType) {
-			return nil
-		}
-		rating, err := s.routingRatingOf(ctx, *req)
-		if err != nil {
-			return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
-		}
-		facts := req.RoutingFacts
-		now := s.now()
-		facts.ContentRating, facts.CapturedAt = &rating, &now
-		updated, err := s.store.SetRoutingFacts(ctx, req.ID, facts)
-		if err != nil {
-			return err
-		}
-		req.RoutingFacts = updated.RoutingFacts
-		return nil
+		return s.recheckCapturedFacts(ctx, req, routes)
 	}
 	detail := s.requestDetail(ctx, req.MediaType, req.TMDBID)
 	if detail == nil {
@@ -2400,6 +2382,72 @@ func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes [
 		return err
 	}
 	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	// Another API server may have stored its capture first, without what
+	// this one reads (a server not yet upgraded has no series status).
+	return s.recheckCapturedFacts(ctx, req, routes)
+}
+
+// recheckCapturedFacts gives captured facts what an enabled route needs and
+// they lack: a rating TMDB had not given yet, or a series' status.
+func (s *Service) recheckCapturedFacts(ctx context.Context, req *Request, routes []Route) error {
+	if err := s.recheckRoutingRating(ctx, req, routes); err != nil {
+		return err
+	}
+	return s.ensureSeriesStatus(ctx, req, routes)
+}
+
+// recheckRoutingRating reads a captured request's rating again when it has
+// none and an enabled route checks ratings: a title TMDB had not rated yet
+// (unreleased) is asked again a day later, so a rating route can still match
+// it once it is rated. Only the rating and its capture time are written, so
+// the read never replaces a fact another API server stored meanwhile.
+func (s *Service) recheckRoutingRating(ctx context.Context, req *Request, routes []Route) error {
+	stored := req.RoutingFacts.ContentRating
+	known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
+	if known || !routesCheckRating(routes, req.MediaType) {
+		return nil
+	}
+	rating, err := s.routingRatingOf(ctx, *req)
+	if err != nil {
+		return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
+	}
+	now := s.now()
+	updated, err := s.store.UpdateRoutingFacts(ctx, req.ID, RoutingFacts{ContentRating: &rating, CapturedAt: &now})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
+	return nil
+}
+
+// ensureSeriesStatus gives a series captured before status was one, only
+// when an enabled route checks status. It is read once, like the facts
+// captured with the request: a status TMDB has none for is not asked again,
+// and the capture time is left alone, since it times the rating's recheck.
+// A series TMDB no longer lists has no status, rather than a request that
+// can never be sent. The first status any API server stores wins, so every
+// server routes the request on the same one.
+func (s *Service) ensureSeriesStatus(ctx context.Context, req *Request, routes []Route) error {
+	if req.RoutingFacts.SeriesStatus != nil || !routesCheckSeriesStatus(routes, req.MediaType) {
+		return nil
+	}
+	if s.tmdb == nil {
+		return errors.New("could not read the series' status from TMDB to route it")
+	}
+	var status *string
+	switch detail, err := s.tmdb.GetMediaDetail(ctx, tmdbMediaType(req.MediaType), req.TMDBID); {
+	case errors.Is(err, tmdb.ErrNotFound):
+		status = new("")
+	case err != nil || detail == nil:
+		return fmt.Errorf("could not read the series' status from TMDB to route it: %w", err)
+	default:
+		status = seriesStatusOf(detail)
+	}
+	updated, err := s.store.FillRoutingFacts(ctx, req.ID, RoutingFacts{SeriesStatus: status})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
 	return nil
 }
 

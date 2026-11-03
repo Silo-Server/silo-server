@@ -191,40 +191,25 @@ server will not honor the parameter, so keep using its per-context defaults.
 
 ## Publication and fallback
 
-Historical GC manifests are verified in the background before they become
-publication records; their listed keys alone do not prove upload completion.
-
-Catalog reads select cached artwork from durable publication and delivery
-records. They never issue storage HEAD requests or fetch artwork delivery URLs.
-The publisher records the exact variant keys after every upload succeeds;
-partially uploaded revisions are not advertised. The revision remains part of
-each key, so an old manifest cannot establish availability for new artwork.
-
-A bounded background task verifies both storage and the client-facing GET path.
-Publication makes a revision eligible for verification. Workers claim up to 100
-revisions per run, use at most 12 concurrent checks, and stop after one minute.
-Completed checks become eligible again after 15 minutes; a large backlog can
-extend that interval. A worker failure leaves a recoverable two-minute lease.
-Delivery verification is scoped to the storage and delivery configuration.
-Transport errors preserve the last completed verdict and are retried. Confirmed
-storage loss schedules image caching for regenerable provider artwork while
-retaining catalog pointers and surviving variants;
-delivery-only failures retain the catalog pointers and are checked again.
+Catalog reads select cached artwork from durable publication records. They
+never issue storage HEAD requests or fetch artwork delivery URLs. The publisher
+records the exact variant keys after every upload succeeds; a rung a ladder
+change added is advertised only once a publication includes it. The revision remains part of each key, so an old
+manifest cannot establish availability for new artwork. Silo is the only writer
+to the assets store and deletes a revision only after retiring it, so a
+published key is served as stored on every backend.
 
 On every storage backend, a size the artwork's revision did not publish, such as
 a rung a ladder change added that the ladder backfill has not generated yet,
 resolves to a smaller size it did publish. Legacy artwork without a
 publication manifest uses an established smaller size until the ladder backfill
-regenerates it. Before external delivery is verified, the server also avoids
-newly added wide rungs and selects a published smaller size or original. A
-completed delivery check restricts selection to working keys.
-If none remain, the URL is empty and the client should display its placeholder.
-Images can still fail at a particular client or CDN edge; this must not prevent
-rendering titles, episode counts, progress, or navigation.
+regenerates it. If none remain, the URL is empty and the client should display
+its placeholder. Images can still fail at a particular client or CDN edge; this
+must not prevent rendering titles, episode counts, progress, or navigation.
 
 `image_size=large` expresses the preferred size; the response may contain a
 smaller variant. The server caches resolved artwork URLs for at most five minutes
-so background recovery becomes visible without waiting for signature expiry.
+so regenerated artwork becomes visible without waiting for signature expiry.
 Cold resolver caches read the same durable records and never rediscover image
 availability through network probes.
 

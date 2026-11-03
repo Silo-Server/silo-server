@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -55,18 +54,22 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			} `json:"output"`
 		}
 		if err := json.Unmarshal(data, &response); err != nil {
-			return fmt.Errorf("decode responses result: %w", err)
+			return fmt.Errorf("decode responses result: %w: %w", ErrUnusableResponse, err)
 		}
 		if response.Error != nil {
 			if isExhaustedQuota(data) {
 				return &permanentError{ErrQuotaExhausted}
 			}
-			if response.Error.Code == responseServerError || response.Error.Code == "rate_limit_exceeded" {
-				return errors.New("responses API is temporarily unavailable")
+			if response.Error.Code == responseRateLimitExceeded {
+				return &HTTPError{StatusCode: http.StatusTooManyRequests, Code: response.Error.Code, message: "responses API is rate limiting requests"}
 			}
+			if response.Error.Code == responseServerError {
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, Code: response.Error.Code, message: "responses API is temporarily unavailable"}
+			}
+			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, Code: response.Error.Code, message: "responses API rejected the text request"}}
 		}
-		if response.Status != "completed" || response.Error != nil {
-			return &permanentError{errors.New("responses API did not complete the text response")}
+		if response.Status != "completed" {
+			return &permanentError{unusable("responses API did not complete the text response")}
 		}
 		var text strings.Builder
 		for _, item := range response.Output {
@@ -75,7 +78,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			}
 			for _, part := range item.Content {
 				if part.Type == "refusal" {
-					return &permanentError{errors.New("responses API refused the text request")}
+					return &permanentError{unusable("responses API refused the text request")}
 				}
 				if part.Type == "output_text" {
 					text.WriteString(part.Text)
@@ -83,7 +86,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			}
 		}
 		if text.Len() == 0 {
-			return &permanentError{errors.New("responses API returned no text")}
+			return &permanentError{unusable("responses API returned no text")}
 		}
 		content = text.String()
 		return nil

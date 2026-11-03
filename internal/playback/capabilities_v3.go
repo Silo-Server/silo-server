@@ -49,9 +49,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.Width = track.Width
 		source.Height = track.Height
 		source.FrameRate = parseFrameRateV3(track.FrameRate)
-		if track.Bitrate > 0 {
-			source.BitrateKbps = normalizeBitrateKbpsV3(track.Bitrate)
-		}
+		source.BitrateKbps = SourceVideoKbps(file.Bitrate, track.Bitrate)
 		source.DynamicRange = normalizeDynamicRangeV3(track)
 		source.HDR10Plus = track.HDR10Plus || tonemap.VideoRangeTypeIsHDR10Plus(track.VideoRangeType)
 		source.DVProfile = track.DVProfile
@@ -602,6 +600,15 @@ func parseFrameRateV3(value string) float64 {
 	}
 	v, _ := strconv.ParseFloat(value, 64)
 	return v
+}
+
+// SourceVideoKbps is a source's video rate: the video track's own rate when
+// the probe found one, or else the file's rate, which includes its audio.
+func SourceVideoKbps(fileKbps, videoTrackKbps int) int {
+	if videoTrackKbps > 0 {
+		return normalizeBitrateKbpsV3(videoTrackKbps)
+	}
+	return normalizeBitrateKbpsV3(fileKbps)
 }
 
 func normalizeBitrateKbpsV3(value int) int {

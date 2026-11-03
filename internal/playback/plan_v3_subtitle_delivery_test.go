@@ -16,7 +16,7 @@ func TestResolveSubtitlePolicyV3PreservesTextThroughSidecarOnlyRenderer(t *testi
 		Enabled: true, SupportedOnDevice: true,
 		Subtitles: DeliverySubtitleCapabilitiesV3{SidecarText: true},
 	}
-	result := ResolveSubtitlePolicyV3(file, request, false, DeliveryClassOriginalHTTPV3, nil)
+	result := ResolveSubtitlePolicyV3(file, request, false, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if result.Terminal != nil || result.Decision.Mode != SubtitleRenderV3 || result.Decision.Embedded != nil {
 		t.Fatalf("a text sidecar renderer must not require embedded decoding support: %#v", result)
 	}

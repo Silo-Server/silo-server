@@ -2151,7 +2151,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	embeddedCombinedIndex := 1
 	req.SubtitleTrackIndex = &embeddedCombinedIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", embeddedCombinedIndex)
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if !result.RequiresBurn || result.SelectedIndex != 1 || result.TransportIndex != 0 {
 		t.Fatalf("embedded burn-in result = %#v", result)
 	}
@@ -2160,7 +2160,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	req.SubtitleTrackIndex = &externalIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", externalIndex)
 	req.SubtitleFidelityPreference = SubtitleFidelityPreserveV3
-	result = ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+	result = ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_burn_in_source_unsupported" {
 		t.Fatalf("external burn-in result = %#v", result)
 	}
@@ -2377,6 +2377,15 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 		{"subtitle_track_id_length", func(r *StartRequestV3) {
 			r.SubtitleTrackID = strings.Repeat("s", 129)
 		}},
+		{"native_subtitle_limitation_count", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, make([]string, 17))
+		}},
+		{"native_subtitle_limitation_length", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, []string{longValue})
+		}},
+		{"native_subtitle_limitation_empty", func(r *StartRequestV3) {
+			setNativeSubtitleLimitationsV3(r, []string{" "})
+		}},
 	}
 	for _, value := range cases {
 		t.Run(value.name, func(t *testing.T) {
@@ -2386,6 +2395,28 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 				t.Fatal("oversized capability accepted")
 			}
 		})
+	}
+}
+
+// setNativeSubtitleLimitationsV3 gives r an otherwise valid original_http
+// native_embedded entry with these limitations.
+func setNativeSubtitleLimitationsV3(r *StartRequestV3, limitations []string) {
+	delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	delivery.Subtitles.NativeEmbedded = []NativeEmbeddedSubtitleCapabilityV3{{Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id", Limitations: limitations}}
+	r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
+}
+
+// A newer client may declare a limitation this server does not know. The
+// request stays valid; planning ignores that entry instead.
+func TestStartRequestV3AcceptsUnknownNativeSubtitleLimitations(t *testing.T) {
+	req := validStartRequestV3()
+	setNativeSubtitleLimitationsV3(&req, []string{" Forced_Unlisted ", "future_limitation"})
+	if _, err := req.NormalizeAndValidate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	got := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3].Subtitles.NativeEmbedded[0].Limitations
+	if len(got) != 2 || got[0] != NativeEmbeddedLimitationForcedUnlistedV3 || got[1] != "future_limitation" {
+		t.Fatalf("limitations = %q, want normalized values kept", got)
 	}
 }
 

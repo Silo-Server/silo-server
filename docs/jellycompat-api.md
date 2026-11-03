@@ -48,6 +48,13 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
+`datePlayed` and `LastPlayedDate` accept the compact Emby form `yyyyMMddHHmmss`,
+which Jellyfin accepts for `datePlayed`, and ISO 8601 forms: `YYYY-MM-DD` alone,
+or followed by `Thh:mm` or by `Thh:mm:ss` with an optional fraction of a second,
+each with an optional `Z`, `±hh:mm` or (with seconds) `±hhmm` offset. A space may
+replace the `T` before `hh:mm:ss` when there is no offset. A fraction needs
+seconds: `Thh:mm.f` returns 400. A value without an offset is read as UTC. Other
+values return 400.
 A `LastPlayedDate` or `datePlayed` more than two minutes ahead of the server
 clock is stored and reported as the server's current time, the same bound
 native progress sync applies, so a client with a wrong clock cannot block
@@ -68,11 +75,18 @@ Non-null `Rating` or `Likes` values return 400. `PlayCount` accepts only 0 or 1;
 other values return 400. Inaccessible items and another profile's user ID are
 rejected before mutation.
 
-Configuration maps audio language, subtitle language, autoplay, and subtitle
-mode into Silo's canonical profile settings. Field names are case-insensitive;
+Configuration maps audio language, subtitle language, autoplay, subtitle mode,
+and `HidePlayedInLatest` into Silo's canonical profile settings. Field names are case-insensitive;
 duplicate casing variants of the same field return 400. Other declared
 presentation preferences round-trip for clients. Storage failures produce
 errors instead of success responses.
+
+`HidePlayedInLatest` is `home.hide_watched_items`, the profile's "Hide watched
+items from Home" switch, so turning it on in either client applies to both.
+When it is on, `/Items/Latest` requests that don't send `IsPlayed` (or an
+`IsPlayed`/`IsUnplayed` filter) leave out items the profile has watched, as
+Jellyfin does. Jellyfin Web's home Latest rows send neither, so they rely on it.
+A request that sends `IsPlayed` gets what it asked for.
 
 `/UserViews` lists libraries in the profile's native `ui.library_order`, then
 the server's library order. `OrderedViews` then applies Jellyfin's rule: views
@@ -780,10 +794,14 @@ profile sets on `VideoBitrate`, `Height` and `Width`, in its `Video` codec
 profiles for `h264` (those without a `Container` or `ApplyConditions`) and its
 HLS video transcoding profiles, instead of being refused for exceeding them:
 the video bitrate is capped and the frame is scaled to fit, keeping its aspect
-ratio. A stored device profile keeps `IsRequired: false`; a missing key reads
-back as `true`. A profile that lists transcoding profiles but no
-`DirectPlayProfiles` gets no direct play or direct stream, as in Jellyfin; Roku
-clients send one to ask for a remux after direct play fails.
+ratio. Unlike Jellyfin, the video bitrate also stops at the source's video
+rate, converted to the output codec's efficiency, so a client's generous
+`MaxStreamingBitrate` does not inflate the encode. The ceiling alone picks the
+frame size, so the source's rate never lowers it. A stored device profile keeps
+`IsRequired: false`; a missing key reads back as `true`. A profile that lists
+transcoding profiles but no `DirectPlayProfiles` gets no direct play or
+direct stream, as in Jellyfin; Roku clients send one to ask for a remux after
+direct play fails.
 
 ## Transcode reasons
 
@@ -804,7 +822,12 @@ documents, and Roku clients list their MPEG-TS transcoding profile first. A
 video-copy HLS stream for a client whose user agent starts with `Roku/` and
 whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 `remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
-keeps fMP4. Other clients are unchanged.
+keeps fMP4.
+
+Any other client that lists the source codecs for MPEG-TS HLS but not for fMP4
+also gets a video copy as MPEG-TS, unless it can take a progressive remux. This
+covers H.264 and HEVC with AAC, AC-3, E-AC-3, or MP3 audio; other audio converts
+to AAC when the profile accepts it.
 
 ## AAC encodes
 

@@ -1816,12 +1816,16 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 	return result
 }
 
-func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType, item *models.MediaItem, meta *sections.SectionItemMeta, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, imageURLs sectionItemImageURLs, resolvedPlayContentID string) sectionItemResponse {
+// sectionItemFromMediaItem maps an item's own catalog fields onto a card.
+// Home and library sections, recommendations and Watch Tonight all start from
+// it, so their cards carry the same catalog fields and poster badges. It copies
+// the item as given: only Home and library rows localize their items first.
+// Callers add the per-request parts: artwork URLs, overlay summary, user state
+// and row metadata. The frozen v1 recommendation and Watch Tonight routes drop
+// the badge fields again (v1RecommendationCard).
+func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	resp := sectionItemResponse{
-		ContentID: item.ContentID,
-		// The resolver validated the item's own hint against this profile, so
-		// its answer replaces the unvalidated one carried by the item.
-		PlayContentID:          resolvedPlayContentID,
+		ContentID:              item.ContentID,
 		Type:                   item.Type,
 		Title:                  item.Title,
 		Year:                   item.Year,
@@ -1847,11 +1851,25 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		BackdropThumbhash:      item.BackdropThumbhash,
 		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,
 		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
-		OverlaySummary:         overlaySummary,
-		UserState:              userState,
 
 		MachineTranslatedFields: item.MachineTranslatedFields,
 	}
+	if resp.Genres == nil {
+		resp.Genres = []string{}
+	}
+	if resp.Keywords == nil {
+		resp.Keywords = []string{}
+	}
+	return resp
+}
+
+func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType, item *models.MediaItem, meta *sections.SectionItemMeta, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, imageURLs sectionItemImageURLs, resolvedPlayContentID string) sectionItemResponse {
+	resp := sectionItemFromMediaItem(item)
+	// The resolver validated the item's own hint against this profile, so
+	// its answer replaces the unvalidated one carried by the item.
+	resp.PlayContentID = resolvedPlayContentID
+	resp.OverlaySummary = overlaySummary
+	resp.UserState = userState
 	if meta != nil {
 		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
 			// Items from queries that don't mark provenance compare their
@@ -1872,13 +1890,6 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		resp.ProgressUpdatedAt = meta.ProgressUpdatedAt
 		resp.ItemSource = meta.ItemSource
 		resp.applyEpisodeCardMeta(meta)
-	}
-
-	if resp.Genres == nil {
-		resp.Genres = []string{}
-	}
-	if resp.Keywords == nil {
-		resp.Keywords = []string{}
 	}
 
 	resp.PosterURL = imageURLs.posterURL

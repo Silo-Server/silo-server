@@ -454,7 +454,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 credentials are no-store and account IDs are strings. Unknown login fields are rejected; revoked logout uses session_expired. Successful login creates one credential-bound session, refresh extends only its expiry, and logout revokes only its caller session.",
+            "summary": "V2 credentials are no-store and account IDs are strings. Unknown login fields are rejected; revoked logout uses session_expired. Successful login creates one credential-bound session, refresh extends only its expiry, and logout revokes only its caller session. V2 permissions list only the admin's assigned permissions, so the fixture admin, which has none, reports an empty list; the role grant applies only while the admin acts as administrator.",
             "recorded_in": "internal/scenariocatalog/executor/auth_lifecycle_pairing_test.go",
             "operation_id": "login",
             "method": "POST",
@@ -475,7 +475,8 @@
                 },
                 {
                   "pointer": "/user/permissions",
-                  "op": "non_empty"
+                  "op": "equals",
+                  "value": []
                 },
                 {
                   "pointer": "/user/impersonation",
@@ -1733,7 +1734,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Distinct original rate-limited registration executed through the real limited router with fresh counter state per transport. Retains original credential/authority semantics and real ten-request burst exhaustion; v2 uses no-store, string account IDs and Problems.",
+            "summary": "Distinct original rate-limited registration executed through the real limited router with fresh counter state per transport. Retains original credential/authority semantics and real ten-request burst exhaustion; v2 uses no-store, string account IDs and Problems. V2 permissions list only the admin's assigned permissions, so the fixture admin, which has none, reports an empty list; the role grant applies only while the admin acts as administrator.",
             "recorded_in": "internal/scenariocatalog/executor/login_r1_pairing_test.go",
             "operation_id": "login",
             "method": "POST",
@@ -1754,7 +1755,8 @@
                 },
                 {
                   "pointer": "/user/permissions",
-                  "op": "non_empty"
+                  "op": "equals",
+                  "value": []
                 },
                 {
                   "pointer": "/user/impersonation",

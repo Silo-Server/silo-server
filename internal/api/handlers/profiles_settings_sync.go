@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -193,10 +194,10 @@ func normalizeCanonicalSettingValue(key string, raw json.RawMessage) (json.RawMe
 var errProfileLimitReached = errors.New("profile limit reached")
 
 // createProfileWithSettingsSync creates the profile, snapshots surviving
-// account-wide legacy settings, and writes every canonical row in one store
-// transaction. PostgreSQL's transaction wrapper also holds a per-user
-// advisory lock shared with legacy account-setting fan-out, closing the
-// cross-replica create/write race.
+// account-wide legacy settings, writes every canonical row and records the
+// audit action in one store transaction. PostgreSQL's transaction wrapper
+// also holds a per-user advisory lock shared with legacy account-setting
+// fan-out, closing the cross-replica create/write race.
 //
 // The household is counted against limit (0 = unlimited) inside that same
 // transaction, so concurrent creates on one account, on any replica, cannot
@@ -216,7 +217,16 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 		return fmt.Errorf("user store does not support atomic preference settings synchronization")
 	}
 	var changedKeys []string
+	var audit *auditmutation.Entry
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		audited, recording := profileAuditWriter(ctx, tx)
+		if recording {
+			// The audit row's account keys come before the acting profile's
+			// row lock, in the order deleting the account takes them.
+			if err := auditmutation.LockActors(ctx, audited.AuditTx()); err != nil {
+				return err
+			}
+		}
 		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
 			return err
 		}
@@ -239,11 +249,23 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, userstore.SettingIdentity{
 			Scope: settingscontract.ScopeProfile, ProfileID: profile.ID,
 		}, append(writes, inherited...))
+		if err != nil {
+			return err
+		}
+		if !recording {
+			return nil
+		}
+		created, err := audited.GetProfile(ctx, profile.ID)
+		if err != nil || created == nil {
+			return err
+		}
+		audit, err = recordProfileMutation(ctx, audited.AuditTx(), nil, created)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	for _, key := range changedKeys {
 		publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.ID, key, string(settingscontract.ScopeProfile))
 	}
@@ -259,14 +281,46 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 	writes []profileSettingSync,
 	acting *userstore.Profile,
 ) error {
-	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
+	var audit *auditmutation.Entry
+	err := applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
 		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
 	}, writes, func(tx userstore.PreferenceSettingsWriter) error {
+		audited, recording := profileAuditWriter(ctx, tx)
+		if recording {
+			// The audit row's account keys come before the acting and edited
+			// profiles' row locks, in the order deleting the account takes them.
+			if err := auditmutation.LockActors(ctx, audited.AuditTx()); err != nil {
+				return err
+			}
+		}
 		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
 			return err
 		}
-		return tx.UpdateProfile(ctx, profileID, input)
+		var before *userstore.Profile
+		if recording {
+			var err error
+			if before, err = audited.GetProfile(ctx, profileID); err != nil {
+				return err
+			}
+		}
+		if err := tx.UpdateProfile(ctx, profileID, input); err != nil {
+			return err
+		}
+		if before == nil {
+			return nil
+		}
+		after, err := audited.GetProfile(ctx, profileID)
+		if err != nil || after == nil {
+			return err
+		}
+		audit, err = recordProfileMutation(ctx, audited.AuditTx(), before, after)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
 
 // applyLegacyPreferenceSettingsSync is the live-write counterpart of the

@@ -6802,6 +6802,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/catalog/box-sets": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Search the box sets of libraries with box sets in search, for listing ahead of their movies. */
+    get: operations["searchCatalogBoxSets"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/box-sets/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One box set of a library with its movies the viewer can see there, in collection order. 404 when the library has box sets off or the viewer can see too few of its movies. */
+    get: operations["getCatalogBoxSet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/catalog/filters": {
     parameters: {
       query?: never;
@@ -6845,6 +6879,23 @@ export interface paths {
     };
     /** The detail page of one item, with the viewer's state. */
     get: operations["getCatalogItem"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/box-set": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 when the ID is missing, hidden, or not a catalog title (an episode or season). */
+    get: operations["getCatalogItemBoxSet"];
     put?: never;
     post?: never;
     delete?: never;
@@ -7639,6 +7690,23 @@ export interface paths {
     get: operations["getApplePushRegistrationCapabilities"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/devices/push/apple/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Clear this account's Apple installation for a device_id so an app that lost its installation key, as after a reinstall, can register again from any generation. */
+    post: operations["resetApplePushInstallation"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12799,7 +12867,7 @@ export interface components {
        */
       password_change_required: boolean;
       /**
-       * @description Effective assignable permissions; empty for a disabled account
+       * @description Assignable permissions the account holds after its access group's mask; empty for a disabled account. An admin lists only explicitly assigned permissions: its role grants every permission only while it acts as administrator (on the primary profile, or with no profile on a household that does not require one), and clients apply that grant from role and profile
        * @example [
        *       "marker_edit"
        *     ]
@@ -15067,7 +15135,7 @@ export interface components {
       /** @description Original validated client diagnostics manifest document, retaining its own schema_version and extension fields. */
       manifest: unknown;
       /** @enum {string} */
-      platform: "android" | "android-tv" | "ios" | "tvos";
+      platform: "android" | "android-tv" | "ios" | "tvos" | "roku";
       playback_session_ids: string[];
       profile_id?: string;
       /**
@@ -15106,7 +15174,7 @@ export interface components {
        */
       id: string;
       /** @enum {string} */
-      platform: "android" | "android-tv" | "ios" | "tvos";
+      platform: "android" | "android-tv" | "ios" | "tvos" | "roku";
       playback_session_ids: string[];
       profile_id?: string;
       /**
@@ -18482,7 +18550,7 @@ export interface components {
        */
       restart_count: number;
       /**
-       * @description Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed
+       * @description Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed, or whose files can't be restored from its stored archive, on the answering server
        * @enum {string}
        */
       state: "stopped" | "starting" | "running" | "backoff" | "failed";
@@ -19006,6 +19074,8 @@ export interface components {
       revision: string;
       /** @description Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing */
       routing: boolean;
+      /** @description Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none */
+      routing_series_status: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -19260,6 +19330,14 @@ export interface components {
       exclude_original_languages?: string[];
       /** @description Match requests from none of these accounts */
       exclude_requester_user_ids?: number[];
+      /** @description Series only: match series whose status is none of these; a series with no TMDB status matches */
+      exclude_series_statuses?: (
+        | "returning"
+        | "in_production"
+        | "upcoming"
+        | "ended"
+        | "cancelled"
+      )[];
       /** @description TMDB genre IDs */
       genre_ids?: number[];
       /** @description TMDB keyword IDs */
@@ -19287,6 +19365,8 @@ export interface components {
       original_languages?: string[];
       /** @description Accounts whose requests the route applies to */
       requester_user_ids?: number[];
+      /** @description Series only: the series' status when the request was made, or, for a request made before Silo captured status, the first time it is routed while a rule checks status (TMDB's Pilot is in_production, Planned is upcoming). A series with no TMDB status matches none of them */
+      series_statuses?: ("returning" | "in_production" | "upcoming" | "ended" | "cancelled")[];
       /**
        * Format: int64
        * @description First release (or first-air) year, inclusive
@@ -19324,6 +19404,11 @@ export interface components {
       origin_countries: string[];
       /** @description The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx) */
       original_language?: string;
+      /**
+       * @description A series' status as series_statuses names it (returning, in_production, upcoming, ended, cancelled), or a newer TMDB status in lower case; absent for a movie or a series with no TMDB status
+       * @example ended
+       */
+      series_status?: string;
       /** Format: int64 */
       year?: number;
     };
@@ -21357,6 +21442,8 @@ export interface components {
     ApplePushRegistrationCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description resetApplePushInstallation is served: after a push_installation_key_mismatch refusal the app can reset its own installation and register again. */
+      installation_reset_available: boolean;
       /** @description Local ordered storage and current-login validation are configured; not provider delivery or cluster rollout readiness. */
       registration_available: boolean;
       /** @description Opaque revision of this document */
@@ -21395,6 +21482,13 @@ export interface components {
        * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
        */
       server_id?: string;
+    };
+    ApplePushResetBody: {
+      device_id: string;
+    };
+    ApplePushResetReceipt: {
+      /** @description True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation. */
+      reset: boolean;
     };
     ApplePushRetirementBody: {
       device_id: string;
@@ -21804,7 +21898,7 @@ export interface components {
        * @example America/New_York
        */
       air_timezone?: string;
-      /** @description series_premiere, season_premiere, finale; empty, never null */
+      /** @description series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null */
       badges: string[];
       /** @example episode:severance-s02e01 */
       content_id: string;
@@ -21877,6 +21971,120 @@ export interface components {
       plex_guid?: string;
       tmdb_id?: string;
       tvdb_id?: string;
+    };
+    CatalogBoxSet: {
+      backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
+      backdrop_url?: string;
+      /**
+       * Format: int64
+       * @description Release year of the earliest of those movies
+       * @example 2001
+       */
+      first_year?: number;
+      /**
+       * @description The TMDB collection ID
+       * @example 1241
+       */
+      id: string;
+      /**
+       * Format: int64
+       * @description Release year of the latest of those movies
+       * @example 2011
+       */
+      last_year?: number;
+      /**
+       * @description The library whose movies make up the box set; pass it to getCatalogBoxSet
+       * @example 1
+       */
+      library_id: string;
+      /**
+       * Format: int64
+       * @description The collection's movies in the library that the viewer can see
+       * @example 8
+       */
+      movie_count: number;
+      overview?: string;
+      /**
+       * Format: int64
+       * @description How many of those movies the profile has played
+       * @example 5
+       */
+      played_count: number;
+      poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
+      poster_url?: string;
+      /**
+       * @description The collection's TMDB name, with a trailing "Collection" shown as "Box Set"
+       * @example Harry Potter Box Set
+       */
+      title: string;
+    };
+    CatalogBoxSetDetail: {
+      backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
+      backdrop_url?: string;
+      /**
+       * Format: int64
+       * @description Release year of the earliest of those movies
+       * @example 2001
+       */
+      first_year?: number;
+      /**
+       * @description The TMDB collection ID
+       * @example 1241
+       */
+      id: string;
+      /** @description The box set's movies in the library that the viewer can see, in collection (release) order */
+      items: components["schemas"]["CatalogItem"][];
+      /**
+       * Format: int64
+       * @description Release year of the latest of those movies
+       * @example 2011
+       */
+      last_year?: number;
+      /**
+       * @description The library whose movies make up the box set; pass it to getCatalogBoxSet
+       * @example 1
+       */
+      library_id: string;
+      /**
+       * Format: int64
+       * @description The collection's movies in the library that the viewer can see
+       * @example 8
+       */
+      movie_count: number;
+      overview?: string;
+      /**
+       * Format: int64
+       * @description How many of those movies the profile has played
+       * @example 5
+       */
+      played_count: number;
+      poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
+      poster_url?: string;
+      /**
+       * @description The collection's TMDB name, with a trailing "Collection" shown as "Box Set"
+       * @example Harry Potter Box Set
+       */
+      title: string;
+    };
+    CatalogBoxSetList: {
+      /** @description Matching box sets, best match first; empty, never null */
+      items: components["schemas"]["CatalogBoxSet"][];
     };
     CatalogBrowseCollection: {
       /** @description The saved or default order a collection or personal list resolved to */
@@ -22119,6 +22327,10 @@ export interface components {
        * @example 1995
        */
       year?: number;
+    };
+    CatalogItemBoxSet: {
+      /** @description The movie's box set with its movies, as getCatalogBoxSet answers it; absent when the movie is in no box set the viewer sees */
+      box_set?: components["schemas"]["CatalogBoxSetDetail"];
     };
     CatalogItemCollection: {
       /** @description The page's items; empty, never null */
@@ -22450,7 +22662,7 @@ export interface components {
       air_date: string;
       /** @description Local wall-clock time, HH:MM */
       air_time?: string;
-      /** @description Empty, never null */
+      /** @description The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null */
       badges: string[];
       /** Format: int64 */
       episode_number?: number;
@@ -22656,6 +22868,8 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on */
+      box_sets?: boolean;
       /** @description Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields */
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
@@ -25817,6 +26031,11 @@ export interface components {
     HLSSubtitleRenditionV3: {
       format: string;
       group_id: string;
+      /**
+       * Format: int64
+       * @description 1-based position of the rendition in its SUBTITLES group, set when the group lists every embedded text track (hls_subtitle_renditions_all_v1); equal to the selected inventory row's hls_rendition.index
+       */
+      index?: number;
       mime_type: string;
       name: string;
     };
@@ -26079,6 +26298,22 @@ export interface components {
        * @example false
        */
       auto_translate_metadata: boolean;
+      /**
+       * Format: int64
+       * @description The fewest of a collection's movies the library must hold for them to form a box set
+       * @example 2
+       */
+      box_set_min_movies: number;
+      /**
+       * @description Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and, when box_sets_in_search is true, in search; library browse still lists each movie. Movie and mixed libraries only
+       * @example false
+       */
+      box_sets_enabled: boolean;
+      /**
+       * @description List matching box sets of this library in search, ahead of their movies
+       * @example true
+       */
+      box_sets_in_search: boolean;
       /** @example false */
       chapter_thumbnails_enabled: boolean;
       /**
@@ -26168,6 +26403,11 @@ export interface components {
     LibraryCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /**
+       * @description This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search) and the box set reads
+       * @example true
+       */
+      box_sets: boolean;
       /**
        * @description This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter
        * @example true
@@ -26268,6 +26508,22 @@ export interface components {
       sort_order: number;
     };
     LibraryCreate: {
+      /**
+       * Format: int64
+       * @description The fewest of a collection's movies that form a box set; default 2
+       * @example 2
+       */
+      box_set_min_movies?: number;
+      /**
+       * @description Group movies of one TMDB collection into a box set; movie and mixed libraries only
+       * @example false
+       */
+      box_sets_enabled?: boolean;
+      /**
+       * @description List matching box sets in search; omitted means true
+       * @example true
+       */
+      box_sets_in_search?: boolean;
       /**
        * @description Requires public asset storage
        * @example false
@@ -26623,6 +26879,22 @@ export interface components {
     LibraryUpdate: {
       /** @example false */
       auto_translate_metadata?: boolean;
+      /**
+       * Format: int64
+       * @description The fewest of a collection's movies that form a box set
+       * @example 2
+       */
+      box_set_min_movies?: number;
+      /**
+       * @description Group movies of one TMDB collection into a box set; movie and mixed libraries only. Turning it on looks up the collections of the library's movies in the background
+       * @example true
+       */
+      box_sets_enabled?: boolean;
+      /**
+       * @description List matching box sets in search
+       * @example true
+       */
+      box_sets_in_search?: boolean;
       /** @example false */
       chapter_thumbnails_enabled?: boolean;
       /** @example true */
@@ -27557,6 +27829,8 @@ export interface components {
       codecs: string[];
       container: string;
       font_attachments: boolean;
+      /** @description Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection. */
+      limitations?: string[];
       track_identity: string;
     };
     NavigationShortcutMutation: {
@@ -32462,22 +32736,46 @@ export interface components {
       source: string;
       title?: string;
     };
+    SubtitleInventoryHLSRenditionV3: {
+      /** @description The rendition's EXT-X-MEDIA GROUP-ID */
+      group_id: string;
+      /**
+       * Format: int64
+       * @description 1-based position of the rendition in its group, in inventory order
+       */
+      index: number;
+      /** @description The rendition's EXT-X-MEDIA NAME, unique in the group */
+      name: string;
+    };
     SubtitleInventoryItemV3: {
       codec?: string;
       /** Format: int64 */
       combined_index: number;
+      /** @description Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown */
+      container_track_id?: string;
       default: boolean;
       delivery: string;
       /** Format: uri-reference */
       font_bundle_url?: string;
       forced: boolean;
       hearing_impaired: boolean;
+      /** @description Embedded text tracks of an HLS plan under hls_subtitle_renditions_all_v1: the track's WebVTT rendition in the stream's SUBTITLES group. The client may select it in its player and report the change with a subtitle_track_changed replan, which keeps the stream; url stays the fallback. */
+      hls_rendition?: components["schemas"]["SubtitleInventoryHLSRenditionV3"];
       label?: string;
       /** @description Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value */
       language?: string;
+      /** @description Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none. */
+      native_selectable?: boolean;
       source: string;
+      /**
+       * Format: int64
+       * @description Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index
+       */
+      stream_index?: number;
       sync_key?: string;
       track_id: string;
+      /** @description No route can show this track: the server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable. */
+      unplayable?: boolean;
       /** Format: uri-reference */
       url?: string;
     };
@@ -33244,6 +33542,11 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     UserLibrary: {
+      /**
+       * @description The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie
+       * @example false
+       */
+      box_sets_enabled: boolean;
       /**
        * @description Opaque identifier
        * @example 1
@@ -94491,6 +94794,243 @@ export interface operations {
       };
     };
   };
+  searchCatalogBoxSets: {
+    parameters: {
+      query: {
+        /** @description Only box sets of this library; absent searches every library with box sets in search */
+        library_id?: string;
+        /** @description Most box sets to return; default 5, maximum 20 */
+        limit?: number;
+        /** @description Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do */
+        q: string;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogBoxSetList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getCatalogBoxSet: {
+    parameters: {
+      query: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description The library whose movies make up the box set */
+        library_id: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The TMDB collection ID */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogBoxSetDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getCatalogFilters: {
     parameters: {
       query?: {
@@ -94809,6 +95349,130 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CatalogItemDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getCatalogItemBoxSet: {
+    parameters: {
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description The library the movie is being viewed in; only its box set is returned. Absent uses the first of the movie's libraries with box sets on */
+        library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Content id of the movie */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemBoxSet"];
         };
       };
       /** @description Bad Request */
@@ -102326,6 +102990,145 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resetApplePushInstallation: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        /** @description The caller's current installation key, the one its next registration will send. An installation already bound to it is left alone, so a retried reset cannot undo the registration that followed it. */
+        "X-Push-Installation-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApplePushResetBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplePushResetReceipt"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -124938,6 +125741,8 @@ export interface operations {
       query?: {
         /** @description Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist. */
         silo_rendition?: "video" | "subtitles";
+        /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
+        silo_track?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -125080,7 +125885,7 @@ export interface operations {
         "X-Profile-Token"?: string;
       };
       path: {
-        /** @description Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. */
+        /** @description Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. sub_<track>_NNNNN.vtt names a segment of the on-demand rendition of container track <track> (hls_subtitle_renditions_all_v1), read from the source when it is requested. */
         name: string;
         session_id: string;
       };

@@ -31,3 +31,15 @@ func (fakeURLs) ResolveURLs(_ context.Context, keys []string) map[string]catalog
 	}
 	return out
 }
+
+// originURLs signs every key under its origin, each expiring in an hour.
+type originURLs string
+
+func (o originURLs) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := map[string]catalog.ResolvedImageURL{}
+	expiry := time.Now().Add(time.Hour)
+	for _, key := range keys {
+		out[key] = catalog.ResolvedImageURL{URL: string(o) + key, ExpiresAt: &expiry}
+	}
+	return out
+}

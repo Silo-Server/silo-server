@@ -7,10 +7,7 @@
     "username": "admin",
     "email": "admin@example.test",
     "role": "admin",
-    "permissions": [
-      "marker_edit",
-      "metadata_curation"
-    ],
+    "permissions": [],
     "download_allowed": true,
     "password_change_required": false
   }
