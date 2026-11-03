@@ -216,12 +216,12 @@ export default function Collections() {
         {sharedCards.length > 0 || libraries.length > 0 ? (
           <PillSwitcher label="Show" options={filterOptions} value={show} onChange={changeShow} />
         ) : null}
-        {personalLoading ? (
-          <PosterGridSkeleton />
-        ) : (
-          <Wall
-            label={wallLabel}
-            before={
+        {/* The personal cards' place while they load; the server's don't wait for them. */}
+        {personalLoading ? <PosterGridSkeleton /> : null}
+        <Wall
+          label={wallLabel}
+          before={
+            personalLoading ? null : (
               <>
                 {showMine ? (
                   <YourCollections
@@ -233,12 +233,12 @@ export default function Collections() {
                 ) : null}
                 {showShared ? <SharedCards cards={sharedCards} /> : null}
               </>
-            }
-            libraries={showServer ? (picked ? [picked] : libraries) : []}
-            loadOnScroll={picked === undefined}
-          />
-        )}
-        {serverLoading ? <PosterGridSkeleton /> : null}
+            )
+          }
+          libraries={showServer ? (picked ? [picked] : libraries) : []}
+          loadOnScroll={picked === undefined}
+        />
+        {serverLoading && !personalLoading ? <PosterGridSkeleton /> : null}
         {show === "mine" && canReorder && own.length > 1 ? (
           <p className="text-muted-foreground flex items-center gap-2 text-[13px]">
             <GripVertical aria-hidden className="size-3.5" />

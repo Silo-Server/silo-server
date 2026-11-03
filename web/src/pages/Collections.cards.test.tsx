@@ -321,6 +321,14 @@ describe("Show filter", () => {
     expect(within(filter).getByRole("button", { name: /^Kids\s*2$/ })).toBeInTheDocument();
   });
 
+  it("shows the server's collections while the profile's own still load", async () => {
+    v2Recorder.answer("GET /api/v2/collections", () => new Promise(() => {}));
+    answerMoviesAndKids(1);
+    show();
+    const all = await screen.findByRole("region", { name: "All collections" });
+    expect(await within(all).findByRole("link", { name: "Studio Ghibli" })).toBeInTheDocument();
+  });
+
   it("keeps the filter its URL names while that filter's collections load", async () => {
     let release = () => {};
     const released = new Promise<void>((resolve) => {
