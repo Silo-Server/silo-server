@@ -45,9 +45,11 @@ renderer follows, and the uploaded images badges can use.
 
 ## Positions and the status corner
 
-A badge sits in one of five places: `top-left`, `bottom-left`, `bottom-right`, or a rail centred
-on the `left-edge` or `right-edge`. A corner draws at most three badges and a rail four; the rest
-are dropped rather than overlapping.
+A badge sits in one of five places: `top-left`, `bottom-left`, `bottom-right`, or a rail centred on
+the `left-edge` or `right-edge`. A corner draws at most three badges and a rail four; the rest are
+dropped rather than overlapping. The two bottom corners share the bottom edge row by row, counted
+from the bottom: a badge shares its width only with the badge at the same height in the other
+corner, so a long badge in one corner never shortens a badge in the other that has room beside it.
 
 The top-right corner belongs to the watch-status indicator, and no badge is drawn there. The
 schema still accepts `top-right` because documents stored before settings revision 25 use it: a

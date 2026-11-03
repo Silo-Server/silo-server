@@ -390,6 +390,50 @@ function BadgeStack({
   );
 }
 
+// The two bottom corners, drawn one row per level from the bottom up, so each
+// badge shares its width only with the badge beside it. Side-by-side columns
+// would each be as wide as their widest badge, and a long badge in one corner
+// would cut the other corner's badges short even where the pair at each
+// height fits.
+function BottomRows({
+  left,
+  right,
+  preset,
+  scalingMode,
+  gap,
+}: {
+  left: ResolvedBadge[];
+  right: ResolvedBadge[];
+  preset: OverlayPreset;
+  scalingMode: ScalingMode;
+  gap: string;
+}) {
+  const levels = Math.max(left.length, right.length);
+  // Index 0 is the top row, so the shorter corner lines up with the bottom.
+  const at = (badges: ResolvedBadge[], level: number) => badges[badges.length - levels + level];
+  return (
+    <div
+      className={`flex flex-col ${preset.gapClass}`}
+      style={{ gap: overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap) }}
+    >
+      {Array.from({ length: levels }, (_, level) => {
+        const start = at(left, level);
+        const end = at(right, level);
+        return (
+          <div key={level} className="flex min-w-0 items-end" style={{ gap }}>
+            {start ? <Badge badge={start} preset={preset} scalingMode={scalingMode} /> : null}
+            {end ? (
+              <span className="ml-auto flex min-w-0 justify-end">
+                <Badge badge={end} preset={preset} scalingMode={scalingMode} />
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // The band layout draws an edge's badges as one row of marks with thin
 // dividers between them. The row shows the marks that fit whole, in the
 // viewer's order, and drops the rest, as a corner drops badges past its cap:
@@ -655,22 +699,17 @@ export default function CardOverlays({
           <div
             data-overlay-edge="bottom"
             className={cn(
-              "pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2",
+              "pointer-events-none absolute inset-x-2 bottom-2 z-10",
               hasProgressBar && "mb-2",
             )}
-            style={{ right: edgeInset, bottom: edgeInset, left: edgeInset, gap: edgeGap }}
+            style={{ right: edgeInset, bottom: edgeInset, left: edgeInset }}
           >
-            <BadgeStack
-              badges={bottomLeft}
-              align="start"
+            <BottomRows
+              left={bottomLeft}
+              right={bottomRight}
               preset={preset}
               scalingMode={scalingMode}
-            />
-            <BadgeStack
-              badges={bottomRight}
-              align="end"
-              preset={preset}
-              scalingMode={scalingMode}
+              gap={edgeGap}
             />
           </div>
         ))}
