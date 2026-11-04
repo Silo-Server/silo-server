@@ -329,8 +329,13 @@ subset.
 capabilities, including client bitrate ceilings, audio-channel limits, container
 conditions, and subtitle delivery profiles. The negotiated source records the
 selected output constraints so local and remote encoders use the same decision.
-Progressive remux evaluates container constraints against its MP4 output;
-direct play evaluates them against the original source container.
+As in Jellyfin 10.11, `SupportsDirectStream` is reported only together with
+`SupportsDirectPlay`. A source that needs a remux is offered through its
+`TranscodingUrl` as an HLS video copy, never as a direct stream: Jellyfin
+Android TV plays the `TranscodingUrl` whenever `SupportsDirectStream` is set,
+and in that mode cannot map the HLS audio track to a stream index, so it
+restarts playback endlessly to "switch" audio. Direct play evaluates container
+constraints against the original source container.
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.
 The server also applies the account's effective per-stream bitrate limit for
@@ -341,7 +346,9 @@ transcode; if none is available, PlaybackInfo returns `PlaybackUnavailable`.
 Static direct-play requests without PlaybackInfo cannot transcode an over-limit
 source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
-Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
+Query `StartTimeTicks` is honored. The `/Videos/{id}/stream` route still serves
+a progressive remux for `static=false` requests, though PlaybackInfo no longer
+advertises one.
 
 PlaybackInfo never offers a version whose file ffprobe rejected with no usable
 stream data recorded (the native API marks it unreadable). Files that have not
@@ -825,7 +832,7 @@ whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 keeps fMP4.
 
 Any other client that lists the source codecs for MPEG-TS HLS but not for fMP4
-also gets a video copy as MPEG-TS, unless it can take a progressive remux. This
+also gets a video copy as MPEG-TS. This
 covers H.264 and HEVC with AAC, AC-3, E-AC-3, or MP3 audio; other audio converts
 to AAC when the profile accepts it.
 

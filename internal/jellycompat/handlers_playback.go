@@ -1363,17 +1363,6 @@ func (h *PlaybackHandler) playbackRoutingPolicy() config.PlaybackRoutingPolicy {
 	return config.DefaultPlaybackRoutingPolicy()
 }
 
-// compatProgressiveRemuxRouteAvailable reports whether a Jellyfin client may
-// use any progressive-remux transport admitted by the current policy. This is
-// a structural check only: temporary node capacity remains a runtime concern.
-func compatProgressiveRemuxRouteAvailable(policy config.PlaybackRoutingPolicy, proxyAllowed bool) bool {
-	routes, err := noderouting.Candidates(noderouting.Request{
-		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryProgressiveRemux,
-		Policy: policy, ProxyAllowed: proxyAllowed,
-	})
-	return err == nil && len(routes.Candidates) > 0
-}
-
 func (h *PlaybackHandler) compatTranscodeNodeID(nodeURL string, planned *nodepool.Node) int {
 	normalizedURL := strings.TrimRight(nodeURL, "/")
 	if planned != nil && strings.TrimRight(planned.URL, "/") == normalizedURL {
@@ -2693,11 +2682,9 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		targetAudioChannels = 1
 	}
 	// A copy is packaged as fMP4, or as MPEG-TS for a client that accepts the
-	// same codecs only there and has no progressive remux to take instead.
-	progressiveRemuxOK := enableDirectStream && allowVideoCopy && videoSupported && allowAudioCopy && audioSupported &&
-		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
+	// same codecs only there.
 	remuxAudioCopyFMP4 := profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	remuxAudioCopyTS := !remuxAudioCopyFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
+	remuxAudioCopyTS := !remuxAudioCopyFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
 		profile.supportsHLSRemuxIn(version, selectedAudioIndex, compatContainerTS)
 	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
@@ -2727,19 +2714,17 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		}
 		hlsRemuxAudioStreamIndexes = supportedHLSRemuxAudioStreamIndexes(version, profile, selectedAudioIndex, container)
 	}
-	supportsDirectStream := !hlsRemux &&
+	// Like Jellyfin 10.11, DirectStream is reported only alongside DirectPlay;
+	// a source that needs a remux is offered through its TranscodingUrl.
+	// Jellyfin Android TV plays the TranscodingUrl whenever DirectStream is
+	// set, and in that mode cannot map an HLS audio track to a stream index,
+	// so it restarts playback to "switch" audio forever (#2645).
+	supportsDirectStream := supportsDirectPlay &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		videoSupported &&
 		allowAudioCopy &&
 		audioSupported
-	// DirectStream means progressive remux when direct play is unavailable.
-	// Do not advertise a transport the routing policy structurally forbids;
-	// clients can then select the independently negotiated HLS route instead.
-	if supportsDirectStream && !supportsDirectPlay &&
-		!compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "") {
-		supportsDirectStream = false
-	}
 	// Copy and audio-transcode remuxes must match the fMP4 output profile;
 	// full video encodes independently match the MPEG-TS output profile.
 	// An encode targets the source's rate, under the client's ceiling less
