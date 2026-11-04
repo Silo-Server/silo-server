@@ -131,6 +131,7 @@ on the timeline where the client already does so.
 | --- | --- |
 | Enter intro (not resolved) | Show pill **"Skip Intro"** with timer running. Pill takes focus on appear on focus-driven platforms (TV, keyboard). |
 | Timer runs out | Pill hides. Intro keeps playing. Intro is **not** resolved — scrubbing back into it re-offers. |
+| Controls overlay shows after the timer ran out, still inside | Pill **"Skip Intro"** returns without a timer and hides again with the controls. It does not take focus or claim Select/Back from elsewhere; activating it acts as Select. |
 | Select | Seek to `end`. Intro resolved. Pill hides. On TV, focus lands on the timeline/transport, never nowhere. |
 | Back | Pill hides. Intro keeps playing. Intro resolved. Press is consumed (does not exit playback / close overlay); a second Back behaves normally. |
 | D-pad / arrow / pointer move away | Focus moves as normal. **Timer keeps running.** Pill stays until timer ends. |
