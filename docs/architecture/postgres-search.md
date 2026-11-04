@@ -53,7 +53,10 @@ phrase rank, title prefix rank, overview rank, lower title, and content ID.
 Media rank puts every series, movie, and other catalog item above every
 episode: an episode often carries its show's title (Dexter's pilot is titled
 "Dexter"), and its one-title document outranked the series on the later keys.
-Episodes stay in the results after the catalog items. Title position
+Episodes stay in the results after the catalog items. Media rank orders
+full-text matches only: fuzzy matches, which run only when full text finds
+fewer than five results, still follow every full-text match, so a typo match
+for a series does not outrank an exact episode match. Title position
 is 2 when a title, original title, sort title, or alias starts with the query,
 1 when it contains the query, and 0 otherwise. When a title variant contains
 the query, title prefix rank is `1 / (1 + words)` of the shortest such variant,
