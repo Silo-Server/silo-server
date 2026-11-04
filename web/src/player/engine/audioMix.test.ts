@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  continuousAudioStart,
   defaultSpeakers,
   LinearResampler,
   mixMatrix,
@@ -106,5 +107,28 @@ describe("LinearResampler", () => {
     const first = resampler.process([new Float32Array([0, 2])])[0]!;
     const second = resampler.process([new Float32Array([4, 6])])[0]!;
     expect(Array.from([...first, ...second])).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe("continuousAudioStart", () => {
+  const FRAME = 512 / 48_000;
+
+  it("lays frames that share a laced block's timestamp end to end", () => {
+    // Eight DTS frames from a cluster's last block, all stamped 2.848 s, then
+    // the next cluster's first block at its rounded millisecond.
+    const stamps = [...Array<number>(8).fill(2.848), 2.933];
+    let previousEnd: number | null = null;
+    const starts = stamps.map((stamped) => {
+      const start = continuousAudioStart(stamped, previousEnd);
+      previousEnd = start + FRAME;
+      return start;
+    });
+    starts.forEach((start, i) => expect(start).toBeCloseTo(2.848 + i * FRAME, 9));
+  });
+
+  it("keeps a stamp after a real gap or a discontinuity", () => {
+    expect(continuousAudioStart(5, null)).toBe(5);
+    expect(continuousAudioStart(5.1, 5)).toBe(5.1);
+    expect(continuousAudioStart(1, 5)).toBe(1);
   });
 });

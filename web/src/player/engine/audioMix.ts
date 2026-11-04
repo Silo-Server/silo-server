@@ -352,3 +352,24 @@ export class LinearResampler {
     return out.map((plane) => plane.subarray(0, written));
   }
 }
+
+/**
+ * Past this, a frame stamped before the previous one ended is a timeline
+ * discontinuity in the file rather than coarse timestamps.
+ */
+const MAX_TIMESTAMP_OVERLAP_SECONDS = 1;
+
+/**
+ * Where a decoded frame starts, given where the previous frame of the run
+ * ended. Container timestamps can be coarser than the audio: Matroska rounds
+ * them to the millisecond, and frames laced into a block whose duration the
+ * file leaves out (the last block of a cluster, on a track without a default
+ * duration) all carry the block's own timestamp. A frame stamped before the
+ * previous one ended therefore continues the stream where that one stopped.
+ * A frame stamped later keeps its stamp, so a real gap stays a gap.
+ */
+export function continuousAudioStart(stamped: number, previousEnd: number | null): number {
+  if (previousEnd === null) return stamped;
+  const overlap = previousEnd - stamped;
+  return overlap > 0 && overlap < MAX_TIMESTAMP_OVERLAP_SECONDS ? previousEnd : stamped;
+}

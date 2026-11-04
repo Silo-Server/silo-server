@@ -23,6 +23,7 @@ import {
 } from "mediabunny";
 import wasmUrl from "./wasm/silo-audio-decoders.wasm?url";
 import {
+  continuousAudioStart,
   defaultSpeakers,
   LinearResampler,
   mixMatrix,
@@ -686,14 +687,17 @@ async function runAudio(run: number, position: number): Promise<void> {
   activeAudioDecoder = decoder;
   let mix: { key: string; matrix: Float32Array } | null = null;
   let resampler: LinearResampler | null = null;
+  // Where this run's last decoded frame ended.
+  let previousEnd: number | null = null;
 
   const emit = (decoded: DecodedAudio) => {
     if (run !== generation) return;
     let planes = decoded.planes;
-    let timestamp = decoded.timestamp;
     const frames = planes[0]?.length ?? 0;
     if (frames === 0) return;
+    let timestamp = continuousAudioStart(decoded.timestamp, previousEnd);
     const end = timestamp + frames / decoded.sampleRate;
+    previousEnd = end;
     if (end <= position) return;
     if (timestamp < position) {
       const skip = Math.min(frames, Math.round((position - timestamp) * decoded.sampleRate));
