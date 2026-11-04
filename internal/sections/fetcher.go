@@ -1450,11 +1450,11 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return []*models.MediaItem{}, 0, nil
 	}
 
+	contentIDs := make([]string, 0, len(collectionItems))
+	for _, item := range collectionItems {
+		contentIDs = append(contentIDs, item.MediaItemID)
+	}
 	if membership.Sort.Field != "" {
-		contentIDs := make([]string, 0, len(collectionItems))
-		for _, item := range collectionItems {
-			contentIDs = append(contentIDs, item.MediaItemID)
-		}
 		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, queryAccess, s.ItemLimit, "")
 		if err != nil {
 			return nil, 0, err
@@ -1462,10 +1462,6 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return items, total, nil
 	}
 
-	contentIDs := make([]string, 0, len(collectionItems))
-	for _, item := range collectionItems {
-		contentIDs = append(contentIDs, item.MediaItemID)
-	}
 	// Filter before limiting, as the sorted and live branches do: limiting
 	// first let the access filter empty the row when the first members sit
 	// in libraries the viewer can't open.
