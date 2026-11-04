@@ -495,8 +495,9 @@ func (r DownloadQualityResolver) ensureServedQualityAllowed(
 	file *models.MediaFile,
 	deviceID string,
 ) error {
+	served := servedQuality(file)
 	if r.actionDecider == nil {
-		if user != nil && !access.QualityAllowed(file.Resolution, user.Policy.MaxPlaybackQuality) {
+		if user != nil && !access.QualityAllowed(served, user.Policy.MaxPlaybackQuality) {
 			return ErrQualityUnavailable
 		}
 		return nil
@@ -510,7 +511,7 @@ func (r DownloadQualityResolver) ensureServedQualityAllowed(
 		deviceID,
 	)
 	input.RequestedQuality = QualityOriginal
-	input.FileQuality = file.Resolution
+	input.FileQuality = served
 	decision, _, err := r.actionDecider.CheckAction(ctx, input)
 	if err != nil {
 		return ErrDownloadNotAllowed
@@ -520,10 +521,20 @@ func (r DownloadQualityResolver) ensureServedQualityAllowed(
 	}
 	// A custom override may narrow the ceiling below the served resolution;
 	// nothing can cap an original/remux, so that narrowing is a denial here.
-	if decision.QualityCeiling != "" && !access.QualityAllowed(file.Resolution, decision.QualityCeiling) {
+	if decision.QualityCeiling != "" && !access.QualityAllowed(served, decision.QualityCeiling) {
 		return ErrQualityUnavailable
 	}
 	return nil
+}
+
+// servedQuality is the video quality a source download serves. Audio-only
+// media serves no video, so a resolution an older probe recorded for its cover
+// art never meets a video quality ceiling.
+func servedQuality(file *models.MediaFile) string {
+	if file.IsAudioOnly() {
+		return ""
+	}
+	return file.Resolution
 }
 
 func ensureTranscodeAllowed(user *PolicyUser, cfg config.DownloadConfig) error {
