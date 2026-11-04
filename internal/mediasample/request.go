@@ -53,8 +53,8 @@ type Request struct {
 	// mode; see keyframeSkipFor and keyframeLowDelayFor.
 	skipFrame string
 	lowDelay  bool
-	// timingAudio are the audio streams (0:a:N) a Sheets window copies to
-	// its packet timing file, the probe's AudioStreams.
+	// timingAudio are the audio streams (0:K) a Sheets window copies to its
+	// packet timing file, the probe's AudioStreams.
 	timingAudio []int
 }
 

@@ -217,7 +217,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 	// packet metadata from interleaving with frame log lines on stderr.
 	args = append(args, mapStreamOption, firstVideoStream)
 	for _, audio := range req.timingAudio {
-		args = append(args, mapStreamOption, "0:a:"+strconv.Itoa(audio))
+		args = append(args, mapStreamOption, "0:"+strconv.Itoa(audio))
 	}
 	args = append(args, "-c", "copy", "-f", "framecrc", packetTimingPath)
 	return append(args, sheetsOutputArgs(graph)...), nil, nil

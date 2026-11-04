@@ -457,8 +457,8 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 // with audio, sampled at 1, 3, 5, and 7 s, through a window: MPEG-TS always
 // reads one, and Matroska does with ReadThrough. Samples after the video
 // ends but within an audio stream show the last frame and publish, whichever
-// audio stream runs on, and a declared audio stream without packets does
-// not fail the copy. A file whose audio stops with its video, as a
+// audio stream runs on and however many programs list it, and a declared
+// audio stream without packets does not fail the copy. A file whose audio stops with its video, as a
 // truncated one does, still fails as empty.
 func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 	ffmpeg, _ := realFFmpeg(t)
@@ -478,6 +478,8 @@ func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 		{"ts truncated", "ts", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
 		{"mkv truncated", "mkv", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
 		{"mkv second audio tail", "mkv", [][]string{tone(2), tone(10)}, []string{"-map", "1:a", "-map", "2:a", "-c:a", "aac"}, true},
+		{"ts multi-program audio tail", "ts", [][]string{tone(2), tone(10)},
+			[]string{"-map", "1:a", "-map", "2:a", "-c:a", "aac", "-program", "st=0:st=1", "-program", "st=0:st=2", "-program", "st=0:st=1"}, true},
 		{"ts audio without packets", "ts", [][]string{tone(10)},
 			[]string{"-filter_complex", "[1:a]asplit[a][b];[a]atrim=end_sample=1[empty]", "-map", "[empty]", "-map", "[b]", "-c:a:0", "ac3", "-c:a:1", "aac"}, true},
 	}
