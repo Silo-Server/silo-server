@@ -172,6 +172,17 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 		}
 	}
 
+	// Converting audio-only media is converting its audio, so with
+	// transcoding off it is served as it is, as it was before audio-only
+	// media skipped the video decision.
+	if audioOnly && !settings.TranscodeEnabled {
+		return &PlayDecision{
+			Method: PlayDirect,
+			File:   file,
+			Reason: "audio-only media needs conversion but transcode disabled; attempting direct",
+		}
+	}
+
 	// A copy-unsafe source (H.264 with conflicting in-band PPS) cannot take a
 	// video stream-copy route: the remux would desync strict decoders. Force it
 	// past the remux cases into a full video transcode. Direct play of the

@@ -253,6 +253,14 @@ var resolverPlayMethodCases = []struct {
 		want:      playback.PlayRemux,
 		wantAudio: &yes,
 	},
+	{
+		// Converting an audiobook's audio is its transcode: with transcoding
+		// off it is served as it is, never queued for a remux.
+		name: "audio-only media needing conversion falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "mp3", Container: "mp3", AudioTracks: []models.AudioTrack{{Codec: "mp3", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {
