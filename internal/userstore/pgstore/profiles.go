@@ -15,20 +15,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// scanProfile scans a profile row, converting TIMESTAMPTZ to string.
+// scanProfile scans a profile row, converting TIMESTAMPTZ to string. extra
+// receives any columns the query selects after the profile's own.
 func scanProfile(scanner interface {
 	Scan(dest ...any) error
-}) (*userstore.Profile, error) {
+}, extra ...any) (*userstore.Profile, error) {
 	var p userstore.Profile
 	var createdAt, updatedAt time.Time
-	err := scanner.Scan(
+	err := scanner.Scan(append([]any{
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
 		&p.RequireAdvisoryAge,
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
 		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &p.PINRevision, &createdAt, &updatedAt,
-	)
+	}, extra...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -110,24 +111,48 @@ func ProfileInTransaction(ctx context.Context, tx pgx.Tx, userID int, id string)
 	return getProfile(ctx, tx, userID, id)
 }
 func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, id string) (*userstore.Profile, error) {
-	row := db.QueryRow(ctx, `
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
-		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
-		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
-		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
+	return profileFromRow(db.QueryRow(ctx, profileByIDQuery, userID, id), id)
+}
 
-	p, err := scanProfile(row)
+// QueueProfile queues GetProfile's read for the account's profile id on
+// batch. The returned function reads the result from the sent batch, in the
+// order the batch's reads were queued, with GetProfile's answer: nil, nil when
+// the account has no such profile.
+func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults) (*userstore.Profile, error) {
+	batch.Queue(profileByIDQuery, userID, id)
+	return func(results pgx.BatchResults) (*userstore.Profile, error) {
+		return profileFromRow(results.QueryRow(), id)
+	}
+}
+
+// profileByIDQuery reads one profile together with its allowed libraries in
+// ascending id order, so a profile costs one statement.
+const profileByIDQuery = `
+	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+	       require_advisory_age,
+	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
+	       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
+	       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at,
+	       ARRAY(
+	           SELECT library_id FROM user_profile_allowed_libraries l
+	           WHERE l.user_id = user_profiles.user_id AND l.profile_id = user_profiles.id
+	           ORDER BY library_id ASC
+	       )
+	FROM user_profiles WHERE user_id = $1 AND id = $2`
+
+func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
+	var libraryIDs []int
+	p, err := scanProfile(row, &libraryIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying profile %s: %w", id, err)
 	}
-	p.AllowedLibraryIDs, err = listProfileAllowedLibraries(ctx, db, userID, p.ID)
-	if err != nil {
-		return nil, err
+	// A profile without allowed libraries keeps a nil list, as ListProfiles
+	// reports it.
+	if len(libraryIDs) > 0 {
+		p.AllowedLibraryIDs = libraryIDs
 	}
 	return p, nil
 }

@@ -24,6 +24,7 @@ import (
 
 type recommendationsEngine interface {
 	SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SimilarItemsWithReasons(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
 }
@@ -181,7 +182,7 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 	}
 
 	filter := requestAccessFilter(r)
-	items, err := h.SimilarItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
+	items, err := h.SimilarItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter, true)
 	if err == nil {
 		items, err = h.keepAccessible(r.Context(), items, filter)
 	}
@@ -480,8 +481,14 @@ func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.R
 // v1RecommendationCard is the card as the frozen v1 recommendation and Watch
 // Tonight routes send it. The shared mapper also fills the poster badge
 // fields, which v1 never sent on these cards; v2 reads them from the service.
+// An upcoming event drops the home release badges, which are v2 only.
 func (c sectionItemResponse) v1RecommendationCard() sectionItemResponse {
 	c.Runtime, c.Studios, c.Networks, c.ContentRating, c.ShowStatus = 0, nil, nil, "", ""
+	if c.UpcomingEvent != nil {
+		event := *c.UpcomingEvent
+		event.Badges = v1CalendarBadges(event.Badges)
+		c.UpcomingEvent = &event
+	}
 	return c
 }
 

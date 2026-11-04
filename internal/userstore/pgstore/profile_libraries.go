@@ -4,47 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-type profileLibraryQuerier interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-}
-
 type profileLibraryExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-}
-
-func listProfileAllowedLibraries(ctx context.Context, q profileLibraryQuerier, userID int, profileID string) ([]int, error) {
-	rows, err := q.Query(ctx,
-		`SELECT library_id
-		FROM user_profile_allowed_libraries
-		WHERE user_id = $1 AND profile_id = $2
-		ORDER BY library_id ASC`,
-		userID,
-		profileID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("listing allowed libraries for profile %s: %w", profileID, err)
-	}
-	defer rows.Close()
-
-	var libraryIDs []int
-	for rows.Next() {
-		var libraryID int
-		if err := rows.Scan(&libraryID); err != nil {
-			return nil, fmt.Errorf("scanning allowed library for profile %s: %w", profileID, err)
-		}
-		libraryIDs = append(libraryIDs, libraryID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating allowed libraries for profile %s: %w", profileID, err)
-	}
-	return libraryIDs, nil
 }
 
 // attachAllowedLibraries fills AllowedLibraryIDs for every profile with a

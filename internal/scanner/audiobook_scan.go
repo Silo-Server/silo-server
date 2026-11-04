@@ -305,6 +305,9 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 			}
 		}
 		if isDir {
+			if SkippedDirName(entry.Name()) {
+				continue
+			}
 			directories = append(directories, child)
 		} else if SupportsAudioFile(entry.Name()) {
 			scan.seenPaths[child] = true

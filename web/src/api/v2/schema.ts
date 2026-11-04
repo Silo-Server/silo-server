@@ -21932,7 +21932,7 @@ export interface components {
        * @example America/New_York
        */
       air_timezone?: string;
-      /** @description series_premiere, season_premiere, finale; empty, never null */
+      /** @description series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null */
       badges: string[];
       /** @example episode:severance-s02e01 */
       content_id: string;
@@ -22215,8 +22215,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -22346,7 +22344,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -22418,8 +22416,6 @@ export interface components {
        * @description Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork
        */
       banner_url?: string;
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /** @description Empty, never null */
       cast: components["schemas"]["CastCredit"][];
       /**
@@ -22622,7 +22618,7 @@ export interface components {
       tmdb_id?: string;
       tvdb_id?: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -22700,7 +22696,7 @@ export interface components {
       air_date: string;
       /** @description Local wall-clock time, HH:MM */
       air_time?: string;
-      /** @description Empty, never null */
+      /** @description The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null */
       badges: string[];
       /** Format: int64 */
       episode_number?: number;
@@ -22771,11 +22767,6 @@ export interface components {
       total: number;
     };
     CatalogLettersQuery: {
-      /**
-       * @description Count the list a group=box_set browse pages, with each box set counted once under its first title
-       * @enum {string}
-       */
-      group?: "box_set";
       /** @description Rule groups, as on queryCatalogItems; empty matches everything */
       groups?: components["schemas"]["CatalogQueryGroup"][];
       /**
@@ -22802,11 +22793,8 @@ export interface components {
     CatalogQuery: {
       collection_id?: string;
       cursor?: string;
-      /**
-       * @description As the listCatalogItems group parameter
-       * @enum {string}
-       */
-      group?: "work" | "box_set";
+      /** @enum {string} */
+      group?: "work";
       /** @description Rule groups; empty matches everything */
       groups?: components["schemas"]["CatalogQueryGroup"][];
       /**
@@ -22914,7 +22902,7 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on */
+      /** @description searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on */
       box_sets?: boolean;
       /** @description Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields */
       extended_query_rules?: boolean;
@@ -25636,8 +25624,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -25767,7 +25753,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -26372,7 +26358,7 @@ export interface components {
        */
       box_set_min_movies: number;
       /**
-       * @description Browse the movies TMDB lists in one collection (a franchise such as Harry Potter) as one box set; movie and mixed libraries only
+       * @description Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and, when box_sets_in_search is true, in search; library browse still lists each movie. Movie and mixed libraries only
        * @example false
        */
       box_sets_enabled: boolean;
@@ -26471,7 +26457,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       /**
-       * @description This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search), group=box_set on the catalog, and the box set reads
+       * @description This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search) and the box set reads
        * @example true
        */
       box_sets: boolean;
@@ -33610,7 +33596,7 @@ export interface components {
     };
     UserLibrary: {
       /**
-       * @description The library browses movies of one TMDB collection as a box set; request group=box_set when browsing it
+       * @description The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie
        * @example false
        */
       box_sets_enabled: boolean;
@@ -34726,8 +34712,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /** @description Up to four cast members; empty, never null */
       cast: components["schemas"]["WatchTonightCastMember"][];
       /**
@@ -34859,7 +34843,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -34941,8 +34925,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -35072,7 +35054,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -61182,7 +61164,7 @@ export interface operations {
         user_id?: number;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -94706,8 +94688,8 @@ export interface operations {
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
         genre?: string;
-        /** @description group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list */
-        group?: "work" | "box_set";
+        /** @description group=work collapses editions of one book into one card */
+        group?: "work";
         /** @description JSON array of structured rule groups; use POST catalog/query for larger queries */
         groups?: string;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
@@ -109804,7 +109786,7 @@ export interface operations {
         channels?: string;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -125558,7 +125540,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -145708,7 +145690,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;

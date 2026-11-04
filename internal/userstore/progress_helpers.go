@@ -247,8 +247,16 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 		ProfileID:    profileID,
 		MediaItemIDs: []string{mediaItemID},
 	})[mediaItemID]
-	if completed.MediaItemID == "" {
-		return progress, nil
+	return WithCompletedHistory(progress, completed, profileID, mediaItemID), nil
+}
+
+// WithCompletedHistory overlays one item's latest completed history entry on
+// its progress row the way GetProgressWithCompletedHistory presents it. A
+// completed row is returned as it is, and a zero entry (no completed watch)
+// leaves progress unchanged.
+func WithCompletedHistory(progress *WatchProgress, completed CompletedHistoryItem, profileID, mediaItemID string) *WatchProgress {
+	if (progress != nil && progress.Completed) || completed.MediaItemID == "" {
+		return progress
 	}
 	if progress == nil {
 		return &WatchProgress{
@@ -256,13 +264,13 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 			MediaItemID: mediaItemID,
 			Completed:   true,
 			UpdatedAt:   completed.WatchedAt,
-		}, nil
+		}
 	}
 	progress.Completed = true
 	if timestampAfter(completed.WatchedAt, progress.UpdatedAt) {
 		progress.UpdatedAt = completed.WatchedAt
 	}
-	return progress, nil
+	return progress
 }
 
 // ListProgressWithCompletedHistory returns progress for mediaItemIDs with

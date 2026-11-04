@@ -38,18 +38,28 @@ func (s *PostgresUserStore) UnmarkNotInterested(ctx context.Context, profileID, 
 }
 
 func (s *PostgresUserStore) GetNotInterested(ctx context.Context, profileID, mediaItemID string) (*userstore.NotInterestedEntry, error) {
+	e, err := scanNotInterested(s.pool.QueryRow(ctx, notInterestedSQL, s.userID, profileID, mediaItemID))
+	if err != nil {
+		return nil, fmt.Errorf("getting not interested mark: %w", err)
+	}
+	return e, nil
+}
+
+// notInterestedSQL reads one item's mark: $1 user, $2 profile, $3 media item.
+const notInterestedSQL = `SELECT profile_id, media_item_id, added_at FROM user_not_interested
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`
+
+// scanNotInterested reads the row notInterestedSQL selects, nil when there
+// is none.
+func scanNotInterested(row pgx.Row) (*userstore.NotInterestedEntry, error) {
 	var e userstore.NotInterestedEntry
 	var addedAt time.Time
-	err := s.pool.QueryRow(ctx,
-		`SELECT profile_id, media_item_id, added_at FROM user_not_interested
-		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		s.userID, profileID, mediaItemID,
-	).Scan(&e.ProfileID, &e.MediaItemID, &addedAt)
+	err := row.Scan(&e.ProfileID, &e.MediaItemID, &addedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("getting not interested mark: %w", err)
+		return nil, err
 	}
 	e.AddedAt = timeToString(addedAt)
 	return &e, nil

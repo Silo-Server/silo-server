@@ -221,11 +221,13 @@ var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevice
 // on the backing store, so they live on the wrapper types above rather than
 // being forwarded unconditionally.
 var _ userstore.WatchedBatchWriter = (*interestTrackingStore)(nil)
+var _ userstore.ItemViewerStateQueuer = (*interestTrackingStore)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStore)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStore)(nil)
 var _ userstore.WatchedBatchWriter = (*interestTrackingStoreWithDevices)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStoreWithDevices)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.ItemUserFlagStore = (*interestTrackingStore)(nil)
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithRollup)(nil)
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevicesAndRollup)(nil)
 var _ userstore.DeviceRegistry = (*interestTrackingStoreWithDevicesAndRollup)(nil)
@@ -636,6 +638,16 @@ func (s *interestTrackingStore) VisibleHistoryTimestamps(ctx context.Context, pr
 	return visibility.VisibleHistoryTimestamps(ctx, profileID, mediaItemIDs, at)
 }
 
+// ItemUserFlags forwards the one-statement list and played read, reporting
+// false when the backing store has none so callers make the per-table reads.
+func (s *interestTrackingStore) ItemUserFlags(ctx context.Context, profileID string, mediaItemIDs, playedIDs []string) (map[string]userstore.ItemUserFlags, bool, error) {
+	reader, ok := s.UserStore.(userstore.ItemUserFlagStore)
+	if !ok {
+		return nil, false, nil
+	}
+	return reader.ItemUserFlags(ctx, profileID, mediaItemIDs, playedIDs)
+}
+
 func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {
 	err := s.UserStore.DeleteHistoryBySource(ctx, profileID, mediaItemIDs, source)
 	if err == nil {
@@ -738,6 +750,13 @@ func preserveDeviceSettings(wrapped, inner userstore.UserStore) userstore.UserSt
 func (p *interestTrackingProvider) SupportsAtomicSectionProfileReset(pool *pgxpool.Pool) bool {
 	provider, ok := p.inner.(userstore.SectionProfileResetProvider)
 	return ok && provider.SupportsAtomicSectionProfileReset(pool)
+}
+
+// The decorator hooks writes only, so reading the shared tables directly
+// misses nothing it does.
+func (p *interestTrackingProvider) StoresAccountsIn(pool *pgxpool.Pool) bool {
+	provider, ok := p.inner.(interface{ StoresAccountsIn(*pgxpool.Pool) bool })
+	return ok && provider.StoresAccountsIn(pool)
 }
 
 func (s *interestTrackingStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {

@@ -110,10 +110,10 @@ var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
 
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
-// when reads go through a separately configured public or token endpoint that
-// can lag behind a storage write; that is the one case the delivery verifier
-// and the per-response published-variant lookup exist for. Scope changes when
-// the delivery configuration does, invalidating earlier verification.
+// when reads go through a separately configured public or token endpoint, the
+// one case seek-preview sheets confirm before clients read them there (see
+// internal/trickplay). Scope changes when the delivery configuration does,
+// invalidating earlier confirmations.
 type ArtworkDelivery struct {
 	Scope    string
 	External bool
@@ -728,7 +728,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults).WithSharedTables(deps.DB)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)

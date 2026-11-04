@@ -787,36 +787,25 @@ The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
 seek. It covers the query source only and takes no search text or
 `name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
-the operation is available. With `group: "box_set"` it counts a box set browse
-(see Movie box sets) the way `queryCatalogItems` pages it.
+the operation is available.
 
 ## Movie box sets
 
-A movie or mixed library can browse the movies TMDB lists in one collection (a
-franchise such as Harry Potter) as one box set. An administrator turns it on
+A movie or mixed library can gather the movies TMDB lists in one collection (a
+franchise such as Harry Potter) into one box set. An administrator turns it on
 with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
 2) is the fewest of a collection's movies the library must hold, and
 `box_sets_in_search` (default true) lists the library's box sets in search.
 `getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
 server supports them (`getLibraryCapabilities` reports the same to
-administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
-so a client knows which libraries to browse with `group=box_set`.
+administrators), and `listUserLibraries` reports each viewer library's
+`box_sets_enabled`.
 
-`listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
-`source=query` browse of one library with box sets on and no search text,
-return a box set card in place of the collection's movies once the viewer can
-see at least `box_set_min_movies` of them there. The card has `type:
-"box_set"`, `content_id: "box_set:<tmdb collection id>"`, the collection's
-title, overview, and artwork, and a `box_set` object with its `id`,
-`library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
-The card stands at its first movie in the requested order and carries that
-movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
-`name_prefix` matches that first movie, so a box set is listed under one
-letter, the one the letter index files it under.
-Any other request with `group=box_set` returns the ordinary list. Send the
-same `group` to `queryCatalogLetters` so the letter index counts the grouped
-list. A collection's artwork is cached like item artwork when the server
-caches metadata images; until then its URLs point at TMDB.
+Box sets appear in search, on their own page, and as a row on a movie's page.
+Library browse never groups them: `listCatalogItems`, `queryCatalogItems`, and
+`queryCatalogLetters` list each movie on its own. A collection's artwork is
+cached like item artwork when the server caches metadata images; until then
+its URLs point at TMDB.
 
 `GET /api/v2/catalog/box-sets/{id}?library_id=` (`getCatalogBoxSet`) answers a
 box set with its movies in that library that the viewer can see, in collection
@@ -1027,6 +1016,36 @@ used cannot be deleted (`409`) until those rows stop showing it.
 
 Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
 unchanged and carries no counts.
+
+## Calendar movie dates
+
+`GET /api/v2/calendar` lists each movie once, on its first home release: the
+earlier of its digital (streaming or purchase) and physical (disc) release
+dates, each the earliest in any country. A theatrical release never reaches a
+media server, so the calendar does not use `release_date` for movies, and a
+movie with no home release date yet is not listed. The event carries a
+`digital` or `physical` badge naming the release it is listed on; when both
+fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
+movies on the same dates, because both read the same events, but never sends
+these two badges.
+
+The home release dates pick only the calendar day. The upcoming titles in the
+For You discover row follow the same day, and their `upcoming_event.badges`
+carry the same `digital` or `physical` badge on `/api/v2` (never on
+`/api/v1/recommendations/discover`). Item detail, sorting, filters and the year
+still use `release_date`, and no item response carries the home release dates.
+
+Metadata providers supply them as `digital_release_date` and
+`physical_release_date` (`YYYY-MM-DD`) in the `metadata` Struct of a movie's
+`GetMetadata` response. The host ignores the keys on other item types and drops
+a value that is not a calendar date. The TMDB plugin derives them from TMDB's
+type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
+ones included, replaces a stored date with the one the provider sends now,
+because providers revise them. A date the provider stops sending is kept,
+except when Identify, or an NFO on a manual refresh, corrects the item's match:
+the new movie's dates replace the stored ones even when it has none. A bulk
+enrichment pass is not a refresh and only fills dates that are empty.
+Locking release dates on an item also locks them.
 
 ## Advisory age
 
