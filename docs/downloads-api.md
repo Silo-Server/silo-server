@@ -96,6 +96,12 @@ it. The row keeps the requested `quality`; `effective_quality` is `original`.
 `quality_options` in the capability (§3) reports each preset's resolution for
 labels.
 
+Audio-only media (an audiobook or podcast, whose only picture is cover art) has
+no video to encode, so neither `original` nor a bitrate preset transcodes it:
+the source is served as it is, or remuxed with its audio converted when `caps`
+show the device cannot decode it. The row keeps the requested `quality`, with
+`effective_quality` `original`.
+
 `remux` is **not** a public quality preset. It is an internal delivery format used
 when `original` is requested but device caps show the source only needs container
 or audio compatibility work. Rows expose both:
