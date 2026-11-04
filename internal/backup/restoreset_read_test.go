@@ -18,9 +18,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/backup/jsonsize"
+	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 )
 
 // mutate changes one thing about a valid restore set.
@@ -62,6 +64,8 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 		{ID: "s2", Scope: "library", LibraryID: &library, SectionType: "collection", Title: "Picks", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"m1"}`), Enabled: true,
 			Collection: &SectionCollectionEntry{CollectionEntry: CollectionEntry{ID: "m1", LibraryID: 3, Libraries: []CollectionLib{{LibraryID: 3}}, Title: "Picks", Items: []string{"m1"}}, ManagementKey: "s2"}},
 	}})
+	avatar := "profile-avatars/5/p1/original.webp"
+	users := mustJSON(testUserDocument(5, "upload:"+avatar))
 	digest := func(path string, data []byte) FileDigest {
 		sum := sha256.Sum256(data)
 		return FileDigest{Path: path, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
@@ -71,6 +75,7 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 			{ID: SectionLibraries, Count: 1, Files: []FileDigest{digest("libraries.json", libraries)}, Blobs: []string{"library-posters/3.jpg"}},
 			{ID: SectionPlugins, Count: 1, Files: []FileDigest{digest("plugins/tmdb/plugin.json", plugin), archiveDigest}, Blobs: []string{}},
 			{ID: SectionSettings, Count: 1, Files: []FileDigest{digest("settings.json", settings)}, Blobs: []string{}},
+			{ID: SectionUsers, Count: 1, Files: []FileDigest{digest("users/5.json", users)}, Blobs: []string{avatar}},
 			{ID: SectionCollections, Count: 2, Files: []FileDigest{digest("collections.json", collections)}, Blobs: []string{original}},
 			{ID: SectionHomeSections, Count: 2, Files: []FileDigest{digest(homeSectionsDocumentName, homeSections)}, Blobs: []string{}},
 		}}
@@ -79,13 +84,40 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 		{name: "plugins/tmdb/plugin.json", data: plugin},
 		{name: "plugins/tmdb/archive.bin", data: archive},
 		{name: "settings.json", data: settings},
+		{name: "users/5.json", data: users},
 		{name: "collections.json", data: collections},
 		{name: homeSectionsDocumentName, data: homeSections},
+		{name: "blobs/" + avatar, data: []byte("avatar")},
+		{name: "blobs/profile-avatars/5/p1/w256.webp", data: []byte("avatar small")},
 		{name: "blobs/library-posters/3.jpg", data: []byte("poster")},
 		{name: "blobs/" + original, data: []byte("original")},
 		{name: "blobs/collection-images/c1/poster/w300.abcd.jpg", data: []byte("variant")},
 	}
 	return index, entries
+}
+
+// testUserDocument is one account with one profile that has an avatar and
+// a rating.
+func testUserDocument(id int, avatar string) UserDocument {
+	return UserDocument{
+		Account: AccountEntry{ID: id, Username: "alice", Email: "alice@example.test", Role: "user", Permissions: []string{}},
+		Profiles: []ProfileEntry{{ID: "p1", Name: "Main", Avatar: avatar, IsPrimary: true, AllowedLibraryIDs: []int{},
+			Data: map[string]json.RawMessage{"ratings": json.RawMessage(`{"ratings":[{"item":"m1","rating":4,"rated_at":"2026-01-01T00:00:00Z"}]}`)}}},
+		Items: []ItemRef{{ContentID: "m1", Kind: "movie", Title: "One"}},
+	}
+}
+
+// userCase rewrites users/5.json.
+func userCase(fn func(*UserDocument)) func(*RestoreSetIndex, *[]testEntry) {
+	return func(_ *RestoreSetIndex, entries *[]testEntry) {
+		for i := range *entries {
+			if (*entries)[i].name == "users/5.json" {
+				doc := testUserDocument(5, "upload:profile-avatars/5/p1/original.webp")
+				fn(&doc)
+				(*entries)[i].data = mustJSON(doc)
+			}
+		}
+	}
 }
 
 func mustJSON(v any) []byte {
@@ -155,12 +187,15 @@ func TestReadRestoreSetAcceptsAValidArchive(t *testing.T) {
 		t.Fatal("digest is not the archive's SHA-256")
 	}
 	if len(rs.Plugins) != 1 || len(rs.Libraries.Libraries) != 1 || len(rs.Collections.Collections) != 1 || len(rs.Settings.Settings) != 1 || len(rs.Collections.Branding) != 1 ||
-		len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
+		len(rs.Users) != 1 || len(rs.Users[0].Profiles) != 1 || len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
 		rs.HomeSections.Sections[1].Collection == nil {
 		t.Fatalf("sections not decoded: %+v", rs)
 	}
 	if family := rs.blobFamily("collection-images/c1/poster/original.abcd.jpg"); len(family) != 2 {
 		t.Fatalf("artwork variants not kept with their original: %v", family)
+	}
+	if family := rs.blobFamily("profile-avatars/5/p1/original.webp"); len(family) != 2 {
+		t.Fatalf("avatar variants not kept with their original: %v", family)
 	}
 	// A plugin archive is checked and never kept: nothing installs it.
 	if kept, _ := filepath.Glob(filepath.Join(rs.dir, "archive-*")); len(kept) != 0 {
@@ -328,38 +363,50 @@ func TestSelectedBlobsIsLinear(t *testing.T) {
 	}
 }
 
-// TestReadRestoreSetBoundsWhatDocumentsDecodeTo: a short collections
-// document of empty entries is refused before it is decoded, without
-// allocating what it would decode to.
+// TestReadRestoreSetBoundsWhatDocumentsDecodeTo: a short document of
+// empty entries, here 100,000 empty collections or account profiles, is
+// refused before it is decoded, without allocating what it would decode to.
 func TestReadRestoreSetBoundsWhatDocumentsDecodeTo(t *testing.T) {
-	index, entries := testRestoreSet()
-	bomb := []byte(`{"collections":[` + strings.Repeat(`{},`, 99_999) + `{}],"item_artwork":[],"branding":[]}`)
-	for i := range entries {
-		if entries[i].name == collectionsDocumentName {
-			entries[i].data = bomb
-		}
-	}
-	for i := range index.Sections {
-		for j, f := range index.Sections[i].Files {
-			if f.Path == collectionsDocumentName {
-				sum := sha256.Sum256(bomb)
-				index.Sections[i].Files[j] = FileDigest{Path: f.Path, Size: int64(len(bomb)), SHA256: hex.EncodeToString(sum[:])}
+	empties := strings.Repeat(`{},`, 99_999) + `{}`
+	for name, bomb := range map[string][]byte{
+		collectionsDocumentName: []byte(`{"collections":[` + empties + `],"item_artwork":[],"branding":[]}`),
+		"users/5.json":          []byte(`{"account":{"id":5},"profiles":[` + empties + `],"items":[]}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			index, entries := testRestoreSet()
+			for i := range entries {
+				if entries[i].name == name {
+					entries[i].data = bomb
+				}
 			}
-		}
-	}
-	data := buildTar(t, index, entries)
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	_, err := ReadRestoreSet(context.Background(), bytes.NewReader(data), ReadOptions{})
-	runtime.ReadMemStats(&after)
-	if !errors.Is(err, jsonsize.ErrTooLarge) {
-		t.Fatalf("100,000 empty collections in %d bytes: %v, want jsonsize.ErrTooLarge", len(bomb), err)
-	}
-	// What reading the archive itself takes, a few times its size, and far
-	// below the ~30 MB the collections would decode to.
-	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {
-		t.Fatalf("reading allocated %d bytes", allocated)
+			for i := range index.Sections {
+				for j, f := range index.Sections[i].Files {
+					if f.Path == name {
+						sum := sha256.Sum256(bomb)
+						index.Sections[i].Files[j] = FileDigest{Path: f.Path, Size: int64(len(bomb)), SHA256: hex.EncodeToString(sum[:])}
+					}
+				}
+			}
+			data := buildTar(t, index, entries)
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			started := time.Now()
+			_, err := ReadRestoreSet(context.Background(), bytes.NewReader(data), ReadOptions{})
+			elapsed := time.Since(started)
+			runtime.ReadMemStats(&after)
+			if !errors.Is(err, jsonsize.ErrTooLarge) {
+				t.Fatalf("%d bytes of empty entries: %v, want jsonsize.ErrTooLarge", len(bomb), err)
+			}
+			// What reading the archive itself takes, a few times its size,
+			// far below the tens of megabytes the entries would decode to.
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {
+				t.Fatalf("reading allocated %d bytes", allocated)
+			}
+			if elapsed > 5*time.Second {
+				t.Fatalf("refusing took %v", elapsed)
+			}
+		})
 	}
 }
 
@@ -674,6 +721,52 @@ func refuseAll(t *testing.T, cases map[string]func(*RestoreSetIndex, *[]testEntr
 	}
 }
 
+// TestReadRestoreSetRefusesHostileUserDocuments: the users section carries
+// password and PIN hashes and access fields, so its documents get the same
+// checks, and a version 1 set may not hold it at all.
+func TestReadRestoreSetRefusesHostileUserDocuments(t *testing.T) {
+	replace := func(name string, fn func(*testEntry)) func(*RestoreSetIndex, *[]testEntry) {
+		return func(_ *RestoreSetIndex, entries *[]testEntry) {
+			for i := range *entries {
+				if (*entries)[i].name == name {
+					fn(&(*entries)[i])
+				}
+			}
+		}
+	}
+	refuseAll(t, map[string]func(*RestoreSetIndex, *[]testEntry){
+		"users in a version 1 set": func(i *RestoreSetIndex, _ *[]testEntry) { i.Version = 1 },
+		"an owner flag in a user document": replace("users/5.json", func(e *testEntry) {
+			e.data = bytes.Replace(e.data, []byte(`"role":"user"`), []byte(`"role":"user","is_owner":true`), 1)
+		}),
+		"avatar not listed": userCase(func(d *UserDocument) { d.Profiles[0].Avatar = "upload:profile-avatars/5/p9/original.webp" }),
+	})
+	// A document whose own values no restore could write leaves that
+	// account out, listed, and the rest of the set readable.
+	for name, edit := range map[string]func(*RestoreSetIndex, *[]testEntry){
+		"user document of another account": replace("users/5.json", func(e *testEntry) {
+			e.data = mustJSON(testUserDocument(6, "upload:profile-avatars/5/p1/original.webp"))
+		}),
+		"an unknown role":            userCase(func(d *UserDocument) { d.Account.Role = "owner" }),
+		"unknown profile data":       userCase(func(d *UserDocument) { d.Profiles[0].Data["passwords"] = json.RawMessage(`{}`) }),
+		"repeated profile id":        userCase(func(d *UserDocument) { d.Profiles = append(d.Profiles, d.Profiles[0]) }),
+		"avatar outside the avatars": userCase(func(d *UserDocument) { d.Profiles[0].Avatar = "upload:library-posters/3.jpg" }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			index, entries := testRestoreSet()
+			edit(&index, &entries)
+			resyncDigests(&index, entries)
+			rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rs.Users) != 0 || len(rs.Unusable) != 1 || rs.Unusable[0].Section != SectionUsers {
+				t.Fatalf("users %d, unusable %+v", len(rs.Users), rs.Unusable)
+			}
+		})
+	}
+}
+
 // brandingCase puts one branding entry, its blob listed and present, into an
 // otherwise valid restore set.
 func brandingCase(b BrandingEntry) func(*RestoreSetIndex, *[]testEntry) {
@@ -792,8 +885,9 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 			dropSection(i, e, SectionHomeSections)
 			dropTemplates(i, e)
 		}, true},
-		{"version 1 without them either", 1, func(i *RestoreSetIndex, e *[]testEntry) {
+		{"version 1 without users either", 1, func(i *RestoreSetIndex, e *[]testEntry) {
 			dropSection(i, e, SectionHomeSections)
+			dropSection(i, e, SectionUsers)
 			dropTemplates(i, e)
 		}, true},
 		{"version 3 without web-only sections", 3, webOnly(false), true},
@@ -826,6 +920,36 @@ func TestReadRestoreSetReportsMissingBlobs(t *testing.T) {
 	}
 	if len(rs.MissingBlobs) != 1 || rs.MissingBlobs[0] != "library-posters/3.jpg" {
 		t.Fatalf("missing = %v", rs.MissingBlobs)
+	}
+}
+
+// TestPendingDecodesFollowTheComparison: documents decoded ahead are handed
+// over in the comparison's order, those of skipped profiles are dropped
+// without stalling a single worker, a passed or undecodable-ahead document
+// falls back to Pending, and a decode error reaches the caller.
+func TestPendingDecodesFollowTheComparison(t *testing.T) {
+	good := json.RawMessage(`{"progress":[{"item":"mv-1","updated_at":"2025-01-01T00:00:00Z"}]}`)
+	bad := json.RawMessage(`{"progress":[{"item":"mv-1"}]}`)
+	profile := func(id string, history json.RawMessage) ProfileEntry {
+		return ProfileEntry{ID: id, Data: map[string]json.RawMessage{userdata.WatchHistory: history, userdata.Ratings: json.RawMessage(`[]`)}}
+	}
+	docs := []UserDocument{
+		{Profiles: []ProfileEntry{profile("a", good), profile("b", bad)}},
+		{Profiles: []ProfileEntry{profile("c", good), profile("d", bad)}},
+	}
+	d := startPendingDecodes(docs, 1)
+	defer d.stop()
+	if r, ok := d.take(&docs[1].Profiles[0], userdata.WatchHistory); !ok || r.err != nil || r.compare == nil {
+		t.Fatalf("c: compare %v, err %v, ok %v; want its decoded document", r.compare != nil, r.err, ok)
+	}
+	if _, ok := d.take(&docs[0].Profiles[0], userdata.WatchHistory); ok {
+		t.Fatal("a was passed; want a fallback to Pending")
+	}
+	if _, ok := d.take(&docs[1].Profiles[1], userdata.Ratings); ok {
+		t.Fatal("ratings are not decoded ahead; want a fallback to Pending")
+	}
+	if r, ok := d.take(&docs[1].Profiles[1], userdata.WatchHistory); !ok || r.err == nil {
+		t.Fatalf("d: err %v, ok %v; want its decode error", r.err, ok)
 	}
 }
 
@@ -941,6 +1065,34 @@ func withPAXRecords(t *testing.T, archive []byte, name string, records map[strin
 	}
 	t.Fatalf("no header for %s", name)
 	return nil
+}
+
+// An account left out of a restore set is recorded with fields the reader
+// accepts, however long its name or error: one long username must not make
+// the whole index unreadable.
+func TestOmittedAccountsStayReadable(t *testing.T) {
+	long := strings.Repeat("é", 400) // 800 bytes, over maxAccountField
+	cases := []struct {
+		name    string
+		account AccountEntry
+		err     error
+	}{
+		{"long username", AccountEntry{ID: 1, Username: long}, errors.New("boom")},
+		{"long email", AccountEntry{ID: 2, Email: long + "@example.com"}, errors.New("boom")},
+		{"long error", AccountEntry{ID: 3, Username: "a"}, errors.New(strings.Repeat("x", 3*maxOmittedText))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var b restoreSetBuild
+			b.omitFailed(sectionSpec{id: SectionUsers}, tc.account, &exportError{part: "ratings", err: fmt.Errorf("reading ratings: %w", tc.err)})
+			if err := validateOmitted(b.index.Omitted); err != nil {
+				t.Fatalf("omitted %+v: %v", b.index.Omitted, err)
+			}
+			if !utf8.ValidString(b.index.Omitted[0].Label) || b.index.Omitted[0].Label == "" {
+				t.Fatalf("label %q is not valid text", b.index.Omitted[0].Label)
+			}
+		})
+	}
 }
 
 // TestReadRestoreSetRefusesExpandingHeaders: a restore set whose first

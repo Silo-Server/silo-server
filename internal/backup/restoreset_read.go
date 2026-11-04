@@ -84,6 +84,7 @@ type RestoreSet struct {
 	Settings    SettingsDocument
 	Libraries   LibrariesDocument
 	Plugins     []PluginDocument
+	Users       []UserDocument
 	Collections CollectionsDocument
 	// HomeSections is the home_sections section (version 3 and later).
 	HomeSections HomeSectionsDocument
@@ -104,7 +105,10 @@ type RestoreSet struct {
 	unverified bool
 	// blobSizes is each blob's size in bytes, extracted or not.
 	blobSizes map[string]int64
-	dir       string
+	// accountBlobs are the blobs each account's document references
+	// (avatars, collection images), by account id.
+	accountBlobs map[string][]string
+	dir          string
 	// metadataBytes estimates what the set holds in memory: its documents
 	// and blob keys, for the preview cache's bound.
 	metadataBytes int64
@@ -390,6 +394,9 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 	if !validServerID(index.ServerID) {
 		return fmt.Errorf("%s: server id %q is not valid", restoreSetIndexName, index.ServerID)
 	}
+	if err := validateOmitted(index.Omitted); err != nil {
+		return fmt.Errorf("%s: %w", restoreSetIndexName, err)
+	}
 	p.index = &index
 	p.rs.Index = index
 	p.files = map[string]FileDigest{}
@@ -447,6 +454,19 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 			}
 			p.blobs[key] = spec
 			p.noteOriginal(key)
+		}
+	}
+	return nil
+}
+
+func validateOmitted(list []OmittedItem) error {
+	if len(list) > maxRestoreSetEntries {
+		return errors.New("too many omitted items")
+	}
+	for _, o := range list {
+		if !validSectionID(o.Section) || len(o.ID) > 128 || len(o.Label) > maxAccountField || len(o.Reason) > 64 || len(o.Message) > maxOmittedText ||
+			len(o.Cause) > 256 || len(o.Error) > maxOmittedText {
+			return errors.New("an omitted item is not valid")
 		}
 	}
 	return nil

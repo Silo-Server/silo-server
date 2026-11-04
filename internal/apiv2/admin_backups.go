@@ -55,7 +55,7 @@ const (
 type AdminBackupCapabilities struct {
 	Capability
 	Destinations     []string `json:"destinations" doc:"Backup destinations this server can write to: default, the server's own local storage, when it has one"`
-	SelectiveRestore bool     `json:"selective_restore" doc:"Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, collections and uploaded artwork, and home and library page sections"`
+	SelectiveRestore bool     `json:"selective_restore" doc:"Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, accounts and their profiles' data, collections and uploaded artwork"`
 	Download         bool     `json:"download" doc:"Whether a full backup can be downloaded"`
 	available        bool
 }
@@ -83,10 +83,22 @@ type AdminBackupMissingBlob struct {
 	Source string `json:"source" doc:"What referenced the file, such as library poster"`
 }
 
+// AdminBackupOmitted is an item a backup's restore set could not carry. The
+// database dump still holds it; only selective restore cannot offer it.
+type AdminBackupOmitted struct {
+	Section string `json:"section" enum:"users"`
+	ID      string `json:"id" doc:"The item's id in its section, such as the account id"`
+	Label   string `json:"label"`
+	Reason  string `json:"reason" enum:"too_large,export_failed" doc:"too_large: its document exceeds what a restore set may hold; export_failed: reading it failed"`
+	Message string `json:"message"`
+	Cause   string `json:"cause,omitempty" doc:"What failed, stable across backups so items can be grouped: the part being read (a profile data type such as notifications, or profiles or items) and, when its error names one, the step that failed in it, such as notifications: reading notification preferences. Absent for too_large and for backups taken before restore set format 3"`
+	Error   string `json:"error,omitempty" doc:"The underlying error, without ids"`
+}
+
 type AdminBackup struct {
 	ID           string                   `json:"id" doc:"The backup folder name: UTC start time and kind"`
 	Kind         string                   `json:"kind" enum:"nightly,manual,before-restore"`
-	Status       string                   `json:"status" enum:"complete,complete_with_warnings,in_progress,incomplete,unverified,unreadable" doc:"complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied. in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours. unverified: this server cannot authenticate the manifest (another SECRET_KEY, none recorded, or changed since it was written); a restore needs confirmation, and one whose manifest names this key but does not verify shows no details and cannot be restored. unreadable: its manifest could not be read just now (the destination failed or the read was cut short); it is kept, and neither rotated nor swept, until it reads"`
+	Status       string                   `json:"status" enum:"complete,complete_with_warnings,in_progress,incomplete,unverified,unreadable" doc:"complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied, or the restore set left items out (restore_set_omitted). in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours. unverified: this server cannot authenticate the manifest (another SECRET_KEY, none recorded, or changed since it was written); a restore needs confirmation, and one whose manifest names this key but does not verify shows no details and cannot be restored. unreadable: its manifest could not be read just now (the destination failed or the read was cut short); it is kept, and neither rotated nor swept, until it reads"`
 	CreatedAt    Instant                  `json:"created_at"`
 	CompletedAt  *Instant                 `json:"completed_at,omitempty"`
 	SizeBytes    int64                    `json:"size_bytes"`
@@ -96,11 +108,13 @@ type AdminBackup struct {
 	MissingBlobs []AdminBackupMissingBlob `json:"missing_blobs"`
 	// MissingBlobsTotal can exceed len(MissingBlobs): a manifest lists at
 	// most 10,000 missing files.
-	MissingBlobsTotal int                 `json:"missing_blobs_total" doc:"Files missing when the backup copied them, all of them; missing_blobs lists at most the first 10,000"`
-	Objects           []AdminBackupObject `json:"objects"`
-	KeyCheck          string              `json:"key_check,omitempty" doc:"Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4"`
-	KeyMatches        bool                `json:"key_matches" doc:"Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key"`
-	Clean             bool                `json:"clean" doc:"Whether this copy counts as a clean copy for rotation: complete, with every file, and verified under this server's SECRET_KEY. Rotation always keeps the newest clean copy, even beyond backup.keep"`
+	MissingBlobsTotal int `json:"missing_blobs_total" doc:"Files missing when the backup copied them, all of them; missing_blobs lists at most the first 10,000"`
+	// RestoreSetOmitted surfaces what selective restore cannot offer.
+	RestoreSetOmitted []AdminBackupOmitted `json:"restore_set_omitted" doc:"Items the restore set left out; the dump still holds them"`
+	Objects           []AdminBackupObject  `json:"objects"`
+	KeyCheck          string               `json:"key_check,omitempty" doc:"Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4"`
+	KeyMatches        bool                 `json:"key_matches" doc:"Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key"`
+	Clean             bool                 `json:"clean" doc:"Whether this copy counts as a clean copy for rotation: complete, with every file, and verified under this server's SECRET_KEY. Rotation always keeps the newest clean copy, even beyond backup.keep"`
 }
 
 // AdminBackupActive is the operation holding the cluster-wide backup lock,
@@ -332,7 +346,8 @@ func adminBackupListOf(l backup.Listing) AdminBackupList {
 			ID: b.ID, Kind: string(b.Kind), Status: string(b.Status), CreatedAt: NewInstant(b.CreatedAt),
 			CompletedAt: instantPtr(b.CompletedAt), SizeBytes: b.SizeBytes, SiloVersion: b.SiloVersion, Location: b.Location, BlobCount: b.BlobCount,
 			MissingBlobs: make([]AdminBackupMissingBlob, 0, len(b.MissingBlobs)), Objects: make([]AdminBackupObject, 0, len(b.Objects)),
-			KeyCheck: b.KeyCheck, KeyMatches: b.KeyMatches, Clean: b.Clean, MissingBlobsTotal: b.MissingBlobsTotal,
+			RestoreSetOmitted: adminBackupOmittedOf(b.RestoreSetOmitted),
+			KeyCheck:          b.KeyCheck, KeyMatches: b.KeyMatches, Clean: b.Clean, MissingBlobsTotal: b.MissingBlobsTotal,
 		}
 		for _, m := range b.MissingBlobs {
 			item.MissingBlobs = append(item.MissingBlobs, AdminBackupMissingBlob{Store: m.Store, Key: m.Key, Source: m.Source})
@@ -417,4 +432,12 @@ func registerAdminBackupObjectDownload(reg *Registry) {
 			}
 		}
 	}))
+}
+
+func adminBackupOmittedOf(list []backup.OmittedItem) []AdminBackupOmitted {
+	out := make([]AdminBackupOmitted, 0, len(list))
+	for _, o := range list {
+		out = append(out, AdminBackupOmitted{Section: o.Section, ID: o.ID, Label: o.Label, Reason: o.Reason, Message: o.Message, Cause: o.Cause, Error: o.Error})
+	}
+	return out
 }

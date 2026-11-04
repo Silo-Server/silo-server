@@ -72,6 +72,21 @@ func selectedBlobs(rs *RestoreSet, sel map[string][]string) map[string]bool {
 	return keep
 }
 
+// selectedUserBlobs is every blob the chosen accounts' documents
+// reference, with the variants stored beside each: their profiles'
+// avatars and collection images.
+func selectedUserBlobs(rs *RestoreSet, users []UserSelection) map[string]bool {
+	keep := map[string]bool{}
+	for _, u := range users {
+		for _, key := range rs.accountBlobs[u.Account] {
+			for _, k := range rs.blobFamily(key) {
+				keep[k] = true
+			}
+		}
+	}
+	return keep
+}
+
 // collectionImagePrefix is where an admin collection's uploaded images live.
 const collectionImagePrefix = "collection-images/"
 

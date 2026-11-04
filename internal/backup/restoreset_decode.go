@@ -75,6 +75,8 @@ func (p *restoreSetParser) decodeSection(si SectionIndex) (int, error) {
 		return n, p.validateHomeSections()
 	case SectionPlugins:
 		return p.decodePlugins(spec)
+	case SectionUsers:
+		return p.decodeUsers(spec)
 	}
 	return 0, fmt.Errorf("no reader for section %q", si.ID)
 }

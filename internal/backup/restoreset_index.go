@@ -19,8 +19,9 @@ type restoreSetIndex struct {
 	// By preview item id.
 	collections, templates, sections, artwork, branding map[string]int
 	plugins                                             map[string]int
-	// By backup id: a collection's or template collection's, a section's.
-	collectionIDs, templateIDs, sectionIDs map[string]int
+	// By backup id: a collection's or template collection's, a section's;
+	// sectionCollections by the id of the collection a section shows.
+	collectionIDs, templateIDs, sectionIDs, sectionCollections map[string]int
 	// variants lists, by original, the blob keys stored beside it
 	// (ladderSibling), sorted; legacyKeys are, by directory, the legacy
 	// originals (legacyOriginalName).
@@ -49,7 +50,7 @@ func buildRestoreSetIndex(rs *RestoreSet) *restoreSetIndex {
 	x := &restoreSetIndex{
 		libraryNames: map[int]string{}, collections: map[string]int{}, templates: map[string]int{},
 		sections: map[string]int{}, artwork: map[string]int{}, branding: map[string]int{}, plugins: map[string]int{},
-		collectionIDs: map[string]int{}, templateIDs: map[string]int{}, sectionIDs: map[string]int{},
+		collectionIDs: map[string]int{}, templateIDs: map[string]int{}, sectionIDs: map[string]int{}, sectionCollections: map[string]int{},
 		variants: map[string][]string{}, legacyKeys: map[string][]string{},
 		sectionTwins: map[sectionTwinKey]map[int]int{}, collectionTwins: map[string]map[int]int{}, templateTwins: map[[2]string]map[int]int{},
 	}
@@ -93,6 +94,9 @@ func buildRestoreSetIndex(rs *RestoreSet) *restoreSetIndex {
 	for i, e := range rs.HomeSections.Sections {
 		first(x.sections, e.itemID(), i)
 		first(x.sectionIDs, e.ID, i)
+		if e.Collection != nil {
+			first(x.sectionCollections, e.Collection.ID, i)
+		}
 		library := noLibrary
 		if e.LibraryID != nil {
 			library = *e.LibraryID

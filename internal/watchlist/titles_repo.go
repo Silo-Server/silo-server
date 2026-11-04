@@ -218,7 +218,19 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 		return Entry{}, false, false, fmt.Errorf("beginning watchlist title add: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	entry, inserted, raced, err = addInTx(ctx, tx, userID, profileID, snap, addedAt, now)
+	if err != nil || raced {
+		return entry, inserted, raced, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Entry{}, false, false, fmt.Errorf("committing watchlist title add: %w", err)
+	}
+	return entry, inserted, false, nil
+}
 
+// addInTx is one attempt of add in tx. raced reports that another add
+// created the title first; the caller rolls tx back and tries again.
+func addInTx(ctx context.Context, tx pgx.Tx, userID int, profileID string, snap Snapshot, addedAt, now time.Time) (entry Entry, inserted, raced bool, err error) {
 	titleID, found, err := lockTitleByTMDB(ctx, tx, snap.MediaType, snap.TMDBID)
 	if err != nil {
 		return Entry{}, false, false, err
@@ -244,36 +256,9 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 		}
 	}
 	if !found {
-		idText, err := idgen.NextID()
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("minting watchlist title id: %w", err)
-		}
-		titleID, err = strconv.ParseInt(idText, 10, 64)
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("parsing watchlist title id: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO watchlist_titles (id, media_type, tmdb_id, imdb_id, tvdb_id, title, year, release_date,
-				poster_path, certification, vote_average, checked_at, next_check_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, nullif($5, 0), $6, nullif($7, 0), $8, $9, $10, round($11::numeric, 1), $12, $13, $12, $12)`,
-			titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID, snap.Title, snap.Year, snap.ReleaseDate,
-			snap.PosterPath, snap.Certification, snap.VoteAverage, now, nextCheckAfterSuccess(now, snap.ReleaseDate)); err != nil {
-			return Entry{}, false, false, fmt.Errorf("creating watchlist title: %w", err)
-		}
-		// The TMDB alias is the title's identity. If another add created the
-		// title first, start over and attach to that one.
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO watchlist_title_aliases (title_id, media_type, provider, provider_id)
-			VALUES ($1, $2, 'tmdb', $3)
-			ON CONFLICT DO NOTHING`, titleID, snap.MediaType, strconv.Itoa(snap.TMDBID))
-		if err != nil {
-			return Entry{}, false, false, fmt.Errorf("recording watchlist title tmdb alias: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return Entry{}, false, true, nil
-		}
-		if err := insertAliases(ctx, tx, titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID); err != nil {
-			return Entry{}, false, false, err
+		titleID, raced, err = createTitle(ctx, tx, snap, now)
+		if err != nil || raced {
+			return Entry{}, false, raced, err
 		}
 	}
 
@@ -299,10 +284,44 @@ func (r *titlesRepo) tryAdd(ctx context.Context, userID int, profileID string, s
 	if err != nil {
 		return Entry{}, false, false, fmt.Errorf("reading watchlist title: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Entry{}, false, false, fmt.Errorf("committing watchlist title add: %w", err)
-	}
 	return Entry{Title: title, AddedAt: entryAddedAt}, inserted, false, nil
+}
+
+// createTitle inserts a title for the snapshot with its aliases. The TMDB
+// alias is the title's identity: raced reports that another add holds it
+// first, and the caller rolls back and attaches to that one instead. The new
+// row is this transaction's, so it is as good as locked.
+func createTitle(ctx context.Context, tx pgx.Tx, snap Snapshot, now time.Time) (titleID int64, raced bool, err error) {
+	idText, err := idgen.NextID()
+	if err != nil {
+		return 0, false, fmt.Errorf("minting watchlist title id: %w", err)
+	}
+	titleID, err = strconv.ParseInt(idText, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("parsing watchlist title id: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO watchlist_titles (id, media_type, tmdb_id, imdb_id, tvdb_id, title, year, release_date,
+			poster_path, certification, vote_average, checked_at, next_check_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, nullif($5, 0), $6, nullif($7, 0), $8, $9, $10, round($11::numeric, 1), $12, $13, $12, $12)`,
+		titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID, snap.Title, snap.Year, snap.ReleaseDate,
+		snap.PosterPath, snap.Certification, snap.VoteAverage, now, nextCheckAfterSuccess(now, snap.ReleaseDate)); err != nil {
+		return 0, false, fmt.Errorf("creating watchlist title: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO watchlist_title_aliases (title_id, media_type, provider, provider_id)
+		VALUES ($1, $2, 'tmdb', $3)
+		ON CONFLICT DO NOTHING`, titleID, snap.MediaType, strconv.Itoa(snap.TMDBID))
+	if err != nil {
+		return 0, false, fmt.Errorf("recording watchlist title tmdb alias: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, true, nil
+	}
+	if err := insertAliases(ctx, tx, titleID, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID); err != nil {
+		return 0, false, err
+	}
+	return titleID, false, nil
 }
 
 // removeByTMDB removes the profile's entry for the title holding the TMDB ID
