@@ -77,6 +77,17 @@ const unsupportedFileColumns = `media_folder_id, directory_path, reason, file_co
 // tests can shrink it to cross a batch boundary.
 var unsupportedFileBatchSize = 500
 
+// lockUnsupportedFiles makes the writes of one library's skipped-file rows
+// take turns for the rest of tx. Scans of the same library can run at once on
+// different servers, and two Replace transactions that lock rows in different
+// orders would otherwise deadlock and lose one scan's list.
+func lockUnsupportedFiles(ctx context.Context, tx pgx.Tx, folderID int) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('unsupported-media-files:' || $1::int::text, 0))`, folderID); err != nil {
+		return fmt.Errorf("locking unsupported files for folder %d: %w", folderID, err)
+	}
+	return nil
+}
+
 // Replace records what a scan of the given scopes, started at startedAt, found
 // in a library. Groups it found are inserted or refreshed; rows under a scope
 // that it did not find are deleted, except at or under a protected path, whose
@@ -143,6 +154,9 @@ func (r *UnsupportedFileRepository) Replace(
 		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
 	})
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := lockUnsupportedFiles(ctx, tx, folderID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM unsupported_media_files u
 			WHERE u.media_folder_id = $1
@@ -189,6 +203,9 @@ func (r *UnsupportedFileRepository) AddNew(ctx context.Context, folderID int, st
 	})
 	// One transaction, as when this was a single batch: a failure adds nothing.
 	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := lockUnsupportedFiles(ctx, tx, folderID); err != nil {
+			return err
+		}
 		return sendBatches(ctx, tx, inserts)
 	}); err != nil {
 		return fmt.Errorf("adding unsupported files for folder %d: %w", folderID, err)
