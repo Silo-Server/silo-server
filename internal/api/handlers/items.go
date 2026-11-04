@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -47,6 +48,12 @@ type batchEpisodeFileProvider interface {
 type overlayFileProvider interface {
 	ListOverlayFilesByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
 	ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
+}
+
+// episodeListFileProvider loads only the file fields a season's episode list
+// renders: access, version rows, the unreadable flag, and overlay badges.
+type episodeListFileProvider interface {
+	ListEpisodeListFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
 }
 
 type MetadataRefreshRequester interface {
@@ -259,12 +266,8 @@ func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Contex
 			h.maybeRequestStaleSeasonMetadataRefresh(ctx, detail.ContentID, episodes)
 		}
 	case "series":
-		if h.itemRepo == nil {
-			return
-		}
-		item, err := h.itemRepo.GetByID(ctx, detail.ContentID)
-		if err == nil && item != nil && item.EpisodeMetadataIncomplete {
-			h.requestStaleMetadataRefresh(ctx, "item", item.ContentID)
+		if detail.EpisodeMetadataIncomplete {
+			h.requestStaleMetadataRefresh(ctx, "item", detail.ContentID)
 		}
 	}
 }
@@ -359,8 +362,6 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
-	// BoxSet describes a box set card (type box_set). Served by v2 only.
-	BoxSet *BoxSetView `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -1273,17 +1274,11 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 // buildEpisodeResponses converts episodes to API responses using batched
 // lookups — localization, media files, watch progress, and image presigning
 // each resolve in one round-trip for the whole list instead of per episode.
+// Localization rewrites only text fields, so the lookups keyed by episode and
+// series ID run alongside it.
 func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, episodes []*models.Episode) []episodeResponse {
 	filter := v.Access
 	size := filter.ImageSizeFor(imagesize.SlotStill)
-
-	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); err == nil && len(localized) == len(episodes) {
-			episodes = localized
-		}
-	}
-
-	fallbacks := h.episodeImageFallbacks(ctx, episodes)
 
 	episodeIDs := make([]string, 0, len(episodes))
 	for _, ep := range episodes {
@@ -1291,8 +1286,29 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 			episodeIDs = append(episodeIDs, ep.ContentID)
 		}
 	}
-	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
-	userData := h.listLeafUserData(ctx, v, episodeIDs)
+
+	var (
+		localized      []*models.Episode
+		localizedOK    bool
+		fallbacks      map[string]episodeImageFallback
+		filesByEpisode map[string][]*models.MediaFile
+		userData       map[string]*catalog.SeasonUserData
+		wg             sync.WaitGroup
+	)
+	if h.detailSvc != nil {
+		wg.Go(func() {
+			var err error
+			localized, err = h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter)
+			localizedOK = err == nil && len(localized) == len(episodes)
+		})
+	}
+	wg.Go(func() { fallbacks = h.episodeImageFallbacks(ctx, episodes) })
+	wg.Go(func() { filesByEpisode = h.listEpisodeListFiles(ctx, episodeIDs) })
+	wg.Go(func() { userData = h.listLeafUserData(ctx, v, episodeIDs) })
+	wg.Wait()
+	if localizedOK {
+		episodes = localized
+	}
 
 	resp := make([]episodeResponse, 0, len(episodes))
 	stillPaths := make([]string, 0, len(episodes))
@@ -1341,6 +1357,20 @@ func (h *ItemsHandler) listEpisodeFiles(ctx context.Context, episodeIDs []string
 	return files
 }
 
+// listEpisodeListFiles fetches the file fields the episode list renders,
+// falling back to full rows when the repository lacks that projection.
+func (h *ItemsHandler) listEpisodeListFiles(ctx context.Context, episodeIDs []string) map[string][]*models.MediaFile {
+	provider, ok := h.fileRepo.(episodeListFileProvider)
+	if !ok || len(episodeIDs) == 0 {
+		return h.listEpisodeFiles(ctx, episodeIDs)
+	}
+	files, err := provider.ListEpisodeListFilesByEpisodeIDs(ctx, episodeIDs)
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
 func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter) []episodeFileResponse {
 	var resp []episodeFileResponse
 	for _, f := range files {
@@ -1361,6 +1391,9 @@ func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter
 	return resp
 }
 
+// episodeImageFallbacks loads the series artwork that stands in for a missing
+// episode still. episodeResponseShell reads it only for episodes without a
+// still of their own, so only their series are loaded.
 func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*models.Episode) map[string]episodeImageFallback {
 	if h.itemRepo == nil || len(episodes) == 0 {
 		return map[string]episodeImageFallback{}
@@ -1368,7 +1401,7 @@ func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*mo
 	seriesIDs := make([]string, 0, 1)
 	seen := make(map[string]struct{})
 	for _, ep := range episodes {
-		if ep == nil || strings.TrimSpace(ep.SeriesID) == "" {
+		if ep == nil || strings.TrimSpace(ep.SeriesID) == "" || strings.TrimSpace(ep.StillPath) != "" {
 			continue
 		}
 		if _, ok := seen[ep.SeriesID]; ok {

@@ -10,6 +10,7 @@ import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
@@ -17,7 +18,6 @@ import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
-import BoxSetCard from "@/components/boxsets/BoxSetCard";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 function formatDate(value?: string | null) {
@@ -195,57 +195,6 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
-  // A box set card opens the box set, not a title page, and has no play or
-  // item menu of its own.
-  if (item.type === "box_set") {
-    if (!item.box_set) return null;
-    return (
-      <BoxSetCard
-        boxSet={item.box_set}
-        posterUrl={item.poster_url || undefined}
-        posterThumbhash={item.poster_thumbhash || undefined}
-      />
-    );
-  }
-  return (
-    <TitleCard
-      // BrowseItem is not a union, so the type check above cannot narrow it.
-      item={item as TitleCardItem}
-      libraryId={libraryId}
-      sortField={sortField}
-      overlayPrefs={overlayPrefs}
-      quickActionMode={quickActionMode}
-      narrowPosterActions={narrowPosterActions}
-      selectionMode={selectionMode}
-      selected={selected}
-      onToggleSelect={onToggleSelect}
-    />
-  );
-}
-
-type TitleCardItem = BrowseItem & { type: Exclude<BrowseItem["type"], "box_set"> };
-
-function TitleCard({
-  item,
-  libraryId,
-  sortField,
-  overlayPrefs,
-  quickActionMode = "none",
-  narrowPosterActions = false,
-  selectionMode = false,
-  selected = false,
-  onToggleSelect,
-}: {
-  item: TitleCardItem;
-  libraryId?: number;
-  sortField?: string;
-  overlayPrefs?: CardOverlayPrefs | null;
-  quickActionMode?: CardQuickActionMode;
-  narrowPosterActions?: boolean;
-  selectionMode?: boolean;
-  selected?: boolean;
-  onToggleSelect?: (item: BrowseItem) => void;
-}) {
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
@@ -293,6 +242,9 @@ function TitleCard({
                 corners; generic overlays would render underneath them. */}
             {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+            )}
+            {item.status === "matched" && item.type !== "manga" && (
+              <CardWatchStatus userState={item.user_state} />
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and

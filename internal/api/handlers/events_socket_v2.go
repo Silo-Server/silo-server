@@ -28,6 +28,9 @@ const eventsSchemeHTTP = "http"
 const eventsSchemeHTTPS = "https"
 const eventsAdminRole = "admin"
 
+// opaqueOrigin is the Origin a browser sends for a page with no web origin.
+const opaqueOrigin = "null"
+
 const EventsSocketProtocol = "silo.events.v2"
 const eventsTicketProtocolPrefix = "silo.ticket."
 const eventsSessionCheckInterval = 15 * time.Second
@@ -233,11 +236,12 @@ func overlayOriginsFrom(source *OverlayOriginSource) []string {
 	return (*source)()
 }
 
-// socketOriginAllowed accepts a browser Origin that matches the configured
-// public origin, the request's own scheme and host, or one of the overlay
-// origins connected providers report. The request's own origin stays accepted
-// with a public origin configured so a browser on a LAN address or IP:port can
-// open the sockets of the page it loaded. All are exact scheme and host
+// socketOriginAllowed accepts no Origin, an opaque or non-http(s) app Origin,
+// or a browser Origin that matches the configured public origin, the request's
+// own scheme and host, or one of the overlay origins connected providers
+// report. The request's own origin stays accepted with a public origin
+// configured so a browser on a LAN address or IP:port can open the sockets of
+// the page it loaded. All are exact scheme and host
 // matches; forwarded host headers are never consulted here.
 func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []string) bool {
 	origins := r.Header.Values("Origin")
@@ -247,8 +251,22 @@ func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []
 	if len(origins) != 1 {
 		return false
 	}
+	// Packaged TV and desktop apps load their pages from the device, so they
+	// send an opaque or non-web origin they cannot change. Like an originless
+	// native client, the ticket still authorizes them.
+	if origins[0] == opaqueOrigin {
+		return true
+	}
 	origin, err := url.Parse(origins[0])
-	if err != nil || origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
+	if err != nil {
+		return false
+	}
+	// Requiring "scheme://" keeps a bare host:port, which parses with the host
+	// as its scheme, out of the app-scheme case.
+	if origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP && strings.HasPrefix(origins[0], origin.Scheme+"://") {
+		return true
+	}
+	if origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
 		return false
 	}
 	if publicOrigin != "" && originMatches(origin, publicOrigin) {

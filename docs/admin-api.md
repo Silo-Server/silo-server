@@ -115,6 +115,44 @@ every asset response carries `X-Content-Type-Options: nosniff` and a sandboxing
 `Content-Security-Policy` — a directly-navigated SVG cannot run script in the
 viewer's session.
 
+## Card overlay images
+
+Administrators upload images that card overlay badges draw: a logo beside a badge's
+label, or an image that replaces the whole badge for one value. The library is
+server-wide; profiles and the server default (`defaults.card_overlays`) name images
+by `ref` in their `ui.card_overlays` document (see
+[card-overlays.md](architecture/card-overlays.md)).
+
+| Route                                       | Auth      | Purpose                                                                |
+| ------------------------------------------- | --------- | ---------------------------------------------------------------------- |
+| `POST /api/v2/admin/overlay-images`         | admin     | Upload (multipart, fields `file` and `name`). `201` with the image.    |
+| `DELETE /api/v2/admin/overlay-images/{ref}` | admin     | Remove the image and delete its bytes. `204`; an unknown ref is `404`. |
+| `GET /api/v2/overlay-images/{ref}`          | public    | Serve the stored WebP. Content-addressed, so `immutable` cached.       |
+| `GET /api/v2/settings/overlay-config`       | signed in | Lists the library under `images`, with `image_uploads_available`.      |
+
+`file` accepts PNG, JPEG or WebP up to 4 MiB. The server re-encodes it to WebP,
+keeping transparency, scaled down to fit 600×300 and never enlarged; `width` and
+`height` report the stored size. `ref` is the SHA-256 of the stored bytes plus
+`.webp`, so uploading the same image again keeps one entry and takes the new
+`name` (1 to 64 characters after trimming). The library holds at most 256 images.
+
+The image row in `overlay_images` is what makes a ref current: the public read
+answers `404` for a ref that was deleted, even while a client still has its bytes
+cached. A document that names a missing image falls back to the badge's own
+rendering. The bytes live under `overlay-images/` in the assets store, and the
+`preserve_uploads` storage transition copies them.
+
+Failure modes: `422 validation_failed` at `body.file` for a missing file, a
+content type outside the list, or bytes that are not a readable image, and at
+`body.name` for a missing or overlong name; `413 payload_too_large` past 4 MiB;
+`409 conflict` when the library is full; `409 capability_not_configured` when
+the server has no asset storage. Both routes are demo-restricted, and the
+upload is `non_retryable`: a delayed retry can restore an image deleted in
+between.
+
+Image responses carry `X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`, like branding assets.
+
 ## Server status and restarts
 
 Some settings are only read at startup. Two routes carry that contract:
@@ -2312,7 +2350,11 @@ client can represent it exactly, that must rise within the session), plus option
 whole body on retry.
 
 The server keeps one ledger per playback session in the process that serves
-the session's realtime lane. The ledger is bounded per session and released
+the session's realtime lane. With several API replicas, a command that reaches
+a replica without the lane is relayed to the replica that holds it, so every
+command for a session meets the same ledger whichever replica receives it
+([playback control relay](architecture/playback-control-relay.md)). The ledger
+is bounded per session and released
 with the session: terminate and the stop fallback drop it directly, and a
 throttled sweep on the command path prunes the ledgers of sessions that ended
 by any other route. It answers deterministically:
@@ -2339,16 +2381,23 @@ by any other route. It answers deterministically:
   rather than starting a fresh session
   ([playback API](playback-api.md#progress-and-stop)).
 - An unknown session is `404`; a server without playback control answers
-  `503 dependency_unavailable`.
+  `503 dependency_unavailable`. So does a command relayed to the replica
+  holding the lane when that replica does not answer in time: it may still
+  have applied the command, so retry with the same body, and a retry that
+  reaches it replays the recorded receipt.
 
 `GET /api/v2/admin/sessions/command-capabilities` reports `available`, the
 `actions` list and `sequenced_commands: true`. All of these require an acting
 administrator. Commands enforce the demo restriction; capability reads do not.
 The web session actions send
 pause, resume, stop and message through these operations under captured
-administrator authority, allocate a fresh identity per click, and raise the
-allocation floor from a stale refusal's `X-Silo-Latest-Sequence`. Terminate has
-its own operation, described next.
+administrator authority. Each click is a new identity, except that a command
+whose answer left its outcome unknown (a `5xx` or no response) keeps its
+identity, and repeating the same command on the same session under the same
+signed-in profile sends it again so the server replays the receipt; any other
+answer, a different command, or a profile or account change drops it. They
+raise the allocation floor from a stale refusal's `X-Silo-Latest-Sequence`.
+Terminate has its own operation, described next.
 
 
 ### Administrator terminate (v2)
@@ -2369,7 +2418,14 @@ reconstructs the session from a stream token that is still inside its TTL
 ([restart-resilient playback](architecture/restart-resilient-playback.md)). Only
 then is the dismissal dispatched on the session's realtime control lane, without
 waiting for an acknowledgement. Terminates for one session are serialized, so a
-repeat observes the first outcome instead of racing it.
+repeat observes the first outcome instead of racing it. With several API
+replicas, the terminate runs on the replica that holds the session's lane, which
+ends its live session and notifies the player. When no replica holds a lane, or
+its holder does not answer, the receiving replica revokes the session itself.
+When the holder did not answer, the answer is `503 dependency_unavailable`
+unless the receiving replica told the player itself: the holder may still be
+telling the player, or may already have ended the session, so whether the
+player was notified is unknown. Retrying the terminate is safe.
 
 The JSON body is required (`{}` when there is no reason) and carries an optional
 `reason`. The `200` receipt carries

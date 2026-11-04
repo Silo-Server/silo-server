@@ -66,6 +66,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
 
@@ -196,7 +197,7 @@ function InvitationManager() {
   const [copyError, setCopyError] = useState("");
   async function handleCopy(text: string) {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       if (mounted.current) {
         setCopyError("");
         toast.success("Copied to clipboard");

@@ -102,6 +102,39 @@ func TestReplaceFailedIsScopedToRequesterDatabase(t *testing.T) {
 	}
 }
 
+func TestDeleteFailedRequestDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "failed", 1, 101, StatusApproved)
+	insertLifecycleRequest(t, repo, "partly-delivered", 1, 102, StatusApproved)
+	insertLifecycleRequest(t, repo, "active", 1, 103, StatusApproved)
+	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed' WHERE id <> 'active'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status)
+		VALUES ('partly-delivered', '1080p', 'completed'), ('partly-delivered', '2160p', 'failed')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteFailed(ctx, "failed"); err != nil {
+		t.Fatalf("delete failed request: %v", err)
+	}
+	if _, err := repo.GetRequest(ctx, "failed"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed request after delete: err = %v, want ErrNotFound", err)
+	}
+	for _, id := range []string{"partly-delivered", "active"} {
+		if err := repo.DeleteFailed(ctx, id); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("delete %s: err = %v, want ErrInvalidState", id, err)
+		}
+		if _, err := repo.GetRequest(ctx, id); err != nil {
+			t.Fatalf("%s after refused delete: %v, want kept", id, err)
+		}
+	}
+	if err := repo.DeleteFailed(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing: err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestApproveTwiceSubmitsOnce(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}

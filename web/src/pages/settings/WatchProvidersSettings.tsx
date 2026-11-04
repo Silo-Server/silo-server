@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import {
   useConnectWatchProviderAPIKey,
@@ -509,7 +510,7 @@ function WatchProviderCard({
   const handleCopyCode = async () => {
     if (!authSession) return;
     try {
-      await navigator.clipboard.writeText(authSession.user_code);
+      await copyTextToClipboard(authSession.user_code);
       setCodeCopied(true);
       toast.success(`${displayName} code copied`);
     } catch {

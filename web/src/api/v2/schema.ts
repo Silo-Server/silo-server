@@ -3409,6 +3409,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/overlay-images": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add an image to the card overlay image library. The image is re-encoded and addressed by its content: uploading the same image again keeps one entry and renames it. No automatic retry: a delayed retry can restore an image deleted in between. */
+    post: operations["uploadAdminOverlayImage"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/overlay-images/{ref}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Remove an image from the card overlay image library and delete its bytes. Badges that name it fall back to their own rendering. */
+    delete: operations["deleteAdminOverlayImage"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/people/{id}": {
     parameters: {
       query?: never;
@@ -9986,6 +10020,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/overlay-images/{ref}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a card overlay image. The ref addresses the content, so a response never changes. */
+    get: operations["getOverlayImage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    /** Read a card overlay image. The ref addresses the content, so a response never changes. */
+    head: operations["headOverlayImage"];
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/password-resets": {
     parameters: {
       query?: never;
@@ -10821,7 +10873,8 @@ export interface paths {
     get: operations["getRequest"];
     put?: never;
     post?: never;
-    delete?: never;
+    /** Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing. */
+    delete: operations["removeFailedRequest"];
     options?: never;
     head?: never;
     patch?: never;
@@ -17680,6 +17733,15 @@ export interface components {
       timestamp: string;
       user_id?: string;
     };
+    AdminOverlayImageForm: {
+      /**
+       * Format: binary
+       * @description The image: PNG, JPEG or WebP, at most 4 MiB. Silo stores it as WebP no larger than 600x300, keeping transparency.
+       */
+      file: string;
+      /** @description Label administrators see when they assign the image to a badge: 1 to 64 characters after trimming. Required. */
+      name?: string;
+    };
     AdminPasswordReset: {
       /**
        * @example link
@@ -21898,7 +21960,7 @@ export interface components {
        * @example America/New_York
        */
       air_timezone?: string;
-      /** @description series_premiere, season_premiere, finale; empty, never null */
+      /** @description series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null */
       badges: string[];
       /** @example episode:severance-s02e01 */
       content_id: string;
@@ -22181,8 +22243,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -22312,7 +22372,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -22384,8 +22444,6 @@ export interface components {
        * @description Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork
        */
       banner_url?: string;
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /** @description Empty, never null */
       cast: components["schemas"]["CastCredit"][];
       /**
@@ -22588,7 +22646,7 @@ export interface components {
       tmdb_id?: string;
       tvdb_id?: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -22666,7 +22724,7 @@ export interface components {
       air_date: string;
       /** @description Local wall-clock time, HH:MM */
       air_time?: string;
-      /** @description Empty, never null */
+      /** @description The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null */
       badges: string[];
       /** Format: int64 */
       episode_number?: number;
@@ -22691,6 +22749,18 @@ export interface components {
       not_interested: boolean;
       /** @example false */
       played: boolean;
+      /**
+       * Format: int64
+       * @description Available episodes the profile has not watched; present on a series or season the profile has not finished
+       * @example 6
+       */
+      unplayed_count?: number;
+      /**
+       * Format: int64
+       * @description Episodes the profile has watched; present on a series or season the profile has not finished
+       * @example 4
+       */
+      watched_count?: number;
     };
     CatalogLetter: {
       /**
@@ -22737,11 +22807,6 @@ export interface components {
       total: number;
     };
     CatalogLettersQuery: {
-      /**
-       * @description Count the list a group=box_set browse pages, with each box set counted once under its first title
-       * @enum {string}
-       */
-      group?: "box_set";
       /** @description Rule groups, as on queryCatalogItems; empty matches everything */
       groups?: components["schemas"]["CatalogQueryGroup"][];
       /**
@@ -22768,11 +22833,8 @@ export interface components {
     CatalogQuery: {
       collection_id?: string;
       cursor?: string;
-      /**
-       * @description As the listCatalogItems group parameter
-       * @enum {string}
-       */
-      group?: "work" | "box_set";
+      /** @enum {string} */
+      group?: "work";
       /** @description Rule groups; empty matches everything */
       groups?: components["schemas"]["CatalogQueryGroup"][];
       /**
@@ -22880,7 +22942,7 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on */
+      /** @description searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on */
       box_sets?: boolean;
       /** @description Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields */
       extended_query_rules?: boolean;
@@ -25437,6 +25499,8 @@ export interface components {
       /** @description Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available. */
       missing_seasons_requestable: boolean;
       rating_restrictions_enforced: boolean;
+      /** @description Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing. */
+      remove_failed_supported: boolean;
       requests_enabled: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -25583,8 +25647,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -25714,7 +25776,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -26319,7 +26381,7 @@ export interface components {
        */
       box_set_min_movies: number;
       /**
-       * @description Browse the movies TMDB lists in one collection (a franchise such as Harry Potter) as one box set; movie and mixed libraries only
+       * @description Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and, when box_sets_in_search is true, in search; library browse still lists each movie. Movie and mixed libraries only
        * @example false
        */
       box_sets_enabled: boolean;
@@ -26418,7 +26480,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       /**
-       * @description This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search), group=box_set on the catalog, and the box set reads
+       * @description This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search) and the box set reads
        * @example true
        */
       box_sets: boolean;
@@ -28613,6 +28675,13 @@ export interface components {
        */
       enabled: boolean;
       /**
+       * @description Whether this server has the asset storage uploadAdminOverlayImage needs
+       * @example true
+       */
+      image_uploads_available: boolean;
+      /** @description Images administrators uploaded for badges, in upload order; card overlay documents name them by ref */
+      images: components["schemas"]["OverlayImage"][];
+      /**
        * @description Default quick-action mode; one of the ui.card_quick_actions values in the settings contract
        * @example both
        */
@@ -28622,6 +28691,36 @@ export interface components {
        * @example false
        */
       quick_actions_enabled: boolean;
+    };
+    OverlayImage: {
+      /**
+       * Format: int64
+       * @description Stored height in pixels
+       * @example 120
+       */
+      height: number;
+      /**
+       * @description Administrator's label for the image
+       * @example 4K Dolby Vision
+       */
+      name: string;
+      /**
+       * @description Content reference card overlay documents use; it changes exactly when the stored bytes change
+       * @example 9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp
+       */
+      ref: string;
+      /**
+       * Format: uri-reference
+       * @description Public, immutable path of the image bytes
+       * @example /api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp
+       */
+      url: string;
+      /**
+       * Format: int64
+       * @description Stored width in pixels
+       * @example 300
+       */
+      width: number;
     };
     PageInfo: {
       /**
@@ -32177,6 +32276,11 @@ export interface components {
        * @example true
        */
       supports_idempotent_writes: boolean;
+      /**
+       * @description Whether this server keeps a card overlay image library: getOverlayConfig lists it and card overlay documents may name its images
+       * @example true
+       */
+      supports_overlay_images: boolean;
     };
     SettingSourceContext: {
       /**
@@ -33557,7 +33661,7 @@ export interface components {
     };
     UserLibrary: {
       /**
-       * @description The library browses movies of one TMDB collection as a box set; request group=box_set when browsing it
+       * @description The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie
        * @example false
        */
       box_sets_enabled: boolean;
@@ -34656,8 +34760,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /** @description Up to four cast members; empty, never null */
       cast: components["schemas"]["WatchTonightCastMember"][];
       /**
@@ -34789,7 +34891,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -34871,8 +34973,6 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
-      /** @description The box set a box_set card stands for; open it with getCatalogBoxSet */
-      box_set?: components["schemas"]["CatalogBoxSet"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -35002,7 +35102,7 @@ export interface components {
       /** @example Heat */
       title: string;
       /**
-       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
        */
       type: string;
@@ -61112,7 +61212,7 @@ export interface operations {
         user_id?: number;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -65440,6 +65540,260 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["NotificationDestinationTestResult"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  uploadAdminOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["AdminOverlayImageForm"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OverlayImage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Content reference of the image */
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -94504,8 +94858,8 @@ export interface operations {
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
         genre?: string;
-        /** @description group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list */
-        group?: "work" | "box_set";
+        /** @description group=work collapses editions of one book into one card */
+        group?: "work";
         /** @description JSON array of structured rule groups; use POST catalog/query for larger queries */
         groups?: string;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
@@ -109465,7 +109819,7 @@ export interface operations {
         channels?: string;
       };
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -123666,6 +124020,128 @@ export interface operations {
       };
     };
   };
+  getOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-None-Match"?: string;
+      };
+      path: {
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Image bytes (no body for HEAD) */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "image/webp": string;
+        };
+      };
+      /** @description Image unchanged */
+      304: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown or deleted image */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image could not be read */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Overlay images are not available on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  headOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-None-Match"?: string;
+      };
+      path: {
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Image bytes (no body for HEAD) */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image unchanged */
+      304: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown or deleted image */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image could not be read */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Overlay images are not available on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   requestPasswordReset: {
     parameters: {
       query?: never;
@@ -125219,7 +125695,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -130586,6 +131062,122 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["MediaRequest"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  removeFailedRequest: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -145369,7 +145961,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
+        /** @description An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket. */
         Origin?: string;
         /** @description Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;

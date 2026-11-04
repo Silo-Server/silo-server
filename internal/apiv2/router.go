@@ -446,6 +446,7 @@ type Dependencies struct {
 	PersonalAPIKeys                    PersonalAPIKeyService
 	PolicyCapability                   PolicyCapabilityService
 	Branding                           BrandingService
+	OverlayImages                      OverlayImageService
 	ArtworkStore                       blobstore.Store
 	ArtworkBackend                     string
 	ArtworkSigner                      *artworkurl.Signer

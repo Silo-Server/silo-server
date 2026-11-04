@@ -14,6 +14,10 @@ export type {
   OverlayPreset,
   OverlayShadow,
   OverlayId,
+  OverlayFontWeight,
+  OverlayImage,
+  OverlayShape,
+  OverlayStyle,
   PresetId,
 } from "./types";
 
@@ -26,12 +30,20 @@ export {
   orderedOverlaysForPosition,
   isOverlaySuppressed,
   isOverlaySupportedBy,
+  isOverlayImageRef,
   overlayPrefsForServer,
+  OVERLAY_STYLE_MANIFEST_REVISION,
+  parseOverlayStyle,
+  STYLE_SIZE_MAX,
+  STYLE_SIZE_MIN,
+  supportsOverlayStyles,
+  withoutUnlistedImages,
   requestDownloadBarPercent,
   storedOverlayIds,
 } from "./schema";
 export type { OverlayServerSupport } from "./schema";
 export { OVERLAY_PRESETS, PRESET_IDS, getPreset, ACCENT_PALETTE } from "./presets";
+export { applyOverlayStyle, overlayImageUrl, readableTextOn } from "./style";
 export { POSITION_OPTIONS, CATEGORY_GROUPS, CATEGORY_META } from "./ui-constants";
 export { OverlayIcon } from "./icons";
 export {
@@ -43,6 +55,7 @@ export {
 export {
   OVERLAY_PREVIEW_SAMPLES,
   OVERLAY_PREVIEW_VARIANTS,
+  OVERLAY_PREVIEW_WATCH_STATES,
   SAMPLE_MOVIE_DATA,
   SAMPLE_REQUEST_DATA,
   SAMPLE_SHOW_DATA,

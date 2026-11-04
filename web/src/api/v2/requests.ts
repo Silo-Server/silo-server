@@ -59,6 +59,11 @@ export function cancelMediaRequestV2(id: string, reason?: string): Promise<Media
   );
 }
 
+// Removes a failed request that delivered nothing, with its error and history.
+export function removeFailedMediaRequestV2(id: string): Promise<void> {
+  return v2("DELETE /api/v2/requests/{id}", { path: { id } }).then(() => undefined);
+}
+
 // Following is keyed by title: a viewer asks to hear when a title someone else
 // already requested becomes available.
 export function followRequestMediaV2(mediaType: RequestMediaType, tmdbID: number) {

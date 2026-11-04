@@ -79,6 +79,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+# Explicit modern-runtime image option for isolated Intel Flex/DG2 devices.
+# The default preserves Media SDK for older supported Intel graphics.
+ARG INTEL_QSV_RUNTIME=auto
+COPY scripts/configure-intel-qsv-runtime.sh /tmp/configure-intel-qsv-runtime.sh
+RUN sh /tmp/configure-intel-qsv-runtime.sh "${INTEL_QSV_RUNTIME}" "${TARGETARCH}" && \
+    rm /tmp/configure-intel-qsv-runtime.sh
 # Debian's Intel OpenCL runtime lags the media hardware supported by the
 # Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
 # tone mapping can use the quality-preserving OpenCL path. Other architectures
@@ -104,6 +110,7 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # ca-certificates updates do not reach. Use the system store instead, so a CA
 # that Debian removes stops being trusted by npm as well.
 ENV NODE_OPTIONS=--use-openssl-ca
+LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an
