@@ -36,6 +36,10 @@ type inputInfo struct {
 	// VideoCodec is the decoder's name for the first playable video, such
 	// as "h264" or "mpeg2video".
 	VideoCodec string
+	// AudioStreams are the audio streams, by ffmpeg's 0:a:N index, whose
+	// sample rate the demuxer found. A stream without one, such as an
+	// MPEG-TS track declared but never carried, fails a stream copy.
+	AudioStreams []int
 }
 
 func (i inputInfo) displayAspect() float64 {
@@ -71,10 +75,12 @@ func probeArgs(input string) []string {
 type inputHeaderParser struct {
 	info                                inputInfo
 	inHeader                            bool
+	audioSeen                           int
 	videoSeen, videoSideData, inputDone bool
 }
 
 var (
+	audioRatePattern = regexp.MustCompile(`, [1-9]\d* Hz(?:,|$)`)
 	videoSizePattern = regexp.MustCompile(`(?:^|,\s+)(\d+)x(\d+)(?:\s|,|$)`)
 	videoDARPattern  = regexp.MustCompile(`DAR ([0-9.]+):([0-9.]+)`)
 )
@@ -118,6 +124,13 @@ func (p *inputHeaderParser) videoGeometry(line string) {
 	trimmed := strings.TrimSpace(line)
 	if strings.HasPrefix(trimmed, "Stream #0:") {
 		p.videoSideData = false
+		if strings.Contains(trimmed, ": Audio: ") {
+			if audioRatePattern.MatchString(trimmed) {
+				p.info.AudioStreams = append(p.info.AudioStreams, p.audioSeen)
+			}
+			p.audioSeen++
+			return
+		}
 		if p.videoSeen || !strings.Contains(trimmed, ": Video:") || strings.Contains(trimmed, "(attached pic)") {
 			return
 		}

@@ -138,18 +138,18 @@ type sheetAssembler struct {
 	prev       []byte
 	// The stream-copy timing file reports how far the input was actually
 	// read, including non-keyframes after the last decoded keyframe.
-	packetTimeBase float64
-	packetEnd      float64
-	hasPacketTime  bool
+	// timeBases holds each of its streams' time base by stream index.
+	timeBases     map[int]float64
+	packetEnd     float64
+	hasPacketTime bool
 	// dtsTiming lets a packet without a PTS count by its DTS; see
 	// packetLine.
 	dtsTiming bool
-	// audioEnd is how far the input's first audio stream was read. Samples
+	// audioEnd is how far the input's audio streams were read. Samples
 	// after the video's extent but within it lie in an audio tail: the file
 	// goes on after its video ends, which a truncated file does not, so they
 	// show the last frame like a gap in the video does.
-	audioTimeBase float64
-	audioEnd      float64
+	audioEnd float64
 	// A window whose decoder dropped keyframes (see droppedKeyframe) gives
 	// the samples after each dropped keyframe an earlier one. The times of
 	// the frames decoded and of the keyframe packets read find those
@@ -316,7 +316,9 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 // packetLine reads the framecrc stream-copy output: "#tb 0: 1/1000",
 // followed by "0, DTS, PTS, duration, size, checksum[, flags]". PTS and
 // duration count in that time base and are relative to the window start.
-// With dtsTiming, a packet without a PTS falls back to its DTS:
+// Stream 0 is the video; any later stream is an audio stream (see
+// buildSheetsArgs), which only extends audioEnd.
+// With dtsTiming, a video packet without a PTS falls back to its DTS:
 // packed-bitstream XviD in AVI carries no PTS on any packet, and a DTS never
 // runs ahead of the PTS it stands in for, so the fallback cannot stretch a
 // reordered stream's extent. Without a PTS the decoder stamps each frame
@@ -324,81 +326,65 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 // for a decoder in low-delay mode, which releases each keyframe as it
 // arrives. A reordering decoder, such as H.264 with B-frames, releases a
 // keyframes-only read's keyframes a GOP or more late; its DTS-only windows
-// keep failing rather than publish every cell at an earlier keyframe.
+// keep failing rather than publish every cell at an earlier keyframe. Audio
+// is not reordered, so an audio packet without a PTS always counts by its
+// DTS.
 func (a *sheetAssembler) packetLine(line string) {
-	if raw, ok := strings.CutPrefix(line, "#tb 0: "); ok {
-		a.packetTimeBase = a.parseTimeBase(raw)
+	if raw, ok := strings.CutPrefix(line, "#tb "); ok {
+		index, value, ok := strings.Cut(raw, ": ")
+		stream, err := strconv.Atoi(index)
+		if !ok || err != nil || stream < 0 {
+			return
+		}
+		numerator, denominator, ok := strings.Cut(value, "/")
+		n, errN := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
+		d, errD := strconv.ParseFloat(strings.TrimSpace(denominator), 64)
+		if !ok || errN != nil || errD != nil || !(n > 0) || !(d > 0) || !finite(n) || !finite(d) {
+			a.err = errors.New("ffmpeg reported an invalid packet time base")
+			return
+		}
+		if a.timeBases == nil {
+			a.timeBases = map[int]float64{}
+		}
+		a.timeBases[stream] = n / d
 		return
 	}
-	if raw, ok := strings.CutPrefix(line, "#tb 1: "); ok {
-		a.audioTimeBase = a.parseTimeBase(raw)
-		return
-	}
-	if strings.HasPrefix(line, "1,") {
-		a.audioPacketLine(line)
-		return
-	}
-	if !strings.HasPrefix(line, "0,") {
+	index, _, ok := strings.Cut(line, ",")
+	stream, err := strconv.Atoi(index)
+	if !ok || err != nil || stream < 0 {
 		return
 	}
 	fields := strings.SplitN(line, ",", 6)
-	if len(fields) != 6 || a.packetTimeBase <= 0 {
+	timeBase := a.timeBases[stream]
+	if len(fields) != 6 || timeBase <= 0 {
 		a.err = errors.New("ffmpeg reported packet timing without a time base")
 		return
 	}
+	video := stream == 0
 	pts, hasPTS := packetTimestamp(fields[2])
-	if !hasPTS && a.dtsTiming {
+	if !hasPTS && (a.dtsTiming || !video) {
 		pts, hasPTS = packetTimestamp(fields[1])
 	}
 	duration, errDuration := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
 	if hasPTS && errDuration == nil && duration >= 0 {
-		end := a.offset + (float64(pts)+float64(duration))*a.packetTimeBase
-		if finite(end) {
+		if end := a.offset + (float64(pts)+float64(duration))*timeBase; finite(end) {
+			if !video {
+				a.audioEnd = max(a.audioEnd, end)
+				return
+			}
 			a.packetEnd = max(a.packetEnd, end)
 			a.hasPacketTime = true
 		}
 	}
+	if !video {
+		return
+	}
 	if packetIsKey(fields[5]) {
-		if at := a.offset + float64(pts)*a.packetTimeBase; hasPTS && finite(at) {
+		if at := a.offset + float64(pts)*timeBase; hasPTS && finite(at) {
 			a.keyTimes = append(a.keyTimes, at)
 		} else {
 			a.untimedKey = true
 		}
-	}
-}
-
-// parseTimeBase reads a framecrc "#tb N: " value, failing the run on an
-// invalid one.
-func (a *sheetAssembler) parseTimeBase(raw string) float64 {
-	numerator, denominator, ok := strings.Cut(raw, "/")
-	n, errN := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
-	d, errD := strconv.ParseFloat(strings.TrimSpace(denominator), 64)
-	if !ok || errN != nil || errD != nil || !(n > 0) || !(d > 0) || !finite(n) || !finite(d) {
-		a.err = errors.New("ffmpeg reported an invalid packet time base")
-		return 0
-	}
-	return n / d
-}
-
-// audioPacketLine reads a packet of the timing file's second stream, the
-// input's first audio, and extends audioEnd. Audio is not reordered, so a
-// packet without a PTS counts by its DTS.
-func (a *sheetAssembler) audioPacketLine(line string) {
-	fields := strings.SplitN(line, ",", 6)
-	if len(fields) != 6 || a.audioTimeBase <= 0 {
-		a.err = errors.New("ffmpeg reported packet timing without a time base")
-		return
-	}
-	pts, hasPTS := packetTimestamp(fields[2])
-	if !hasPTS {
-		pts, hasPTS = packetTimestamp(fields[1])
-	}
-	duration, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
-	if !hasPTS || err != nil || duration < 0 {
-		return
-	}
-	if end := a.offset + (float64(pts)+float64(duration))*a.audioTimeBase; finite(end) {
-		a.audioEnd = max(a.audioEnd, end)
 	}
 }
 
