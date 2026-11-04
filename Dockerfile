@@ -110,9 +110,7 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # ca-certificates updates do not reach. Use the system store instead, so a CA
 # that Debian removes stops being trusted by npm as well.
 ENV NODE_OPTIONS=--use-openssl-ca
-ARG BUILD_REVISION
-LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}" \
-      org.opencontainers.image.revision="${BUILD_REVISION}"
+LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an

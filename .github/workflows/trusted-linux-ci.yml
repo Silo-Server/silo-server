@@ -142,6 +142,8 @@ jobs:
           fi
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
+      - name: Test image packaging scripts
+        run: sh scripts/tests/intel-qsv-runtime.sh
       - name: Check action SHA pins
         shell: bash
         run: |

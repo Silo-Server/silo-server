@@ -105,27 +105,3 @@ and the API stops a node whose count differs. Recipe cards carry the whole
 list; signed reconstruction claims carry only the track numbers, the default
 and the source version, under a method older nodes refuse, so a session
 rebuilt from a token names its renditions `Track <n>`.
-
-## Intel QSV runtime packaging
-
-The Dockerfile's `INTEL_QSV_RUNTIME` build argument selects the packaged Intel
-runtime. `auto` is the unchanged default. An explicit amd64 `vpl` image removes
-only Jellyfin's `libmfxhw64.so*` legacy Media SDK runtime while retaining the
-modern VPL GPU runtime, dispatcher, iHD driver and dependencies. Invalid options,
-non-amd64 VPL selection, or a missing modern runtime fail the build. The image's
-`io.silo.intel-qsv-runtime` label records the selection.
-
-The VPL option addresses a measured mixed-library selection failure on an
-isolated native non-first Flex render device: the legacy runtime selected there
-fails QSV device initialization, while removing it selects the modern runtime.
-The dispatcher ordering defect is not established. Both capability probing and
-actual transcodes use the same packaged FFmpeg and allocated native render path;
-this option never renames devices or grants additional GPUs.
-
-Legacy Intel support remains in the default image. Intel's
-[dispatcher hardware matrix](https://github.com/intel/libvpl#dispatcher-behavior-when-targeting-intel-gpus)
-lists older Media SDK-only platforms and Flex/DG2 as VPL platforms, so removing
-Media SDK globally would narrow support. Use the explicit VPL image for modern
-hardware; validate the resulting image on assigned native render devices. The
-packaging regression is `sh scripts/tests/intel-qsv-runtime.sh`; actual H.264,
-HEVC, VA-API and device-isolation acceptance requires Intel hardware.
