@@ -1450,11 +1450,11 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return []*models.MediaItem{}, 0, nil
 	}
 
+	contentIDs := make([]string, 0, len(collectionItems))
+	for _, item := range collectionItems {
+		contentIDs = append(contentIDs, item.MediaItemID)
+	}
 	if membership.Sort.Field != "" {
-		contentIDs := make([]string, 0, len(collectionItems))
-		for _, item := range collectionItems {
-			contentIDs = append(contentIDs, item.MediaItemID)
-		}
 		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, queryAccess, s.ItemLimit, "")
 		if err != nil {
 			return nil, 0, err
@@ -1462,49 +1462,16 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return items, total, nil
 	}
 
-	selectedCollectionItems := collectionRailItemsToFetch(collectionItems, s.ItemLimit)
-
-	contentIDs := make([]string, 0, len(selectedCollectionItems))
-	for _, item := range selectedCollectionItems {
-		contentIDs = append(contentIDs, item.MediaItemID)
-	}
-
-	items, err := f.fetchItemsByContentIDs(ctx, contentIDs, libraryID, libraryIDs, filter)
+	// Filter before limiting, as the sorted and live branches do: limiting
+	// first let the access filter empty the row when the first members sit
+	// in libraries the viewer can't open.
+	items, err := f.fetchItemsInListOrder(ctx, contentIDs, s.ItemLimit, libraryID, libraryIDs, filter)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	itemByID := make(map[string]*models.MediaItem, len(items))
-	for _, item := range items {
-		itemByID[item.ContentID] = item
-	}
-
-	orderedItems := make([]*models.MediaItem, 0, len(contentIDs))
-	for _, contentID := range contentIDs {
-		item, ok := itemByID[contentID]
-		if !ok {
-			continue
-		}
-		orderedItems = append(orderedItems, item)
-	}
-
-	// Historically total represented the number of visible rail items, not the
-	// collection membership. Keep that contract for unsorted rails.
-	orderedItems, total := unsortedCollectionRailResult(orderedItems)
-	return orderedItems, total, nil
-}
-
-func collectionRailItemsToFetch(items []*models.LibraryCollectionItem, itemLimit int) []*models.LibraryCollectionItem {
-	if itemLimit > 0 && itemLimit < len(items) {
-		// Preserve the legacy rail path when no default sort is configured:
-		// bound the lookup before expanding content IDs into SQL parameters.
-		return items[:itemLimit]
-	}
-	return items
-}
-
-func unsortedCollectionRailResult(items []*models.MediaItem) ([]*models.MediaItem, int) {
-	return items, len(items)
+	// The total of an unsorted rail is the number of cards it shows, not the
+	// collection's membership.
+	return items, len(items), nil
 }
 
 // fetchUserCollection resolves a personal (profile-scoped) user collection.
@@ -3046,18 +3013,8 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 
 	// One array parameter keeps one statement shape for every list size; a
 	// placeholder per ID made each count new SQL to prepare.
-	conditions := []string{"mi.content_id = ANY($1::text[])"}
-	args := []any{contentIDs}
-	argIdx := 2
-
-	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
-
-	effectiveLibraryIDs := effectiveFetchLibraryIDs(libraryIDs, filter)
-	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, effectiveLibraryIDs, cfgFilters.LibraryIDs(), filter.DisabledLibraryIDs, argIdx)
-	conditions = append(conditions, libConditions...)
-	args = append(args, libArgs...)
-	argIdx = newArgIdx
-	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+	conditions, args, fromClause := contentIDScopeConditions(contentIDs, libraryID, libraryIDs, cfgFilters, filter)
+	conditions = append([]string{"mi.content_id = ANY($1::text[])"}, conditions...)
 
 	query := fmt.Sprintf(
 		`SELECT %s FROM %s WHERE %s`,
@@ -3071,6 +3028,56 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 	defer rows.Close()
 
 	return scanMediaItems(rows)
+}
+
+// fetchItemsInListOrder returns the first limit items of contentIDs, in list
+// order, that the viewer can open. The access filter runs before the limit, so
+// hidden members never take a card from a visible one. A limit of 0 or less
+// returns every visible item.
+func (f *Fetcher) fetchItemsInListOrder(ctx context.Context, contentIDs []string, limit int, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, error) {
+	if len(contentIDs) == 0 {
+		return []*models.MediaItem{}, nil
+	}
+
+	conditions, args, fromClause := contentIDScopeConditions(contentIDs, libraryID, libraryIDs, SectionConfigFilters{}, filter)
+	fromClause = "unnest($1::text[]) WITH ORDINALITY AS member(content_id, position) JOIN " +
+		fromClause + " ON mi.content_id = member.content_id"
+	where := "TRUE"
+	if len(conditions) > 0 {
+		where = strings.Join(conditions, " AND ")
+	}
+	query := fmt.Sprintf(`SELECT %s FROM %s WHERE %s ORDER BY member.position`, itemColumns("mi"), fromClause, where)
+	if limit > 0 {
+		args = append(args, limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMediaItems(rows)
+}
+
+// contentIDScopeConditions builds the section config, library scope and access
+// conditions for a read of contentIDs, which it binds as $1. The caller adds
+// how $1 selects rows from media_items mi.
+func contentIDScopeConditions(contentIDs []string, libraryID *int, libraryIDs []int, cfgFilters SectionConfigFilters, filter catalog.AccessFilter) ([]string, []any, string) {
+	var conditions []string
+	args := []any{contentIDs}
+	argIdx := 2
+
+	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
+
+	effectiveLibraryIDs := effectiveFetchLibraryIDs(libraryIDs, filter)
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, effectiveLibraryIDs, cfgFilters.LibraryIDs(), filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+	return conditions, args, fromClause
 }
 
 // markEpisodeStillProvenance records whether the artwork the episode query
