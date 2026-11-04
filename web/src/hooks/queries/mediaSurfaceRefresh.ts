@@ -495,10 +495,11 @@ export async function invalidateMediaSurfaceQueries(
 }
 
 const CATALOG_LIST_KEY = [...catalogKeys.all, "list"] as const;
-// The longest a sweep waits for catalog pages on their first read: as long
-// as a read may take before the client gives up on it, so every read that can
-// still land does.
-const CATALOG_LIST_HOLD_MAX_MS = API_READ_TIMEOUT_MS;
+// How long a sweep waits for each catalog page on its first read, from when
+// the hold first sees it: as long as a read may take before the client gives
+// up on it, so every read that can still land does, however late in the hold
+// it started.
+const CATALOG_LIST_READ_HOLD_MS = API_READ_TIMEOUT_MS;
 const heldCatalogListSweeps = new WeakMap<QueryClient, Array<(query: Query) => boolean>>();
 
 function isCatalogListQuery(query: Query) {
@@ -520,10 +521,11 @@ function firstCatalogListReads(queryClient: QueryClient, matches: (query: Query)
 // for it. A jump deep into a large title-ordered library takes longer than a
 // scan's sweep window to seek, so during a scan it never landed. While a list
 // page of the sweep is on its first read, the sweep leaves the catalog lists
-// alone and sweeps them once those reads finish, or after
-// CATALOG_LIST_HOLD_MAX_MS. Sweeps arriving meanwhile join the held one. A
-// page already shown still reloads under the new snapshot, showing what it
-// held until then. Returns whether the sweep must leave the lists alone.
+// alone and sweeps them once no first read remains that started within the
+// last CATALOG_LIST_READ_HOLD_MS; a read that runs past that fails on the
+// client anyway. Sweeps arriving meanwhile join the held one. A page already
+// shown still reloads under the new snapshot, showing what it held until
+// then. Returns whether the sweep must leave the lists alone.
 function holdCatalogListsForFirstReads(
   queryClient: QueryClient,
   matches: (query: Query) => boolean,
@@ -538,17 +540,29 @@ function holdCatalogListsForFirstReads(
   heldCatalogListSweeps.set(queryClient, sweeps);
   const anySweep = (query: Query) => sweeps.some((match) => match(query));
   void (async () => {
+    // When the hold first saw each first read; each gets its own deadline.
+    const seenAt = new Map<Query, number>();
+    const pendingReads = () => {
+      const now = Date.now();
+      return firstCatalogListReads(queryClient, anySweep).filter((query) => {
+        const seen = seenAt.get(query) ?? now;
+        seenAt.set(query, seen);
+        return now - seen < CATALOG_LIST_READ_HOLD_MS;
+      });
+    };
     try {
-      const deadline = Date.now() + CATALOG_LIST_HOLD_MAX_MS;
-      let reads = firstCatalogListReads(queryClient, anySweep);
-      while (reads.length > 0 && Date.now() < deadline) {
+      let reads = pendingReads();
+      while (reads.length > 0) {
+        const nextDeadline = Math.min(
+          ...reads.map((query) => (seenAt.get(query) ?? 0) + CATALOG_LIST_READ_HOLD_MS),
+        );
         let timer: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
           Promise.allSettled(reads.map((query) => query.promise)),
-          new Promise((resolve) => (timer = setTimeout(resolve, deadline - Date.now()))),
+          new Promise((resolve) => (timer = setTimeout(resolve, nextDeadline - Date.now()))),
         ]);
         clearTimeout(timer);
-        reads = firstCatalogListReads(queryClient, anySweep);
+        reads = pendingReads();
       }
     } finally {
       // Always release the hold, or every later sweep would join one that

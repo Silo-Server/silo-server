@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -415,6 +415,49 @@ describe("catalog window cursor paging", () => {
       }
     },
   );
+
+  it("gives a first read that starts late in a hold its own read time", async () => {
+    vi.useFakeTimers();
+    try {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const listKey = (offset: number) => ["catalog", "list", { library_id: 7, offset }];
+      // A page already on screen, which the held sweep refreshes once it runs.
+      queryClient.setQueryData(listKey(0), { items: [] });
+      const refreshShown = vi.fn(async () => ({ items: [] }));
+      const shown = new QueryObserver(queryClient, {
+        queryKey: listKey(0),
+        queryFn: refreshShown,
+        staleTime: Infinity,
+      });
+      // A first read that never lands, and one that starts 29 seconds later.
+      const early = new QueryObserver(queryClient, {
+        queryKey: listKey(100),
+        queryFn: () => new Promise<never>(() => undefined),
+      });
+      let finishLate: (page: { items: never[] }) => void = () => undefined;
+      const late = new QueryObserver(queryClient, {
+        queryKey: listKey(200),
+        queryFn: () => new Promise<{ items: never[] }>((resolve) => (finishLate = resolve)),
+      });
+      const unsubscribe = [shown.subscribe(() => undefined), early.subscribe(() => undefined)];
+
+      await invalidateMediaSurfaceQueries(queryClient, { libraryId: 7, itemMayBeNew: true });
+      await vi.advanceTimersByTimeAsync(29_000);
+      unsubscribe.push(late.subscribe(() => undefined));
+
+      // The early read's 30 seconds are up; the late one's are not.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(refreshShown).not.toHaveBeenCalled();
+
+      finishLate({ items: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refreshShown).toHaveBeenCalledOnce();
+      unsubscribe.forEach((stop) => stop());
+      queryClient.clear();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("cancels an adjacent request when its search scope changes", async () => {
     const { requests, fetchMock, reply } = catalogTransport();
