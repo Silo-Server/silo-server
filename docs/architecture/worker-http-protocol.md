@@ -202,11 +202,19 @@ The request's optional `log_session_id` (`download-prepare-<artifact id>`) label
 the node's FFmpeg log lines with the durable job, so every attempt of one artifact
 reads as one stream in the operational logs. The node accepts only that shape and
 otherwise logs nothing; the field never affects bytes, so the execution fingerprint
-excludes it.
+excludes it. The optional `source_frame_rate` (the source video's frames per second)
+is excluded from the fingerprint for the same reason. A node that receives it measures
+progress by encoded video frames.
 
 `GET /downloads/prepare/{artifact_id}/progress` reads the in-memory progress of a
 prepare attempt running on the node: `encoded_seconds`, `duration_seconds`, and
-`speed` from FFmpeg's `-progress` stream. It requires node bearer authorization.
+`speed` from FFmpeg's `-progress` stream. FFmpeg's `out_time` trails the slowest
+output stream, so a sparse subtitle track can hold it still while video encodes.
+When the request carried `source_frame_rate`, the node uses the encoded frame count
+divided by that rate whenever it is ahead of `out_time`, and derives `speed` from
+that position and the wall-clock time since the encode started. Older nodes and
+sources with no known frame rate report FFmpeg's values unchanged. The operation
+requires node bearer authorization.
 An id with no encode in flight answers `running: false`, never 404, so the API
 treats 404 as a node that predates the operation and reports the attempt as unable
 to report progress. Readings are not durable and say nothing about a completed
