@@ -2462,7 +2462,11 @@ slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
 `validation_failed` problem on `body.base_url`. An options request that leaves
 `base_url` out tests the saved address; one that sends it blank tests a router
-that declares `base_url_optional` without an address. When `POST
+that declares `base_url_optional` without an address. The options request first runs
+the router's `TestConnection` without the plugin config, because a router can
+answer an empty option list for a server it cannot reach; a failed test
+answers like a failed option load, and a router that does not implement the
+check is judged by its options. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL

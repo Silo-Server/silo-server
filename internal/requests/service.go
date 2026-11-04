@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -1595,11 +1597,41 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: strings.TrimSpace(integration.APIKeyRef), Config: integration.PluginConfig}
+	if integration.TestConnection {
+		if err := s.testIntegrationConnection(ctx, integration, conn); err != nil {
+			return nil, err
+		}
+	}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
 		return nil, classifyIntegrationError(err, integration.CapabilityID)
 	}
 	return options, nil
+}
+
+// testIntegrationConnection asks the router whether it can reach and sign in
+// to the server, since a router may answer an empty option list for a server
+// it cannot reach. The test is sent without the plugin config: the options
+// probe runs while that config is being edited, and a stale choice in it (a
+// server the router no longer lists) must not stop the options that replace
+// it from loading; save-time validation checks the config. A router that does
+// not implement the test is judged by its options. A failed test is
+// classified like a failed options load.
+func (s *Service) testIntegrationConnection(ctx context.Context, integration Integration, conn ResolvedRouterConnection) error {
+	conn.Config = nil
+	ok, message, err := s.router.TestConnection(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	switch {
+	case status.Code(err) == codes.Unimplemented:
+		return nil
+	case err != nil:
+		return classifyIntegrationError(err, integration.CapabilityID)
+	case !ok:
+		if strings.TrimSpace(message) == "" {
+			message = "connection test failed"
+		}
+		return classifyIntegrationError(errors.New(message), integration.CapabilityID)
+	}
+	return nil
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
