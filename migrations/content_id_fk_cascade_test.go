@@ -37,8 +37,8 @@ ORDER BY 1`)
 
 // TestContentIDFamilyReferencesUseCCollationPostgres guards the content ID
 // collation (docs/architecture/deterministic-content-id.md): every column with
-// a foreign key to media_items, seasons or episodes must have the collation of
-// the column it references, COLLATE "C". Across two collations a join on
+// a foreign key to a text column of media_items, seasons or episodes must be
+// COLLATE "C", as the column it references is. Across two collations a join on
 // content_id cannot use the referencing table's index, so a NOT EXISTS against
 // it filters a scan of the whole table for each outer row. A new table that
 // references the family must declare the collation itself.
@@ -51,7 +51,8 @@ JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
 JOIN pg_attribute r ON r.attrelid = con.confrelid AND r.attnum = k.refnum
 WHERE con.contype = 'f'
   AND con.confrelid IN ('media_items'::regclass, 'seasons'::regclass, 'episodes'::regclass)
-  AND a.attcollation <> r.attcollation
+  AND r.attcollation <> 0
+  AND (a.attcollation <> r.attcollation OR r.attcollation <> 'pg_catalog."C"'::regcollation)
 ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)

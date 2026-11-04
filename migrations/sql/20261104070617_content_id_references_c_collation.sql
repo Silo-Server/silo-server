@@ -14,7 +14,14 @@
 -- Each change also recreates the foreign key's triggers on the referenced table,
 -- so the referenced tables (media_items on a stock schema) are locked against
 -- reads and writes until the migration commits. They are locked first, so the
--- lock order is fixed. A 1 GB child table with 4 million rows took 4.5 seconds.
+-- lock order is fixed, and a lock that takes more than 10 seconds to get fails
+-- the migration rather than queue every read of media_items behind a long-running
+-- query; startup then fails and the next start tries again. A 1 GB child table
+-- with 4 million rows took 4.5 seconds.
+--
+-- Changing a column's type drops its statistics, so the changed tables are
+-- analyzed before the commit: the joins this fixes should not be planned from
+-- default estimates until autovacuum gets to them.
 -- TestContentIDFamilyReferencesUseCCollationPostgres keeps new tables in line.
 
 -- +goose Up
@@ -39,12 +46,16 @@ BEGIN
     IF parents IS NULL THEN
         RETURN;
     END IF;
+    SET LOCAL lock_timeout = '10s';
     FOR c IN SELECT unnest(parents) AS parent LOOP
         EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE', c.parent);
     END LOOP;
 
     FOR c IN SELECT DISTINCT table_name, column_name FROM _content_id_collation_targets ORDER BY 1, 2 LOOP
         EXECUTE format('ALTER TABLE %s ALTER COLUMN %I TYPE text COLLATE "C"', c.table_name, c.column_name);
+    END LOOP;
+    FOR c IN SELECT DISTINCT table_name FROM _content_id_collation_targets ORDER BY 1 LOOP
+        EXECUTE format('ANALYZE %s', c.table_name);
     END LOOP;
 END $$;
 -- +goose StatementEnd
