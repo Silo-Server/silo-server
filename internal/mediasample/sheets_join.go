@@ -144,6 +144,12 @@ type sheetAssembler struct {
 	// dtsTiming lets a packet without a PTS count by its DTS; see
 	// packetLine.
 	dtsTiming bool
+	// audioEnd is how far the input's first audio stream was read. Samples
+	// after the video's extent but within it lie in an audio tail: the file
+	// goes on after its video ends, which a truncated file does not, so they
+	// show the last frame like a gap in the video does.
+	audioTimeBase float64
+	audioEnd      float64
 	// A window whose decoder dropped keyframes (see droppedKeyframe) gives
 	// the samples after each dropped keyframe an earlier one. The times of
 	// the frames decoded and of the keyframe packets read find those
@@ -321,14 +327,15 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 // keep failing rather than publish every cell at an earlier keyframe.
 func (a *sheetAssembler) packetLine(line string) {
 	if raw, ok := strings.CutPrefix(line, "#tb 0: "); ok {
-		numerator, denominator, ok := strings.Cut(raw, "/")
-		n, errN := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
-		d, errD := strconv.ParseFloat(strings.TrimSpace(denominator), 64)
-		if !ok || errN != nil || errD != nil || !(n > 0) || !(d > 0) || !finite(n) || !finite(d) {
-			a.err = errors.New("ffmpeg reported an invalid packet time base")
-		} else {
-			a.packetTimeBase = n / d
-		}
+		a.packetTimeBase = a.parseTimeBase(raw)
+		return
+	}
+	if raw, ok := strings.CutPrefix(line, "#tb 1: "); ok {
+		a.audioTimeBase = a.parseTimeBase(raw)
+		return
+	}
+	if strings.HasPrefix(line, "1,") {
+		a.audioPacketLine(line)
 		return
 	}
 	if !strings.HasPrefix(line, "0,") {
@@ -357,6 +364,41 @@ func (a *sheetAssembler) packetLine(line string) {
 		} else {
 			a.untimedKey = true
 		}
+	}
+}
+
+// parseTimeBase reads a framecrc "#tb N: " value, failing the run on an
+// invalid one.
+func (a *sheetAssembler) parseTimeBase(raw string) float64 {
+	numerator, denominator, ok := strings.Cut(raw, "/")
+	n, errN := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
+	d, errD := strconv.ParseFloat(strings.TrimSpace(denominator), 64)
+	if !ok || errN != nil || errD != nil || !(n > 0) || !(d > 0) || !finite(n) || !finite(d) {
+		a.err = errors.New("ffmpeg reported an invalid packet time base")
+		return 0
+	}
+	return n / d
+}
+
+// audioPacketLine reads a packet of the timing file's second stream, the
+// input's first audio, and extends audioEnd. Audio is not reordered, so a
+// packet without a PTS counts by its DTS.
+func (a *sheetAssembler) audioPacketLine(line string) {
+	fields := strings.SplitN(line, ",", 6)
+	if len(fields) != 6 || a.audioTimeBase <= 0 {
+		a.err = errors.New("ffmpeg reported packet timing without a time base")
+		return
+	}
+	pts, hasPTS := packetTimestamp(fields[2])
+	if !hasPTS {
+		pts, hasPTS = packetTimestamp(fields[1])
+	}
+	duration, err := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
+	if !hasPTS || err != nil || duration < 0 {
+		return
+	}
+	if end := a.offset + (float64(pts)+float64(duration))*a.audioTimeBase; finite(end) {
+		a.audioEnd = max(a.audioEnd, end)
 	}
 }
 
@@ -585,7 +627,7 @@ func (a *sheetAssembler) close() *AttemptError {
 		if !a.hasPacketTime {
 			return fail(ReasonOutput, errors.New("ffmpeg reported no usable packet timing for the sampled window"))
 		}
-		a.assignWindow(a.packetEnd + sampleMatchSeconds)
+		a.assignWindow(max(a.packetEnd, a.audioEnd) + sampleMatchSeconds)
 		if a.droppedKeyframes {
 			a.filled += a.staleSamples()
 		}
