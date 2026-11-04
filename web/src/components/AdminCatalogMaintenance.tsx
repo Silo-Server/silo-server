@@ -657,6 +657,7 @@ export default function AdminCatalogMaintenance() {
                         onClick={async () => {
                           try {
                             await copyTextToClipboard(job.public_url ?? "");
+                            toast.success("Copied to clipboard");
                           } catch {
                             toast.error("Failed to copy to clipboard");
                           }
