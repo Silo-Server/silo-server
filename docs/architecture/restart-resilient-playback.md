@@ -403,8 +403,10 @@ evolution:
   (`internal/noderecipe`) keyed by upstream session id and overwrites it on every
   switch, and the node (which cannot reach Postgres) reads the *current* recipe on
   the reconstruct miss — over the same Redis the session tracker and the deny
-  marker already use, so no central URL is needed. The boot-time full
-  segment-dir wipe stands; reconstruct re-transcodes from the requested segment. See §10 for the
+  marker already use, so no central URL is needed. A node restart does not wipe
+  segment dirs: the startup and hourly sweeps remove only dirs older than
+  `MaxTokenTTL` that no live job owns, so reconstruct serves any surviving
+  segments and re-transcodes from the requested segment otherwise. See §10 for the
   full rationale (and why this is *not* a token-carryable case).
 - **`userID==0` tolerance / "auth optional" (P-5).** Reconstruct hard-rejects
   `userID==0` and a card whose session id does not match the URL.
