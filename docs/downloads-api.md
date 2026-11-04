@@ -99,8 +99,10 @@ labels.
 Audio-only media (an audiobook or podcast, whose only picture is cover art) has
 no video to encode, so neither `original` nor a bitrate preset transcodes it:
 the source is served as it is, or remuxed with its audio converted when `caps`
-show the device cannot decode it. The row keeps the requested `quality`, with
-`effective_quality` `original`.
+show the device cannot decode it. A file without cover art remuxes to an
+audio-only MP4. With transcoding off for the server or the account, an
+`original` request is served as it is even when `caps` call for conversion.
+The row keeps the requested `quality`, with `effective_quality` `original`.
 
 `remux` is **not** a public quality preset. It is an internal delivery format used
 when `original` is requested but device caps show the source only needs container
