@@ -507,6 +507,11 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# Plugin instance state versions: a write at a stale version, or a create-only
+# write on an existing key, changes nothing; of several writers at one version
+# exactly one lands; the key budget still refuses a new key.
+./internal/plugins TestInstanceStateConditionalWritesPostgres
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.

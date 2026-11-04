@@ -129,6 +129,19 @@ admin API reports, so the two never disagree. Limits: key ≤ 256 bytes, value
 state. Empty values also use an encrypted, row-bound envelope; a plaintext
 empty marker is rejected.
 
+Each key carries a `version` column: 1 after the first write, one more after
+each later write. `ReadInstanceState` returns it with `versioned = true`, and
+version 0 means the key is absent. Every API server runs its own process of a
+plugin against the one `api` scope, so a read-modify-write passes the version
+it read as `WriteInstanceState.expected_version`: the write lands only while
+the key is still at that version (0: the key must not exist), and otherwise
+fails with `ABORTED` and changes nothing. Without `expected_version` a write
+is unconditional. `WriteInstanceStateResponse.version` is the version just
+written. The version check is part of the write statement and runs under
+the scope's advisory lock, so two servers cannot both land at one version;
+a create-only write on a full scope fails with `RESOURCE_EXHAUSTED`, not
+`ABORTED`. The version is not part of the AAD.
+
 ## Proxy nodes
 
 Every enabled proxy node runs the same provider installations as the API
