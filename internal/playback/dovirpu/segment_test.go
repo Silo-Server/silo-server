@@ -76,3 +76,44 @@ func TestConvertInitAndSegment(t *testing.T) {
 		t.Fatalf("second pass = %+v, %v", stats, err)
 	}
 }
+
+// An RPU that reuses the previous mapping keeps its length when converted,
+// so it is rewritten in place with no filler rather than dropped.
+func TestConvertSampleKeepsSameLengthRPU(t *testing.T) {
+	// Rebuild dovi_tool's MEL RPU with use_prev_vdr_rpu_flag set and the
+	// mapping removed.
+	mel := fixture(t, "mel_orig.bin")
+	d := unescape(mel)
+	crcAt := len(d) - 5
+	for d[crcAt+4] == 0 { // trailing zero bytes
+		crcAt--
+	}
+	c := converter{r: bitReader{data: d[:crcAt], pos: 8}}
+	_, _, compressed := c.header()
+	usePrev := c.r.pos - 1
+	c.mapping()
+	dmStart := c.r.pos
+	c.dm(compressed)
+	if c.err != nil {
+		t.Fatal(c.err)
+	}
+	var w bitWriter
+	w.copyBits(d, 8, usePrev)
+	w.bits(1, 1) // use_prev_vdr_rpu_flag
+	w.ue(0)      // prev_vdr_rpu_id
+	w.copyBits(d, dmStart, c.r.pos)
+	w.align()
+	w.copyBits(d, c.r.pos, crcAt*8)
+	body := append([]byte{0x19}, w.out...)
+	body = binary.BigEndian.AppendUint32(body, crc32MPEG2(w.out))
+	rpu := escape(append(body, 0x80))
+
+	if out, err := ConvertRPU(rpu); err != nil || len(out) != len(rpu) || bytes.Equal(out, rpu) {
+		t.Fatalf("ConvertRPU = %d bytes, %v; want a converted RPU of %d bytes", len(out), err, len(rpu))
+	}
+	sample := nal(append([]byte{0x7C, 0x01}, rpu...))
+	var stats SegmentStats
+	if _, err := convertSample(sample, 4, &stats); err != nil || stats != (SegmentStats{Converted: 1}) || sample[4]>>1 != 62 {
+		t.Fatalf("convertSample = %+v, %v, NAL type %d", stats, err, sample[4]>>1)
+	}
+}

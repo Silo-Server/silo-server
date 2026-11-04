@@ -346,13 +346,17 @@ func convertSample(s []byte, nalLength int, stats *SegmentStats) ([][2]int, erro
 			continue
 		}
 		// The filler takes the bytes the conversion saved: its length prefix,
-		// a 2-byte header and the 0x80 trailing byte at minimum.
+		// a 2-byte header and the 0x80 trailing byte at minimum. An RPU that
+		// reuses the previous mapping converts to the same length and needs
+		// none.
 		gap := end - start - (nalLength + 2 + len(rpu))
-		if err != nil || gap < nalLength+3 {
+		if err != nil || gap != 0 && gap < nalLength+3 {
 			writeFiller(s[start:end], nalLength)
 			stats.Dropped++
 		} else {
-			writeFiller(s[start:start+gap], nalLength)
+			if gap > 0 {
+				writeFiller(s[start:start+gap], nalLength)
+			}
 			r := s[start+gap:]
 			putLength(r, nalLength, 2+len(rpu))
 			r[nalLength], r[nalLength+1] = 0x7C, 0x01
@@ -383,12 +387,18 @@ func putLength(b []byte, nalLength, n int) {
 
 // File is the part of *os.File the file converters use.
 type File interface {
-	io.ReaderAt
+	ReadFile
 	io.WriterAt
+}
+
+// ReadFile is the part of *os.File InitTrack uses.
+type ReadFile interface {
+	io.ReaderAt
 	Stat() (os.FileInfo, error)
 }
 
-// ConvertInitFile applies ConvertInit to an init segment file.
+// ConvertInitFile applies ConvertInit to an init segment file, writing back
+// only the bytes that changed.
 func ConvertInitFile(f File) (Track, error) {
 	b, err := readAll(f)
 	if err != nil {
@@ -396,11 +406,30 @@ func ConvertInitFile(f File) (Track, error) {
 	}
 	orig := bytes.Clone(b)
 	t, err := ConvertInit(b)
-	if err != nil || bytes.Equal(b, orig) {
+	if err != nil {
 		return t, err
 	}
-	_, err = f.WriteAt(b, 0)
+	first, last := 0, len(b)
+	for first < last && b[first] == orig[first] {
+		first++
+	}
+	for last > first && b[last-1] == orig[last-1] {
+		last--
+	}
+	if first < last {
+		_, err = f.WriteAt(b[first:last], int64(first))
+	}
 	return t, err
+}
+
+// InitTrack returns the video track of an init segment file without
+// changing the file.
+func InitTrack(f ReadFile) (Track, error) {
+	b, err := readAll(f)
+	if err != nil {
+		return Track{}, err
+	}
+	return ConvertInit(b)
 }
 
 // ConvertSegmentFile applies ConvertSegment to a media segment file, writing
@@ -419,7 +448,7 @@ func ConvertSegmentFile(f File, track Track) (SegmentStats, error) {
 	return stats, err
 }
 
-func readAll(f File) ([]byte, error) {
+func readAll(f ReadFile) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err

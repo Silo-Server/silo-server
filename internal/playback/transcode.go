@@ -286,9 +286,12 @@ type TranscodeSession struct {
 	// dv81Converted maps each media segment a DV7ToDV81BitstreamFilter
 	// session has rewritten to the segmentGeneration it was rewritten in, so
 	// a repeat request does not re-read it. dv81Mu guards it and serializes
-	// the rewrites; it is never held with mu.
+	// the rewrites; it is never held with mu. dv81Track is the video track
+	// read from init.mp4, which a restart of the same recipe does not change,
+	// so media segments never reopen init.mp4 once it is known.
 	dv81Mu             sync.Mutex
 	dv81Converted      map[string]uint64
+	dv81Track          dovirpu.Track
 	throttler          *TranscodeThrottler
 	stderrLinesLogged  int
 	stderrBytesLogged  int
@@ -3189,34 +3192,32 @@ func (s *TranscodeSession) convertDV81(name string, lease *SegmentLease, session
 	if name != hlsInitSegmentName && (!strings.HasSuffix(name, ".m4s") || s.dv81Converted[name] == lease.Generation+1) {
 		return nil
 	}
-	root, err := os.OpenRoot(s.outputDir)
-	if err != nil {
-		return ErrSegmentNotFound
-	}
-	defer func() { _ = root.Close() }()
-	// The leased file when it is init.mp4. For a media segment the current
-	// init.mp4 only supplies the track id and NAL length size, which a
-	// restart of the same recipe does not change.
-	initFile := lease.File
-	if name != hlsInitSegmentName {
-		if initFile, err = root.OpenFile(hlsInitSegmentName, os.O_RDWR, 0); err != nil {
+	// init.mp4 is converted only through its own lease. A media segment needs
+	// just its track id and NAL length size: from the init already served, or
+	// else read from the current init.mp4 without writing to it, which FFmpeg
+	// may be rewriting after a restart.
+	track := s.dv81Track
+	if name == hlsInitSegmentName || track.NALLength == 0 {
+		initTrack, err := s.dv81InitTrack(name, lease)
+		switch {
+		case errors.Is(err, dovirpu.ErrUnsupportedInit):
+			slog.Error("playback: dolby vision 8.1 init segment cannot be converted", "session", sessionID, "error", err)
+			return fmt.Errorf("convert init segment to dolby vision 8.1: %w", err)
+		case err != nil:
+			slog.Warn("playback: dolby vision 8.1 init segment not convertible yet", "session", sessionID, "error", err)
 			return ErrSegmentNotFound
 		}
-		defer func() { _ = initFile.Close() }()
-	}
-	track, err := dovirpu.ConvertInitFile(initFile)
-	if errors.Is(err, dovirpu.ErrUnsupportedInit) {
-		slog.Error("playback: dolby vision 8.1 init segment cannot be converted", "session", sessionID, "error", err)
-		return fmt.Errorf("convert init segment to dolby vision 8.1: %w", err)
-	}
-	if err != nil {
-		slog.Warn("playback: dolby vision 8.1 init segment not convertible yet", "session", sessionID, "error", err)
-		return ErrSegmentNotFound
+		track, s.dv81Track = initTrack, initTrack
 	}
 	if name == hlsInitSegmentName {
 		return nil
 	}
 	stats, err := dovirpu.ConvertSegmentFile(lease.File, track)
+	if err == nil && stats.Converted == 0 && stats.Dropped > 0 {
+		// Not one RPU converted: serving it would claim Dolby Vision 8.1
+		// for frames that carry no Dolby Vision metadata at all.
+		err = errors.New("no RPU could be converted")
+	}
 	if err != nil {
 		slog.Error("playback: dolby vision 8.1 segment conversion failed", "session", sessionID, "segment", name, "error", err)
 		return fmt.Errorf("convert segment to dolby vision 8.1: %w", err)
@@ -3231,6 +3232,25 @@ func (s *TranscodeSession) convertDV81(name string, lease *SegmentLease, session
 	// Stored as generation+1 so the zero value means "never converted".
 	s.dv81Converted[name] = lease.Generation + 1
 	return nil
+}
+
+// dv81InitTrack converts the leased init.mp4 in place and returns its video
+// track. For a media segment it reads the current init.mp4 read-only.
+func (s *TranscodeSession) dv81InitTrack(name string, lease *SegmentLease) (dovirpu.Track, error) {
+	if name == hlsInitSegmentName {
+		return dovirpu.ConvertInitFile(lease.File)
+	}
+	root, err := os.OpenRoot(s.outputDir)
+	if err != nil {
+		return dovirpu.Track{}, err
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open(hlsInitSegmentName)
+	if err != nil {
+		return dovirpu.Track{}, err
+	}
+	defer func() { _ = f.Close() }()
+	return dovirpu.InitTrack(f)
 }
 
 // servableSegmentName reports whether name is a plain file name the segment

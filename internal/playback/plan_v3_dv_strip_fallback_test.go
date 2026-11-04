@@ -315,3 +315,30 @@ func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
 		}
 	}
 }
+
+// A client whose HLS delivery cannot take Dolby Vision never gets the server
+// 8.1 plan, so offering it must not hide the precise terminal for a Profile 7
+// source whose RPUs cannot be stripped.
+func TestPlanPlaybackV3DV81IneligibleWhenHLSDeliveryRejectsDV(t *testing.T) {
+	file, req := dv81NativeAndHDR10FixtureV3()
+	track := &file.VideoTracks[0]
+	track.DVProfile, track.DVBLCompatID, track.VideoRangeType = 7, 6, "DOVIWithEL"
+	track.DVConfigPresent, track.DVRPUPresent, track.DVBLPresent, track.DVELPresent = true, true, true, true
+	track.DVEnhancementLayer = string(EnhancementFELV3)
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.HDRDetails = &HDRCapabilitiesV3{HDR10: true} // e.g. hls.js: no Dolby Vision over MSE
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	_, terminal := replanChainV3(t, PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: NewTransformationRegistryV3([]TransformationSpecV3{
+			{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+			{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+			{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+		}),
+		DVRPUStrippable: func() bool { return false },
+	})
+	if terminal == nil || terminal.Reason != TerminalDVConversionUnsupportedV3 {
+		t.Fatalf("terminal = %+v, want %s", terminal, TerminalDVConversionUnsupportedV3)
+	}
+}

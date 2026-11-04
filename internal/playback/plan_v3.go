@@ -1907,8 +1907,11 @@ const (
 // single-track source qualifies: its DOVI record says the RPUs and the
 // enhancement layer travel in the base-layer track, which is the track a
 // remux copies. The conversion rewrites fMP4 only, so a client that needs
-// MPEG-TS copies (hls_copy_mpegts_v1) does not get it. The registry is
-// consulted last because it may fetch node capabilities.
+// MPEG-TS copies (hls_copy_mpegts_v1) does not get it. The HLS delivery's
+// own HDR details must take the 8.1 output too, as deliverySupportsPlanV3
+// later requires; otherwise this would lift the planner's Dolby Vision gates
+// for a plan that can never be accepted. The registry is consulted last
+// because it may fetch node capabilities.
 func canServerConvertDV7ToDV81V3(source SourceDescriptorV3, file *models.MediaFile, request StartRequestV3, registry func() *TransformationRegistryV3) bool {
 	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 7 || source.VideoCodec != transcodeCodecHEVC ||
 		file == nil || len(file.VideoTracks) == 0 {
@@ -1923,6 +1926,12 @@ func canServerConvertDV7ToDV81V3(source SourceDescriptorV3, file *models.MediaFi
 	source.DVBLCompatID = 1
 	if !clientSupportsDVProfileV3(request, source, 8) {
 		return false
+	}
+	if hls := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]; hls.HDRDetails != nil {
+		source.DVProfile = 8
+		if !hdrSupportsDolbyVisionSourceV3(*hls.HDRDetails, source) {
+			return false
+		}
 	}
 	r := registry()
 	return r != nil && r.Available(TransformationServerDV7DV81V3)
