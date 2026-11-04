@@ -85,8 +85,10 @@ The reset runs synchronously while holding the embeddings, taste profile and
 recommendation jobs' claims and the stale profile sweep's lock, so none of
 them runs beside it on any server. It returns `409` while any of them is
 running, while a catalog import with embeddings runs, or while saved embedding
-settings wait for a server restart, and `500` when the transaction fails, which
-leaves every row in place.
+settings wait for a server restart, and `500` when the reset fails. A failure
+before the commit leaves every row in place. A failed commit can also answer
+`500` after PostgreSQL committed the reset, so read the status counts before
+retrying.
 A profile refresh that was already running when the reset committed can still
 write one taste profile from the old embeddings; the profile's next refresh
 after re-embedding replaces it.

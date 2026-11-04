@@ -2048,14 +2048,15 @@ change. This read adds no installation, update, removal or provider request.
 
 The autoscan administrator UI displays and copies the accepted
 `/api/v2/autoscan/webhooks/{token}` delivery URL, including immediately created or
-rotated source responses. Bridge management responses retain their frozen URL;
-the UI projects only the known delivery path to v2 and preserves the configured
+rotated source responses. Bridge management responses also mint the v2 delivery
+URL; the UI projects any `/api/v1` delivery path to v2 and preserves the configured
 host, deployment prefix, query and existing secret. An already-v2 URL is unchanged.
 
-Operators must replace the saved URL in existing download-manager connections.
-Displaying or copying it does not rotate the secret, update a provider, send a
-test delivery or replay an event. New setup and existing-source instructions both
-state the external configuration step.
+The server does not update existing download-manager connections. Displaying or
+copying the URL does not rotate the secret, update a provider, send a test
+delivery or replay an event. The bridge serves both delivery routes, so a
+connection that still holds a `/api/v1` delivery URL keeps working until
+`/api/v1` retires.
 
 `GET /api/v2/admin/autoscan/sources` returns administrator-only source metadata in
 signed, account/profile/page-size-bound cursor pages ordered by label then source
@@ -2520,9 +2521,9 @@ flags to an acting administrator. These describe the v2 surface in the API build
 they do not promise that a database or other runtime dependency is healthy.
 
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
-`downloads_stats`, `egress_totals` and `egress_by_source` are true for the existing v2 dashboard operations.
-`server_layouts` remains false until the full layout lifecycle is accepted, although
-layout save and reset are served.
+`downloads_stats`, `egress_totals`, `egress_by_source` and `api_clients` are true for
+the existing v2 dashboard operations. `server_layouts` remains false until the full
+layout lifecycle is accepted, although layout read, save and reset are served.
 `log_level_list` is true for the accepted multi-level application-log reader. Clients
 must not infer v2 support from the bridge's independently retained capabilities.
 
