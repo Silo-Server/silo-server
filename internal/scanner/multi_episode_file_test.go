@@ -83,6 +83,7 @@ func TestMultiEpisodeFileServesSpannedEpisodesDB(t *testing.T) {
 	if len(grouped[episodeIDs[0]]) != 1 || len(grouped[episodeIDs[1]]) != 1 || len(grouped[episodeIDs[2]]) != 0 {
 		t.Fatalf("files by episode = %v, want the file under the first two episodes only", grouped)
 	}
+	assertEpisodeListFiles(t, ctx, pool, repo, file.ID, episodeIDs)
 
 	assertSpannedEpisodeReaders(t, ctx, pool, file.ID, folderID, episodeIDs[1])
 
@@ -140,6 +141,48 @@ func assertSpannedEpisodeReaders(t *testing.T, ctx context.Context, pool *pgxpoo
 	}
 	if len(resolutionCodes) == 0 {
 		t.Fatalf("spanned episode catalog entry has no resolution")
+	}
+}
+
+// assertEpisodeListFiles checks that the narrow projection a season's episode
+// list reads agrees with full rows on every field the list renders, including
+// a rejected probe.
+func assertEpisodeListFiles(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *FileRepository, fileID int, episodeIDs []string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET probe_failed_at = NOW(), probe_updated_at = NULL WHERE id = $1`, fileID); err != nil {
+		t.Fatalf("reject probe: %v", err)
+	}
+	full, err := repo.ListByEpisodeIDs(ctx, episodeIDs)
+	if err != nil {
+		t.Fatalf("full files by episodes: %v", err)
+	}
+	listed, err := repo.ListEpisodeListFilesByEpisodeIDs(ctx, episodeIDs)
+	if err != nil {
+		t.Fatalf("episode list files by episodes: %v", err)
+	}
+	type rendered struct {
+		ID, FolderID     int
+		Path, Resolution string
+		Size             int64
+		Rejected         bool
+	}
+	view := func(files []*models.MediaFile) []rendered {
+		out := make([]rendered, 0, len(files))
+		for _, f := range files {
+			out = append(out, rendered{f.ID, f.MediaFolderID, f.FilePath, f.Resolution, f.FileSize, f.ProbeRejected()})
+		}
+		return out
+	}
+	for _, episodeID := range episodeIDs {
+		if got, want := view(listed[episodeID]), view(full[episodeID]); !slices.Equal(got, want) {
+			t.Fatalf("episode list files of %s = %+v, want %+v", episodeID, got, want)
+		}
+	}
+	if files := listed[episodeIDs[0]]; len(files) != 1 || !files[0].ProbeRejected() {
+		t.Fatalf("episode list files = %+v, want the rejected file", files)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET probe_failed_at = NULL WHERE id = $1`, fileID); err != nil {
+		t.Fatalf("clear probe failure: %v", err)
 	}
 }
 

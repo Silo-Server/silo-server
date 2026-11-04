@@ -349,8 +349,10 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 // titles it marked Not interested; an unavailable engine, and an anchor the
 // viewer cannot see, answer an empty list. The engine leaves out
 // titles the viewer cannot see before it ranks; v1 filters again with
-// keepAccessible and v2 as it renders the cards.
-func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+// keepAccessible and v2 as it renders the cards. withReasons asks the engine
+// for each item's connection reason, which v1 answers and the v2 cards do not
+// carry.
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter, withReasons bool) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
 	}
@@ -364,7 +366,11 @@ func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, p
 	if !visible {
 		return []recommendations.ScoredItem{}, nil
 	}
-	items, err := h.engine.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
+	similar := h.engine.SimilarItems
+	if withReasons {
+		similar = h.engine.SimilarItemsWithReasons
+	}
+	items, err := similar(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		slog.WarnContext(ctx, "SimilarItems failed", "component", "api", "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
@@ -397,7 +403,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 
 // SimilarCards is SimilarItems rendered as cards for the acting profile.
 func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
+	items, err := h.SimilarItems(ctx, userID, profileID, itemID, limit, filter, false)
 	if err != nil {
 		return nil, err
 	}

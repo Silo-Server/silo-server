@@ -388,6 +388,7 @@
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
@@ -454,6 +455,9 @@
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
+
+# The omnibus image's startup tuning file holds exactly the restart-only settings it can size.
+./internal/database TestPostgresStartupSettingsMatchServerPostgres
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -594,6 +598,7 @@
 ./internal/recommendations TestRelevanceRubricLeakagePostgres
 ./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
 ./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestSimilarItemsValidateEveryCandidatePostgres
 ./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
 ./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
@@ -780,3 +785,13 @@
 # Local artwork in a title folder linked out of the library is vouched for by
 # present cataloged files of the same title under that folder.
 ./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB
+
+# Theme lookup reads only the folders that hold themes, and an item whose
+# versions span folders still finds the themes of the one that has them.
+./internal/themesongs TestResolveFindsThemesInOneOfAnItemsFoldersDB
+
+# Item detail reads the viewer's per-item state in one batch: each part equals
+# its single-item read, and a promotable watchlist title still reports
+# in_watchlist after the batch read the watchlist first.
+./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
+./internal/api/handlers TestItemDetailViewerStateBatchDB

@@ -100,6 +100,9 @@ func TestFindSimilarAppliesAccessLimitsInSQLPostgres(t *testing.T) {
 	if got := prefixed(open, prefix); len(got) != 5 || !slices.Equal(got, f.adults[:5]) {
 		t.Fatalf("unrestricted = %v, want the five nearest adult titles", got)
 	}
+	if open[0].Score < 0.99 || open[0].Score < open[4].Score {
+		t.Fatalf("scores %v..%v, want cosine similarities, the nearest highest", open[0].Score, open[4].Score)
+	}
 
 	for name, filter := range map[string]catalog.AccessFilter{
 		"allowed library": {AllowedLibraryIDs: []int{f.kidsLib}},
