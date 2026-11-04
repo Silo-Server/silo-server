@@ -182,6 +182,26 @@ func TestPlanPreparedTracksSkipsUndecodableAudio(t *testing.T) {
 	}
 }
 
+// An audiobook may have no cover art at all, so its prepared remux maps video
+// only when there is one; a video file still requires its video stream.
+func TestBuildPrepareFileArgsMakesVideoOptionalForAudioOnlyMedia(t *testing.T) {
+	for _, tc := range []struct {
+		file *models.MediaFile
+		want string
+	}{
+		{&models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}}, "-map 0:v:0? -map 0:a:0 -dn"},
+		{&models.MediaFile{CodecVideo: "h264", CodecAudio: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}}, "-map 0:v:0 -map 0:a:0 -dn"},
+	} {
+		joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
+			InputPath: "/media/in.flac", TargetCodecVideo: "copy", TargetCodecAudio: "aac",
+			HWAccel: "none", AudioTrackIndex: -1, SubtitleTrackIndex: -1, PreparedTracks: PlanPreparedTracks(tc.file, "aac", -1),
+		}, "/artifacts/out.mp4"), " ")
+		if !strings.Contains(joined, tc.want) {
+			t.Fatalf("base type %q: want %q in:\n%s", tc.file.BaseType, tc.want, joined)
+		}
+	}
+}
+
 func TestBuildPrepareFileArgsWithoutPreparedTracksKeepsLegacyLayout(t *testing.T) {
 	joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
 		InputPath: "/media/in.mkv", TargetCodecVideo: "copy", TargetCodecAudio: "copy",

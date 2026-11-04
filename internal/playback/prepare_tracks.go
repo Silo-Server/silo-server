@@ -63,6 +63,11 @@ type PreparedSubtitleTrack struct {
 type PreparedTracks struct {
 	Audio     []PreparedAudioTrack    `json:"audio"`
 	Subtitles []PreparedSubtitleTrack `json:"subtitles,omitempty"`
+	// AudioOnly marks an audiobook or podcast, whose only picture is cover
+	// art: its video map is optional, so a file without a cover still
+	// prepares. Older nodes ignore it and therefore cannot return the
+	// matching execution fingerprint.
+	AudioOnly bool `json:"audio_only,omitempty"`
 }
 
 // PreparedTracksAvailable reports whether file's probed audio inventory can
@@ -91,6 +96,7 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 	if file == nil {
 		return plan
 	}
+	plan.AudioOnly = file.IsAudioOnly()
 	copyAudio := strings.EqualFold(strings.TrimSpace(targetCodecAudio), PreparedAudioCopy)
 	primaryCodec := normalizeCodecV3(file.CodecAudio)
 	if primaryCodec == "" && len(file.AudioTracks) > 0 {
@@ -206,7 +212,11 @@ func PreparedSubtitleSidecarFormat(codec string) string {
 // title (MP4 handler name), and disposition are written explicitly.
 func appendPreparedTrackArgs(args []string, opts TranscodeOpts) []string {
 	plan := opts.PreparedTracks
-	args = append(args, "-map", "0:v:0")
+	videoMap := "0:v:0"
+	if plan.AudioOnly {
+		videoMap += "?"
+	}
+	args = append(args, "-map", videoMap)
 	for _, track := range plan.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d", track.SourceIndex))
 	}
