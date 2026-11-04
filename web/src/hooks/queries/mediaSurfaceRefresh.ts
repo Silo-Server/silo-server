@@ -1,4 +1,5 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
+import { API_READ_TIMEOUT_MS } from "@/api/requestDeadline";
 import type {
   HomeSectionItemsResponse,
   ItemDetail,
@@ -494,8 +495,10 @@ export async function invalidateMediaSurfaceQueries(
 }
 
 const CATALOG_LIST_KEY = [...catalogKeys.all, "list"] as const;
-// The longest a sweep waits for catalog pages on their first read.
-const CATALOG_LIST_HOLD_MAX_MS = 10_000;
+// The longest a sweep waits for catalog pages on their first read: as long
+// as a read may take before the client gives up on it, so every read that can
+// still land does.
+const CATALOG_LIST_HOLD_MAX_MS = API_READ_TIMEOUT_MS;
 const heldCatalogListSweeps = new WeakMap<QueryClient, Array<(query: Query) => boolean>>();
 
 function isCatalogListQuery(query: Query) {
