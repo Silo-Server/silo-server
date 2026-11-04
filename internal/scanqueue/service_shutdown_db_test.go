@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -15,7 +17,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func openDirectRunTestRepository(t *testing.T) (context.Context, *pgxpool.Pool, *Repository, int) {
+// openDirectRunTestRepository connects to the test database, seeds one
+// library, and returns a repository over that pool. An optional tracer sees
+// every statement the pool sends.
+func openDirectRunTestRepository(t *testing.T, tracer ...pgx.QueryTracer) (context.Context, *pgxpool.Pool, *Repository, int) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -23,7 +28,14 @@ func openDirectRunTestRepository(t *testing.T) (context.Context, *pgxpool.Pool, 
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse test database url: %v", err)
+	}
+	if len(tracer) > 0 {
+		cfg.ConnConfig.Tracer = tracer[0]
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
@@ -380,5 +392,103 @@ func TestStaleWorkerLeavesALaterClaimRunningDB(t *testing.T) {
 					got.Status, got.StartedAt, got.FollowupTrigger, later.StartedAt)
 			}
 		})
+	}
+}
+
+// scanRunStatementTracer records every statement Postgres answered with an
+// error (Postgres logs each one as ERROR whether or not the caller handles
+// it). When afterEmptyInsert is set, it runs once right after an INSERT that
+// stored no row, before the caller can look up the run that owns the scope.
+type scanRunStatementTracer struct {
+	mu               sync.Mutex
+	rejected         []error
+	afterEmptyInsert func()
+}
+
+func (t *scanRunStatementTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (t *scanRunStatementTracer) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	t.mu.Lock()
+	if data.Err != nil {
+		t.rejected = append(t.rejected, data.Err)
+	}
+	var hook func()
+	if data.Err == nil && data.CommandTag.String() == "INSERT 0 0" {
+		hook, t.afterEmptyInsert = t.afterEmptyInsert, nil
+	}
+	t.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+}
+
+func (t *scanRunStatementTracer) arm(hook func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.afterEmptyInsert = hook
+}
+
+func (t *scanRunStatementTracer) rejectedStatements() []error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]error(nil), t.rejected...)
+}
+
+// TestCreateOnClaimedScopeJoinsTheActiveRunDB pins how a scan request for a
+// scope that already has a queued or running run is handled (issue #3441).
+// It joins that run without tripping idx_scan_runs_active_scope; before,
+// every such request left a duplicate key ERROR in the Postgres log. And when
+// the run it collided with finishes before the request can join it, the
+// request queues a new run instead of failing.
+func TestCreateOnClaimedScopeJoinsTheActiveRunDB(t *testing.T) {
+	tracer := &scanRunStatementTracer{}
+	ctx, _, repo, folderID := openDirectRunTestRepository(t, tracer)
+	input := CreateInput{LibraryID: folderID, Mode: ModeLibrary, Trigger: "task:scan_libraries"}
+
+	run, created, err := repo.Create(ctx, input)
+	if err != nil || !created {
+		t.Fatalf("create library run: created=%v err=%v", created, err)
+	}
+	queued, created, err := repo.Create(ctx, input)
+	if err != nil || created || queued.ID != run.ID {
+		t.Fatalf("request on queued run: created=%v err=%v run=%#v", created, err, queued)
+	}
+	run, err = repo.Start(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("start library run: %v", err)
+	}
+	running, created, err := repo.Create(ctx, input)
+	if err != nil || created || running.ID != run.ID || running.FollowupTrigger != input.Trigger {
+		t.Fatalf("request on running run: created=%v err=%v run=%#v", created, err, running)
+	}
+	batch, batchCreated, err := repo.CreateBatch(ctx, []CreateInput{input, input})
+	if err != nil || len(batch) != 2 || batchCreated[0] || batchCreated[1] || batch[0].ID != run.ID || batch[1].ID != run.ID {
+		t.Fatalf("batch request on running run: created=%v err=%v runs=%#v", batchCreated, err, batch)
+	}
+	if rejected := tracer.rejectedStatements(); len(rejected) != 0 {
+		t.Fatalf("Postgres rejected %d statement(s): %v", len(rejected), rejected)
+	}
+
+	// A separate scope whose run has no owed follow-up, so finishing it frees
+	// the scope.
+	subtree := CreateInput{LibraryID: folderID, Mode: ModeSubtree, Path: "Show", Trigger: "autoscan:sonarr"}
+	claim, created, err := repo.Create(ctx, subtree)
+	if err != nil || !created {
+		t.Fatalf("create subtree run: created=%v err=%v", created, err)
+	}
+	claim, err = repo.Start(ctx, claim.ID)
+	if err != nil {
+		t.Fatalf("start subtree run: %v", err)
+	}
+	tracer.arm(func() {
+		if _, err := repo.Complete(context.Background(), claim.ID, claim.StartedAt, nil); err != nil {
+			t.Errorf("complete the run mid-request: %v", err)
+		}
+	})
+	next, created, err := repo.Create(ctx, subtree)
+	if err != nil || !created || next.ID == claim.ID {
+		t.Fatalf("request after the active run finished: created=%v err=%v run=%#v", created, err, next)
 	}
 }

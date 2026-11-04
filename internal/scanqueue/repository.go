@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 
@@ -102,33 +101,48 @@ func scanRunRows(rows pgx.Rows) ([]*models.ScanRun, error) {
 }
 
 func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.ScanRun, bool, error) {
-	run, err := scanRunRow(r.pool.QueryRow(ctx, `
-		INSERT INTO scan_runs (
-			id, media_folder_id, mode, path, trigger, status, autoscan_event_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING `+scanRunColumns,
-		ulid.Make().String(),
-		input.LibraryID,
-		input.Mode,
-		input.Path,
-		input.Trigger,
-		StatusAccepted,
-		input.AutoscanEventID,
-	))
-	if err == nil {
-		return run, true, nil
-	}
+	return r.createOrCoalesce(ctx, r.pool, input)
+}
 
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		existing, lookupErr := r.coalesceIntoActive(ctx, r.pool, input)
-		if lookupErr != nil {
-			return nil, false, lookupErr
+// createOrCoalesce inserts an accepted run for input's scope, or, when an
+// accepted or running run already owns that scope, coalesces input into it
+// and reports created=false. The insert names idx_scan_runs_active_scope as
+// its conflict arbiter, so a claimed scope is an ordinary empty result rather
+// than a unique violation Postgres would log as an ERROR; any other conflict
+// still fails. If the owning run finishes between the insert and the
+// coalesce, the scope is free again and the insert is retried once.
+func (r *Repository) createOrCoalesce(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, bool, error) {
+	for range 2 {
+		run, err := scanRunRow(db.QueryRow(ctx, `
+			INSERT INTO scan_runs (
+				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (media_folder_id, mode, path) WHERE status IN ('accepted', 'running') DO NOTHING
+			RETURNING `+scanRunColumns,
+			ulid.Make().String(),
+			input.LibraryID,
+			input.Mode,
+			input.Path,
+			input.Trigger,
+			StatusAccepted,
+			input.AutoscanEventID,
+		))
+		if err == nil {
+			return run, true, nil
 		}
-		return existing, false, nil
-	}
+		if !errors.Is(err, ErrScanRunNotFound) {
+			return nil, false, fmt.Errorf("create scan run: %w", err)
+		}
 
-	return nil, false, fmt.Errorf("create scan run: %w", err)
+		existing, err := r.coalesceIntoActive(ctx, db, input)
+		if err == nil {
+			return existing, false, nil
+		}
+		if !errors.Is(err, ErrScanRunNotFound) {
+			return nil, false, err
+		}
+	}
+	return nil, false, fmt.Errorf("create scan run: scope stayed claimed with no active run: %w", ErrScanRunNotFound)
 }
 
 // coalesceIntoActive returns the accepted or running run that already owns
@@ -197,35 +211,12 @@ func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*
 	runs := make([]*models.ScanRun, 0, len(inputs))
 	created := make([]bool, 0, len(inputs))
 	for _, input := range inputs {
-		run, err := scanRunRow(tx.QueryRow(ctx, `
-			INSERT INTO scan_runs (
-				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT DO NOTHING
-			RETURNING `+scanRunColumns,
-			ulid.Make().String(),
-			input.LibraryID,
-			input.Mode,
-			input.Path,
-			input.Trigger,
-			StatusAccepted,
-			input.AutoscanEventID,
-		))
-		if err == nil {
-			runs = append(runs, run)
-			created = append(created, true)
-			continue
+		run, wasCreated, err := r.createOrCoalesce(ctx, tx, input)
+		if err != nil {
+			return nil, nil, err
 		}
-		if !errors.Is(err, ErrScanRunNotFound) {
-			return nil, nil, fmt.Errorf("create scan run: %w", err)
-		}
-
-		existing, lookupErr := r.coalesceIntoActive(ctx, tx, input)
-		if lookupErr != nil {
-			return nil, nil, lookupErr
-		}
-		runs = append(runs, existing)
-		created = append(created, false)
+		runs = append(runs, run)
+		created = append(created, wasCreated)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

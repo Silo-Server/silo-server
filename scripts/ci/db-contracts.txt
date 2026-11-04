@@ -696,6 +696,11 @@
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
 
+# A scan request for a scope with an active run joins that run without a
+# duplicate-key ERROR, and queues a new run if that one finished meanwhile
+# (issue #3441).
+./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
