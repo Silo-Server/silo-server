@@ -191,8 +191,11 @@ type PlannerResultV3 struct {
 	// best effort: an executor whose FFmpeg lacks the filter serves the plain
 	// copy, so it never narrows where the route may run.
 	RemuxResumeLeadingPictureDrop bool
-	TargetVideoCodec              string
-	TargetAudioCodec              string
+	// VideoCopyFailed carries StartRequestV3.VideoCopyFailed into the frozen
+	// recipe so later replans of the attempt keep refusing the copy.
+	VideoCopyFailed  bool
+	TargetVideoCodec string
+	TargetAudioCodec string
 	// SourceAudioChannels freezes the selected input track's channel count for
 	// source-sensitive encode recipes such as multichannel-to-stereo downmixing.
 	SourceAudioChannels int
@@ -249,6 +252,7 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// Registered first so it runs last, after any rewrite of the result.
 	defer func() {
+		result.VideoCopyFailed = input.Request.VideoCopyFailed
 		if result.Plan != nil {
 			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
 			file := input.EffectiveFile
@@ -633,10 +637,13 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// client's decoder claims; the validated HDR10 strip is the only eligible
 	// P7 remux recipe.
 	remuxRangeOK := rangeOK && source.DVProfile != 7
-	// A copy-unsafe source (H.264 with conflicting in-band PPS) must not take a
-	// video stream-copy route: the avc1/fMP4 segment would desync strict
-	// decoders. Skipping the remux branch drops through to the HLS transcode.
-	if videoOK && !source.VideoCopyUnsafe && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
+	// A copy-unsafe source (H.264 with conflicting in-band PPS) is still
+	// offered a video stream-copy first. Every copy keeps every in-band PPS,
+	// so a decoder that applies them plays it (Media3 does); a decoder that
+	// trusts only the sample entry's parameter sets fails, the client's
+	// failure_recovery replan reports it, and from then on the attempt skips
+	// the remux branch and drops through to the HLS transcode.
+	if videoOK && (!source.VideoCopyUnsafe || !input.Request.VideoCopyFailed) && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) { //nolint:nestif // pre-existing remux ladder; only its copy-safety condition changed
 		// A source with more channels than the delivery's ceiling cannot be
 		// copied there even when the codec is supported. Adapt only the audio
 		// so the video stays a copy instead of falling through to a transcode.
