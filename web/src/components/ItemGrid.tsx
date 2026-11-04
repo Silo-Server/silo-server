@@ -80,17 +80,24 @@ function stickyHeaderInset(): number {
  * tall, and on a phone every row past about 2.5 million went blank. So a grid
  * on a device with a touchscreen keeps to TOUCH_GRID_MAX_EXTENT_PX and any
  * other to GRID_MAX_EXTENT_PX; a list shorter than that keeps its whole
- * height, and its scrollbar spans it. The window is sized by the estimated
- * row pitch, which the measured one exceeds (by 12% at the default text
- * size), so both limits leave room for a pitch half again the estimate.
+ * height, and its scrollbar spans it. Chrome also caps an element's height
+ * at ELEMENT_MAX_DEVICE_PX device pixels, which at a high pixel ratio or
+ * browser zoom comes before the desktop limit, so that limit shrinks with the
+ * pixel ratio. The window is sized by the estimated row pitch, which the
+ * measured one exceeds (by 12% at the default text size), so every limit
+ * leaves room for a pitch half again the estimate.
  */
 const TOUCH_GRID_MAX_EXTENT_PX = 1_200_000;
 const GRID_MAX_EXTENT_PX = 5_000_000;
+const ELEMENT_MAX_DEVICE_PX = 33_554_428;
+const PITCH_HEADROOM = 1.5;
 // How long the scroll position rests before the row window moves.
 const WINDOW_SETTLE_MS = 600;
 
 function gridMaxExtent(touch: boolean): number {
-  return touch ? TOUCH_GRID_MAX_EXTENT_PX : GRID_MAX_EXTENT_PX;
+  if (touch) return TOUCH_GRID_MAX_EXTENT_PX;
+  const pixelRatio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  return Math.min(GRID_MAX_EXTENT_PX, ELEMENT_MAX_DEVICE_PX / pixelRatio / PITCH_HEADROOM);
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {

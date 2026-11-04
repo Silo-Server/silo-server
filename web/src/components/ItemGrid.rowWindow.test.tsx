@@ -152,6 +152,16 @@ describe("ItemGrid row window", () => {
     expect(rendered(80_000)).toBe(true);
   });
 
+  it("shrinks a desktop window at a high pixel ratio", () => {
+    usePointer(false);
+    // At five device pixels to the CSS pixel, Chrome's element height cap is
+    // about 6.7 million CSS pixels, before the desktop limit's 5 million plus
+    // headroom for a taller pitch.
+    vi.stubGlobal("devicePixelRatio", 5);
+    const { extent } = renderGrid(100_000, pagesAround(0, 800));
+    expect(extent()).toBe(`${14_913 * 300}px`);
+  });
+
   it("jumps deep into a touch grid without scrolling the page deep", () => {
     usePointer(true);
     const { gridRef, extent, onTopRowChange, onVisibleRangeChange, rendered } = renderGrid(
