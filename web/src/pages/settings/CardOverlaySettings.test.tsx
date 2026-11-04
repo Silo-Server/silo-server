@@ -5,6 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CardOverlaySettings } from "./CardOverlaySettings";
 
+// The badge size slider (Radix) measures itself with ResizeObserver.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
@@ -21,24 +32,30 @@ const mocks = vi.hoisted(() => ({
   setQuickActionMode: vi.fn(),
 }));
 
-vi.mock("@/hooks/useOverlayPrefs", () => ({
-  useOverlayPrefs: () => ({
-    prefs: null,
-    setPrefs: mocks.setPrefs,
-    quickActionPreference: "favorites",
-    setQuickActionMode: mocks.setQuickActionMode,
-    quickActionsEnabled: mocks.quickActionsEnabled,
-    setQuickActionsEnabled: mocks.setQuickActionsEnabled,
-    overlaysEnabled: mocks.overlaysEnabled,
-    setOverlaysEnabled: mocks.setOverlaysEnabled,
-    resetPrefs: mocks.resetPrefs,
-    hasBadgeOverride: mocks.hasBadgeOverride,
-    hasQuickActionOverride: mocks.hasQuickActionOverride,
-    isResetting: false,
-    isOverlaySupported: () => true,
-    isLoading: false,
-  }),
-}));
+vi.mock("@/hooks/useOverlayPrefs", async () => {
+  const { buildDefaultPrefs } = await import("@/lib/overlays");
+  return {
+    useOverlayPrefs: () => ({
+      prefs: null,
+      editablePrefs: buildDefaultPrefs(),
+      images: [],
+      supportsStyles: true,
+      setPrefs: mocks.setPrefs,
+      quickActionPreference: "favorites",
+      setQuickActionMode: mocks.setQuickActionMode,
+      quickActionsEnabled: mocks.quickActionsEnabled,
+      setQuickActionsEnabled: mocks.setQuickActionsEnabled,
+      overlaysEnabled: mocks.overlaysEnabled,
+      setOverlaysEnabled: mocks.setOverlaysEnabled,
+      resetPrefs: mocks.resetPrefs,
+      hasBadgeOverride: mocks.hasBadgeOverride,
+      hasQuickActionOverride: mocks.hasQuickActionOverride,
+      isResetting: false,
+      isOverlaySupported: () => true,
+      isLoading: false,
+    }),
+  };
+});
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -81,8 +98,9 @@ describe("CardOverlaySettings", () => {
   it("turns shortcuts off without changing their kind", () => {
     mocks.quickActionsEnabled = true;
     render(<CardOverlaySettings />);
+    const shortcuts = screen.getByRole("radiogroup", { name: "Shortcut buttons" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Off" }));
+    fireEvent.click(within(shortcuts).getByRole("radio", { name: "Off" }));
 
     expect(mocks.setQuickActionsEnabled).toHaveBeenCalledWith(false);
     expect(mocks.setQuickActionMode).not.toHaveBeenCalled();

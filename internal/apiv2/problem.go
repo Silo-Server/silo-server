@@ -376,7 +376,11 @@ const (
 	codeMalformedJSON    = "malformed_json"
 	codeMalformedForm    = "malformed_form"
 
-	locationBody = "body"
+	locationBody     = "body"
+	locationBodyFile = "body.file"
+
+	// The detail of a required image upload's missing file part.
+	detailImageFileRequired = "an image file is required"
 )
 
 // validationCode maps Huma's validation messages onto stable codes. A message

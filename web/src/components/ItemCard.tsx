@@ -10,6 +10,7 @@ import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
@@ -241,6 +242,9 @@ export default function ItemCard({
                 corners; generic overlays would render underneath them. */}
             {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+            )}
+            {item.status === "matched" && item.type !== "manga" && (
+              <CardWatchStatus userState={item.user_state} />
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and

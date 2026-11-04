@@ -5,7 +5,8 @@ import { OVERLAY_CATEGORIES, type OverlayCategory, type OverlayPosition } from "
 
 export const POSITION_OPTIONS: { value: OverlayPosition; label: string }[] = [
   { value: "top-left", label: "Top Left" },
-  { value: "top-right", label: "Top Right" },
+  { value: "left-edge", label: "Left Edge" },
+  { value: "right-edge", label: "Right Edge" },
   { value: "bottom-left", label: "Bottom Left" },
   { value: "bottom-right", label: "Bottom Right" },
 ];
