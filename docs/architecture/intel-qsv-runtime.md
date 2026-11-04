@@ -15,12 +15,12 @@ The Dockerfile's `INTEL_QSV_RUNTIME` build argument chooses what the image keeps
   dispatcher was measured selecting Media SDK 1.35, which then failed QSV device
   initialization; without it, the dispatcher selected VPL 2.17 and encoded.
 
-`scripts/configure-intel-qsv-runtime.sh` does the selection and fails the build
-on any other value, on `vpl` for another architecture, and when the package no
-longer ships `libmfx-gen.so.*`, so a packaging change cannot produce an image
-with no usable QSV runtime. The image's `io.silo.intel-qsv-runtime` label
-records the choice. CI runs `scripts/tests/intel-qsv-runtime.sh` on every change;
-it builds only the `auto` image.
+`scripts/configure-intel-qsv-runtime.sh` does the selection. It fails the build
+on any other value, and a `vpl` build fails on another architecture or when the
+package no longer ships `libmfx-gen.so.*`, so a packaging change cannot produce a
+VPL image without the modern runtime. The image's `io.silo.intel-qsv-runtime`
+label records the choice. CI never builds a `vpl` image, so it runs
+`scripts/tests/intel-qsv-runtime.sh` on every change instead.
 
 The default stays `auto` because Intel's
 [dispatcher hardware matrix](https://github.com/intel/libvpl#dispatcher-behavior-when-targeting-intel-gpus)
