@@ -135,3 +135,36 @@ func TestPickMembersFillsTheLimitWithAllowedTitles(t *testing.T) {
 		})
 	}
 }
+
+// failingStateStore replaces members but cannot record the sync, as when the
+// database drops between the two writes.
+type failingStateStore struct {
+	mockSyncUserStore
+	stateWrites int
+}
+
+func (f *failingStateStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {
+	f.stateWrites++
+	return errors.New("connection reset")
+}
+
+// A sync that fails after it replaced the members must not record the failure
+// over them with the item count it started with.
+func TestRunSyncDoesNotRecordAFailureAfterReplacingMembers(t *testing.T) {
+	svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
+	svc.TMDBLists = &countingTMDBListFetcher{}
+	store := &failingStateStore{}
+	collection := &userstore.Collection{
+		ID:               "c",
+		CreatorProfileID: "owner",
+		SourceConfig:     `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
+		ItemCount:        12,
+	}
+
+	if _, _, err := svc.RunSync(t.Context(), 7, store, collection); err == nil {
+		t.Fatal("RunSync succeeded although the sync state write failed")
+	}
+	if store.replacedItems == nil || store.stateWrites != 1 {
+		t.Fatalf("members replaced: %v, state writes: %d; want the members replaced and only the sync's own state write", store.replacedItems != nil, store.stateWrites)
+	}
+}

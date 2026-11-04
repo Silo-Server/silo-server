@@ -114,23 +114,18 @@ type sourceMatcher func(ctx context.Context, collection *userstore.Collection, c
 // that have validated ownership pass the collection in to avoid a second
 // GetCollection round trip. Returns both the sync result and the post-sync
 // collection state so callers can render the updated row without an extra
-// read. A sync that fails is recorded as the collection's failed status with
-// the error's message, whether it ran on import, on a schedule or by hand,
-// and the members and next run stay as they were. A collection with no
-// source is left alone.
+// read. A sync that fails before it writes anything is recorded as the
+// collection's failed status with the error's message, whether it ran on
+// import, on a schedule or by hand, and the members, item count and next run
+// stay as they were. A collection with no source is left alone.
 func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection) (*SyncResult, *userstore.Collection, error) {
-	result, updated, err := s.runSync(ctx, userID, store, collection)
-	// ownerFilter records its own failure.
-	if err != nil && !errors.Is(err, ErrSyncUnsupported) && !errors.Is(err, ErrOwnerAccessUnavailable) {
+	fail := func(err error) (*SyncResult, *userstore.Collection, error) {
 		s.recordFailedSync(ctx, userID, store, collection, logredact.SanitizeURLError(err).Error())
+		return nil, nil, err
 	}
-	return result, updated, err
-}
-
-func (s *Service) runSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection) (*SyncResult, *userstore.Collection, error) {
 	cfg, err := ParseSourceConfig(collection.SourceConfig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing source_config: %w", err)
+		return fail(fmt.Errorf("parsing source_config: %w", err))
 	}
 	var match sourceMatcher
 	switch cfg.Mode {
@@ -144,18 +139,21 @@ func (s *Service) runSync(ctx context.Context, userID int, store userstore.UserS
 		return nil, nil, ErrSyncUnsupported
 	}
 	startedAt := time.Now().UTC()
+	// ownerFilter records its own failure.
 	owner, err := s.ownerFilter(ctx, userID, store, collection)
 	if err != nil {
 		return nil, nil, err
 	}
 	contentIDs, err := match(ctx, collection, cfg)
 	if err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
 	members, scanned, unmatched, err := s.selectMembers(ctx, owner, cfg, contentIDs)
 	if err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
+	// applyResult replaces the members before it records the sync, so a
+	// failure inside it is not recorded over them with the old item count.
 	result, updated, err := s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
 	if err == nil {
 		s.refreshCollage(userID, store, updated, owner)
