@@ -74,6 +74,12 @@ func (r DownloadQualityResolver) Resolve(
 		if err != nil {
 			return QualityDecision{}, err
 		}
+		if file.IsAudioOnly() {
+			// The presets are video bitrate classes and the encode writes
+			// video, so audio-only media keeps its own audio, remuxed when
+			// the device cannot take the source as it is.
+			return r.sourceDecision(ctx, quality, sourceMethod(file, caps, playback.AdminSettings{TranscodeEnabled: true}), user, cfg, file, caps, artifactsAvailable, deviceID)
+		}
 		presetKbps := QualityBitrateKbps(quality)
 		target, ok := downloadTranscodeTarget(file, caps, cfg, user, presetKbps, ceiling)
 		if !ok {
@@ -90,12 +96,9 @@ func (r DownloadQualityResolver) Resolve(
 		return transcodeDecision(quality, quality, target), nil
 	}
 
-	method := playback.PlayDirect
-	if hasCapabilities(caps) {
-		method = playback.Resolve(file, caps, playback.AdminSettings{
-			TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
-		}).Method
-	}
+	method := sourceMethod(file, caps, playback.AdminSettings{
+		TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
+	})
 	if method != playback.PlayTranscode {
 		return r.sourceDecision(ctx, QualityOriginal, method, user, cfg, file, caps, artifactsAvailable, deviceID)
 	}
@@ -108,6 +111,15 @@ func (r DownloadQualityResolver) Resolve(
 		return QualityDecision{}, ErrQualityUnavailable
 	}
 	return transcodeDecision(QualityOriginal, Quality20Mbps, target), nil
+}
+
+// sourceMethod is how a download that keeps the source quality delivers file:
+// as-is without caps to check, otherwise as playback.Resolve decides for them.
+func sourceMethod(file *models.MediaFile, caps playback.ClientCapabilities, settings playback.AdminSettings) playback.PlayMethod {
+	if !hasCapabilities(caps) {
+		return playback.PlayDirect
+	}
+	return playback.Resolve(file, caps, settings).Method
 }
 
 // sourceDecision serves the source file as-is (PlayDirect) or remuxed

@@ -100,9 +100,14 @@ type PlayDecision struct {
 // Returns direct if client supports codec+container, remux if codec matches
 // but container doesn't, transcode otherwise.
 func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSettings) *PlayDecision {
+	// An audiobook or podcast whose only picture is cover art has no video
+	// for the client to decode, so video never sends it to a transcode, as
+	// SourceDescriptorFromFileV3 drops its video for streaming. A transcode
+	// would encode the cover as H.264, which the MP4 muxer refuses.
+	audioOnly := file.IsAudioOnly()
 	// Check if client supports the video codec.
-	videoOK := containsStr(caps.CodecsVideo, file.CodecVideo)
-	detailedVideoEvidence := caps.hasDetailedVideoEvidence()
+	videoOK := audioOnly || containsStr(caps.CodecsVideo, file.CodecVideo)
+	detailedVideoEvidence := !audioOnly && caps.hasDetailedVideoEvidence()
 	// detailedBoundsChecked is true only when the videoEligibleV3 bounds walk
 	// below actually ran. It gates the resolution ceiling check further down:
 	// when the detailed walk ran, its per-decoder max_width/max_height are
@@ -142,7 +147,7 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 	containerOK := containsStr(caps.Containers, file.Container)
 
 	// Check resolution constraint.
-	if !detailedBoundsChecked && !resolutionFits(file.Resolution, caps.MaxResolution) {
+	if !audioOnly && !detailedBoundsChecked && !resolutionFits(file.Resolution, caps.MaxResolution) {
 		if !settings.TranscodeEnabled {
 			return &PlayDecision{
 				Method: PlayDirect,

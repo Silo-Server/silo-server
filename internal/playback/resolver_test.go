@@ -231,6 +231,28 @@ var resolverPlayMethodCases = []struct {
 		},
 		want: playback.PlayDirect,
 	},
+	{
+		// An audiobook's cover art is not video to decode: AAC in MP4 is
+		// served as it is, never encoded to H.264 for the cover (#3486).
+		name: "audio-only media ignores the video caps",
+		file: &models.MediaFile{
+			BaseType: "audiobook", CodecAudio: "aac", Container: "mp4",
+			AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+		},
+		caps: &playback.ClientCapabilities{
+			CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac"},
+			Containers: []string{"mp4", "m4b"}, MaxResolution: "1080p",
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// Older scans recorded the cover as an MJPEG video track; it still
+		// takes the audio route, here an audio transcode the device can play.
+		name:      "legacy cover-art video on audio-only media remuxes its audio",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "flac", Container: "flac", Resolution: "2160p"},
+		want:      playback.PlayRemux,
+		wantAudio: &yes,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {
