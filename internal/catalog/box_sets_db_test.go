@@ -188,6 +188,16 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	if restricted := search("bravo", []int{f.lib}, f.viewer, 50, 0); slices.Contains(restricted, f.franchise) {
 		t.Fatalf("PG title search = %v, want no franchise from a hidden title", restricted)
 	}
+	// A name that opens with the query word ranks ahead of a shorter one
+	// that only contains it.
+	for id, name := range map[int64]string{f.franchise: "Dirty Harry Collection", f.single: "Harry Potter Collection"} {
+		if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET name = $2 WHERE tmdb_collection_id = $1`, id, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ranked := search("harry", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(ranked, []int64{f.single, f.franchise}) {
+		t.Fatalf("search harry = %v, want Harry Potter %d before Dirty Harry %d", ranked, f.single, f.franchise)
+	}
 
 	// A collection no movie belongs to any more is deleted; one with movies
 	// is kept.

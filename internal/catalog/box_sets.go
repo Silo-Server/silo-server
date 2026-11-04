@@ -523,7 +523,9 @@ func (e *QueryExecutor) movieBoxSet(ctx context.Context, contentID string, libra
 // SearchBoxSetCollectionIDs returns up to limit stored collections that match
 // query among the movies of libraryIDs the viewer can see, skipping the first
 // offset: first those whose name contains every word of it, then those with
-// at least two such movies whose titles do, case-insensitively. Only movies
+// at least two such movies whose titles do, case-insensitively. Name matches
+// that open with a query word rank first, then those with a word that opens
+// with one, then shorter names. Only movies
 // access admits count, so a match cannot reveal a title the viewer may not
 // see.
 func (r *CatalogResolver) SearchBoxSetCollectionIDs(ctx context.Context, query string, libraryIDs []int, access AccessFilter, limit, offset int) ([]int64, error) {
@@ -545,26 +547,43 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 	patterns := make([]string, 0, len(words))
 	namePatterns := []string{}
 	suffixPatterns := []string{}
+	// Name words that open the stem, or open one of its words, rank a name
+	// match: "harry" finds "Harry Potter" before "Dirty Harry".
+	leadPatterns := []string{}
+	wordStartPatterns := []string{}
 	for _, word := range words {
-		pattern := "%" + escapePrefixForLike(word) + "%"
+		escaped := escapePrefixForLike(word)
+		pattern := "%" + escaped + "%"
 		patterns = append(patterns, pattern)
 		if boxSetSuffixWords[word] {
 			suffixPatterns = append(suffixPatterns, pattern)
 		} else {
 			namePatterns = append(namePatterns, pattern)
+			leadPatterns = append(leadPatterns, escaped+"%")
+			wordStartPatterns = append(wordStartPatterns, "% "+escaped+"%")
 		}
 	}
 	with, from, args, err := e.visibleCollectionMovies(QueryDefinition{MediaScope: playableTypeMovie, LibraryIDs: libraryIDs}, access)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, patterns, namePatterns, suffixPatterns, limit, offset)
-	patternIdx := len(args) - 4
+	bind := func(v any) int {
+		args = append(args, v)
+		return len(args)
+	}
+	allIdx, nameIdx, suffixIdx := bind(patterns), bind(namePatterns), bind(suffixPatterns)
+	leadIdx, wordStartIdx := bind(leadPatterns), bind(wordStartPatterns)
+	limitIdx, offsetIdx := bind(limit), bind(offset)
 	// A name matches when one query word is in its stem, the other words
 	// are too, and the suffix words are either there or answered by its
 	// suffix.
 	nameMatch := fmt.Sprintf(`(%[1]s LIKE ANY($%[3]d::text[]) AND %[1]s LIKE ALL($%[4]d::text[]) AND (%[2]s OR %[1]s LIKE ALL($%[5]d::text[])))`,
-		boxSetStemSQL, boxSetSuffixedSQL, patternIdx, patternIdx+1, patternIdx+2)
+		boxSetStemSQL, boxSetSuffixedSQL, allIdx, nameIdx, suffixIdx)
+	// Name matches come first: those whose stem opens with a query word,
+	// then those with a word that does, then the rest; within each, shorter
+	// names, then box sets with more movies the viewer sees.
+	nameRank := fmt.Sprintf(`CASE WHEN %[1]s LIKE ANY($%[2]d::text[]) THEN 0 WHEN %[1]s LIKE ANY($%[3]d::text[]) THEN 1 ELSE 2 END`,
+		boxSetStemSQL, leadIdx, wordStartIdx)
 	// Grouping the movies the viewer can see by collection keeps only
 	// collections with such a movie, so matches elsewhere do not use up the
 	// candidates a page reads.
@@ -573,9 +592,11 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 		GROUP BY bsm.tmdb_collection_id, c.name
 		HAVING %[6]s
 			OR count(*) FILTER (WHERE lower(mi.title) LIKE ALL($%[3]d::text[])) >= 2
-		ORDER BY CASE WHEN %[6]s THEN length(%[7]s) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
+		ORDER BY CASE WHEN %[6]s THEN %[8]s END NULLS LAST,
+			CASE WHEN %[6]s THEN length(%[7]s) END NULLS LAST,
+			count(DISTINCT mi.content_id) DESC, bsm.tmdb_collection_id
 		LIMIT $%[4]d OFFSET $%[5]d`,
-		with, from, patternIdx, patternIdx+3, patternIdx+4, nameMatch, boxSetStemSQL)
+		with, from, allIdx, limitIdx, offsetIdx, nameMatch, boxSetStemSQL, nameRank)
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching box sets: %w", err)
