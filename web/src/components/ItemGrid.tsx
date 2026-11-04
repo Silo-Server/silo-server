@@ -73,30 +73,24 @@ function stickyHeaderInset(): number {
  * on, and scrolling near either end of the window moves it on, keeping the
  * same row in place.
  *
- * Chrome on Android stops drawing a page scrolled a few million pixels down:
- * a 151,000-title library in three columns is 11.5 million pixels tall, and
- * on a phone every row past about 2.5 million went blank, so a grid on a
- * device with a touchscreen keeps to TOUCH_GRID_MAX_EXTENT_PX. Desktop
- * browsers draw that deep, and a desktop grid keeps the whole list's height,
- * so its scrollbar spans it, up to what an element may measure: Chrome caps
- * one at 33,554,428 device pixels, about 11 million CSS pixels at a pixel
- * ratio of 3, and Firefox at about 17.9 million CSS pixels. A million
- * episodes in eight columns (52 million pixels) passes both. The window is
- * sized by the estimated row pitch, which the measured one exceeds (by 12% at
- * the default text size), so the limits leave room for a pitch up to
- * PITCH_HEADROOM times the estimate.
+ * Chrome stops drawing a page scrolled too far down; the screen goes blank,
+ * header included. Desktop Chrome draws a page scrolled 8.30 million pixels
+ * and nothing at 8.42 million, about 2^23. Chrome on an Android phone gave out
+ * sooner: a 151,000-title library in three columns is 11.5 million pixels
+ * tall, and on a phone every row past about 2.5 million went blank. So a grid
+ * on a device with a touchscreen keeps to TOUCH_GRID_MAX_EXTENT_PX and any
+ * other to GRID_MAX_EXTENT_PX; a list shorter than that keeps its whole
+ * height, and its scrollbar spans it. The window is sized by the estimated
+ * row pitch, which the measured one exceeds (by 12% at the default text
+ * size), so both limits leave room for a pitch half again the estimate.
  */
 const TOUCH_GRID_MAX_EXTENT_PX = 1_200_000;
-const GRID_MAX_EXTENT_PX = 11_000_000;
-const MAX_ELEMENT_DEVICE_PX = 33_554_428;
-const PITCH_HEADROOM = 1.5;
+const GRID_MAX_EXTENT_PX = 5_000_000;
 // How long the scroll position rests before the row window moves.
 const WINDOW_SETTLE_MS = 600;
 
 function gridMaxExtent(touch: boolean): number {
-  if (touch) return TOUCH_GRID_MAX_EXTENT_PX;
-  const pixelRatio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-  return Math.min(GRID_MAX_EXTENT_PX, MAX_ELEMENT_DEVICE_PX / pixelRatio / PITCH_HEADROOM);
+  return touch ? TOUCH_GRID_MAX_EXTENT_PX : GRID_MAX_EXTENT_PX;
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {

@@ -6,8 +6,8 @@ import { resetScrollRestoration } from "@/lib/scrollRestoration";
 import ItemGrid, { type ItemGridHandle } from "./ItemGrid";
 
 // The real window virtualizer, with two 300px columns: a touch grid's window
-// holds 1,200,000 / 300 = 4,000 rows, a desktop grid's at a pixel ratio of 1
-// 11,000,000 / 300 = 36,666.
+// holds 1,200,000 / 300 = 4,000 rows, a desktop grid's 5,000,000 / 300 =
+// 16,666.
 const gridLayout = vi.hoisted(() => ({ columnCount: 2, rowHeight: 300 }));
 vi.mock("@/hooks/useGridLayout", async () => {
   const { useRef } = await import("react");
@@ -131,23 +131,23 @@ describe("ItemGrid row window", () => {
 
   it("keeps a desktop grid at the whole list's height", () => {
     usePointer(false);
-    const { gridRef, extent } = renderGrid(60_000, pagesAround(0, 500));
-    expect(extent()).toBe(`${30_000 * 300}px`);
+    const { gridRef, extent } = renderGrid(20_000, pagesAround(0, 150));
+    expect(extent()).toBe(`${10_000 * 300}px`);
 
-    act(() => gridRef.current?.scrollToItem(50_001));
+    act(() => gridRef.current?.scrollToItem(15_001));
 
-    expect(window.scrollY).toBe(25_000 * 300);
+    expect(window.scrollY).toBe(7_500 * 300);
   });
 
-  it("windows a desktop grid taller than a browser lets an element grow", () => {
+  it("windows a desktop grid taller than a browser draws", () => {
     usePointer(false);
     const { gridRef, extent, onTopRowChange, rendered } = renderGrid(100_000, pagesAround(0, 800));
-    expect(extent()).toBe(`${36_666 * 300}px`);
+    expect(extent()).toBe(`${16_666 * 300}px`);
 
     act(() => gridRef.current?.scrollToItem(80_001));
 
-    // Row 40,000 is in the list's last window, which starts at row 13,334.
-    expect(window.scrollY).toBe(26_666 * 300);
+    // Row 40,000 lands in the middle of a window starting at row 31,667.
+    expect(window.scrollY).toBe(8_333 * 300);
     expect(onTopRowChange).toHaveBeenLastCalledWith(80_000, 80_001);
     expect(rendered(80_000)).toBe(true);
   });
