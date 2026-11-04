@@ -16,8 +16,8 @@ import (
 
 // TestLibraryCollectionRailsMatchTheCollectionPageDB checks that a Home or
 // library row showing a server collection lists the same titles, in the same
-// order, as the collection's own page, for smart collections and for a manual
-// collection that carries a query_definition. A cached row costs one statement,
+// order, as the collection's own page, for smart collections and for manual
+// collections, including one whose first members the viewer cannot open. A cached row costs one statement,
 // the revision read that keys it.
 func TestLibraryCollectionRailsMatchTheCollectionPageDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -223,6 +223,34 @@ func TestLibraryCollectionRailsMatchTheCollectionPageDB(t *testing.T) {
 		assertContentIDs(t, "collection page", collectionPage(manual.ID, viewer), bravo, echo)
 		got, _ := rail(manual.ID, nil, viewer)
 		assertContentIDs(t, "rail", got, bravo, echo)
+	})
+
+	t.Run("manual collection whose first members are hidden", func(t *testing.T) {
+		// The row's first item_limit members sit in a library the viewer
+		// cannot open. The row skips them and fills from the visible members
+		// in collection order, as the collection's page does.
+		zulu := movie("Zulu", 2001, other)
+		manual := create(catalog.CreateLibraryCollectionInput{
+			LibraryIDs:     []int{shown, other},
+			Title:          "Mixed",
+			CollectionType: "manual",
+		})
+		if err := repo.ReplaceItems(ctx, manual.ID, []catalog.LibraryCollectionItemInput{
+			{MediaItemID: aardvark, Position: 0},
+			{MediaItemID: zulu, Position: 1},
+			{MediaItemID: delta, Position: 2},
+			{MediaItemID: bravo, Position: 3},
+			{MediaItemID: alpha, Position: 4},
+		}); err != nil {
+			t.Fatalf("store items: %v", err)
+		}
+		page := collectionPage(manual.ID, viewer)
+		assertContentIDs(t, "collection page", page, delta, bravo, alpha)
+		got, total := rail(manual.ID, nil, viewer)
+		assertContentIDs(t, "rail", got, page[:2]...)
+		if total != 2 {
+			t.Fatalf("rail total = %d, want 2 cards", total)
+		}
 	})
 }
 

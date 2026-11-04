@@ -1653,10 +1653,9 @@ every other read that answers a `Section`. This includes an admin curated list, 
 read can answer past its own `item_limit`. The server fetches and filters a capped row at the
 row's own `item_limit`, exactly as the uncapped read does, and builds only its first cards, so
 `has_more` is true exactly when the uncapped read answers more cards. Fetching at the cap would
-miss cards that a fetcher drops after applying its limit, such as an unsorted collection's
-members the access filter removes. A client sends `item_limit` to these two reads only when
-`getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
-parameter on them does not send. A row that draws a random subset on each read may answer
+miss cards that a fetcher drops after applying its limit. A client sends `item_limit` to these
+two reads only when `getHomeCapabilities` reports `row_item_limit_max` (100), which a server that
+predates the parameter on them does not send. A row that draws a random subset on each read may answer
 different cards when read again.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
