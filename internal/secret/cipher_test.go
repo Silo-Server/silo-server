@@ -220,3 +220,17 @@ func TestEncryptIfPlaintextIdempotent(t *testing.T) {
 		t.Fatalf("EncryptIfPlaintext(\"\") = (%q, %v, %v), want (\"\", false, nil)", got, changed3, err)
 	}
 }
+
+// TestKeyCheckValueIsStable pins the derivation: every backup manifest records
+// this value and `silo secret check` must reproduce it for the same key on any
+// later release, or a restore would refuse a backup taken with the right key.
+// The expected value was computed independently from RFC 5869.
+func TestKeyCheckValueIsStable(t *testing.T) {
+	got, err := KeyCheckValue([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "85eb-9109-3131-4a60" {
+		t.Fatalf("KeyCheckValue = %q, want 85eb-9109-3131-4a60", got)
+	}
+}

@@ -1669,26 +1669,17 @@ func withPolicyCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, policyCacheKey{}, &policyCache{byUser: map[int]EffectivePolicy{}})
 }
 
-func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	limit, err := s.store.GetUserLimit(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-
+// LayeredPolicy is the request policy an account gets, without its usage:
+// the server's settings, then its access group's limits, then its own, a
+// layer set to inherit deferring to the next; allowed is the account's
+// requests switch. Every reader of an account's request authority uses it.
+func LayeredPolicy(settings Settings, allowed bool, group *GroupLimit, limit *UserLimit) EffectivePolicy {
 	policy := EffectivePolicy{
 		RequestsEnabled: settings.RequestsEnabled,
 		MaxRequests:     settings.GlobalMaxRequests,
 		WindowDays:      settings.GlobalWindowDays,
 		AutoApprove:     settings.GlobalAutoApprovalEnabled,
-		Blocked:         !viewerAccess.allowed,
+		Blocked:         !allowed,
 	}
 	if policy.WindowDays <= 0 {
 		policy.WindowDays = 7
@@ -1698,7 +1689,7 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 	limitMode, maxRequests, windowDays := LimitModeInherit, (*int)(nil), (*int)(nil)
 	approval := ApprovalModeInherit
 	layers := []*UserLimit{}
-	if g := viewerAccess.group; g != nil {
+	if g := group; g != nil {
 		layers = append(layers, &UserLimit{LimitMode: g.LimitMode, MaxRequests: g.MaxRequests, WindowDays: g.WindowDays, ApprovalMode: g.ApprovalMode})
 	}
 	if limit != nil {
@@ -1734,6 +1725,28 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 		policy.AutoApprove = true
 	}
 
+	return policy
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	limit, err := s.store.GetUserLimit(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+
+	var group *GroupLimit
+	if viewerAccess.group != nil {
+		group = viewerAccess.group
+	}
+	policy := LayeredPolicy(settings, viewerAccess.allowed, group, limit)
 	policy.WindowStart = s.now().AddDate(0, 0, -policy.WindowDays)
 	if !policy.Unlimited {
 		used, err := s.store.CountUserRequestsSince(ctx, userID, policy.WindowStart)

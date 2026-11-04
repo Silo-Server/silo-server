@@ -52,6 +52,7 @@ const ADMIN_TITLES: Record<string, string> = {
   activity: "Admin Activity",
   "api-keys": "Admin API Keys",
   autoscan: "Admin Autoscan",
+  backups: "Admin Backups",
   collections: "Admin Collections",
   devices: "Admin Devices",
   diagnostics: "Admin Client Diagnostics",

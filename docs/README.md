@@ -13,7 +13,9 @@ This folder is for people and coding agents changing the server:
   [v1-scope.md](architecture/v1-scope.md) are the usual starting points.
 - The `*-api.md` files are API references for client and integration
   developers. [api-docs.md](api-docs.md) covers the interactive OpenAPI viewer
-  every server serves.
+  every server serves. [backups-api.md](backups-api.md) covers backups; full
+  restore is the `silo backup restore` command
+  ([architecture/backups.md](architecture/backups.md)).
 - [`design/`](design/) holds design notes and schemas for client-facing
   protocols.
 - [non-goals.md](non-goals.md), [ai-contributions.md](ai-contributions.md), and
