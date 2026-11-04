@@ -154,36 +154,50 @@ func TestHandleItems_SeriesParentWithoutTypeReturnsSeasons(t *testing.T) {
 	}
 }
 
-// TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty pins that a type filter a
-// series parent cannot satisfy (e.g. Movie) returns an empty page rather than a
-// wrong-typed seasons listing, and does not even hit ListSeasons.
+// TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty pins that a filter a series
+// parent cannot satisfy returns an empty page rather than a wrong-typed listing:
+// a type filter such as Movie, or an episode listing whose MediaTypes leave out
+// Video (issue #3186). The type filter does not even hit ListSeasons.
 func TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty(t *testing.T) {
-	codec := NewResourceIDCodec()
-	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, "series-1")
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10}},
-	}
-	h := &ItemsHandler{
-		content:  contentSvc,
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		images:   NewImageCache(time.Hour, time.Now),
-	}
+	for _, filter := range []string{"IncludeItemTypes=Movie", "IncludeItemTypes=Episode&MediaTypes=Audio"} {
+		t.Run(filter, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			encodedSeriesID := codec.EncodeStringID(EncodedIDItem, "series-1")
+			contentSvc := &countingContentService{
+				seasons: []upstreamSeason{{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10}},
+			}
+			h := &ItemsHandler{
+				content:     contentSvc,
+				userData:    &mockUserDataService{},
+				codec:       codec,
+				mapper:      newMapper(codec, &config.Config{}),
+				images:      NewImageCache(time.Hour, time.Now),
+				episodeRepo: &boundedEpisodeContractRepo{},
+			}
 
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID+"&IncludeItemTypes=Movie")
-	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("expected empty result for Movie type under a series parent, got %+v", result.Items)
-	}
-	if contentSvc.listSeasonsCalls != 0 {
-		t.Fatalf("ListSeasons must not be called for an unsatisfiable type filter; got %d", contentSvc.listSeasonsCalls)
+			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID+"&"+filter)
+			if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+				t.Fatalf("expected empty result under a series parent, got %+v", result.Items)
+			}
+			if contentSvc.listSeasonsCalls != 0 {
+				t.Fatalf("ListSeasons must not be called for an unsatisfiable filter; got %d", contentSvc.listSeasonsCalls)
+			}
+		})
 	}
 }
 
 // TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty pins that a season ParentId
-// with a type filter that excludes Episode (e.g. Movie) returns an empty page and
-// short-circuits before listing episodes, even though episodes exist.
+// with a type filter that excludes Episode (e.g. Movie), or MediaTypes that
+// leave out Video (issue #3186), returns an empty page and short-circuits before
+// listing episodes, even though episodes exist.
 func TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty(t *testing.T) {
+	for _, filter := range []string{"IncludeItemTypes=Movie", "MediaTypes=Audio", "IncludeItemTypes=Episode&MediaTypes=Audio"} {
+		t.Run(filter, func(t *testing.T) { assertSeasonParentFilterIsEmpty(t, filter) })
+	}
+}
+
+func assertSeasonParentFilterIsEmpty(t *testing.T, filter string) {
+	t.Helper()
 	codec := NewResourceIDCodec()
 	seriesContentID := "series-1"
 	seasonContentID := "season-1"
@@ -208,12 +222,12 @@ func TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty(t *testing.T) {
 		}},
 	}
 
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&IncludeItemTypes=Movie")
+	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&"+filter)
 	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("expected empty for Movie type under a season parent, got %+v", result.Items)
+		t.Fatalf("expected empty under a season parent, got %+v", result.Items)
 	}
 	if contentSvc.listSeasonsCalls != 0 {
-		t.Fatalf("type guard should short-circuit before episode listing; ListSeasons called %d times", contentSvc.listSeasonsCalls)
+		t.Fatalf("filter guard should short-circuit before episode listing; ListSeasons called %d times", contentSvc.listSeasonsCalls)
 	}
 }
 
