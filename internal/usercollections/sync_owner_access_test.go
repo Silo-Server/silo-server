@@ -136,35 +136,66 @@ func TestPickMembersFillsTheLimitWithAllowedTitles(t *testing.T) {
 	}
 }
 
-// failingStateStore replaces members but cannot record the sync, as when the
-// database drops between the two writes.
-type failingStateStore struct {
+// failingWriteStore fails the member replacement or the sync state write
+// the sync itself makes, as when the database drops between writes.
+type failingWriteStore struct {
 	mockSyncUserStore
+	replaceErr  error
+	stateErr    error
 	stateWrites int
 }
 
-func (f *failingStateStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {
-	f.stateWrites++
-	return errors.New("connection reset")
+func (f *failingWriteStore) ReplaceCollectionItems(ctx context.Context, id string, items []userstore.CollectionItemReplacement) error {
+	if f.replaceErr != nil {
+		return f.replaceErr
+	}
+	return f.mockSyncUserStore.ReplaceCollectionItems(ctx, id, items)
 }
 
-// A sync that fails after it replaced the members must not record the failure
-// over them with the item count it started with.
-func TestRunSyncDoesNotRecordAFailureAfterReplacingMembers(t *testing.T) {
-	svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
-	svc.TMDBLists = &countingTMDBListFetcher{}
-	store := &failingStateStore{}
-	collection := &userstore.Collection{
-		ID:               "c",
-		CreatorProfileID: "owner",
-		SourceConfig:     `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
-		ItemCount:        12,
+func (f *failingWriteStore) UpdateCollectionSyncState(ctx context.Context, input userstore.UpdateCollectionSyncStateInput) error {
+	f.stateWrites++
+	if f.stateErr != nil && input.Status != "failed" {
+		return f.stateErr
 	}
+	return f.mockSyncUserStore.UpdateCollectionSyncState(ctx, input)
+}
 
-	if _, _, err := svc.RunSync(t.Context(), 7, store, collection); err == nil {
-		t.Fatal("RunSync succeeded although the sync state write failed")
+// A failed member replacement wrote nothing, so it is recorded. A failure
+// after the members were replaced must not be recorded over them with the
+// item count the sync started with.
+func TestRunSyncRecordsAWriteFailureOnlyBeforeMembersChange(t *testing.T) {
+	cases := []struct {
+		name        string
+		store       *failingWriteStore
+		wantWrites  int
+		wantFailed  bool
+		wantReplace bool
+	}{
+		{"replacing the members fails", &failingWriteStore{replaceErr: errors.New("connection reset")}, 1, true, false},
+		{"recording the sync fails after the members changed", &failingWriteStore{stateErr: errors.New("connection reset")}, 1, false, true},
 	}
-	if store.replacedItems == nil || store.stateWrites != 1 {
-		t.Fatalf("members replaced: %v, state writes: %d; want the members replaced and only the sync's own state write", store.replacedItems != nil, store.stateWrites)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
+			svc.TMDBLists = &countingTMDBListFetcher{}
+			collection := &userstore.Collection{
+				ID:               "c",
+				CreatorProfileID: "owner",
+				SourceConfig:     `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
+				ItemCount:        12,
+			}
+
+			if _, _, err := svc.RunSync(t.Context(), 7, tc.store, collection); err == nil {
+				t.Fatal("RunSync succeeded although a write failed")
+			}
+			state := tc.store.syncState
+			if tc.store.stateWrites != tc.wantWrites || (state.Status == "failed") != tc.wantFailed || (tc.store.replacedItems != nil) != tc.wantReplace {
+				t.Fatalf("state writes %d, recorded %+v, members replaced %v; want %d writes, failure recorded %v, members replaced %v",
+					tc.store.stateWrites, state, tc.store.replacedItems != nil, tc.wantWrites, tc.wantFailed, tc.wantReplace)
+			}
+			if tc.wantFailed && state.ItemCount != 12 {
+				t.Fatalf("recorded item count %d, want the unchanged 12", state.ItemCount)
+			}
+		})
 	}
 }

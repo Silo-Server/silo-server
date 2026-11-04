@@ -152,8 +152,11 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 	if err != nil {
 		return fail(err)
 	}
-	// applyResult replaces the members before it records the sync, so a
-	// failure inside it is not recorded over them with the old item count.
+	if err := store.ReplaceCollectionItems(ctx, collection.ID, members); err != nil {
+		return fail(err)
+	}
+	// The members are replaced, so a failure recording the sync is not
+	// recorded over them with the old item count.
 	result, updated, err := s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
 	if err == nil {
 		s.refreshCollage(userID, store, updated, owner)
@@ -447,9 +450,6 @@ func (s *Service) applyResult(
 	scanned int,
 	unmatched int,
 ) (*SyncResult, *userstore.Collection, error) {
-	if err := store.ReplaceCollectionItems(ctx, collection.ID, matched); err != nil {
-		return nil, nil, err
-	}
 	completedAt := time.Now().UTC()
 
 	status := "success"
