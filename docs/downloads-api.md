@@ -1094,7 +1094,8 @@ do not keep one for the next sync.
 To pick up changes from other devices after reconnecting, read the listing
 without `status` or `library_id` from the first page (no `cursor`) until
 `page.has_more` is false. Do not stop early at entries older than the last sync:
-`updated_at` can be a device's clamped event time, so a late offline flush from
+`updated_at` is the event time the device reported (replaced with server time
+only when it is more than two minutes ahead), so a late offline flush from
 another device can sort behind that point. The listing is live, not a snapshot:
 a row another device writes while you page can sort ahead of the cursor and be
 missing from that pass, so a row absent from one read is not proof that it was
