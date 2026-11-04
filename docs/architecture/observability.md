@@ -151,18 +151,19 @@ that already set `component` via `.With(...)` are left as-is.
 message) but **cannot** enforce that a `component` attribute is present. That convention
 rests on this doc, the canonical list below, and review.
 
-Canonical component values (first path segment under `internal/`; `app` for `cmd/silo`):
+Canonical component values (usually the first path segment under `internal/`; `app` for `cmd/silo`):
 
 `access`, `activitylog`, `adminjob`, `ai`, `api`, `apiv2`, `app`, `audiobooks`, `auth`,
-`autoscan`, `catalog`, `chapterthumbs`, `config`, `dashmetrics`, `database`, `diagnostics`,
-`downloads`, `ebooks`, `extrastills`, `historyimport`, `jellycompat`, `libraryingest`,
-`librarymonitor`, `logstream`, `manga`, `metadata`, `netadmin`, `nodeauth`, `nodeconfig`,
-`nodemetrics`, `nodepool`, `noderecipe`, `noderouting`, `nodesessions`, `notifications`,
-`opslog`, `passwordreset`, `playback`, `plugins`, `policy`, `proxy`, `ratelimit`,
-`recommendations`, `requests`, `s3client`, `scanner`, `scanqueue`, `sections`,
-`settingsresolve`, `subtitles`, `taskmanager`, `tcpcongestion`, `telemetry`, `themedelivery`,
-`tonemap`, `transcodenode`, `trickplay`, `tuning`, `userdb`, `watchlist`, `watchsync`,
-`watchtogether`, `webhooksync`, `worker`.
+`autoscan`, `boxsets`, `catalog`, `chapterthumbs`, `collections`, `config`, `dashmetrics`,
+`database`, `diagnostics`, `downloads`, `ebooks`, `extrastills`, `historyimport`,
+`jellycompat`, `keptsub`, `libraryingest`, `librarymonitor`, `logstream`, `manga`, `metadata`,
+`netadmin`, `nodeauth`, `nodeconfig`, `nodemetrics`, `nodepool`, `noderecipe`, `noderouting`,
+`nodesessions`, `notifications`, `opslog`, `passwordreset`, `playback`, `plugins`, `policy`,
+`progresssync`, `proxy`, `ratelimit`, `recommendations`, `requests`, `s3client`, `scanner`,
+`scanqueue`, `sections`, `settingsresolve`, `stream_telemetry`, `subsync`, `subtitles`,
+`taskmanager`, `tcpcongestion`, `telemetry`, `themedelivery`, `tonemap`, `transcodenode`,
+`trickplay`, `tuning`, `uploads`, `userdb`, `watchlist`, `watchsync`, `watchtogether`,
+`webhooksync`, `worker`.
 
 Two API-handler surfaces predate this rule and log a domain component instead of `api`:
 `settings` (`internal/api/handlers/settings_values_http.go`) and `webhook_sync`

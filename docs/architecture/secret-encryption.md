@@ -23,9 +23,10 @@ does not expose the secrets.
   binding fails authentication. The row key is usually the primary key; a few
   columns bind a business key instead: watch-sync tokens and device codes bind
   `provider:user_id:profile_id`, plugin runtime configuration binds
-  `installation:config_key`, and history-import server-list entries bind the
-  session, entry index and server ID. Notification webhook, server channel and
-  email-verification outbox ciphertexts use their own prefixes
+  `installation:config_key`, history-import Connect server-list entries bind the
+  session, entry index and `server.ID`, and Plex server-list entries bind the
+  session, entry index and `ClientIdentifier`. Notification webhook, server channel
+  and email-verification outbox ciphertexts use their own prefixes
   (`notification_webhook:<id>:…`, `server_channel:<id>:…`,
   `notification-email-verification:<id>`). Changing a bound key in SQL makes its
   value undecryptable.
