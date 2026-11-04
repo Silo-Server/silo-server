@@ -1667,8 +1667,8 @@ The operation answers
 `watched_at` instant, `duration_seconds`, `completed`, `source`); `removeHistoryEntries` takes a
 closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
 integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
-per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
-optional as v1 does (narrowed by the household rule under
+per-item error) and answers `ProgressSyncBatchResult` (per-item `items` plus a bulk `summary`);
+`getWatchState` keeps the profile header optional as v1 does (narrowed by the household rule under
 [Credential continuity](#credential-continuity)), takes `file_id` (string ID) and a strict `image_size`, renders file ids as
 string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
 `{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;

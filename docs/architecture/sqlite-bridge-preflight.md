@@ -33,7 +33,7 @@ messages, and unknown table names. Unknown tables are represented with a redacte
 label and block import even when empty. Integrity errors stop inspection. Missing
 tables, schema versions other than 22, and nonempty legacy session/download
 tables are blockers. The current SQLite user store (`schemaVersion` in
-`internal/userdb/migrate.go`, 36 today) is newer, so its backups are blocked too.
+`internal/userdb/migrate.go`) is well past 22, so its backups are blocked too.
 Old sources are never upgraded in place.
 
 The manifest covers the 29 persistent application tables of a schema 22 source.

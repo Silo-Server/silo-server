@@ -789,8 +789,10 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 - Seasons have no banner, thumb or extra backdrops (`seasonNN-fanart`,
   `seasonNN-banner`, `seasonNN-landscape` and their season-folder forms are not
   read).
-- NFO `<thumb aspect="banner|landscape|thumb|clearart|discart|disc|keyart">`
-  references are parsed but fill no slot (`nfoArtImageTypes`). A provider that
+- In movie and series NFOs, `<thumb aspect="banner|landscape|thumb|clearart|discart|disc|keyart">`
+  references are parsed but fill no item-art slot (`nfoArtImageTypes`). Episode
+  NFOs are the exception: every non-empty episode `<thumb>` is read as the
+  episode's still, whatever its aspect (`episodeArtRefs`). A provider that
   offers banners, thumbs, clear art or disc art
   returns `RemoteImage` entries of type `ImageBanner`, `ImageThumb`,
   `ImageClearArt` or `ImageDisc` (plugin image kinds `banner`, `thumb`,
