@@ -11,7 +11,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -75,6 +77,74 @@ func TestCompatWorkerHLSRouteAllowedHonorsHardExecutionBoundaries(t *testing.T) 
 			}
 			if got := compatWorkerHLSRouteAllowed(test.workload, policy); got != test.want {
 				t.Fatalf("compatWorkerHLSRouteAllowed() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+// A progressive remux is the last resort, offered only when a source that
+// needs a remux has no TranscodingUrl (#2645).
+func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID: 1, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}},
+	}
+	profile := DeviceProfile{
+		DirectPlayProfiles: []DirectPlayProfile{{
+			Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac",
+		}},
+		TranscodingProfiles: []TranscodingProfile{{
+			Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac",
+		}},
+	}
+
+	tests := []struct {
+		name             string
+		execution        config.PlaybackExecutionPreference
+		egress           config.PlaybackEgressPreference
+		wantDirectStream bool
+	}{
+		{
+			name:      "API execution with API egress keeps progressive remux",
+			execution: config.PlaybackExecutionAPIOnly, egress: config.PlaybackEgressAPIOnly,
+			wantDirectStream: true,
+		},
+		{
+			name:      "transcode preference does not rewrite the requested Jellyfin transport",
+			execution: config.PlaybackExecutionPreferTranscode, egress: config.PlaybackEgressPreferProxy,
+			wantDirectStream: true,
+		},
+		{
+			name:      "worker execution with API egress offers no progressive remux",
+			execution: config.PlaybackExecutionWorkerOnly, egress: config.PlaybackEgressAPIOnly,
+			wantDirectStream: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := config.DefaultPlaybackRoutingPolicy()
+			policy.RemuxExecution = test.execution
+			policy.RemuxEgress = test.egress
+			handler := &PlaybackHandler{
+				codec:     NewResourceIDCodec(),
+				JWTSecret: "test-secret",
+				PlaybackConfig: func() config.PlaybackConfig {
+					return config.PlaybackConfig{Routing: policy}
+				},
+			}
+
+			source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableTranscoding: new(false)}, true)
+			if source.SupportsDirectPlay {
+				t.Fatal("SupportsDirectPlay = true, want false for MKV source and MP4 profile")
+			}
+			if source.SupportsDirectStream != test.wantDirectStream {
+				t.Fatalf("SupportsDirectStream = %v, want %v", source.SupportsDirectStream, test.wantDirectStream)
+			}
+
+			dto := handler.mediaSourceDTO("item", "play", "token", source)
+			if (dto.DirectStreamURL != "") != test.wantDirectStream {
+				t.Fatalf("DirectStreamURL = %q, advertised direct stream = %v", dto.DirectStreamURL, test.wantDirectStream)
 			}
 		})
 	}

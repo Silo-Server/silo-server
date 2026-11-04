@@ -224,8 +224,8 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 // Jellyfin Android TV retries a failed play with direct play off, then with
 // direct stream off too. It plays the TranscodingUrl whenever DirectStream is
 // set, and in that mode restarts playback forever trying to select the HLS
-// audio track (#2645). As in Jellyfin 10.11, DirectStream comes only with
-// DirectPlay, and each retry keeps the video a copy.
+// audio track (#2645). As in Jellyfin 10.11, DirectStream comes with
+// DirectPlay, and a retry keeps the video a copy when that can help.
 func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 	version := catalog.FileVersion{FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 10000,
 		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}},
@@ -236,27 +236,42 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
 	}
 	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
+	stereoAAC := version
+	stereoAAC.CodecAudio = "aac"
+	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
 	for _, tc := range []struct {
 		name                     string
+		version                  catalog.FileVersion
 		directPlay, directStream bool
+		noDirectPlayProfiles     bool
+		wantVideoCopy            bool
 		wantAudioEncode          bool
 	}{
-		{name: "direct play also reports direct stream", directPlay: true, directStream: true},
-		{name: "first retry copies video and audio", directStream: true},
-		{name: "second retry copies video and encodes audio", wantAudioEncode: true},
+		{name: "direct play also reports direct stream", version: version, directPlay: true, directStream: true},
+		{name: "first retry copies video and audio", version: version, directStream: true, wantVideoCopy: true},
+		{name: "second retry copies video and encodes audio", version: version, wantVideoCopy: true, wantAudioEncode: true},
+		// Encoding AAC stereo to AAC stereo would repeat the stream that failed.
+		{name: "second retry encodes video when the audio would not change", version: stereoAAC},
+		// Without direct play profiles no audio counts as supported, which
+		// must not turn an unchanged AAC track into a reason to copy.
+		{name: "profile without direct play still encodes video for unchanged audio", version: stereoAAC, noDirectPlayProfiles: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
-			source := h.buildPlaybackSource("item", "play", version, profile, req, true)
+			profile := profile
+			if tc.noDirectPlayProfiles {
+				profile.DirectPlayProfiles = nil
+			}
+			source := h.buildPlaybackSource("item", "play", tc.version, profile, req, true)
 			if source.SupportsDirectPlay != tc.directPlay || source.SupportsDirectStream != tc.directPlay {
 				t.Fatalf("direct play=%v direct stream=%v, want both %v", source.SupportsDirectPlay, source.SupportsDirectStream, tc.directPlay)
 			}
 			if tc.directPlay {
 				return
 			}
-			if !source.SupportsTranscoding || !compatHLSCopiesVideo(source) || source.TranscodeAudio != tc.wantAudioEncode {
-				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want a video copy with audio encode=%v",
-					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantAudioEncode)
+			if !source.SupportsTranscoding || compatHLSCopiesVideo(source) != tc.wantVideoCopy || source.TranscodeAudio != tc.wantAudioEncode {
+				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want copies video=%v audio encode=%v",
+					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
 			}
 			dto := h.mediaSourceDTO("item", "play", "token", source)
 			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || dto.DefaultAudioStreamIndex == nil {
@@ -553,6 +568,7 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8000,
 		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
+	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
 	for _, tc := range []struct{ property, value string }{
 		{"Width", "1280"}, {"AudioChannels", "2"},
 	} {
@@ -565,12 +581,17 @@ func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 			if profile.SupportsDirectStream(version) || profile.SupportsVideoCodecForDirectStream(version) || profile.SupportsAudioCodecForDirectStream(version) {
 				t.Fatal("progressive MP4 ignored output restriction")
 			}
+			source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableDirectPlay: new(false), EnableTranscoding: new(false)}, true)
+			if source.SupportsDirectStream || source.SupportsTranscoding {
+				t.Fatalf("advertised unsupported remux: %+v", source)
+			}
 			profile.ContainerProfiles[0].Container = "mkv"
 			if profile.SupportsDirectPlay(version) {
 				t.Fatal("original MKV ignored source restriction")
 			}
-			if !profile.SupportsDirectStream(version) {
-				t.Fatal("MKV restriction leaked into progressive MP4")
+			source = handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableDirectPlay: new(false), EnableTranscoding: new(false)}, true)
+			if !source.SupportsDirectStream || source.HLSRemux {
+				t.Fatalf("MKV restriction leaked into progressive MP4: %+v", source)
 			}
 		})
 	}
