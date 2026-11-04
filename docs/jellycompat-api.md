@@ -334,7 +334,10 @@ As in Jellyfin 10.11, `SupportsDirectStream` is reported only together with
 `TranscodingUrl` as an HLS video copy, never as a direct stream: Jellyfin
 Android TV plays the `TranscodingUrl` whenever `SupportsDirectStream` is set,
 and in that mode cannot map the HLS audio track to a stream index, so it
-restarts playback endlessly to "switch" audio. Direct play evaluates container
+restarts playback endlessly to "switch" audio. `EnableDirectStream=false` rules
+out serving the source streams unchanged but not copying video, which only
+`AllowVideoStreamCopy=false` forbids: such a request gets a video copy with the
+audio encoded when the profile accepts it. Direct play evaluates container
 constraints against the original source container.
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.

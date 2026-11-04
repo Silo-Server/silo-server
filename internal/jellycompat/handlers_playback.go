@@ -2695,13 +2695,17 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	remuxAudioEncodeFMP4 := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
 	remuxAudioEncodeTS := !remuxAudioEncodeFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, "") &&
 		profile.supportsHLSRemuxWithAudioTranscodeIn(version, selectedAudioIndex, targetAudioChannels, compatContainerTS)
+	// EnableDirectStream=false rules out serving the source's streams as they
+	// are, not copying video: as in Jellyfin, AllowVideoStreamCopy governs
+	// that. Jellyfin Android TV sends it on its second retry after a failed
+	// play; the audio is the usual failure, so it is encoded and the video
+	// stays a copy instead of a full encode.
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
-		(!allowAudioCopy || !audioSupported) &&
+		(!allowAudioCopy || !audioSupported || !enableDirectStream) &&
 		(remuxAudioEncodeFMP4 || remuxAudioEncodeTS)
 	transcodeAudio := !hlsAudioCopy &&
-		enableDirectStream &&
 		allowVideoCopy &&
 		hlsAudioTranscode
 	hlsRemux := hlsAudioCopy || transcodeAudio

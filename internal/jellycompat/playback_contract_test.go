@@ -221,11 +221,12 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	}
 }
 
-// Jellyfin Android TV plays the TranscodingUrl whenever DirectStream is set,
-// and in that mode restarts playback forever trying to select the HLS audio
-// track (#2645). As in Jellyfin 10.11, DirectStream comes only with
-// DirectPlay, and a source that needs a remux is offered as an HLS copy.
-func TestDirectStreamOnlyAccompaniesDirectPlay(t *testing.T) {
+// Jellyfin Android TV retries a failed play with direct play off, then with
+// direct stream off too. It plays the TranscodingUrl whenever DirectStream is
+// set, and in that mode restarts playback forever trying to select the HLS
+// audio track (#2645). As in Jellyfin 10.11, DirectStream comes only with
+// DirectPlay, and each retry keeps the video a copy.
+func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 	version := catalog.FileVersion{FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 10000,
 		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}},
 		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}}
@@ -236,15 +237,16 @@ func TestDirectStreamOnlyAccompaniesDirectPlay(t *testing.T) {
 	}
 	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
 	for _, tc := range []struct {
-		name       string
-		directPlay bool
+		name                     string
+		directPlay, directStream bool
+		wantAudioEncode          bool
 	}{
-		{"direct play also reports direct stream", true},
-		// The client's retry after a failed direct play.
-		{"a remux is an HLS copy, not a direct stream", false},
+		{name: "direct play also reports direct stream", directPlay: true, directStream: true},
+		{name: "first retry copies video and audio", directStream: true},
+		{name: "second retry copies video and encodes audio", wantAudioEncode: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay)}
+			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
 			source := h.buildPlaybackSource("item", "play", version, profile, req, true)
 			if source.SupportsDirectPlay != tc.directPlay || source.SupportsDirectStream != tc.directPlay {
 				t.Fatalf("direct play=%v direct stream=%v, want both %v", source.SupportsDirectPlay, source.SupportsDirectStream, tc.directPlay)
@@ -252,8 +254,9 @@ func TestDirectStreamOnlyAccompaniesDirectPlay(t *testing.T) {
 			if tc.directPlay {
 				return
 			}
-			if !source.SupportsTranscoding || !compatHLSCopiesVideo(source) {
-				t.Fatalf("transcoding=%v copies video=%v, want an HLS video copy", source.SupportsTranscoding, compatHLSCopiesVideo(source))
+			if !source.SupportsTranscoding || !compatHLSCopiesVideo(source) || source.TranscodeAudio != tc.wantAudioEncode {
+				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want a video copy with audio encode=%v",
+					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantAudioEncode)
 			}
 			dto := h.mediaSourceDTO("item", "play", "token", source)
 			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || dto.DefaultAudioStreamIndex == nil {
