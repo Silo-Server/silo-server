@@ -1,9 +1,10 @@
 # Backups
 
 `internal/backup` takes whole-server backups: a `pg_dump` of the database plus
-the blobs that cannot be fetched again. It lists, rotates, and deletes them,
-and the `silo backup` command restores one in full. The endpoints are in
-[backups-api.md](../backups-api.md).
+the blobs that cannot be fetched again, and a restore set of versioned
+sections for selective restore. It lists, rotates, and deletes them; the
+`silo backup` command restores one in full, and the admin API restores chosen
+parts of one (see [Selective restore](#selective-restore)). The endpoints are in [backups-api.md](../backups-api.md).
 
 A backup is a recovery point for this server's own data. It does not include
 media files (Silo never manages them, see [non-goals](../non-goals.md)),
@@ -23,6 +24,7 @@ Each backup is one folder at the destination:
 ```
 backups/<server-id>/<UTC time>-<kind>/
   db.dump          pg_dump custom format, zstd level 3
+  restore-set.tar  sections for selective restore
   blobs.tar        assets/<key> and operational/<key> entries
   manifest.json    written last
 ```
@@ -33,7 +35,7 @@ backups/<server-id>/<UTC time>-<kind>/
 - The folder name is the backup id: `20261031T040000.123Z-nightly`. The time
   is the start of the run in UTC, to the millisecond; ids written to the
   second (`20261031T040000Z-nightly`) still parse. Kinds are `nightly`,
-  and `manual`. Names that do not parse,
+  `manual`, and `before-restore`. Names that do not parse,
   such as a full restore's `<time>-overwritten-blobs`, are never treated as
   backups.
 - **A folder is never reused.** A backup reserves its id under the subsystem
@@ -76,11 +78,13 @@ goose version, ascending, without goose's version 0; it must end at the goose
 version), PostgreSQL server version, `pg_dump`
 version, the tables whose data was excluded, each object's size and the
 SHA-256 of its stored bytes, the `SECRET_KEY` check value, how the table of contents was checked, the blob count and bytes,
-`missing_blobs`, and the core table inventory. The objects are exactly
-`db.dump` and `blobs.tar`. A manifest is at most 16 MiB, the most a reader
-reads: `missing_blobs` lists at most 10,000 entries, with
-`missing_blobs_total` counting them all when there are more, and a manifest
-that would still be larger is not written.
+`missing_blobs`, the core table inventory, and, when the backup has a restore
+set, `restore_set`: its format version and the item count of each section.
+The objects are exactly `db.dump` and `blobs.tar`, plus `restore-set.tar`
+when `restore_set` is present.
+A manifest is at most 16 MiB, the most a reader reads: `missing_blobs` lists
+at most 10,000 entries, with `missing_blobs_total` counting them all when
+there are more, and a manifest that would still be larger is not written.
 
 The inventory covers `users`, `user_profiles`, `media_folders`, `media_items`,
 `media_files`, `server_settings`, `plugin_installations`,
@@ -129,8 +133,10 @@ path (every Silo that writes manifests signs them):
   and grants, not arbitrary SQL in other entries). So before loading such a
   dump, every mode (verify's scratch database, `--into`, and a replace's
   `DATABASE_URL` role) checks the role and refuses a superuser unless the
-  operator also passes `--accept-superuser` (`checkLoadRole`). A selective restore needs the admin's confirmation
-  (`accept_unauthenticated`), and the listing shows it as `unverified`.
+  operator also passes `--accept-superuser` (`checkLoadRole`). A selective
+  restore needs the admin's confirmation (`accept_unauthenticated`) before
+  it reads anything inside the restore set, its preview included, and the
+  listing shows it as `unverified`.
 - A manifest a destination read must also name the folder and server it was
   read from. A folder whose manifest names this key and does not verify is
   listed as `unverified` with no details, cannot be restored or downloaded,
@@ -172,8 +178,12 @@ path (every Silo that writes manifests signs them):
    and the upload continues. If the piped check fails, the check reads the
    stored object back. The manifest records which happened (`pipe` or
    `read_back`).
-5. Close the snapshot transaction and copy the blobs into `blobs.tar`.
-6. Write the manifest, then rotate and sweep. A failure in any earlier step
+5. Write `restore-set.tar` (see
+   [Restore set](#restore-set)): its documents and plugin archives come from
+   the same snapshot transaction, then the snapshot closes and the section
+   blobs are copied, as blobs.tar's are.
+6. Copy the blobs into `blobs.tar`.
+7. Write the manifest, then rotate and sweep. A failure in any earlier step
    leaves an incomplete folder and deletes nothing.
 
 Missing fingerprints are safe to leave out: existing markers live elsewhere,
@@ -273,9 +283,10 @@ One cluster-wide lock covers the subsystem: a PostgreSQL session advisory lock
 (`backup.SubsystemLockKey`) held on a connection of its own, opened with the
 application pool's settings but outside the pool. Work under the lock takes
 pool connections (the snapshot transaction, settings reads), so a lock held
-on a pool connection would deadlock a pool of one. Every operation that
-writes or deletes backups holds it: the nightly and manual backup, rotation,
-deletion, and the sweep.
+on a pool connection would deadlock a pool of one. Every
+operation that writes or deletes backups, or restores from one, holds it: the
+nightly and manual backup, rotation, deletion, the sweep, and the restore
+job.
 
 - Rotation and the sweep run inside the backup that holds the lock.
 - "Back up now" takes the lock in the request and hands it to the task run it
@@ -296,7 +307,7 @@ deletion, and the sweep.
   copy. A failed nightly records no slot; manual and
   before-upgrade backups neither record nor check one.
 - A held lock's session is checked every 10 seconds. If it ends, the work
-  holding the lock is canceled (`pg_dump`), and the
+  holding the lock is canceled (`pg_dump`, a restore), and the
   incomplete folder it leaves is the sweep's.
 - Whether the lock is held is read from `pg_locks`, never by taking it: a read
   that took the lock even briefly could make a nightly run skip.
@@ -305,8 +316,8 @@ deletion, and the sweep.
 
 The lock holder publishes what it is doing in the one-row `backup_status`
 table, so any API server can report a run another server started: the active
-operation (`backup` or `delete`), its backup id, start time, progress and
-message, and, when a backup run ends, its id, kind, outcome, and error, and
+operation (`backup`, `delete`, or `restore`, whose backup id is its source),
+its backup id, start time, progress and message, and, when a backup run ends, its id, kind, outcome, and error, and
 for a run that succeeded its finish time as `last_success_at`, which a
 failed run after it leaves alone. Lock occupancy alone says nothing about
 which operation holds it.
@@ -329,6 +340,10 @@ which operation holds it.
   the row as the latest run, `interrupted`, with its id, kind, and start
   time, in the same statement.
 
+A restore holds the subsystem lock for its
+whole run and takes its before-restore backup by calling the backup function
+directly, never by acquiring the lock again.
+
 ## Scheduling and settings
 
 The `backup` task runs daily at `backup.time` (server local time) and on
@@ -345,6 +360,8 @@ status, size, duration, missing blobs, and what rotation removed.
 | `backup.keep` | `7` | 1–60 |
 | `backup.include_intro_fingerprints` | `false` | boolean |
 | `backup.include_subtitles` | `true` | boolean |
+
+Every `backup.*` key is server-specific: selective restore never offers one.
 
 An absent or invalid value takes its default, but a setting that cannot be
 read fails the backup or the listing, and skips rotation with a warning. It
@@ -365,9 +382,572 @@ away copies the admin meant to keep.
   one this server can restore without extra flags. An unverified copy never
   stands in for it. The listing sends `clean` per backup, and the page
   predicts rotation from that instead of deciding it again.
-- Rotation manages only the current server id's prefix.
-- Deleting a backup takes the same lock.
+- `before-restore` copies are deleted after 7 days and do not count toward
+  `backup.keep`.
+- Rotation manages only the current server id's prefix, and never deletes a backup that is the source of a queued or
+  running restore. A running restore holds the subsystem lock for its whole
+  run, so no other rotation, sweep, or delete runs, and the rotation of its
+  own before-restore backup is told to keep the source. A queued restore is
+  read from the job queue under the lock rotation holds, the lock restores
+  are queued under ([The restore job](#the-restore-job)); the service reads
+  it from `admin_jobs` itself, wired when it is built, so nothing that
+  starts before the API router can rotate without it. When the queue cannot
+  be read, rotation deletes nothing and warns.
+- Deleting a backup takes the same lock and refuses (409) while a queued or
+  running restore reads it.
 - A delete that fails leaves a warning in the task result.
+
+## Restore set
+
+`restore-set.tar` duplicates a small part of the database as versioned JSON
+so that selective restore never loads the dump, works across Silo versions,
+and works on another server.
+
+```
+restore-set.json                  index; always the first entry
+libraries.json
+plugins/<plugin-id>/plugin.json
+plugins/<plugin-id>/archive.bin
+settings.json
+collections.json
+home-sections.json                version 3 and later
+blobs/<object key>
+```
+
+`restore-set.json` has `format: "silo-restore-set"`, `version` (3: version 3
+added the home sections section and template collections in
+`collections.json`), the source
+server id and name, Silo version, creation time, `SECRET_KEY` check value, and
+a section index: for each section its item count, each of its files with
+size and SHA-256, and the blob keys its documents reference. Plugin archive
+digests are computed in the snapshot (`sha256(archive_bytes)`), so the index
+is written before the archives; blob digests are not indexed, because blobs
+are copied after the snapshot closes. The manifest's checksum of the whole
+`restore-set.tar` is the restore set's digest, which a preview returns and a
+restore request must carry.
+
+Sections are registered in one table in `internal/backup/restoreset.go`, in
+the order a restore applies them: libraries, plugins, settings, collections,
+home sections. Collections come before the home sections that name them.
+Each names its document (or per-item
+files) and the blob prefixes it may carry, which are disjoint across
+sections, and the first format version that may hold it. A reader refuses a
+section, and a document field, it does not know, so adding either is a new
+format version: an older reader refuses a newer set as "from a newer Silo"
+instead of failing on what it does not know, and a set that claims an older
+version while holding something added later (`home_sections` or template
+collections before version 3) is refused. Readers
+accept versions 1 to 3; version 3 is always written.
+
+| Section | Holds | Blob prefixes |
+|---|---|---|
+| `libraries` | `media_folders` rows with their paths and per-library options, and the poster key | `library-posters/` |
+| `plugins` | per installation: plugin id, version, enabled state, installation id, the stored archive (`plugin_archives`, a record only: never installed), and `plugin_runtime_configs` rows as stored | none |
+| `settings` | `server_settings` rows the restore table offers, as stored | none |
+| `collections` | manually managed admin collections with their library scope, group, and items; template-bundle collections (see below); uploaded item and season artwork (`upload://` sources); branding assets | `collection-images/`, `local/`, `branding/` |
+| `home_sections` | every admin `page_sections` row of the home page and each library page as it is now, and the collection a section manages | none |
+
+Encrypted values stay ciphertext under their source AAD: settings under
+`server_settings:<key>`, plugin configuration under the source installation
+id. Server-specific settings are never written into a restore set.
+
+What a restore set leaves out on purpose:
+
+- A template-bundle collection (`management_mode` `template_bundle`) carries
+  no items and no template definition. The template catalog is code
+  (`internal/collections/templates`), so the collections are the only record
+  of which Starter packs were applied to which library: each carries its
+  management key (`<bundle>:<template>:library:<library id>`), bundle and
+  template ids, library scope and group slugs, and the fields an admin can
+  change afterwards (title, description, visibility, featured, sort order,
+  item sort, source, sync schedule, and a poster or backdrop the admin set,
+  with an upload's blob; a template poster or a generated collage is not
+  carried). Its items come back from the source by syncing.
+- A collection a section manages (`management_mode` `section`) travels in
+  the home sections section with its section, items included, and without
+  uploaded images, which its collage replaces.
+- Page section revisions (`page_section_revisions`,
+  `page_section_scope_revisions`) are not carried: they are concurrency
+  witnesses, and writing a section advances them through their triggers.
+- Collection poster variants (`library_collection_poster_variants`) are not
+  restored: they are per-viewer collages, regenerated on read, and backups do
+  not carry their files.
+- A library's metadata provider chain is not restored. A restored library
+  gets the default chain, as a library created in the editor does.
+- Builtin plugin rows and `plugin_instance_state` are never included.
+
+**Restore sets are untrusted input**: something other than this server can
+write to the destination. The reader (`ReadRestoreSet`) checks the whole archive
+before anything is applied: regular files only (links, directories, and
+devices are refused); canonical relative paths with no empty, `.`, or `..`
+segment, backslash, or NUL; no duplicate paths, sections, or item ids;
+`restore-set.json` first; every other file listed in the index with its size
+and digest, and every listed file present; blobs only under their section's
+prefixes and only keys the section references, or variants stored beside a
+referenced artwork original (in its directory and of its revision, or, for
+the legacy names the writer used, `original.<ext>` and `w<width>.<ext>`,
+both without one; at most 16 per original); documents that decode strictly
+(unknown fields and trailing data refused) and match the index counts; and
+limits on entries (200,000), document size (64 MiB for the collections and
+account documents, 32 MiB for the index, 8 MiB for `libraries.json` and
+`home-sections.json`, 4 MiB for `settings.json` and each `plugin.json`), the
+documents one read holds together (256 MiB, checked from the index's listed
+sizes before any document is read), plugin archive and blob size (256 MiB),
+total bytes (32 GiB), and JSON nesting (32). What a document decodes to is
+bounded too, before it is decoded: `internal/backup/jsonsize` walks the
+document beside its Go type and adds up what `encoding/json` would allocate
+(each array element at its type's size, doubled for slice growth; map
+entries, pointers, strings, raw values). A document is refused when that is
+over 8 times its size plus 64 KiB, when the set's documents together would
+decode to over 256 MiB, or when one array or object holds over 1,000,000
+elements. A short document of empty elements (`[{},{},…]`) would otherwise
+decode to a whole struct per three bytes; documents Silo writes decode to
+about their size. Every entry a restore writes (a setting, a library, a
+plugin configuration, a collection, a template collection, an item artwork,
+a branding asset, a page section, and each account's profiles) is left out
+as unusable when it encodes to more than 1 MiB, the v2 API's request body
+cap (`maxRestoredEntryBytes`), and a stored thumbhash is the one computed
+from the restored image (item artwork) or one of thumbhash form, never
+anything else. A selective restore also writes at most 16 MiB of collection metadata
+(every field but the item list) in all and 8 MiB into one library, counted
+over the collections, template collections, and section-managed collections
+it commits; the rest are left out with `over_restore_budget`, since a
+library's collections are listed whole. The collection editors have no
+per-field limits besides the request body cap, so a restore applies none of
+its own to single fields. A set holds at most 5,000 settings, 1,000 libraries, 500 plugins, 20,000
+collections and as many template collections, 50,000 item artwork entries,
+64 branding assets, and 10,000 page sections, valid or not; a set beyond
+one of them is refused when read, so a preview lists a bounded number of
+items. A set's collections list at most 1,000,000 items together. The preview
+cache charges each set what it holds once read: the bytes read, jsonsize's
+estimate of its decoded documents, and its blob index; and it keeps at most
+one set of a backup this server cannot verify, dropping the older one.
+Restored rate limits are written through the rate-limit configuration's
+own checks (`RateLimitHandler.ApplyRateLimitSettingsInTx`), every other
+setting through the admin settings batch, in the item's transaction. A
+restore job claimed while the request that queued it still holds the
+subsystem lock waits up to 10 seconds for it (`lockWithin`) before it
+gives up. A set lists at most the first 100 entries of a section it
+leaves out, and one more entry counting the rest, so a preview of a set of
+malformed entries stays small. A plugin archive is checked against its
+digest and discarded, never installed ([Plugins](#plugins)). Readers accept
+every format version up to theirs and refuse a newer one with "This backup is
+from a newer Silo. Upgrade this server first."
+
+**Nothing inside a restore set is decoded before it is verified.** The
+manifest records the restore set's digest and the digest of its index
+(`restore_set.index_sha256`), both covered by the manifest's `mac`. For an
+authenticated manifest the reader checks the index against its digest
+before decoding it, and the whole archive against its digest
+(`ReadOptions.Verify`) before decoding any document; until then documents
+are held as bytes, each checked against its index digest. A backup whose
+manifest cannot be authenticated, or that records no index digest, is read
+only after the admin confirms (`accept_unauthenticated`), its preview
+included. Previews of one archive share a read (`restoreSetCache`); the read
+stops when every preview waiting on it has gone.
+
+A restored library, admin collection, template collection, or section
+meets the editor's own checks, run through restore targets so they are the
+editor's code: the library create command's (`CheckRestoredLibrary`), the
+admin collection create command's (`CheckRestoredCollection`), and the
+section editor's (`CheckRestoredSection`). One the editor would refuse is not
+offered, with its message. No entry may encode to more than the v2 API's
+request body cap (1 MiB; a collection's item list is not counted), as no
+editor request could write more for one.
+
+Any of those failures refuses the whole set. An entry whose own values no
+restore could write is left out instead, and the rest stays readable
+(`RestoreSet.Unusable`): a setting key that is not one, a library without an
+id, name, type, or clean absolute folders, a collection, template
+collection, or section with no valid id, title, scope, type, or JSON, a
+section carrying a collection its configuration does not name, item artwork
+that does not say what it is, a plugin whose configuration keys repeat or
+whose values are not JSON, and a branding entry that is not for a branding
+asset setting (`branding.AssetSettingKeys`) or whose reference is not one
+file name naming its own blob (a branding entry is written as a setting).
+The preview lists each as an unchoosable item with reason `unreadable`; an
+id listed twice still refuses the set.
+
+A referenced blob absent from the archive was missing when the backup was
+taken; the preview and the report list it with the item.
+
+Previews of a backup share one validated copy of its restore set, keyed by
+the archive's SHA-256 from the manifest (at most 4 sets and 256 MiB of
+documents and blob keys, least recently used evicted), and concurrent
+previews of the same archive read it once. Only the parsed documents and
+index are kept, never blobs or archives; comparisons with this server run on
+every request. Applying a restore never uses the cache: the job reads and
+verifies the whole archive again.
+
+## Selective restore
+
+### Settings
+
+The restore table (`internal/backup/restore_settings.go`) is an allowlist,
+grouped by the admin page that edits each key: a key or prefix with its class.
+
+- **portable**: offered.
+- **external service**: offered, and flagged in review as connecting to an
+  outside service (mail, Discord, request integrations, metadata provider
+  credentials, AI keys).
+- **server-specific**: never offered: the server's identity and URLs, storage
+  identities, locations and credentials (`artwork.*`, `s3.*`, `storage.*`),
+  the search provider and its endpoint, key, and index, `database.*`,
+  `redis.*`, `userdb.*`, `ratelimit.*`, `auth.jwt_secret`, push relay and web
+  push keys, AI provider registry and bindings, local paths and hardware
+  (`playback.ffmpeg_path`, `playback.transcode_dir`, `playback.hw_*`),
+  `backup.*`, and state the server writes for itself under an admin prefix:
+  sweep and cleanup checkpoints, `recommendations.embedding_lock` (the
+  stored vectors' model and dimensions), and
+  `recommendations.policy_marked_generation`. The network-security and
+  sign-in trust toggles are server-specific too (`trustSettings`): whether
+  webhooks and media-server connections may reach private networks
+  (`*.allow_private_destinations`), `clientip.trusted_proxies`, sign-up,
+  self-service password reset, local password sign-in, and matching
+  external sign-ins by email. A backup is only as trustworthy as its
+  destination, and one of these turned on would let a profile reach this
+  server's private network or let someone sign in, so they stay as the live
+  server has them. `TestTrustSettingsAreServerSpecific` fails on a setting
+  named like one that is not in the list.
+- A restore never widens access. The access settings
+  (`accessSettings`, shared with the full restore: `access.unrated_content`, the Jellyfin and
+  Audiobookshelf sign-in switches, access and refresh token and Jellyfin
+  session lifetimes, and the identity provider's re-check interval and
+  outage policy) are offered, but a value that grants more than the live one
+  (`AccessSettingWider`; a value that does not parse counts as wider)
+  is never written: the preview marks it `kept_stricter` and the report says
+  the stricter current value was kept. The write compares again under the
+  settings lock (`accessUnchanged`, the admin settings write path's guard),
+  so a stricter value an admin saves after the plan is kept: the item starts
+  again from its read. `TestAccessSettingsAreComparedOnRestore` requires
+  every access setting to be offered, so none is compared in vain. Mail's
+  transport security (`email.smtp_security`) is compared the same way: a
+  restore never weakens it to `none`.
+- A service's address and its secrets restore together (`settingRoutes`:
+  the SMTP host and password, the AI, speech, subtitle-AI, and embedding
+  base URLs and their keys). When a restore changes the address, each secret
+  must come from the backup and decrypt here; otherwise the restore clears
+  it and turns the service off (`email.enabled`) instead of sending this
+  server's secret to the backup's address. The preview marks those settings
+  `cleared`, and the secrets are expected unchanged under the settings lock.
+- A backup this server cannot authenticate restores no setting that
+  connects to an outside service (class `external_service`) and no plugin
+  configuration, whatever the admin confirmed: the preview marks them
+  `unverified_backup`. Nor does it turn on work that sends library data to
+  outside services or runs for hours: a new library is created with AI
+  translation of metadata, trickplay previews, intro detection, chapter
+  thumbnails, and box sets off (`costlyLibraryOptions`); every collection
+  a restore creates (an admin collection, or one a section carries) keeps
+  its source but gets no sync schedule (`applier.createCollection`, which
+  every creation goes through); and a template collection keeps this
+  server's source and sync schedule; a seasonal section comes back
+  disabled (the seasonal task fetches the MDBList lists of every enabled
+  one). `unverifiedWorkFields` lists every such item field, with where the
+  restore leaves it inactive, and `TestUnverifiedWorkIsClassified` walks
+  it. The preview says what is left off; for a verified backup it names the
+  library options the restore turns on and the lists a seasonal section
+  fetches. One restore writes at most 50 seasonal sections, and a seasonal
+  task run fetches at most 200 lists, taking the rest in turn on later runs.
+- Every collection a restore or import writes from a document stores its
+  source as the editors build one (`collectionutil.CanonicalCollectionSource`):
+  each list URL the sync fetches (an MDBList collection's, a `tmdb_list`
+  source's) goes through its canonicalizer and is stored canonical; a
+  collection with any other URL is refused (`planner.checkCollection`).
+
+A key the table does not match is never offered. `TestEverySettingIsClassified`
+fails for any admin setting default, sensitive setting, or branding asset key
+the table leaves out. Branding asset references are restored with their blobs
+in the collections section, not as settings.
+
+Settings are chosen per page. A restore writes the page's differing values
+through the admin settings write path (the same normalization, validation,
+and `ServerSettingsMutationLock`) inside the item's transaction, then
+publishes `EventSettingsChanged` per key and flags keys where
+`config.RestartRequired` holds. An encrypted value is decrypted with this
+server's key and written through the same path, which re-encrypts it under
+the same key name, only when the backup's key check value matches; otherwise
+it is never offered and the preview says so.
+
+### Plugins
+
+A restore never installs or runs a plugin from a backup. Its archive is
+vouched for only by the backup's own checksums, and anyone who can write the
+backup destination could replace it with code that would run as the Silo
+user. A plugin missing here is not selectable (`needs_install`): the preview
+and the report tell the admin to install that plugin id and version from a
+plugin catalog, through the normal install path and its checks, and to
+restore it again, which then applies its settings. The archive stays in the
+restore set as a record of what was installed; the reader checks its digest
+and keeps no copy.
+
+A plugin installed here keeps its installation and enabled state. At the
+same version its configuration is decrypted under the source installation
+id, checked with the validation an admin save uses, and written re-encrypted
+under this installation's id
+(`plugin_runtime_configs:config_value:<installation id>:<key>`); at another
+version only values the installed version accepts are written ("settings
+only"). Configuration that cannot be decrypted, as with another
+`SECRET_KEY`, or that fails validation is left out, and the report says why.
+`plugin_instance_state` is never restored. Reconfiguring a plugin advances
+its runtime generation in the item's transaction, which replaces stale
+processes even when the event after commit is lost.
+
+### Libraries
+
+A backup library carries its settings, the box set settings among them, its
+folders, and its poster. It matches a library here only by an identical
+folder set. A
+library sharing a folder with another library here cannot be restored, nor
+can one with a folder this server cannot open (an absolute directory it
+can read, checked by opening it and reading at most one entry). A library
+entry lists at most 64 folders, none twice. A restored library gets a new id, reserved
+before its transaction so its poster is written under
+`library-posters/<new id>` first; after commit the library editor's
+follow-ups run: sections, provider chain, monitoring, and the first scan
+(see [Follow-ups](#follow-ups)).
+The job records a library map (backup id to local id), matched or restored,
+in its report; later sections remap through it.
+
+### Collections and artwork
+
+A collection maps every library in its scope through the library map; one
+whose library is not here is left out. It matches in its mapped library:
+the collection with its backup id, else by name. A name match skips a
+collection that has another backup collection's id or that another item of
+the same restore wrote, and a name two of the backup's collections share in
+that library is no identity, so a collection here with it makes both
+ambiguous. No match creates it (with its backup id when no collection here
+has it, else a new one; uploaded artwork copied under
+`collection-images/<id>/` first; a smart collection's library ids remapped
+and unmapped ones dropped), one adds the items it lacks, more than one is
+ambiguous. A re-run therefore finds each created collection by id, even
+when two share a name. In every library of its scope the collection goes back
+into the group its membership had there, matched by slug in the mapped
+library or created; only an ungrouped membership is changed, so a group an
+admin chose since stays, and a re-run repairs a membership left ungrouped. Items not in this catalog
+are left out. Uploaded item and season artwork is published for the same
+content id, whose blob key is the same on every server, as an upload does,
+with the images lock. Branding assets write their blob and then their setting
+through the admin settings write path. Item artwork or a branding asset this
+server already shows as the backup has it is the same only when its files
+(the artwork's stored family, the branding blob) are in the assets store,
+checked with `Stat`, eight at a time. When any is missing it differs
+(`files_missing_here`), and restoring it writes the missing files back with
+the exclusive create every restore uses and changes nothing else; the next
+preview finds it the same. Library posters and collection images of a library
+or collection matched here are not restored onto it, so they are not checked.
+
+### Template collections
+
+A template collection maps its library through the library map and matches
+by its remapped management key within it; two of the backup's that would
+share one key here (their libraries map to one library) are ambiguous. Its template must be in this
+server's catalog and suit the library; otherwise it cannot be chosen
+(`template_not_available`). A field counts as the admin's change only where
+the backup differs from the template's default as a bundle apply creates it
+here (`LibraryCollectionHandler.TemplateCollectionDefaults`, the input the
+bundle apply itself builds, so validation and defaults match), and a restore
+writes it only where the collection here differs from the backup; a field
+the admin changed here since, that the backup left at the default, stays.
+Visibility is written only as the backup had it, never wider. An existing
+collection takes those changes and goes back into its groups. A missing one
+is created in the item's transaction from that same input, under the mapped
+library's key and a free slug, with the changes applied and its groups, and
+records a `collection_created` follow-up: after commit the template's poster
+is stored when the collection still uses it, the collection syncs, and its
+next scheduled sync is set. A failed sync keeps the follow-up for the next
+restore run. A placeholder template that needs a source (the TMDB franchise
+template) is created and noted, and does not sync until one is set.
+
+### Home sections
+
+A page section maps its library page and every library its configuration
+names (`library_ids`, `filter_library_ids`, `filter_library_id`,
+`generated_library_id`, `library_id`) through the library map; one naming a
+library that is neither here nor restorable cannot be chosen. A collection
+it names is mapped through the collections section: a manual collection by
+name in its mapped library, a template collection by its remapped
+management key, and, on the server that took the backup, one the set does
+not carry by its id. One that is neither here nor in the backup cannot be
+chosen (`collection_not_mapped`); one only in the backup is required with it.
+A section matches by id: on the server that took the backup any section of
+the page with it, on another server one a restore created from it (same
+page and type). Otherwise it matches by scope, library, type, and title with
+exactly one candidate, skipping a section that has another backup section's
+id or that another item of the same restore wrote; more than one candidate
+is ambiguous, and so is any candidate when two of the backup's sections
+share that page, type, and title, since the title then identifies neither.
+So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
+(title, position, featured, item limit, enabled, configuration, and missing
+items of its managed collection), and a restore replaces its configuration
+as an admin save would. Only a collection the section manages stands for the
+carried one: a managed section pointed at an ordinary collection since the
+backup lists "collection replaced", whatever that collection holds, and the
+restore points it back at its managed collection (the one still here with
+its management key, or a new one). The key's section id and each
+`library:<id>` it names are this server's (`remapManagementKey`), and a
+collection here with that key is reused only when its libraries are the
+mapped ones (`collectionScopeIs`); otherwise a new one is created under a
+key of its own. A missing one is created, with its backup id when
+no section here has it. The
+section editor's checks (`SectionHandler.CheckRestoredSection`: type,
+scope, configuration, recipe) run first, the write locks the collections it
+names as every section writer does (`sections.WriteSectionInTx`), and a
+featured section stays the only featured one on its page. A managed
+collection is kept, adding the items it lacks, or created with the section,
+its management fields renamed to the section's id where they named the old
+one.
+
+### The restore job
+
+`POST /admin/backups/{id}/restore` queues a `backup_restore` admin job with
+the selection and the preview's digest; one restore can be queued or running
+at a time (a partial unique index). The request takes the subsystem lock
+(409 while another backup or restore holds it), checks the source and its
+digest again, creates the job, and releases the lock. Backup deletion and
+rotation check the queued restore's source under the same lock, so either
+they see the job or the job's check sees the source gone; a source can never disappear between the check and the queue.
+Whichever API server claims it:
+
+1. takes the subsystem lock and holds it for the whole run;
+2. reads the restore set and refuses it when its digest differs from the
+   request's;
+3. takes a `before-restore` backup by calling the backup function under the
+   same lock, and records its id; if that fails, nothing is restored;
+4. publishes `restore` as the active operation;
+5. applies the chosen items section by section. **Each item runs in its own
+   transaction that begins with `SELECT … FROM admin_jobs … FOR UPDATE`,
+   requiring status running and the worker's claim generation, holds that
+   lock through commit, and records the item's outcome in the same
+   transaction.** The outcome is a `backup_restore_items` row; the job's
+   result holds the counts, the library map, and the latest 20 outcomes, so
+   each item's write is the same size however many came before it. The full
+   list goes into the result once: when the restore returns, however it
+   ends, or when stale recovery marks it interrupted; the rows are then
+   removed. The package write paths take that transaction.
+   A failed item rolls back to a savepoint and is recorded as failed; the
+   restore continues. Events are published after each commit.
+6. honors cancellation between items, never inside one.
+
+Every item is matched again when it is applied, so a mapping that changed
+since the preview is left out and reported, and running the same restore
+twice reports what already committed as `unchanged`.
+
+**A stale restore is never requeued.** `RequeueStaleRunning` marks a
+`backup_restore` job whose worker stopped heartbeating failed with error
+`interrupted`, keeping the report of what committed. The stale updater waits
+on the row lock an item holds, so it cannot mark the job between an item's
+check and its commit, and a slow original worker's next item finds the job no
+longer running under its claim and writes nothing. An item's commit writes
+its heartbeat at `clock_timestamp()`, the commit's time: `NOW()` is the
+transaction's start, which an item longer than the stale window would leave
+already stale for the updater waiting behind it. Every heartbeat only moves
+forward (`GREATEST(heartbeat_at, clock_timestamp())`), so an ordinary
+heartbeat that waited on the row behind an item cannot write its older
+start over the item's commit. Running the same restore
+again is safe.
+
+### Blobs a restore writes
+
+A restore writes a blob only where no object is, with an exclusive create
+(`blobstore.CreateExclusive`): on a local store the synced temporary file is
+hard-linked into place, which fails when the name exists, and on S3 the
+upload carries `If-None-Match: *`. A concurrent upload of the same key on
+another server is therefore never overwritten. There is no check-then-write
+fallback, which a writer landing between the two could lose to: a bucket
+that rejects the conditional header, or a store without an exclusive create,
+answers `blobstore.ErrExclusiveUnsupported`, writes nothing, and the item
+fails with "this storage can't guarantee existing files are kept; restore
+this item manually" (`ErrBlobNotExclusive`); other items go on. Ordinary
+writes to such a bucket are unaffected. An object found at the key with the same bytes is left as it is; one
+with other bytes fails the item and is never replaced (`ErrBlobConflict`). Uploaded item artwork and branding keys
+are content-addressed revisions, and library posters and collection images
+are written under ids the restore just took, so a legitimate restore finds
+them absent or equal; an archive naming a live asset's key cannot replace
+it, whether or not the item's transaction later commits.
+
+A restored blob meets the checks an upload of its kind meets, before it
+reaches storage (`checkRestoredBlob`): a branding asset its kind's size limit,
+the type its extension serves, and the kind's processing
+(`branding.CheckStoredAsset`); any other image at most 10 MB, a JPEG, PNG, or
+WebP by its bytes, and a source `imageutil.CheckImage` accepts. A blob that
+fails fails its item with `ErrRestoredFileRefused`; other items go on.
+
+The job extracts only the blobs its selected items write (`selectedBlobs`):
+the exact keys the apply step reads (a library's poster, a branding asset,
+an item artwork's family, a collection's uploaded poster and backdrop with
+their families), never a prefix. It sizes them from the preview's read of the
+same restore set, and refuses to start (`ErrNotEnoughTempSpace`) for more
+than 50,000 files, or unless the temporary directory has their size plus
+1 GB free and a free inode for each plus 10,000. The rest of the archive is
+read, checked, and discarded. Reading the set and extracting stop when the
+job is canceled; once the first item runs, a cancel stops between items.
+
+Before its first item, a restore records each store's identity
+(`blobstore.RecordIdentity`), which a store opened with settings would do on
+its first write through a pool connection; items write files inside their
+transactions, and on a one-connection pool that second connection never
+comes.
+
+### Lock order
+
+An item takes the locks the editor or API path for the same rows takes, in
+the same order, so the two wait for each other instead of deadlocking:
+
+- Admin collections: the collection parent (`FOR NO KEY UPDATE`), then the
+  library's collection order revision, then membership rows. The library
+  editor's move and reorder takes every parent of the library first, in id
+  order, so a restore holding one parent never holds what the editor waits
+  on. Restoring onto an existing collection (admin, template, or a page
+  section's managed one) takes its parent first in the item's transaction
+  (`catalog.LockLibraryCollectionInTx`), before it creates a group, adds
+  items, or regroups a membership, any of which takes the order revision
+  (`TestGroupingWaitsForTheEditorDB`). The catalog functions take the parent
+  again themselves, which is free in the same transaction, so no caller can
+  skip it.
+- Page sections and featured sections: the section editor's order (see
+  `selective_sections.go`): collection parents, then section rows in id
+  order, then surface revisions. A section whose collection references
+  changed between its read and its row lock is `sections.ErrReferencesChanged`:
+  its new parents are never locked under the section lock.
+- Any item that fails with that, a deadlock (`40P01`), or a serialization
+  failure (`40001`) rolls back to its savepoint and starts again from its
+  read, up to three times, and is then left out as changed during the
+  restore (`changed_since_preview`).
+- Accounts and profiles: `userdata.Preparer`'s order, the account locks, then
+  each data type's own, then data rows.
+- Libraries, plugins, and settings write through the editor's own functions
+  (`catalog.CreateFolderInTx`, the plugin configuration store, the admin settings write
+  path) and take their locks.
+
+### Follow-ups
+
+Some work runs only after an item commits: a restored library's sections,
+provider chain, monitoring, and first scan, and a restored template collection's
+template poster and sync. The item's transaction records it in
+`backup_restore_followups`, and the row is deleted only once every step of
+the work succeeded: the restore's follow-ups return each failed step
+(sections, provider chain, scan queue, provider-chain sync), where the
+editor and an admin upload only log them. A provider's chain placement comes
+from its manifest metadata; when that lookup fails, no chain is written from
+a fallback placement, on any path, and the restore's retry places it from
+the manifest. A
+crash or failure between the commit and the work leaves the row; every
+restore job runs the owed rows before its own items, and after each item.
+A restored library's default and home sections are their own follow-up
+(`library_sections`), which runs only at the end of the restore, once the
+saved sections it carries are written, and seeds only where none exist: a
+default renamed before the backup comes back once, not beside a fresh
+default. Template and section-managed collections seed no sections.
+Only rows a restore recorded run, so a library or plugin that exists for any
+other reason is never set up again. A library's follow-ups seed sections only
+where none exist and leave a provider chain an admin already set; a target
+that no longer exists drops its row.
+
+The before-restore copy is a recovery point, not an undo: selective restore
+merges and never deletes, so restoring that copy selectively cannot remove
+what a restore added. Going back means restoring it in full with
+`silo backup restore`.
 
 ## Full restore
 
@@ -391,7 +971,9 @@ forever. When it passes, the command stops with the databases closed and
 prints the journal and the `--recover` command.
 
 Every mode first validates: the manifest is present and complete (exactly
-`db.dump` and `blobs.tar`, each with a size and SHA-256; exactly the core
+`db.dump` and `blobs.tar`, and
+`restore-set.tar` when it lists a restore set,
+each with a size and SHA-256; exactly the core
 inventory tables, each present with a count or absent; a kind matching the
 id; a valid server id), `db.dump` and `blobs.tar` match their checksums,
 `blobs.tar` holds the manifest's file count (each header checked before

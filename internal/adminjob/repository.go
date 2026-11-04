@@ -38,7 +38,7 @@ var (
 
 // cancellableJobTypes are the job types RequestCancellation accepts. Every v2
 // job resource that reports such a job as cancelable accepts its cancellation.
-var cancellableJobTypes = []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}
+var cancellableJobTypes = []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup, JobTypeBackupRestore}
 
 // IsCancellableJobType reports whether jobs of this type accept cancellation
 // while queued or running.
@@ -470,11 +470,15 @@ func (r *Repository) HoldStorageTransitionForRestart(ctx context.Context, id str
 	return nil
 }
 
+// TouchHeartbeat records that the job's worker is alive. The heartbeat
+// only moves forward, at the time the row is written: an update that waited
+// on the row behind a fenced restore item (RunFenced) must not write its
+// statement's start over the time that item committed.
 func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
-		SET heartbeat_at = NOW(),
-			updated_at = NOW()
+		SET heartbeat_at = GREATEST(heartbeat_at, clock_timestamp()),
+			updated_at = clock_timestamp()
 		WHERE id = $1 AND status = 'running' AND ($2::bigint IS NULL OR claim_generation = $2)`,
 		id, r.claim,
 	)
@@ -778,7 +782,42 @@ func (r *Repository) Yield(ctx context.Context, id string, current, total int, m
 	return nil
 }
 
+// RequeueStaleRunning requeues running jobs whose worker stopped
+// heartbeating, except backup restores: a restore is never run twice by
+// recovery. It is marked failed as interrupted instead, keeping the report of
+// what committed; running the same restore again is safe. A restore item's
+// fenced transaction holds the job row locked, so this update waits for it
+// and then sees a fresh heartbeat.
 func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) (int, error) {
+	// The report keeps every outcome the restore committed: until the run
+	// ends they are backup_restore_items rows, which this collects into its
+	// result and removes.
+	var interrupted int64
+	err := r.pool.QueryRow(ctx, `
+		WITH stale AS (
+			UPDATE admin_jobs
+			SET status = $2,
+				message = 'Restore interrupted: the server running it stopped',
+				error_message = $4,
+				result_payload = CASE WHEN EXISTS (SELECT 1 FROM backup_restore_items i WHERE i.run_id = admin_jobs.id)
+					THEN jsonb_set(coalesce(result_payload, '{}'::jsonb), '{items}',
+						(SELECT jsonb_agg(i.item ORDER BY i.seq) FROM backup_restore_items i WHERE i.run_id = admin_jobs.id))
+					ELSE result_payload END,
+				completed_at = NOW(),
+				expires_at = NOW() + INTERVAL '7 days',
+				updated_at = NOW()
+			WHERE status = $1 AND job_type = $5
+			  AND COALESCE(heartbeat_at, started_at, requested_at) < $3
+			RETURNING id
+		), removed AS (
+			DELETE FROM backup_restore_items i USING stale WHERE i.run_id = stale.id
+		)
+		SELECT count(*) FROM stale`,
+		StatusRunning, StatusFailed, before, BackupRestoreInterrupted, JobTypeBackupRestore,
+	).Scan(&interrupted)
+	if err != nil {
+		return 0, fmt.Errorf("failing interrupted restores: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = $2,
@@ -791,14 +830,14 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 			completed_at = NULL,
 			heartbeat_at = NULL,
 			updated_at = NOW()
-		WHERE status = $1
+		WHERE status = $1 AND job_type <> $4
 		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3`,
-		StatusRunning, StatusQueued, before,
+		StatusRunning, StatusQueued, before, JobTypeBackupRestore,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("requeueing stale admin jobs: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return int(tag.RowsAffected() + interrupted), nil
 }
 
 func (r *Repository) ListExpired(ctx context.Context, now time.Time, limit int) ([]*models.AdminJob, error) {

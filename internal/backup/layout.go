@@ -8,17 +8,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
-// Kind says why a backup was taken.
+// Kind says why a backup was taken. Rotation treats each kind differently.
 type Kind string
 
 const (
-	KindNightly Kind = "nightly"
-	KindManual  Kind = "manual"
+	KindNightly       Kind = "nightly"
+	KindManual        Kind = "manual"
+	KindBeforeRestore Kind = "before-restore"
 )
 
 func (k Kind) valid() bool {
 	switch k {
-	case KindNightly, KindManual:
+	case KindNightly, KindManual, KindBeforeRestore:
 		return true
 	}
 	return false
@@ -31,6 +32,8 @@ const (
 	ManifestName = "manifest.json"
 	DumpName     = "db.dump"
 	BlobsName    = "blobs.tar"
+	// RestoreSetName holds the sections selective restore reads.
+	RestoreSetName = "restore-set.tar"
 
 	// folderTimeLayout is the UTC time, to the millisecond, at the start of
 	// every folder name. secondTimeLayout is the same to the second, which

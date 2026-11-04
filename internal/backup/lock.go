@@ -25,6 +25,29 @@ var ErrBusy = errors.New("another backup or restore is running")
 // server starts the same work.
 const lockCheckInterval = 10 * time.Second
 
+// enqueueHandoff is how long a restore job waits for the lock before it
+// gives up: StartRestore commits the job while it holds the lock and
+// releases it a round trip later, so a runner that claims the job at once
+// finds the lock held by the request that queued it.
+const enqueueHandoff = 10 * time.Second
+
+// lockWithin takes the lock, trying again while another holds it for up to
+// wait; then it returns ErrBusy.
+func lockWithin(ctx context.Context, locker Locker, wait time.Duration) (Held, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		held, err := locker.TryLock(ctx)
+		if !errors.Is(err, ErrBusy) || time.Now().After(deadline) {
+			return held, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 // Locker hands out the subsystem lock.
 type Locker interface {
 	// TryLock takes the lock without waiting, or returns ErrBusy.

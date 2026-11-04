@@ -150,6 +150,24 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
 }
 
+// CheckImage reports whether data is an image an upload would accept as
+// a source: a header libvips reads, at most maxSquareSourcePixels, and, for
+// a JPEG or PNG, pixel data that decodes (PixelDataUndecodable). A file
+// failing it wraps ErrInvalidImage.
+func CheckImage(data []byte) error {
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidImage, err)
+	}
+	if size.Width <= 0 || size.Height <= 0 || int64(size.Width)*int64(size.Height) > maxSquareSourcePixels {
+		return fmt.Errorf("%w: %dx%d is not a size uploads accept", ErrInvalidImage, size.Width, size.Height)
+	}
+	if PixelDataUndecodable(data) {
+		return fmt.Errorf("%w: its pixel data does not decode", ErrInvalidImage)
+	}
+	return nil
+}
+
 // EncodeWebPWidth re-encodes the source image as a single WebP no wider than
 // width, with metadata stripped. It is the "w<width>" rung of GenerateVariants
 // for callers that store that one variant and no original. Narrower sources

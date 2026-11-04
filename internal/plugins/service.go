@@ -1145,6 +1145,15 @@ func (s *Service) readInstalledManifest(
 	return s.archiveCache.Manifest(ctx, installation)
 }
 
+// readInstalledManifestFrom is readInstalledManifest reading a stored
+// archive, when it needs one, through archives.
+func (s *Service) readInstalledManifestFrom(ctx context.Context, installation *Installation, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	if s.archiveCache == nil {
+		return s.readInstalledManifest(ctx, installation)
+	}
+	return s.archiveCache.ManifestFrom(ctx, installation, archives)
+}
+
 func (s *Service) globalConfigEntries(ctx context.Context, installationID int) ([]*pluginv1.ConfigEntry, error) {
 	if s.configs == nil {
 		return nil, nil

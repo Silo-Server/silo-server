@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"hash"
 	"io"
 	"log/slog"
+	"maps"
 	"path"
 	"sort"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -85,6 +88,11 @@ type Options struct {
 	// Status publishes the active operation and the latest run for every
 	// API server. Nil publishes nothing.
 	Status StatusStore
+	// ActiveRestore returns the request of the restore job queued or
+	// running now, or nil when there is none. Rotation and deletes keep its
+	// source. New reads the admin jobs on Pool when it is nil; a service
+	// with neither deletes no backup.
+	ActiveRestore func(ctx context.Context) (*RestoreRequest, error)
 	// FindTools overrides tool discovery for tests.
 	FindTools func(context.Context) (Tools, error)
 	Now       func() time.Time
@@ -107,6 +115,10 @@ type Service struct {
 
 	// manifests are the manifests the listing read (listFolders).
 	manifests manifestCache
+
+	targets RestoreTargets
+	// restoreSets shares validated restore sets among previews.
+	restoreSets restoreSetCache
 }
 
 // pendingRun hands a lock taken by StartManual to the task run it starts.
@@ -126,6 +138,9 @@ func New(opts Options) *Service {
 	}
 	if opts.FindTools == nil {
 		opts.FindTools = FindTools
+	}
+	if opts.ActiveRestore == nil && opts.Pool != nil {
+		opts.ActiveRestore = activeRestoreJob(adminjob.NewRepository(opts.Pool))
 	}
 	stores := blobStores{}
 	if opts.Stores.Assets != nil {
@@ -271,11 +286,17 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 	return &pendingRun{held: held, kind: kind}, RunResult{}, nil
 }
 
-// Backup takes one backup under held, the subsystem lock the caller holds.
-// id may be empty. On success rotation and the sweep run; a failed backup
-// deletes nothing. The run is published as the active operation and then as
-// the latest run.
+// Backup takes one backup under held, the subsystem lock the caller holds; a
+// restore calls this directly for its before-restore copy. id may be empty.
+// On success rotation and the sweep run; a failed backup deletes nothing. The
+// run is published as the active operation and then as the latest run.
 func (s *Service) Backup(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string)) (RunResult, error) {
+	return s.backupWith(ctx, held, kind, id, progress, nil)
+}
+
+// backupWith is Backup with ids its rotation must keep: a restore pins its
+// source, so the before-restore backup it takes cannot rotate it away.
+func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string), pinned map[string]bool) (RunResult, error) {
 	if progress == nil {
 		progress = func(float64, string) {}
 	}
@@ -293,7 +314,7 @@ func (s *Service) Backup(ctx context.Context, held Held, kind Kind, id string, p
 	}
 	result, err := RunResult{}, prepErr
 	if err == nil {
-		result, err = s.backup(ctx, prep, kind, started, report)
+		result, err = s.backup(ctx, prep, kind, started, report, pinned)
 	}
 	last := &LastRun{ID: id, Kind: kind, StartedAt: started, FinishedAt: s.opts.Now(), Status: string(result.Status)}
 	if kind == KindNightly {
@@ -402,7 +423,7 @@ func (p *publishedOperation) end(ctx context.Context, last *LastRun) {
 	}
 }
 
-func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, started time.Time, progress func(float64, string)) (RunResult, error) {
+func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, started time.Time, progress func(float64, string), pinned map[string]bool) (RunResult, error) {
 	serverID, id := prep.serverID, prep.id
 	tools, err := s.findTools(ctx)
 	if err != nil {
@@ -455,9 +476,12 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		return RunResult{}, err
 	}
 	created := folderTime(id, started)
-	// The dump has imported the snapshot; the blob copies run outside it.
-	_ = tx.Rollback(ctx)
-	conn.Release()
+	closeSnapshot := sync.OnceFunc(func() { _ = tx.Rollback(ctx); conn.Release() })
+	objects, restoreSet, err := s.restoreSetFor(ctx, t, tx, closeSnapshot, serverID, id, created, progress)
+	if err != nil {
+		return RunResult{}, err
+	}
+	objects = append([]ObjectEntry{dumpEntry}, objects...)
 
 	progress(70, fmt.Sprintf("Copying %d referenced files", len(facts.blobs)))
 	blobEntry, copied, err := s.writeBlobs(ctx, t, objectKey(serverID, id, BlobsName), facts.blobs)
@@ -473,7 +497,8 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		AppliedMigrations: facts.applied,
 		PostgresVersion:   facts.postgresVersion, PgDumpVersion: tools.Version,
 		ExcludedTableData: excluded,
-		Objects:           []ObjectEntry{dumpEntry, blobEntry},
+		Objects:           append(objects, blobEntry),
+		RestoreSet:        restoreSet,
 		KeyCheck:          s.opts.KeyCheck,
 		TOCCheck:          tocMode,
 		Blobs:             BlobSummary{Count: copied.count, Bytes: copied.bytes, IncludesSubtitles: includeSubtitles},
@@ -485,7 +510,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		return RunResult{}, err
 	}
 	result := RunResult{ID: id, Kind: kind, Status: manifest.Status(), SizeBytes: manifest.Size(), MissingBlobs: manifest.MissingBlobs}
-	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, t, serverID)
+	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, t, serverID, pinned)
 	if manifest.MissingBlobsTotal > 0 {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%d stored files were missing; the manifest lists the first %d", manifest.MissingBlobsTotal, len(manifest.MissingBlobs)))
 	}
@@ -618,10 +643,64 @@ func folderTime(id string, started time.Time) time.Time {
 	return started.UTC()
 }
 
+// restoreSetFor writes restore-set.tar from the snapshot and then calls
+// closeSnapshot: the dump has imported the snapshot, and the blob copies run
+// outside it.
+func (s *Service) restoreSetFor(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), serverID, id string, created time.Time, progress func(float64, string)) ([]ObjectEntry, *RestoreSetSummary, error) {
+	progress(60, "Writing the restore set")
+	entry, summary, err := s.writeRestoreSet(ctx, t, tx, closeSnapshot, objectKey(serverID, id, RestoreSetName),
+		restoreSetMeta{serverID: serverID, keyCheck: s.opts.KeyCheck, createdAt: created, version: buildinfo.Current().Display})
+	closeSnapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	return []ObjectEntry{entry}, summary, nil
+}
+
+// writeRestoreSet streams restore-set.tar into the destination while
+// hashing it. Its documents and plugin archives come from the snapshot
+// transaction; closeSnapshot then ends it, and the section blobs are copied
+// after, as blobs.tar's are.
+func (s *Service) writeRestoreSet(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), key string, meta restoreSetMeta) (ObjectEntry, *RestoreSetSummary, error) {
+	build, err := buildRestoreSet(ctx, tx, meta)
+	if err != nil {
+		return ObjectEntry{}, nil, err
+	}
+	pr, pw := io.Pipe()
+	var entry ObjectEntry
+	putDone := make(chan error, 1)
+	go func() {
+		var err error
+		entry, err = t.put(ctx, key, pr)
+		_ = pr.CloseWithError(errors.New("restore set upload ended"))
+		putDone <- err
+	}()
+	tw := tar.NewWriter(pw)
+	err = build.writeSnapshotPart(ctx, tw, tx)
+	closeSnapshot()
+	if err == nil {
+		err = build.writeBlobPart(ctx, tw, s.stores)
+	}
+	if err == nil {
+		err = tw.Close()
+	}
+	_ = pw.CloseWithError(err)
+	putErr := <-putDone
+	if err != nil {
+		return ObjectEntry{}, nil, fmt.Errorf("writing the restore set: %w", err)
+	}
+	if putErr != nil {
+		return ObjectEntry{}, nil, fmt.Errorf("writing %s: %w", RestoreSetName, putErr)
+	}
+	return entry, build.summary(), nil
+}
+
 // rotate runs rotation and the incomplete-folder sweep after a manifest
-// landed, under the subsystem lock. Failures are warnings: the backup itself
-// succeeded.
-func (s *Service) rotate(ctx context.Context, t target, serverID string) (rotated, swept, warnings []string) {
+// landed, under the subsystem lock.
+// pinned and the source of a queued or running restore are never rotated
+// away; when that restore cannot be read, nothing is. Failures are warnings:
+// the backup itself succeeded.
+func (s *Service) rotate(ctx context.Context, t target, serverID string, pinned map[string]bool) (rotated, swept, warnings []string) {
 	folders, err := s.folders(ctx, t, serverID)
 	if err != nil {
 		return nil, nil, []string{"rotation skipped: " + err.Error()}
@@ -631,7 +710,20 @@ func (s *Service) rotate(ctx context.Context, t target, serverID string) (rotate
 	if err != nil {
 		return nil, nil, []string{"rotation skipped: " + err.Error()}
 	}
-	for _, id := range planRotation(folders, keep) {
+	// A queued restore's source is kept like the running one's: restores are
+	// queued under the lock this rotation holds.
+	active, err := s.activeRestoreSource(ctx)
+	if err != nil {
+		return nil, nil, []string{"rotation skipped: " + err.Error()}
+	}
+	if active.backupID != "" {
+		pinned = maps.Clone(pinned)
+		if pinned == nil {
+			pinned = map[string]bool{}
+		}
+		pinned[active.backupID] = true
+	}
+	for _, id := range planRotation(folders, keep, now, pinned) {
 		if err := t.DeletePrefix(ctx, folderPrefix(serverID, id)); err != nil {
 			warnings = append(warnings, fmt.Sprintf("could not delete %s: %v", id, err))
 			continue
