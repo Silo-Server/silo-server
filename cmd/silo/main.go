@@ -2635,6 +2635,9 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+		if pluginService != nil {
+			notificationSystem.SetPluginChannelHost(pluginChannelHost{plugins: pluginService})
+		}
 
 		if libraryIngestExecutor != nil {
 			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)

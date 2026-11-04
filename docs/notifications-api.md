@@ -548,6 +548,75 @@ This is a non-retryable operation: resubmitting a URL replacement advances the w
 
 The bridge update wire and behavior remain unchanged. No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
 
+## Plugin destinations
+
+A plugin with a `notification_channel.v1` capability provides a kind of
+destination, such as ntfy or Pushover. A profile adds destinations of that
+kind next to its webhooks, and they receive the same deliveries webhooks do:
+new episodes filtered by the destination's reason flags, and request updates
+when `notify_requests` is on. Plugin destinations exist only when the server
+has an at-rest cipher, because their settings hold credentials.
+`GET /api/v2/notifications/capabilities` reports `plugin_destinations.available`
+(an enabled plugin provides at least one kind) and `max_per_profile` (10).
+
+All operations below are profile-scoped, demo-guarded when mutating, and
+identify the recipient by account and profile together. A destination that
+belongs to another account, including another account's profile with the
+same ID, answers `404`.
+
+### List the kinds
+
+`GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
+returns the kinds enabled plugins provide now, unpaginated. Each names its
+`plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
+`display_name` and `description`, and `settings_form`, the plugin's settings
+schema and form (the shape of an admin plugin config schema). Fields the form
+marks `secret` are write-only.
+
+### List destinations
+
+`GET /api/v2/notifications/plugin-destinations` (`listNotificationPluginDestinations`)
+is cursor-paginated in creation order. Each item carries its `etag`, the
+reason flags, the delivery bookkeeping webhooks carry (`consecutive_failures`,
+`disabled_reason`, `last_success_at`, `last_failure_at`,
+`last_failure_message`), `settings` without secret fields, and
+`secret_settings_set`, the secret fields that have a stored value. `available`
+is false, `channel_name` empty and `settings` empty while no enabled plugin
+provides the destination's kind; nothing is sent then.
+
+### Create a destination
+
+`POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
+takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
+account profile), `settings`, and optional reason flags (default on). The
+server accepts only top-level settings the schema declares, then calls the
+plugin's `ValidateDestination`. A refusal answers `422` with the plugin's
+message in the problem's error detail at `body.settings`. An unknown or
+unreachable kind answers `503 dependency_unavailable` with `Retry-After`; ten
+destinations answer `422`. Success is `201` with the destination and its
+`ETag`. The operation is non-retryable: a replay can create a second
+destination.
+
+### Update a destination
+
+`PUT /api/v2/notifications/plugin-destinations/{id}` (`updateNotificationPluginDestination`)
+requires the original `If-Match` validator, like a webhook update. Omitted
+fields stay unchanged. `settings` merges over the stored settings: a
+non-secret field sent as `null` is removed, a secret field sent blank or left
+out keeps its stored value, and `clear_secrets` removes named secrets.
+Changed settings are checked by the plugin again and, like a changed webhook
+URL, clear the failure streak and the disable reason; so does re-enabling.
+Missing preconditions answer `428`, stale validators `412`.
+
+### Delete and test
+
+`DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
+requires `If-Match` and removes the destination and its queued attempts.
+`POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
+sends one test message now and answers `200` with `ok`, `message` and
+`duration_ms`; a failed send is `ok: false`, not retried and not counted. It
+is non-retryable.
+
 ## Ordered Apple registration storage
 
 Apple registration ordering uses a separate retained installation record. Its

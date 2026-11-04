@@ -703,6 +703,12 @@ GET /api/v2/notifications/email-preferences/address/capabilities	non-media
 GET /api/v2/notifications/email/unsubscribe	non-media
 POST /api/v2/notifications/email/unsubscribe	non-media
 GET /api/v2/notifications/email/verify	non-media
+GET /api/v2/notifications/plugin-channels	non-media
+GET /api/v2/notifications/plugin-destinations	non-media
+POST /api/v2/notifications/plugin-destinations	non-media
+DELETE /api/v2/notifications/plugin-destinations/{id}	non-media
+PUT /api/v2/notifications/plugin-destinations/{id}	non-media
+POST /api/v2/notifications/plugin-destinations/{id}/test	non-media
 GET /api/v2/notifications/preferences	non-media
 PUT /api/v2/notifications/preferences	non-media
 GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
@@ -2028,6 +2034,12 @@ GET /api/v2/notifications/email-preferences/address/capabilities	non-media
 GET /api/v2/notifications/email/unsubscribe	non-media
 POST /api/v2/notifications/email/unsubscribe	non-media
 GET /api/v2/notifications/email/verify	non-media
+GET /api/v2/notifications/plugin-channels	non-media
+GET /api/v2/notifications/plugin-destinations	non-media
+POST /api/v2/notifications/plugin-destinations	non-media
+DELETE /api/v2/notifications/plugin-destinations/{id}	non-media
+PUT /api/v2/notifications/plugin-destinations/{id}	non-media
+POST /api/v2/notifications/plugin-destinations/{id}/test	non-media
 GET /api/v2/notifications/preferences	non-media
 PUT /api/v2/notifications/preferences	non-media
 GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media

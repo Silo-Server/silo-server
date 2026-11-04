@@ -82,6 +82,12 @@ import { notificationKeys } from "@/hooks/queries/keys";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { formatRelativeTime } from "@/lib/date";
+import { PluginDestinationsSection } from "./PluginDestinationsSection";
+import {
+  DESTINATION_NOTIFY_FIELDS as WEBHOOK_NOTIFY_FIELDS,
+  REASON_FIELDS,
+  type DestinationNotifyKey,
+} from "./notificationReasonFields";
 import {
   currentWebPushSubscription,
   disableWebPush,
@@ -89,21 +95,7 @@ import {
   webPushSupport,
 } from "@/lib/webPush";
 
-const REASON_FIELDS = [
-  { key: "notify_favorites", label: "Favorites" },
-  { key: "notify_watchlist", label: "Watchlist" },
-  { key: "notify_continue_watching", label: "Continue Watching" },
-  { key: "notify_next_up", label: "Next Up" },
-] as const;
-
-// Webhooks additionally carry the request.fulfilled toggle; it is not an
-// episode reason, so the profile preferences section keeps REASON_FIELDS.
-const WEBHOOK_NOTIFY_FIELDS = [
-  ...REASON_FIELDS,
-  { key: "notify_requests", label: "Requests" },
-] as const;
-
-type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
+type WebhookNotifyKey = DestinationNotifyKey;
 
 function PreferencesSection() {
   const { data: prefs, isLoading } = useNotificationPreferences();
@@ -1143,6 +1135,8 @@ export default function NotificationsSettings() {
       <DiscordSection key={notificationScope()} />
 
       <WebhooksSection />
+
+      <PluginDestinationsSection />
     </div>
   );
 }

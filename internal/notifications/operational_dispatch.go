@@ -15,6 +15,9 @@ import (
 // filter: profile-level gating happens before dispatch.
 type OperationalDispatch struct {
 	WebhookFilter func(Webhook) bool
+	// PluginDestinationFilter does for plugin destinations what
+	// WebhookFilter does for webhooks; nil keeps the delivery off them.
+	PluginDestinationFilter func(PluginDestination) bool
 }
 
 // DispatchOperational durably creates one operational delivery. The inbox row
@@ -85,6 +88,26 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			})
 		}
 		if err := s.webhookRepo.EnqueueAttempts(ctx, tx, attempts); err != nil {
+			return nil, err
+		}
+	}
+	if opts.PluginDestinationFilter != nil && s.pluginDestinationSender != nil && s.pluginDestinationSender.host() != nil {
+		byProfile, err := s.pluginDestinationSender.repo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
+		if err != nil {
+			return nil, err
+		}
+		attempts := make([]DeliveryAttempt, 0, 2)
+		for _, destination := range byProfile[owner] {
+			if !opts.PluginDestinationFilter(destination) {
+				continue
+			}
+			attempts = append(attempts, DeliveryAttempt{
+				ID:                     ulid.Make().String(),
+				NotificationDeliveryID: row.ID,
+				TargetID:               destination.ID,
+			})
+		}
+		if err := s.pluginDestinationSender.repo.EnqueueAttempts(ctx, tx, attempts); err != nil {
 			return nil, err
 		}
 	}

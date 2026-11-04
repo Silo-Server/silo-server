@@ -73,6 +73,14 @@ type EventConsumerClient struct {
 	timeout time.Duration
 }
 
+// NotificationChannelClient drives one plugin's notification_channel.v1
+// capabilities. The caller bounds each call; the notification system sets
+// the timeouts the SDK documents.
+type NotificationChannelClient struct {
+	client       pluginv1.NotificationChannelClient
+	capabilityID string
+}
+
 type AuthProviderClient struct {
 	client  pluginv1.AuthProviderClient
 	checks  pluginv1.AuthProviderChecksClient
@@ -215,6 +223,13 @@ func (c *Client) EventConsumer(capabilityID string) (*EventConsumerClient, error
 		client:  c.rpc.EventConsumer(),
 		timeout: DefaultEventTimeout,
 	}, nil
+}
+
+func (c *Client) NotificationChannel(capabilityID string) (*NotificationChannelClient, error) {
+	if err := c.requireCapability("notification_channel.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &NotificationChannelClient{client: c.rpc.NotificationChannel(), capabilityID: capabilityID}, nil
 }
 
 func (c *Client) AuthProvider(capabilityID string) (*AuthProviderClient, error) {
@@ -418,6 +433,20 @@ func (c *RequestRouterClient) Validate(ctx context.Context, req *pluginv1.Valida
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.Validate(callCtx, req)
+}
+
+// ValidateDestination asks the plugin whether a destination's settings
+// work. The request names this client's capability.
+func (c *NotificationChannelClient) ValidateDestination(ctx context.Context, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
+	req.CapabilityId = c.capabilityID
+	return c.client.ValidateDestination(ctx, req)
+}
+
+// SendNotification asks the plugin to deliver one message. The request
+// names this client's capability.
+func (c *NotificationChannelClient) SendNotification(ctx context.Context, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error) {
+	req.CapabilityId = c.capabilityID
+	return c.client.SendNotification(ctx, req)
 }
 
 func (c *EventConsumerClient) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {

@@ -50,6 +50,19 @@ export function listNotificationWebhooks(profileContext: ProfileRequestContextSn
     profileContext,
   );
 }
+type PluginDestination = V2Result<"GET /api/v2/notifications/plugin-destinations">["items"][number];
+
+export function listNotificationPluginDestinations(profileContext: ProfileRequestContextSnapshot) {
+  return destinationPages<PluginDestination>(
+    (cursor) =>
+      v2("GET /api/v2/notifications/plugin-destinations", {
+        profileContext,
+        query: { cursor, limit: 100 },
+      }),
+    profileContext,
+  );
+}
+
 export function listNotificationServerChannels(profileContext: ProfileRequestContextSnapshot) {
   return destinationPages<ServerChannel>(
     (cursor) =>

@@ -335,6 +335,9 @@
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestPluginDestinationsStayOnTheirAccountDB
+./internal/notifications TestPluginDestinationDeliveryOutcomesDB
+./internal/notifications TestPluginDestinationStaleSendsDontWinDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
