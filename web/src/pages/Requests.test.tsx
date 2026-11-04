@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   sections: [] as RequestDiscoverySection[],
   rows: [] as RequestDiscoverRowRef[],
   cancel: vi.fn(),
+  remove: vi.fn(),
   create: vi.fn(),
 }));
 
@@ -32,6 +33,11 @@ vi.mock("@/hooks/queries/useRequests", () => {
     }),
     useCreateMediaRequest: () => ({ mutateAsync: mocks.create, isPending: false }),
     useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false, variables: undefined }),
+    useRemoveFailedMediaRequest: () => ({
+      mutate: mocks.remove,
+      isPending: false,
+      variables: undefined,
+    }),
   };
 });
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
@@ -109,6 +115,7 @@ function currentLocation() {
 
 beforeEach(() => {
   mocks.cancel.mockReset();
+  mocks.remove.mockReset();
   mocks.create.mockReset().mockResolvedValue({});
   mocks.mine = [];
   mocks.sections = [];
@@ -305,5 +312,36 @@ describe("Requests (Yours list)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel request" }));
 
     expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("r1");
+  });
+
+  it("removes a failed request that delivered nothing, only after the viewer confirms", () => {
+    mocks.mine = [
+      request("r40", "Failed Movie", { outcome: "failed", last_error: "Movie was not found" }),
+      request("r41", "Half Delivered Movie", {
+        outcome: "failed",
+        targets: [
+          { quality: "1080p", status: "completed" },
+          { quality: "2160p", status: "failed" },
+        ] as MediaRequest["targets"],
+      }),
+      request("r42", "Declined Movie", { outcome: "declined" }),
+      request("r43", "Waiting Movie"),
+    ];
+    renderYours();
+
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Remove request for / })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Remove request for Failed Movie"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove request for Failed Movie" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Remove this request?");
+    expect(mocks.remove).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove request" }));
+
+    expect(mocks.remove).toHaveBeenCalledExactlyOnceWith("r40");
   });
 });

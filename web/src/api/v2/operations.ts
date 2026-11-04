@@ -85,6 +85,7 @@ export const v2Operations = {
   "DELETE /api/v2/progress/{media_item_id}/position": "clearResumePosition",
   "DELETE /api/v2/ratings/{item_id}": "deleteRating",
   "DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}": "unfollowRequestMedia",
+  "DELETE /api/v2/requests/{id}": "removeFailedRequest",
   "DELETE /api/v2/settings/device/subtitle-appearance": "deleteSubtitleAppearanceDeviceOverride",
   "DELETE /api/v2/settings/values/{key}": "deleteSettingValue",
   "DELETE /api/v2/shuffles/{shuffle_id}": "deleteShuffle",

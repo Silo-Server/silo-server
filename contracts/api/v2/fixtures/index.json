@@ -13917,6 +13917,26 @@
       "body_file": "rematch_stale_id_permission_denied.json"
     },
     {
+      "name": "remove_failed_request_ok",
+      "operation_id": "removeFailedRequest",
+      "scenario": "Profile-scoped lifecycle response with synthetic provider state.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/requests/r-1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "remove_history_entries_not_found",
       "operation_id": "removeHistoryEntries",
       "scenario": "A target that is not in the viewer's catalog is not found; nothing is hidden.",

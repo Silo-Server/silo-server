@@ -1147,7 +1147,10 @@ func (s *Service) AdminCancel(ctx context.Context, viewer Viewer, id, reason str
 	return s.cancel(ctx, viewer, id, reason, true)
 }
 
-func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, closeFailed bool) (*Request, error) {
+// ownedRequest loads a request the viewer may withdraw or remove: its own
+// account's, or any for an admin. Requesters are refused while requests are
+// turned off; admins are not.
+func (s *Service) ownedRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
 	if viewer.UserID == 0 {
 		return nil, ErrForbidden
 	}
@@ -1163,6 +1166,14 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
 		return nil, ErrForbidden
 	}
+	return req, nil
+}
+
+func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, closeFailed bool) (*Request, error) {
+	req, err := s.ownedRequest(ctx, viewer, id)
+	if err != nil {
+		return nil, err
+	}
 	guard := guardWithdrawable
 	if closeFailed && req.Outcome == OutcomeFailed {
 		// Closing a failed request moves it out of the admin's failed view;
@@ -1174,6 +1185,18 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 		return nil, err
 	}
 	return withdrawn, nil
+}
+
+// RemoveFailed deletes a failed request for good. Owners can remove their
+// own; admins can remove any. Nothing is sent downstream: a failed request has
+// nothing in flight, and the guarded delete refuses one an admin is retrying
+// or one that delivered a copy before failing.
+func (s *Service) RemoveFailed(ctx context.Context, viewer Viewer, id string) error {
+	req, err := s.ownedRequest(ctx, viewer, id)
+	if err != nil {
+		return err
+	}
+	return s.store.DeleteFailed(ctx, req.ID)
 }
 
 func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request, error) {

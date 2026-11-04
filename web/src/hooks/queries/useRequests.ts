@@ -11,6 +11,7 @@ import { v2 } from "@/api/v2/request";
 import {
   browseDiscoverV2,
   cancelMediaRequestV2,
+  removeFailedMediaRequestV2,
   createMediaRequestV2,
   followRequestMediaV2,
   getDiscoverRowV2,
@@ -333,6 +334,23 @@ export function useCancelMediaRequest() {
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to cancel request");
+    },
+  });
+}
+
+export function useRemoveFailedMediaRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => removeFailedMediaRequestV2(id),
+    onSuccess: () => {
+      toast.success("Request removed");
+    },
+    // A refused removal still refreshes: an admin may have retried it, and the
+    // row should show what happened.
+    onSettled: () => invalidateRequestSurfaces(queryClient),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to remove request");
     },
   });
 }
