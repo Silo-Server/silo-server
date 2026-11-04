@@ -85,6 +85,35 @@ func (p playableTargetPlan) progressRows() float64 {
 	return rows
 }
 
+// explainPlayableTargetPlan runs EXPLAIN ANALYZE on the generic plan the
+// resolver keeps for its statement.
+func explainPlayableTargetPlan(t *testing.T, pool *pgxpool.Pool, query string, args []any) []byte {
+	t.Helper()
+	ctx := t.Context()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SET plan_cache_mode = force_generic_plan; PREPARE playable_target_plan AS "+query); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), "DEALLOCATE playable_target_plan; RESET plan_cache_mode")
+	}()
+	params := make([]string, len(args))
+	for i := range args {
+		params[i] = fmt.Sprintf("$%d", i+1)
+	}
+	// EXECUTE takes its arguments as SQL text, so pgx interpolates them.
+	var raw []byte
+	explain := "EXPLAIN (ANALYZE, FORMAT JSON) EXECUTE playable_target_plan(" + strings.Join(params, ", ") + ")"
+	if err := conn.QueryRow(ctx, explain, append([]any{pgx.QueryExecModeSimpleProtocol}, args...)...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 // Statistics can briefly describe an empty profile after a bulk history import.
 // Ensure completed membership remains a unique-key lookup instead of comparing
 // every requested episode with every materialized profile progress row.
@@ -156,10 +185,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	if capture.query == "" {
 		t.Fatal("PostgreSQL winner query was not captured")
 	}
-	var raw []byte
-	if err := pool.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+capture.query, capture.args...).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw := explainPlayableTargetPlan(t, pool, capture.query, capture.args)
 	var documents []struct {
 		Plan playableTargetPlan `json:"Plan"`
 	}
@@ -185,9 +211,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	if err != nil || targets[input.Key()] != "episode-1" {
 		t.Fatalf("unseen target = %#v, err %v; want episode-1", targets, err)
 	}
-	if err := pool.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+capture.query, capture.args...).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
 	documents = nil
 	if err := json.Unmarshal(raw, &documents); err != nil {
 		t.Fatal(err)
@@ -236,9 +260,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 			t.Fatalf("card %s target = %q, want %q", card.ContentID, targets[card.Key()], want)
 		}
 	}
-	if err := pool.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+capture.query, capture.args...).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
 	documents = nil
 	if err := json.Unmarshal(raw, &documents); err != nil {
 		t.Fatal(err)
@@ -282,9 +304,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 			t.Fatalf("season card %s target = %q, want %q", card.ContentID, targets[card.Key()], want)
 		}
 	}
-	if err := pool.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+capture.query, capture.args...).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
 	documents = nil
 	if err := json.Unmarshal(raw, &documents); err != nil {
 		t.Fatal(err)

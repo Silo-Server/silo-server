@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/database/readtx"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -1069,6 +1070,11 @@ func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profil
 	if len(seriesIDs) == 0 {
 		return map[string]userstore.SeriesWatchCounts{}, nil
 	}
+	if len(seriesIDs) == 1 {
+		return queryOneSeriesWatchCounts[string](ctx, s, `SELECT e.series_id,`+oneSeriesWatchCountsSQL+`
+		  AND e.series_id = $3
+		GROUP BY e.series_id`, profileID, seriesIDs[0])
+	}
 	return queryEpisodeWatchCounts[string](ctx, s, `SELECT e.series_id,`+episodeWatchCountsSQL+`
 		  AND e.series_id = ANY($3::text[])
 		GROUP BY e.series_id`, profileID, seriesIDs)
@@ -1078,7 +1084,7 @@ func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profil
 // by episode season number like catalog's ListBySeriesGroupedBySeason. The
 // season list reads each season's episode count from it as well.
 func (s *PostgresUserStore) SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]userstore.SeriesWatchCounts, error) {
-	return queryEpisodeWatchCounts[int](ctx, s, `SELECT e.season_number,`+episodeWatchCountsSQL+`
+	return queryOneSeriesWatchCounts[int](ctx, s, `SELECT e.season_number,`+oneSeriesWatchCountsSQL+`
 		  AND e.series_id = $3
 		GROUP BY e.season_number`, profileID, seriesID)
 }
@@ -1097,7 +1103,19 @@ func (s *PostgresUserStore) SeasonEpisodeWatchCounts(ctx context.Context, profil
 // episodeWatchCountsSQL is the rollup shared by the series and season
 // variants. Each selects its grouping column first, then appends its $3
 // parent filter and GROUP BY.
-const episodeWatchCountsSQL = `
+var episodeWatchCountsSQL = fmt.Sprintf(episodeWatchCountsTemplate, "")
+
+// oneSeriesWatchCountsSQL is episodeWatchCountsSQL for one series. OFFSET 0
+// keeps its completed-history check a key lookup per episode, so the work
+// follows the series' episode count whatever the profile's history. Without
+// it a plan can hash the profile's whole history instead, and a generic plan
+// prices that hash for the average profile: for a profile with 53k history
+// rows it took about 100 ms where the lookups take under 1 ms. Pages of
+// several series keep the planner's choice, since hashing a short history
+// beats a lookup for each of their many episodes.
+var oneSeriesWatchCountsSQL = fmt.Sprintf(episodeWatchCountsTemplate, "OFFSET 0")
+
+const episodeWatchCountsTemplate = `
 		       COUNT(*)::int,
 		       COUNT(*) FILTER (WHERE ws.watched)::int,
 		       COUNT(*) FILTER (WHERE NOT ws.watched AND ws.resumable)::int
@@ -1120,6 +1138,7 @@ const episodeWatchCountsSQL = `
 		                  WHERE hh.user_id = h.user_id AND hh.profile_id = h.profile_id
 		                    AND hh.media_item_id = h.media_item_id AND h.watched_at <= hh.hidden_before
 		              )
+		              %s
 		        ) AS watched,
 		        COALESCE(p.position_seconds, 0) > 0 AS resumable
 		) ws
@@ -1135,18 +1154,40 @@ func queryEpisodeWatchCounts[K comparable](ctx context.Context, s *PostgresUserS
 	defer rows.Close()
 
 	result := make(map[K]userstore.SeriesWatchCounts)
+	if err := scanEpisodeWatchCounts(rows, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// queryOneSeriesWatchCounts runs a oneSeriesWatchCountsSQL rollup on the
+// connection's generic plan. Planning it takes 1-2 ms, more than running it
+// for most series, and PostgreSQL would plan it again on every call because
+// the generic plan is priced for an average series.
+func queryOneSeriesWatchCounts[K comparable](ctx context.Context, s *PostgresUserStore, query, profileID, seriesID string) (map[K]userstore.SeriesWatchCounts, error) {
+	result := make(map[K]userstore.SeriesWatchCounts)
+	err := readtx.Query(ctx, s.pool, query, []any{s.userID, profileID, seriesID}, func(rows pgx.Rows) error {
+		return scanEpisodeWatchCounts(rows, result)
+	}, readtx.GenericPlan)
+	if err != nil {
+		return nil, fmt.Errorf("aggregating episode watch counts: %w", err)
+	}
+	return result, nil
+}
+
+func scanEpisodeWatchCounts[K comparable](rows pgx.Rows, result map[K]userstore.SeriesWatchCounts) error {
 	for rows.Next() {
 		var key K
 		var counts userstore.SeriesWatchCounts
 		if err := rows.Scan(&key, &counts.TotalEpisodes, &counts.WatchedCount, &counts.InProgressCount); err != nil {
-			return nil, fmt.Errorf("scanning episode watch counts: %w", err)
+			return fmt.Errorf("scanning episode watch counts: %w", err)
 		}
 		result[key] = counts
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating episode watch counts: %w", err)
+		return fmt.Errorf("iterating episode watch counts: %w", err)
 	}
-	return result, nil
+	return nil
 }
 
 // UpdateProgressHints writes the version hints of an existing progress row.

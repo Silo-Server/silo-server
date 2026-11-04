@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/database/readtx"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -3816,16 +3817,24 @@ func (r *FileRepository) listServedEpisodeFiles(
 		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
 		JOIN media_files mf ON mf.id = served.file_id
 		ORDER BY served.episode_id ASC, mf.id ASC`
-	rows, err := r.pool.Query(ctx, query, episodeIDs)
+	// Each connection keeps one generic plan. Planning takes about 1 ms,
+	// several times what a short season takes to read. PostgreSQL would plan
+	// again for every list shorter than ten, because the generic plan is
+	// priced for ten episodes; longer lists already run on it. Both branches
+	// look up each requested episode by index whatever the list's length.
+	var served *servedEpisodeRows
+	var files []*models.MediaFile
+	var scanErr error
+	err := readtx.Query(ctx, r.pool, query, []any{episodeIDs}, func(rows pgx.Rows) error {
+		served = &servedEpisodeRows{Rows: rows}
+		files, scanErr = scan(served)
+		return scanErr
+	}, readtx.GenericPlan)
+	if scanErr != nil {
+		return nil, scanErr
+	}
 	if err != nil {
 		return nil, fmt.Errorf("querying %s by episode_ids: %w", what, err)
-	}
-	defer rows.Close()
-
-	served := &servedEpisodeRows{Rows: rows}
-	files, err := scan(served)
-	if err != nil {
-		return nil, err
 	}
 	for i, file := range files {
 		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)

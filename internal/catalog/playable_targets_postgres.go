@@ -86,6 +86,11 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	`, fileSQL, progress, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
 
 	result := make(map[string]PlayableTarget, len(keysByOrd))
+	// queryPlayableTargets keeps one generic plan per connection. Planning
+	// this statement takes 4-7 ms, several times what a show page's single
+	// card takes to run. Its generic plan does the same work as a custom one
+	// whatever the card count or history: it reads the profile's resumable
+	// rows once and checks each episode's completion by key.
 	err := r.queryPlayableTargets(ctx, query, args, func(rows pgx.Rows) error {
 		var ord int64
 		var contentID string

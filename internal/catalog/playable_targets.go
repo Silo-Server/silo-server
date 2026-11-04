@@ -463,6 +463,12 @@ func progressUpdatedAfter(candidate, current string) bool {
 // row. The planner prices the per-card candidate subqueries far above their
 // real cost, which crosses jit_above_cost for a page of cards; compiling then
 // takes about twice as long as running the query.
+//
+// Each connection also keeps one generic plan. Planning the movie and episode
+// statement takes 3-5 ms, against 0.2 ms to run it for a detail page's single
+// card. PostgreSQL would plan it again on every call with one card, because
+// the generic plan is priced for ten. That plan reads each card's files and
+// episodes by index, so it reads the same rows as a custom plan.
 func (r *PlayableTargetResolver) queryPlayableTargets(ctx context.Context, query string, args []any, scan func(pgx.Rows) error) error {
-	return queryWithoutJIT(ctx, r.pool, query, args, scan)
+	return queryGenericPlanWithoutJIT(ctx, r.pool, query, args, scan)
 }
