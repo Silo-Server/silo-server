@@ -274,6 +274,8 @@ export function useIntroSkipPrompt({
     scheduleCountdown,
   ]);
 
+  const insideIntro = intro !== null && currentTime >= intro.start && currentTime < intro.end;
+
   /* eslint-disable react-hooks/set-state-in-effect -- Playback position and mode changes are the
    * external events this hook translates into prompt state. The updates cannot be derived during
    * render because they also own timers, per-intro resolution, and one-shot seek effects. */
@@ -286,7 +288,7 @@ export function useIntroSkipPrompt({
       clearPrompt();
     }
 
-    const inside = intro !== null && currentTime >= intro.start && currentTime < intro.end;
+    const inside = insideIntro;
     if (!enabled || mode === "never" || !intro || !introKey) {
       wasInsideRef.current = false;
       setExpiredKey(null);
@@ -336,7 +338,7 @@ export function useIntroSkipPrompt({
       if (!promptStillActive(activePromptRef.current, introKey, "undo")) return;
       clearPrompt();
     });
-  }, [clearPrompt, currentTime, enabled, intro, introKey, mode, setExpiredKey, startPrompt]);
+  }, [clearPrompt, enabled, insideIntro, intro, introKey, mode, setExpiredKey, startPrompt]);
   /* eslint-enable react-hooks/set-state-in-effect -- ends the playback-position exception */
 
   useEffect(
@@ -350,7 +352,6 @@ export function useIntroSkipPrompt({
   // Derived during render as well as kept in state, so a render that already
   // left the intro, changed mode or lost the player shows nothing even before
   // the effect above has cleared the expiry.
-  const insideIntro = intro !== null && currentTime >= intro.start && currentTime < intro.end;
   const reofferKey =
     activePrompt === null &&
     controlsVisible &&

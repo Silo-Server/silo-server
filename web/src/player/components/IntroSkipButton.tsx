@@ -13,6 +13,12 @@ interface IntroSkipButtonProps {
    */
   caption?: string;
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
+  /**
+   * Marks the pill as the intro prompt the player's root key handler acts on.
+   * Defaults to having a timer: the intro offer that returns with the controls
+   * has none but is still that prompt.
+   */
+  introPrompt?: boolean;
   controlsVisible?: boolean;
   focusOnMount?: boolean;
   /**
@@ -35,6 +41,7 @@ export function IntroSkipButton({
   label = "Skip Intro",
   caption,
   timer,
+  introPrompt = timer !== undefined,
   controlsVisible = true,
   focusOnMount = false,
   provenance,
@@ -76,7 +83,7 @@ export function IntroSkipButton({
       ref={buttonRef}
       onClick={onSkip}
       type="button"
-      data-intro-skip-prompt={timer === undefined ? undefined : "true"}
+      data-intro-skip-prompt={introPrompt ? "true" : undefined}
       className="relative min-h-11 overflow-hidden rounded-full border border-white/20 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-2xl backdrop-blur-md hover:border-white/35 hover:bg-black/85 focus-visible:border-white/55 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none active:bg-white/25"
     >
       {progress !== null ? (

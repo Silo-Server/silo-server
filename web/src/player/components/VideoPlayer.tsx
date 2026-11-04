@@ -3465,10 +3465,12 @@ export function VideoPlayer({
     return true;
   }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
 
-  // Only a timed prompt claims Enter/Escape and focus. The untimed offer that
-  // returns with the controls is a plain button like the other skip pills, or
-  // Space with nothing focused would skip the intro instead of resuming.
-  const introPromptVisible = activeIntroPrompt !== null && activeIntroPrompt.timer !== null;
+  const introPromptVisible = activeIntroPrompt !== null;
+  // Only a timed prompt takes focus and claims Enter/Space/Escape from the rest
+  // of the player. The untimed offer that returns with the controls answers
+  // Enter/Space only while it has focus, or Space with nothing focused would
+  // skip the intro instead of resuming.
+  const introPromptTimed = activeIntroPrompt?.timer != null;
 
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
@@ -3479,6 +3481,10 @@ export function VideoPlayer({
       if (event.defaultPrevented) return;
       const key = pillKey(event, promptSelector, containerRef.current);
       if (!key) return;
+      if (!introPromptTimed) {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (key !== "select" || target?.closest(promptSelector) == null) return;
+      }
 
       const handled = key === "select" ? selectIntroPrompt() : dismissIntroPrompt();
       if (!handled) return;
@@ -3488,7 +3494,7 @@ export function VideoPlayer({
 
     document.addEventListener("keydown", handlePromptKeyDown, true);
     return () => document.removeEventListener("keydown", handlePromptKeyDown, true);
-  }, [dismissIntroPrompt, displayMode, introPromptVisible, selectIntroPrompt]);
+  }, [dismissIntroPrompt, displayMode, introPromptTimed, introPromptVisible, selectIntroPrompt]);
 
   // A pill takes focus only after keyboard input, and never from a scrub, an
   // open menu or a text field.
@@ -3503,7 +3509,7 @@ export function VideoPlayer({
         null;
     return !interactionInProgress;
   };
-  const focusIntroPromptOnMount = introPromptVisible && pillMayTakeFocus();
+  const focusIntroPromptOnMount = introPromptTimed && pillMayTakeFocus();
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -5477,6 +5483,7 @@ export function VideoPlayer({
           label={activeIntroPrompt.label}
           caption={activeIntroPrompt.caption}
           timer={activeIntroPrompt.timer ?? undefined}
+          introPrompt
           controlsVisible={controlsVisible}
           focusOnMount={focusIntroPromptOnMount}
           provenance={activeIntro}
