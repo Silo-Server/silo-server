@@ -10,6 +10,7 @@ import type { V2Body } from "@/api/v2/request";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { createCatalogSearchState, useCatalogFilters, useCatalogWindow } from "./catalog";
+import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 
 type CatalogQueryBody = V2Body<"POST /api/v2/catalog/query">;
 interface RequestRecord {
@@ -319,6 +320,67 @@ describe("catalog window cursor paging", () => {
     act(() => releaseHeld!());
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(result.current.data.pages.get(1)).toHaveLength(2);
+  });
+
+  it("lands a jump while a scan's sweeps keep arriving, then sweeps the window", async () => {
+    const { requests, fetchMock, reply } = catalogTransport();
+    const heldSeeks: (() => void)[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      const signal = options?.signal;
+      requests.push({ body, signal });
+      // Each reply arrives as its own task, as a browser's network replies do.
+      if (body.seek === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return reply(body);
+      }
+      return new Promise((resolve, reject) => {
+        heldSeeks.push(() => resolve(reply(body)));
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+          once: true,
+        });
+      });
+    });
+    const { wrapper, queryClient } = makeClient();
+    const { result } = renderHook(
+      () =>
+        useCatalogWindow(titleOrderedLibrary(), {
+          limit: 2,
+          includeTotal: false,
+          visibleRange: [100, 105],
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(heldSeeks).toHaveLength(1));
+    const seek = requests.at(-1)!;
+    expect(seek.body.seek).toBe(100);
+
+    // A seek deep into a large library outlasts a scan's sweep window. A
+    // sweep that cancelled it, or re-keyed it under page 0's next snapshot,
+    // would start it over on every sweep, and it would never land.
+    for (let sweep = 0; sweep < 3; sweep++) {
+      await act(async () => {
+        await invalidateMediaSurfaceQueries(queryClient, { libraryId: 7, itemMayBeNew: true });
+      });
+    }
+    expect(seek.signal?.aborted).toBe(false);
+    expect(requests.filter(({ body }) => !body.cursor)).toHaveLength(1);
+
+    await act(async () => heldSeeks.shift()!());
+    await waitFor(() => expect(result.current.data.pages.get(50)).toHaveLength(2));
+    // The page above the jump seeks once the first visible page is in; it is
+    // a first read too.
+    await waitFor(() => expect(requests.some(({ body }) => body.seek === 98)).toBe(true));
+    await act(async () => heldSeeks.splice(0).forEach((finish) => finish()));
+
+    // Once the window's first reads are in, the held sweep reloads it under a
+    // new snapshot, showing what it loaded until the reloads land.
+    await waitFor(() => expect(requests.filter(({ body }) => !body.cursor)).toHaveLength(2));
+    expect(result.current.data.pages.get(50)?.map((item) => item.content_id)).toEqual([
+      "item-100",
+      "item-101",
+    ]);
+    heldSeeks.splice(0).forEach((finish) => finish());
   });
 
   it.each([

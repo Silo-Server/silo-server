@@ -484,9 +484,79 @@ export async function invalidateMediaSurfaceQueries(
   const matches = (query: Query) =>
     shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds);
   const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
+  const holdsCatalogLists = holdCatalogListsForFirstReads(queryClient, matches);
   await queryClient.invalidateQueries({
-    predicate: (query) => matches(query) && !runningLetterIndexes.has(query),
+    predicate: (query) =>
+      matches(query) &&
+      !runningLetterIndexes.has(query) &&
+      !(holdsCatalogLists && isCatalogListQuery(query)),
   });
+}
+
+const CATALOG_LIST_KEY = [...catalogKeys.all, "list"] as const;
+// The longest a sweep waits for catalog pages on their first read.
+const CATALOG_LIST_HOLD_MAX_MS = 10_000;
+const heldCatalogListSweeps = new WeakMap<QueryClient, Array<(query: Query) => boolean>>();
+
+function isCatalogListQuery(query: Query) {
+  return queryKeyStartsWith(query.queryKey, CATALOG_LIST_KEY);
+}
+
+function firstCatalogListReads(queryClient: QueryClient, matches: (query: Query) => boolean) {
+  return queryClient.getQueryCache().findAll({
+    queryKey: CATALOG_LIST_KEY,
+    fetchStatus: "fetching",
+    predicate: (query) => query.state.data === undefined && matches(query),
+  });
+}
+
+// A catalog page on its first read has nothing to show until it lands. A
+// sweep refetches page 0, and page 0 coming back under a new snapshot re-keys
+// every later page: the first read loses its last observer, which aborts it,
+// and the page starts over under the new key with no earlier page to stand in
+// for it. A jump deep into a large title-ordered library takes longer than a
+// scan's sweep window to seek, so during a scan it never landed. While a list
+// page of the sweep is on its first read, the sweep leaves the catalog lists
+// alone and sweeps them once those reads finish, or after
+// CATALOG_LIST_HOLD_MAX_MS. Sweeps arriving meanwhile join the held one. A
+// page already shown still reloads under the new snapshot, showing what it
+// held until then. Returns whether the sweep must leave the lists alone.
+function holdCatalogListsForFirstReads(
+  queryClient: QueryClient,
+  matches: (query: Query) => boolean,
+): boolean {
+  const held = heldCatalogListSweeps.get(queryClient);
+  if (held) {
+    held.push(matches);
+    return true;
+  }
+  if (firstCatalogListReads(queryClient, matches).length === 0) return false;
+  const sweeps = [matches];
+  heldCatalogListSweeps.set(queryClient, sweeps);
+  const anySweep = (query: Query) => sweeps.some((match) => match(query));
+  void (async () => {
+    try {
+      const deadline = Date.now() + CATALOG_LIST_HOLD_MAX_MS;
+      let reads = firstCatalogListReads(queryClient, anySweep);
+      while (reads.length > 0 && Date.now() < deadline) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(reads.map((query) => query.promise)),
+          new Promise((resolve) => (timer = setTimeout(resolve, deadline - Date.now()))),
+        ]);
+        clearTimeout(timer);
+        reads = firstCatalogListReads(queryClient, anySweep);
+      }
+    } finally {
+      // Always release the hold, or every later sweep would join one that
+      // never ends and the lists would stop refreshing.
+      heldCatalogListSweeps.delete(queryClient);
+    }
+    await queryClient.invalidateQueries({
+      predicate: (query) => isCatalogListQuery(query) && anySweep(query),
+    });
+  })();
+  return true;
 }
 
 // itemKeyedListOwners is the items whose children a cached list holds.
