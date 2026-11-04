@@ -1639,7 +1639,8 @@ home sections service is not wired.
 every row: each row's limit becomes the smaller of its own effective limit and `item_limit`, and
 the response's per-row `item_limit` reports the capped value. The cap applies to the resolved rows
 before their items are fetched, so the hide-watched widening and the cross-row duplicate filter
-work from the capped size; `total_count` keeps its meaning. Without the parameter every row keeps
+work from the capped size, and a row whose source answers more cards than its limit, such as an
+admin curated list, is cut to it before the duplicate filter; `total_count` keeps its meaning. Without the parameter every row keeps
 its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
 only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
 `include_items_max` is.
