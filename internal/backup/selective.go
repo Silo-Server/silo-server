@@ -258,8 +258,9 @@ func (r RestoreRequest) source() restoreSource {
 
 // locatedSource is a restore set as its manifest records it.
 type locatedSource struct {
-	// digest is of the stored bytes, frozen in the manifest; the opened
-	// reader hashes them as it reads.
+	// digest is of the stored bytes, encrypted or not, frozen in the
+	// manifest or at upload completion; the opened reader hashes them as
+	// it reads.
 	digest string
 	// indexSHA256 is the index's digest the manifest records.
 	indexSHA256 string
@@ -271,11 +272,14 @@ type locatedSource struct {
 	// uploaded marks an uploaded restore set, whose digest was taken when
 	// the upload completed.
 	uploaded bool
-	open     func(context.Context) (*storedReader, error)
+	// open opens the set's plaintext, decrypting an encrypted one.
+	open func(context.Context) (*storedReader, error)
 }
 
 // locate reads a source's manifest, which completeBackup refuses when it
-// was changed after the backup wrote it, and returns its restore set.
+// was changed after the backup wrote it, and returns its restore set. An
+// encrypted backup this server's key cannot open is refused here, before
+// anything is read.
 func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource, error) {
 	if src.uploadID != "" {
 		digest, keys, err := s.completedUpload(ctx, src.uploadID)
@@ -285,7 +289,7 @@ func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource,
 		// An upload has no manifest this server wrote: nothing in it can be
 		// authenticated, so it reads only with the admin's confirmation.
 		return locatedSource{digest: digest, uploaded: true, open: func(ctx context.Context) (*storedReader, error) {
-			return openUploaded(s.openParts(ctx, keys)), nil
+			return s.openUploaded(s.openParts(ctx, keys))
 		}}, nil
 	}
 	b, err := s.completeBackup(ctx, src.backupID)
@@ -295,6 +299,9 @@ func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource,
 	entry, ok := b.manifest.object(RestoreSetName)
 	if b.manifest.RestoreSet == nil || !ok {
 		return locatedSource{}, ErrNoRestoreSet
+	}
+	if err := s.readable(b.manifest); err != nil {
+		return locatedSource{}, err
 	}
 	index := b.manifest.RestoreSet.IndexSHA256
 	return locatedSource{digest: entry.SHA256, indexSHA256: index, authenticated: b.manifest.authenticated && index != "", open: func(ctx context.Context) (*storedReader, error) {

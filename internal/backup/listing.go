@@ -7,11 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
-	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -43,14 +40,12 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 	op := s.beginOperation(ctx, held, ActiveOperation{Operation: OperationDelete, BackupID: id, StartedAt: s.opts.Now()})
 	defer op.end(ctx, nil)
-	objects, err := t.List(ctx, folderPrefix(serverID, id))
-	if err != nil {
+	if found, err := hasObjects(ctx, t, folderPrefix(serverID, id)); err != nil {
 		return err
-	}
-	if len(objects) == 0 {
+	} else if !found {
 		return ErrNotFound
 	}
-	return t.DeletePrefix(ctx, folderPrefix(serverID, id))
+	return deleteBackupFolder(ctx, t, folderPrefix(serverID, id))
 }
 
 // Summary describes one backup folder of this server.
@@ -62,7 +57,8 @@ type Summary struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	SizeBytes   int64      `json:"size_bytes"`
 	SiloVersion string     `json:"silo_version,omitempty"`
-	// Location is where the folder is: a path on a local store.
+	// Location is where the folder is: a path on a local store, or
+	// s3://bucket/key in a bucket.
 	Location     string        `json:"location"`
 	MissingBlobs []MissingBlob `json:"missing_blobs"`
 	// MissingBlobsTotal counts every missing blob; MissingBlobs lists at
@@ -72,8 +68,10 @@ type Summary struct {
 	RestoreSetOmitted []OmittedItem `json:"restore_set_omitted"`
 	BlobCount         int           `json:"blob_count"`
 	Objects           []ObjectEntry `json:"objects"`
-	// KeyCheck is the check value of the SECRET_KEY the backup was taken
-	// with, and KeyMatches whether it is this server's.
+	// Encrypted says the objects are stored encrypted; KeyCheck is the check
+	// value of the SECRET_KEY the backup was taken with, and KeyMatches
+	// whether it is this server's.
+	Encrypted  bool   `json:"encrypted"`
 	KeyCheck   string `json:"key_check,omitempty"`
 	KeyMatches bool   `json:"key_matches"`
 	// Clean is whether rotation protects this copy as its newest clean one
@@ -95,7 +93,16 @@ const (
 	WarningSQLiteUserStore        = "sqlite_user_store"
 	WarningToolsMissing           = "pg_dump_missing"
 	WarningToolsTooOld            = "pg_dump_too_old"
-	WarningBackupUnreadable       = "backup_unreadable"
+	// WarningNoBackupsAtDestination: backups completed recently, but none
+	// at the current destination: the destination was switched since. The
+	// earlier copies stay at the previous destination.
+	WarningNoBackupsAtDestination = "no_backups_at_destination"
+	// WarningKeyNotConfirmed: backups are encrypted (the destination is an
+	// S3 bucket) and SECRET_KEY changed since the admin confirmed it, or was
+	// never confirmed. They are paused until the admin confirms the current
+	// key.
+	WarningKeyNotConfirmed  = "key_not_confirmed"
+	WarningBackupUnreadable = "backup_unreadable"
 )
 
 // Listing is the Backups page's whole state.
@@ -109,12 +116,19 @@ type Listing struct {
 	Active *ActiveOperation `json:"active,omitempty"`
 	// LastRun is the latest backup run's outcome, including one that died.
 	LastRun *LastRun `json:"last_run,omitempty"`
+	// Encrypted says backups written now are encrypted: the S3 destination,
+	// or the default one when it is the private bucket.
+	Encrypted bool `json:"encrypted"`
 	// KeyCheck is this server's SECRET_KEY check value, for display.
 	KeyCheck string `json:"key_check"`
-	Keep     int    `json:"keep"`
-	// LastSuccessAt is when the latest successful backup finished: the
-	// published status, or the newest complete backup when that is later
-	// (the status row is not in a dump, so a full restore starts it empty).
+	// KeyConfirmed says the admin confirmed keeping a copy of the current
+	// SECRET_KEY: the confirmed check value is this server's.
+	KeyConfirmed bool `json:"key_confirmed"`
+	Keep         int  `json:"keep"`
+	// LastSuccessAt is when the latest successful backup finished, at any
+	// destination: the published status, or the newest complete backup at
+	// the current destination when that is later (the status row is not in
+	// a dump, so a full restore starts it empty).
 	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
 	Backups        []Summary  `json:"backups"`
 	OtherServerIDs []string   `json:"other_server_ids"`
@@ -122,7 +136,9 @@ type Listing struct {
 }
 
 // List reports this server's backups, the other server ids at the
-// destination, and the warnings the dashboard shows.
+// destination, and the warnings the dashboard shows. The 48-hour warning
+// reads the latest success at any destination, so switching destinations
+// does not raise it; the destination's own emptiness is a separate warning.
 func (s *Service) List(ctx context.Context) (Listing, error) {
 	listing, err := s.list(ctx)
 	if err == nil && listing.Enabled && (listing.LastSuccessAt == nil || s.opts.Now().Sub(*listing.LastSuccessAt) > lastSuccessWarnAge) {
@@ -132,8 +148,15 @@ func (s *Service) List(ctx context.Context) (Listing, error) {
 }
 
 func (s *Service) list(ctx context.Context) (Listing, error) {
-	listing := Listing{Backups: []Summary{}, OtherServerIDs: []string{}, Warnings: []Warning{}, KeyCheck: s.opts.KeyCheck, Destination: DestinationDefault}
+	listing := Listing{Backups: []Summary{}, OtherServerIDs: []string{}, Warnings: []Warning{}, KeyCheck: s.opts.KeyCheck}
 	var err error
+	if listing.Destination, err = s.destinationSetting(ctx); err != nil {
+		return listing, err
+	}
+	if listing.KeyConfirmed, err = s.keyConfirmed(ctx); err != nil {
+		return listing, err
+	}
+	listing.Encrypted = s.encrypts(listing.Destination)
 	if listing.Enabled, err = s.settingBool(ctx, config.BackupEnabledSettingKey, true); err != nil {
 		return listing, err
 	}
@@ -142,6 +165,10 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 	}
 	if s.sqliteUserStore() {
 		listing.Warnings = append(listing.Warnings, Warning{Code: WarningSQLiteUserStore, Message: ErrSQLiteUserStore.Error()})
+	}
+	if listing.Encrypted && !listing.KeyConfirmed {
+		listing.Warnings = append(listing.Warnings, Warning{Code: WarningKeyNotConfirmed,
+			Message: "Backups to this bucket are paused until you confirm this server's SECRET_KEY."})
 	}
 	s.toolWarnings(ctx, &listing)
 	if listing.Keep, err = s.settingKeep(ctx); err != nil {
@@ -167,11 +194,14 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 		return listing, nil
 	}
 	listing.DestinationAvailable = true
-	objects, err := t.List(ctx, RootPrefix)
+	recordedSuccess := listing.LastSuccessAt
+	hereSuccess := false
+	// A server id and "uploads" may be among them, so two more than shown.
+	children, err := childFolders(ctx, t, RootPrefix, maxOtherServers+2)
 	if err != nil {
 		return listing, err
 	}
-	listing.OtherServerIDs = otherServerIDs(objects, serverID)
+	listing.OtherServerIDs = otherServerIDs(children, serverID)
 	folders, err := s.listFolders(ctx, t, serverID)
 	if err != nil {
 		return listing, err
@@ -187,9 +217,14 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 			// Only a manifest this server authenticated says when a backup
 			// succeeded: anyone who can write the destination could set an
 			// unverified one's completion time in the future and silence the
-			// no-recent-backup warning.
+			// no-recent-backup warning, or the one for a destination
+			// without backups.
 			completed := f.manifest.CompletedAt
-			if f.verified && (listing.LastSuccessAt == nil || completed.After(*listing.LastSuccessAt)) {
+			if !f.verified {
+				break
+			}
+			hereSuccess = true
+			if listing.LastSuccessAt == nil || completed.After(*listing.LastSuccessAt) {
 				listing.LastSuccessAt = &completed
 			}
 		case f.tampered:
@@ -208,24 +243,22 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 		listing.Warnings = append(listing.Warnings, Warning{Code: WarningBackupUnreadable, Message: fmt.Sprintf(
 			"%d of the backups could not be read just now. They are kept, and not rotated or swept, until they can be read.", unreadable)})
 	}
+	if !hereSuccess && recordedSuccess != nil {
+		listing.Warnings = append(listing.Warnings, Warning{Code: WarningNoBackupsAtDestination,
+			Message: "This destination has no backups yet. Earlier backups stay where they were written; the next backup goes here."})
+	}
 	return listing, nil
 }
 
 // otherServerIDs lists the server ids other than serverID with backups at
-// a destination, from a listing of RootPrefix.
-func otherServerIDs(objects []blobstore.ObjectInfo, serverID string) []string {
-	others := map[string]bool{}
-	for _, obj := range objects {
-		sid, _, ok := strings.Cut(strings.TrimPrefix(obj.Key, RootPrefix), "/")
-		if ok && sid != serverID && validServerID(sid) && sid != "uploads" {
-			others[sid] = true
+// a destination, from the folders under RootPrefix (childFolders).
+func otherServerIDs(children []string, serverID string) []string {
+	out := make([]string, 0, len(children))
+	for _, sid := range children {
+		if sid != serverID && validServerID(sid) && sid != "uploads" && len(out) < maxOtherServers {
+			out = append(out, sid)
 		}
 	}
-	out := make([]string, 0, len(others))
-	for sid := range others {
-		out = append(out, sid)
-	}
-	sort.Strings(out)
 	return out
 }
 
@@ -238,7 +271,7 @@ func (s *Service) fromManifest(summary *Summary, m *Manifest) {
 	}
 	summary.SizeBytes, summary.MissingBlobs, summary.Objects, summary.BlobCount = m.Size(), m.MissingBlobs, m.Objects, m.Blobs.Count
 	summary.MissingBlobsTotal = max(m.MissingBlobsTotal, len(m.MissingBlobs))
-	summary.KeyCheck, summary.KeyMatches = m.KeyCheck, m.KeyCheck != "" && m.KeyCheck == s.opts.KeyCheck
+	summary.Encrypted, summary.KeyCheck, summary.KeyMatches = m.Encrypted, m.KeyCheck, m.KeyCheck != "" && m.KeyCheck == s.opts.KeyCheck
 	if m.RestoreSet != nil && m.RestoreSet.Omitted != nil {
 		summary.RestoreSetOmitted = m.RestoreSet.Omitted
 	}

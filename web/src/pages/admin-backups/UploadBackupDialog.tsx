@@ -39,6 +39,7 @@ import {
   progressPercent,
   retryable,
   sendParts,
+  sniffDecision,
   sniffRestoreSet,
   type UploadFailure,
 } from "./uploadModel";
@@ -81,7 +82,11 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
   const [dragging, setDragging] = useState(false);
   // The ref is what the running upload reads; the state is what renders.
   const file = useRef<File | null>(null);
-  const [chosenFile, setChosenFile] = useState<{ name: string; size: number } | null>(null);
+  const [chosenFile, setChosenFile] = useState<{
+    name: string;
+    size: number;
+    notice: string | null;
+  } | null>(null);
   const authority = useRef<ProfileRequestContextSnapshot | null>(null);
   const abort = useRef<AbortController | null>(null);
 
@@ -165,7 +170,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
 
   const start = async (chosen: File) => {
     file.current = chosen;
-    setChosenFile({ name: chosen.name, size: chosen.size });
+    setChosenFile({ name: chosen.name, size: chosen.size, notice: null });
     const context = captureAdminAuthority();
     authority.current = context;
     const controller = new AbortController();
@@ -178,11 +183,12 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
     setPhase({ step: "uploading", upload: null });
     const head = new Uint8Array(await chosen.slice(0, SNIFF_BYTES).arrayBuffer());
     if (controller.signal.aborted) return;
-    const sniffed = sniffRestoreSet(head);
-    if (sniffed !== "restore_set") {
-      fail({ kind: "rejected", reason: sniffed, message: "" });
+    const decision = sniffDecision(sniffRestoreSet(head));
+    if (!decision.upload) {
+      fail({ kind: "rejected", reason: "not_a_restore_set", message: "" });
       return;
     }
+    setChosenFile({ name: chosen.name, size: chosen.size, notice: decision.notice });
     let upload: AdminBackupUpload;
     try {
       upload = await createBackupUpload(context, chosen.size, controller.signal);
@@ -276,7 +282,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
           <input
             ref={inputRef}
             type="file"
-            accept=".tar,application/x-tar"
+            accept=".tar,.age,application/x-tar"
             className="sr-only"
             tabIndex={-1}
             aria-hidden="true"
@@ -300,6 +306,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
             </span>
           </div>
           <Progress value={progressPercent(sent, total)} aria-label="Upload progress" />
+          {chosenFile?.notice && (
+            <p className="text-muted-foreground text-sm">{chosenFile.notice}</p>
+          )}
         </div>
       );
       footer = (
@@ -339,6 +348,11 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
         <div className="space-y-2" role="alert">
           <p className="text-sm font-medium">{copy.title}</p>
           <p className="text-muted-foreground text-sm">{copy.body}</p>
+          {copy.command ? (
+            <pre className="bg-muted overflow-x-auto rounded-md px-3 py-2 font-mono text-xs">
+              <code>{copy.command}</code>
+            </pre>
+          ) : null}
           {phase.failure.kind === "rejected" && phase.failure.message ? (
             <p className="text-muted-foreground text-xs break-words">{phase.failure.message}</p>
           ) : null}

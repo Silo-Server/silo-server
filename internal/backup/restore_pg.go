@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -209,14 +210,17 @@ func (l PGLoader) Inspect(ctx context.Context, dbURL string) (Inspection, error)
 	return in, err
 }
 
+// backupBucketSettingPrefix names the dedicated backup bucket's settings.
+const backupBucketSettingPrefix = "backup.s3."
+
 func (l PGLoader) UnbindStorage(ctx context.Context, dbURL string) error {
 	conn, err := pgx.Connect(ctx, dbURL)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	_, err = conn.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`,
-		[]string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey})
+	_, err = conn.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1) OR starts_with(key, $2)`,
+		[]string{blobstore.IdentitySettingKey, blobstore.OperationalIdentitySettingKey, config.BackupDestinationSettingKey}, backupBucketSettingPrefix)
 	return err
 }
 

@@ -1,6 +1,6 @@
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { requireAdminAuthority } from "./adminAuthority";
-import { v2, type V2Result } from "./request";
+import { v2, type V2Body, type V2Result } from "./request";
 
 export type AdminBackupCapabilities = V2Result<"GET /api/v2/admin/backups/capabilities">;
 export type AdminBackupList = V2Result<"GET /api/v2/admin/backups">;
@@ -14,8 +14,10 @@ export type AdminBackupLastRun = NonNullable<AdminBackupList["last_run"]>;
 export type AdminBackupDownloadLink =
   V2Result<"POST /api/v2/admin/backups/{id}/download-links">["items"][number];
 export type AdminBackupDestination = AdminBackupList["destination"];
-/** full: every stored object as it is; restore-set: restore-set.tar alone. */
+/** full: every stored object as it is; restore-set: restore-set.tar alone, decrypted here. */
 export type AdminBackupDownloadScope = "full" | "restore-set";
+export type AdminBackupS3TestBody = V2Body<"POST /api/v2/admin/backups/s3/test">;
+export type AdminBackupS3TestResult = V2Result<"POST /api/v2/admin/backups/s3/test">;
 
 /** Runs `run` only while `context` is the active admin authority, and checks it again after. */
 export async function readAsAdmin<T>(
@@ -56,8 +58,9 @@ export function deleteAdminBackup(context: ProfileRequestContextSnapshot, id: st
 }
 
 /**
- * Links valid for 15 minutes: every stored object of the backup for `full`,
- * or restore-set.tar alone for `restore-set`.
+ * Links valid for 15 minutes: every stored object of the backup (encrypted
+ * ones as stored) for `full`, or restore-set.tar alone, decrypted by this
+ * server, for `restore-set`.
  */
 export async function createAdminBackupDownloadLinks(
   context: ProfileRequestContextSnapshot,
@@ -72,4 +75,35 @@ export async function createAdminBackupDownloadLinks(
     }),
   );
   return result.items;
+}
+
+const S3_TEST_TIMEOUT_MS = 60_000;
+
+/** Reaches a bucket and writes and deletes a test object in it. Saves nothing. */
+export function testAdminBackupS3(
+  context: ProfileRequestContextSnapshot,
+  body: AdminBackupS3TestBody,
+) {
+  return readAsAdmin(context, () =>
+    v2("POST /api/v2/admin/backups/s3/test", {
+      profileContext: context,
+      body,
+      // The test reaches the bucket and writes to it; a bucket that never
+      // answers must not keep the dialog waiting.
+      timeoutMs: S3_TEST_TIMEOUT_MS,
+    }),
+  );
+}
+
+/** Confirms a copy of the SECRET_KEY with `keyCheck` is kept elsewhere; 409 when the key changed. */
+export function acknowledgeAdminBackupKey(
+  context: ProfileRequestContextSnapshot,
+  keyCheck: string,
+) {
+  return readAsAdmin(context, () =>
+    v2("POST /api/v2/admin/backups/s3/acknowledge-key", {
+      profileContext: context,
+      body: { key_check: keyCheck },
+    }),
+  );
 }
