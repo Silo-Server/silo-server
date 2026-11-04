@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
+import { INTRO_PROMPT_SECONDS } from "../hooks/useIntroSkipPrompt";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
@@ -3856,6 +3857,37 @@ describe("VideoPlayer intro skip prompt", () => {
 
     expect(notPrevented).toBe(true);
     expect(prompt).toBeInTheDocument();
+  });
+
+  // The offer that returns with the controls after the timer ran out must not
+  // take Space or Escape from the rest of the player, only answer them when
+  // the viewer focused it.
+  it("brings a timed-out ask back without claiming unfocused keys", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const rendered = await enterIntro("ask");
+      const video = rendered.container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      fireEvent.play(video);
+      expect(screen.getByRole("button", { name: "Skip Intro" })).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      const offer = screen.getByRole("button", { name: "Skip Intro" });
+
+      expect(fireEvent.keyDown(document.body, { key: "Escape" })).toBe(true);
+      expect(offer).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: " " });
+      expect(offer).toBeInTheDocument();
+      expect(video.currentTime).toBe(12);
+
+      offer.focus();
+      expect(fireEvent.keyDown(offer, { key: " " })).toBe(false);
+      await act(async () => Promise.resolve());
+      expect(offer).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("acts on Select while the pill itself is focused", async () => {

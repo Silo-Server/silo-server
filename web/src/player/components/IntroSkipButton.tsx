@@ -13,11 +13,7 @@ interface IntroSkipButtonProps {
    */
   caption?: string;
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
-  /**
-   * Marks the pill as the intro prompt the player's root key handler acts on.
-   * Defaults to having a timer: the intro offer that returns with the controls
-   * has none but is still that prompt.
-   */
+  /** Marks the pill as the intro prompt the player's root key handler acts on. */
   introPrompt?: boolean;
   controlsVisible?: boolean;
   focusOnMount?: boolean;
@@ -41,7 +37,7 @@ export function IntroSkipButton({
   label = "Skip Intro",
   caption,
   timer,
-  introPrompt = timer !== undefined,
+  introPrompt = false,
   controlsVisible = true,
   focusOnMount = false,
   provenance,
