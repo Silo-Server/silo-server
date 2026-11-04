@@ -25,6 +25,11 @@ func validTestManifest() Manifest {
 	return m
 }
 
+// beforeUpgrade makes m the database-only backup taken before migrations.
+func beforeUpgrade(m *Manifest) {
+	m.ID, m.Kind, m.Objects = "20261031T040000Z-before-upgrade", KindBeforeUpgrade, m.Objects[:1]
+}
+
 // TestParseManifestRefusesWhatARestoreCouldNotCheck: a restore verifies the
 // restored database against the manifest's inventory and its objects against
 // their checksums, so a manifest that leaves either out, or names something
@@ -53,6 +58,11 @@ func TestParseManifestRefusesWhatARestoreCouldNotCheck(t *testing.T) {
 		"restore set summary without its object": func(m *Manifest) {
 			m.RestoreSet = &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{SectionSettings: 1}}
 		},
+		"before-upgrade with blobs.tar": func(m *Manifest) {
+			beforeUpgrade(m)
+			m.Objects = append(m.Objects, ObjectEntry{Name: BlobsName, SHA256: m.Objects[0].SHA256})
+		},
+		"before-upgrade counting blobs": func(m *Manifest) { beforeUpgrade(m); m.Blobs.Count = 1 },
 		"unknown restore set section": func(m *Manifest) {
 			m.Objects = append(m.Objects, ObjectEntry{Name: RestoreSetName, SHA256: m.Objects[0].SHA256})
 			m.RestoreSet = &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{"../x": 1}}
@@ -76,6 +86,12 @@ func TestParseManifestRefusesWhatARestoreCouldNotCheck(t *testing.T) {
 	data, _ := json.Marshal(good)
 	if _, err := ParseManifest(data); err != nil {
 		t.Fatalf("a valid manifest with an absent table was refused: %v", err)
+	}
+	upgrade := validTestManifest()
+	beforeUpgrade(&upgrade)
+	data, _ = json.Marshal(upgrade)
+	if _, err := ParseManifest(data); err != nil {
+		t.Fatalf("a database-only before-upgrade manifest was refused: %v", err)
 	}
 }
 

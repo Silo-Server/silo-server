@@ -90,6 +90,7 @@ describe("retentionPlan", () => {
         }),
         backup(29, { id: "failed", status: "incomplete" }),
         backup(28, { id: "restore", kind: "before-restore" }),
+        backup(27, { id: "upgrade", kind: "before-upgrade" }),
         backup(26, { id: "nightly" }),
       ],
       2,

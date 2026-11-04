@@ -72,8 +72,12 @@ func OpenSource(dir string) (*Source, error) {
 func (src *Source) path(name string) string { return filepath.Join(src.Dir, name) }
 
 // writesBlobs reports whether a restore from src writes blobs.tar: not for
-// a database-only restore.
-func (src *Source) writesBlobs() bool { return !src.withoutBlobs }
+// a database-only restore, and not from a backup that has none.
+func (src *Source) writesBlobs() bool { return !src.withoutBlobs && src.Manifest.HasBlobs() }
+
+// noBlobsNote is what a restore from a database-only backup prints instead
+// of writing files.
+const noBlobsNote = "This backup was taken before an upgrade and holds the database only; files in storage are left as they are."
 
 // Objects reads the stored objects of one backup folder by name.
 type Objects interface {
@@ -166,7 +170,8 @@ type FetchOptions struct {
 }
 
 // FetchSource copies the objects a full restore reads (db.dump, and
-// blobs.tar unless opts.DatabaseOnly) into opts.WorkDir as plaintext,
+// blobs.tar unless opts.DatabaseOnly or the backup has none) into
+// opts.WorkDir as plaintext,
 // decrypting as each streams and checking its stored bytes against the
 // manifest's size and SHA-256. Before anything is fetched, the working
 // folder must have room for the objects' stored sizes (a plaintext is never
@@ -182,7 +187,7 @@ func FetchSource(ctx context.Context, objects Objects, m *Manifest, opts FetchOp
 		key = nil
 	}
 	bases := []string{DumpName, BlobsName}
-	if opts.DatabaseOnly {
+	if opts.DatabaseOnly || !m.HasBlobs() {
 		bases = bases[:1]
 	}
 	entries := make([]ObjectEntry, 0, len(bases))
@@ -650,7 +655,8 @@ type SeparateOptions struct {
 // open for the operator to point DATABASE_URL at.
 func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, opts SeparateOptions) (RestoreReport, error) {
 	out := writerOrDiscard(opts.Out)
-	if !opts.DatabaseOnly && opts.BlobsInto == "" {
+	hasBlobs := src.Manifest.HasBlobs()
+	if !opts.DatabaseOnly && hasBlobs && opts.BlobsInto == "" {
 		return RestoreReport{}, errors.New("--blobs-into is required unless --database-only")
 	}
 	if err := src.Validate(ctx, opts.Validate); err != nil {
@@ -660,7 +666,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 		return RestoreReport{}, err
 	}
 	// Both stores land in one directory.
-	if !opts.DatabaseOnly {
+	if !opts.DatabaseOnly && hasBlobs {
 		if err := src.checkArchive(ctx, func(string) (string, bool) { return opts.BlobsInto, true }); err != nil {
 			return RestoreReport{}, err
 		}
@@ -705,9 +711,12 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 		}
 	}
 	report := RestoreReport{Database: opts.Into, MissingBlobs: src.Manifest.MissingBlobs}
-	if opts.DatabaseOnly {
+	switch {
+	case !hasBlobs:
+		_, _ = fmt.Fprintln(out, noBlobsNote)
+	case opts.DatabaseOnly:
 		_, _ = fmt.Fprintln(out, "Skipped files (--database-only): uploaded artwork, avatars, and branding will be missing.")
-	} else {
+	default:
 		n, err := writeSeparateBlobs(ctx, src, opts)
 		if err != nil {
 			return report, err
@@ -822,7 +831,9 @@ func VerifyBackup(ctx context.Context, src *Source, loader DatabaseLoader, scrat
 	if err := loadAndVerify(ctx, src, loader, scratch, validate, out); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "blobs.tar holds the %d files the manifest records.\n", src.Manifest.Blobs.Count)
+	if src.Manifest.HasBlobs() {
+		_, _ = fmt.Fprintf(out, "blobs.tar holds the %d files the manifest records.\n", src.Manifest.Blobs.Count)
+	}
 	printMissing(out, src.Manifest)
 	_, _ = fmt.Fprintln(out, "Verified: the backup restores and matches its manifest.")
 	return nil

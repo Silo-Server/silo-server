@@ -91,6 +91,20 @@ func TestPlanRotation(t *testing.T) {
 			want: []string{id(KindNightly, 1), id(KindBeforeRestore, 8)},
 		},
 		{
+			name: "before-upgrade keeps the two newest outside keep",
+			folders: []folder{backup(KindBeforeUpgrade, 10, clean), backup(KindBeforeUpgrade, 20, clean), backup(KindBeforeUpgrade, 30, clean),
+				backup(KindNightly, 0, clean)},
+			keep: 1,
+			want: []string{id(KindBeforeUpgrade, 30)},
+		},
+		{
+			name: "unverified before-upgrade copies never rotate away the two newest verified ones",
+			folders: []folder{unverified(KindBeforeUpgrade, 1, clean), unverified(KindBeforeUpgrade, 2, clean), backup(KindBeforeUpgrade, 10, clean),
+				backup(KindBeforeUpgrade, 20, clean), backup(KindBeforeUpgrade, 30, clean), backup(KindNightly, 0, clean)},
+			keep: 1,
+			want: []string{id(KindBeforeUpgrade, 30)},
+		},
+		{
 			name:    "an active restore source is never deleted",
 			folders: []folder{backup(KindNightly, 0, clean), backup(KindNightly, 1, clean), backup(KindBeforeRestore, 9, clean)},
 			keep:    1,

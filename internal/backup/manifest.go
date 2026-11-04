@@ -103,7 +103,7 @@ type Manifest struct {
 	// restore compares the restored database with it, presence and counts.
 	Tables []TableCount `json:"tables"`
 	// RestoreSet describes restore-set.tar, the sections selective restore
-	// reads. Absent when the backup has none.
+	// reads. Absent when the backup has none (before-upgrade backups).
 	RestoreSet *RestoreSetSummary `json:"restore_set,omitempty"`
 	// MAC authenticates every other field: HMAC-SHA256, under the key
 	// secret.BackupManifestKey derives from SECRET_KEY, of the manifest
@@ -247,6 +247,11 @@ func (m *Manifest) Status() Status {
 	return StatusComplete
 }
 
+// HasBlobs reports whether the backup has blobs.tar. A before-upgrade
+// backup is the database only: migrations do not touch blobs, so a full
+// restore from it leaves the files in place.
+func (m *Manifest) HasBlobs() bool { return !m.Kind.databaseOnly() }
+
 // Size is the sum of the stored objects, manifest excluded.
 func (m *Manifest) Size() int64 {
 	var total int64
@@ -316,7 +321,10 @@ func (m *Manifest) validate() error {
 	if err := validateApplied(m.AppliedMigrations, m.GooseVersion); err != nil {
 		return err
 	}
-	if err := validateObjects(m.Objects, m.RestoreSet != nil, m.Encrypted); err != nil {
+	if !m.HasBlobs() && (m.RestoreSet != nil || m.Blobs.Count != 0 || len(m.MissingBlobs) != 0) {
+		return fmt.Errorf("a %s backup holds the database only", m.Kind)
+	}
+	if err := validateObjects(m.Objects, m.HasBlobs(), m.RestoreSet != nil, m.Encrypted); err != nil {
 		return err
 	}
 	if err := m.RestoreSet.validate(); err != nil {
@@ -333,11 +341,14 @@ func (m *Manifest) validate() error {
 	return validateInventory(m.Tables)
 }
 
-// validateObjects requires exactly db.dump, blobs.tar, and restore-set.tar
-// when the manifest describes one, each once, with a size and a SHA-256;
-// each named .age when encrypted.
-func validateObjects(objects []ObjectEntry, restoreSet, encrypted bool) error {
-	want := map[string]bool{storedName(DumpName, encrypted): false, storedName(BlobsName, encrypted): false}
+// validateObjects requires exactly db.dump, blobs.tar unless the backup is
+// database-only, and restore-set.tar when the manifest describes one, each
+// once, with a size and a SHA-256; each named .age when encrypted.
+func validateObjects(objects []ObjectEntry, blobs, restoreSet, encrypted bool) error {
+	want := map[string]bool{storedName(DumpName, encrypted): false}
+	if blobs {
+		want[storedName(BlobsName, encrypted)] = false
+	}
 	if restoreSet {
 		want[storedName(RestoreSetName, encrypted)] = false
 	}

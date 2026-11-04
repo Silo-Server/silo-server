@@ -117,7 +117,7 @@ type AdminBackupOmitted struct {
 
 type AdminBackup struct {
 	ID           string                   `json:"id" doc:"The backup folder name: UTC start time and kind"`
-	Kind         string                   `json:"kind" enum:"nightly,manual,before-restore"`
+	Kind         string                   `json:"kind" enum:"nightly,manual,before-restore,before-upgrade"`
 	Status       string                   `json:"status" enum:"complete,complete_with_warnings,in_progress,incomplete,unverified,unreadable" doc:"complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied, or the restore set left items out (restore_set_omitted). in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours. unverified: this server cannot authenticate the manifest (another SECRET_KEY, none recorded, or changed since it was written); a restore needs confirmation, and one whose manifest names this key but does not verify shows no details and cannot be restored. unreadable: its manifest could not be read just now (the destination failed or the read was cut short); it is kept, and neither rotated nor swept, until it reads"`
 	CreatedAt    Instant                  `json:"created_at"`
 	CompletedAt  *Instant                 `json:"completed_at,omitempty"`
@@ -152,7 +152,7 @@ type AdminBackupActive struct {
 // AdminBackupLastRun is the latest backup run's outcome.
 type AdminBackupLastRun struct {
 	ID         string   `json:"id"`
-	Kind       string   `json:"kind" enum:"nightly,manual,before-restore"`
+	Kind       string   `json:"kind" enum:"nightly,manual,before-restore,before-upgrade"`
 	Status     string   `json:"status" enum:"complete,complete_with_warnings,failed,interrupted" doc:"interrupted: the server running it stopped before it finished"`
 	StartedAt  Instant  `json:"started_at"`
 	FinishedAt *Instant `json:"finished_at,omitempty"`
@@ -231,7 +231,7 @@ func backupProblem(err error) error {
 	case errors.Is(err, backup.ErrNoDestination), errors.Is(err, backup.ErrNoArchiveKey):
 		return NewProblem(TypeCapabilityNotConfigured, "This server has no storage for backups.")
 	case errors.Is(err, backup.ErrNoRestoreSet):
-		return NewProblem(TypeConflict, "This backup has no restore set: it was taken before selective restore existed.")
+		return NewProblem(TypeConflict, "This backup has no restore set: it was taken before an upgrade, or before selective restore existed.")
 	case errors.Is(err, backup.ErrRestoreSetTooNew):
 		return NewProblem(TypeConflict, backup.ErrRestoreSetTooNew.Error())
 	case errors.Is(err, backup.ErrUnauthenticated):

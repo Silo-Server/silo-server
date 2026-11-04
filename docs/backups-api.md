@@ -115,7 +115,7 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
   when that is later; an unverified manifest's completion time never
   counts).
 - `items`: this server's backups, newest first. Each has `id`, `kind`
-  (`nightly`, `manual`, `before-restore`), `status`,
+  (`nightly`, `manual`, `before-restore`, `before-upgrade`), `status`,
   `created_at`, `completed_at`, `size_bytes`, `silo_version`, `location`
   (a filesystem path on a local store, or `s3://bucket/key` in a bucket),
   `blob_count`,
@@ -242,7 +242,8 @@ from another key reaches the `backup_unauthenticated` answer below.
 
 `GET /admin/backups/{id}/restore-set` reads the backup's `restore-set.tar`
 and compares each item with this server. It writes nothing and takes no
-lock. `409` when the backup has no restore set, when it is from a newer Silo ("This backup is from a newer Silo. Upgrade this
+lock. `409` when the backup has no restore set (a before-upgrade backup),
+when it is from a newer Silo ("This backup is from a newer Silo. Upgrade this
 server first."), or when the restore set cannot be read. `409
 backup_unauthenticated` when this server cannot authenticate the backup's
 manifest (an unencrypted backup taken with another `SECRET_KEY`; an
