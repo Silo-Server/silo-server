@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,20 +12,32 @@ import (
 )
 
 func TestMeilisearchCursorInitialTimeoutAndCancellation(t *testing.T) {
-	for _, callerCancels := range []bool{false, true} {
-		name := "provider timeout falls back"
-		if callerCancels {
-			name = "caller cancellation does not fall back"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// hangOn is the Meilisearch request that never answers.
+		hangOn        string
+		callerCancels bool
+	}{
+		{name: "settings timeout falls back and opens the breaker", hangOn: "/settings"},
+		{name: "ranking search timeout falls back and opens the breaker", hangOn: "/search"},
+		{name: "caller cancellation does not fall back", hangOn: "/settings", callerCancels: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			started := make(chan struct{})
-			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, tc.hangOn) {
+					_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
+					return
+				}
+				// The server notices the client giving up only once the
+				// request body has been read.
+				_, _ = io.Copy(io.Discard, r.Body)
 				close(started)
 				<-r.Context().Done()
 			}))
 			defer server.Close()
 			timeout := 50 * time.Millisecond
-			if callerCancels {
+			if tc.callerCancels {
 				timeout = 5 * time.Second
 			}
 			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{
@@ -47,9 +60,9 @@ func TestMeilisearchCursorInitialTimeoutAndCancellation(t *testing.T) {
 			select {
 			case <-started:
 			case <-time.After(5 * time.Second):
-				t.Fatal("settings request never started")
+				t.Fatalf("%s request never started", tc.hangOn)
 			}
-			if callerCancels {
+			if tc.callerCancels {
 				cancel()
 			}
 			select {
@@ -57,9 +70,10 @@ func TestMeilisearchCursorInitialTimeoutAndCancellation(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("search did not finish after timeout or cancellation")
 			}
-			if callerCancels {
-				if !errors.Is(err, context.Canceled) || provider.lastFallback != "" {
-					t.Fatalf("cancellation = %v, fallback = %q", err, provider.lastFallback)
+			_, circuitOpen := provider.circuitBlocked(time.Now())
+			if tc.callerCancels {
+				if !errors.Is(err, context.Canceled) || provider.lastFallback != "" || circuitOpen {
+					t.Fatalf("cancellation = %v, fallback = %q, circuit open = %v", err, provider.lastFallback, circuitOpen)
 				}
 				return
 			}
@@ -67,6 +81,11 @@ func TestMeilisearchCursorInitialTimeoutAndCancellation(t *testing.T) {
 			// the fallback without requiring a database for this HTTP regression.
 			if ctx.Err() != nil || err == nil || !strings.Contains(err.Error(), "postgres search provider requires item repository") || provider.lastFallback == "" {
 				t.Fatalf("provider timeout: context = %v, result = %v, fallback = %q", ctx.Err(), err, provider.lastFallback)
+			}
+			// The open breaker sends later cursor searches straight to PostgreSQL
+			// instead of each waiting out the timeout (issue #3369).
+			if !circuitOpen {
+				t.Fatal("provider timeout left the circuit breaker closed")
 			}
 		})
 	}

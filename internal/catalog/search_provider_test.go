@@ -940,6 +940,10 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 			if got != tc.wantResult {
 				t.Fatalf("SearchContinuationCapabilities = %+v, want %+v", got, tc.wantResult)
 			}
+			// Capability failures must never down keyword search.
+			if _, open := provider.circuitBlocked(time.Now()); open && !tc.circuitOpen {
+				t.Fatal("capability read opened the circuit breaker")
+			}
 		})
 	}
 }

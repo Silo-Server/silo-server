@@ -154,7 +154,9 @@ func (r *CatalogResolver) SearchContinuationCapabilities(ctx context.Context) (S
 	if provider.sessions == nil {
 		return result, ErrSearchContinuationUnavailable
 	}
-	_, _, window, err := provider.rankingIndex(ctx)
+	// Capability failures must never down keyword search, so this read
+	// does not trip the circuit breaker.
+	_, _, window, err := provider.rankingIndex(ctx, false)
 	if errors.Is(err, ErrSearchProviderFallback) && !errors.Is(err, context.Canceled) {
 		// Ranking sessions fall back to PostgreSQL in this state, so report
 		// that path rather than failing feature detection.

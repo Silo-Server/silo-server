@@ -146,8 +146,10 @@ func (p *MeilisearchSearchProvider) visibleRankingBoundary(ctx context.Context, 
 // rankingIndex returns the active index, its compatibility, and its result
 // window when Meilisearch can rank a search now. ErrSearchProviderFallback
 // means ranking falls back to PostgreSQL; ErrSearchWindowUnsupported means the
-// index is configured with a window Silo cannot use.
-func (p *MeilisearchSearchProvider) rankingIndex(ctx context.Context) (SearchIndexState, catalogSearchIndexCompatibility, int, error) {
+// index is configured with a window Silo cannot use. A search sets
+// tripOnFailure so a failed settings request opens the circuit breaker; a
+// capability read leaves the breaker alone.
+func (p *MeilisearchSearchProvider) rankingIndex(ctx context.Context, tripOnFailure bool) (SearchIndexState, catalogSearchIndexCompatibility, int, error) {
 	if p.client == nil || p.stateRepo == nil {
 		return SearchIndexState{}, 0, 0, ErrSearchProviderFallback
 	}
@@ -167,6 +169,9 @@ func (p *MeilisearchSearchProvider) rankingIndex(ctx context.Context) (SearchInd
 	}
 	settings, err := p.client.GetSettings(ctx, state.ActiveIndexUID)
 	if err != nil {
+		if tripOnFailure {
+			p.tripCircuitOnRequestFailure(ctx, err)
+		}
 		return SearchIndexState{}, 0, 0, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
 	window := settings.Pagination.MaxTotalHits
@@ -180,7 +185,7 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 	if !p.indexCoversRequest(req.ItemTypes) {
 		return nil, ErrSearchProviderFallback
 	}
-	state, compatibility, window, err := p.rankingIndex(ctx)
+	state, compatibility, window, err := p.rankingIndex(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +217,7 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 		response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
 	}
 	if err != nil {
+		p.tripCircuitOnRequestFailure(ctx, err)
 		return nil, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
 	ids := make([]string, 0, len(response.Hits))

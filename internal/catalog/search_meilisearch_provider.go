@@ -818,6 +818,15 @@ func (p *MeilisearchSearchProvider) tripCircuit(cause error) {
 	p.lastFallback = cause.Error()
 }
 
+// tripCircuitOnRequestFailure opens the breaker after a failed Meilisearch
+// request that shouldTripCircuit accepts, as the offset Search path does. The
+// caller ending its own request is not a Meilisearch failure and never trips it.
+func (p *MeilisearchSearchProvider) tripCircuitOnRequestFailure(ctx context.Context, err error) {
+	if ctx.Err() == nil && p.shouldTripCircuit(err) {
+		p.tripCircuit(err)
+	}
+}
+
 func (p *MeilisearchSearchProvider) markFallback(reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
