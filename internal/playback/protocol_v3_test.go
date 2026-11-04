@@ -1520,28 +1520,51 @@ func TestPlanPlaybackV3Profile7DoesNotInferClientTransformFromHDRProfile(t *test
 // with the copy-safety flag settable by the caller.
 func copyUnsafeFixtureV3(multiPPS bool) (*models.MediaFile, StartRequestV3) {
 	file := detailedFixtureFileV3()
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.VideoTracks[0].ColorTransfer = "bt709"
+	file.CodecVideo = "h264"
+	file.Resolution = "1080p"
+	file.Bitrate = 12_000
+	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR", ColorTransfer: "bt709"}
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
 	file.CodecAudio = "truehd"
 	file.VideoTracks[0].MultiplePPS = &multiPPS
 	req := validStartRequestV3()
 	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
+	req.Capabilities.CodecsVideo = []string{"h264"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
 	return file, req
 }
 
-func TestPlanPlaybackV3CopyUnsafeSourceForcesTranscode(t *testing.T) {
-	// The source carries conflicting in-band PPS, so the video stream-copy remux
-	// is disqualified and planning must fall through to a real transcode.
-	file, req := copyUnsafeFixtureV3(true)
-	result := planFileV3(req, file)
-	if result.PlayMethod != PlayTranscode {
-		t.Fatalf("PlayMethod = %q, want transcode; result = %s", result.PlayMethod, ExplainPlannerResultV3(result))
-	}
-	if result.Plan == nil || result.Plan.DecisionReason != "copy_routes_exhausted" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+func TestPlanPlaybackV3CopyUnsafeSourceCopiesUntilACopyFails(t *testing.T) {
+	// The source carries conflicting in-band PPS. Every client is offered the
+	// video stream-copy first; once a copy has failed in the attempt, the remux
+	// ladder is closed and planning falls through to a real transcode. The
+	// failure is frozen with the recipe so later replans keep refusing it.
+	for _, delivery := range []DeliveryV3{DeliveryRemuxProgressiveV3, DeliveryRemuxHLSV3} {
+		t.Run(string(delivery), func(t *testing.T) {
+			file, req := copyUnsafeFixtureV3(true)
+			if delivery == DeliveryRemuxHLSV3 {
+				delete(req.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+			}
+			result := planFileV3(req, file)
+			if result.PlayMethod != PlayRemux || result.Plan == nil || result.Plan.Delivery != delivery {
+				t.Fatalf("want a video stream-copy first; result = %s", ExplainPlannerResultV3(result))
+			}
+
+			failed := planFileAfterCopyFailureV3(req, file)
+			if failed.PlayMethod != PlayTranscode || failed.Plan == nil || failed.Plan.DecisionReason != "copy_routes_exhausted" {
+				t.Fatalf("want transcode via copy_routes_exhausted after a failed copy; result = %s", ExplainPlannerResultV3(failed))
+			}
+			if !FreezeExecutableRecipeV3(failed).PlannerResult(failed.Plan).VideoCopyFailed {
+				t.Fatal("the frozen recipe dropped VideoCopyFailed")
+			}
+
+			// A failed copy only closes the ladder for a copy-unsafe source.
+			file.VideoTracks[0].MultiplePPS = nil
+			safe := planFileAfterCopyFailureV3(req, file)
+			if safe.PlayMethod != PlayRemux {
+				t.Fatalf("an unresolved verdict must still copy; result = %s", ExplainPlannerResultV3(safe))
+			}
+		})
 	}
 }
 
@@ -1621,7 +1644,8 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 		t.Fatal("fixture already carries the runtime copy-safety flags; the test would prove nothing")
 	}
 
-	result := planFileV3(req, file)
+	// The verdict only matters once a copy has failed in the attempt.
+	result := planFileAfterCopyFailureV3(req, file)
 	if result.Plan == nil {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -1633,7 +1657,7 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 	// A stale verdict (the file was rewritten) must not be honored.
 	staleSize := file.FileSize + 1
 	file.MultiplePPSScanSize = &staleSize
-	stale := planFileV3(req, file)
+	stale := planFileAfterCopyFailureV3(req, file)
 	if stale.Plan == nil || stale.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("stale verdict = %s, want the ordinary remux back", ExplainPlannerResultV3(stale))
 	}
@@ -2855,6 +2879,13 @@ func clientManagedDV7RequestV3(hdr, outputHDR, directHDR *HDRCapabilitiesV3, tra
 // and the standard test registry.
 func planFileV3(req StartRequestV3, file *models.MediaFile) PlannerResultV3 {
 	return PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+}
+
+// planFileAfterCopyFailureV3 plans the way a failure_recovery replan does once
+// a video stream-copy has failed in the attempt.
+func planFileAfterCopyFailureV3(req StartRequestV3, file *models.MediaFile) PlannerResultV3 {
+	req.VideoCopyFailed = true
+	return planFileV3(req, file)
 }
 
 // A source whose RPU ffmpeg cannot parse must lose the strip in the plan, not

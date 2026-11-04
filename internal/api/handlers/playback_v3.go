@@ -6112,6 +6112,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	if !seekReanchor && !userIntentOperation && (!intentChange || seekFailureRecovery) {
+		// A video stream-copy that failed on the client stays refused for the
+		// rest of the attempt, so a multi-PPS source lands on a transcode instead
+		// of the next remux variant. A failure on an unreachable node or proxy
+		// origin is not the decoder's. It goes on the durable recipe now because
+		// a terminal or transport error persists this record unchanged.
+		if !proxyOriginRecovery && !nodeRecovery && playback.PlanCopiesVideoV3(record.CurrentPlan) {
+			record.FrozenRecipe.VideoCopyFailed = true
+		}
 		// Always exclude the durable server recipe so stale or malformed client
 		// history cannot immediately re-select the route that just failed and
 		// ping-pong the session. A client-reported local mutation (for example a
@@ -6129,6 +6137,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
+	// The failed-copy mark rides on start so every plan this replan builds sees it.
+	start.VideoCopyFailed = record.FrozenRecipe.VideoCopyFailed
 	var result playback.PlannerResultV3
 	var toneMapCapabilityErr error
 	var plannerSettings playback.PlannerSettingsV3

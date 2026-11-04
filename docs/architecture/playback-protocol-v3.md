@@ -1310,6 +1310,14 @@ Three scoping rules keep the stop from firing where it cannot help:
   copy-safety verdict, so a stopped compat client reconnects onto the identical
   remux. The stop is only correct for clients whose recovery re-decides the
   route, which for a Silo client means planning against the persisted verdict.
+- **A multi-PPS source is copied first, for every client.** Decoders that
+  apply in-band parameter sets (Media3) play the copy; ones that trust only the
+  sample entry's (VideoToolbox, browser MSE) fail it. A `failure_recovery` or
+  `seek_failure_recovery` replan of a copy plan, unless blamed on a node or
+  proxy origin, marks the attempt `VideoCopyFailed` in its frozen recipe, and
+  the attempt's copy-unsafe source then gets only a transcode. Until then the
+  notifier leaves a v3 attempt's copy alone. A strict decoder costs up to two
+  failed routes (direct play, then the copy); a silent mis-decode is not caught.
 
 That persisted verdict is read from the `media_files` row on every path that
 plans a route — start, replan, and the v2 resolver — not only from the probe

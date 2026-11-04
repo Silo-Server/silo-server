@@ -87,6 +87,9 @@ func remuxAttempt(sessionID, planID string, features ...string) *AttemptRecordV3
 			PlanID:   planID,
 			Delivery: DeliveryRemuxHLSV3,
 		},
+		// The notifier only withdraws a v3 copy once a copy has failed in the
+		// attempt; these fixtures model that attempt.
+		FrozenRecipe:      ExecutableRecipeV3{PlanID: planID, VideoCopyFailed: true},
 		NormalizedRequest: StartRequestV3{ClientFeatures: features},
 	}
 }
@@ -242,6 +245,30 @@ func TestCopySafetyNotifierUsesSessionPlayMethodWithoutAnAttempt(t *testing.T) {
 // The Jellyfin-protocol surface picks direct stream from the device profile
 // alone, so a compat client reconnects onto the identical remux. Stopping it
 // would be a mid-stream interruption that buys nothing.
+// A v3 attempt is offered the copy of a multi-PPS source on purpose and leaves
+// it only once a copy has failed on the client; the verdict alone does not stop
+// it.
+func TestCopySafetyNotifierLeavesV3CopiesThatHaveNotFailed(t *testing.T) {
+	sessions, hub, tracker, control := newCopySafetyFixture(t)
+	playing := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	failed := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayRemux)
+
+	notFailed := remuxAttempt(playing.ID, "plan-playing")
+	notFailed.FrozenRecipe.VideoCopyFailed = false
+	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
+		playing.ID: notFailed,
+		failed.ID:  remuxAttempt(failed.ID, "plan-failed"),
+	}}
+	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
+	notifier.settle = 0
+	notifier.VideoCopyUnsafe(context.Background(), 100)
+
+	stopped := control.stoppedSessions()
+	if len(stopped) != 1 || stopped[0] != failed.ID {
+		t.Fatalf("stopped = %v, want only the session whose copy already failed (%q)", stopped, failed.ID)
+	}
+}
+
 func TestCopySafetyNotifierLeavesJellyfinCompatSessionsAlone(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
 	ctx := WithClientInfo(context.Background(), ClientInfo{Name: "Infuse", IsCompat: true})
