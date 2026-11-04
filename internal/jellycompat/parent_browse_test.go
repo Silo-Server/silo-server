@@ -154,13 +154,25 @@ func TestHandleItems_SeriesParentWithoutTypeReturnsSeasons(t *testing.T) {
 	}
 }
 
-// TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty pins that a filter a series
-// parent cannot satisfy returns an empty page rather than a wrong-typed listing:
-// a type filter such as Movie, or an episode listing whose MediaTypes leave out
-// Video (issue #3186). The type filter does not even hit ListSeasons.
-func TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty(t *testing.T) {
-	for _, filter := range []string{"IncludeItemTypes=Movie", "IncludeItemTypes=Episode&MediaTypes=Audio"} {
-		t.Run(filter, func(t *testing.T) {
+// parentFilterCase is one ParentId filter and the number of episodes it must
+// list. A filter the parent cannot satisfy lists none.
+type parentFilterCase struct {
+	filter    string
+	wantItems int
+}
+
+// TestHandleItems_SeriesParentFilters pins that a filter a series parent cannot
+// satisfy returns an empty page rather than a wrong-typed listing: a type
+// filter such as Movie, or an episode listing whose MediaTypes leave out Video
+// (issue #3186). An empty page does not even hit ListSeasons, and MediaTypes
+// that include Video still list the episodes.
+func TestHandleItems_SeriesParentFilters(t *testing.T) {
+	for _, tc := range []parentFilterCase{
+		{filter: "IncludeItemTypes=Movie"},
+		{filter: "IncludeItemTypes=Episode&MediaTypes=Audio"},
+		{filter: "IncludeItemTypes=Episode&MediaTypes=Video", wantItems: 1},
+	} {
+		t.Run(tc.filter, func(t *testing.T) {
 			codec := NewResourceIDCodec()
 			encodedSeriesID := codec.EncodeStringID(EncodedIDItem, "series-1")
 			contentSvc := &countingContentService{
@@ -175,59 +187,61 @@ func TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty(t *testing.T) {
 				episodeRepo: &boundedEpisodeContractRepo{},
 			}
 
-			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID+"&"+filter)
-			if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-				t.Fatalf("expected empty result under a series parent, got %+v", result.Items)
-			}
-			if contentSvc.listSeasonsCalls != 0 {
-				t.Fatalf("ListSeasons must not be called for an unsatisfiable filter; got %d", contentSvc.listSeasonsCalls)
-			}
+			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeriesID+"&"+tc.filter)
+			assertParentFilterResult(t, tc, result, contentSvc)
 		})
 	}
 }
 
-// TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty pins that a season ParentId
-// with a type filter that excludes Episode (e.g. Movie), or MediaTypes that
-// leave out Video (issue #3186), returns an empty page and short-circuits before
-// listing episodes, even though episodes exist.
-func TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty(t *testing.T) {
-	for _, filter := range []string{"IncludeItemTypes=Movie", "MediaTypes=Audio", "IncludeItemTypes=Episode&MediaTypes=Audio"} {
-		t.Run(filter, func(t *testing.T) { assertSeasonParentFilterIsEmpty(t, filter) })
+// TestHandleItems_SeasonParentFilters pins that a season ParentId with a type
+// filter that excludes Episode (e.g. Movie), or MediaTypes that leave out Video
+// (issue #3186), returns an empty page and short-circuits before listing
+// episodes, even though episodes exist; MediaTypes=Video still lists them.
+func TestHandleItems_SeasonParentFilters(t *testing.T) {
+	for _, tc := range []parentFilterCase{
+		{filter: "IncludeItemTypes=Movie"},
+		{filter: "MediaTypes=Audio"},
+		{filter: "IncludeItemTypes=Episode&MediaTypes=Audio"},
+		{filter: "MediaTypes=Video", wantItems: 1},
+	} {
+		t.Run(tc.filter, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			seriesContentID := "series-1"
+			seasonContentID := "season-1"
+			encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
+			contentSvc := &countingContentService{
+				seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+			}
+			episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+				episodeBySeasonKey(seriesContentID, 1): {
+					{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
+				},
+			}}
+			h := &ItemsHandler{
+				content:     contentSvc,
+				userData:    &mockUserDataService{},
+				codec:       codec,
+				mapper:      newMapper(codec, &config.Config{}),
+				images:      NewImageCache(time.Hour, time.Now),
+				episodeRepo: episodeRepo,
+				seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
+					seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
+				}},
+			}
+
+			result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&"+tc.filter)
+			assertParentFilterResult(t, tc, result, contentSvc)
+		})
 	}
 }
 
-func assertSeasonParentFilterIsEmpty(t *testing.T, filter string) {
+func assertParentFilterResult(t *testing.T, tc parentFilterCase, result queryResultDTO, contentSvc *countingContentService) {
 	t.Helper()
-	codec := NewResourceIDCodec()
-	seriesContentID := "series-1"
-	seasonContentID := "season-1"
-	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	if len(result.Items) != tc.wantItems {
+		t.Fatalf("listed %d items, want %d: %+v", len(result.Items), tc.wantItems, result.Items)
 	}
-	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
-		episodeBySeasonKey(seriesContentID, 1): {
-			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
-		},
-	}}
-	h := &ItemsHandler{
-		content:     contentSvc,
-		userData:    &mockUserDataService{},
-		codec:       codec,
-		mapper:      newMapper(codec, &config.Config{}),
-		images:      NewImageCache(time.Hour, time.Now),
-		episodeRepo: episodeRepo,
-		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
-			seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
-		}},
-	}
-
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&"+filter)
-	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("expected empty under a season parent, got %+v", result.Items)
-	}
-	if contentSvc.listSeasonsCalls != 0 {
-		t.Fatalf("filter guard should short-circuit before episode listing; ListSeasons called %d times", contentSvc.listSeasonsCalls)
+	if tc.wantItems == 0 && (result.TotalRecordCount != 0 || contentSvc.listSeasonsCalls != 0) {
+		t.Fatalf("unsatisfiable filter reported total %d and called ListSeasons %d times, want neither", result.TotalRecordCount, contentSvc.listSeasonsCalls)
 	}
 }
 
