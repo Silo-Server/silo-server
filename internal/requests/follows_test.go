@@ -201,6 +201,10 @@ func TestNotifyFulfilledAnnouncesOnceAfterTheStamp(t *testing.T) {
 	if !slices.Equal(notifier.announced, []string{"req1"}) {
 		t.Fatalf("announced = %v, want req1 once", notifier.announced)
 	}
+	// Plugins learn which catalog item fulfilled the request from it.
+	if want := fakePresenceContentID(MediaTypeMovie, 42); !slices.Equal(notifier.announcedContent, []string{want}) {
+		t.Fatalf("announced content = %v, want %q", notifier.announcedContent, want)
+	}
 }
 
 func TestNotifyFulfilledKeepsFollowersWhenDispatchFails(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/requests"
 )
 
 // TestEventCatalogMatchesProducers projects what each producer of a catalog
@@ -35,6 +36,12 @@ func TestEventCatalogMatchesProducers(t *testing.T) {
 	stopped := mustJSON(t, apiv2.AdminPlaybackLifecycleEvent{SessionID: "s1", Seq: 5, At: apiv2.NewInstant(at), State: "stopped",
 		History: &apiv2.AdminPlaybackHistoryEntry{SessionID: "s1", UserID: "7", MediaTitle: "Heat",
 			StartedAt: apiv2.NewInstant(at), EndedAt: apiv2.NewInstant(at.Add(time.Hour))}})
+	year := 1995
+	request := func(status requests.Status, reason string) []byte {
+		return mustJSON(t, notifications.RequestEventPayload(requests.Request{ID: "r1", MediaType: requests.MediaTypeMovie, TMDBID: 949,
+			Title: "Heat", Year: &year, Status: status, RequestedByUserID: 7, RequestedByProfileID: "p1",
+			RequesterUsername: "josh", OutcomeReason: reason, LibraryContentID: "movie-949", CreatedAt: at}))
+	}
 	notification := mustJSON(t, notifications.PayloadForRow(notifications.DeliveryRow{
 		Delivery:    notifications.Delivery{ID: "d1", Type: "episode.available", UserID: 7, ProfileID: "p1", CreatedAt: at},
 		SeriesTitle: "Severance", SeasonNumber: &season,
@@ -57,14 +64,18 @@ func TestEventCatalogMatchesProducers(t *testing.T) {
 			history, err := p.(*publicevents.SessionEvent).DecodeHistory()
 			return err == nil && history != nil && history.MediaTitle == "Heat" && history.EndedAt.Equal(at.Add(time.Hour))
 		}},
-		publicevents.ScanStarted:   {scan("running"), scanCheck},
-		publicevents.ScanCompleted: {scan("completed"), scanCheck},
-		publicevents.ScanFailed:    {scan("failed"), scanCheck},
-		publicevents.ScanCancelled: {scan("canceled"), scanCheck},
-		publicevents.JobCreated:    {published[publicevents.JobFailed], jobCheck},
-		publicevents.JobCompleted:  {published[publicevents.JobFailed], jobCheck},
-		publicevents.JobFailed:     {published[publicevents.JobFailed], jobCheck},
-		publicevents.JobCancelled:  {published[publicevents.JobFailed], jobCheck},
+		publicevents.ScanStarted:      {scan("running"), scanCheck},
+		publicevents.ScanCompleted:    {scan("completed"), scanCheck},
+		publicevents.ScanFailed:       {scan("failed"), scanCheck},
+		publicevents.ScanCancelled:    {scan("canceled"), scanCheck},
+		publicevents.JobCreated:       {published[publicevents.JobFailed], jobCheck},
+		publicevents.JobCompleted:     {published[publicevents.JobFailed], jobCheck},
+		publicevents.JobFailed:        {published[publicevents.JobFailed], jobCheck},
+		publicevents.JobCancelled:     {published[publicevents.JobFailed], jobCheck},
+		publicevents.RequestSubmitted: {request(requests.StatusPending, ""), requestCheck("")},
+		publicevents.RequestApproved:  {request(requests.StatusApproved, ""), requestCheck("")},
+		publicevents.RequestDeclined:  {request(requests.StatusPending, "Already in the library"), requestCheck("Already in the library")},
+		publicevents.RequestFulfilled: {request(requests.StatusCompleted, ""), requestCheck("")},
 		publicevents.NotificationCreated: {notification, func(p any) bool {
 			n := p.(*publicevents.Notification)
 			return n.ID == "d1" && n.SeriesTitle == "Severance" && n.SeasonNumber != nil && *n.SeasonNumber == 2 && n.CreatedAt.Equal(at)
@@ -97,6 +108,14 @@ func sessionCheck(title string) func(any) bool {
 	return func(p any) bool {
 		session, err := p.(*publicevents.SessionEvent).DecodeSession()
 		return err == nil && session != nil && session.MediaTitle == title && session.UserID == "7" && p.(*publicevents.SessionEvent).Seq > 0
+	}
+}
+
+func requestCheck(reason string) func(any) bool {
+	return func(p any) bool {
+		r := p.(*publicevents.RequestEvent)
+		return r.ID == "r1" && r.Title == "Heat" && r.Year != nil && *r.Year == 1995 && r.RequestedByUserID == 7 &&
+			r.RequestedByProfileID == "p1" && r.Status != "" && r.Reason == reason && r.LibraryContentID == "movie-949"
 	}
 }
 

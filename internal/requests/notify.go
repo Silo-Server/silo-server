@@ -140,6 +140,8 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 			continue
 		}
 		req.Followers = followers
+		// The stored row doesn't carry the match; the announcement names it.
+		req.LibraryContentID = match.ContentID
 		if err := s.notifier.NotifyFulfilled(ctx, *req, match.ContentID); err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: dispatch failed", "component", "requests",
 				"request_id", req.ID, "err", err)

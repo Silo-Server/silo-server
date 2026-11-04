@@ -36,6 +36,12 @@ A field the host adds for its own clients therefore stays off the plugin
 contract until the SDK type adds it. `notification.created` also gets the
 envelope's `user_id`, because profile IDs repeat across accounts.
 
+Request lifecycle events (`request.submitted`, `.approved`, `.declined`,
+`.fulfilled`) exist only for plugins: `notifications.System` publishes them
+on `ChannelPlugins`, which no websocket client receives, beside the
+server-channel post for the same transition. Their event ID is derived from
+the request and its last update, so a repeated call carries the same ID.
+
 `TestEventCatalogMatchesProducers` projects what each producer publishes and
 fails when a producer change drops a catalog field, or when the SDK catalog
 gains an event without a producer case.

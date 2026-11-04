@@ -81,6 +81,7 @@ type RequestFulfillmentNotifier struct {
 // unexported methods keep *System its only production implementation.
 type fulfillmentBackend interface {
 	PostServerChannelRequestEvent(ctx context.Context, event string, info RequestEventInfo)
+	publishRequestEvent(ctx context.Context, event string, req requests.Request)
 	notificationsEnabled(ctx context.Context, userID int, profileID string) (bool, error)
 	fulfilledDelivered(ctx context.Context, recipient requests.Follower, requestID string) (bool, error)
 	dispatchFulfilled(ctx context.Context, delivery Delivery) error
@@ -163,6 +164,7 @@ func (n *RequestFulfillmentNotifier) AnnounceFulfilled(ctx context.Context, req 
 		return
 	}
 	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
+	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestFulfilled, req)
 }
 
 // notifyFulfilledProfile posts one request.fulfilled delivery to a profile
@@ -204,6 +206,7 @@ const requestLifecycleDispatchTimeout = 30 * time.Second
 // the only production implementation.
 type requestLifecycleBackend interface {
 	PostServerChannelRequestEvent(ctx context.Context, event string, info RequestEventInfo)
+	publishRequestEvent(ctx context.Context, event string, req requests.Request)
 	dispatchRequestLifecycleDetached(ctx context.Context, req requests.Request, deliveryType string)
 }
 
@@ -235,6 +238,7 @@ func NewRequestLifecycleNotifier(system *System) *RequestLifecycleNotifier {
 // personal confirmation would be noise.
 func (n *RequestLifecycleNotifier) RequestSubmitted(ctx context.Context, req requests.Request) {
 	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestSubmitted, requestEventInfoFor(req))
+	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestSubmitted, req)
 }
 
 // RequestApproved implements requests.LifecycleNotifier. Every approval is
@@ -247,6 +251,7 @@ func (n *RequestLifecycleNotifier) RequestApproved(
 	origin requests.ApprovalOrigin,
 ) {
 	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestApproved, requestEventInfoFor(req))
+	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestApproved, req)
 	switch origin {
 	case requests.ApprovalOriginAdmin:
 		n.backend.dispatchRequestLifecycleDetached(ctx, req, DeliveryTypeRequestApproved)
@@ -262,6 +267,7 @@ func (n *RequestLifecycleNotifier) RequestApproved(
 // RequestDeclined implements requests.LifecycleNotifier.
 func (n *RequestLifecycleNotifier) RequestDeclined(ctx context.Context, req requests.Request) {
 	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestDeclined, requestEventInfoFor(req))
+	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestDeclined, req)
 	n.backend.dispatchRequestLifecycleDetached(ctx, req, DeliveryTypeRequestDeclined)
 }
 
