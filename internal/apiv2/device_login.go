@@ -141,6 +141,7 @@ type DeviceLoginOutput struct {
 
 // PollDeviceLoginInput is the device's poll.
 type PollDeviceLoginInput struct {
+	SignInDeviceHeaders
 	Body struct {
 		DeviceCode string `json:"device_code" minLength:"1" doc:"The device code from startDeviceLogin" example:"d3v1c3c0d3"`
 	}

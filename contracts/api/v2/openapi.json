@@ -137525,6 +137525,45 @@
     "/api/v2/auth/device/poll": {
       "post": {
         "operationId": "pollDeviceLogin",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -138028,6 +138067,45 @@
     "/api/v2/auth/login": {
       "post": {
         "operationId": "login",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -138286,6 +138364,43 @@
         "description": "For a network provider (mode network in listAuthProviders), such as the Tailscale network access plugin: the provider's network already knows who owns the device a request came from, so there is no password and no browser. Only a request that arrived through that provider's own network address can sign in; listAuthProviders lists the provider, with the owner's name, only to such a request. The provider's plugin is asked who the device belongs to, and the answer goes through the same account resolution as other providers: a linked account signs in, an unknown person gets a new account while the binding's account creation is on, and the provider may set the account's role. The session is re-checked with the provider like other provider sessions. Send an empty JSON object as the body. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out, or the account's OIDC or LDAP provider refuses the account); 403 account_required; 403 permission_denied (the account is disabled); 409 email_in_use or identity_linked_elsewhere; 404 not_found (not an enabled network provider); 429 rate_limited; 503 provider_unavailable. Spends the login rate-limit budget.",
         "operationId": "signInWithNetworkIdentity",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "The network provider's plugin installation, as listAuthProviders shows it",
             "in": "path",
@@ -138591,6 +138706,43 @@
         "description": "A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in.",
         "operationId": "completeOAuthLogin",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it",
             "in": "cookie",
@@ -140020,6 +140172,45 @@
     "/api/v2/auth/setup": {
       "post": {
         "operationId": "setupServer",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -140225,6 +140416,45 @@
       },
       "post": {
         "operationId": "signup",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -173253,6 +173483,43 @@
         "operationId": "acceptInvitation",
         "parameters": [
           {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "token",
             "required": true,
@@ -190283,6 +190550,43 @@
       "post": {
         "operationId": "completePasswordReset",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "token",
