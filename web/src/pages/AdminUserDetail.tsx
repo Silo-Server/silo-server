@@ -43,6 +43,7 @@ import { CardEditingProvider } from "./admin-users/detail/cardEditing";
 import { DownloadsTab } from "./admin-users/detail/downloads/DownloadsTab";
 import { OverviewTab } from "./admin-users/detail/overview/OverviewTab";
 import { PreferencesTab } from "./admin-users/detail/preferences/PreferencesTab";
+import { ProfilesTab } from "./admin-users/detail/profiles/ProfilesTab";
 import { UnsavedCardGuard } from "./admin-users/detail/UnsavedCardGuard";
 import { UserDetailHeader } from "./admin-users/detail/UserDetailHeader";
 import { UserDetailTabBar } from "./admin-users/detail/UserDetailTabBar";
@@ -229,6 +230,9 @@ function AdminUserDetailPage() {
           <UserDetailTabBar user={account} active={tab} />
           <TabsContent value="overview" className="min-w-0">
             <OverviewTab user={account} />
+          </TabsContent>
+          <TabsContent value="profiles" className="min-w-0">
+            <ProfilesTab user={account} />
           </TabsContent>
           <TabsContent value="access" className="min-w-0">
             <AccessTab

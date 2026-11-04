@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -315,6 +316,63 @@ func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileL
 	}, nil
 }
 
+// GetProfile reads one profile of the account: 404 not_found when the
+// account has no profile with that ID, so another account's profile is
+// never found. v2 getAdminUserProfile calls it.
+func (h *ProfileHandler) GetProfile(ctx context.Context, userID int, profileID string) (ProfileView, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil || store == nil {
+		return ProfileView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return ProfileView{}, apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	return h.toProfileResponse(ctx, store, *profile), nil
+}
+
+// checkAccountAdmin applies the Owner rules to an administrator's profile
+// write on an account (accountAdmin): only the Owner may change the Owner's
+// or another admin's profiles. A primary profile's PIN guards that account's
+// admin access, so another admin setting it could lock the account out of
+// administration. Household writes (accountAdmin false) pass.
+func (h *ProfileHandler) checkAccountAdmin(ctx context.Context, accountAdmin bool, userID int) error {
+	if !accountAdmin {
+		return nil
+	}
+	if h.UserRepo == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	target, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			return apiError(http.StatusNotFound, "not_found", "User not found")
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	actor, err := requestOwnerActor(ctx, h.UserRepo)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	return ownerError(auth.CheckOwnerTarget(actor, target))
+}
+
+// manageHouseholdAs is householdManagerAs for a profile write: a server
+// administrator acting through the admin API (accountAdmin) manages the
+// household with no acting profile, so no PIN revision is bound to the write.
+func manageHouseholdAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	accountAdmin bool,
+	activeProfileID string,
+	verify func(*userstore.Profile) error,
+) (bool, *userstore.Profile, error) {
+	if accountAdmin {
+		return true, nil, nil
+	}
+	return householdManagerAs(ctx, store, activeProfileID, verify)
+}
+
 // HandleCreateProfile handles POST /profiles.
 func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
@@ -358,6 +416,12 @@ type ProfileCreateCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // CreateProfile creates a household profile: validation, the bootstrap or
@@ -367,6 +431,9 @@ type ProfileCreateCommand struct {
 // *APIError carrying the v1 status, code and message.
 func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCommand) (ProfileView, error) {
 	var none ProfileView
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return none, err
+	}
 	req := cmd.Request
 	userID := cmd.UserID
 	if strings.TrimSpace(req.Name) == "" {
@@ -410,7 +477,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	var acting *userstore.Profile
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
-		allowed, active, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+		allowed, active, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 		if err != nil {
 			return none, profileManagementError(err)
 		}
@@ -589,6 +656,12 @@ type ProfileUpdateCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // UpdateProfile applies a profile update: authorization (household manager
@@ -598,6 +671,9 @@ type ProfileUpdateCommand struct {
 // status, code and message.
 func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCommand) (ProfileView, error) {
 	var none ProfileView
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return none, err
+	}
 	req := cmd.Request
 	userID, profileID := cmd.UserID, cmd.ProfileID
 	var avatarRef *string
@@ -630,7 +706,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
-	canManage, acting, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	canManage, acting, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
 		return none, profileManagementError(err)
 	}
@@ -799,6 +875,12 @@ type ProfileDeleteCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // DeleteProfile deletes a household profile: the household-manager
@@ -807,12 +889,15 @@ type ProfileDeleteCommand struct {
 // deleteProfile both call it; a failure is an *APIError carrying the v1
 // status, code and message.
 func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCommand) error {
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return err
+	}
 	userID, profileID := cmd.UserID, cmd.ProfileID
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	allowed, _, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
 		return profileManagementError(err)
 	}

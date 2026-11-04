@@ -587,6 +587,7 @@ func registerAll(reg *Registry) {
 	registerAdminRequestUsage(reg)
 	registerAdminAccountSettings(reg)
 	registerAdminProfileSections(reg)
+	registerAdminProfiles(reg)
 	registerAdminAccessGroups(reg)
 	registerPreferences(reg)
 	registerHome(reg)

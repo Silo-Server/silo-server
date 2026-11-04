@@ -863,6 +863,7 @@ type ProgressService interface {
 // operations use.
 type ProfileService interface {
 	ListProfiles(ctx context.Context, userID int) (handlers.ProfileListView, error)
+	GetProfile(ctx context.Context, userID int, profileID string) (handlers.ProfileView, error)
 	CreateProfile(ctx context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error)
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
 	DeleteProfile(ctx context.Context, cmd handlers.ProfileDeleteCommand) error
