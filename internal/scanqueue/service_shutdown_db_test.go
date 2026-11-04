@@ -395,6 +395,36 @@ func TestStaleWorkerLeavesALaterClaimRunningDB(t *testing.T) {
 	}
 }
 
+// TestStaleRequeueClearsTheAbandonedProgressDB pins that a run requeued as
+// stale goes back to the queue with no progress, as a shutdown requeue does
+// (issue #2983). Before, the queued run and its next attempt showed the dead
+// attempt's phase and file counts.
+func TestStaleRequeueClearsTheAbandonedProgressDB(t *testing.T) {
+	ctx, pool, repo, folderID := openDirectRunTestRepository(t)
+	run := startShutdownTestRun(t, ctx, repo, folderID)
+	if _, err := repo.UpdateProgress(ctx, run.ID, run.StartedAt, &evt.ScanRunResult{Message: "Processing files", FilesProcessed: 5, TotalFiles: 10}); err != nil {
+		t.Fatalf("record progress: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE scan_runs SET heartbeat_at = NOW() - INTERVAL '1 hour' WHERE id = $1`, run.ID); err != nil {
+		t.Fatalf("age heartbeat: %v", err)
+	}
+	if _, err := repo.RequeueStaleRunning(ctx, time.Minute); err != nil {
+		t.Fatalf("requeue stale runs: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if got.Status != StatusAccepted || got.StartedAt != nil || string(got.ResultPayload) != "{}" {
+		t.Fatalf("run after stale requeue = status %s started %v progress %s, want accepted and unclaimed with no progress",
+			got.Status, got.StartedAt, got.ResultPayload)
+	}
+	if got.FollowupTrigger != "autoscan:sonarr" {
+		t.Fatalf("follow-up trigger after stale requeue = %q, want autoscan:sonarr", got.FollowupTrigger)
+	}
+}
+
 // scanRunStatementTracer records every statement Postgres answered with an
 // error (Postgres logs each one as ERROR whether or not the caller handles
 // it). When afterEmptyInsert is set, it runs once right after an INSERT that
