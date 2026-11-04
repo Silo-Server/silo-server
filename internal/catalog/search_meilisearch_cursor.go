@@ -167,6 +167,9 @@ func (p *MeilisearchSearchProvider) rankingIndex(ctx context.Context) (SearchInd
 	}
 	settings, err := p.client.GetSettings(ctx, state.ActiveIndexUID)
 	if err != nil {
+		if p.shouldTripCircuit(err) {
+			p.tripCircuit(err)
+		}
 		return SearchIndexState{}, 0, 0, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
 	window := settings.Pagination.MaxTotalHits
@@ -212,6 +215,9 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 		response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
 	}
 	if err != nil {
+		if p.shouldTripCircuit(err) {
+			p.tripCircuit(err)
+		}
 		return nil, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
 	ids := make([]string, 0, len(response.Hits))
