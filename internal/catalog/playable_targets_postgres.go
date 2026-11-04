@@ -37,6 +37,23 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 			JOIN seasons season ON requested.media_type = 'season' AND season.content_id = requested.content_id
 			WHERE NOT (requested.series_id <> '' AND requested.season_number >= 0
 				AND requested.series_id = season.series_id AND requested.season_number = season.season_number)
+		), resumable AS MATERIALIZED (
+			-- Every card's newest resumable episode, chosen once per statement.
+			-- The progress relation's truncated updated_at keeps an index from
+			-- supplying this order, so a per-card subquery re-read all of the
+			-- profile's resumable rows for each card. MATERIALIZED keeps the
+			-- single reference below from inlining it back into every card;
+			-- it runs only when a card without a valid anchor first reads it.
+			SELECT DISTINCT ON (scope.ord) scope.ord, episode.content_id
+			FROM target_scopes scope
+			JOIN episodes episode ON episode.series_id = scope.series_id
+			  AND (scope.season_number IS NULL OR episode.season_number = scope.season_number)
+			JOIN %[2]s progress ON progress.media_item_id = episode.content_id
+			WHERE progress.position_seconds > 0 AND NOT progress.completed
+			  AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
+			ORDER BY scope.ord, progress.updated_at DESC,
+			  CASE WHEN episode.season_number = 0 THEN 1 ELSE 0 END,
+			  episode.season_number, episode.episode_number, episode.content_id
 		)
 		SELECT requested.ord, target.play_content_id, target_episode.season_number
 		FROM requested
@@ -55,17 +72,7 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 				 WHERE scope.ord = requested.ord AND episode.content_id = requested.preferred_content_id
 				   AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
 				 LIMIT 1),
-				(SELECT episode.content_id
-				 FROM %[2]s progress
-				 JOIN episodes episode ON episode.content_id = progress.media_item_id
-				 JOIN target_scopes scope ON scope.ord = requested.ord AND episode.series_id = scope.series_id
-				   AND (scope.season_number IS NULL OR episode.season_number = scope.season_number)
-				 WHERE progress.position_seconds > 0 AND NOT progress.completed
-				   AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
-				 ORDER BY progress.updated_at DESC,
-				   CASE WHEN episode.season_number = 0 THEN 1 ELSE 0 END,
-				   episode.season_number, episode.episode_number, episode.content_id
-				 LIMIT 1),
+				(SELECT resumable.content_id FROM resumable WHERE resumable.ord = requested.ord),
 				%[3]s,
 				%[4]s
 			) AS play_content_id
@@ -103,6 +110,9 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 // picking each scope's first match preserves the legacy union's global order.
 // Separating regular seasons and specials lets the episode series index supply
 // the order, so ordinary unseen cards stop after their first available match.
+// The season is a range bound rather than "IS NULL OR equal" so that the
+// episode index applies it and a season card reads only its own season. With
+// the OR, each season card of a long-running series read the whole series.
 func firstPlayableEpisodeSQL(fileSQL, progressSQL string) string {
 	first := func(seasonSQL string) string {
 		return fmt.Sprintf(`(SELECT winner.content_id
@@ -111,7 +121,8 @@ func firstPlayableEpisodeSQL(fileSQL, progressSQL string) string {
 				SELECT episode.content_id, episode.season_number, episode.episode_number
 				FROM episodes episode
 				WHERE episode.series_id = scope.series_id
-				  AND (scope.season_number IS NULL OR episode.season_number = scope.season_number)
+				  AND episode.season_number BETWEEN COALESCE(scope.season_number, -2147483648)
+				    AND COALESCE(scope.season_number, 2147483647)
 				  AND %s
 				  AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %s)
 				  %s
