@@ -29,6 +29,9 @@ func (m *mockSyncUserStore) ReplaceCollectionItems(ctx context.Context, collecti
 }
 
 func (m *mockSyncUserStore) UpdateCollectionSyncState(ctx context.Context, input userstore.UpdateCollectionSyncStateInput) error {
+	if input.RequireLastSyncAt && !equalTimePtr(m.stored.LastSyncAt, input.LastSyncAtAtStart) {
+		return nil
+	}
 	m.syncState = input
 	at := input.LastSyncAt
 	m.stored.LastSyncAt, m.stored.LastSyncStatus, m.stored.LastSyncMessage, m.stored.ItemCount = &at, input.Status, input.Message, input.ItemCount

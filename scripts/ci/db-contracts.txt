@@ -376,6 +376,7 @@
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves

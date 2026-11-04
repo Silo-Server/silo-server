@@ -199,3 +199,27 @@ func TestRunSyncRecordsAWriteFailureOnlyBeforeMembersChange(t *testing.T) {
 		})
 	}
 }
+
+// Two syncs can run at once. One that started earlier and fails later must
+// not record its failure over the result of the one that finished first.
+func TestRunSyncKeepsAResultThatFinishedFirst(t *testing.T) {
+	started := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	newer := started.Add(time.Minute)
+	svc := NewService(nil, nil, nil, &staticOwners{}, nil, slog.New(slog.DiscardHandler))
+	svc.TMDBLists = &recordingTMDBListFetcher{err: errors.New("list unavailable")}
+	store := newMockSyncUserStore(userstore.Collection{ID: "c", LastSyncAt: &newer, LastSyncStatus: "success", ItemCount: 30})
+	collection := &userstore.Collection{
+		ID:               "c",
+		CreatorProfileID: "owner",
+		SourceConfig:     `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
+		LastSyncAt:       &started,
+		ItemCount:        12,
+	}
+
+	if _, _, err := svc.RunSync(t.Context(), 7, store, collection); err == nil {
+		t.Fatal("RunSync succeeded although the source failed")
+	}
+	if store.stored.LastSyncStatus != "success" || store.stored.ItemCount != 30 || !store.stored.LastSyncAt.Equal(newer) {
+		t.Fatalf("stored %s with %d items at %v, want the newer success kept", store.stored.LastSyncStatus, store.stored.ItemCount, store.stored.LastSyncAt)
+	}
+}

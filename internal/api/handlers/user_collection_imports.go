@@ -487,13 +487,10 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")
 		}
-		// RunSync recorded the failure on the collection. A source that
-		// refused or did not answer is not a server fault, so its reason goes
-		// back to the caller, as MDBList search failures do.
-		if _, ok := errors.AsType[*usercollections.SourceError](err); ok {
-			return nil, apiError(http.StatusBadGateway, "upstream_error", fmt.Sprintf("Sync failed: %v", err))
-		}
-		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err))
+		// RunSync recorded the failure on the collection. The frozen v1 route
+		// keeps answering 500; the cause lets v2 answer a source that refused
+		// or did not answer as dependency_unavailable with the reason.
+		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err)).WithCause(err)
 	}
 	return result, nil
 }

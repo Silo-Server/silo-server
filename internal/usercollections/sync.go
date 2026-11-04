@@ -205,7 +205,9 @@ func (s *Service) ownerFilter(ctx context.Context, userID int, store userstore.U
 }
 
 // recordFailedSync stores a failed sync with message on the collection,
-// keeping its members, item count and next run.
+// keeping its members, item count and next run. It writes only while the
+// collection's last sync is still the one this sync started from, so a sync
+// that started later and finished first keeps its result.
 func (s *Service) recordFailedSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection, message string) {
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordFailedSyncTimeout)
 	defer cancel()
@@ -218,6 +220,8 @@ func (s *Service) recordFailedSync(ctx context.Context, userID int, store userst
 		NextSyncAt:        collection.NextSyncAt,
 		ScheduleAtStart:   collection.SyncSchedule,
 		NextSyncAtAtStart: collection.NextSyncAt,
+		RequireLastSyncAt: true,
+		LastSyncAtAtStart: collection.LastSyncAt,
 	}); err != nil {
 		s.logger.ErrorContext(ctx, "user collection sync: recording the failed sync failed",
 			"user_id", userID,
