@@ -15,6 +15,7 @@ import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 
 interface EpisodeCarouselProps {
@@ -34,6 +35,12 @@ export default function EpisodeCarousel({
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs();
+  // Moving between siblings keeps the viewer where they scrolled to: the page
+  // keeps its layout, and the carousel re-centres on the new episode.
+  const linkState: EpisodeNavigationState & ScrollPreservingState = {
+    ...episodeLinkState,
+    preserveScroll: true,
+  };
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -68,7 +75,7 @@ export default function EpisodeCarousel({
                 key={ep.content_id}
                 ep={ep}
                 isCurrent={ep.episode_number === currentEpisodeNumber}
-                episodeLinkState={episodeLinkState}
+                episodeLinkState={linkState}
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
                 hideOverviewIfUnwatched={hideOverviews}
