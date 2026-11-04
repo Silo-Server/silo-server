@@ -539,7 +539,10 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	resp, err := h.HomeSections(r.Context(), sectionViewerFromRequest(r))
+	// The frozen v1 endpoint keeps answering empty rows other than an
+	// off-season seasonal row and one that hiding watched titles emptied;
+	// v2 leaves every empty row out.
+	resp, err := h.homeSections(r.Context(), sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -580,7 +583,8 @@ func (h *SectionHandler) HandleLibrarySections(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	resp, err := h.LibrarySections(r.Context(), libraryID, sectionViewerFromRequest(r))
+	// As on Home, v1 keeps answering empty rows.
+	resp, err := h.librarySections(r.Context(), libraryID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1345,13 +1349,28 @@ func applyDiversityFilter(withItems []sections.SectionWithItems) []sections.Sect
 }
 
 // dropEmptySeasonalSections removes seasonal_themed sections that produced
-// no items so the home page doesn't render an empty row off-season. Called
-// from the aggregate handlers; per-section endpoints still return empty
-// seasonal sections when explicitly requested by ID.
+// no items so the home page doesn't render an empty row off-season. The frozen
+// v1 aggregate handlers use it; v2 drops every empty section instead.
 func dropEmptySeasonalSections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
 	out := withItems[:0]
 	for _, w := range withItems {
 		if w.SectionType == sections.SectionSeasonalThemed && len(w.Items) == 0 {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// dropEmptySections removes every section that produced no items, so the v2
+// aggregate Home and library reads never answer a row the viewer cannot fill:
+// one whose titles all sit outside their access, an off-season seasonal row,
+// or a row whose fetch failed. The per-section endpoints still answer an empty
+// section when it is asked for by ID.
+func dropEmptySections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
+	out := withItems[:0]
+	for _, w := range withItems {
+		if len(w.Items) == 0 {
 			continue
 		}
 		out = append(out, w)

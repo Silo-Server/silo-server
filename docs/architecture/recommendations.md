@@ -535,5 +535,5 @@ Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
 truthfully: up to two Because You Watched rows under their anchor's title,
 dropped when the viewer cannot see the anchor, and the taste-cluster rows
 under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
-per-section items request that fails to load answers `500`; the aggregate
-sections endpoints still degrade to empty rows.
+per-section items request that fails to load answers `500`; the v2 aggregate
+sections endpoints leave that row out, and v1 answers it as an empty row.
